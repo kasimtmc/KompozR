@@ -489,9 +489,8 @@ impl fmt::Debug for ImageVector {
 
 /// Builds a vector (Compose's ImageVector.Builder): paths drawn in order, in groups (nested) that move, scale, turn
 /// and clip what is in them. Compose's calls (`add_group`, `add_path`, `group`, `path`) take their parameters named,
-/// with defaults, in a `#[kompozable]` body (`b.add_path(nodes, fill = Some(SolidColor(red)))`; they return nothing,
-/// one call a statement); from plain code they take what has no default. The `…_of` ones take a whole
-/// [`VectorPath`] or [`VectorGroup`], and chain:
+/// with defaults, in a `#[kompozable]` body (`b.add_path(nodes, fill = Some(SolidColor(red)))`); from plain code they
+/// take what has no default. The `…_of` ones take a whole [`VectorPath`] or [`VectorGroup`]. All of them chain:
 ///
 /// ```
 /// # use kompoz_graphics::*;
@@ -652,7 +651,7 @@ impl ImageVectorBuilder {
         #[default(DefaultTranslationX)] translation_x: f32,
         #[default(DefaultTranslationY)] translation_y: f32,
         #[default(Vec::new())] clip_path_data: Vec<PathNode>,
-    ) {
+    ) -> &mut ImageVectorBuilder {
         self.add_group_of(VectorGroup {
             name: name.into(),
             rotation: rotate,
@@ -664,7 +663,7 @@ impl ImageVectorBuilder {
             translation_y,
             clip_path_data,
             children: Vec::new(),
-        });
+        })
     }
 
     /// Compose's addPath: a path of `path_data` in these paints (Compose's defaults: neither filled nor stroked).
@@ -685,7 +684,7 @@ impl ImageVectorBuilder {
         #[default(DefaultTrimPathStart)] trim_path_start: f32,
         #[default(DefaultTrimPathEnd)] trim_path_end: f32,
         #[default(DefaultTrimPathOffset)] trim_path_offset: f32,
-    ) {
+    ) -> &mut ImageVectorBuilder {
         self.add_path_of(VectorPath {
             name: name.into(),
             path_data,
@@ -701,7 +700,7 @@ impl ImageVectorBuilder {
             trim_path_start,
             trim_path_end,
             trim_path_offset,
-        });
+        })
     }
 
     /// Compose's Builder.group: a group of these, what `block` adds in it.
@@ -718,7 +717,7 @@ impl ImageVectorBuilder {
         #[default(DefaultTranslationY)] translation_y: f32,
         #[default(Vec::new())] clip_path_data: Vec<PathNode>,
         block: impl FnOnce(&mut ImageVectorBuilder),
-    ) {
+    ) -> &mut ImageVectorBuilder {
         let group = VectorGroup {
             name: name.into(),
             rotation: rotate,
@@ -731,7 +730,7 @@ impl ImageVectorBuilder {
             clip_path_data,
             children: Vec::new(),
         };
-        self.group_of(group, block);
+        self.group_of(group, block)
     }
 
     /// Compose's Builder.path: a path of what `path_builder` makes, in these paints.
@@ -749,7 +748,7 @@ impl ImageVectorBuilder {
         #[default(DefaultStrokeLineMiter)] stroke_line_miter: f32,
         #[default(DefaultFillType)] path_fill_type: PathFillType,
         path_builder: impl FnOnce(&mut PathBuilder),
-    ) {
+    ) -> &mut ImageVectorBuilder {
         let path = VectorPath {
             name: name.into(),
             fill,
@@ -763,6 +762,6 @@ impl ImageVectorBuilder {
             path_fill_type,
             ..VectorPath::default()
         };
-        self.path_of(path, path_builder);
+        self.path_of(path, path_builder)
     }
 }

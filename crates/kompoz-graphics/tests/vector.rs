@@ -1088,16 +1088,17 @@ fn image_vector_builder_takes_composes_named_calls() {
     // Compose's calls, their parameters named, the rest Compose's defaults.
     let mut b = builder(24.0, 24.0, 24.0, 24.0);
     kompozable_block!({
-        b.add_path(add_path_nodes("M0,0h4v4z"), fill = solid(red), name = "kare");
-        b.add_group(name = "g", rotate = 45.0, pivot_x = 12.0, pivot_y = 12.0);
-        b.path(
-            stroke = solid(red),
-            stroke_line_width = 2.0,
-            path_builder = |p: &mut PathBuilder| {
-                p.move_to(7.0, 12.0).line_to(17.0, 12.0);
-            },
-        );
-        b.clear_group();
+        // (chained, as Compose's return the builder)
+        b.add_path(add_path_nodes("M0,0h4v4z"), fill = solid(red), name = "kare")
+            .add_group(name = "g", rotate = 45.0, pivot_x = 12.0, pivot_y = 12.0)
+            .path(
+                stroke = solid(red),
+                stroke_line_width = 2.0,
+                path_builder = |p: &mut PathBuilder| {
+                    p.move_to(7.0, 12.0).line_to(17.0, 12.0);
+                },
+            )
+            .clear_group();
         b.group(
             scale_x = 2.0,
             clip_path_data = add_path_nodes("M0,0h4v4z"),
