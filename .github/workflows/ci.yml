@@ -26,3 +26,14 @@ jobs:
           cargo run -p kompoz-syntax-proto --example a > a.txt
           cargo run -p kompoz-syntax-proto --example b > b.txt
           diff a.txt b.txt
+
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: The runtime's unsafe code under Miri
+        run: cargo miri test -p kompoz-runtime

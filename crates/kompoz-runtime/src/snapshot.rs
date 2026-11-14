@@ -238,8 +238,8 @@ impl<T: Clone + Send + Sync + 'static> StateCell<T> {
     pub(crate) fn set(self: &Arc<Self>, value: T) {
         let this: Arc<dyn StateObject> = self.clone();
         write(&this, |current| {
-            // SAFETY: `current` is this cell's record, made by new_record::<T>.
-            let current = unsafe { &mut (*(current as *mut Record<T>)).value };
+            // SAFETY: `current` is this cell's record, made by new_record::<T>; others may be reading it.
+            let current = unsafe { &(*(current as *const Record<T>)).value };
             if self.equivalent.is_some_and(|eq| eq(current, &value)) {
                 return Write::Nothing;
             }
