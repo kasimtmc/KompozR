@@ -1,0 +1,10 @@
+[package]
+name = "kompoz-syntax-proto"
+description = "Stage 0 prototype: the same samples written in the Rust API's candidate call syntaxes"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kompoz-syntax-proto-macros = { path = "../syntax-macros" }

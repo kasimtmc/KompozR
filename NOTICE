@@ -1,0 +1,7 @@
+KompozR
+Copyright 2026 The Kompoz Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+KompozR is the Rust version of Kompoz. It follows the behavior and public API of Jetpack Compose
+(Copyright The Android Open Source Project, Apache License 2.0). No source files of it are included.

@@ -1,0 +1,14 @@
+/target/
+
+# Local, never shared: tool state, editors, caches, signing keys, secrets
+.claude/
+CLAUDE.md
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+*.jks
+*.keystore
+.env
+.env.*
