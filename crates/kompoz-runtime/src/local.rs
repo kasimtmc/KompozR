@@ -1,10 +1,10 @@
 //! Composition locals: values handed down the composition (Compose's CompositionLocal).
 
-use crate::composer::{Composer, Provided, key_of};
+use crate::composer::{Composer, Provided};
+use crate::kompozable;
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::panic::Location;
 use std::rc::Rc;
 
 /// A value handed down the composition: what the nearest provider above gives, else its default (made from
@@ -13,11 +13,12 @@ use std::rc::Rc;
 /// ```
 /// # use kompoz_runtime::*;
 /// static LocalAccent: KompozitionLocal<&str> = KompozitionLocal::new(|| "blue");
-/// # fn content() {
-/// KompozitionLocalProvider(&[LocalAccent.provides("green")], || {
-///     let accent = LocalAccent.current();
-/// });
-/// # }
+/// #[kompozable]
+/// fn Accented() {
+///     KompozitionLocalProvider(&[LocalAccent.provides("green")], || {
+///         let accent = LocalAccent.current();
+///     });
+/// }
 /// ```
 pub struct KompozitionLocal<T> {
     default: fn() -> T,
@@ -114,17 +115,16 @@ pub const fn static_kompozition_local_of<T: Clone + 'static>(default: fn() -> T)
 pub struct ProvidedValue(pub(crate) Provided);
 
 /// Composes `content` with `values` provided to it and to what it calls.
-#[allow(non_snake_case)]
-#[track_caller]
+#[kompozable(inline)]
 pub fn KompozitionLocalProvider<R>(values: &[ProvidedValue], content: impl FnOnce() -> R) -> R {
-    let values = values.iter().map(|v| v.0.clone()).collect();
-    provide_at(key_of(Location::caller()), values, content)
+    provide_here(values.iter().map(|v| v.0.clone()).collect(), content)
 }
 
-fn provide_at<R>(key: u64, values: Vec<Provided>, content: impl FnOnce() -> R) -> R {
+/// Composes `content` with `values` provided, in the current group.
+pub(crate) fn provide_here<R>(values: Vec<Provided>, content: impl FnOnce() -> R) -> R {
     let c = Composer::require();
     let mut out = None;
-    c.provide(key, values, || out = Some(content()));
+    c.provide(values, || out = Some(content()));
     out.unwrap()
 }
 
@@ -142,12 +142,11 @@ pub fn current_kompozition_local_context() -> KompozitionLocalContext {
 }
 
 /// Composes `content` with everything `context` holds provided.
-#[allow(non_snake_case)]
-#[track_caller]
+#[kompozable(inline)]
 pub fn KompozitionLocalProviderContext<R>(context: &KompozitionLocalContext, content: impl FnOnce() -> R) -> R {
     let values = context.values.iter().cloned().map(|mut p| {
         p.provider = None;
         p
     });
-    provide_at(key_of(Location::caller()), values.collect(), content)
+    provide_here(values.collect(), content)
 }

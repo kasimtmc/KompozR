@@ -5,7 +5,8 @@
 //! composable leaves.
 
 use crate::composer::{Composer, GroupId, key_of, mix_key, stable_hash};
-use crate::local::{KompozitionLocal, KompozitionLocalProvider};
+use crate::kompozable;
+use crate::local::{KompozitionLocal, provide_here};
 use crate::remember::remember;
 use crate::saved_value::{Saveable, SavedValue};
 use crate::state::MutableState;
@@ -292,14 +293,10 @@ impl SaveableStateRegistry {
 }
 
 /// Composes `content` with its `remember_saveable` values kept in `registry`.
-#[allow(non_snake_case)]
-#[track_caller]
+#[kompozable(inline)]
 pub fn ProvideSaveableStateRegistry(registry: &SaveableStateRegistry, content: impl FnOnce()) {
-    let c = Composer::require();
-    c.start_group(key_of(Location::caller()));
-    registry.inner.borrow_mut().boundary = Some(c.current_group());
-    KompozitionLocalProvider(&[LocalSaveableRegistry.provides(Some(RegistryRef(registry.inner.clone())))], content);
-    c.end_group();
+    registry.inner.borrow_mut().boundary = Some(Composer::require().current_group());
+    provide_here(vec![LocalSaveableRegistry.provides(Some(RegistryRef(registry.inner.clone()))).0], content);
 }
 
 /// Keeps the `remember_saveable` values of content shown under different keys (Compose's
@@ -346,7 +343,7 @@ impl SaveableStateHolder {
         }
         let presence = remember(|| Rc::new(Presence(RefCell::new(Weak::new()))));
         *presence.0.borrow_mut() = Rc::downgrade(&registry);
-        KompozitionLocalProvider(&[LocalSaveableRegistry.provides(Some(RegistryRef(registry)))], content);
+        provide_here(vec![LocalSaveableRegistry.provides(Some(RegistryRef(registry))).0], content);
         c.end_group();
     }
 

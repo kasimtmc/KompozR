@@ -1,0 +1,5 @@
+error: kompoz: a restartable composable keeps its arguments: take a type, `impl Into<T>` or `impl Fn…` (or make it #[kompozable(inline)])
+ --> tests/ui/unsupported_impl_trait.rs:4:16
+  |
+4 | fn Show(value: impl std::fmt::Display) {
+  |                ^^^^

@@ -37,30 +37,24 @@ fn reset(c: &'static std::thread::LocalKey<Cell<u32>>) {
     c.with(|c| c.set(0));
 }
 
-#[track_caller]
+#[kompozable]
 fn CounterView(count: MutableState<i32>) {
-    restartable(count, Some(MutableState::eq), |count| {
-        bump(&COUNTER_RUNS);
-        Text(format!("count={count}"));
-    });
+    bump(&COUNTER_RUNS);
+    Text(format!("count={count}"));
 }
 
-#[track_caller]
+#[kompozable]
 fn StaticView() {
-    restartable((), Some(|_, _| true), |_| {
-        bump(&STATIC_RUNS);
-        Text("static");
-    });
+    bump(&STATIC_RUNS);
+    Text("static");
 }
 
 /// A row that remembers its own click count.
-#[track_caller]
+#[kompozable(inline)]
 fn Item(id: i32, clicks_out: Rc<RefCell<Vec<(i32, MutableState<i32>)>>>) {
-    group(|| {
-        let clicks = remember(|| mutable_state_of(0));
-        clicks_out.borrow_mut().push((id, clicks.clone()));
-        Text(format!("item{id}:{clicks}"));
-    });
+    let clicks = remember(|| mutable_state_of(0));
+    clicks_out.borrow_mut().push((id, clicks.clone()));
+    Text(format!("item{id}:{clicks}"));
 }
 
 fn click(handles: &Rc<RefCell<Vec<(i32, MutableState<i32>)>>>, id: i32) {
@@ -71,7 +65,7 @@ fn click(handles: &Rc<RefCell<Vec<(i32, MutableState<i32>)>>>, id: i32) {
 fn nodes_are_retained_across_recompositions() {
     let label = mutable_state_of("a".to_string());
     let l = label.clone();
-    let rule = Rule::new(move || Text(l.get()));
+    let rule = Rule::new(kompozable_lambda!(move || Text(l.get())));
     let before = rule.root.children.borrow()[0].clone();
     label.set("b".into());
     rule.wait_for_idle();
@@ -84,14 +78,14 @@ fn key_keeps_state_with_its_item() {
     let ids = mutable_state_of(vec![1, 2, 3]);
     let handles = Rc::new(RefCell::new(Vec::new()));
     let (i, h) = (ids.clone(), handles.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let (i, h) = (i.clone(), h.clone());
         Column("column", move || {
             for id in i.get() {
                 key(&id, || Item(id, h.clone()));
             }
         });
-    });
+    }));
     click(&handles, 2);
     rule.wait_for_idle();
     assert!(rule.has("item2:1"));
@@ -107,14 +101,14 @@ fn without_key_state_is_positional() {
     let ids = mutable_state_of(vec![1, 2]);
     let handles = Rc::new(RefCell::new(Vec::new()));
     let (i, h) = (ids.clone(), handles.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let (i, h) = (i.clone(), h.clone());
         Column("column", move || {
             for id in i.get() {
                 Item(id, h.clone());
             }
         });
-    });
+    }));
     click(&handles, 1);
     ids.update(|v| {
         v.remove(0);
@@ -127,7 +121,7 @@ fn disposable_effect_runs_and_cleans_up() {
     let show = mutable_state_of(true);
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let (s, l) = (show.clone(), log.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         if s.get() {
             let l = l.clone();
             DisposableEffect(0, move || {
@@ -135,7 +129,7 @@ fn disposable_effect_runs_and_cleans_up() {
                 on_dispose(move || l.borrow_mut().push("stop".into()))
             });
         }
-    });
+    }));
     assert_eq!(*log.borrow(), ["start"]);
     show.set(false);
     rule.wait_for_idle();
@@ -146,26 +140,24 @@ fn disposable_effect_restarts_when_key_changes() {
     let k = mutable_state_of(1);
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let (kk, l) = (k.clone(), log.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let key = kk.get();
         let l = l.clone();
         DisposableEffect(key, move || {
             l.borrow_mut().push(format!("start{key}"));
             on_dispose(move || l.borrow_mut().push(format!("stop{key}")))
         });
-    });
+    }));
     k.set(2);
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["start1", "stop1", "start2"]);
 }
 
 /// Takes a state it only reads: a mutable or a derived one.
-#[track_caller]
+#[kompozable]
 fn Shown(value: State<i32>) {
-    restartable(value, Some(State::eq), |value| {
-        bump(&SHOWN_RUNS);
-        Text(format!("value={value}"));
-    });
+    bump(&SHOWN_RUNS);
+    Text(format!("value={value}"));
 }
 
 fn read_only_states_come_from_mutable_and_derived_ones() {
@@ -173,7 +165,7 @@ fn read_only_states_come_from_mutable_and_derived_ones() {
     let count = mutable_state_of(1);
     let other = mutable_state_of(0);
     let (c, o) = (count.clone(), other.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         o.get(); // the parent runs again, the same states given: they're skipped
         let cc = c.clone();
         let doubled = remember(|| derived_state_of(move || cc.get() * 2));
@@ -182,7 +174,7 @@ fn read_only_states_come_from_mutable_and_derived_ones() {
             Shown(c.clone().into());
             Shown(doubled.clone().into());
         });
-    });
+    }));
     assert!(rule.has("value=1") && rule.has("value=2") && runs(&SHOWN_RUNS) == 2);
     other.set(1);
     rule.wait_for_idle();
@@ -288,7 +280,7 @@ fn a_composition_sees_other_threads_writes_whole_and_once_applied() {
     let second = mutable_state_of(0);
     let seen = Rc::new(RefCell::new(Vec::<(i32, i32)>::new()));
     let (f, s, sn) = (first.clone(), second.clone(), seen.clone());
-    let rule = Rule::new(move || sn.borrow_mut().push((f.get(), s.get())));
+    let rule = Rule::new(kompozable_lambda!(move || sn.borrow_mut().push((f.get(), s.get()))));
     Snapshot::with_mutable_snapshot(|| {
         first.set(1);
         second.set(1);
@@ -338,7 +330,7 @@ fn states_take_a_mutation_policy() {
     let sign = mutable_state_of_with_policy(1, SnapshotMutationPolicy::new(|a: &i32, b: &i32| (*a < 0) == (*b < 0)));
     let counts = Rc::new([Cell::new(0), Cell::new(0), Cell::new(0), Cell::new(0)]);
     let (s, e, g, c) = (same.clone(), every.clone(), sign.clone(), counts.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let (s, e, g, c) = (s.clone(), e.clone(), g.clone(), c.clone());
         let c1 = c.clone();
         let s1 = s.clone();
@@ -362,7 +354,7 @@ fn states_take_a_mutation_policy() {
             tens.get();
             c[3].set(c[3].get() + 1);
         });
-    });
+    }));
     let n = |i: usize| counts[i].get();
     same.set(1);
     every.set(1);
@@ -380,7 +372,7 @@ fn remember_and_effects_take_two_or_three_keys() {
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let made = Rc::new([Cell::new(0), Cell::new(0)]);
     let (aa, bb, cc, l, m) = (a.clone(), b.clone(), c.clone(), log.clone(), made.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let (x, y, z) = (aa.get(), bb.get(), cc.get());
         remember_keyed((x, y), || {
             m[0].set(m[0].get() + 1);
@@ -395,7 +387,7 @@ fn remember_and_effects_take_two_or_three_keys() {
             l.borrow_mut().push(format!("+{x}{y}"));
             on_dispose(move || l.borrow_mut().push("-".into()))
         });
-    });
+    }));
     assert!(made[0].get() == 1 && made[1].get() == 1 && *log.borrow() == ["+11"]);
     log.borrow_mut().clear();
     c.set(2); // only in the three-key one
@@ -420,7 +412,7 @@ impl RememberObserver for Remembered {
     }
 }
 
-#[track_caller]
+#[kompozable(inline)]
 fn effect(log: &Rc<RefCell<Vec<String>>>, name: &'static str, k: i32) {
     let log = log.clone();
     DisposableEffect(k, move || {
@@ -436,7 +428,7 @@ fn effects_run_in_composes_order() {
     let show = mutable_state_of(true);
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let (k, s, l) = (key.clone(), show.clone(), log.clone());
-    let mut rule = Rule::new(move || {
+    let mut rule = Rule::new(kompozable_lambda!(move || {
         let kv = k.get();
         let l1 = l.clone();
         SideEffect(move || l1.borrow_mut().push("side".into()));
@@ -456,7 +448,7 @@ fn effects_run_in_composes_order() {
         if !s.get() {
             l.borrow_mut().push("composed".into());
         }
-    });
+    }));
     assert_eq!(*log.borrow(), ["+a1", "+b1", "+r1", "+x0", "+y0", "+z0", "side"]);
     log.borrow_mut().clear();
     key.set(2); // a key changed: the old ones go, all of them before the new ones come
@@ -474,7 +466,7 @@ fn effects_run_in_composes_order() {
 static LocalName: KompozitionLocal<String> = KompozitionLocal::new(|| "default".into());
 
 fn kompozition_local_is_scoped() {
-    let rule = Rule::new(|| {
+    let rule = Rule::new(kompozable_lambda!(|| {
         Column("column", || {
             Text(format!("a={}", LocalName.current()));
             KompozitionLocalProvider(&[LocalName.provides("inner".into())], || {
@@ -482,7 +474,7 @@ fn kompozition_local_is_scoped() {
             });
             Text(format!("c={}", LocalName.current()));
         });
-    });
+    }));
     assert_eq!(rule.names(), ["column", "a=default", "b=inner", "c=default"]);
 }
 
@@ -512,7 +504,7 @@ fn kompozition_locals_from_factories_defaults_and_contexts() {
     let seen = Rc::new(RefCell::new(Seen::default()));
     let here = Rc::new(RefCell::new(KompozitionLocalContext::default()));
     let (t, m, sn, h) = (tick.clone(), mode.clone(), seen.clone(), here.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         t.get();
         sn.borrow_mut().lazy = LocalLazy.current();
         sn.borrow_mut().lazy_again = LocalLazy.current();
@@ -534,7 +526,7 @@ fn kompozition_locals_from_factories_defaults_and_contexts() {
         KompozitionLocalProviderContext(&context, || {
             sn.borrow_mut().elsewhere = format!("{}/{}", LocalNeeded.current(), LocalTheme.current());
         });
-    });
+    }));
     {
         let s = seen.borrow();
         assert!(s.lazy == 7 && s.lazy_again == 7 && MADE.with(|m| m.get()) == 1 && s.threw && s.plain == "light");
@@ -560,14 +552,14 @@ fn only_readers_of_a_state_recompose() {
     let count = mutable_state_of(0);
     let root_runs = Rc::new(Cell::new(0));
     let (c, r) = (count.clone(), root_runs.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         r.set(r.get() + 1);
         let c = c.clone();
         Column("column", move || {
             CounterView(c.clone());
             StaticView();
         });
-    });
+    }));
     count.set(1);
     rule.wait_for_idle();
     assert!(rule.has("count=1"));
@@ -580,14 +572,14 @@ fn parent_recomposition_skips_unchanged_children() {
     reset(&STATIC_RUNS);
     let tick = mutable_state_of(0);
     let t = tick.clone();
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let t = t.clone();
         Column("column", move || {
             Text(format!("tick={t}"));
             Text("fixed");
             StaticView();
         });
-    });
+    }));
     let skipped_before = rule.composition().stats().scopes_skipped;
     tick.set(1);
     rule.wait_for_idle();
@@ -603,7 +595,7 @@ fn changed_argument_reruns_child() {
     let (a, b) = (mutable_state_of(0), mutable_state_of(0));
     let which = mutable_state_of(true);
     let (aa, bb, w) = (a.clone(), b.clone(), which.clone());
-    let rule = Rule::new(move || CounterView(if w.get() { aa.clone() } else { bb.clone() }));
+    let rule = Rule::new(kompozable_lambda!(move || CounterView(if w.get() { aa.clone() } else { bb.clone() })));
     assert_eq!(runs(&COUNTER_RUNS), 1);
     which.set(false); // a different state object: the argument changed
     rule.wait_for_idle();
@@ -618,20 +610,16 @@ fn changed_argument_reruns_child() {
 
 static LocalLevel: KompozitionLocal<i32> = KompozitionLocal::new(|| 0);
 
-#[track_caller]
+#[kompozable]
 fn Middle() {
-    restartable((), Some(|_, _| true), |_| {
-        bump(&MIDDLE_RUNS);
-        Reader();
-    });
+    bump(&MIDDLE_RUNS);
+    Reader();
 }
 
-#[track_caller]
+#[kompozable]
 fn Reader() {
-    restartable((), Some(|_, _| true), |_| {
-        bump(&READER_RUNS);
-        Text(format!("level={}", LocalLevel.current()));
-    });
+    bump(&READER_RUNS);
+    Text(format!("level={}", LocalLevel.current()));
 }
 
 fn local_change_reaches_reader_under_skipped_parent() {
@@ -639,7 +627,8 @@ fn local_change_reaches_reader_under_skipped_parent() {
     reset(&READER_RUNS);
     let level = mutable_state_of(1);
     let l = level.clone();
-    let rule = Rule::new(move || KompozitionLocalProvider(&[LocalLevel.provides(l.get())], Middle));
+    let rule =
+        Rule::new(kompozable_lambda!(move || KompozitionLocalProvider(&[LocalLevel.provides(l.get())], || Middle())));
     assert!(rule.has("level=1"));
     level.set(2);
     rule.wait_for_idle();
@@ -648,26 +637,24 @@ fn local_change_reaches_reader_under_skipped_parent() {
     assert_eq!(runs(&READER_RUNS), 2);
 }
 
-#[track_caller]
+#[kompozable]
 fn Items(n: MutableState<i32>) {
-    restartable(n, Some(MutableState::eq), |n| {
-        for i in 0..n.get() {
-            Text(format!("item{i}"));
-        }
-    });
+    for i in 0..n.get() {
+        Text(format!("item{i}"));
+    }
 }
 
 fn partial_recomposition_keeps_node_order() {
     let n = mutable_state_of(1);
     let nn = n.clone();
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let nn = nn.clone();
         Column("col", move || {
             Text("header");
             Items(nn.clone());
             Text("footer");
         });
-    });
+    }));
     let col = rule.root.find("col").unwrap();
     assert_eq!(col.child_names(), ["header", "item0", "footer"]);
     n.set(3);
@@ -696,13 +683,13 @@ fn a_restarted_scope_leaves_nothing_provided_held() {
     let count = mutable_state_of(0);
     let shown = mutable_state_of(true);
     let (h, c, s) = (holder.clone(), count.clone(), shown.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         if s.get() {
             let held = h.borrow().clone().map(Held);
             let c = c.clone();
             KompozitionLocalProvider(&[LocalHeld.provides(held)], move || CounterView(c.clone()));
         }
-    });
+    }));
     holder.borrow_mut().take();
     count.set(1); // only CounterView runs again
     rule.wait_for_idle();
@@ -712,18 +699,16 @@ fn a_restarted_scope_leaves_nothing_provided_held() {
     assert!(weak.upgrade().is_none());
 }
 
-#[track_caller]
+#[kompozable]
 fn Toggle(show: MutableState<bool>, log: Rc<RefCell<Vec<String>>>) {
-    restartable((show, log), None, |(show, log)| {
-        if show.get() {
-            let log = log.clone();
-            DisposableEffect(0, move || {
-                log.borrow_mut().push("on".into());
-                on_dispose(move || log.borrow_mut().push("off".into()))
-            });
-        }
-        Text(if show.get() { "shown" } else { "hidden" });
-    });
+    if show.get() {
+        let log = log.clone();
+        DisposableEffect(0, move || {
+            log.borrow_mut().push("on".into());
+            on_dispose(move || log.borrow_mut().push("off".into()))
+        });
+    }
+    Text(if show.get() { "shown" } else { "hidden" });
 }
 
 fn restarted_scope_disposes_what_it_no_longer_calls() {
@@ -731,10 +716,10 @@ fn restarted_scope_disposes_what_it_no_longer_calls() {
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let root_runs = Rc::new(Cell::new(0));
     let (s, l, r) = (show.clone(), log.clone(), root_runs.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         r.set(r.get() + 1);
         Toggle(s.clone(), l.clone());
-    });
+    }));
     show.set(false);
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["on", "off"]);
@@ -745,7 +730,7 @@ fn restarted_scope_disposes_what_it_no_longer_calls() {
 fn state_set_from_another_thread() {
     let count = mutable_state_of(0);
     let c = count.clone();
-    let rule = Rule::new(move || CounterView(c.clone()));
+    let rule = Rule::new(kompozable_lambda!(move || CounterView(c.clone())));
     let c = count.clone();
     std::thread::spawn(move || c.set(5)).join().unwrap();
     rule.wait_for_idle();
@@ -757,7 +742,7 @@ fn frame_scopes_recompose_only_themselves() {
     let root_runs = Rc::new(Cell::new(0));
     let frames = Rc::new(Cell::new(0));
     let (r, f) = (root_runs.clone(), frames.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         r.set(r.get() + 1);
         let f = f.clone();
         scoped(move || {
@@ -767,7 +752,7 @@ fn frame_scopes_recompose_only_themselves() {
             }
             Text(if f.get() >= 5 { "done" } else { "moving" });
         });
-    });
+    }));
     assert!(rule.has("done"));
     assert_eq!(root_runs.get(), 1);
     assert_eq!(frames.get(), 5);
@@ -777,7 +762,7 @@ fn derived_state_recomposes_only_when_its_value_changes() {
     let count = mutable_state_of(0);
     let runs = Rc::new(Cell::new(0));
     let (c, r) = (count.clone(), runs.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let c = c.clone();
         let big = remember(|| derived_state_of(move || c.get() > 3));
         let r = r.clone();
@@ -785,7 +770,7 @@ fn derived_state_recomposes_only_when_its_value_changes() {
             r.set(r.get() + 1);
             Text(if big.get() { "big" } else { "small" });
         });
-    });
+    }));
     for i in 1..=3 {
         count.set(i);
         rule.wait_for_idle();
@@ -802,11 +787,11 @@ fn derived_state_recomposes_only_when_its_value_changes() {
 fn state_list_recomposes_on_changes() {
     let list = mutable_state_list_of(["a".to_string()]);
     let l = list.clone();
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         for item in l.to_vec() {
             Text(item);
         }
-    });
+    }));
     list.add("b".into());
     rule.wait_for_idle();
     assert_eq!(rule.names(), ["a", "b"]);
@@ -827,10 +812,10 @@ fn state_maps_recompose_their_readers() {
     let likes = mutable_state_map_of::<String, i32>([]);
     let runs = Rc::new(Cell::new(0));
     let (l, r) = (likes.clone(), runs.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         r.set(r.get() + 1);
         Text(format!("likes={}", l.get_or_default(&"a".to_string(), 0)));
-    });
+    }));
     assert_eq!(likes.put("a".into(), 1), None);
     rule.wait_for_idle();
     assert!(rule.has("likes=1") && runs.get() == 2);
@@ -853,7 +838,7 @@ fn remember_updated_state_gives_effects_the_latest_value() {
     let latest = Rc::new(RefCell::new(None::<UpdatedState<i32>>));
     let starts = Rc::new(Cell::new(0));
     let (v, l, s) = (value.clone(), latest.clone(), starts.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let updated = remember_updated_state(v.get());
         let (l, s) = (l.clone(), s.clone());
         DisposableEffect((), move || {
@@ -862,7 +847,7 @@ fn remember_updated_state_gives_effects_the_latest_value() {
             *l.borrow_mut() = Some(updated);
             on_dispose(|| {})
         });
-    });
+    }));
     value.set(2);
     rule.wait_for_idle();
     value.set(3);
@@ -875,7 +860,7 @@ fn movable_content_keeps_its_state_where_it_moves() {
     let handles = Rc::new(RefCell::new(Vec::new()));
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let (w, h, l) = (wide.clone(), handles.clone(), log.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let (h, l) = (h.clone(), l.clone());
         let video = remember(move || {
             movable_content_of(move || {
@@ -893,7 +878,7 @@ fn movable_content_keeps_its_state_where_it_moves() {
             let v = video.clone();
             Column("column", move || v.call());
         }
-    });
+    }));
     click(&handles, 1);
     rule.wait_for_idle();
     assert_eq!(rule.names(), ["column", "item1:1"]);
@@ -911,13 +896,13 @@ fn movable_content_leaves_a_composition_it_isnt_called_in() {
     let show = mutable_state_of(true);
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
     let (s, l) = (show.clone(), log.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let l = l.clone();
         let content = remember(move || movable_content_of(move || effect(&l, "m", 0)));
         if s.get() {
             content.call();
         }
-    });
+    }));
     show.set(false);
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["+m0", "-m0"]);
@@ -926,12 +911,12 @@ fn movable_content_leaves_a_composition_it_isnt_called_in() {
 fn movable_content_called_twice_makes_a_second_instance() {
     let handles = Rc::new(RefCell::new(Vec::new()));
     let h = handles.clone();
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let h = h.clone();
         let content = remember(move || movable_content_with_param_of(move |id: &i32| Item(*id, h.clone())));
         content.call(1);
         content.call(2);
-    });
+    }));
     click(&handles, 2);
     rule.wait_for_idle();
     assert_eq!(rule.names(), ["item1:0", "item2:1"]);
@@ -941,7 +926,7 @@ fn remember_saveable_comes_back_with_its_holders_key() {
     let tab = mutable_state_of("a".to_string());
     let handles = Rc::new(RefCell::new(Vec::<(String, MutableState<i32>)>::new()));
     let (t, h) = (tab.clone(), handles.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let holder = remember_saveable_state_holder();
         let key = t.get();
         let h = h.clone();
@@ -950,7 +935,7 @@ fn remember_saveable_comes_back_with_its_holders_key() {
             h.borrow_mut().push((key.clone(), count.clone()));
             Text(format!("{key}:{count}"));
         });
-    });
+    }));
     let count_of = |k: &str| handles.borrow().iter().rev().find(|(t, _)| t == k).unwrap().1.clone();
     count_of("a").set(5);
     rule.wait_for_idle();
@@ -964,7 +949,7 @@ fn remember_saveable_comes_back_with_its_holders_key() {
 }
 
 /// The same composable in both hosts: its saved values are found by their place in it.
-#[track_caller]
+#[kompozable]
 fn SavedText(handles: Rc<RefCell<Vec<MutableState<String>>>>) {
     let text = remember_saveable(|| mutable_state_of(String::new()));
     handles.borrow_mut().push(text.clone());
@@ -975,7 +960,10 @@ fn saved_state_outlives_the_host() {
     let host = |saved: Option<&SavedValue>, handles: Rc<RefCell<Vec<MutableState<String>>>>| {
         let registry = SaveableStateRegistry::new(saved);
         let r = registry.clone();
-        (registry, Rule::new(move || ProvideSaveableStateRegistry(&r, || SavedText(handles.clone()))))
+        (
+            registry,
+            Rule::new(kompozable_lambda!(move || ProvideSaveableStateRegistry(&r, || SavedText(handles.clone())))),
+        )
     };
     let handles = Rc::new(RefCell::new(Vec::new()));
     let saved = {
@@ -995,7 +983,7 @@ fn remember_saveable_starts_again_when_its_inputs_change() {
     let input = mutable_state_of(1);
     let handles = Rc::new(RefCell::new(Vec::<MutableState<i32>>::new()));
     let (i, h) = (input.clone(), handles.clone());
-    let rule = Rule::new(move || {
+    let rule = Rule::new(kompozable_lambda!(move || {
         let holder = remember_saveable_state_holder();
         let (i, h) = (i.clone(), h.clone());
         holder.SaveableStateProvider("screen", move || {
@@ -1003,7 +991,7 @@ fn remember_saveable_starts_again_when_its_inputs_change() {
             h.borrow_mut().push(count.clone());
             Text(format!("count={count}"));
         });
-    });
+    }));
     handles.borrow().last().unwrap().set(3);
     rule.wait_for_idle();
     assert!(rule.has("count=3"));
@@ -1018,7 +1006,7 @@ struct City {
     country: String,
 }
 
-#[track_caller]
+#[kompozable]
 fn CityText(saver: Saver<MutableState<City>>) {
     let city =
         remember_saveable_with(&saver, || mutable_state_of(City { name: "Madrid".into(), country: "Spain".into() }));
@@ -1039,7 +1027,7 @@ fn remember_saveable_with_a_saver_of_its_own() {
     let host = |saved: Option<&SavedValue>, saver: Saver<MutableState<City>>| {
         let registry = SaveableStateRegistry::new(saved);
         let r = registry.clone();
-        (registry, Rule::new(move || ProvideSaveableStateRegistry(&r, || CityText(saver.clone()))))
+        (registry, Rule::new(kompozable_lambda!(move || ProvideSaveableStateRegistry(&r, || CityText(saver.clone())))))
     };
     let (registry, rule) = host(None, saver.clone());
     assert!(rule.has("Izmir/Türkiye"));

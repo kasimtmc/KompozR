@@ -5,8 +5,8 @@ use crate::executor::{CoroutineScope, Dispatcher};
 use crate::flow::{Flow, flow};
 use crate::hot::{AsFlow, StateFlow};
 use kompoz_runtime::{
-    DisposableEffect, KompozitionLocal, MutableState, RememberObserver, Snapshot, StateKey, group, mutable_state_of,
-    observe_reads, on_dispose, remember, remember_keyed, remember_observer,
+    DisposableEffect, KompozitionLocal, MutableState, RememberObserver, Snapshot, StateKey, group, kompozable,
+    kompozable_block, mutable_state_of, observe_reads, on_dispose, remember, remember_keyed, remember_observer,
 };
 use std::collections::HashSet;
 use std::future::Future;
@@ -28,17 +28,18 @@ fn dispatcher() -> Dispatcher {
 /// ```no_run
 /// # use kompoz_coroutines::*;
 /// # use kompoz_runtime::*;
-/// # fn content(seconds: MutableState<i32>) {
-/// LaunchedEffect((), async move {
-///     loop {
-///         delay_ms(1000).await;
-///         seconds.update(|s| *s += 1);
-///     }
-/// });
-/// # }
+/// # fn main() {}
+/// #[kompozable]
+/// fn Clock(seconds: MutableState<i32>) {
+///     LaunchedEffect((), async move {
+///         loop {
+///             delay_ms(1000).await;
+///             seconds.update(|s| *s += 1);
+///         }
+///     });
+/// }
 /// ```
-#[allow(non_snake_case)]
-#[track_caller]
+#[kompozable(inline)]
 pub fn LaunchedEffect<K: PartialEq + 'static>(keys: K, effect: impl Future<Output = ()> + 'static) {
     let d = dispatcher();
     DisposableEffect(keys, move || {
@@ -65,18 +66,16 @@ pub fn remember_coroutine_scope() -> CoroutineScope {
 }
 
 /// A state a coroutine produces (restarted when `keys` change): `producer` gets the state and sets it.
-#[track_caller]
+#[kompozable]
 pub fn produce_state<T, K, Fut>(initial: T, keys: K, producer: impl FnOnce(MutableState<T>) -> Fut) -> T
 where
     T: PartialEq + Clone + Send + Sync + 'static,
     K: PartialEq + 'static,
     Fut: Future<Output = ()> + 'static,
 {
-    group(|| {
-        let state = remember(|| mutable_state_of(initial));
-        LaunchedEffect(keys, producer(state.clone()));
-        state.get()
-    })
+    let state = remember(|| mutable_state_of(initial));
+    LaunchedEffect(keys, producer(state.clone()));
+    state.get()
 }
 
 impl<T: PartialEq + Clone + Send + Sync + 'static> Flow<T> {
@@ -86,7 +85,11 @@ impl<T: PartialEq + Clone + Send + Sync + 'static> Flow<T> {
         group(|| {
             let state = remember_keyed(self.clone(), || mutable_state_of(initial));
             let (flow, s) = (self.clone(), state.clone());
-            LaunchedEffect(self.clone(), flow.collect(move |v| s.set(v)));
+            let collecting = flow.collect(move |v| s.set(v));
+            let key = self.clone();
+            kompozable_block!({
+                LaunchedEffect(key, collecting);
+            });
             state.get()
         })
     }
@@ -99,7 +102,11 @@ impl<T: PartialEq + Clone + Send + Sync + 'static> StateFlow<T> {
         group(|| {
             let state = remember_keyed(self.clone(), || mutable_state_of(self.value()));
             let s = state.clone();
-            LaunchedEffect(self.clone(), self.as_flow().collect(move |v| s.set(v)));
+            let collecting = self.as_flow().collect(move |v| s.set(v));
+            let key = self.clone();
+            kompozable_block!({
+                LaunchedEffect(key, collecting);
+            });
             state.get()
         })
     }

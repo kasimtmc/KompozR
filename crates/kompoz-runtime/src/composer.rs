@@ -915,11 +915,10 @@ impl Composer {
         StateKey::hashed(mix_key(local as u64, provider.map_or(u64::MAX, |g| g.0 as u64)))
     }
 
-    /// Composes `content` with `values` provided: a provider that now gives a different value recomposes the
-    /// scopes that read it from it.
-    pub(crate) fn provide(&self, key: u64, mut values: Vec<Provided>, content: impl FnOnce()) {
+    /// Composes `content` with `values` provided, in the current group (the provider's): a provider that now gives
+    /// a different value recomposes the scopes that read it from it.
+    pub(crate) fn provide(&self, mut values: Vec<Provided>, content: impl FnOnce()) {
         values.retain(|v| !(v.if_missing && self.find_local(v.local).is_some())); // provided above already
-        self.start_group(key);
         let (changed, mark) = {
             let mut st = self.state.borrow_mut();
             let st = &mut *st;
@@ -948,7 +947,6 @@ impl Composer {
             st.locals.split_off(mark)
         };
         drop(dropped);
-        self.end_group();
     }
 
     /// The value provided for `local` nearest above, if any.
@@ -1160,6 +1158,18 @@ impl Composer {
 // ---------------------------------------------------------------------------------------------------------------
 // Composition
 
+/// What a composition composes: a closure, or a `#[kompozable]` function taking no arguments (or only defaulted
+/// ones).
+pub trait Content {
+    fn compose(&self);
+}
+
+impl<F: Fn()> Content for F {
+    fn compose(&self) {
+        self()
+    }
+}
+
 /// A composition: content composed into a tree of groups, emitting into `root`'s node, recomposed where what it
 /// read changed. The host drives it: [`recompose`](Composition::recompose) at every frame (after
 /// [`Snapshot::send_apply_notifications`]).
@@ -1184,13 +1194,14 @@ impl Composition {
         Composition { composer, _observer: observer }
     }
 
-    /// Sets what it composes (composed at the next `recompose`).
-    pub fn set_content(&self, content: impl Fn() + 'static) {
+    /// Sets what it composes (composed at the next `recompose`): a closure, or a `#[kompozable]` taking no
+    /// arguments.
+    pub fn set_content(&self, content: impl Content + 'static) {
         let s = {
             let mut st = self.composer.state.borrow_mut();
             let st = &mut *st;
             let root = st.root.unwrap();
-            let body: Rc<dyn Fn(&dyn Any)> = Rc::new(move |_| content());
+            let body: Rc<dyn Fn(&dyn Any)> = Rc::new(move |_| content.compose());
             match st.groups.get(root.0).scope {
                 Some(s) => {
                     let old = st.scopes.get_mut(s.0).body.replace(body);

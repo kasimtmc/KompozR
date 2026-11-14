@@ -1,14 +1,20 @@
-//! What the generated builders use.
+//! What `#[kompozable]` and `#[named]` generate code against. Not for use by hand.
+
+use std::marker::PhantomData;
+
+pub use crate::remember::{group, restartable};
 
 /// An argument that was given.
 pub struct Set<T>(pub T);
 /// A parameter with a default that wasn't given.
 pub struct Unset;
+/// A generic parameter of a function not known yet (until an argument gives it).
+pub struct Infer;
 
 #[diagnostic::on_unimplemented(
     message = "a required argument is missing: `{Self}`",
     label = "this call needs it",
-    note = "`Missing_x` names the parameter `x`"
+    note = "`__kz_F_Missing_x` names the parameter `x` of `F`"
 )]
 pub trait Required {
     type Value;
@@ -125,6 +131,10 @@ tuples!(A1 A2 A3 A4);
 tuples!(A1 A2 A3 A4 A5);
 tuples!(A1 A2 A3 A4 A5 A6);
 tuples!(A1 A2 A3 A4 A5 A6 A7);
+tuples!(A1 A2 A3 A4 A5 A6 A7 A8);
+tuples!(A1 A2 A3 A4 A5 A6 A7 A8 A9);
+tuples!(A1 A2 A3 A4 A5 A6 A7 A8 A9 A10);
+tuples!(A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11);
 
 macro_rules! positional_setters {
     ($($m:ident)*) => {
@@ -147,4 +157,51 @@ macro_rules! positional_setters {
         }
     };
 }
-positional_setters!(__arg0 __arg1 __arg2 __arg3 __arg4 __arg5 __arg6 __arg7 __last);
+positional_setters!(__arg0 __arg1 __arg2 __arg3 __arg4 __arg5 __arg6 __arg7 __arg8 __arg9 __arg10 __arg11 __last);
+
+/// `(&&EqProbe::<T>::new()).__kz_eq()`: `T`'s `==` if it has one (what makes a composable skippable).
+pub struct EqProbe<T>(PhantomData<T>);
+
+impl<T> EqProbe<T> {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        EqProbe(PhantomData)
+    }
+}
+
+pub trait EqViaPartialEq<T> {
+    fn __kz_eq(&self) -> Option<fn(&T, &T) -> bool>;
+}
+impl<T: PartialEq> EqViaPartialEq<T> for &EqProbe<T> {
+    fn __kz_eq(&self) -> Option<fn(&T, &T) -> bool> {
+        Some(<T as PartialEq>::eq)
+    }
+}
+
+pub trait EqFallback<T> {
+    fn __kz_eq(&self) -> Option<fn(&T, &T) -> bool>;
+}
+impl<T> EqFallback<T> for EqProbe<T> {
+    fn __kz_eq(&self) -> Option<fn(&T, &T) -> bool> {
+        None
+    }
+}
+
+/// Whether `a` equals `b` by `eq`; never without one.
+pub fn eq_by<T>(eq: Option<fn(&T, &T) -> bool>, a: &T, b: &T) -> bool {
+    eq.is_some_and(|eq| eq(a, b))
+}
+
+/// What a closure a composable keeps captures: cloned into it, so the closure can run again and the value stay
+/// where it was (Kotlin's lambdas share what they capture).
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is captured by a closure a composable keeps, which takes a clone of it: it must be `Clone`",
+    label = "captured here",
+    note = "share it (an `Rc`, a state), or write `move` on a closure at the top of the body to move it in"
+)]
+pub trait Capture: Clone {}
+impl<T: Clone> Capture for T {}
+
+pub fn capture<T: Capture>(value: &T) -> T {
+    value.clone()
+}

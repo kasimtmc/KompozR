@@ -1,0 +1,8 @@
+error[E0599]: no method named `colour` found for struct `__kz_Label_Builder<P0, P1>` in the current scope
+  --> tests/ui/unknown_argument.rs:10:24
+   |
+ 3 | #[kompozable]
+   | ------------- method `colour` not found for this struct
+...
+10 |     Label("hi".into(), colour = 3);
+   |                        ^^^^^^ method not found in `__kz_Label_Builder<kompoz_runtime::__private::Set<std::string::String>, kompoz_runtime::__private::Unset>`

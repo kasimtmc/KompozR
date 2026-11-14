@@ -1,6 +1,7 @@
 //! What composables call: remember, keys, restartable scopes, effects.
 
 use crate::composer::{Composer, RememberObserver, key_of, mix_key, stable_hash};
+use crate::kompozable;
 use std::any::Any;
 use std::hash::Hash;
 use std::panic::Location;
@@ -168,7 +169,7 @@ pub fn scoped(content: impl Fn() + 'static) {
 
 /// Runs after every successful composition of the enclosing scope (after what entered the composition was told
 /// so).
-#[allow(non_snake_case)]
+#[kompozable(inline)]
 pub fn SideEffect(effect: impl FnOnce() + 'static) {
     Composer::require().side_effect(Box::new(effect));
 }
@@ -183,11 +184,9 @@ pub fn on_dispose(cleanup: impl FnOnce() + 'static) -> DisposableEffectResult {
 
 /// Runs `effect` after the composition when it enters the composition or when `keys` change (several: a tuple);
 /// the cleanup it returns runs when it leaves or runs again.
-#[allow(non_snake_case)]
-#[track_caller]
+#[kompozable(inline)]
 pub fn DisposableEffect<K: PartialEq + 'static>(keys: K, effect: impl FnOnce() -> DisposableEffectResult + 'static) {
     let c = Composer::require();
-    c.start_group(key_of(Location::caller()));
     let g = c.current_group();
     let mut keys = Some(keys);
     let changed = slot_get::<K, _>(&c, |k| {
@@ -217,7 +216,6 @@ pub fn DisposableEffect<K: PartialEq + 'static>(keys: K, effect: impl FnOnce() -
             }
         }));
     }
-    c.end_group();
 }
 
 /// The latest value passed to [`remember_updated_state`]. Not observable: meant for long-running effects that

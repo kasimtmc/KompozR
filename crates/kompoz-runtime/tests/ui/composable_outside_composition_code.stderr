@@ -1,0 +1,10 @@
+error[E0618]: expected function, found `__kz_Label_Marker`
+ --> tests/ui/composable_outside_composition_code.rs:9:5
+  |
+3 | #[kompozable]
+  | ------------- `Label` defined here
+...
+9 |     Label("not in a #[kompozable] body".into());
+  |     ^^^^^--------------------------------------
+  |     |
+  |     call expression requires function

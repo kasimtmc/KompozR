@@ -25,13 +25,16 @@ struct CoRule {
 }
 
 impl CoRule {
-    fn new(content: impl Fn() + 'static) -> CoRule {
+    fn new(content: impl Content + 'static) -> CoRule {
         let root = TestNode::new("root");
         let composition = Composition::new(Some(root.clone()));
         let dispatcher = Dispatcher::new();
         let d = dispatcher.clone();
-        composition
-            .set_content(move || KompozitionLocalProvider(&[LocalDispatcher.provides(Some(d.clone()))], &content));
+        let content = Rc::new(content);
+        composition.set_content(kompozable_lambda!(move || KompozitionLocalProvider(
+            &[LocalDispatcher.provides(Some(d.clone()))],
+            || content.compose()
+        )));
         let rule = CoRule { root, composition: Some(composition), dispatcher, time: Cell::new(0) };
         rule.frame();
         rule
@@ -145,7 +148,7 @@ fn scope_of(rule_scope: &Rc<RefCell<Option<CoroutineScope>>>) -> CoroutineScope 
 fn scope_rule() -> (CoRule, CoroutineScope) {
     let cell = Rc::new(RefCell::new(None));
     let c = cell.clone();
-    let rule = CoRule::new(move || *c.borrow_mut() = Some(remember_coroutine_scope()));
+    let rule = CoRule::new(kompozable_lambda!(move || *c.borrow_mut() = Some(remember_coroutine_scope())));
     let scope = scope_of(&cell);
     (rule, scope)
 }
@@ -157,7 +160,7 @@ fn launched_effect_ticks_and_is_cancelled_on_leave() {
     let ticks = mutable_state_of(0);
     let log = new_log();
     let (s, t, l) = (show.clone(), ticks.clone(), log.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if s.get() {
             let (t, l) = (t.clone(), l.clone());
             LaunchedEffect(0, async move {
@@ -169,7 +172,7 @@ fn launched_effect_ticks_and_is_cancelled_on_leave() {
             });
         }
         Text(format!("ticks={t}"));
-    });
+    }));
     rule.advance_time_by(3500);
     assert!(rule.has("ticks=3"), "{:?}", rule.names());
     show.set(false);
@@ -212,7 +215,7 @@ fn coroutines_give_back_values_and_work_in_the_background() {
         slow_key.clone(),
         slow_results.clone(),
     );
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let kv = k.get();
         let (sh, fa) = (sh.clone(), fa.clone());
         LaunchedEffect(kv, async move {
@@ -247,7 +250,7 @@ fn coroutines_give_back_values_and_work_in_the_background() {
                 fw.set(-1);
             }
         });
-    });
+    }));
     quietly(|| rule.wait_for_idle());
     assert!(shown.peek() == "twice 2" && failure.peek().is_empty());
     assert_eq!(summed.peek(), 5050);
@@ -485,7 +488,7 @@ fn launched_effect_restarts_when_key_changes() {
     let k = mutable_state_of(1);
     let log = new_log();
     let (kk, l) = (k.clone(), log.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let key = kk.get();
         let l = l.clone();
         LaunchedEffect(key, async move {
@@ -493,7 +496,7 @@ fn launched_effect_restarts_when_key_changes() {
             push(&l, format!("start{key}"));
             delay(Duration::from_secs(10)).await;
         });
-    });
+    }));
     k.set(2);
     rule.advance_time_by(100);
     assert_eq!(*log.borrow(), ["start1", "run1 destroyed", "start2"]);
@@ -508,10 +511,10 @@ fn coroutine_scope_launches_from_a_click() {
     let value = mutable_state_of(0);
     let scope_cell = Rc::new(RefCell::new(None));
     let (v, sc) = (value.clone(), scope_cell.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         *sc.borrow_mut() = Some(remember_coroutine_scope());
         Text(format!("value={v}"));
-    });
+    }));
     // What a button's click does:
     let v = value.clone();
     scope_of(&scope_cell).launch(async move {
@@ -531,7 +534,7 @@ fn coroutine_scope_launches_from_a_click() {
 fn coroutine_failure_is_reported_not_fatal() {
     let after = mutable_state_of(0);
     let a = after.clone();
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         LaunchedEffect(0, async {
             delay_ms(10).await;
             panic!("boom (expected in this test)");
@@ -541,7 +544,7 @@ fn coroutine_failure_is_reported_not_fatal() {
             delay_ms(50).await;
             a.set(1);
         });
-    });
+    }));
     quietly(|| rule.advance_time_by(100));
     assert_eq!(after.peek(), 1); // other coroutines keep running
 }
@@ -567,7 +570,7 @@ fn snapshot_flow_reports_each_new_value() {
     let running = mutable_state_of(true);
     let seen = Rc::new(RefCell::new(Vec::new()));
     let (aa, bb, r, s) = (a.clone(), b.clone(), running.clone(), seen.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if !r.get() {
             return;
         }
@@ -575,7 +578,7 @@ fn snapshot_flow_reports_each_new_value() {
         LaunchedEffect(0, async move {
             snapshot_flow(move || aa.get() + bb.get() / 10).collect(move |v| s.borrow_mut().push(v)).await;
         });
-    });
+    }));
     rule.wait_for_idle();
     assert_eq!(*seen.borrow(), [2]); // the value it starts with
     a.set(2);
@@ -606,20 +609,18 @@ thread_local! {
     static FLOW_READER_RUNS: Cell<u32> = const { Cell::new(0) };
 }
 
-#[track_caller]
+#[kompozable]
 fn FlowReader(vm: DownloadViewModel) {
-    restartable(vm, None, |vm| {
-        FLOW_READER_RUNS.with(|r| r.set(r.get() + 1));
-        let progress = vm.progress.collect_as_state();
-        Text(format!("{} · %{progress}", vm.status.collect_as_state()));
-    });
+    FLOW_READER_RUNS.with(|r| r.set(r.get() + 1));
+    let progress = vm.progress.collect_as_state();
+    Text(format!("{} · %{progress}", vm.status.collect_as_state()));
 }
 
 fn state_flow_is_collected_as_state() {
     FLOW_READER_RUNS.with(|r| r.set(0));
     let vm = DownloadViewModel { progress: MutableStateFlow::new(0), status: MutableStateFlow::new("waiting".into()) };
     let v = vm.clone();
-    let rule = CoRule::new(move || FlowReader(v.clone()));
+    let rule = CoRule::new(kompozable_lambda!(move || FlowReader(v.clone())));
     let runs = || FLOW_READER_RUNS.with(|r| r.get());
     assert!(rule.has("waiting · %0"));
     vm.progress.set_value(40);
@@ -699,7 +700,7 @@ fn flows_produce_on_demand_and_operators_shape_them() {
     let numbers = numbers(&alive, 1);
     let seen = new_log();
     let (n, s) = (numbers.clone(), seen.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let (n, s) = (n.clone(), s.clone());
         LaunchedEffect(0, async move {
             let s2 = s.clone();
@@ -714,7 +715,7 @@ fn flows_produce_on_demand_and_operators_shape_them() {
                 .await;
             push(&s, "done"); // take stopped the endless producer
         });
-    });
+    }));
     assert!(alive.get() == 1 && *seen.borrow() == ["before 10", "10"]); // the first at once, the rest as produced
     rule.advance_time_by(1000);
     assert_eq!(*seen.borrow(), ["before 10", "10", "before 30", "30", "before 50", "50", "done"]);
@@ -775,7 +776,7 @@ fn flow_collection_stops_with_its_coroutine() {
     let compositions = Rc::new(Cell::new(0));
     let totals = Rc::new(RefCell::new(Vec::new()));
     let (s, c, t) = (shown.clone(), compositions.clone(), totals.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if !s.get() {
             return;
         }
@@ -786,7 +787,7 @@ fn flow_collection_stops_with_its_coroutine() {
         });
         let (sums, t) = (sums.clone(), t.clone());
         LaunchedEffect(0, async move { sums.collect(move |v| t.borrow_mut().push(v)).await });
-    });
+    }));
     assert!(rule.has("thirds 0") && alive.get() == 3, "{} {:?}", alive.get(), rule.names()); // the thirds', and combine's two
     rule.advance_time_by(100);
     assert!(!totals.borrow().is_empty() && alive.get() == 4, "{}", alive.get()); // and flat_map_latest's current one
@@ -850,12 +851,12 @@ impl SearchModel {
 fn flows_combine_debounce_and_follow_the_latest_into_a_state_flow() {
     let model: Rc<RefCell<Option<Rc<SearchModel>>>> = Rc::new(RefCell::new(None));
     let m = model.clone();
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let d = LocalDispatcher.current().unwrap();
         let vm = remember(|| Rc::new(SearchModel::new(&d)));
         *m.borrow_mut() = Some(vm.clone());
         Text(vm.results.collect_as_state());
-    });
+    }));
     let model = model.borrow().clone().unwrap();
     assert!(rule.has("-")); // the initial value, until the debounced query is searched
     rule.advance_time_by(1000);
@@ -882,7 +883,7 @@ fn shared_flows_hand_every_value_to_every_collector() {
     let late = mutable_state_of(false);
     let gone = mutable_state_of(false);
     let (e, f, s, la, g) = (events.clone(), first.clone(), second.clone(), late.clone(), gone.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if !g.get() {
             let (e, f) = (e.clone(), f.clone());
             LaunchedEffect(0, async move { e.collect(move |v| push(&f, v)).await });
@@ -891,7 +892,7 @@ fn shared_flows_hand_every_value_to_every_collector() {
             let (e, s) = (e.clone(), s.clone());
             LaunchedEffect(0, async move { e.collect(move |v| push(&s, v)).await });
         }
-    });
+    }));
     assert_eq!(events.subscription_count(), 1);
     events.try_emit("a".into());
     let e = events.clone();
@@ -921,14 +922,14 @@ fn hot_flows_take_flows_operators_on_their_values() {
     let (evens, seen, first_two) =
         (Rc::new(RefCell::new(Vec::new())), Rc::new(RefCell::new(Vec::new())), Rc::new(RefCell::new(Vec::new())));
     let (e, c, ev, se, ft) = (events.clone(), count.clone(), evens.clone(), seen.clone(), first_two.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let (e1, ev) = (e.clone(), ev.clone());
         LaunchedEffect(0, async move { e1.filter(|v| v % 2 == 0).collect(move |v| ev.borrow_mut().push(v)).await });
         let (e2, se) = (e.clone(), se.clone());
         LaunchedEffect(1, async move { e2.on_each(move |v| se.borrow_mut().push(*v)).collect(|_| {}).await });
         let (c, ft) = (c.clone(), ft.clone());
         LaunchedEffect(2, async move { c.take(2).collect(move |v| ft.borrow_mut().push(v)).await });
-    });
+    }));
     for i in 1..=4 {
         events.try_emit(i);
         count.set_value(i);
@@ -944,7 +945,7 @@ fn rendezvous_channels_hand_each_element_from_sender_to_receiver() {
     let log = new_log();
     let receiving = mutable_state_of(false);
     let (ch, l, r) = (channel.clone(), log.clone(), receiving.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let (ch1, l1) = (ch.clone(), l.clone());
         LaunchedEffect(0, async move {
             for i in 1..=3 {
@@ -962,7 +963,7 @@ fn rendezvous_channels_hand_each_element_from_sender_to_receiver() {
                 push(&l2, "done");
             });
         }
-    });
+    }));
     // Nobody receives yet: the first send waits.
     assert!(log.borrow().is_empty() && !channel.is_empty() && !channel.try_send(9));
     receiving.set(true);
@@ -989,7 +990,7 @@ fn buffered_channels_wait_only_when_full() {
     let channel = Channel::<i32>::new(2, BufferOverflow::Suspend);
     let sent = Rc::new(Cell::new(0));
     let (ch, s) = (channel.clone(), sent.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let (ch, s) = (ch.clone(), s.clone());
         LaunchedEffect(0, async move {
             for i in 1..=4 {
@@ -997,7 +998,7 @@ fn buffered_channels_wait_only_when_full() {
                 s.set(s.get() + 1);
             }
         });
-    });
+    }));
     assert_eq!(sent.get(), 2); // two fit; the third waits for room
     assert_eq!(channel.try_receive(), Some(1));
     rule.wait_for_idle();
@@ -1035,13 +1036,13 @@ fn closed_channels_give_what_is_left_and_cancelled_ones_drop_it() {
     let cancelled = Channel::<i32>::new(1, BufferOverflow::Suspend);
     let result = Rc::new(Cell::new(None));
     let (ch, r) = (cancelled.clone(), result.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let (ch, r) = (ch.clone(), r.clone());
         LaunchedEffect(0, async move {
             ch.send(1).await;
             r.set(Some(ch.send(2).await)); // waits: full
         });
-    });
+    }));
     assert!(result.get().is_none());
     cancelled.cancel();
     rule.wait_for_idle();
@@ -1056,7 +1057,7 @@ fn channel_receivers_share_its_elements_and_a_cancelled_one_takes_nothing() {
     let lost = Rc::new(Cell::new(None));
     let (ch, f, s, b, w, lo) =
         (channel.clone(), first.clone(), second.clone(), both.clone(), waiter.clone(), lost.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if b.get() {
             let (c1, f) = (ch.clone(), f.clone());
             LaunchedEffect(1, async move { c1.receive_as_flow().collect(move |v| f.borrow_mut().push(v)).await });
@@ -1067,7 +1068,7 @@ fn channel_receivers_share_its_elements_and_a_cancelled_one_takes_nothing() {
             let (c3, lo) = (ch.clone(), lo.clone());
             LaunchedEffect(3, async move { lo.set(c3.receive().await) });
         }
-    });
+    }));
     for i in 1..=6 {
         channel.try_send(i);
     }
@@ -1090,7 +1091,7 @@ fn produce_sends_from_a_coroutine_and_consume_each_takes_it_all() {
     let got = Rc::new(RefCell::new(Vec::new()));
     let numbers: Rc<RefCell<Option<Channel<i32>>>> = Rc::new(RefCell::new(None));
     let (g, n) = (got.clone(), numbers.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let scope = remember_coroutine_scope();
         let (g, n) = (g.clone(), n.clone());
         LaunchedEffect(0, async move {
@@ -1102,7 +1103,7 @@ fn produce_sends_from_a_coroutine_and_consume_each_takes_it_all() {
             *n.borrow_mut() = Some(ch.clone());
             ch.consume_each(move |v| g.borrow_mut().push(v)).await;
         });
-    });
+    }));
     rule.wait_for_idle();
     assert_eq!(*got.borrow(), [1, 4, 9, 16, 25]);
     assert!(numbers.borrow().as_ref().unwrap().is_closed_for_receive());
@@ -1111,7 +1112,7 @@ fn produce_sends_from_a_coroutine_and_consume_each_takes_it_all() {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let where_ = Rc::new(Cell::new(None));
     let (e, s, w) = (events.clone(), seen.clone(), where_.clone());
-    let other = CoRule::new(move || {
+    let other = CoRule::new(kompozable_lambda!(move || {
         let (e, s, w) = (e.clone(), s.clone(), w.clone());
         LaunchedEffect(0, async move {
             e.consume_each(move |v| {
@@ -1120,7 +1121,7 @@ fn produce_sends_from_a_coroutine_and_consume_each_takes_it_all() {
             })
             .await;
         });
-    });
+    }));
     let e = events.clone();
     std::thread::spawn(move || {
         e.try_send(42);
@@ -1152,7 +1153,7 @@ fn closed_channels_answer_at_once_and_consumers_and_producers_end_them() {
         consuming.clone(),
         got.clone(),
     );
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let scope = remember_coroutine_scope();
         let (cl, se, re, ea) = (cl.clone(), se.clone(), re.clone(), ea.clone());
         LaunchedEffect(0, async move {
@@ -1168,7 +1169,7 @@ fn closed_channels_answer_at_once_and_consumers_and_producers_end_them() {
             let (co, g) = (co.clone(), g.clone());
             LaunchedEffect(1, async move { co.consume_each(move |v| g.borrow_mut().push(v)).await });
         }
-    });
+    }));
     assert!(sent.get() == Some(false) && received.get() == Some(None));
     let e = early.borrow().clone().unwrap();
     assert!(
@@ -1215,7 +1216,7 @@ fn sharing_started_while_subscribed_collects_only_while_collected() {
     // A ViewModel's scope, say: the sharing lives as long as it.
     let shared: Rc<RefCell<Option<(StateFlow<i32>, SharedFlow<i32>, CoroutineScope)>>> = Rc::new(RefCell::new(None));
     let (t, sh, sd) = (ticks.clone(), shown.clone(), shared.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if sd.borrow().is_none() {
             let scope = CoroutineScope::new(&LocalDispatcher.current().unwrap());
             let state = t.state_in(&scope, SharingStarted::WhileSubscribed(Duration::from_millis(1000)), 0);
@@ -1226,7 +1227,7 @@ fn sharing_started_while_subscribed_collects_only_while_collected() {
             let state = sd.borrow().as_ref().unwrap().0.clone();
             Text(format!("value {}", state.collect_as_state()));
         }
-    });
+    }));
     let (state, lazy, _scope) = shared.borrow().clone().unwrap();
     rule.advance_time_by(300);
     assert!(alive.get() == 0 && starts.get() == 0 && state.value() == 0); // nobody collects it: not started
@@ -1267,7 +1268,7 @@ fn state_flow_values_arrive_after_input_stamped_ahead_of_frames() {
     // leave the collector waiting for the frames to catch up.
     let vm = DownloadViewModel { progress: MutableStateFlow::new(0), status: MutableStateFlow::new("waiting".into()) };
     let v = vm.clone();
-    let rule = CoRule::new(move || FlowReader(v.clone()));
+    let rule = CoRule::new(kompozable_lambda!(move || FlowReader(v.clone())));
     rule.dispatcher.advance_to(rule.time.get() + 60_000 * MS); // a minute ahead
     vm.progress.set_value(30);
     rule.wait_for_idle();
@@ -1284,7 +1285,7 @@ fn state_flow_collect_follows_the_latest_value_until_cancelled() {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let shown = Rc::new(Cell::new(-1));
     let (aa, bb, so, ru, se, sh) = (a.clone(), b.clone(), source.clone(), running.clone(), seen.clone(), shown.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         if !ru.get() {
             return;
         }
@@ -1292,7 +1293,7 @@ fn state_flow_collect_follows_the_latest_value_until_cancelled() {
         sh.set(flow.collect_as_state()); // another flow: the new one's value at once
         let (aa, se) = (aa.clone(), se.clone());
         LaunchedEffect(0, async move { aa.collect(move |v| se.borrow_mut().push(v)).await });
-    });
+    }));
     rule.wait_for_idle();
     assert!(*seen.borrow() == [1] && shown.get() == 1);
     a.set_value(2);
@@ -1322,7 +1323,7 @@ fn remember_updated_state_gives_effects_the_latest_value() {
     let label = mutable_state_of("first".to_string());
     let seen = Rc::new(RefCell::new(String::new()));
     let (l, s) = (label.clone(), seen.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let latest = remember_updated_state(l.get());
         let s = s.clone();
         LaunchedEffect(0, async move {
@@ -1330,7 +1331,7 @@ fn remember_updated_state_gives_effects_the_latest_value() {
             delay(Duration::from_secs(1)).await;
             *s.borrow_mut() = latest.get();
         });
-    });
+    }));
     label.set("last".into());
     rule.frame();
     rule.advance_time_by(1100);
@@ -1338,7 +1339,7 @@ fn remember_updated_state_gives_effects_the_latest_value() {
 }
 
 fn produce_state_from_a_coroutine() {
-    let rule = CoRule::new(|| {
+    let rule = CoRule::new(kompozable_lambda!(|| {
         let value = produce_state(0, 0, |state| async move {
             for i in 1..=3 {
                 delay_ms(100).await;
@@ -1346,7 +1347,7 @@ fn produce_state_from_a_coroutine() {
             }
         });
         Text(format!("produced={value}"));
-    });
+    }));
     assert!(rule.has("produced=0"));
     rule.advance_time_by(250);
     assert!(rule.has("produced=2"));
@@ -1359,7 +1360,7 @@ fn launched_effects_and_produce_state_take_several_keys() {
     let log = new_log();
     let produced = Rc::new(Cell::new(0));
     let (aa, bb, cc, l, p) = (a.clone(), b.clone(), c.clone(), log.clone(), produced.clone());
-    let rule = CoRule::new(move || {
+    let rule = CoRule::new(kompozable_lambda!(move || {
         let (x, y, z) = (aa.get(), bb.get(), cc.get());
         let l = l.clone();
         LaunchedEffect((y, z), async move { push(&l, "launched") });
@@ -1369,7 +1370,7 @@ fn launched_effects_and_produce_state_take_several_keys() {
             state.set(p.get());
         });
         Text(format!("p={v}"));
-    });
+    }));
     rule.wait_for_idle();
     assert!(*log.borrow() == ["launched"] && rule.has("p=1"));
     log.borrow_mut().clear();

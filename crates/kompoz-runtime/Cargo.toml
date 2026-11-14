@@ -9,9 +9,17 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[dev-dependencies]
+trybuild = "1"
+
 [dependencies]
+kompoz-macros = { path = "../kompoz-macros" }
 parking_lot.workspace = true
 
 [[test]]
 name = "runtime"
+harness = false
+
+[[test]]
+name = "macros"
 harness = false

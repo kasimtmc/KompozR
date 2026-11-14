@@ -1,0 +1,5 @@
+error: kompoz: a restartable composable runs its closures again: take `impl Fn…` (or make it #[kompozable(inline)])
+ --> tests/ui/fn_once_in_restartable.rs:4:18
+  |
+4 | fn Once(content: impl FnOnce()) {
+  |                  ^^^^

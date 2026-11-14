@@ -61,25 +61,22 @@ impl Node for TestNode {
 }
 
 /// A leaf node named `text` (skipped when its text is the same and it read nothing that changed).
-#[track_caller]
+#[kompozable]
 pub fn Text(text: impl Into<String>) {
-    restartable(text.into(), Some(String::eq), |text| {
-        let text = text.clone();
-        emit(
-            || TestNode::new(""),
-            |n| {
-                *n.name.borrow_mut() = text;
-                n.compositions.set(n.compositions.get() + 1);
-            },
-            || {},
-        );
-    });
+    emit(
+        || TestNode::new(""),
+        |n| {
+            *n.name.borrow_mut() = text;
+            n.compositions.set(n.compositions.get() + 1);
+        },
+        || {},
+    );
 }
 
 /// A node named `name` whose content runs in a scope of its own (as a Compose block's does).
-#[track_caller]
-pub fn Column(name: &'static str, content: impl Fn() + 'static) {
-    group(|| emit(|| TestNode::new(name), |n| n.compositions.set(n.compositions.get() + 1), || scoped(content)));
+#[kompozable]
+pub fn Column(name: &'static str, content: impl Fn()) {
+    emit(|| TestNode::new(name), |n| n.compositions.set(n.compositions.get() + 1), content);
 }
 
 /// Composes content into a root node and runs its frames.
@@ -90,7 +87,7 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn new(content: impl Fn() + 'static) -> Rule {
+    pub fn new(content: impl Content + 'static) -> Rule {
         let root = TestNode::new("root");
         let composition = Composition::new(Some(root.clone()));
         composition.set_content(content);
