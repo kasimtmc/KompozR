@@ -1,0 +1,18 @@
+[package]
+name = "kompoz-coroutines"
+description = "KompozR's coroutines on the UI thread: a frame-clock dispatcher, jobs and structured concurrency, LaunchedEffect, flows, channels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-runtime = { path = "../kompoz-runtime" }
+parking_lot.workspace = true
+
+[[test]]
+name = "coroutines"
+harness = false
