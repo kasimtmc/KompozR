@@ -1,10 +1,11 @@
-//! What paints and what it goes through (Compose's `ui-graphics`): tile modes, blend modes and [`blend`], shaders,
-//! brushes (a color, gradients, shaders of one's own, composites) and their lerp, border strokes, vertices, color
-//! matrices and color filters, render effects (blurs, offsets, Compose 1.13's progressive blurs) and filter
-//! qualities. Lengths are pixels.
+//! What paints and what it goes through (Compose's `ui-graphics`): tile modes, blend modes and [`blend`], shaders
+//! (gradients, images, composites), brushes (a color, gradients, shaders of one's own, composites) and their lerp,
+//! border strokes, vertices, color matrices and color filters (on colors, brushes and bitmaps), render effects
+//! (blurs, offsets, Compose 1.13's progressive blurs) and filter qualities. Lengths are pixels.
 
 use crate::color::{Color, lerp_color};
 use crate::geometry::{Offset, Rect, Size, lerp, lerp_offset};
+use crate::image::{ImageBitmap, WeakImageBitmap};
 use crate::matrix::Matrix;
 use crate::unit::{Density, Dp};
 use kompoz_runtime::named;
@@ -377,6 +378,7 @@ pub enum ShaderKind {
     Linear,
     Radial,
     Sweep,
+    Image,
     Composite,
 }
 
@@ -384,7 +386,10 @@ pub enum ShaderKind {
 struct ShaderData {
     kind: ShaderKind,
     stops: Vec<ColorStop>,
+    // (an image's across, and down)
     tile_mode: TileMode,
+    tile_mode_y: TileMode,
+    image: Option<ImageBitmap>,
     start: Offset,
     end: Offset,
     radius: f32,
@@ -396,10 +401,11 @@ struct ShaderData {
     back: Option<Matrix>,
 }
 
-/// What paints a shape pixel by pixel (Compose's Shader): a gradient or two shaders composited, through a transform
-/// if it has one. Made by [`LinearGradientShader`], [`RadialGradientShader`], [`SweepGradientShader`] and
-/// [`CompositeShader`]; painted by a [`Brush`] ([`ShaderBrush`]). Copies share what they are; equal by what they
-/// are.
+/// What paints a shape pixel by pixel (Compose's Shader): a gradient, an image (tiled), or two shaders composited,
+/// through a transform if it has one; an image's pixel a pixel. Made by [`LinearGradientShader`],
+/// [`RadialGradientShader`], [`SweepGradientShader`], [`ImageShader`] and [`CompositeShader`]; painted by a
+/// [`Brush`] ([`ShaderBrush`]). Copies share what they are; equal by what they are (an image by being the same
+/// bitmap).
 #[derive(Clone)]
 pub struct Shader {
     data: Arc<ShaderData>,
@@ -421,9 +427,13 @@ impl fmt::Debug for Shader {
             ShaderKind::Linear => s.field("stops", &d.stops).field("from", &d.start).field("to", &d.end),
             ShaderKind::Radial => s.field("stops", &d.stops).field("center", &d.start).field("radius", &d.radius),
             ShaderKind::Sweep => s.field("stops", &d.stops).field("center", &d.start),
+            ShaderKind::Image => s.field("image", &d.image),
         };
         if d.kind != ShaderKind::Composite {
             s.field("tile_mode", &d.tile_mode);
+        }
+        if d.kind == ShaderKind::Image {
+            s.field("tile_mode_y", &d.tile_mode_y);
         }
         s.field("transform", &d.transform).finish()
     }
@@ -442,6 +452,8 @@ fn gradient_shader(
             kind,
             stops,
             tile_mode: tile,
+            tile_mode_y: TileMode::Clamp,
+            image: None,
             start,
             end,
             radius,
@@ -488,6 +500,28 @@ pub fn SweepGradientShader(center: Offset, colors: &[Color], color_stops: Option
     gradient_shader(ShaderKind::Sweep, stops_of(colors, color_stops), center, Offset::Zero, 0.0, TileMode::Clamp)
 }
 
+/// `image` from its top left, a pixel a pixel, going on past its edges as `tile_mode_x` says across and
+/// `tile_mode_y` down (Compose's ImageShader; Compose's defaults: `TileMode::Clamp` both ways).
+pub fn ImageShader(image: ImageBitmap, tile_mode_x: TileMode, tile_mode_y: TileMode) -> Shader {
+    Shader {
+        data: Arc::new(ShaderData {
+            kind: ShaderKind::Image,
+            stops: Vec::new(),
+            tile_mode: tile_mode_x,
+            tile_mode_y,
+            image: Some(image),
+            start: Offset::Zero,
+            end: Offset::Zero,
+            radius: 0.0,
+            dst: None,
+            src: None,
+            blend_mode: BlendMode::SrcOver,
+            transform: None,
+            back: None,
+        }),
+    }
+}
+
 /// `src` composited onto `dst` by `blend_mode`, pixel by pixel (Compose's CompositeShader).
 pub fn CompositeShader(dst: Shader, src: Shader, blend_mode: BlendMode) -> Shader {
     Shader {
@@ -495,6 +529,8 @@ pub fn CompositeShader(dst: Shader, src: Shader, blend_mode: BlendMode) -> Shade
             kind: ShaderKind::Composite,
             stops: Vec::new(),
             tile_mode: TileMode::Clamp,
+            tile_mode_y: TileMode::Clamp,
+            image: None,
             start: Offset::Zero,
             end: Offset::Zero,
             radius: 0.0,
@@ -515,8 +551,17 @@ impl Shader {
     pub fn stops(&self) -> &[ColorStop] {
         &self.data.stops
     }
+    /// How a gradient goes on past its ends; an image's across.
     pub fn tile_mode(&self) -> TileMode {
         self.data.tile_mode
+    }
+    /// How an image goes on past its edges down.
+    pub fn tile_mode_y(&self) -> TileMode {
+        self.data.tile_mode_y
+    }
+    /// An image shader's image.
+    pub fn image(&self) -> Option<&ImageBitmap> {
+        self.data.image.as_ref()
     }
     /// Where it lies: a linear gradient's start, a radial one's or a sweep's center.
     pub fn start(&self) -> Offset {
@@ -562,7 +607,7 @@ impl Shader {
         Shader { data: Arc::new(d) }
     }
 
-    /// Its color at `p` (straight).
+    /// Its color at `p` (straight): an image's bilinearly from its pixels, as Compose's default sampling does.
     pub fn color_at(&self, p: Offset) -> Color {
         let d = &*self.data;
         let p = d.back.map_or(p, |b| b.map(p));
@@ -578,11 +623,65 @@ impl Shader {
                 color_along(&d.stops, d.tile_mode, t)
             }
             ShaderKind::Sweep => color_along(&d.stops, TileMode::Clamp, sweep_parameter(p, d.start)),
+            ShaderKind::Image => match &d.image {
+                Some(image) => image_color_at(image, d.tile_mode, d.tile_mode_y, p),
+                None => Color::Transparent,
+            },
             ShaderKind::Composite => match (&d.src, &d.dst) {
                 (Some(src), Some(dst)) => blend(src.color_at(p), dst.color_at(p), d.blend_mode),
                 _ => Color::Transparent,
             },
         }
+    }
+}
+
+/// Where index `i` of `n` falls past an image's edge as `tile` says; none for Decal.
+fn tiled(i: i64, n: i64, tile: TileMode) -> Option<i64> {
+    if (0..n).contains(&i) {
+        return Some(i);
+    }
+    match tile {
+        TileMode::Clamp => Some(i.clamp(0, n - 1)),
+        TileMode::Repeated => Some(i.rem_euclid(n)),
+        TileMode::Mirror => {
+            let m = i.rem_euclid(2 * n);
+            Some(if m < n { m } else { 2 * n - 1 - m })
+        }
+        TileMode::Decal => None,
+    }
+}
+
+/// `image` at `p` bilinearly, from the four pixels round it (premultiplied: a clear pixel adds no color), each
+/// tiled.
+fn image_color_at(image: &ImageBitmap, tile_x: TileMode, tile_y: TileMode, p: Offset) -> Color {
+    let (w, h) = (image.width() as i64, image.height() as i64);
+    let pixels = image.pixels();
+    let (u, v) = (p.x - 0.5, p.y - 0.5);
+    let (x0, y0) = (u.floor(), v.floor());
+    let (fx, fy) = (u - x0, v - y0);
+    // (Rust's `as`: NaN 0, saturated)
+    let (x0, y0) = (x0 as i64, y0 as i64);
+    let mut sum = [0.0f32; 4];
+    for j in 0..2 {
+        for i in 0..2 {
+            let (Some(x), Some(y)) = (tiled(x0.saturating_add(i), w, tile_x), tiled(y0.saturating_add(j), h, tile_y))
+            else {
+                continue;
+            };
+            let at = (y * w + x) as usize * 4;
+            let q = &pixels[at..at + 4];
+            let weight = (if i == 1 { fx } else { 1.0 - fx }) * (if j == 1 { fy } else { 1.0 - fy });
+            let a = q[3] as f32 / 255.0;
+            for c in 0..3 {
+                sum[c] += q[c] as f32 / 255.0 * a * weight;
+            }
+            sum[3] += a * weight;
+        }
+    }
+    if sum[3] > 0.0 {
+        Color::new(sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3], sum[3])
+    } else {
+        Color::Transparent
     }
 }
 
@@ -1647,6 +1746,54 @@ impl ColorFilter {
                 blend(color, d, blend_mode)
             }
         }
+    }
+
+    /// A filtered copy of `image` (an Argb8888 bitmap of its own, in sRGB): each of its pixels through it. Made once
+    /// for each bitmap (as it is: one drawn into since is filtered again) and filter, and kept while the bitmap
+    /// lives (the last 32 made).
+    pub fn apply_image(&self, image: &ImageBitmap) -> ImageBitmap {
+        struct Entry {
+            image: WeakImageBitmap,
+            id: u64,
+            version: u64,
+            filter: ColorFilter,
+            filtered: ImageBitmap,
+        }
+        // (the latest last)
+        static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+        const KEPT: usize = 32;
+        let (id, version) = (image.id(), image.version());
+        {
+            let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            cache.retain(|e| e.image.is_alive());
+            if let Some(i) = cache.iter().position(|e| e.id == id && e.version == version && e.filter == *self) {
+                let entry = cache.remove(i);
+                let filtered = entry.filtered.clone();
+                cache.push(entry);
+                return filtered;
+            }
+        }
+        let input = image.pixels();
+        let mut out = vec![0u8; input.len()];
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        for (q, p) in out.as_chunks_mut::<4>().0.iter_mut().zip(input.as_chunks::<4>().0) {
+            let c = self.apply(Color::new(
+                p[0] as f32 / 255.0,
+                p[1] as f32 / 255.0,
+                p[2] as f32 / 255.0,
+                p[3] as f32 / 255.0,
+            ));
+            q.copy_from_slice(&[byte(c.red()), byte(c.green()), byte(c.blue()), byte(c.alpha())]);
+        }
+        let Some(filtered) = ImageBitmap::from_pixels(image.width(), image.height(), out) else {
+            return image.clone();
+        };
+        let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        cache.push(Entry { image: image.downgrade(), id, version, filter: *self, filtered: filtered.clone() });
+        if cache.len() > KEPT {
+            cache.remove(0);
+        }
+        filtered
     }
 
     /// A brush filtered: a color's and a gradient's colors through it, a composite's two brushes; a shader brush of

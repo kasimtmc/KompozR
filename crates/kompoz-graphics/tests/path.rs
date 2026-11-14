@@ -1480,3 +1480,37 @@ fn outlines_are_composes() {
     g.add_outline(&Outline::Generic(triangle.clone()));
     assert_eq!(g, triangle);
 }
+
+// ---- Cubic Béziers along an axis ----------------------------------------------------------------------------------
+
+/// The cubic Bézier of `p` at `t`, in doubles.
+fn cubic(p: [f32; 4], t: f64) -> f64 {
+    let u = 1.0 - t;
+    u * u * u * p[0] as f64 + 3.0 * u * u * t * p[1] as f64 + 3.0 * u * t * t * p[2] as f64 + t * t * t * p[3] as f64
+}
+
+/// Compose's Bezier.kt: a cubic's first root within 0..1 (NaN if none), its value with its ends at 0 and 1, and its
+/// bounds along the axis (what CubicBezierEasing solves its curves with).
+#[test]
+fn cubic_roots_and_bounds_are_composes() {
+    // Roots: where the curve crosses 0, the first within 0..1.
+    for p in [[-0.5, -0.1, 0.3, 0.5], [-1.0, 2.0, -2.0, 1.0], [0.25, -0.75, 0.75, -0.25], [-0.2, -0.2, 0.8, 0.8]] {
+        let t = find_first_cubic_root(p[0], p[1], p[2], p[3]);
+        assert!((0.0..=1.0).contains(&t) && cubic(p, t as f64).abs() < 1e-4, "{p:?}: {t}");
+    }
+    // A quadratic, a line, nothing; outside 0..1: none.
+    let quadratic = find_first_cubic_root(-1.0, 0.0, 1.0, 2.0);
+    assert!(cubic([-1.0, 0.0, 1.0, 2.0], quadratic as f64).abs() < 1e-5);
+    assert!(near_by(find_first_cubic_root(-0.5, -0.5 + 1.0 / 3.0, -0.5 + 2.0 / 3.0, 0.5), 0.5, 1e-5));
+    assert!(find_first_cubic_root(1.0, 1.0, 1.0, 1.0).is_nan());
+    assert!(find_first_cubic_root(1.0, 2.0, 3.0, 4.0).is_nan());
+    // Its ends at 0 and 1: FastOutSlowIn's y halfway along t.
+    assert!(near_by(evaluate_cubic(0.0, 1.0, 0.5), cubic([0.0, 0.0, 1.0, 1.0], 0.5) as f32, 1e-6));
+    assert!(evaluate_cubic(0.3, 0.9, 0.0) == 0.0 && near_by(evaluate_cubic(0.3, 0.9, 1.0), 1.0, 1e-6));
+    // Bounds: its ends, or past them where it overshoots.
+    assert_eq!(compute_cubic_vertical_bounds(0.0, 0.0, 1.0, 1.0), (0.0, 1.0));
+    let (min, max) = compute_cubic_vertical_bounds(0.0, -0.5, 1.5, 1.0);
+    let brute = (0..=10_000).map(|i| cubic([0.0, -0.5, 1.5, 1.0], i as f64 / 10_000.0) as f32);
+    let (want_min, want_max) = brute.fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(y), b.max(y)));
+    assert!(near_by(min, want_min, 1e-4) && near_by(max, want_max, 1e-4) && min < 0.0 && max > 1.0);
+}

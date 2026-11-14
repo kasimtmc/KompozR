@@ -1,6 +1,8 @@
 //! Paths (Compose's Path, an Android Path: Skia's SkPath): building them, their bounds, convexity and insides,
-//! transforms, boolean operations, iterators, hit testers, lengths along them, path effects, strokes, outlines.
+//! transforms, boolean operations, iterators, hit testers, lengths along them, path effects, strokes, outlines, and
+//! the roots and bounds of cubic Béziers along an axis.
 
+mod bezier;
 mod curves;
 mod effect;
 mod hit_test;
@@ -12,6 +14,7 @@ mod outline;
 mod path;
 mod stroke;
 
+pub use bezier::{compute_cubic_vertical_bounds, evaluate_cubic, find_first_cubic_root};
 pub use effect::{PathEffect, StampedPathEffectStyle, path_effected, res_scale_of};
 pub use hit_test::PathHitTester;
 pub use iterator::{ConicEvaluation, PathIterator, PathSegment, PathSegmentType};

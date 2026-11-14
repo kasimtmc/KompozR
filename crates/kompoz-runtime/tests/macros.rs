@@ -107,6 +107,26 @@ fn top_app_bar_colors(
     BarColors { container, title }
 }
 
+/// Something built by chained calls on it (as an ImageVector's builder is).
+#[derive(Default)]
+struct Steps {
+    done: Vec<String>,
+}
+
+#[named]
+impl Steps {
+    fn add(&mut self, name: &str, #[default(1)] times: i32) -> &mut Steps {
+        self.done.push(format!("{name}x{times}"));
+        self
+    }
+}
+
+/// What comes before `separator` (an output borrowing the only reference given).
+#[named]
+fn first_word(text: &str, #[default(' ')] separator: char) -> &str {
+    text.split(separator).next().unwrap_or(text)
+}
+
 // ---- Composables ---------------------------------------------------------------------------------------------
 
 /// A node named by what it was given.
@@ -236,6 +256,18 @@ fn methods_and_factories_take_named_arguments() {
     let m = Modifier.background(Color::rgb(0, 0, 0)).fill_max_height();
     assert_eq!(m.to_string(), "Modifier.background(#FF000000, Rectangle).fillMaxHeight(1)");
     assert_eq!(top_app_bar_colors().title, Color::rgb(0x1D, 0x1B, 0x20));
+    // Methods returning the receiver they borrow, and functions an argument they borrow, chain on.
+    let mut steps = Steps::default();
+    steps.add("plain").add("again");
+    let rule = Rule::new(kompozable_lambda!(|| {
+        let mut steps = Steps::default();
+        steps.add("a", times = 2).add(name = "b").add("c");
+        Label(steps.done.join(" "));
+        Label(first_word("x-y", separator = '-').to_string());
+    }));
+    assert_eq!(steps.done, ["plainx1", "againx1"]);
+    assert_eq!(rule.names(), ["ax2 bx1 cx1", "x"]);
+    assert_eq!(first_word("hello world"), "hello");
 }
 
 // ---- Generics ------------------------------------------------------------------------------------------------

@@ -114,6 +114,29 @@ impl VisitMut for NameLifetimes<'_> {
     }
 }
 
+/// Gives the output's elided lifetimes the one elision gives them (`__call` takes its builder by value, so it has
+/// no input to elide them from): a method's receiver's, else the signature's only lifetime.
+struct ElideTo(Lifetime);
+impl VisitMut for ElideTo {
+    fn visit_type_reference_mut(&mut self, r: &mut TypeReference) {
+        if r.lifetime.is_none() {
+            r.lifetime = Some(self.0.clone());
+        }
+        visit_mut::visit_type_reference_mut(self, r);
+    }
+    fn visit_lifetime_mut(&mut self, l: &mut Lifetime) {
+        if l.ident == "_" {
+            *l = self.0.clone();
+        }
+    }
+    fn visit_type_fn_ptr_mut(&mut self, _: &mut TypeFnPtr) {
+        // (a `fn(&T) -> &U`'s lifetimes are its own: higher-ranked)
+    }
+    fn visit_parenthesized_generic_arguments_mut(&mut self, _: &mut ParenthesizedGenericArguments) {
+        // (and an `Fn(&T) -> &U`'s)
+    }
+}
+
 /// Whether `ty` names `name` (a type or lifetime parameter).
 fn mentions(ty: &Type, name: &str) -> bool {
     struct Finder<'a>(&'a str, bool);
@@ -252,6 +275,16 @@ pub(crate) struct Spec<'a> {
 /// The builder of a function or method.
 pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     let Spec { rt, params, generics, where_clause, output, call, recv, prefix, vis } = spec;
+    let mut output = output.clone();
+    let own_lifetimes: Vec<&Generic> = generics.iter().filter(|g| g.lifetime && g.inferred).collect();
+    let elided = match (recv, own_lifetimes.as_slice()) {
+        (Some(Receiver::Ref(..)), _) => Some(Lifetime::new("'__kzr", Span::call_site())),
+        (_, [only]) => Some(syn::parse2(only.name.clone())?),
+        _ => None,
+    };
+    if let (Some(l), ReturnType::Type(_, t)) = (elided, &mut output) {
+        ElideTo(l).visit_type_mut(t);
+    }
     let n = params.len();
     let builder_name = format_ident!("{}Builder", prefix);
     let new_name = format_ident!("{}new", prefix);

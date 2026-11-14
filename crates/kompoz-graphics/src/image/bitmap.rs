@@ -7,7 +7,7 @@ use kompoz_runtime::named;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 /// How a bitmap keeps its pixels (Compose's ImageBitmapConfig, Android's Bitmap.Config): 8 bits a channel
 /// (Argb8888; Gpu: the same, kept by the GPU), alpha alone (Alpha8: drawn in a paint's color as a mask), 5, 6 and 5
@@ -168,6 +168,11 @@ impl ImageBitmap {
     /// What it holds: another each time it is drawn into.
     pub fn version(&self) -> u64 {
         self.lock().version
+    }
+
+    /// It held without being kept alive (for what is made of it and kept while it lives).
+    pub(crate) fn downgrade(&self) -> WeakImageBitmap {
+        WeakImageBitmap(Arc::downgrade(&self.data))
     }
 
     fn lock(&self) -> MutexGuard<'_, Pixels> {
@@ -382,6 +387,16 @@ impl Hash for ImageBitmap {
 impl fmt::Debug for ImageBitmap {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ImageBitmap(#{}, {}x{}, {:?})", self.id(), self.width(), self.height(), self.config())
+    }
+}
+
+/// A bitmap held without being kept alive.
+pub(crate) struct WeakImageBitmap(Weak<BitmapData>);
+
+impl WeakImageBitmap {
+    /// Whether the bitmap still lives.
+    pub(crate) fn is_alive(&self) -> bool {
+        self.0.strong_count() > 0
     }
 }
 

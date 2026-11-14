@@ -242,6 +242,26 @@ fn shaders_are_composes() {
     assert!(!panics(|| {
         SweepGradientShader(o(0.0, 0.0), &[red], Some(&[0.0]));
     }));
+    // An image: a pixel a pixel, bilinearly between pixel centers (premultiplied: a clear pixel adds no color).
+    let img = ImageBitmap::from_pixels(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 0]).unwrap();
+    let image = |x: TileMode, y: TileMode| ImageShader(img.clone(), x, y);
+    let clamp = image(CLAMP, CLAMP);
+    assert!(clamp.kind() == ShaderKind::Image && clamp.image() == Some(&img) && clamp.tile_mode_y() == CLAMP);
+    assert!(same(clamp.color_at(o(0.5, 0.5)), red) && same(clamp.color_at(o(1.0, 0.5)), with_alpha(red, 0.5)));
+    assert!(same(clamp.color_at(o(-3.0, 0.5)), red) && clamp.color_at(o(5.0, 0.5)).alpha() == 0.0);
+    let repeated = image(TileMode::Repeated, CLAMP);
+    assert!(same(repeated.color_at(o(2.5, 0.5)), red) && repeated.color_at(o(3.5, 0.5)).alpha() == 0.0);
+    assert_eq!(image(TileMode::Mirror, CLAMP).color_at(o(2.5, 0.5)).alpha(), 0.0);
+    assert!(same(image(TileMode::Mirror, CLAMP).color_at(o(3.5, 0.5)), red));
+    assert_eq!(image(TileMode::Decal, CLAMP).color_at(o(-0.5, 0.5)).alpha(), 0.0);
+    assert!(same(image(CLAMP, TileMode::Decal).color_at(o(0.5, 0.75)), with_alpha(red, 0.75)));
+    // Through a transform, and painted by a brush: what it painted at p, at matrix(p).
+    let mut right = Matrix::new();
+    right.translate(10.0, 0.0, 0.0);
+    assert!(same(clamp.transformed(&right).color_at(o(10.5, 0.5)), red));
+    let tiles = ShaderBrush(image(TileMode::Repeated, TileMode::Repeated));
+    assert!(same(tiles.color_at(o(102.5, 50.5), xywh(100.0, 50.0, 20.0, 20.0)), red));
+    assert_eq!(tiles.color_at(o(103.5, 50.5), xywh(100.0, 50.0, 20.0, 20.0)).alpha(), 0.0);
     // A composite: src onto dst.
     let both = CompositeShader(
         LinearGradientShader(o(0.0, 0.0), o(10.0, 0.0), &[red, red], None, CLAMP),
@@ -270,6 +290,12 @@ fn shaders_are_composes() {
     assert_ne!(even, moved);
     assert_ne!(radial, RadialGradientShader(o(50.0, 50.0), 21.0, &[red, blue], None, CLAMP));
     assert_ne!(both, dst_in);
+    // An image's by being the same bitmap, and by its tile modes.
+    assert_eq!(image(CLAMP, CLAMP), clamp);
+    assert_ne!(image(TileMode::Repeated, CLAMP), clamp);
+    assert_ne!(image(CLAMP, TileMode::Repeated), clamp);
+    let copy = ImageBitmap::from_pixels(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 0]).unwrap();
+    assert_ne!(ImageShader(copy, CLAMP, CLAMP), clamp);
 }
 
 #[test]
@@ -596,6 +622,38 @@ fn color_filters_tint_matrices_and_lighting() {
     assert!(
         format!("{:?}", tint(blue, BlendMode::SrcIn)).starts_with("BlendModeColorFilter(color=Color(0.0, 0.0, 1.0")
     );
+}
+
+/// The filtered copy of `images_draw_through_a_color_filter` (what a backend filtering images on the CPU draws; the
+/// drawing itself is stage 5's).
+#[test]
+fn images_filter_into_copies_kept_while_they_live() {
+    let photo = ImageBitmap::from_pixels(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]).unwrap();
+    let blue = ColorFilter::tint(BLUE, BlendMode::SrcIn);
+    // Made once, then kept.
+    let tinted = blue.apply_image(&photo);
+    assert_eq!(tinted.id(), blue.apply_image(&photo).id());
+    assert!(tinted.id() != photo.id() && tinted.width() == 2 && tinted.config() == ImageBitmapConfig::Argb8888);
+    let px = tinted.pixels();
+    assert!(px[0] == 0 && px[2] == 255 && px[3] == 255 && px[4] == 0 && px[6] == 255 && px[7] == 128);
+    // Another filter: its own copy.
+    let green = ColorFilter::tint(GREEN, BlendMode::SrcIn).apply_image(&photo);
+    assert!(green.id() != tinted.id() && green.pixels()[1] == 255 && green.pixels()[2] == 0);
+    // The bitmap drawn into since: filtered again.
+    photo.store(&[0, 0, 0, 0, 0, 0, 0, 255], true);
+    let again = blue.apply_image(&photo);
+    assert!(again.id() != tinted.id() && again.pixels()[3] == 0 && again.pixels()[7] == 255);
+    assert_eq!(blue.apply_image(&photo).id(), again.id());
+    // Another bitmap of the same pixels: its own.
+    let twin = ImageBitmap::from_pixels(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 128]).unwrap();
+    assert_ne!(blue.apply_image(&twin).id(), tinted.id());
+    // A matrix's and a light's too.
+    let mut saturation = ColorMatrix::new();
+    saturation.set_to_saturation(0.0);
+    let gray = ColorFilter::color_matrix(saturation).apply_image(&twin);
+    assert!(gray.pixels()[0] == gray.pixels()[1] && gray.pixels()[1] == gray.pixels()[2] && gray.pixels()[0] > 0);
+    let dark = ColorFilter::lighting(Color::Black, Color::Transparent).apply_image(&twin);
+    assert!(dark.pixels()[0] == 0 && dark.pixels()[3] == 255 && dark.pixels()[7] == 128);
 }
 
 #[test]

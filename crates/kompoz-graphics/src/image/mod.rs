@@ -9,6 +9,7 @@ mod content_scale;
 mod png_decoder;
 mod sample;
 
+pub(crate) use bitmap::WeakImageBitmap;
 pub use bitmap::{ImageBitmap, ImageBitmapConfig, PixelMap};
 pub use bmp_decoder::decode_bmp;
 pub use codec::{RgbaImage, decode_image, decode_to_image_bitmap, encode_png, save_png};
