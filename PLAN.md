@@ -15,6 +15,9 @@ davranışla yapmak; C++'ta bilinen eksikler (aşağıda "C++'tan devralınmayac
 | Metin | Saf Rust: `skrifa`/`swash` (yazı tipi okuma, glif çizimi), `harfrust` (şekillendirme), `fontique` (sistem yazı tipleri, yedek yazı tipleri) |
 | Lisans | Apache 2.0 (C++ sürümüyle aynı) |
 | Dil sürümü | Rust 2024 baskısı, kararlı derleyici; en düşük sürüm ilk yayında sabitlenir |
+| Rust yazımında çağrılar | A biçimi (Aşama 0 prototipinden): `#[kompozable]` gövdesinde Kotlin'deki gibi adlı bağımsız değişkenler (`ad = değer`), varsayılanlar ve sondaki kapanış; büyük harfli çağrılar her zaman, küçük harfli işlev ve yöntem çağrıları adlı bir değişken olduğunda kurucuya çevrilir |
+| Rust yazımında adlar | İşlevler Compose'daki gibi (`Column`, `Text`), parametre ve yöntemler Rust'taki gibi (`vertical_arrangement`, `fill_max_width()`) |
+| Gönderme | Her aşama bitince `main`'e gönderilir, sürekli tümleştirme yeşil olmalı |
 
 "Hepsi bizim" çizgisi: işletim sisteminin kendi arayüzüne erişmek için yalnızca ince bağlama paketleri kullanılır
 (`wayland-client` + `wayland-protocols`, `x11rb`, `windows`, `objc2-*`, `jni`/`ndk-sys`, `web-sys`, `ash`). Bunlar
