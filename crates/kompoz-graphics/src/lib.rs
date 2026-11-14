@@ -22,6 +22,7 @@ pub use brush::*;
 pub use color::*;
 pub use geometry::*;
 pub use image::*;
+pub use material_shapes::*;
 pub use matrix::*;
 pub use path::*;
 pub use shape::*;

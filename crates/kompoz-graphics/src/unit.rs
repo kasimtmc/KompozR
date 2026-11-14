@@ -284,6 +284,14 @@ impl DpRect {
     }
 }
 
+/// Which way layouts go (Compose's LayoutDirection): left to right, or right to left (where a start is on the
+/// right).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum LayoutDirection {
+    Ltr,
+    Rtl,
+}
+
 /// Between two lengths.
 pub fn lerp_dp(start: Dp, stop: Dp, fraction: f32) -> Dp {
     Dp(crate::geometry::lerp(start.0, stop.0, fraction))
