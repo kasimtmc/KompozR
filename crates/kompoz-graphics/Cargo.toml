@@ -1,0 +1,16 @@
+[package]
+name = "kompoz-graphics"
+description = "KompozR's graphics foundations: units and geometry, colors and color spaces, HCT and dynamic color, paths and their effects, brushes, shapes, vector images, bitmaps and decoding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-runtime = { path = "../kompoz-runtime" }
+image-webp = "0.2"
+png = "0.18"
+zune-jpeg = "0.5"

@@ -19,6 +19,7 @@ davranışla yapmak; C++'ta bilinen eksikler (aşağıda "C++'tan devralınmayac
 | Rust yazımında adlar | İşlevler Compose'daki gibi (`Column`, `Text`), parametre ve yöntemler Rust'taki gibi (`vertical_arrangement`, `fill_max_width()`) |
 | Gönderme | Her aşama bitince `main`'e gönderilir, sürekli tümleştirme yeşil olmalı |
 | Kapanışların yakaladığı (Aşama 3) | `#[kompozable]` gövdesinde oluşturulabilir ve adlı çağrılara verilen kapanışlar ve `async` blokları, kullandıkları yerel değişkenlerin kopyasını alır (Kotlin'deki paylaşımın karşılığı; durumlar ve `Rc`'ler paylaşır). Başka bir kapanışın içindeki `move` kapanışları da kopyalar. Gövdenin en üstünde açıkça `move` yazılan kapanış, düz Rust'taki gibi taşır |
+| Birimler (Aşama 4) | Compose'unki: yerleşim ve çizim piksel (kısıtlar ve ölçüler tam sayı piksel), `Dp`, `Sp`, `DpOffset`, `DpSize` ayrı türler, `Rect` sol/üst/sağ/alt. (C++'ta her şey dp idi.) |
 | Oluşturulabilir türleri (Aşama 3) | Hiçbir şey döndürmeyen `#[kompozable]` yeniden başlatılabilir; bütün parametreleri `PartialEq` ise atlanabilir. `#[kompozable(inline)]` ve değer döndüren oluşturulabilir, çağıranın kapsamında çalışır (Compose'un satır içi oluşturulabilirleri gibi). Oluşturulabilirler yalnızca oluşturulabilir gövdelerinden (`#[kompozable]`, `kompozable_lambda!`, `kompozable_block!`) çağrılır; kimlik çağrı yerinden gelir |
 
 "Hepsi bizim" çizgisi: işletim sisteminin kendi arayüzüne erişmek için yalnızca ince bağlama paketleri kullanılır
