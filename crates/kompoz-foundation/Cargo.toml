@@ -1,0 +1,23 @@
+[package]
+name = "kompoz-foundation"
+description = "KompozR's foundation (androidx.compose.foundation and foundation.layout): Box, Row, Column, Spacer, arrangements, padding and size modifiers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+kompoz-test = { path = "../kompoz-test" }
+
+[[test]]
+name = "layout"
+harness = false

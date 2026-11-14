@@ -51,7 +51,8 @@ impl<T: Clone + 'static> KompozitionLocal<T> {
         self.default_value()
     }
 
-    fn default_value(&self) -> T {
+    /// Its default (what is read where nothing provides it), without reading anything.
+    pub fn default_value(&self) -> T {
         let id = self.id();
         if let Some(v) = DEFAULTS.with(|d| d.borrow().get(&id).cloned()) {
             return v.downcast_ref::<T>().unwrap().clone();
@@ -139,6 +140,27 @@ pub struct KompozitionLocalContext {
 /// What is provided here; reading it subscribes to them all.
 pub fn current_kompozition_local_context() -> KompozitionLocalContext {
     KompozitionLocalContext { values: Composer::require().locals() }
+}
+
+/// What is provided here, subscribing nothing (Compose's `currentCompositionLocalMap` as a layout node keeps it):
+/// read later, outside the composition, as it was when taken.
+pub fn current_kompozition_local_context_unobserved() -> KompozitionLocalContext {
+    KompozitionLocalContext { values: Composer::require().locals_unobserved() }
+}
+
+impl KompozitionLocalContext {
+    /// `local`'s value in it: what is provided for it, else its default. Reading it subscribes nothing.
+    pub fn get<T: Clone + 'static>(&self, local: &KompozitionLocal<T>) -> T {
+        match self.values.iter().rev().find(|p| p.local == local.id()) {
+            Some(p) => p.value.downcast_ref::<T>().expect("a local's value of another type").clone(),
+            None => local.default_value(),
+        }
+    }
+
+    /// Whether something is provided for `local` in it.
+    pub fn provides<T: Clone + 'static>(&self, local: &KompozitionLocal<T>) -> bool {
+        self.values.iter().any(|p| p.local == local.id())
+    }
 }
 
 /// Composes `content` with everything `context` holds provided.

@@ -276,6 +276,12 @@ pub fn frame_time_nanos() -> i64 {
     Composer::current().map_or(0, |c| c.frame_time())
 }
 
+/// The key of where this runs in the composition (Compose's `currentCompositeKeyHash`): the same at the same place
+/// whenever it composes again, so state can be found again by it.
+pub fn current_composite_key_hash() -> u64 {
+    Composer::require().key_below(None)
+}
+
 /// Whether this runs in a composition.
 pub fn in_composition() -> bool {
     Composer::current().is_some()

@@ -78,17 +78,60 @@ fn condition_names(e: &Expr, out: &mut Vec<String>) {
     }
 }
 
-/// The identifiers a closure or async block uses that it doesn't bind itself: candidates for its captures. Inside
-/// macros (`format!`, `vec!`) every identifier counts, and the `{name}` of a format string.
+/// The identifiers a closure or async block uses that it doesn't bind itself: candidates for its captures. A name
+/// bound inside it hides an outer one only after its binding and within its scope (`let w = w.get();` uses the
+/// outer `w`, then hides it below). Inside macros (`format!`, `vec!`) every identifier counts, and the `{name}` of a
+/// format string.
 struct FreeNames {
     used: HashSet<String>,
     /// Where each was first used (what an error about its capture points at).
     spans: std::collections::HashMap<String, proc_macro2::Span>,
-    bound: HashSet<String>,
+    /// The names bound inside it, by scope (innermost last), as the walk reaches them.
+    scopes: Vec<HashSet<String>>,
     /// Names only seen as what is called (`f(…)`): functions, not captures, where locals aren't known.
     called: HashSet<String>,
     /// Inside macros whose arguments aren't expressions: every identifier.
     raw: HashSet<String>,
+}
+
+impl FreeNames {
+    fn new() -> FreeNames {
+        FreeNames {
+            used: HashSet::new(),
+            spans: Default::default(),
+            scopes: vec![HashSet::new()],
+            called: HashSet::new(),
+            raw: HashSet::new(),
+        }
+    }
+
+    fn bound(&self, name: &str) -> bool {
+        self.scopes.iter().any(|s| s.contains(name))
+    }
+
+    /// `name`, used here: free unless bound in a scope around this use.
+    fn use_name(&mut self, name: String, span: Option<proc_macro2::Span>) {
+        if self.bound(&name) {
+            return;
+        }
+        if let Some(span) = span {
+            self.spans.entry(name.clone()).or_insert(span);
+        }
+        self.used.insert(name);
+    }
+
+    fn bind_pattern(&mut self, p: &Pat) {
+        let mut names = Vec::new();
+        pattern_names(p, &mut names);
+        self.scopes.last_mut().unwrap().extend(names);
+    }
+
+    /// Walks `f` in a scope of its own, `names` bound in it.
+    fn scoped(&mut self, names: Vec<String>, f: impl FnOnce(&mut Self)) {
+        self.scopes.push(names.into_iter().collect());
+        f(self);
+        self.scopes.pop();
+    }
 }
 
 impl<'ast> Visit<'ast> for FreeNames {
@@ -97,20 +140,82 @@ impl<'ast> Visit<'ast> for FreeNames {
             && p.path.leading_colon.is_none()
             && let Some(i) = p.path.get_ident()
         {
-            self.used.insert(i.to_string());
-            self.spans.entry(i.to_string()).or_insert(i.span());
+            self.use_name(i.to_string(), Some(i.span()));
         }
         visit::visit_expr_path(self, p);
     }
-    fn visit_pat_ident(&mut self, i: &'ast PatIdent) {
-        self.bound.insert(i.ident.to_string());
-        visit::visit_pat_ident(self, i);
+    fn visit_block(&mut self, b: &'ast Block) {
+        self.scoped(Vec::new(), |me| {
+            for stmt in &b.stmts {
+                match stmt {
+                    // The initializer sees the names around it; the pattern binds after it.
+                    Stmt::Local(l) => {
+                        if let Some(init) = &l.init {
+                            me.visit_expr(&init.expr);
+                            if let Some((_, diverge)) = &init.diverge {
+                                me.visit_expr(diverge);
+                            }
+                        }
+                        me.bind_pattern(&l.pat);
+                    }
+                    Stmt::Item(_) => {}
+                    _ => me.visit_stmt(stmt),
+                }
+            }
+        });
+    }
+    fn visit_expr_closure(&mut self, c: &'ast ExprClosure) {
+        let mut names = Vec::new();
+        for p in &c.inputs {
+            pattern_names(p, &mut names);
+        }
+        self.scoped(names, |me| me.visit_expr(&c.body));
+    }
+    fn visit_arm(&mut self, a: &'ast Arm) {
+        let mut names = Vec::new();
+        pattern_names(&a.pat, &mut names);
+        self.scoped(names, |me| {
+            me.visit_pat(&a.pat); // (a guard is in the pattern)
+            me.visit_expr(&a.body);
+        });
+    }
+    fn visit_expr_for_loop(&mut self, f: &'ast ExprForLoop) {
+        self.visit_expr(&f.expr);
+        let mut names = Vec::new();
+        pattern_names(&f.pat, &mut names);
+        self.scoped(names, |me| me.visit_block(&f.body));
+    }
+    fn visit_expr_if(&mut self, i: &'ast ExprIf) {
+        let mut names = Vec::new();
+        condition_names(&i.cond, &mut names);
+        // (the condition's `let`s bind for what follows them in it and for the then branch)
+        self.scoped(names, |me| {
+            me.visit_expr(&i.cond);
+            me.visit_block(&i.then_branch);
+        });
+        if let Some((_, e)) = &i.else_branch {
+            self.visit_expr(e);
+        }
+    }
+    fn visit_expr_while(&mut self, w: &'ast ExprWhile) {
+        let mut names = Vec::new();
+        condition_names(&w.cond, &mut names);
+        self.scoped(names, |me| {
+            me.visit_expr(&w.cond);
+            me.visit_block(&w.body);
+        });
+    }
+    fn visit_expr_let(&mut self, l: &'ast ExprLet) {
+        // (its pattern's names are bound by the `if`/`while` around it)
+        self.visit_expr(&l.expr);
     }
     fn visit_expr_call(&mut self, c: &'ast ExprCall) {
         if let Expr::Path(p) = &*c.func
             && let Some(i) = p.path.get_ident()
         {
-            self.called.insert(i.to_string());
+            if !self.bound(&i.to_string()) {
+                self.called.insert(i.to_string());
+            }
         } else {
             self.visit_expr(&c.func);
         }
@@ -130,19 +235,31 @@ impl<'ast> Visit<'ast> for FreeNames {
             Ok(args) => {
                 for a in &args {
                     if let Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) = a {
-                        format_names(&format!("{:?}", s.value()), &mut self.used);
+                        let mut names = HashSet::new();
+                        format_names(&format!("{:?}", s.value()), &mut names);
+                        for n in names {
+                            self.use_name(n, None);
+                        }
                     }
                     self.visit_expr(a);
                 }
             }
-            Err(_) => tokens_names(m.tokens.clone(), &mut self.raw),
+            Err(_) => {
+                let mut names = HashSet::new();
+                tokens_names(m.tokens.clone(), &mut names);
+                for n in names {
+                    if !self.bound(&n) {
+                        self.raw.insert(n);
+                    }
+                }
+            }
         }
     }
     fn visit_expr_struct(&mut self, s: &'ast ExprStruct) {
         // `Point { x, y }`: the shorthand fields use locals.
         for f in &s.fields {
             if let (Member::Named(n), None) = (&f.member, &f.colon_token) {
-                self.used.insert(n.to_string());
+                self.use_name(n.to_string(), Some(n.span()));
             }
         }
         visit::visit_expr_struct(self, s);
@@ -268,13 +385,7 @@ impl Transformer {
 
     /// The locals a closure or async block captures, with where each is used.
     fn captures(&self, e: &Expr) -> Vec<(String, proc_macro2::Span)> {
-        let mut free = FreeNames {
-            used: HashSet::new(),
-            spans: Default::default(),
-            bound: HashSet::new(),
-            called: HashSet::new(),
-            raw: HashSet::new(),
-        };
+        let mut free = FreeNames::new();
         free.visit_expr(e);
         if !self.outer_unknown {
             // (where the locals are known, a name in a macro's tokens is one only if it is one)
@@ -284,7 +395,7 @@ impl Transformer {
         let mut names: Vec<(String, proc_macro2::Span)> = free
             .used
             .into_iter()
-            .filter(|n| !free.bound.contains(n) && self.visible(n))
+            .filter(|n| self.visible(n))
             .map(|n| {
                 let span = free.spans.get(&n).copied().unwrap_or_else(|| e.span());
                 (n, span)

@@ -1,0 +1,36 @@
+[package]
+name = "kompoz-ui"
+description = "KompozR's UI core (androidx.compose.ui): layout nodes, modifier node chains, measure and layout, intrinsics, alignment lines, drawing, semantics, the host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+parking_lot.workspace = true
+
+[dev-dependencies]
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-test = { path = "../kompoz-test" }
+
+[[test]]
+name = "graphics_context"
+harness = false
+
+[[test]]
+name = "ui"
+harness = false
+
+[[test]]
+name = "tree"
+harness = false
+
+[[test]]
+name = "layouts"
+harness = false

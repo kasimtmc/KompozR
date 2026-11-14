@@ -108,6 +108,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompoz-foundation"
+version = "0.1.0"
+dependencies = [
+ "kompoz-coroutines",
+ "kompoz-graphics",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-ui",
+]
+
+[[package]]
 name = "kompoz-graphics"
 version = "0.1.0"
 dependencies = [
@@ -134,6 +145,28 @@ dependencies = [
  "kompoz-macros",
  "parking_lot",
  "trybuild",
+]
+
+[[package]]
+name = "kompoz-test"
+version = "0.1.0"
+dependencies = [
+ "kompoz-coroutines",
+ "kompoz-graphics",
+ "kompoz-runtime",
+ "kompoz-ui",
+]
+
+[[package]]
+name = "kompoz-ui"
+version = "0.1.0"
+dependencies = [
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-runtime",
+ "kompoz-test",
+ "parking_lot",
 ]
 
 [[package]]

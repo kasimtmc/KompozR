@@ -1,0 +1,16 @@
+[package]
+name = "kompoz-test"
+description = "KompozR's headless UI testing (androidx.compose.ui.test): KompozTestRule, finders and assertions over the semantics tree, a virtual clock, a fake text measurer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-ui = { path = "../kompoz-ui" }

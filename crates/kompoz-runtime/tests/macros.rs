@@ -270,6 +270,70 @@ fn methods_and_factories_take_named_arguments() {
     assert_eq!(first_word("hello world"), "hello");
 }
 
+// ---- Methods of a type from elsewhere -------------------------------------------------------------------------
+
+/// What another crate adds to `Modifier` (Compose's extension functions, foundation's `Modifier.padding`): a trait
+/// it implements, with the same named and defaulted parameters, used where the trait is in scope.
+mod layout_modifiers {
+    use super::Modifier;
+    use kompoz_runtime::named;
+
+    #[named(trait LayoutModifiers)]
+    impl Modifier {
+        /// Each side its own, none by default.
+        fn padding_sides(
+            self,
+            #[default(0)] start: i32,
+            #[default(0)] top: i32,
+            #[default(0)] end: i32,
+            #[default(0)] bottom: i32,
+        ) -> Modifier {
+            self.then(format!("padding({start}, {top}, {end}, {bottom})"))
+        }
+        fn size(self, width: i32, #[default(1)] height: i32) -> Modifier {
+            self.then(format!("size({width}, {height})"))
+        }
+        /// Without a default: a plain trait method.
+        fn wrap_content(mut self) -> Modifier {
+            self = self.then("wrapContent".into());
+            self
+        }
+    }
+
+    /// Of the same name in another trait: the builders don't clash.
+    #[named(pub(crate) trait OtherModifiers)]
+    impl Modifier {
+        fn size(self, #[default(1)] all: i32) -> Modifier {
+            self.then(format!("other size({all})"))
+        }
+    }
+}
+
+use layout_modifiers::LayoutModifiers;
+
+fn methods_of_a_type_from_elsewhere_take_named_arguments_through_a_trait() {
+    // Outside a body: the plain methods.
+    let m = Modifier.padding_sides().size(3).wrap_content();
+    assert_eq!(m.to_string(), "Modifier.padding(0, 0, 0, 0).size(3, 1).wrapContent");
+    let rule = Rule::new(kompozable_lambda!(|| {
+        Label("a", modifier = Modifier.padding_sides(top = 4, end = 2).size(10, height = 20));
+        Label("b", modifier = Modifier.size(width = 5).wrap_content());
+        let other = {
+            use layout_modifiers::OtherModifiers;
+            OtherModifiers::size(Modifier)
+        };
+        Label(other.to_string());
+    }));
+    assert_eq!(
+        rule.names(),
+        [
+            "a [Modifier.padding(0, 4, 2, 0).size(10, 20), 16]",
+            "b [Modifier.size(5, 1).wrapContent, 16]",
+            "Modifier.other size(1)"
+        ]
+    );
+}
+
 // ---- Generics ------------------------------------------------------------------------------------------------
 
 #[kompozable]
@@ -360,6 +424,31 @@ fn closures_share_what_they_capture_and_move_when_told() {
 
 struct NotClone(String);
 
+fn a_name_bound_inside_a_closure_hides_the_outer_one_only_after_its_binding() {
+    let width = mutable_state_of(1);
+    let w = width.clone();
+    // `let w = w.get();` reads the outer `w` (captured by clone: the content runs again), then hides it below; a
+    // `w` bound in a nested closure's own scope doesn't hide it outside that scope either.
+    let rule = Rule::new(kompozable_lambda!(move || {
+        Boxed(|| {
+            let w = w.get();
+            Label(format!("w {w}"));
+        });
+        Boxed(|| {
+            let shown = { |w: i32| w * 10 }(2);
+            Label(format!("{shown} {}", w.get()));
+            match Some(w.get()) {
+                Some(w) if w > 0 => Label(format!("matched {w}")),
+                _ => Label("none"),
+            }
+        });
+    }));
+    assert_eq!(rule.names(), ["box", "w 1", "box", "20 1", "matched 1"]);
+    width.set(2);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["box", "w 2", "box", "20 2", "matched 2"]);
+}
+
 // ---- A composable inside a function ------------------------------------------------------------------------
 
 fn composables_can_be_defined_inside_functions() {
@@ -422,4 +511,6 @@ tests!(
     composables_can_be_defined_inside_functions,
     each_call_site_is_its_own_identity,
     calls_inside_macros_are_rewritten,
+    methods_of_a_type_from_elsewhere_take_named_arguments_through_a_trait,
+    a_name_bound_inside_a_closure_hides_the_outer_one_only_after_its_binding,
 );

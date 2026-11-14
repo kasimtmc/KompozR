@@ -967,6 +967,11 @@ impl Composer {
         Some(value)
     }
 
+    /// Everything provided where this runs, outermost first, read by no one.
+    pub(crate) fn locals_unobserved(&self) -> Vec<Provided> {
+        self.state.borrow().locals.clone()
+    }
+
     /// Everything provided where this runs, outermost first (each read, so the reader follows them).
     pub(crate) fn locals(&self) -> Vec<Provided> {
         let locals = self.state.borrow().locals.clone();

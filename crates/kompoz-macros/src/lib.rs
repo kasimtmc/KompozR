@@ -10,7 +10,9 @@
 //! - rewrites its body: calls into the callees' builders, closures passed to calls into ones capturing clones of
 //!   the locals they use (see `transform`).
 //!
-//! `#[named]` gives the same named and defaulted parameters to a plain function or to the methods of an impl block.
+//! `#[named]` gives the same named and defaulted parameters to a plain function or to the methods of an impl block;
+//! `#[named(trait Name)]` on an impl puts its methods into a trait implemented for the type, so a crate can add
+//! them to a type of another (Compose's extension functions: foundation's `Modifier.padding`).
 //! `kompozable_lambda!(|| …)` is a closure written as a `#[kompozable]` body (content given from plain code);
 //! `kompozable_block!({ … })` an expression written as one, in place (in a method).
 
@@ -65,13 +67,37 @@ pub fn kompozable(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn named(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn named(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let ext = if attr.is_empty() { None } else { Some(parse_macro_input!(attr as ExtensionTrait)) };
     let out = match parse_macro_input!(item as Item) {
-        Item::Fn(f) => expand_fn(f, None),
-        Item::Impl(i) => expand_impl(i),
+        Item::Fn(f) if ext.is_none() => expand_fn(f, None),
+        Item::Fn(f) => Err(Error::new(f.sig.span(), "kompoz: #[named(trait …)] goes on an impl block")),
+        Item::Impl(i) => expand_impl(i, ext),
         other => Err(Error::new(other.span(), "kompoz: #[named] goes on a function or an impl block")),
     };
     out.unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+/// `#[named(trait Name)]` (or `#[named(pub(crate) trait Name)]`): the impl's methods go into a trait of that name
+/// (public unless told otherwise), implemented for the type — methods on a type of another crate (Compose's
+/// extension functions: `Modifier.padding(…)` from foundation), callable with named arguments where the trait is
+/// in scope.
+struct ExtensionTrait {
+    vis: Visibility,
+    name: Ident,
+}
+
+impl syn::parse::Parse for ExtensionTrait {
+    fn parse(input: syn::parse::ParseStream) -> Result<Self> {
+        let vis: Visibility = input.parse()?;
+        let vis = if matches!(vis, Visibility::Inherited) { parse_quote!(pub) } else { vis };
+        input.parse::<Token![trait]>()?;
+        let name: Ident = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error("kompoz: #[named(trait Name)] takes a trait's name and nothing else"));
+        }
+        Ok(ExtensionTrait { vis, name })
+    }
 }
 
 /// A closure written as a `#[kompozable]` body: `set_content(kompozable_lambda!(move || App()))`.
@@ -347,27 +373,48 @@ fn fn_sugar_of(it: &TypeImplTrait) -> bool {
 }
 
 /// `#[named]` on an impl block: each method with a defaulted parameter gets a builder (`__kz_name`) and keeps its
-/// name for the parameters without a default.
-fn expand_impl(mut imp: ItemImpl) -> Result<Ts> {
+/// name for the parameters without a default. With `#[named(trait Name)]` the methods (and the builders' entry
+/// points) go into a trait instead, implemented for the type: an extension of a type defined elsewhere.
+fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
     let rt = runtime();
     let self_ty = (*imp.self_ty).clone();
     let ty_name = match &self_ty {
         Type::Path(p) => p.path.segments.last().unwrap().ident.clone(),
         _ => return Err(Error::new(self_ty.span(), "kompoz: #[named] impl: a plain type")),
     };
-    let (impl_gi, _, impl_wc) = imp.generics.split_for_impl();
+    if let Some((path, _)) = &imp.trait_ {
+        return Err(Error::new(path.span(), "kompoz: #[named] goes on an inherent impl (`impl Type { … }`)"));
+    }
+    // The builders' items are named by the trait as well: two crates may extend a type with methods of one name.
+    let item_prefix = match &ext {
+        Some(e) => format!("{}_{}", e.name, ty_name),
+        None => ty_name.to_string(),
+    };
+    let (impl_gi, impl_tg, impl_wc) = imp.generics.split_for_impl();
     let impl_gi = quote!(#impl_gi);
+    let impl_tg = quote!(#impl_tg);
     let impl_wc = quote!(#impl_wc);
     let mut kz_fns = Vec::new();
     let mut modules = Vec::new();
     let mut items = Vec::new();
+    // The trait's declarations (with `#[named(trait …)]`).
+    let mut decls: Vec<Ts> = Vec::new();
     for item in std::mem::take(&mut imp.items) {
         let ImplItem::Fn(mut m) = item else {
+            if ext.is_some() {
+                return Err(Error::new(item.span(), "kompoz: a #[named(trait …)] impl holds methods only"));
+            }
             items.push(item);
             continue;
         };
         let mut params = take_params(&mut m.sig)?;
         if params.iter().all(|p| p.default.is_none()) {
+            if ext.is_some() {
+                m.vis = Visibility::Inherited;
+                let docs = m.attrs.iter().filter(|a| a.path().is_ident("doc"));
+                let sig = declaration(&m.sig);
+                decls.push(quote!(#(#docs)* #sig;));
+            }
             items.push(ImplItem::Fn(m));
             continue;
         }
@@ -382,10 +429,14 @@ fn expand_impl(mut imp: ItemImpl) -> Result<Ts> {
         let name = m.sig.ident.clone();
         let imp_name = format_ident!("__kz_impl_{}", name);
         let kz_name = format_ident!("__kz_{}", name);
-        let prefix = format_ident!("__kz_{}_{}_", ty_name, name);
-        let new_fn = format_ident!("__kz_{}_{}_new", ty_name, name);
+        let prefix = format_ident!("__kz_{}_{}_", item_prefix, name);
+        let new_fn = format_ident!("__kz_{}_{}_new", item_prefix, name);
         let output = m.sig.output.clone();
-        let vis = m.vis.clone();
+        // A trait's methods have no visibility of their own: its builders are as visible as it is.
+        let vis = match &ext {
+            Some(e) => e.vis.clone(),
+            None => m.vis.clone(),
+        };
         let original: Vec<(Ident, Type, bool)> =
             params.iter().map(|p| (p.ident.clone(), p.ty.clone(), p.default.is_some())).collect();
         let mut gens = generics(&rt, &m.sig.generics, Some(&imp.generics), &mut params)?;
@@ -394,7 +445,14 @@ fn expand_impl(mut imp: ItemImpl) -> Result<Ts> {
             wc.predicates.extend(w.predicates.iter().cloned());
         }
         let args: Vec<Ident> = (0..params.len()).map(|i| format_ident!("__a{i}")).collect();
-        let call = quote!(__self.#imp_name(#(#args),*));
+        // (through the trait by name: another trait in scope may have a method of the same name)
+        let call = match &ext {
+            Some(e) => {
+                let t = &e.name;
+                quote!(<#self_ty as #t #impl_tg>::#imp_name(__self, #(#args),*))
+            }
+            None => quote!(__self.#imp_name(#(#args),*)),
+        };
         let built = builder(Spec {
             rt: &rt,
             params: &params,
@@ -410,13 +468,25 @@ fn expand_impl(mut imp: ItemImpl) -> Result<Ts> {
         let (b, new_type) = (built.items, built.new_type);
         modules.push(b);
         let receiver = &m.sig.inputs[0];
-        kz_fns.push(quote! {
-            #[doc(hidden)]
-            pub fn #kz_name(#receiver) -> #new_type { #new_fn(self) }
-        });
+        let decl_sig = declaration(&m.sig);
+        let decl_receiver = &decl_sig.inputs[0];
+        if ext.is_some() {
+            decls.push(quote! {
+                #[doc(hidden)]
+                fn #kz_name(#decl_receiver) -> #new_type;
+            });
+            items.push(parse_quote! {
+                fn #kz_name(#receiver) -> #new_type { #new_fn(self) }
+            });
+        } else {
+            kz_fns.push(quote! {
+                #[doc(hidden)]
+                pub fn #kz_name(#receiver) -> #new_type { #new_fn(self) }
+            });
+        }
 
         // The plain method: the parameters without a default, in order.
-        let req = original.iter().filter(|o| !o.2).map(|(i, t, _)| quote!(#i: #t));
+        let req: Vec<Ts> = original.iter().filter(|o| !o.2).map(|(i, t, _)| quote!(#i: #t)).collect();
         let defaults = params.iter().filter_map(|p| {
             let i = &p.ident;
             p.default.as_ref().map(|d| {
@@ -428,25 +498,75 @@ fn expand_impl(mut imp: ItemImpl) -> Result<Ts> {
         let all = params.iter().map(|p| &p.ident);
         let (mgi, _, mwc) = m.sig.generics.split_for_impl();
         let attrs = m.attrs.clone();
+        let method_vis = if ext.is_some() { quote!() } else { quote!(#vis) };
+        let inner_call = match &ext {
+            Some(e) => {
+                let t = &e.name;
+                quote!(<Self as #t #impl_tg>::#imp_name(__self, #(#all),*))
+            }
+            None => quote!(__self.#imp_name(#(#all),*)),
+        };
         items.push(parse_quote! {
             #(#attrs)*
             #[track_caller]
-            #vis fn #name #mgi(#receiver, #(#req),*) #output #mwc {
+            #method_vis fn #name #mgi(#receiver, #(#req),*) #output #mwc {
                 let __self = self;
                 #(#defaults)*
-                __self.#imp_name(#(#all),*)
+                #inner_call
             }
         });
+        if ext.is_some() {
+            let docs = attrs.iter().filter(|a| a.path().is_ident("doc"));
+            decls.push(quote!(#(#docs)* fn #name #mgi(#decl_receiver, #(#req),*) #output #mwc;));
+        }
         m.sig.ident = imp_name;
-        m.vis = parse_quote!(pub);
+        m.attrs.retain(|a| !a.path().is_ident("doc"));
         m.attrs.push(parse_quote!(#[doc(hidden)]));
+        if ext.is_some() {
+            m.vis = Visibility::Inherited;
+            let sig = declaration(&m.sig);
+            decls.push(quote!(#[doc(hidden)] #sig;));
+        } else {
+            m.vis = parse_quote!(pub);
+        }
         items.push(ImplItem::Fn(m));
     }
     imp.items = items;
-    let _ = &impl_wc;
-    Ok(quote! {
-        #imp
-        impl #impl_gi #self_ty #impl_wc { #(#kz_fns)* }
-        #(#modules)*
-    })
+    match ext {
+        Some(ExtensionTrait { vis, name }) => {
+            let docs = imp.attrs.iter().filter(|a| a.path().is_ident("doc"));
+            let others = imp.attrs.iter().filter(|a| !a.path().is_ident("doc"));
+            let items = &imp.items;
+            Ok(quote! {
+                #(#docs)*
+                #vis trait #name #impl_gi #impl_wc { #(#decls)* }
+                #(#others)*
+                impl #impl_gi #name #impl_tg for #self_ty #impl_wc { #(#items)* }
+                #(#modules)*
+            })
+        }
+        None => Ok(quote! {
+            #imp
+            impl #impl_gi #self_ty #impl_wc { #(#kz_fns)* }
+            #(#modules)*
+        }),
+    }
+}
+
+/// A method's signature as a trait declares it: its parameters plain names (no `mut`, which only a body has).
+fn declaration(sig: &Signature) -> Signature {
+    let mut sig = sig.clone();
+    for arg in sig.inputs.iter_mut() {
+        if let FnArg::Typed(pt) = arg
+            && let Pat::Ident(pi) = &mut *pt.pat
+        {
+            pi.mutability = None;
+        }
+        if let FnArg::Receiver(r) = arg
+            && matches!(r.kind, ReceiverKind::Value)
+        {
+            r.mutability = None;
+        }
+    }
+    sig
 }
