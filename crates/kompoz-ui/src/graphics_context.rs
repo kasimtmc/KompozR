@@ -271,9 +271,9 @@ pub enum LayerContent {
 }
 
 /// A run of text to draw (C++'s utf8 and Font): its text, where its baseline starts, its font size (px), its
-/// advance width and line height, whether its paragraph goes right to left (which orders its stretches of either
-/// direction; either way the text starts at `baseline.x` and goes right), and what the text stage shaped it into
-/// (opaque here).
+/// advance width and line height, its font's ascent and descent (C++'s FontMetrics, which a display list measures
+/// what it touches by), whether its paragraph goes right to left (which orders its stretches of either direction;
+/// either way the text starts at `baseline.x` and goes right), and what the text stage shaped it into (opaque here).
 #[derive(Clone)]
 pub struct TextDraw {
     pub text: Rc<str>,
@@ -282,19 +282,38 @@ pub struct TextDraw {
     pub font_size: f32,
     /// The run's advance width and line height.
     pub size: Size,
+    /// How far its glyphs reach above and below the baseline (px; accents, italics and the like aside).
+    pub ascent: f32,
+    pub descent: f32,
     pub rtl: bool,
     /// An opaque shaped payload the text stage fills in.
     pub shaped: Option<Rc<dyn Any>>,
 }
 
 impl TextDraw {
-    /// Left to right, not shaped yet.
+    /// Left to right, not shaped yet; its metrics as far as fonts' glyphs mostly reach (an em above the baseline,
+    /// 0.3 em below) until told ([`with_metrics`](TextDraw::with_metrics)).
     pub fn new(text: impl Into<Rc<str>>, baseline: Offset, font_size: f32, size: Size) -> TextDraw {
-        TextDraw { text: text.into(), baseline, font_size, size, rtl: false, shaped: None }
+        TextDraw {
+            text: text.into(),
+            baseline,
+            font_size,
+            size,
+            ascent: font_size,
+            descent: 0.3 * font_size,
+            rtl: false,
+            shaped: None,
+        }
+    }
+
+    /// The same, its font's ascent and descent these.
+    pub fn with_metrics(self, ascent: f32, descent: f32) -> TextDraw {
+        TextDraw { ascent, descent, ..self }
     }
 }
 
-/// The same text, placed and sized the same, the same way round, shaped into the same payload (or neither shaped).
+/// The same text, placed, sized and measured the same, the same way round, shaped into the same payload (or neither
+/// shaped).
 impl PartialEq for TextDraw {
     fn eq(&self, o: &TextDraw) -> bool {
         let same_shaped = match (&self.shaped, &o.shaped) {
@@ -306,6 +325,8 @@ impl PartialEq for TextDraw {
             && self.baseline == o.baseline
             && self.font_size == o.font_size
             && self.size == o.size
+            && self.ascent == o.ascent
+            && self.descent == o.descent
             && self.rtl == o.rtl
             && same_shaped
     }
@@ -759,10 +780,10 @@ pub trait GraphicsContext {
     }
     /// Asked as a node (known by its id) is about to be drawn (before begin_node), where the canvas keeps what nodes
     /// drew from one frame to the next (a display list's frames): Kept, it drew again what the node drew last
-    /// frame, moved from where it was to `origin` (its top left in root coordinates), as the node would
-    /// (`unchanged`: nothing that it and those in it draw from changed), and the node draws nothing; Fresh, the node
-    /// is drawn, into the frame kept; Other: it is drawn, but not into what is kept (any other canvas, or a node
-    /// drawn a second time in a frame).
+    /// frame, moved from where it was to `origin` (where it is in what it is drawn in: its position in its parent,
+    /// the translation it is drawn through), as the node would (`unchanged`: nothing that it and those in it draw
+    /// from changed), and the node draws nothing; Fresh, the node is drawn, into the frame kept; Other: it is drawn,
+    /// but not into what is kept (any other canvas, or a node drawn a second time in a frame).
     fn record_node(&mut self, node: u64, origin: Offset, unchanged: bool) -> NodeRecording {
         let _ = (node, origin, unchanged);
         NodeRecording::Other

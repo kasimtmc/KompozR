@@ -11,6 +11,7 @@
 
 pub mod alignment;
 pub mod back;
+pub mod display_list;
 pub mod draw;
 pub mod focus;
 pub mod graphics_context;
@@ -28,6 +29,7 @@ pub mod window;
 pub use alignment::{
     AbsoluteAlignment, Alignment, BiasAbsoluteAlignment, BiasAlignment, HorizontalAlignment, VerticalAlignment,
 };
+pub use display_list::DisplayList;
 pub use host::{HostHandle, KompozHost};
 pub use layout::{
     AlignmentLine, FirstBaseline, IntrinsicMeasurable, IntrinsicMeasureScope, LastBaseline, Layout, LayoutCoordinates,

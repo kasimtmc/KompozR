@@ -46,3 +46,7 @@ harness = false
 [[test]]
 name = "draw"
 harness = false
+
+[[test]]
+name = "display_list"
+harness = false

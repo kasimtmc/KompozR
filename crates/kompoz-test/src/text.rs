@@ -139,7 +139,8 @@ impl DrawModifierNode for TextNode {
             Offset::new(0.0, metrics.ascent),
             self.px,
             Size::new(self.width(&scope.density()), metrics.line_height),
-        );
+        )
+        .with_metrics(metrics.ascent, metrics.descent);
         text.rtl = rtl;
         scope.draw_text(&text, Color::Black);
         scope.draw_content();

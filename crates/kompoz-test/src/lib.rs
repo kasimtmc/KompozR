@@ -51,8 +51,9 @@ impl MainClock<'_> {
 
 /// Composes content in a headless host and drives it (Compose's ComposeContentTestRule, C++'s KompozTestRule): its
 /// viewport (C++'s default 400 by 800 px), a virtual clock of 16 ms frames, finders over the semantics tree. The
-/// layout check (every settled layout measured again from scratch, which must come out the same) is on, as in C++'s
-/// test binary: a difference fails `wait_for_idle`.
+/// layout check (every settled layout measured again from scratch, which must come out the same) and the keep check
+/// (every frame drawn into a display list keeping the nodes that didn't change and into one drawing them all, which
+/// must record the same) are on, as in C++'s test binary: a difference fails the frame.
 pub struct KompozTestRule {
     host: KompozHost,
     clock: Cell<i64>,
@@ -71,6 +72,7 @@ impl KompozTestRule {
         let host = KompozHost::new(content);
         host.set_viewport_size(viewport);
         host.set_layout_check(true);
+        host.set_keep_check(true);
         let rule = KompozTestRule { host, clock: Cell::new(0), injection: Default::default() };
         rule.wait_for_idle_within(0);
         rule
@@ -90,6 +92,11 @@ impl KompozTestRule {
     /// on.
     pub fn set_layout_check(&self, on: bool) {
         self.host.set_layout_check(on);
+    }
+
+    /// Turns the keep check off (a test that counts draws: the check draws everything twice more each frame) or on.
+    pub fn set_keep_check(&self, on: bool) {
+        self.host.set_keep_check(on);
     }
 
     pub fn main_clock(&self) -> MainClock<'_> {
@@ -128,11 +135,13 @@ impl KompozTestRule {
         }
     }
 
-    /// Advances virtual time by one frame and runs it; a difference the layout check found fails.
+    /// Advances virtual time by one frame and runs it; a difference the layout check or the keep check found
+    /// fails.
     pub fn advance_frame(&self) {
         self.clock.set(self.clock.get() + FRAME_NANOS);
         self.host.frame(self.clock.get());
-        let mismatches = self.host.take_layout_check_mismatches();
+        let mut mismatches = self.host.take_layout_check_mismatches();
+        mismatches.extend(self.host.take_keep_check_mismatches());
         assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
     }
 

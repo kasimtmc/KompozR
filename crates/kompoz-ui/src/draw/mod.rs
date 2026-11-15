@@ -200,7 +200,7 @@ impl LayoutNode {
     /// drew last frame (then nothing more), then between `begin_node` and `end_node`, through its coordinators,
     /// what it reads observed (a change draws it again).
     pub fn draw(&self, canvas: &mut dyn GraphicsContext) {
-        let origin = if self.is_attached() { self.coordinates().position_in_root() } else { Offset::Zero };
+        let origin = self.outer_coordinator().position.get().to_offset(); // (where it is in its parent)
         let recording = canvas.record_node(self.id, origin, !self.draw_dirty.get());
         if recording == NodeRecording::Kept {
             return;

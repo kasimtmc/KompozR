@@ -3,6 +3,7 @@
 //! input and the environment, and gets the callbacks only it can serve.
 
 use crate::back::BackDispatcher;
+use crate::display_list::DisplayList;
 use crate::focus::{FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
 use crate::input::{InputState, Key, KeyModifiers, PointerButton, PointerType};
@@ -105,6 +106,11 @@ pub struct KompozHost {
     frame_time: Cell<i64>,
     layout_check: Cell<bool>,
     layout_check_mismatches: RefCell<Vec<String>>,
+    /// The keep check's: on, its two lists (one keeping the nodes that didn't change, one drawing all), and what it
+    /// found.
+    keep_check: Cell<bool>,
+    keep_check_lists: RefCell<Option<Box<(DisplayList, DisplayList)>>>,
+    keep_check_mismatches: RefCell<Vec<String>>,
     /// Counted up by `invalidate`: the content's scope composes again when it changes.
     generation: Rc<Cell<u64>>,
     /// The input package's state.
@@ -152,6 +158,9 @@ impl KompozHost {
             frame_time: Cell::new(0),
             layout_check: Cell::new(false),
             layout_check_mismatches: RefCell::new(Vec::new()),
+            keep_check: Cell::new(false),
+            keep_check_lists: RefCell::new(None),
+            keep_check_mismatches: RefCell::new(Vec::new()),
             generation: Rc::new(Cell::new(0)),
             input: RefCell::new(InputState::default()),
             focus,
@@ -358,7 +367,53 @@ impl KompozHost {
             }
             break;
         }
-        self.owner.take_needs_draw()
+        let redraw = self.owner.take_needs_draw();
+        if self.keep_check.get() {
+            self.check_kept();
+            self.owner.take_needs_draw(); // (drawn for the check: no frame asked for by it)
+        }
+        redraw
+    }
+
+    /// The keep check (C++'s `checkKept`): the frame drawn into a display list that keeps the nodes that didn't
+    /// change since it last drew, and into one that draws them all, which must record the same. Its keeping list
+    /// goes by a dirty flag of its own (swapped in while it draws), so the platform's keeping list still sees what
+    /// changed since it drew.
+    fn check_kept(&self) {
+        let mut lists = self.keep_check_lists.borrow_mut().take().unwrap_or_else(|| {
+            let mut kept = DisplayList::new();
+            kept.set_keep_nodes(true);
+            Box::new((kept, DisplayList::new()))
+        });
+        let mut nodes = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![self.root.clone()];
+        stack.extend(self.overlays.borrow().roots());
+        while let Some(n) = stack.pop() {
+            if seen.insert(n.id()) {
+                stack.extend(n.children());
+                nodes.push(n);
+            }
+        }
+        let swap = |nodes: &[Rc<LayoutNode>]| {
+            for n in nodes {
+                let dirty = n.draw_dirty.replace(n.keep_check_dirty.get());
+                n.keep_check_dirty.set(dirty);
+            }
+        };
+        let viewport = self.viewport.get().to_size();
+        swap(&nodes);
+        let (kept, fresh) = &mut *lists;
+        for list in [&mut *kept, &mut *fresh] {
+            list.begin(viewport);
+            self.draw(list);
+            list.end();
+        }
+        swap(&nodes);
+        if let Err(why) = kept.same_frame(fresh) {
+            self.keep_check_mismatches.borrow_mut().push(format!("kompoz: keep check: {why}"));
+        }
+        *self.keep_check_lists.borrow_mut() = Some(lists);
     }
 
     /// Draws the tree, then the overlays, into `canvas`.
@@ -529,6 +584,20 @@ impl KompozHost {
     /// The differences the layout check found so far (taken).
     pub fn take_layout_check_mismatches(&self) -> Vec<String> {
         std::mem::take(&mut *self.layout_check_mismatches.borrow_mut())
+    }
+
+    /// Turns the keep check on (C++'s KOMPOZ_KEEP_CHECK): after each frame the tree is drawn into a display list
+    /// keeping the nodes that didn't change and into one drawing them all, which must record the same.
+    pub fn set_keep_check(&self, on: bool) {
+        self.keep_check.set(on);
+        if !on {
+            self.keep_check_lists.borrow_mut().take();
+        }
+    }
+
+    /// The frames the keep check found recorded otherwise so far (taken).
+    pub fn take_keep_check_mismatches(&self) -> Vec<String> {
+        std::mem::take(&mut *self.keep_check_mismatches.borrow_mut())
     }
 
     /// Whether a redraw is due (something drawn changed since the last frame said so).

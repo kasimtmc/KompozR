@@ -95,6 +95,9 @@ pub struct LayoutNode {
     pub(crate) needs_on_positioned_dispatch: Cell<bool>,
     /// Drawn again at the next frame: what it or a node in it draws changed.
     pub(crate) draw_dirty: Cell<bool>,
+    /// The same for the host's keep check, whose keeping list draws apart from the platform's (swapped with
+    /// `draw_dirty` while it draws).
+    pub(crate) keep_check_dirty: Cell<bool>,
     pub(crate) semantics_configuration: RefCell<Option<SemanticsConfiguration>>,
     pub(crate) semantics_invalidated: Cell<bool>,
     pub(crate) measure_reads: RefCell<Option<Rc<ReaderScope>>>,
@@ -173,6 +176,7 @@ impl LayoutNode {
                 globally_positioned_observers: Cell::new(0),
                 needs_on_positioned_dispatch: Cell::new(false),
                 draw_dirty: Cell::new(true),
+                keep_check_dirty: Cell::new(true),
                 semantics_configuration: RefCell::new(None),
                 semantics_invalidated: Cell::new(false),
                 measure_reads: RefCell::new(None),
@@ -343,6 +347,8 @@ impl LayoutNode {
         if let Some(p) = self.parent() {
             p.invalidate_layer();
         }
+        // (Compose's invalidateLayers: what it draws itself draws otherwise, which a canvas keeping nodes keeps.)
+        self.invalidate_draw();
         self.invalidate_semantics();
         for c in self.coordinators() {
             if c.layer.borrow().is_some() {
@@ -548,7 +554,8 @@ impl LayoutNode {
     pub fn invalidate_draw(&self) {
         let mut node = Some(self.rc());
         while let Some(n) = node {
-            if n.draw_dirty.replace(true) {
+            let was = n.draw_dirty.replace(true) & n.keep_check_dirty.replace(true);
+            if was {
                 break;
             }
             node = n.parent();
