@@ -41,6 +41,8 @@ macro_rules! check {
 
 mod device;
 mod exact;
+mod fonts;
+mod frames;
 mod golden;
 mod harness;
 mod images;
@@ -89,6 +91,11 @@ const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
     ("drawn_twice_in_a_frame_alike", submit::drawn_twice_in_a_frame_alike),
     ("paths_share_their_masks", submit::paths_share_their_masks),
     ("a_path_keeps_its_coverage", submit::a_path_keeps_its_coverage),
+    ("transforms_carry_everything", frames::transforms_carry_everything),
+    ("primitives_draw_alone_as_among_others", frames::primitives_draw_alone_as_among_others),
+    ("kept_frames_move_what_scrolled", frames::kept_frames_move_what_scrolled),
+    ("blit_copies_textures_as_they_are", frames::blit_copies_textures_as_they_are),
+    ("text_is_drawn_from_the_atlas", frames::text_is_drawn_from_the_atlas),
     ("scenes_match_their_pictures", scenes::scenes_match_their_pictures),
     ("images_match_their_picture", images::images_match_their_picture),
 ];

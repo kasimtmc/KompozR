@@ -800,7 +800,8 @@ impl Renderer {
     // ---- After each frame -------------------------------------------------------------------------------------------
 
     /// After each frame: the frame's table and chains go; textures of images that are gone, layer targets unused for
-    /// a while, kept layers and paths' shadows unused for a while go; the kept paths start over once full.
+    /// a while, kept layers and paths' shadows unused for a while go; the glyph atlas's pages unused longest are
+    /// cleared for reuse; the kept paths start over once full.
     pub fn end_frame(&mut self) {
         self.images.retired.clear();
         self.stops.clear();
@@ -815,6 +816,7 @@ impl Renderer {
         self.evict_pool();
         self.end_frame_shadows();
         self.age_kept_layers();
+        self.end_frame_text();
         // The kept paths started over once full, unless this frame's paths fill most of it themselves (then kept
         // as they are: those in it are drawn from it, the rest as any path, rather than all of them rasterized again
         // each frame).

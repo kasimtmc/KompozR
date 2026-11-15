@@ -129,10 +129,31 @@ fn fake_italic_leans_right() {
     let (low, high) = (2, 26);
     let lean = (centre(high) - centre(low)) / (high - low) as f32;
     assert!((lean - 0.25).abs() < 0.03, "{lean}");
-    // The text style's slant the other way (C++'s: y · skew_x to the right).
-    let back = GlyphStyle { skew_x: -0.25, ..GlyphStyle::PLAIN };
-    let l = coverage('l', 40, &back);
-    assert!(l.left < coverage('l', 40, &GlyphStyle::PLAIN).left);
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn text_skew_leans_as_androids() {
+    // TextGeometricTransform(skewX = -0.25) as Android draws it (TextPaint.textSkewX, Skia's y down): leaning
+    // right, as much as the fake italic; 0.25 leans left as much.
+    let lean = |skew_x: f32| {
+        let l = coverage('l', 40, &GlyphStyle { skew_x, ..GlyphStyle::PLAIN });
+        let centre = |y: i32| {
+            let (sum, weight) = (l.left..l.left + l.width as i32)
+                .map(|x| (x as f32 * at(&l, x, y) as f32, at(&l, x, y) as f32))
+                .fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
+            sum / weight
+        };
+        let (low, high) = (2, 26);
+        ((centre(high) - centre(low)) / (high - low) as f32, l)
+    };
+    let (right, slanted) = lean(-0.25);
+    assert!((right - 0.25).abs() < 0.03, "{right}");
+    // Its top right of the plain glyph's: the box reaches further right.
+    let plain = coverage('l', 40, &GlyphStyle::PLAIN);
+    assert!(slanted.left as usize + slanted.width > plain.left as usize + plain.width);
+    let (left, _) = lean(0.25);
+    assert!((left + 0.25).abs() < 0.03, "{left}");
 }
 
 #[test]

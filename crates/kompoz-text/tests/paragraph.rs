@@ -763,3 +763,25 @@ fn font_padding_tabs_backgrounds_and_decorations() {
         .paint_ops(&TextPaintStyle { decoration: Some(TextDecoration::Underline), ..TextPaintStyle::default() });
     assert_eq!(underlined.iter().filter(|op| matches!(op, TextPaintOp::Line { .. })).count(), 3);
 }
+
+#[test]
+fn skewed_text_ink_leans_as_androids() {
+    // TextGeometricTransform(skewX = -0.25) as Android draws it (TextPaint.textSkewX, Skia's y down): what is above
+    // the baseline leans right, what is below it left, a quarter of its height; 0.25 the other way.
+    let ink = |skew_x: f32| {
+        let style =
+            TextStyle { text_geometric_transform: Some(TextGeometricTransform::new(1.0, skew_x)), ..size(10.0) };
+        let r = lay("l", style, Constraints::Infinity);
+        let ops = r.multi_paragraph.paint_ops(&TextPaintStyle::default());
+        ops.iter()
+            .find_map(|op| match op {
+                TextPaintOp::Text { text, .. } => Some(text.ink_bounds),
+                _ => None,
+            })
+            .expect("drawn")
+    };
+    let (plain, right, left) = (ink(0.0), ink(-0.25), ink(0.25));
+    assert!(plain.top < 0.0 && plain.bottom > 0.0);
+    assert!(near(right.right, plain.right - plain.top * 0.25) && near(right.left, plain.left - plain.bottom * 0.25));
+    assert!(near(left.left, plain.left + plain.top * 0.25) && near(left.right, plain.right + plain.bottom * 0.25));
+}

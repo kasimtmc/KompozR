@@ -122,6 +122,16 @@ fn text_laid_out_bigger_is_drawn_bigger() {
     assert_eq!((two[0].x0, two[0].y0), (10.0 + big.left as f32, 40.0 - big.top as f32));
     assert_eq!(two[1].x0 - two[0].x0, 17.0);
     assert!(two[0].height > one[0].height);
+    // Laid out at the size it is rasterized at, the second H as far on as that size's advance puts it: 1.5 times
+    // bigger, at 18 px (8.4 · 18 / 12 = 12.6: 13); 1.45 times, at 17 px (11.9: 12); 1.48 times, at 18 px again
+    // (12.6: 13, where 8.4 · 1.48 = 12.43 would be 12).
+    let mut at = |scale: f32| {
+        let q = layout(&mut cache, &draw, &GlyphRequest { scale, ..GlyphRequest::new(Offset::new(0.0, 20.0)) });
+        q[1].x0 - q[0].x0
+    };
+    assert_eq!(at(1.5), 13.0);
+    assert_eq!(at(1.45), 12.0);
+    assert_eq!(at(1.48), 13.0);
 }
 
 #[test]

@@ -5,7 +5,7 @@
 
 use crate::exact::{none, worst_against};
 use crate::harness::{Gpu, Pixels, WatchedDevice, max_difference, render_by};
-use crate::scenes::{blend_modes, fill, lines, oval, paths, rects, rgba, shadows, star, xywh};
+use crate::scenes::{blend_modes, effects, fill, lines, oval, paths, rects, rgba, shadows, star, text_scene, xywh};
 use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{ClearColor, Device, Format, IRect, TextureUsage};
 use kompoz_graphics::{
@@ -20,8 +20,8 @@ pub fn variants_fall_back_to_the_whole_shader(g: &mut Gpu) {
     let device = WatchedDevice::new(&g.device, true);
     let refused = device.refused.clone();
     let mut renderer = Renderer::new(Box::new(device)).expect("a renderer");
-    // (C++'s rects, text, blend modes and effects; text and effects with the parts that draw them.)
-    let scenes: [fn(&mut Renderer); 5] = [rects, blend_modes, paths, lines, shadows];
+    // (C++'s rects, text, blend modes and effects, and more.)
+    let scenes: [fn(&mut Renderer); 7] = [rects, text_scene, blend_modes, effects, paths, lines, shadows];
     for (i, draw) in scenes.into_iter().enumerate() {
         let expected = g.render(192, 192, draw);
         let actual = render_by(&mut renderer, 192, 192, draw, ClearColor::WHITE);

@@ -84,7 +84,8 @@ fn ours(fonts: &mut Fonts, record: &Record) -> Option<Image> {
         };
         GlyphStyle {
             scale_x: w[7].parse().unwrap(),
-            skew_x: w[8].parse().unwrap(),
+            // (The dumper's is FreeType's matrix's, y up: x moves by skew · y. Android's, ours, is the other way.)
+            skew_x: -w[8].parse::<f32>().unwrap(),
             stroke: (stroke_px > 0).then(|| GlyphStroke {
                 width: stroke_px,
                 cap: StrokeCap::Butt,

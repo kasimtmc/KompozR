@@ -22,6 +22,70 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
 
+  # The GPU renderer's tests on Vulkan on lavapipe (Mesa's, on the CPU), with the validation layers: no device is a
+  # failure, so is an error the layers report; the scenes against tests/golden (lavapipe's pictures).
+  gpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Vulkan (the loader, Mesa's lavapipe, the validation layers)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
+      - name: kompoz-gpu's tests (Vulkan on lavapipe, validated, against tests/golden)
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+        run: |
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          cargo test -p kompoz-gpu
+      - name: The pictures that differ from their goldens
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-golden-differences
+          path: |
+            crates/kompoz-gpu/tests/golden/*.actual.png
+            crates/kompoz-gpu/tests/golden/*.diff.png
+          if-no-files-found: ignore
+
+  # The shaders' generated SPIR-V, MSL and WGSL are what the .slang sources compile to (cargo xtask shaders --check),
+  # with Slang's pinned release (the same as C++ Kompoz's scripts/shaders.py: its URL and SHA-256), cached, and
+  # SPIRV-Tools' spirv-val.
+  shaders:
+    runs-on: ubuntu-latest
+    env:
+      SLANG_VERSION: "2026.20"
+      SLANG_SHA256: e863e568c204810d6e8bc31852f056aef6763c55ea9925db2db7affa060347c9
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: SPIRV-Tools (spirv-val)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends spirv-tools
+      - name: Slang, cached
+        id: slang
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/slang-${{ env.SLANG_VERSION }}
+          key: slang-${{ env.SLANG_VERSION }}-${{ env.SLANG_SHA256 }}
+      - name: Slang's release (pinned, its checksum checked)
+        if: steps.slang.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/slang.tar.gz" \
+            "https://github.com/shader-slang/slang/releases/download/v${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64.tar.gz"
+          echo "${SLANG_SHA256}  $RUNNER_TEMP/slang.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.cache/slang-${SLANG_VERSION}"
+          tar -xzf "$RUNNER_TEMP/slang.tar.gz" -C "$HOME/.cache/slang-${SLANG_VERSION}"
+      - name: cargo xtask shaders --check
+        run: |
+          export KOMPOZ_SLANGC="$HOME/.cache/slang-${SLANG_VERSION}/bin/slangc"
+          cargo xtask shaders --check
+
   miri:
     runs-on: ubuntu-latest
     steps:

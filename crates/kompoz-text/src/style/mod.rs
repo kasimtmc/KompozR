@@ -261,8 +261,9 @@ pub fn lerp_baseline_shift(start: BaselineShift, stop: BaselineShift, fraction: 
     BaselineShift(lerp(start.0, stop.0, fraction))
 }
 
-/// Glyphs stretched across (their advances too) and slanted (Compose's TextGeometricTransform): a point `y` above
-/// the baseline moves `y * skew_x` to the right (-0.25 leans as a synthetic italic does).
+/// Glyphs stretched across (their advances too) and slanted (Compose's TextGeometricTransform) as Android draws them
+/// (TextPaint.textSkewX, in Skia's space, y down): a point `y` above the baseline moves `y * -skew_x` to the right
+/// (-0.25 leans right, as a synthetic italic does).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct TextGeometricTransform {
     pub scale_x: f32,

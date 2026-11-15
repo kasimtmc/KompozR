@@ -297,8 +297,9 @@ pub struct GlyphStroke {
 }
 
 /// How an outline glyph is drawn besides its face and size (C++'s GlyphStyle with the synthesis): stretched across
-/// by `scale_x` and slanted by `skew_x` (a point y above the baseline moves y · skew_x to the right), faked bold or
-/// italic, outlined by a stroke.
+/// by `scale_x` and slanted by `skew_x` as Android's TextPaint.textSkewX slants it (a point y above the baseline
+/// moves y · -skew_x to the right: -0.25 leans right, as a synthetic italic), faked bold or italic, outlined by a
+/// stroke.
 #[derive(Clone, PartialEq, Debug)]
 pub struct GlyphStyle {
     pub scale_x: f32,
@@ -331,7 +332,8 @@ impl Default for GlyphStyle {
 /// (a fake bold's width added to the stroke's, as Skia adds it).
 pub fn styled_coverage(mut outline: FixedOutline, px: u32, style: &GlyphStyle, scale: f32, shift: i32) -> Coverage {
     if style.scale_x != 1.0 || style.skew_x != 0.0 {
-        outline.transform(&FixedMatrix::from_f32(style.scale_x, style.skew_x, 0.0, 1.0));
+        // (Android's textSkewX is Skia's, whose y is down: x moves by skew_x · y there, by -skew_x · y here.)
+        outline.transform(&FixedMatrix::from_f32(style.scale_x, -style.skew_x, 0.0, 1.0));
     }
     if style.synthesis.skew != 0.0 {
         outline.transform(&FixedMatrix::from_f32(1.0, -style.synthesis.skew, 0.0, 1.0));

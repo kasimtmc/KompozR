@@ -270,7 +270,9 @@ impl Paragraph {
             let b = p.backend.glyph_bounds(font, glyph.id);
             if b.width() > 0.0 || b.height() > 0.0 {
                 let (sx, skew) = scale;
-                let (a, c) = (-b.top * skew, -b.bottom * skew);
+                // (Android's textSkewX: a point y below the baseline moves y · skew to the right, Skia's y being
+                // down; -0.25 leans right.)
+                let (a, c) = (b.top * skew, b.bottom * skew);
                 let r = Rect::new(
                     glyph.x + b.left * sx + a.min(c),
                     glyph.y + b.top,

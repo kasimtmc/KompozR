@@ -423,8 +423,9 @@ impl GlyphCache {
     /// `text`'s glyphs as `request` asks for them, appended to `out` in its runs' order (glyphs that draw nothing
     /// left out). Each glyph's page is marked used this frame.
     ///
-    /// Each run is drawn at `round(size · scale)` px; its glyphs' origins at `origin · scale + glyph · scale`,
-    /// rounded to whole pixels (C++'s, for text that is still: Compose's TextMotion.Static), or to a quarter of a
+    /// Each run is drawn at `round(size · scale)` px; its glyphs' origins at `origin · scale + glyph · scale` (laid
+    /// out bigger or smaller than drawn, `glyph · round(size · scale) / size`: at the size it is rasterized at, as
+    /// C++ shaped it again there), rounded to whole pixels (C++'s, for text that is still: Compose's TextMotion.Static), or to a quarter of a
     /// pixel across with the glyph rasterized that far into its pixel and unhinted (TextMotion.Animated: subpixel
     /// positions, linear); colour glyphs on whole pixels either way. A stroke's width is whole pixels
     /// (`round(width · scale)`, at least one), a shadow's blur too (`round(radius · scale)`).
@@ -480,8 +481,12 @@ impl GlyphCache {
             blur,
             foreground: request.foreground,
         };
+        // Text laid out bigger (or smaller) than drawn is laid out at the whole size its glyphs are rasterized at, as
+        // C++ shaped it again at that size: its glyphs apart as that size's advances put them (glyph and advance in
+        // proportion), not the drawn size's times k. Drawn as it is, as it was laid out.
+        let at = if k != 1.0 && run.size > 0.0 { spec.px as f32 / run.size } else { k };
         for g in &run.glyphs {
-            let x = request.origin.x * k + g.x * k;
+            let x = request.origin.x * k + g.x * at;
             let (x, offset) = if subpixel {
                 let quarters = (x * 4.0).round();
                 let whole = (quarters / 4.0).floor();
@@ -501,7 +506,7 @@ impl GlyphCache {
             }
             self.atlas.use_page(slot.page);
             let x0 = x + cached.left as f32;
-            let y0 = (request.origin.y * k + g.y * k).round() - cached.top as f32;
+            let y0 = (request.origin.y * k + g.y * at).round() - cached.top as f32;
             out.push(GlyphQuad {
                 x0,
                 y0,
