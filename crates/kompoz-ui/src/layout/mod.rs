@@ -1,6 +1,7 @@
 //! Layout, as Compose's `androidx.compose.ui.layout`: measuring and placing, measure policies and intrinsics,
 //! alignment lines, layout coordinates, graphics layers' properties, the `Layout` composables and ui's layout
-//! modifiers (`layout {}`, `layout_id`, `on_size_changed`, `on_globally_positioned`, `on_placed`, `z_index`).
+//! modifiers (`layout {}`, `layout_id`, `on_size_changed`, `on_globally_positioned`, `on_placed`, `z_index`,
+//! `on_layout_rect_changed`, `on_visibility_changed`, `on_first_visible`, `layout_bounds`).
 
 mod alignment_line;
 mod composables;
@@ -8,6 +9,7 @@ mod coordinates;
 mod layer;
 mod measure;
 mod modifiers;
+mod visibility;
 
 pub use alignment_line::{AlignmentLine, FirstBaseline, HorizontalAlignmentLine, LastBaseline, VerticalAlignmentLine};
 pub use composables::{Layout, MultiMeasureLayout, layout_into, measure_policy};
@@ -21,6 +23,7 @@ pub use measure::{
 pub use modifiers::{
     LayoutIdKey, LayoutIdParentData, MeasureFn, OnGloballyPositionedNode, OnPlacedNode, OnSizeChangedNode, ZIndexNode,
 };
+pub use visibility::{LayoutBoundsHolder, OnVisibilityChangedNode, on_visibility_changed_node};
 
 use crate::unit::Constraints;
 use kompoz_graphics::{Density, IntSize};

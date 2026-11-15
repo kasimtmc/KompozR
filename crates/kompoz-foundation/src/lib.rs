@@ -1,6 +1,7 @@
 //! KompozR's foundation, as Jetpack Compose's `androidx.compose.foundation` and `foundation.layout`: the layouts
-//! (`Box`, `Row`, `Column`, `Spacer`), arrangements, and the padding and size modifiers. Its modifiers extend
-//! `Modifier` through traits: `use kompoz_foundation::prelude::*`.
+//! (`Box`, `Row`, `Column`, `Spacer`), arrangements, the layout modifiers (padding, size, offset, aspect ratio,
+//! intrinsic sizes, alignment line padding) and window insets. Its modifiers extend `Modifier` through traits:
+//! `use kompoz_foundation::prelude::*`.
 
 #![allow(non_upper_case_globals, non_snake_case)]
 

@@ -1,7 +1,8 @@
 //! Padding, as Compose's `Modifier.padding` family and `PaddingValues`: space around what a layout wraps.
 
 use super::same_dp;
-use kompoz_graphics::{Dp, LayoutDirection, UnitExt};
+use super::window_insets::WindowInsets;
+use kompoz_graphics::{Density, Dp, LayoutDirection, UnitExt};
 use kompoz_runtime::named;
 use kompoz_ui::layout::LayoutModifierNode;
 use kompoz_ui::{
@@ -86,9 +87,9 @@ pub(crate) fn offset(constraints: Constraints, horizontal: i32, vertical: i32) -
 // PaddingValues
 
 /// Padding on each side (Compose's PaddingValues): its start and end mirrored right to left, or left and right
-/// that aren't (absolute), or what a [`CustomPaddingValues`] works out. Added and subtracted side by side (`+`,
-/// `-`, a difference at least zero). Equal when made the same way of equal lengths (a custom one: when it is the
-/// same one).
+/// that aren't (absolute), window insets' (`WindowInsets::as_padding_values`), or what a [`CustomPaddingValues`]
+/// works out. Added and subtracted side by side (`+`, `-`, a difference at least zero). Equal when made the same
+/// way of equal lengths (a custom one: when it is the same one).
 #[derive(Clone, PartialEq)]
 pub struct PaddingValues {
     repr: Repr,
@@ -101,6 +102,8 @@ enum Repr {
     Plus(Rc<PaddingValues>, Rc<PaddingValues>),
     Minus(Rc<PaddingValues>, Rc<PaddingValues>),
     Custom(Rc<dyn CustomPaddingValues>),
+    // Window insets as padding in a density (Compose's InsetsPaddingValues).
+    Insets(Rc<WindowInsets>, Density),
 }
 
 /// Padding values of one's own (Compose's `PaddingValues` interface implemented): its sides, worked out when
@@ -160,6 +163,11 @@ impl PaddingValues {
         PaddingValues::of(Repr::Custom(Rc::new(custom)))
     }
 
+    /// `insets` as padding in `density` (Compose's InsetsPaddingValues: `WindowInsets.as_padding_values`).
+    pub(crate) fn of_insets(insets: WindowInsets, density: Density) -> PaddingValues {
+        PaddingValues::of(Repr::Insets(Rc::new(insets), density))
+    }
+
     /// The padding at the left, laid out `layout_direction` (Compose's `calculateLeftPadding`).
     pub fn calculate_left_padding(&self, layout_direction: LayoutDirection) -> Dp {
         match &self.repr {
@@ -176,6 +184,7 @@ impl PaddingValues {
                 - b.calculate_left_padding(layout_direction))
             .coerce_at_least(Dp(0.0)),
             Repr::Custom(c) => c.calculate_left_padding(layout_direction),
+            Repr::Insets(i, d) => d.to_dp(i.get_left(d, layout_direction) as f32),
         }
     }
 
@@ -186,6 +195,7 @@ impl PaddingValues {
             Repr::Plus(a, b) => a.calculate_top_padding() + b.calculate_top_padding(),
             Repr::Minus(a, b) => (a.calculate_top_padding() - b.calculate_top_padding()).coerce_at_least(Dp(0.0)),
             Repr::Custom(c) => c.calculate_top_padding(),
+            Repr::Insets(i, d) => d.to_dp(i.get_top(d) as f32),
         }
     }
 
@@ -207,6 +217,7 @@ impl PaddingValues {
                 - b.calculate_right_padding(layout_direction))
             .coerce_at_least(Dp(0.0)),
             Repr::Custom(c) => c.calculate_right_padding(layout_direction),
+            Repr::Insets(i, d) => d.to_dp(i.get_right(d, layout_direction) as f32),
         }
     }
 
@@ -217,6 +228,7 @@ impl PaddingValues {
             Repr::Plus(a, b) => a.calculate_bottom_padding() + b.calculate_bottom_padding(),
             Repr::Minus(a, b) => (a.calculate_bottom_padding() - b.calculate_bottom_padding()).coerce_at_least(Dp(0.0)),
             Repr::Custom(c) => c.calculate_bottom_padding(),
+            Repr::Insets(i, d) => d.to_dp(i.get_bottom(d) as f32),
         }
     }
 
@@ -264,6 +276,7 @@ impl PartialEq for Repr {
             }
             (Repr::Plus(a, b), Repr::Plus(c, d)) | (Repr::Minus(a, b), Repr::Minus(c, d)) => a == c && b == d,
             (Repr::Custom(a), Repr::Custom(b)) => Rc::ptr_eq(a, b),
+            (Repr::Insets(a, d), Repr::Insets(b, e)) => a == b && d == e,
             _ => false,
         }
     }
@@ -282,6 +295,7 @@ impl fmt::Debug for PaddingValues {
             Repr::Plus(a, b) => write!(f, "({a:?} + {b:?})"),
             Repr::Minus(a, b) => write!(f, "({a:?} - {b:?})"),
             Repr::Custom(_) => write!(f, "PaddingValues(custom)"),
+            Repr::Insets(i, d) => write!(f, "InsetsPaddingValues(insets={i:?}, density={d:?})"),
         }
     }
 }

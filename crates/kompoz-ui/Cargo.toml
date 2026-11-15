@@ -34,3 +34,7 @@ harness = false
 [[test]]
 name = "layouts"
 harness = false
+
+[[test]]
+name = "spatial"
+harness = false

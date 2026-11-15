@@ -21,6 +21,7 @@ pub mod modifier;
 pub mod node;
 pub mod platform;
 pub mod semantics;
+pub mod spatial;
 pub mod unit;
 pub mod window;
 

@@ -21,3 +21,11 @@ kompoz-test = { path = "../kompoz-test" }
 [[test]]
 name = "layout"
 harness = false
+
+[[test]]
+name = "layout_modifiers"
+harness = false
+
+[[test]]
+name = "window_insets"
+harness = false
