@@ -372,8 +372,8 @@ impl Paragraph {
         } else {
             rect(self.get_line_right(first), top, width, bottom);
         }
-        for i in first + 1..last {
-            rect(0.0, self.lines[i].top, width, self.lines[i].bottom);
+        for line in &self.lines[first + 1..last] {
+            rect(0.0, line.top, width, line.bottom);
         }
         let (top, bottom) = (self.lines[last].top, self.lines[last].bottom);
         for r in self.selection_rects(last, self.lines[last].range.start, end) {
