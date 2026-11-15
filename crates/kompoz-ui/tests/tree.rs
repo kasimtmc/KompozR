@@ -473,7 +473,7 @@ impl DrawModifierNode for LabelNode {
     fn draw(&mut self, scope: &mut ContentDrawScope) {
         scope.draw_content();
         let text = TextDraw::new(self.0.get(), Offset::new(1.0, 2.0), 10.0, Size::new(10.0, 10.0));
-        scope.canvas().draw_text(&text, Color::Black);
+        scope.context().draw_text(&text, Color::Black);
     }
 }
 

@@ -472,6 +472,9 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     let new_init = recv.map(|_| quote!(recv,));
     let _ = gnames;
     let all_g: Vec<Ts> = lifetimes.iter().chain(types.iter()).map(|g| g.name.clone()).collect();
+    // (an impl's generics, which `new` starts the builder with: declared on it)
+    let outer_g: Vec<Ts> =
+        lifetimes.iter().chain(types.iter()).filter(|g| !g.inferred).map(|g| g.name.clone()).collect();
     let items = quote! {
         #(#missing)*
         #[doc(hidden)]
@@ -483,7 +486,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         }
         #[doc(hidden)]
         #[allow(non_snake_case, clippy::needless_lifetimes)]
-        #vis fn #new_name<#recv_lt>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> {
+        #vis fn #new_name<#recv_lt #(#outer_g,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> {
             #builder_name { _g: ::core::marker::PhantomData, #new_init #(#fs: #initial),* }
         }
         #[allow(clippy::type_complexity, clippy::too_many_arguments)]

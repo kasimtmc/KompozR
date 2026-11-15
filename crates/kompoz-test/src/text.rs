@@ -141,7 +141,7 @@ impl DrawModifierNode for TextNode {
             Size::new(self.width(&scope.density()), metrics.line_height),
         );
         text.rtl = rtl;
-        scope.canvas().draw_text(&text, Color::Black);
+        scope.draw_text(&text, Color::Black);
         scope.draw_content();
     }
 }

@@ -2,7 +2,8 @@
 //! Android's RenderNode makes it (C++'s `LayerGeometry`/`layerMatrix`).
 
 use kompoz_graphics::{
-    BlendMode, Color, ColorFilter, Density, LayoutDirection, Matrix, Outline, RectangleShape, RenderEffect, Shape, Size,
+    BlendMode, Color, ColorFilter, Density, Dp, LayoutDirection, Matrix, Outline, RectangleShape, RenderEffect, Shape,
+    Size,
 };
 use std::fmt;
 use std::rc::Rc;
@@ -36,6 +37,31 @@ pub enum CompositingStrategy {
     Auto,
     Offscreen,
     ModulateAlpha,
+}
+
+/// How far a layer drawn offscreen reaches past its bounds, each side (Compose's LayerOutsets): room for what an
+/// effect or a drawing past the bounds puts there.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct LayerOutsets {
+    pub left: Dp,
+    pub top: Dp,
+    pub right: Dp,
+    pub bottom: Dp,
+}
+
+impl LayerOutsets {
+    /// None on any side.
+    pub const Zero: LayerOutsets = LayerOutsets::new(Dp(0.0), Dp(0.0), Dp(0.0), Dp(0.0));
+
+    /// Each side its own. Panics, as Compose throws, for a negative one.
+    #[track_caller]
+    pub const fn new(left: Dp, top: Dp, right: Dp, bottom: Dp) -> LayerOutsets {
+        assert!(
+            left.0 >= 0.0 && top.0 >= 0.0 && right.0 >= 0.0 && bottom.0 >= 0.0,
+            "Layer outsets must be non-negative"
+        );
+        LayerOutsets { left, top, right, bottom }
+    }
 }
 
 /// Compose's DefaultCameraDistance: 8 (inches of 72 px, as Android takes it).
@@ -72,6 +98,8 @@ pub struct GraphicsLayerScope {
     pub compositing_strategy: CompositingStrategy,
     pub blend_mode: BlendMode,
     pub color_filter: Option<ColorFilter>,
+    /// How far it reaches past its bounds when it is drawn offscreen.
+    pub outsets: LayerOutsets,
     pub(crate) size: Size,
     pub(crate) density: Density,
     pub(crate) layout_direction: LayoutDirection,
@@ -99,6 +127,7 @@ impl Default for GraphicsLayerScope {
             compositing_strategy: CompositingStrategy::Auto,
             blend_mode: BlendMode::SrcOver,
             color_filter: None,
+            outsets: LayerOutsets::Zero,
             size: Size::Zero,
             density: Density::default(),
             layout_direction: LayoutDirection::Ltr,
@@ -198,6 +227,7 @@ impl GraphicsLayerScope {
             && self.compositing_strategy == other.compositing_strategy
             && self.blend_mode == other.blend_mode
             && self.color_filter == other.color_filter
+            && self.outsets == other.outsets
             && self.size == other.size
     }
 }
@@ -205,25 +235,44 @@ impl GraphicsLayerScope {
 /// A graphics layer block, as placement takes it.
 pub type LayerBlock = Rc<dyn Fn(&mut GraphicsLayerScope)>;
 
-/// What a layer's matrix is made from (C++'s LayerGeometry), in px.
-struct LayerGeometry {
-    scale_x: f32,
-    scale_y: f32,
-    translation_x: f32,
-    translation_y: f32,
-    rotation_x: f32,
-    rotation_y: f32,
-    rotation_z: f32,
-    camera_distance: f32,
-    pivot_x: f32,
-    pivot_y: f32,
+/// What a layer's matrix is made from (C++'s LayerGeometry), in px; the pivot where it is in what the layer is
+/// drawn in.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct LayerGeometry {
+    pub(crate) scale_x: f32,
+    pub(crate) scale_y: f32,
+    pub(crate) translation_x: f32,
+    pub(crate) translation_y: f32,
+    pub(crate) rotation_x: f32,
+    pub(crate) rotation_y: f32,
+    pub(crate) rotation_z: f32,
+    pub(crate) camera_distance: f32,
+    pub(crate) pivot_x: f32,
+    pub(crate) pivot_y: f32,
+}
+
+impl Default for LayerGeometry {
+    fn default() -> Self {
+        LayerGeometry {
+            scale_x: 1.0,
+            scale_y: 1.0,
+            translation_x: 0.0,
+            translation_y: 0.0,
+            rotation_x: 0.0,
+            rotation_y: 0.0,
+            rotation_z: 0.0,
+            camera_distance: DefaultCameraDistance,
+            pivot_x: 0.0,
+            pivot_y: 0.0,
+        }
+    }
 }
 
 /// The 3x3 of a matrix's plane part, row by row.
-type Plane = [f32; 9];
+pub(crate) type Plane = [f32; 9];
 
 /// `b`, then `a`.
-fn mul(a: &Plane, b: &Plane) -> Plane {
+pub(crate) fn mul(a: &Plane, b: &Plane) -> Plane {
     let mut out = [0.0; 9];
     for r in 0..3 {
         for c in 0..3 {
@@ -252,7 +301,7 @@ fn matrix_of(p: &Plane) -> Matrix {
 }
 
 /// A rotation about a unit axis (Skia's SkM44::Rotate), 3x3.
-fn rotation(x: f32, y: f32, z: f32, degrees: f32) -> Plane {
+pub(crate) fn rotation(x: f32, y: f32, z: f32, degrees: f32) -> Plane {
     let r = (degrees as f64).to_radians();
     let (c, s) = (r.cos() as f32, r.sin() as f32);
     let t = 1.0 - c;
@@ -272,7 +321,7 @@ fn rotation(x: f32, y: f32, z: f32, degrees: f32) -> Plane {
 /// The matrix a layer is drawn through, as Android's RenderNode makes it (C++'s `layerMatrix`): scaled about the
 /// pivot; turned about z in the plane, then moved; or, turned in 3D, seen through Sk3DView's camera at 72 ×
 /// camera distance px.
-fn layer_matrix(g: &LayerGeometry) -> Matrix {
+pub(crate) fn layer_matrix(g: &LayerGeometry) -> Matrix {
     let (px, py) = (g.pivot_x, g.pivot_y);
     let scale =
         mul(&moving(px, py), &mul(&[g.scale_x, 0.0, 0.0, 0.0, g.scale_y, 0.0, 0.0, 0.0, 1.0], &moving(-px, -py)));

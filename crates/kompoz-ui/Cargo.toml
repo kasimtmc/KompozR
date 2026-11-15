@@ -42,3 +42,7 @@ harness = false
 [[test]]
 name = "input"
 harness = false
+
+[[test]]
+name = "draw"
+harness = false

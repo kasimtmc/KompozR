@@ -14,7 +14,10 @@ mod visibility;
 pub use alignment_line::{AlignmentLine, FirstBaseline, HorizontalAlignmentLine, LastBaseline, VerticalAlignmentLine};
 pub use composables::{Layout, MultiMeasureLayout, layout_into, measure_policy};
 pub use coordinates::LayoutCoordinates;
-pub use layer::{CompositingStrategy, DefaultCameraDistance, GraphicsLayerScope, LayerBlock, TransformOrigin};
+pub use layer::{
+    CompositingStrategy, DefaultCameraDistance, GraphicsLayerScope, LayerBlock, LayerOutsets, TransformOrigin,
+};
+pub(crate) use layer::{LayerGeometry, layer_matrix, mul, rotation};
 pub(crate) use measure::{DefaultIntrinsicMeasurable, MinMax, Side};
 pub use measure::{
     IntrinsicMeasurable, IntrinsicMeasureScope, Measurable, MeasurePolicy, MeasureResult, MeasureScope, PlaceTarget,

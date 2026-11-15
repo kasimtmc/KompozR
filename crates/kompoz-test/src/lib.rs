@@ -12,9 +12,11 @@
 #![allow(non_snake_case)]
 
 mod input;
+mod recording;
 mod text;
 
 pub use input::{EVENT_PERIOD_MILLIS, InjectionScope, MouseInjectionScope, ScrollWheel, TouchInjectionScope};
+pub use recording::{Arc, Backdrop, ClipShape, Elevated, Mesh, PathShadow, RecordingCanvas, ShapeShadow};
 pub use text::{FakeTextMeasurer, FontMetrics, Text};
 
 use kompoz_graphics::{Dp, IntSize, Offset, Rect};
@@ -156,6 +158,17 @@ impl KompozTestRule {
         )
     }
 
+    /// The node one of whose content descriptions is `description` (Compose's `onNodeWithContentDescription`), in
+    /// the merged tree.
+    pub fn on_node_with_content_description(&self, description: &str) -> SemanticsNodeInteraction<'_> {
+        let wanted = description.to_string();
+        self.on_node(
+            move |n| n.config().get(SemanticsProperties::ContentDescription).is_some_and(|ds| ds.contains(&wanted)),
+            format!("ContentDescription = '{description}'"),
+            false,
+        )
+    }
+
     /// The node whose text (or a part of it, with `substring`) is `text` (Compose's `onNodeWithText`), in the
     /// merged tree.
     pub fn on_node_with_text(&self, text: &str) -> SemanticsNodeInteraction<'_> {
@@ -200,6 +213,18 @@ impl KompozTestRule {
     /// The host's density.
     pub fn density(&self) -> kompoz_graphics::Density {
         self.host.density()
+    }
+
+    /// What the host draws now, recorded.
+    pub fn draw(&self) -> RecordingCanvas {
+        let mut canvas = RecordingCanvas::new();
+        self.host.draw(&mut canvas);
+        canvas
+    }
+
+    /// The texts the host draws now, in order (C++'s `drawnTexts`).
+    pub fn drawn_texts(&self) -> Vec<String> {
+        self.draw().texts
     }
 }
 

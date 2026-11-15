@@ -4,14 +4,42 @@
 //! through its layer), its children in z order, what it reads observed, and the node hooks a display list keeps
 //! frames by around it (C++'s `LayoutNode::draw`).
 //!
-//! The core is here; the drawing API of the scope (`draw_rect` and the rest), the draw modifiers and the full
-//! graphics layer drawing are the drawing package of this stage, in other files of this module (`impl DrawScope`).
+//! The drawing API of the scope (`draw_rect` and the rest: [`scope`]), Compose's ui.graphics [`Canvas`] and
+//! [`Paint`], the draw modifiers ([`modifiers`]), [`GraphicsLayer`] recording, painters ([`painter`]) and
+//! composable vector content ([`vector`]) are in this module's other files.
 
-use crate::graphics_context::{CornerRadii, GraphicsContext, LayerTransform, NodeRecording};
-use crate::layout::GraphicsLayerScope;
+mod bitmap;
+mod canvas;
+mod graphics_layer;
+mod layer_draw;
+pub mod modifiers;
+pub mod painter;
+mod picture;
+pub mod scope;
+mod style;
+pub mod vector;
+
+pub use bitmap::{BitmapRenderer, draw_into_bitmap, pending_draws, set_bitmap_renderer};
+pub use canvas::{Canvas, CanvasState, Paint, PaintingStyle};
+pub use graphics_layer::{GraphicsLayer, GraphicsLayerProperties, remember_graphics_layer};
+pub use modifiers::{BlurScope, BlurType, BlurredEdgeTreatment, CacheDrawScope, DrawResult, ShadowScope};
+pub use painter::{
+    BitmapPainter, BrushPainter, ColorPainter, DrawPainter, Painter, VectorPainter, draw_vector,
+    remember_vector_painter, vector_drawn_into,
+};
+pub use picture::Picture;
+pub use scope::{DrawContext, DrawTransform};
+pub use style::{DefaultAlpha, DefaultBlendMode, DrawStyle, Fill, PointMode, Stroke};
+pub use vector::remember_vector_painter_content;
+
+pub(crate) use layer_draw::draw_through_layer;
+
+use crate::graphics_context::{GraphicsContext, NodeRecording};
 use crate::modifier::{NodeKind, NodeRc};
 use crate::node::{LayoutNode, NodeCoordinator};
-use kompoz_graphics::{Density, LayoutDirection, Offset, Rect, Size};
+use canvas::CanvasSlot;
+use kompoz_graphics::{Density, LayoutDirection, Offset, Size};
+use layer_draw::DRAW_PART;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -23,24 +51,54 @@ pub trait DrawModifierNode {
     fn on_measure_result_changed(&mut self) {}
 }
 
-/// Where drawing happens (Compose's DrawScope): the context, the size drawn in, the layout direction and the
-/// density (it derefs to it: `scope.to_px(1.dp())`). Its drawing functions are the drawing package's.
+/// Where drawing happens (Compose's DrawScope): the context, where the scope is in it and its size, the layout
+/// direction and the density (it derefs to it: `scope.to_px(1.dp())`). Its drawing functions are [`scope`]'s.
 pub struct DrawScope<'a> {
     pub(crate) canvas: &'a mut dyn GraphicsContext,
+    /// Its top left in the context (an inset moves it).
+    pub(crate) origin: Offset,
     pub(crate) size: Size,
     pub(crate) layout_direction: LayoutDirection,
     pub(crate) density: Density,
+    /// Its canvas's stack, made when asked for (or the canvas's it draws over).
+    pub(crate) canvas_state: CanvasSlot<'a>,
 }
 
 impl<'a> DrawScope<'a> {
+    /// A scope of `size` over `canvas`, from its origin.
     pub fn new(
         canvas: &'a mut dyn GraphicsContext,
         size: Size,
         layout_direction: LayoutDirection,
         density: Density,
     ) -> Self {
-        DrawScope { canvas, size, layout_direction, density }
+        DrawScope::at(canvas, Offset::Zero, size, layout_direction, density)
     }
+
+    /// A scope of `size` over `canvas`, its top left at `origin` there (C++'s DrawScope over bounds).
+    pub fn at(
+        canvas: &'a mut dyn GraphicsContext,
+        origin: Offset,
+        size: Size,
+        layout_direction: LayoutDirection,
+        density: Density,
+    ) -> Self {
+        DrawScope { canvas, origin, size, layout_direction, density, canvas_state: CanvasSlot::Own(None) }
+    }
+
+    /// A scope of `size` over a [`Canvas`], drawing into it from its origin (Compose's CanvasDrawScope.draw):
+    /// `canvas()` and `draw_into_canvas` give that canvas, what is pushed on it left there.
+    pub fn over_canvas(
+        canvas: &'a mut Canvas<'_>,
+        size: Size,
+        layout_direction: LayoutDirection,
+        density: Density,
+    ) -> Self {
+        let (context, state) = canvas.parts();
+        let origin = state.origin();
+        DrawScope { canvas: context, origin, size, layout_direction, density, canvas_state: CanvasSlot::Of(state) }
+    }
+
     /// The size drawn in, in px.
     pub fn size(&self) -> Size {
         self.size
@@ -55,9 +113,22 @@ impl<'a> DrawScope<'a> {
     pub fn density(&self) -> Density {
         self.density
     }
-    /// The context drawn into.
-    pub fn canvas(&mut self) -> &mut dyn GraphicsContext {
+    /// The context drawn into (its coordinates: this scope's top left is [`origin`](DrawScope::origin)).
+    pub fn context(&mut self) -> &mut dyn GraphicsContext {
         &mut *self.canvas
+    }
+    /// Its top left in the context.
+    pub fn origin(&self) -> Offset {
+        self.origin
+    }
+}
+
+/// What its canvas left pushed is popped as it goes.
+impl Drop for DrawScope<'_> {
+    fn drop(&mut self) {
+        if let CanvasSlot::Own(Some(state)) = &mut self.canvas_state {
+            state.restore_to(&mut *self.canvas, 0);
+        }
     }
 }
 
@@ -76,6 +147,7 @@ pub struct ContentDrawScope<'a> {
 }
 
 /// What `draw_content` draws: the draw nodes of a coordinator from `index` on, then what it holds.
+#[derive(Clone)]
 pub(crate) struct ContentNext {
     pub(crate) coordinator: Rc<NodeCoordinator>,
     pub(crate) nodes: Rc<Vec<NodeRc>>,
@@ -84,13 +156,23 @@ pub(crate) struct ContentNext {
 
 impl ContentDrawScope<'_> {
     /// Draws what is below the node: the draw nodes after it, then the layout's content (Compose's
-    /// `drawContent`). Call it once, or not at all to draw nothing below.
+    /// `drawContent`), at the scope's top left (an inset or a translation moves it). Call it once, or not at all
+    /// to draw nothing below.
     pub fn draw_content(&mut self) {
+        let origin = self.scope.origin;
+        let canvas = &mut *self.scope.canvas;
+        let moved = origin != Offset::Zero;
+        if moved {
+            canvas.push_translation(origin);
+        }
         let next = &self.next;
         if next.index < next.nodes.len() {
-            next.coordinator.draw_node_at(&next.nodes, next.index, &mut *self.scope.canvas);
+            next.coordinator.draw_node_at(&next.nodes, next.index, canvas);
         } else {
-            next.coordinator.perform_draw(&mut *self.scope.canvas);
+            next.coordinator.perform_draw(canvas);
+        }
+        if moved {
+            canvas.pop_translation();
         }
     }
 }
@@ -110,7 +192,7 @@ impl std::ops::DerefMut for ContentDrawScope<'_> {
 
 thread_local! {
     /// Drawing into what a recording canvas keeps from one frame to the next (C++'s gKeptPass).
-    static KEPT_PASS: Cell<bool> = const { Cell::new(false) };
+    pub(crate) static KEPT_PASS: Cell<bool> = const { Cell::new(false) };
 }
 
 impl LayoutNode {
@@ -178,12 +260,12 @@ impl NodeCoordinator {
         let Some(layout_node) = self.layout_node() else { return };
         let cell = nodes[index].clone();
         let mut scope = ContentDrawScope {
-            scope: DrawScope {
+            scope: DrawScope::new(
                 canvas,
-                size: self.measured_size.get().to_size(),
-                layout_direction: layout_node.layout_direction(),
-                density: layout_node.density(),
-            },
+                self.measured_size.get().to_size(),
+                layout_node.layout_direction(),
+                layout_node.density(),
+            ),
             next: ContentNext { coordinator: self.rc(), nodes: nodes.clone(), index: index + 1 },
         };
         let mut node = cell.node.borrow_mut();
@@ -193,14 +275,27 @@ impl NodeCoordinator {
     }
 
     /// Draws what it holds (Compose's `performDraw`): what a layout modifier wraps, or the layout's placed
-    /// children in z order.
+    /// children in z order (none while only its own drawing is drawn, and only them, onto the canvas under the
+    /// state-only one, while only they are: a blur of the node's own drawing).
     pub(crate) fn perform_draw(&self, canvas: &mut dyn GraphicsContext) {
         if self.is_inner() {
             let Some(node) = self.layout_node() else { return };
+            let part = DRAW_PART.with(|p| p.borrow().clone()).filter(|p| p.node == node.id);
+            if part.as_ref().is_some_and(|p| p.own) {
+                return;
+            }
+            let outer_part = part.as_ref().map(|p| {
+                p.pass.set(true);
+                DRAW_PART.with(|d| d.borrow_mut().take())
+            });
             for child in node.z_sorted_children() {
                 if child.is_placed() {
                     child.draw(canvas);
                 }
+            }
+            if let (Some(p), Some(outer)) = (&part, outer_part) {
+                p.pass.set(false);
+                DRAW_PART.with(|d| *d.borrow_mut() = outer);
             }
         } else if let Some(wrapped) = self.wrapped() {
             wrapped.draw(canvas);
@@ -214,49 +309,5 @@ impl NodeCoordinator {
                 d.on_measure_result_changed();
             }
         });
-    }
-}
-
-/// Draws `content` through a graphics layer of `size`: through its matrix, faded by its alpha (in a layer), cut to
-/// its shape when it clips. The drawing package of this stage draws the rest as C++'s `drawThroughLayer` does
-/// (its elevation shadow, render effect, blend mode, color filter and compositing strategy).
-pub(crate) fn draw_through_layer(
-    canvas: &mut dyn GraphicsContext,
-    layer: &GraphicsLayerScope,
-    size: Size,
-    content: &mut dyn FnMut(&mut dyn GraphicsContext),
-) {
-    let alpha = layer.alpha.clamp(0.0, 1.0);
-    if alpha <= 0.0 || layer.scale_x == 0.0 || layer.scale_y == 0.0 {
-        return;
-    }
-    let matrix = layer.matrix();
-    let moved = !matrix.is_identity();
-    if moved {
-        canvas.push_transform(&matrix);
-    }
-    let bounds = Rect::new(0.0, 0.0, size.width, size.height);
-    let faded = alpha < 1.0;
-    if faded {
-        canvas.push_layer(bounds, CornerRadii::Zero, alpha, LayerTransform::default());
-    }
-    if layer.clip {
-        canvas.push_clip_shape(
-            bounds,
-            &*layer.shape,
-            layer.layout_direction,
-            &layer.density,
-            crate::graphics_context::ClipOp::Intersect,
-        );
-    }
-    content(canvas);
-    if layer.clip {
-        canvas.pop_clip();
-    }
-    if faded {
-        canvas.pop_layer();
-    }
-    if moved {
-        canvas.pop_transform();
     }
 }

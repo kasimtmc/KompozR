@@ -373,15 +373,7 @@ pub trait GraphicsContext {
         alpha: f32,
         quality: FilterQuality,
     ) {
-        self.push_layer(dst, CornerRadii::Zero, alpha, LayerTransform::Identity); // the brush, kept where the image is
-        match brush.solid_color() {
-            Some(color) => self.fill_round_rect(dst, CornerRadii::Zero, color),
-            None => self.fill_gradient(dst, CornerRadii::Zero, brush, brush_area),
-        }
-        self.push_blend_mode(BlendMode::DstIn);
-        self.draw_image(image, src, dst, 1.0, quality);
-        self.pop_blend_mode();
-        self.pop_layer();
+        default_draw_image_mask(self, image, src, dst, brush, brush_area, alpha, quality);
     }
     /// Everything drawn until pop_layer() goes to an offscreen layer that is then composited into `bounds`, clipped
     /// to a rounded rect of `radii`, faded by `alpha` and transformed by `transform` (LayerTransform::Identity
@@ -750,48 +742,7 @@ pub trait GraphicsContext {
         shadow: &Shadow,
         inner: bool,
     ) {
-        let p = place(rect, shape, layout_direction, density);
-        let mut s = Shadow { brush: None, alpha: 1.0, blend_mode: BlendMode::SrcOver, ..shadow.clone() };
-        let alpha = shadow.alpha.clamp(0.0, 1.0);
-        let mut brush = shadow.brush.clone();
-        if let Some(color) = brush.as_ref().and_then(Brush::solid_color) {
-            s.color = color;
-            brush = None;
-        }
-        let draw = |g: &mut Self, s: &Shadow| {
-            if p.rounded {
-                g.draw_shadow(rect, p.radii, s, inner);
-            } else {
-                g.draw_shadow_path(&outline_path(&p.outline), rect.top_left(), s, inner);
-            }
-        };
-        let out = shadow.blur_radius.max(0.0) + shadow.spread.max(0.0);
-        let bitmap = rect.translate(shadow.offset).inflate(out);
-        if !inner {
-            self.push_clip(bitmap);
-        }
-        if shadow.blend_mode != BlendMode::SrcOver {
-            self.push_blend_mode(shadow.blend_mode);
-        }
-        if let Some(brush) = brush {
-            let area = if inner { rect } else { bitmap };
-            self.push_layer(area, CornerRadii::Zero, alpha, LayerTransform::Identity);
-            s.color = Color::White;
-            draw(self, &s);
-            self.push_blend_mode(BlendMode::SrcIn);
-            self.fill_gradient(area, CornerRadii::Zero, &brush, area);
-            self.pop_blend_mode();
-            self.pop_layer();
-        } else {
-            s.color = with_alpha(s.color, s.color.alpha() * alpha);
-            draw(self, &s);
-        }
-        if shadow.blend_mode != BlendMode::SrcOver {
-            self.pop_blend_mode();
-        }
-        if !inner {
-            self.pop_clip();
-        }
+        default_draw_shape_shadow(self, rect, shape, layout_direction, density, shadow, inner);
     }
 
     /// Before what a layout node (known by its id) draws: a recording canvas lines frames up by these; others
@@ -825,6 +776,85 @@ pub trait GraphicsContext {
     /// recording replayed tells it which layer comes next).
     fn layer_content(&self) -> LayerContent {
         LayerContent::Draw
+    }
+}
+
+// ---- The provided methods' drawing, for a backend that overrides one and still draws it the default way ----------
+
+/// What [`GraphicsContext::draw_image_mask`] draws by default: the brush in a layer, the image over it by DstIn.
+#[allow(clippy::too_many_arguments)]
+pub fn default_draw_image_mask<G: GraphicsContext + ?Sized>(
+    g: &mut G,
+    image: &ImageBitmap,
+    src: Rect,
+    dst: Rect,
+    brush: &Brush,
+    brush_area: Rect,
+    alpha: f32,
+    quality: FilterQuality,
+) {
+    g.push_layer(dst, CornerRadii::Zero, alpha, LayerTransform::Identity); // the brush, kept where the image is
+    match brush.solid_color() {
+        Some(color) => g.fill_round_rect(dst, CornerRadii::Zero, color),
+        None => g.fill_gradient(dst, CornerRadii::Zero, brush, brush_area),
+    }
+    g.push_blend_mode(BlendMode::DstIn);
+    g.draw_image(image, src, dst, 1.0, quality);
+    g.pop_blend_mode();
+    g.pop_layer();
+}
+
+/// What [`GraphicsContext::draw_shape_shadow`] draws by default (see there).
+pub fn default_draw_shape_shadow<G: GraphicsContext + ?Sized>(
+    g: &mut G,
+    rect: Rect,
+    shape: &dyn Shape,
+    layout_direction: LayoutDirection,
+    density: &Density,
+    shadow: &Shadow,
+    inner: bool,
+) {
+    let p = place(rect, shape, layout_direction, density);
+    let mut s = Shadow { brush: None, alpha: 1.0, blend_mode: BlendMode::SrcOver, ..shadow.clone() };
+    let alpha = shadow.alpha.clamp(0.0, 1.0);
+    let mut brush = shadow.brush.clone();
+    if let Some(color) = brush.as_ref().and_then(Brush::solid_color) {
+        s.color = color;
+        brush = None;
+    }
+    let draw = |g: &mut G, s: &Shadow| {
+        if p.rounded {
+            g.draw_shadow(rect, p.radii, s, inner);
+        } else {
+            g.draw_shadow_path(&outline_path(&p.outline), rect.top_left(), s, inner);
+        }
+    };
+    let out = shadow.blur_radius.max(0.0) + shadow.spread.max(0.0);
+    let bitmap = rect.translate(shadow.offset).inflate(out);
+    if !inner {
+        g.push_clip(bitmap);
+    }
+    if shadow.blend_mode != BlendMode::SrcOver {
+        g.push_blend_mode(shadow.blend_mode);
+    }
+    if let Some(brush) = brush {
+        let area = if inner { rect } else { bitmap };
+        g.push_layer(area, CornerRadii::Zero, alpha, LayerTransform::Identity);
+        s.color = Color::White;
+        draw(g, &s);
+        g.push_blend_mode(BlendMode::SrcIn);
+        g.fill_gradient(area, CornerRadii::Zero, &brush, area);
+        g.pop_blend_mode();
+        g.pop_layer();
+    } else {
+        s.color = with_alpha(s.color, s.color.alpha() * alpha);
+        draw(g, &s);
+    }
+    if shadow.blend_mode != BlendMode::SrcOver {
+        g.pop_blend_mode();
+    }
+    if !inner {
+        g.pop_clip();
     }
 }
 
