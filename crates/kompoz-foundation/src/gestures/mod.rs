@@ -23,6 +23,7 @@ mod transform;
 
 pub use drag::{DetectAxisDragGestures, DetectDragGestures, DetectDragGesturesAfterLongPress};
 pub use tap::{DetectTapGestures, GestureCancellation, PressGestureScope};
+pub(crate) use tap::{FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY, is_changed_to_down};
 pub use transform::DetectTransformGestures;
 
 use kompoz_graphics::Offset;

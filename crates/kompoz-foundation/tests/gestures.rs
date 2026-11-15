@@ -274,8 +274,9 @@ fn small_tap_targets_take_touches_near_them_only_for_a_finger() {
 }
 
 fn view_configuration_sets_the_gesture_thresholds() {
-    // The pointer input part of C++'s view_configuration_sets_the_gesture_thresholds (its scrollables, clickables
-    // and tooltips are stage 10's, WP5's and stage 12's): the host's long press and double tap timeouts, and a
+    // The pointer input part of C++'s view_configuration_sets_the_gesture_thresholds (its scrollables and tooltips
+    // are stage 10's and stage 12's, its long click the clickable tests'): the host's long press and double tap
+    // timeouts, and a
     // touch slop a part of the screen provides for its own.
     let log = new_log();
     let seen = Rc::new(RefCell::new(None::<ViewConfiguration>));
@@ -750,7 +751,8 @@ fn detect_transform_gestures_reports_pinch_and_twist() {
 }
 
 fn a_pinch_goes_on_as_a_pan_with_the_finger_left() {
-    // The transform part of C++'s two_finger_tap_is_no_click_and_the_next_finger_leads (its clickable is WP5's):
+    // The transform part of C++'s two_finger_tap_is_no_click_and_the_next_finger_leads (its click part is the
+    // clickable tests'):
     // pinched, the first finger lifted, the second one goes on panning.
     let pans = Rc::new(RefCell::new(Vec::<Offset>::new()));
     let p = pans.clone();

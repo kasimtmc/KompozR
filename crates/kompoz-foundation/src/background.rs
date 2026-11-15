@@ -4,6 +4,7 @@ use kompoz_graphics::{Brush, Color, LayoutDirection, Outline, RectangleShape, Sh
 use kompoz_runtime::named;
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode};
 use kompoz_ui::modifier::ObserverModifierNode;
+use kompoz_ui::semantics::{SemanticsConfiguration, SemanticsModifierNode};
 use kompoz_ui::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, node_capabilities};
 use std::sync::Arc;
 
@@ -73,6 +74,9 @@ impl ModifierNodeElement for BackgroundElement {
         if *node.shape != *self.shape {
             node.shape = self.shape.clone();
             node.last = None;
+            if let Some(h) = &node.handle {
+                h.invalidate_semantics();
+            }
         }
         if let Some(h) = &node.handle {
             h.invalidate_draw();
@@ -84,8 +88,8 @@ impl ModifierNodeElement for BackgroundElement {
 }
 
 /// The node of `Modifier.background` (Compose's BackgroundNode): a rect, or its shape's outline (kept for its size,
-/// direction and shape; what making it reads observed), in its color and brush. (Compose's node also sets the
-/// `Shape` semantics property, which the semantics package adds.)
+/// direction and shape; what making it reads observed), in its color and brush; its shape is its layout's `Shape`
+/// semantics property.
 struct BackgroundNode {
     color: Color,
     brush: Option<Brush>,
@@ -115,12 +119,18 @@ impl BackgroundNode {
 }
 
 impl ModifierNode for BackgroundNode {
-    node_capabilities!(draw, observer);
+    node_capabilities!(draw, observer, semantics);
     fn on_attach(&mut self, cx: &NodeCx) {
         self.handle = Some(cx.handle());
     }
     fn should_auto_invalidate(&self) -> bool {
         false
+    }
+}
+
+impl SemanticsModifierNode for BackgroundNode {
+    fn apply_semantics(&mut self, config: &mut SemanticsConfiguration) {
+        config.set_shape(self.shape.clone());
     }
 }
 

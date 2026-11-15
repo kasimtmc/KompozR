@@ -10,6 +10,7 @@ use kompoz_graphics::{
 use kompoz_runtime::named;
 use kompoz_ui::draw::{Canvas, ContentDrawScope, DrawModifierNode, DrawScope, DrawStyle, Fill, Stroke};
 use kompoz_ui::graphics_context::ClipOp;
+use kompoz_ui::semantics::{SemanticsConfiguration, SemanticsModifierNode};
 use kompoz_ui::{Modifier, ModifierNode, ModifierNodeElement, node_capabilities};
 use std::sync::Arc;
 
@@ -99,8 +100,7 @@ enum RoundKind {
 }
 
 /// The node of `Modifier.border` (Compose's BorderModifierNode): what it draws worked out again for another size,
-/// density or direction, or another width, brush or shape. (Compose's node also sets the `Shape` semantics property,
-/// which the semantics package adds.)
+/// density or direction, or another width, brush or shape; its shape is its layout's `Shape` semantics property.
 pub struct BorderModifierNode {
     width: Dp,
     brush: Brush,
@@ -109,7 +109,13 @@ pub struct BorderModifierNode {
 }
 
 impl ModifierNode for BorderModifierNode {
-    node_capabilities!(draw);
+    node_capabilities!(draw, semantics);
+}
+
+impl SemanticsModifierNode for BorderModifierNode {
+    fn apply_semantics(&mut self, config: &mut SemanticsConfiguration) {
+        config.set_shape(self.shape.clone());
+    }
 }
 
 /// Compose's CornerRadius.shrink.

@@ -410,7 +410,7 @@ fn back_gestures_wait_for_popups() {
                 }
             });
         }
-        Box(Modifier.size(40.dp()).focus_requester(&f).focus_target().test_tag("field"));
+        Box(Modifier.size(40.dp()).focus_requester(&f).focusable().test_tag("field"));
         if o.get() {
             let (o2, l2) = (o.clone(), l.clone());
             Popup(

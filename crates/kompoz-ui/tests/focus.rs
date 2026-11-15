@@ -1,7 +1,7 @@
 //! The focus and key tests: focus targets and their state, requesters, properties (redirects, cancels, enter and
 //! exit), restorers, groups, events, one- and two-dimensional search, the keys along the focused path, and the C++
-//! Kompoz's focus and key tests that need no clickable or text field (focus targets instead), with Compose's
-//! behaviour where the two differ. Numbers in px.
+//! Kompoz's focus and key tests that need no text field (focus targets for those), with Compose's behaviour where
+//! the two differ. Numbers in px.
 
 #![allow(non_snake_case)]
 
@@ -67,13 +67,14 @@ fn name(s: FocusState) -> &'static str {
     }
 }
 
-/// A focus target `size` px, its top left at (`x`, `y`) of the box it is in (C++'s tests' buttons).
+/// A clickable `size` px, its top left at (`x`, `y`) of the box it is in (C++'s tests' buttons): focusable in
+/// keyboard mode, as the keys these tests press put the UI in.
 #[kompozable(inline)]
 fn Target(x: i32, y: i32, size: i32, tag: &'static str) {
     Box(
         Modifier.padding_sides_with(x.dp(), y.dp(), 0.dp(), 0.dp()),
         content = move || {
-            Box(Modifier.size(size.dp()).focus_target().test_tag(tag));
+            Box(Modifier.size(size.dp()).clickable(|| {}).test_tag(tag));
         },
     );
 }
@@ -82,14 +83,18 @@ fn Target(x: i32, y: i32, size: i32, tag: &'static str) {
 // Ported from C++
 
 fn arrow_keys_move_focus_to_the_nearest_one_that_way() {
-    // C++'s arrow_keys_move_focus_to_the_nearest_one_that_way, focus targets for its clickables.
+    // C++'s arrow_keys_move_focus_to_the_nearest_one_that_way.
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Column(
             content = || {
                 for row in 0..3 {
                     Row(content = move || {
                         for col in 0..3 {
-                            Box(Modifier.size(50.dp()).padding(5.dp()).focus_target().test_tag(format!("{row}{col}")));
+                            Box(Modifier
+                                .size(50.dp())
+                                .padding(5.dp())
+                                .clickable(|| {})
+                                .test_tag(format!("{row}{col}")));
                         }
                     });
                 }
@@ -201,8 +206,8 @@ fn nested_focus_groups_count_as_their_outermost_from_outside() {
 }
 
 fn focus_properties_skip_and_redirect_the_focus() {
-    // C++'s focus_properties_skip_and_redirect_the_focus, focus targets for its clickables and a target that can't
-    // be focused for its text field.
+    // C++'s focus_properties_skip_and_redirect_the_focus, a target that can't be focused for its text field; the
+    // properties before the clickables, as Compose's apply to the targets after them (C++ put them after).
     let (first, last, field) = (FocusRequester::new(), FocusRequester::new(), FocusRequester::new());
     let (f1, l1, d1) = (first.clone(), last.clone(), field.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
@@ -219,14 +224,14 @@ fn focus_properties_skip_and_redirect_the_focus() {
                             p.next = next.clone();
                             p.right = right.clone();
                         })
-                        .focus_target()
+                        .clickable(|| {})
                         .test_tag("bir"));
                     Box(Modifier
                         .size(50.dp())
                         .focus_properties(|p| p.can_focus = false)
-                        .focus_target()
+                        .clickable(|| {})
                         .test_tag("iki"));
-                    Box(Modifier.size(50.dp()).focus_target().test_tag("üç"));
+                    Box(Modifier.size(50.dp()).clickable(|| {}).test_tag("üç"));
                 });
                 Box(Modifier
                     .size_wh(280.dp(), 56.dp())
@@ -242,12 +247,12 @@ fn focus_properties_skip_and_redirect_the_focus() {
                         p.previous = previous.clone();
                         p.down = down.clone();
                     })
-                    .focus_target()
+                    .clickable(|| {})
                     .test_tag("son"));
-                // A target's properties are its own: the target inside one that can't be focused still can.
+                // A target's properties are its own: the clickable inside one that can't be focused still can.
                 Box(
-                    Modifier.size(80.dp()).focus_properties(|p| p.can_focus = false).focus_target().test_tag("dış"),
-                    content = || Box(Modifier.size(40.dp()).focus_target().test_tag("iç")),
+                    Modifier.size(80.dp()).focus_properties(|p| p.can_focus = false).clickable(|| {}).test_tag("dış"),
+                    content = || Box(Modifier.size(40.dp()).clickable(|| {}).test_tag("iç")),
                 );
             },
         );
@@ -265,7 +270,7 @@ fn focus_properties_skip_and_redirect_the_focus() {
     // To one that can't take it: the move fails there (Compose's; C++ went the usual way instead).
     assert!(!rule.host().move_focus(FocusDirection::Down));
     assert!(at(&rule, "son"));
-    key(&rule, Key::Tab); // a target's properties are its own: the target inside "dış" can take it
+    key(&rule, Key::Tab); // a target's properties are its own: the clickable inside "dış" can take it
     assert!(at(&rule, "iç"));
     key(&rule, Key::DirectionUp);
     key(&rule, Key::DirectionUp);
@@ -281,7 +286,7 @@ fn focus_properties_skip_and_redirect_the_focus() {
 }
 
 fn on_focus_event_and_progress_semantics() {
-    // C++'s on_focus_event_and_progress_semantics, focus targets for its focusables and the column a focus group
+    // C++'s on_focus_event_and_progress_semantics, the column a focus group
     // (Compose's event nodes see the nearest target below them: the group's state); Compose tells the first state
     // too, and nothing for a move inside the group.
     let events = new_log();
@@ -299,11 +304,11 @@ fn on_focus_event_and_progress_semantics() {
                         .on_focus_changed(move |s| c.borrow_mut().push(name(s).to_string()))
                         .focus_group(),
                     content = move || {
-                        Box(Modifier.size(20.dp()).focus_requester(&a).focus_target());
-                        Box(Modifier.size(20.dp()).focus_requester(&b).focus_target());
+                        Box(Modifier.size(20.dp()).focus_requester(&a).focusable());
+                        Box(Modifier.size(20.dp()).focus_requester(&b).focusable());
                     },
                 );
-                Box(Modifier.size(20.dp()).focus_requester(&far).focus_target());
+                Box(Modifier.size(20.dp()).focus_requester(&far).focusable());
                 Box(Modifier.size(50.dp()).test_tag("ilerleme").progress_semantics_with(15.0, 0.0..=10.0, 4));
                 Box(Modifier.size(50.dp()).test_tag("belirsiz").progress_semantics_indeterminate());
             },
@@ -484,15 +489,15 @@ fn focus_restoration_outlives_the_process() {
 // Compose's behaviour
 
 fn arrow_keys_find_focusables_where_an_offset_put_them() {
-    // C++'s arrow_keys_find_focusables_where_an_offset_put_them, focus targets for its clickables (its scrolling
-    // part waits for the scroll containers).
+    // C++'s arrow_keys_find_focusables_where_an_offset_put_them (its scrolling part waits for the scroll
+    // containers).
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Box(
             Modifier.size(400.dp()),
             content = || {
-                Box(Modifier.size(40.dp()).focus_target().test_tag("a"));
-                Box(Modifier.offset_with(200.dp(), 0.dp()).size(40.dp()).focus_target().test_tag("b")); // moved right
-                Box(Modifier.offset_with(0.dp(), 150.dp()).size(40.dp()).focus_target().test_tag("c")); // and down
+                Box(Modifier.size(40.dp()).clickable(|| {}).test_tag("a"));
+                Box(Modifier.offset_with(200.dp(), 0.dp()).size(40.dp()).clickable(|| {}).test_tag("b")); // moved right
+                Box(Modifier.offset_with(0.dp(), 150.dp()).size(40.dp()).clickable(|| {}).test_tag("c")); // and down
             },
         );
     }));

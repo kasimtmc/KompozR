@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 /// Whether a first down is only a mouse's primary button (Compose desktop's `firstDownRefersToPrimaryMouseButtonOnly`).
-const FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY: bool = true;
+pub(crate) const FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY: bool = true;
 
 /// Whether every change of the event went down (and, for a mouse, with its primary button: Compose's
 /// `isChangedToDown`).

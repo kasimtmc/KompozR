@@ -361,7 +361,8 @@ impl LayoutNode {
         // (Compose's invalidateLayers: what it draws itself draws otherwise, which a canvas keeping nodes keeps.)
         self.invalidate_draw();
         self.invalidate_semantics();
-        for c in self.coordinators() {
+        // (the inner coordinator's too: the innermost layer modifier's layer is on it)
+        for c in self.coordinators().into_iter().chain(std::iter::once(self.inner.clone())) {
             if c.layer.borrow().is_some() {
                 c.update_layer_parameters(true);
             }
@@ -583,14 +584,14 @@ impl LayoutNode {
         }
     }
 
-    /// Drawn again: it, and what it is drawn into (its ancestors, for what keeps their drawings).
+    /// Drawn again: it, and what it is drawn into (its ancestors, for what keeps their drawings). Every ancestor:
+    /// a node drawn only into a graphics layer's recording is never kept and stays marked, so one marked already
+    /// doesn't mean those above it are.
     pub fn invalidate_draw(&self) {
         let mut node = Some(self.rc());
         while let Some(n) = node {
-            let was = n.draw_dirty.replace(true) & n.keep_check_dirty.replace(true);
-            if was {
-                break;
-            }
+            n.draw_dirty.set(true);
+            n.keep_check_dirty.set(true);
             node = n.parent();
         }
         if let Some(owner) = self.owner() {

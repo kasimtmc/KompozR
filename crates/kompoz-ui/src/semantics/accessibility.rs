@@ -198,6 +198,10 @@ fn visit(
     if node.is_hidden() {
         return;
     }
+    // Not placed (measured only) or gone: not shown, not told (Compose's getAllUncoveredSemanticsNodes).
+    if !node.is_fake() && (!node.is_placed() || !node.layout_node().is_attached()) {
+        return;
+    }
     let config = node.config();
     let own_types = config.get(SemanticsProperties::ContentType).map(|c| c.hints);
     let include = node.is_root() || node.is_important_for_accessibility();

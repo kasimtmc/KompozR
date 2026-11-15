@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-foundation"
-description = "KompozR's foundation (androidx.compose.foundation and foundation.layout): Box, Row, Column, Spacer, arrangements, padding and size modifiers"
+description = "KompozR's foundation (androidx.compose.foundation and foundation.layout): Box, Row, Column, Spacer, arrangements, padding and size modifiers, clickables, focusables, interactions and indications"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -36,4 +36,8 @@ harness = false
 
 [[test]]
 name = "draw"
+harness = false
+
+[[test]]
+name = "clickable"
 harness = false

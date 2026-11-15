@@ -159,8 +159,9 @@ pub(crate) fn call_node(call: impl FnOnce()) {
     }
 }
 
-/// Runs `f` once the node being called is no longer borrowed (now, if no node is being called).
-pub(crate) fn when_node_released(f: impl FnOnce() + 'static) {
+/// Runs `f` once the node being called is no longer borrowed (now, if no node is being called): what a node's
+/// pointer, key or focus callback sets off that runs user code (a click's `on_click`) or calls back into the node.
+pub fn when_node_released(f: impl FnOnce() + 'static) {
     let f: Box<dyn FnOnce()> = Box::new(f);
     let rest = DEFERRED.with(|d| match d.borrow_mut().last_mut() {
         Some(list) => {

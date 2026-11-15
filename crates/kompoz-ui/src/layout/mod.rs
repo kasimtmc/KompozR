@@ -2,7 +2,7 @@
 //! alignment lines, rulers and the window insets rulers, layout coordinates, graphics layers' properties, the
 //! `Layout` composables and ui's layout modifiers (`layout {}`, `layout_id`, `on_size_changed`,
 //! `on_globally_positioned`, `on_placed`, `z_index`, `on_layout_rect_changed`, `on_visibility_changed`,
-//! `on_first_visible`, `layout_bounds`).
+//! `on_first_visible`, `layout_bounds`), and pinnable containers.
 
 mod alignment_line;
 mod composables;
@@ -10,6 +10,7 @@ mod coordinates;
 mod layer;
 mod measure;
 mod modifiers;
+mod pinnable;
 mod ruler;
 mod visibility;
 mod window_insets_rulers;
@@ -29,6 +30,7 @@ pub use measure::{
 pub use modifiers::{
     LayoutIdKey, LayoutIdParentData, MeasureFn, OnGloballyPositionedNode, OnPlacedNode, OnSizeChangedNode, ZIndexNode,
 };
+pub use pinnable::{LocalPinnableContainer, PinnableContainer, PinnableContainerRef, PinnedHandle};
 pub(crate) use ruler::RulerScopeState;
 pub use ruler::{
     HorizontalRuler, IsRulerProvided, RectRulers, Ruler, RulerCalculation, RulerProvider, RulerScope, RulersBlock,

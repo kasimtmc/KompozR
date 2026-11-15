@@ -587,20 +587,30 @@ fn dispatch_kind(cell: &NodeRc, kind: NodeKind, f: &mut dyn FnMut(&NodeRc) -> bo
     cells.iter().any(f)
 }
 
+/// A key node's preview of `event` (what it sets off run once it is released): whether it took it.
 fn key_pre(cell: &NodeRc, event: &KeyEvent) -> bool {
     if let Some((pre, _)) = crate::input::key_handlers(cell) {
         return pre.is_some_and(|h| h(event));
     }
-    let mut n = cell.node.borrow_mut();
-    n.as_key_input().is_some_and(|k| k.on_pre_key_event(event))
+    let mut taken = false;
+    crate::input::call_node(|| {
+        let mut n = cell.node.borrow_mut();
+        taken = n.as_key_input().is_some_and(|k| k.on_pre_key_event(event));
+    });
+    taken
 }
 
+/// A key node's `event` (what it sets off run once it is released): whether it took it.
 fn key_post(cell: &NodeRc, event: &KeyEvent) -> bool {
     if let Some((_, post)) = crate::input::key_handlers(cell) {
         return post.is_some_and(|h| h(event));
     }
-    let mut n = cell.node.borrow_mut();
-    n.as_key_input().is_some_and(|k| k.on_key_event(event))
+    let mut taken = false;
+    crate::input::call_node(|| {
+        let mut n = cell.node.borrow_mut();
+        taken = n.as_key_input().is_some_and(|k| k.on_key_event(event));
+    });
+    taken
 }
 
 /// The indirect pointer nodes from `cell` up.

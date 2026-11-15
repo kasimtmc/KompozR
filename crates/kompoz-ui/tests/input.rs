@@ -117,17 +117,22 @@ fn layered(block: impl Fn(&mut GraphicsLayerScope) + 'static) -> Modifier {
 // Passes, consumption, the coroutines
 
 fn pointer_event_passes_reach_parents_before_and_after_their_children() {
-    // C++'s pointer_event_passes_reach_parents_before_and_after_their_children, without its clickable (WP5):
-    // Initial from the parent in, Main from the child out, Final from the parent in again; a parent consuming in
-    // the Initial pass is seen consumed by the child.
+    // C++'s pointer_event_passes_reach_parents_before_and_after_their_children: Initial from the parent in, Main
+    // from the child out, Final from the parent in again; a parent consuming in the Initial pass is seen consumed by
+    // the child (and its clickable doesn't click); the handler inside a clickable sees each event before it does.
     let log = new_log();
     let block = mutable_state_of(false);
+    let child_takes = mutable_state_of(true);
+    let parent_takes = mutable_state_of(false);
     let taps = Rc::new(Cell::new(0));
-    let (l, b, t) = (log.clone(), block.clone(), taps.clone());
+    let clicks = Rc::new(Cell::new(0));
+    let (l, b, t, c, cht, pat) =
+        (log.clone(), block.clone(), taps.clone(), clicks.clone(), child_takes.clone(), parent_takes.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (pl, pb, cl, ct) = (l.clone(), b.clone(), l.clone(), t.clone());
+        let (pl, pb, cl, ct, cc, cht, pat) =
+            (l.clone(), b.clone(), l.clone(), t.clone(), c.clone(), cht.clone(), pat.clone());
         let parent = move |s: PointerInputScope| {
-            let (log, block) = (pl.clone(), pb.clone());
+            let (log, block, parent_takes) = (pl.clone(), pb.clone(), pat.clone());
             async move {
                 s.await_pointer_event_scope(|s| async move {
                     loop {
@@ -138,6 +143,9 @@ fn pointer_event_passes_reach_parents_before_and_after_their_children() {
                         }
                         let e = s.await_pointer_event().await;
                         push(&log, format!("ebeveyn {}", name(e.r#type)));
+                        if parent_takes.peek() && e.r#type == PointerEventType::Release {
+                            e.changes[0].consume();
+                        }
                         let e = s.await_pointer_event_with(PointerEventPass::Final).await;
                         let taken = if e.changes[0].is_consumed() { " (tüketilmiş)" } else { "" };
                         push(&log, format!("ebeveyn sonra {}{taken}", name(e.r#type)));
@@ -147,14 +155,14 @@ fn pointer_event_passes_reach_parents_before_and_after_their_children() {
             }
         };
         let child = move |s: PointerInputScope| {
-            let (log, taps) = (cl.clone(), ct.clone());
+            let (log, taps, child_takes) = (cl.clone(), ct.clone(), cht.clone());
             async move {
                 s.await_pointer_event_scope(|s| async move {
                     loop {
                         let e = s.await_pointer_event().await;
                         let taken = if e.changes[0].is_consumed() { " (tüketilmiş)" } else { "" };
                         push(&log, format!("çocuk {}{taken}", name(e.r#type)));
-                        if e.r#type == PointerEventType::Release && !e.changes[0].is_consumed() {
+                        if child_takes.peek() && e.r#type == PointerEventType::Release && !e.changes[0].is_consumed() {
                             taps.set(taps.get() + 1);
                             e.changes[0].consume();
                         }
@@ -168,7 +176,9 @@ fn pointer_event_passes_reach_parents_before_and_after_their_children() {
         Box(
             modifier = Modifier.size(200.dp()).pointer_input(0, parent),
             content = move || {
-                Box(modifier = Modifier.size(100.dp()).pointer_input(0, child.clone()));
+                let cc = cc.clone();
+                let clicked = move || cc.set(cc.get() + 1);
+                Box(modifier = Modifier.size(100.dp()).clickable(clicked).pointer_input(0, child.clone()));
             },
         );
     }));
@@ -184,7 +194,7 @@ fn pointer_event_passes_reach_parents_before_and_after_their_children() {
             "ebeveyn önce basış",
             "çocuk basış",
             "ebeveyn basış",
-            "ebeveyn sonra basış",
+            "ebeveyn sonra basış (tüketilmiş)",
             "çocuk sonra basış",
             "ebeveyn önce hareket",
             "çocuk hareket",
@@ -198,13 +208,23 @@ fn pointer_event_passes_reach_parents_before_and_after_their_children() {
             "çocuk sonra bırakış",
         ]
     );
-    assert_eq!(taps.get(), 1);
-    // The parent takes the press in the Initial pass: the child sees it taken.
+    assert!(taps.get() == 1 && clicks.get() == 0); // the child's handler took the release before its clickable
+    // The parent takes the press in the Initial pass: the child sees it taken, its clickable doesn't click.
     block.set(true);
     rule.wait_for_idle();
     tap(&rule, 50.0, 50.0);
+    rule.wait_for_idle();
     let l = taken(&log);
     assert!(l.len() >= 2 && l[0] == "ebeveyn önce basış" && l[1] == "çocuk basış (tüketilmiş)", "{l:?}");
+    assert_eq!(clicks.get(), 0);
+    // Nobody inside takes the release: the click comes before the parent's handler does.
+    block.set(false);
+    child_takes.set(false);
+    parent_takes.set(true);
+    rule.wait_for_idle();
+    tap(&rule, 50.0, 50.0);
+    rule.wait_for_idle();
+    assert_eq!(clicks.get(), 1);
 }
 
 fn pointer_input_restarts_on_key_change_and_stops_when_removed() {
@@ -571,7 +591,8 @@ fn hit_testing_goes_through_layers_and_their_clips() {
 }
 
 fn small_targets_take_touches_near_them_the_nearest_first() {
-    // C++'s small_touch_targets_take_touches_near_them with pointer input nodes (its clickables are WP5's): the
+    // C++'s small_touch_targets_take_touches_near_them with pointer input nodes (with its clickables: foundation's
+    // clickable tests): the
     // 48 px minimum touch target, the nearer of two, not past it, not for a mouse.
     let log = new_log();
     let l = log.clone();
@@ -829,8 +850,8 @@ impl PlatformCallbacks for Cursors {
 }
 
 fn pointer_hover_icon_picks_the_innermost_say_unless_overridden() {
-    // C++'s pointer_hover_icon_picks_the_innermost_say with Compose's hover icon nodes (its clickables' hand and
-    // text fields' cursors are WP5's and stage 6's).
+    // C++'s pointer_hover_icon_picks_the_innermost_say with Compose's hover icon nodes (Compose's clickables set
+    // no hand, unlike C++'s; its text fields' cursors are stage 6's).
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         Column(|| {
             Box(

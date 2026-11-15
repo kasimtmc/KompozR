@@ -7,6 +7,7 @@ use kompoz_graphics::{ColorFilter, ContentScale, DefaultFilterQuality, FilterQua
 use kompoz_runtime::{kompozable, remember_keyed};
 use kompoz_ui::draw::{BitmapPainter, Painter, remember_vector_painter};
 use kompoz_ui::layout::layout_into;
+use kompoz_ui::semantics::Role;
 use kompoz_ui::{Alignment, Constraints, Measurable, MeasurePolicy, MeasureResult, MeasureScope, Modifier};
 use std::rc::Rc;
 
@@ -63,8 +64,8 @@ pub fn VectorImage(
     image_layout(painter, content_description, modifier, alignment, content_scale, alpha, color_filter);
 }
 
-/// Compose's Image body: the description's semantics, cut to its bounds, the painter painted, measured as small as
-/// it may be.
+/// Compose's Image body: the description's semantics (an image to accessibility), cut to its bounds, the painter
+/// painted, measured as small as it may be.
 #[track_caller]
 fn image_layout(
     painter: Rc<dyn Painter>,
@@ -76,7 +77,10 @@ fn image_layout(
     color_filter: Option<ColorFilter>,
 ) {
     let described = match content_description {
-        Some(description) => modifier.semantics(move |c| c.set_content_description(description.clone())),
+        Some(description) => modifier.semantics(move |c| {
+            c.set_content_description(description.clone());
+            c.set_role(Role::Image);
+        }),
         None => modifier,
     };
     let m = described.clip_to_bounds().paint_with(painter, true, alignment, content_scale, alpha, color_filter);

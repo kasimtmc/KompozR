@@ -1,6 +1,7 @@
 //! The semantics tests: the properties and actions and how they merge and combine, merging, clearing and hiding,
 //! fake nodes, the reading order, the change listeners, and what accessibility sees and does (the C++ Kompoz's
-//! semantics tests without Material: semantics modifiers for its buttons, checkboxes and icons). Numbers in px.
+//! semantics tests without Material: clickables, toggleables and selectables for its buttons, switches, checkboxes
+//! and radio buttons, semantics modifiers for its icons). Numbers in px.
 
 #![allow(non_snake_case)]
 
@@ -25,18 +26,11 @@ fn any(tree: &[AccessibilityNode], part: &str) -> bool {
     tree.iter().any(|n| n.label.contains(part))
 }
 
-/// A merging, clickable box (what a Material button is to semantics): its click counts.
+/// A clickable box, its role a button (what a Material button is to semantics): its clicks count.
 #[kompozable(inline)]
 fn Button(clicks: Rc<Cell<i32>>, content: impl FnOnce()) {
     Box(
-        Modifier.semantics_with(true, move |c| {
-            let clicks = clicks.clone();
-            c.set_role(Role::Button);
-            c.on_click(move || {
-                clicks.set(clicks.get() + 1);
-                true
-            });
-        }),
+        Modifier.clickable_with(true, None, Some(Role::Button), None, move || clicks.set(clicks.get() + 1)),
         content = content,
     );
 }
@@ -79,7 +73,7 @@ fn semantics_set_on_a_receiver() {
 }
 
 fn semantics_merge_clear_and_hide() {
-    // C++'s semantics_merge_clear_and_hide: semantics boxes for its icons, buttons and toggleables.
+    // C++'s semantics_merge_clear_and_hide: semantics boxes for its icons, clickables for its buttons.
     let clicks = Rc::new(Cell::new(0));
     let c1 = clicks.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
@@ -125,11 +119,7 @@ fn semantics_merge_clear_and_hide() {
                 // Two semantics modifiers on one node: the toggle's role and state, the description after.
                 Box(Modifier
                     .size(40.dp())
-                    .semantics_with(true, |c| {
-                        c.set_role(Role::Switch);
-                        c.set_toggleable_state(ToggleableState::On);
-                        c.on_click(|| true);
-                    })
+                    .toggleable(true, role = Some(Role::Switch), on_value_change = |_| {})
                     .semantics(|c| c.set_content_description("Wi-Fi"))
                     .test_tag("anahtar"));
                 Text("Düz metin");
@@ -143,12 +133,10 @@ fn semantics_merge_clear_and_hide() {
                     c.set_content_description("Sekme");
                     c.set_role(Role::Image);
                 }));
-                Box(Modifier.size(40.dp()).semantics(|c| c.set_content_description("Bildirim")).semantics_with(
-                    true,
-                    |c| {
-                        c.set_role(Role::Switch);
-                        c.set_toggleable_state(ToggleableState::Off);
-                    },
+                Box(Modifier.size(40.dp()).semantics(|c| c.set_content_description("Bildirim")).toggleable(
+                    false,
+                    role = Some(Role::Switch),
+                    on_value_change = |_| {},
                 ));
             },
         );
@@ -180,7 +168,7 @@ fn semantics_merge_clear_and_hide() {
 }
 
 fn selectable_groups_are_told_to_accessibility() {
-    // C++'s selectable_groups_are_told_to_accessibility: selectables as merging semantics boxes.
+    // C++'s selectable_groups_are_told_to_accessibility.
     let chosen = mutable_state_of(1);
     let ch = chosen.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
@@ -190,15 +178,11 @@ fn selectable_groups_are_told_to_accessibility() {
             content = move || {
                 for i in 0..3 {
                     let (selected, ch) = (ch.get() == i, ch.clone());
-                    Box(Modifier.size(40.dp()).semantics_with(true, move |c| {
-                        let ch = ch.clone();
-                        c.set_role(Role::RadioButton);
-                        c.set_selected(selected);
-                        c.on_click(move || {
-                            ch.set(i);
-                            true
-                        });
-                    }));
+                    Box(Modifier.size(40.dp()).selectable(
+                        selected,
+                        role = Some(Role::RadioButton),
+                        on_click = move || ch.set(i),
+                    ));
                 }
             },
         );
@@ -322,8 +306,8 @@ fn semantics_ranges_live_regions_custom_actions_and_order() {
 }
 
 fn semantics_tree_merges_buttons_and_performs_actions() {
-    // C++'s semantics_tree_merges_buttons_and_performs_actions without Material: a merging clickable for its
-    // button, a toggle for its checkbox, a heading, and a dialog that makes the tree its own.
+    // C++'s semantics_tree_merges_buttons_and_performs_actions without Material: a clickable for its button, a
+    // toggleable for its checkbox, a heading, and a dialog that makes the tree its own.
     let clicks = Rc::new(Cell::new(0));
     let checked = mutable_state_of(true);
     let dialog = mutable_state_of(false);
@@ -339,15 +323,11 @@ fn semantics_tree_merges_buttons_and_performs_actions() {
                 });
                 let on = ch.get();
                 let ch2 = ch.clone();
-                Box(Modifier.size(20.dp()).semantics_with(true, move |c| {
-                    let ch2 = ch2.clone();
-                    c.set_role(Role::Checkbox);
-                    c.set_toggleable_state(ToggleableState::of(on));
-                    c.on_click(move || {
-                        ch2.set(!ch2.peek());
-                        true
-                    });
-                }));
+                Box(Modifier.size(20.dp()).toggleable(
+                    on,
+                    role = Some(Role::Checkbox),
+                    on_value_change = move |v| ch2.set(v),
+                ));
                 if dl.get() {
                     Dialog(on_dismiss_request = || {}, content = || Text("Uyarı"));
                 }
@@ -377,20 +357,24 @@ fn semantics_tree_merges_buttons_and_performs_actions() {
 }
 
 fn semantics_tree_has_the_keyboard_focus() {
-    // C++'s semantics_tree_has_the_keyboard_focus with focus targets for its buttons (no Material): the keyboard
-    // focus is in the tree wherever Tab took it, and Focus puts it on what can take it.
+    // C++'s semantics_tree_has_the_keyboard_focus with clickables for its buttons (no Material): the keyboard
+    // focus is in the tree wherever Tab took it (a clickable takes it in keyboard mode), and Focus puts it on what
+    // can take it.
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Column(
             content = || {
-                Box(Modifier.semantics_with(true, |_| {}).focus_target(), content = || Text("Bir"));
+                Box(Modifier.clickable(role = Some(Role::Button), on_click = || {}), content = || Text("Bir"));
                 Box(
-                    Modifier
-                        .semantics_with(true, |c| c.disabled())
-                        .focus_properties(|p| p.can_focus = false)
-                        .focus_target(),
+                    Modifier.clickable(enabled = false, role = Some(Role::Button), on_click = || {}),
                     content = || Text("Kapalı"),
                 );
-                Box(Modifier.semantics_with(true, |_| {}).focus_target(), content = || Text("İki"));
+                Box(Modifier.clickable(role = Some(Role::Button), on_click = || {}), content = || Text("İki"));
+                Box(
+                    Modifier
+                        .focus_properties(|p| p.can_focus = false)
+                        .clickable(role = Some(Role::Button), on_click = || {}),
+                    content = || Text("Odaksız"),
+                );
                 Text("Etiket");
             },
         );
@@ -407,6 +391,7 @@ fn semantics_tree_has_the_keyboard_focus() {
     assert_eq!(focused_label(), "Bir");
     assert!(!rule.host().perform_semantics_action(id_of("Kapalı"), SemanticsAction::Focus));
     assert!(!rule.host().perform_semantics_action(id_of("Etiket"), SemanticsAction::Focus));
+    assert!(!rule.host().perform_semantics_action(id_of("Odaksız"), SemanticsAction::Focus)); // its properties say no
     assert_eq!(focused_label(), "Bir");
     assert!(!rule.host().accessibility_tree().into_iter().find(|n| n.label == "Kapalı").unwrap().enabled);
 }
