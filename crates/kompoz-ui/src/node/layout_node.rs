@@ -768,7 +768,17 @@ impl Node for LayoutNode {
                     self.on_z_sorted_children_invalidated();
                     self.invalidate_measurements();
                 }
-                None => me.insert_at(i, child.clone()),
+                None => {
+                    // Moved here from another node (movable content): taken out of the one it was in first, which
+                    // may not have been told its new children yet, or may itself have left the tree.
+                    if let Some(old_parent) = child.parent() {
+                        let at = old_parent.children.borrow().iter().position(|c| Rc::ptr_eq(c, child));
+                        if let Some(j) = at {
+                            old_parent.remove_at(j);
+                        }
+                    }
+                    me.insert_at(i, child.clone())
+                }
             }
         }
     }

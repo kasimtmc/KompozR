@@ -1853,6 +1853,54 @@ fn movable_content_with_parameters_keeps_its_state_where_it_goes() {
     rule.on_node_with_tag("kart").assert_text_equals(&["iki 2 1"]);
 }
 
+fn movable_content_leaves_a_container_from_two_groups_down() {
+    // C++'s movable_content_leaves_a_container_from_two_groups_down: the container goes while the content moves out
+    // of a group inside it to elsewhere; its node is taken from the old parent before it joins the new one.
+    let inside = mutable_state_of(true);
+    let i = inside.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let tile = remember(|| {
+            movable_content_of(move || {
+                let clicks = remember(|| mutable_state_of(0));
+                let c = clicks.clone();
+                Text(
+                    format!("kutu {}", clicks.get()),
+                    modifier = Modifier.test_tag("kutu").clickable(move || c.set(c.peek() + 1)),
+                );
+            })
+        });
+        let inside = i.get();
+        let (a, b) = (tile.clone(), tile.clone());
+        Column(move || {
+            let a = a.clone();
+            if inside {
+                Box(
+                    modifier = Modifier.test_tag("dış"),
+                    content = move || {
+                        let a = a.clone();
+                        Box(move || {
+                            Text("önce"); // siblings: the empty place is sorted among them
+                            a.call();
+                            Text("sonra");
+                        });
+                    },
+                );
+            }
+        });
+        Row(move || {
+            if !inside {
+                b.call();
+            }
+        });
+    }));
+    rule.on_node_with_tag("kutu").perform_click();
+    rule.wait_for_idle();
+    inside.set(false);
+    rule.wait_for_idle();
+    rule.on_node_with_tag("dış").assert_does_not_exist();
+    rule.on_node_with_tag("kutu").assert_text_equals(&["kutu 1"]); // moved, its state with it
+}
+
 fn movable_content_keeps_its_state_wherever_it_goes() {
     // C++'s movable_content_keeps_its_state_wherever_it_goes: clicked counts, nodes and running effects go along
     // from a Row to a Column and from one box to another; called twice, the second is a new instance; no longer
@@ -2006,4 +2054,5 @@ tests!(
     without_key_state_is_positional,
     movable_content_with_parameters_keeps_its_state_where_it_goes,
     movable_content_keeps_its_state_wherever_it_goes,
+    movable_content_leaves_a_container_from_two_groups_down,
 );
