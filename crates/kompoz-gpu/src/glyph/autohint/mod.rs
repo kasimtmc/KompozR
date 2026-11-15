@@ -32,6 +32,8 @@
 //! code.
 
 #![deny(unsafe_code)]
+// (skrifa's code, kept as it is written there: it indexes its loops)
+#![allow(clippy::needless_range_loop)]
 
 pub mod adjust;
 mod closure;
