@@ -411,22 +411,8 @@ pub(super) fn pop_layer(r: &mut Renderer) {
                 image
             }
         };
-        let t = image.texture;
-        let x0 = image.shown.x as f32 + image.offset_x;
-        let y0 = image.shown.y as f32 + image.offset_y;
-        let (x1, y1) = (x0 + image.shown.width as f32, y0 + image.shown.height as f32);
-        let tx = image.origin_x as f32 + image.offset_x;
-        let ty = image.origin_y as f32 + image.offset_y;
-        let p = Prim {
-            bounds: [x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0],
-            shape: [x0, y0, x1, y1],
-            params: [tx, ty, tx + (image.texels_x * image.step_x) as f32, ty + (image.texels_y * image.step_y) as f32],
-            uv: [0.0, 0.0, 1.0 / (t.width() * image.step_x) as f32, 1.0 / (t.height() * image.step_y) as f32],
-            color: [0.0, 0.0, 0.0, layer.alpha],
-            xform: [1.0 / res, 0.0, 0.0, 1.0 / res],
-            ..Prim::default()
-        };
-        r.add(LAYER, &p, Inputs { texture: Some(t), ..Inputs::default() });
+        let p = image.prim(layer.alpha, res);
+        r.add(LAYER, &p, Inputs { texture: Some(image.texture), ..Inputs::default() });
         return;
     }
     let b = layer.shape;

@@ -46,6 +46,7 @@ mod frames;
 mod golden;
 mod harness;
 mod images;
+mod layers;
 mod scenes;
 mod submit;
 
@@ -98,6 +99,16 @@ const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
     ("text_is_drawn_from_the_atlas", frames::text_is_drawn_from_the_atlas),
     ("scenes_match_their_pictures", scenes::scenes_match_their_pictures),
     ("images_match_their_picture", images::images_match_their_picture),
+    ("layer_alpha_is_exact", layers::layer_alpha_is_exact),
+    ("graphics_layers_composite_as_compose", layers::graphics_layers_composite_as_compose),
+    ("blurs_are_gaussian", layers::blurs_are_gaussian),
+    ("path_shadows_are_composes", layers::path_shadows_are_composes),
+    ("elevation_shadows_are_androids", layers::elevation_shadows_are_androids),
+    ("kept_layers_draw_as_drawn_afresh", layers::kept_layers_draw_as_drawn_afresh),
+    ("a_layer_is_kept_from_its_first_frame", layers::a_layer_is_kept_from_its_first_frame),
+    ("path_shadows_are_kept", layers::path_shadows_are_kept),
+    ("layer_textures_come_in_few_sizes", layers::layer_textures_come_in_few_sizes),
+    ("layer_scenes_match_their_pictures", layers::layer_scenes_match_their_pictures),
 ];
 
 /// Tests that make devices of their own, one after another (after the one device is gone), or need none.

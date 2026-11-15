@@ -23,7 +23,7 @@ fn bounds_of(contours: &[Contour]) -> Option<IRect> {
 }
 
 /// A path's commands as bytes (what a kept path is known by).
-fn command_bytes(path: &Path) -> Vec<u8> {
+pub(super) fn command_bytes(path: &Path) -> Vec<u8> {
     let mut out = Vec::with_capacity(path.commands().len() * 28);
     let point = |out: &mut Vec<u8>, p: Offset| {
         out.extend_from_slice(&p.x.to_ne_bytes());
