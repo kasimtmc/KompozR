@@ -348,6 +348,7 @@ dependencies = [
  "ash",
  "kompoz-graphics",
  "kompoz-text",
+ "kompoz-ui",
  "skrifa",
 ]
 

@@ -1,12 +1,18 @@
-//! What the GPU tests draw with: a device made without a window (drawing only into textures), the device tests'
-//! pipelines (tests/gpu/shaders: quads of a color, or of a texture), and `render`, which draws a scene into a new
-//! target and reads it back, as the C++ Kompoz's `Gpu` does.
+//! What the GPU tests draw with: a device made without a window (drawing only into textures), shared by the tests
+//! and the renderers drawing on it; the device tests' pipelines (tests/gpu/shaders: quads of a color, or of a
+//! texture); and `render`, which draws a scene with the renderer into a new target and reads it back, as the C++
+//! Kompoz's `Gpu` does (`render_quads` the same with the test pipelines).
 
+use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{
-    self, Backend, BlendState, ClearColor, Device, Filter, Format, IRect, Pipeline, PipelineDesc, PipelineId, Sampler,
-    ShaderCode, Surface, TextureId, TextureUsage, VertexAttribute, VertexFormat,
+    self, Backend, BlendState, BufferRef, ClearColor, Device, Filter, Format, GpuFrameTime, IRect, Pipeline,
+    PipelineDesc, PipelineFactory, PipelineId, Sampler, ShaderCode, Surface, Texture, TextureId, TextureUsage,
+    VertexAttribute, VertexFormat,
 };
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
 
 /// A picture read back: RGBA, premultiplied, the top row first.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -154,10 +160,175 @@ impl Frame<'_> {
     }
 }
 
-/// A device (one per process: the tests run in sequence on it) and what the tests draw with.
+/// The calls of a [`Device`] that pass straight to the shared one in `self.<field>`, all but `create_texture` and
+/// `create_pipeline`.
+macro_rules! passed_on {
+    ($($field:tt).+) => {
+        fn backend(&self) -> Backend {
+            self.$($field).+.borrow().backend()
+        }
+        fn device_name(&self) -> String {
+            self.$($field).+.borrow().device_name()
+        }
+        fn validation_errors(&self) -> u32 {
+            self.$($field).+.borrow().validation_errors()
+        }
+        fn clip_y_down(&self) -> bool {
+            self.$($field).+.borrow().clip_y_down()
+        }
+        fn pipeline_factory(&self) -> Option<Arc<dyn PipelineFactory>> {
+            self.$($field).+.borrow().pipeline_factory()
+        }
+        fn swapchain_format(&self) -> Format {
+            self.$($field).+.borrow().swapchain_format()
+        }
+        fn begin_frame(&mut self) {
+            self.$($field).+.borrow_mut().begin_frame()
+        }
+        fn swapchain_texture(&mut self) -> Option<TextureId> {
+            self.$($field).+.borrow_mut().swapchain_texture()
+        }
+        fn swapchain_turns(&self) -> i32 {
+            self.$($field).+.borrow().swapchain_turns()
+        }
+        fn swapchain_age(&self) -> i32 {
+            self.$($field).+.borrow().swapchain_age()
+        }
+        fn surface_changed(&mut self) {
+            self.$($field).+.borrow_mut().surface_changed()
+        }
+        fn write_frame_data(&mut self, data: &[u8], alignment: usize) -> Option<BufferRef> {
+            self.$($field).+.borrow_mut().write_frame_data(data, alignment)
+        }
+        fn upload(&mut self, texture: TextureId, region: IRect, pixels: &[u8], row_bytes: usize) {
+            self.$($field).+.borrow_mut().upload(texture, region, pixels, row_bytes)
+        }
+        fn begin_pass(&mut self, target: TextureId, clear: Option<ClearColor>, reads: &[TextureId], area: Option<IRect>) {
+            self.$($field).+.borrow_mut().begin_pass(target, clear, reads, area)
+        }
+        fn set_pipeline(&mut self, pipeline: PipelineId) {
+            self.$($field).+.borrow_mut().set_pipeline(pipeline)
+        }
+        fn set_scissor(&mut self, rect: IRect) {
+            self.$($field).+.borrow_mut().set_scissor(rect)
+        }
+        fn set_uniforms(&mut self, data: &[u8]) {
+            self.$($field).+.borrow_mut().set_uniforms(data)
+        }
+        fn set_texture(&mut self, slot: usize, texture: TextureId, sampler: Sampler) {
+            self.$($field).+.borrow_mut().set_texture(slot, texture, sampler)
+        }
+        fn draw(&mut self, instances: Option<BufferRef>, vertex_count: u32, instance_count: u32) {
+            self.$($field).+.borrow_mut().draw(instances, vertex_count, instance_count)
+        }
+        fn end_pass(&mut self) {
+            self.$($field).+.borrow_mut().end_pass()
+        }
+        fn generate_mipmaps(&mut self, texture: TextureId) {
+            self.$($field).+.borrow_mut().generate_mipmaps(texture)
+        }
+        fn discard(&mut self, texture: TextureId) {
+            self.$($field).+.borrow_mut().discard(texture)
+        }
+        fn copy_texture(&mut self, source: TextureId, region: IRect, destination: TextureId, x: i32, y: i32) {
+            self.$($field).+.borrow_mut().copy_texture(source, region, destination, x, y)
+        }
+        fn read_pixels(&mut self, texture: TextureId, region: IRect) -> Vec<u8> {
+            self.$($field).+.borrow_mut().read_pixels(texture, region)
+        }
+        fn end_frame(&mut self, present: bool) {
+            self.$($field).+.borrow_mut().end_frame(present)
+        }
+        fn set_gpu_timing(&mut self, on: bool) -> bool {
+            self.$($field).+.borrow_mut().set_gpu_timing(on)
+        }
+        fn take_gpu_times(&mut self) -> Vec<GpuFrameTime> {
+            self.$($field).+.borrow_mut().take_gpu_times()
+        }
+        fn wait_idle(&mut self) {
+            self.$($field).+.borrow_mut().wait_idle()
+        }
+    };
+}
+
+/// The one device, shared by the tests and the renderers drawing on it (as C++'s tests hand a renderer a `Device&`).
+#[derive(Clone)]
+pub struct SharedDevice(Rc<RefCell<Box<dyn Device>>>);
+
+impl Device for SharedDevice {
+    passed_on!(0);
+
+    fn create_texture(&mut self, width: i32, height: i32, format: Format, usage: TextureUsage) -> Option<Texture> {
+        self.0.borrow_mut().create_texture(width, height, format, usage)
+    }
+    fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Option<Pipeline> {
+        self.0.borrow_mut().create_pipeline(desc)
+    }
+}
+
+/// A device passing all to the shared one, watched: what it refuses (a variant of the shader, as an Adreno 6xx's
+/// Vulkan compiler couldn't make one) and the coverage masks (R16F textures) it made (C++'s WatchedDevice).
+pub struct WatchedDevice {
+    device: SharedDevice,
+    refuse_variants: bool,
+    pub refused: Rc<Cell<i32>>,
+    pub masks: Rc<Cell<i32>>,
+}
+
+impl WatchedDevice {
+    pub fn new(device: &SharedDevice, refuse_variants: bool) -> WatchedDevice {
+        WatchedDevice { device: device.clone(), refuse_variants, refused: Rc::default(), masks: Rc::default() }
+    }
+}
+
+impl Device for WatchedDevice {
+    passed_on!(device.0);
+
+    fn create_texture(&mut self, width: i32, height: i32, format: Format, usage: TextureUsage) -> Option<Texture> {
+        if format == Format::R16f {
+            self.masks.set(self.masks.get() + 1);
+        }
+        self.device.create_texture(width, height, format, usage)
+    }
+    fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Option<Pipeline> {
+        if self.refuse_variants && !desc.constants.is_empty() {
+            self.refused.set(self.refused.get() + 1);
+            return None;
+        }
+        self.device.create_pipeline(desc)
+    }
+}
+
+/// `draw` with `renderer` into a new w x h target, cleared to `clear`, in a frame of its own; read back
+/// (premultiplied). C++'s renderBy.
+pub fn render_by(
+    renderer: &mut Renderer,
+    w: i32,
+    h: i32,
+    draw: impl FnOnce(&mut Renderer),
+    clear: ClearColor,
+) -> Pixels {
+    renderer.device_mut().begin_frame();
+    let target = renderer
+        .device_mut()
+        .create_texture(w, h, Format::Rgba8, TextureUsage::SAMPLED | TextureUsage::RENDER_TARGET)
+        .expect("a render target");
+    renderer.begin_target(target.id(), Some(clear));
+    draw(renderer);
+    renderer.end_target();
+    renderer.flush();
+    let rgba = renderer.device_mut().read_pixels(target.id(), IRect::new(0, 0, w, h));
+    renderer.device_mut().end_frame(false);
+    renderer.end_frame();
+    Pixels { width: w, height: h, rgba }
+}
+
+/// A device (one per process: the tests run in sequence on it), a renderer on it, and what the device tests draw
+/// with.
 pub struct Gpu {
     pub pipelines: Pipelines,
-    pub device: Box<dyn Device>,
+    pub device: SharedDevice,
+    pub renderer: Renderer,
 }
 
 impl Gpu {
@@ -165,9 +336,21 @@ impl Gpu {
     /// not if this system has none.
     pub fn start(pipeline_cache: Option<PathBuf>) -> Result<Gpu, String> {
         let surface = Surface { drawable_size: Some(Box::new(|| (64, 64))), pipeline_cache, ..Surface::default() };
-        let mut device = device::create(Backend::Vulkan, surface)?;
-        let pipelines = Pipelines::new(&mut *device).ok_or("the test pipelines couldn't be made")?;
-        Ok(Gpu { pipelines, device })
+        let mut device = SharedDevice(Rc::new(RefCell::new(device::create(Backend::Vulkan, surface)?)));
+        let pipelines = Pipelines::new(&mut device).ok_or("the test pipelines couldn't be made")?;
+        let renderer = Renderer::new(Box::new(device.clone())).ok_or("the renderer couldn't be made")?;
+        Ok(Gpu { pipelines, device, renderer })
+    }
+
+    /// `draw` with the renderer on a w x h px target (cleared white), in a frame of its own, read back
+    /// (premultiplied): C++'s `Gpu::render` (its px per dp the scene's own: `dp`).
+    pub fn render(&mut self, w: i32, h: i32, draw: impl FnOnce(&mut Renderer)) -> Pixels {
+        render_by(&mut self.renderer, w, h, draw, ClearColor::WHITE)
+    }
+
+    /// The same on a target cleared to `clear`.
+    pub fn render_cleared(&mut self, w: i32, h: i32, clear: ClearColor, draw: impl FnOnce(&mut Renderer)) -> Pixels {
+        render_by(&mut self.renderer, w, h, draw, clear)
     }
 
     /// Whether the device keeps its pipelines in the file it is given: where the driver's pipeline cache holds them
@@ -177,9 +360,9 @@ impl Gpu {
         !name.contains("llvmpipe") && !name.contains("SwiftShader")
     }
 
-    /// `draw` on a w x h px target cleared to `clear` at `scale` px per dp, in a frame of its own, read back
-    /// (premultiplied).
-    pub fn render(
+    /// `draw` with the test pipelines on a w x h px target cleared to `clear` at `scale` px per dp, in a frame of its
+    /// own, read back (premultiplied).
+    pub fn render_quads(
         &mut self,
         w: i32,
         h: i32,
@@ -187,7 +370,7 @@ impl Gpu {
         draw: impl FnOnce(&mut Frame<'_>),
         clear: ClearColor,
     ) -> Pixels {
-        let device = &mut *self.device;
+        let device: &mut dyn Device = &mut self.device;
         device.begin_frame();
         let target = device
             .create_texture(w, h, Format::Rgba8, TextureUsage::SAMPLED | TextureUsage::RENDER_TARGET)

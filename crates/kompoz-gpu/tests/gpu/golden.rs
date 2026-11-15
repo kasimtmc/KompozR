@@ -106,7 +106,6 @@ pub fn match_golden_in(dir: &Path, name: &str, actual: &Pixels, update: bool) ->
 }
 
 /// The scene against its picture (a check).
-#[allow(dead_code)] // (the renderer's scenes': their tests come with it)
 pub fn matches_golden(name: &str, actual: &Pixels) {
     match match_golden_in(&golden_dir(), name, actual, updating()) {
         Outcome::Matches(_) => check!(true),

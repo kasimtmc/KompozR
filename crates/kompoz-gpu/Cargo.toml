@@ -13,6 +13,7 @@ workspace = true
 ash = "0.38.0"
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-text = { path = "../kompoz-text" }
+kompoz-ui = { path = "../kompoz-ui" }
 skrifa = "0.50.0"
 
 # The GPU tests: one binary on one device, the tests in sequence (harness = false), as the C++ Kompoz's gpu_tests.

@@ -27,7 +27,8 @@ macro_rules! check {
     };
     ($condition:expr, $($message:tt)+) => {{
         $crate::CHECKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if !($condition) {
+        let held: bool = $condition;
+        if !held {
             $crate::FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             println!("  {}:{}: check!({}) failed", file!(), line!(), stringify!($condition));
             let message = format!($($message)+);
@@ -39,10 +40,14 @@ macro_rules! check {
 }
 
 mod device;
+mod exact;
 mod golden;
 mod harness;
+mod scenes;
+mod submit;
 
 use harness::Gpu;
+use kompoz_gpu::device::Device;
 
 /// Tests on the one device.
 const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
@@ -58,6 +63,26 @@ const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
     ("copies_move_texels", device::copies_move_texels),
     ("frame_memory_grows_as_asked", device::frame_memory_grows_as_asked),
     ("textures_come_and_go", device::textures_come_and_go),
+    ("edges_are_covered_exactly", exact::edges_are_covered_exactly),
+    ("edges_cut_pixels_exactly", exact::edges_cut_pixels_exactly),
+    ("clips_and_translations_are_exact", exact::clips_and_translations_are_exact),
+    ("paths_are_covered_exactly", exact::paths_are_covered_exactly),
+    ("strokes_cover_once", exact::strokes_cover_once),
+    ("gradients_match_color_at", exact::gradients_match_color_at),
+    ("blend_modes_match_blend", exact::blend_modes_match_blend),
+    ("color_filters_match_apply", exact::color_filters_match_apply),
+    ("target_copies_fit_every_target", exact::target_copies_fit_every_target),
+    ("transformed_edges_are_exact", exact::transformed_edges_are_exact),
+    ("clips_cut_as_their_shapes", exact::clips_cut_as_their_shapes),
+    ("conics_are_exact", exact::conics_are_exact),
+    ("aliased_drawing_is_skias", exact::aliased_drawing_is_skias),
+    ("path_effects_apply_where_drawn", exact::path_effects_apply_where_drawn),
+    ("variants_fall_back_to_the_whole_shader", submit::variants_fall_back_to_the_whole_shader),
+    ("pipelines_are_warmed_from_their_list", submit::pipelines_are_warmed_from_their_list),
+    ("drawn_twice_in_a_frame_alike", submit::drawn_twice_in_a_frame_alike),
+    ("paths_share_their_masks", submit::paths_share_their_masks),
+    ("a_path_keeps_its_coverage", submit::a_path_keeps_its_coverage),
+    ("scenes_match_their_pictures", scenes::scenes_match_their_pictures),
 ];
 
 /// Tests that make devices of their own, one after another (after the one device is gone), or need none.

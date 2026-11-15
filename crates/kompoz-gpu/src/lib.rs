@@ -2,7 +2,8 @@
 //! renderer needs, on Vulkan now, with our own memory allocator), the shaders every backend draws with ([`shaders`]:
 //! compiled from Slang by `cargo xtask shaders`, and what they read laid out as they read it), a path's geometry in
 //! the target's pixels ([`path`]: curves cut into lines, strokes into outlines, projected, as edges for the coverage
-//! mask) and text's glyphs ([`glyph`]: rasterized as FreeType does, colour glyphs painted, kept in an atlas).
+//! mask), text's glyphs ([`glyph`]: rasterized as FreeType does, colour glyphs painted, kept in an atlas), and the
+//! [`renderer`] that draws kompoz-ui's GraphicsContext with them.
 //!
 //! `unsafe` code is confined to [`device::vulkan`], each block with a `// SAFETY:` comment; everything else is safe.
 
@@ -11,4 +12,7 @@
 pub mod device;
 pub mod glyph;
 pub mod path;
+pub mod renderer;
 pub mod shaders;
+
+pub use renderer::Renderer;

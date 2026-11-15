@@ -10,7 +10,7 @@ use crate::harness::{
     COLOR_FRAGMENT, Frame, Gpu, Pixels, Quad, blit, draw_quads, fill, near, quad_desc, quad_pipeline,
 };
 use kompoz_gpu::device::{
-    BlendFactor, BlendOp, BlendState, ClearColor, Filter, Format, IRect, Sampler, TextureUsage, fnv1a,
+    BlendFactor, BlendOp, BlendState, ClearColor, Device, Filter, Format, IRect, Sampler, TextureUsage, fnv1a,
     read_pipeline_cache, write_pipeline_cache,
 };
 use std::path::PathBuf;
@@ -101,7 +101,7 @@ pub fn readbacks_leave_the_frame_going(g: &mut Gpu) {
     let first = g.device.create_texture(n, n, Format::Rgba8, TARGET).expect("a texture");
     let second = g.device.create_texture(n, n, Format::Rgba8, TARGET).expect("a texture");
     let color = g.pipelines.color.id();
-    let d = &mut *g.device;
+    let d: &mut dyn Device = &mut g.device;
     d.begin_frame();
     d.begin_pass(first.id(), Some(ClearColor::WHITE), &[], None);
     draw_quads(d, color, first.id(), &[Quad::new(2.0, 2.0, 8.0, 8.0, 1.0, 0.0, 0.0)], [0.0; 4]);
@@ -131,7 +131,7 @@ pub fn gpu_times_come_back(g: &mut Gpu) {
             break;
         }
         let start = Instant::now();
-        g.render(192, 192, 1.0, rects, ClearColor::WHITE);
+        g.render_quads(192, 192, 1.0, rects, ClearColor::WHITE);
         longest = longest.max(start.elapsed().as_secs_f64() * 1000.0);
         times.extend(g.device.take_gpu_times());
     }
@@ -143,11 +143,11 @@ pub fn gpu_times_come_back(g: &mut Gpu) {
     g.device.set_gpu_timing(false);
     // (Those timed before still coming back.)
     for _ in 0..4 {
-        g.render(192, 192, 1.0, rects, ClearColor::WHITE);
+        g.render_quads(192, 192, 1.0, rects, ClearColor::WHITE);
         g.device.take_gpu_times();
     }
     for _ in 0..4 {
-        g.render(192, 192, 1.0, rects, ClearColor::WHITE);
+        g.render_quads(192, 192, 1.0, rects, ClearColor::WHITE);
     }
     check!(g.device.take_gpu_times().is_empty());
 }
@@ -181,7 +181,7 @@ pub fn discarded_textures_are_drawn_over(g: &mut Gpu) {
     let (w, h) = (40, 30);
     let frame = g.device.create_texture(w, h, Format::Rgba8, TARGET).expect("a texture");
     let out = g.device.create_texture(w, h, Format::Rgba8, TARGET).expect("a texture");
-    let kept = g.render(
+    let kept = g.render_quads(
         w,
         h,
         1.0,
@@ -214,7 +214,7 @@ pub fn discarded_textures_are_drawn_over(g: &mut Gpu) {
 /// A scissor stays within its pass's area, and nothing is drawn outside either.
 pub fn scissors_stay_within_the_pass(g: &mut Gpu) {
     let (w, h) = (48, 32);
-    let p = g.render(
+    let p = g.render_quads(
         w,
         h,
         1.0,
@@ -258,8 +258,8 @@ pub fn pipelines_are_made_as_described(g: &mut Gpu) {
         (BlendState::OFF, [102, 0, 0, 102]),
     ];
     for (blend, want) in cases {
-        let pipeline = quad_pipeline(&mut *g.device, &COLOR_FRAGMENT, blend, Vec::new()).expect("a pipeline");
-        let p = g.render(4, 4, 1.0, |f| fill(f.device, pipeline.id(), f.target, &[quad]), under);
+        let pipeline = quad_pipeline(&mut g.device, &COLOR_FRAGMENT, blend, Vec::new()).expect("a pipeline");
+        let p = g.render_quads(4, 4, 1.0, |f| fill(f.device, pipeline.id(), f.target, &[quad]), under);
         let got = p.at(2, 2);
         check!(
             got.iter().zip(want).all(|(&a, b)| (a as i32 - b as i32).abs() <= 1),
@@ -267,7 +267,7 @@ pub fn pipelines_are_made_as_described(g: &mut Gpu) {
         );
     }
     // The constant swaps red and blue.
-    let p = g.render(
+    let p = g.render_quads(
         8,
         8,
         1.0,
@@ -282,7 +282,7 @@ pub fn pipelines_are_made_as_described(g: &mut Gpu) {
     let target = g.device.create_texture(8, 8, Format::Bgra8, TARGET).expect("a texture");
     g.device.begin_frame();
     g.device.begin_pass(target.id(), Some(ClearColor::new(0.0, 1.0, 0.0, 1.0)), &[], None);
-    draw_quads(&mut *g.device, bgra.id(), target.id(), &[Quad::new(0.0, 0.0, 4.0, 8.0, 1.0, 0.0, 0.0)], [0.0; 4]);
+    draw_quads(&mut g.device, bgra.id(), target.id(), &[Quad::new(0.0, 0.0, 4.0, 8.0, 1.0, 0.0, 0.0)], [0.0; 4]);
     g.device.end_pass();
     let p = Pixels { width: 8, height: 8, rgba: g.device.read_pixels(target.id(), IRect::new(0, 0, 8, 8)) };
     g.device.end_frame(false);
@@ -309,7 +309,7 @@ pub fn pipelines_are_made_on_other_threads(g: &mut Gpu) {
     check!(made.iter().all(Option::is_some));
     for (i, pipeline) in made.iter().enumerate() {
         let Some(pipeline) = pipeline else { continue };
-        let p = g.render(
+        let p = g.render_quads(
             8,
             8,
             1.0,
@@ -354,9 +354,9 @@ pub fn mipmaps_halve_the_texture(g: &mut Gpu) {
         );
         f.device.end_pass();
     };
-    let one = g.render(1, 1, 1.0, draw, ClearColor::TRANSPARENT);
+    let one = g.render_quads(1, 1, 1.0, draw, ClearColor::TRANSPARENT);
     check!(near(one.at(0, 0), 128, 128, 128, 2), "  {:?}", one.at(0, 0));
-    let two = g.render(2, 2, 1.0, draw, ClearColor::TRANSPARENT);
+    let two = g.render_quads(2, 2, 1.0, draw, ClearColor::TRANSPARENT);
     let quarters = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, y)| two.at(x, y));
     check!(quarters == [(0, 0), (n - 1, 0), (0, n - 1), (n - 1, n - 1)].map(|(x, y)| quarter(x, y)), "  {quarters:?}");
 }
@@ -404,7 +404,7 @@ pub fn frame_memory_grows_as_asked(g: &mut Gpu) {
         })
         .collect();
     let mut aligned = true;
-    let p = g.render(
+    let p = g.render_quads(
         w,
         h,
         1.0,
@@ -484,7 +484,7 @@ pub fn pipelines_are_kept_between_runs() {
         *keeps = g.keeps_pipelines();
         let out: Vec<Pixels> = [rects as fn(&mut Frame<'_>), swapped, textured]
             .into_iter()
-            .map(|draw| g.render(192, 192, 1.0, draw, ClearColor::WHITE))
+            .map(|draw| g.render_quads(192, 192, 1.0, draw, ClearColor::WHITE))
             .collect();
         check!(g.device.validation_errors() == 0);
         // (Kept at a frame's end, the app going on.)
