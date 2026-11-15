@@ -243,6 +243,46 @@ impl Dispatcher {
         }
     }
 
+    /// Runs `f`, then polls the coroutines it woke before returning — and those they wake in turn, until none is
+    /// left — as Compose resumes the continuation awaiting a pointer event in place, while the event is dispatched,
+    /// so the next handler sees what it consumed. Coroutines woken before `f` (from this thread or another) wait for
+    /// the next `run` or `run_ready`, as before.
+    pub fn run_woken_by<R>(&self, f: impl FnOnce() -> R) -> R {
+        let earlier = std::mem::take(&mut *self.0.queue.ready.lock());
+        /// Puts the earlier ones back in front of what is left, however this ends (a panic in `f` included).
+        struct Restore<'a>(&'a Inner, Vec<(u32, u32)>);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                if !self.1.is_empty() {
+                    let mut ready = self.0.queue.ready.lock();
+                    let later = std::mem::take(&mut *ready);
+                    *ready = std::mem::take(&mut self.1);
+                    ready.extend(later);
+                }
+            }
+        }
+        let restore = Restore(&self.0, earlier);
+        let result = f();
+        let mut busy = Vec::new();
+        loop {
+            let woken = std::mem::take(&mut *self.0.queue.ready.lock());
+            if woken.is_empty() {
+                break;
+            }
+            for (index, generation) in woken {
+                if self.0.is_polling(index, generation) {
+                    // Being polled further up (this runs from inside a coroutine): its wake stays for later.
+                    busy.push((index, generation));
+                } else {
+                    self.0.poll(index, generation);
+                }
+            }
+        }
+        self.0.queue.ready.lock().extend(busy);
+        drop(restore);
+        result
+    }
+
     /// Whether a coroutine was woken and waits to be polled.
     pub fn has_ready(&self) -> bool {
         !self.0.queue.ready.lock().is_empty()
@@ -298,6 +338,14 @@ impl Inner {
         slot.job = None;
         self.free.borrow_mut().push(index);
         slot.task.take()
+    }
+
+    /// Whether that task is being polled now (taken out of its slot further up the stack).
+    fn is_polling(&self, index: u32, generation: u32) -> bool {
+        let slots = self.slots.borrow();
+        slots.get(index as usize).is_some_and(|s| {
+            s.generation == generation && s.task.is_none() && s.job.as_ref().is_some_and(|j| j.running.get())
+        })
     }
 
     fn waker(&self, index: u32, generation: u32) -> Waker {

@@ -38,3 +38,7 @@ harness = false
 [[test]]
 name = "spatial"
 harness = false
+
+[[test]]
+name = "input"
+harness = false

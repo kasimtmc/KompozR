@@ -1383,6 +1383,114 @@ fn launched_effects_and_produce_state_take_several_keys() {
     assert!(*log.borrow() == ["launched"] && produced.get() == 2);
 }
 
+/// A value handed to whoever waits for it, waking them (what a pointer event is to a pointer input coroutine).
+#[derive(Clone, Default)]
+struct Signal(Rc<RefCell<(Option<i32>, Option<std::task::Waker>)>>);
+
+impl Signal {
+    fn fire(&self, v: i32) {
+        let waker = {
+            let mut s = self.0.borrow_mut();
+            s.0 = Some(v);
+            s.1.take()
+        };
+        if let Some(w) = waker {
+            w.wake();
+        }
+    }
+    async fn wait(&self) -> i32 {
+        std::future::poll_fn(|cx| {
+            let mut s = self.0.borrow_mut();
+            match s.0.take() {
+                Some(v) => std::task::Poll::Ready(v),
+                None => {
+                    s.1 = Some(cx.waker().clone());
+                    std::task::Poll::Pending
+                }
+            }
+        })
+        .await
+    }
+}
+
+fn run_woken_by_resumes_what_it_wakes_before_returning() {
+    let d = Dispatcher::new();
+    let scope = CoroutineScope::new(&d);
+    let log = new_log();
+    let (a, b, c) = (Signal::default(), Signal::default(), Signal::default());
+    for (name, signal) in [("a", a.clone()), ("b", b.clone())] {
+        let (log, c) = (log.clone(), c.clone());
+        scope.launch(async move {
+            loop {
+                let v = signal.wait().await;
+                push(&log, format!("{name} {v}"));
+                if name == "b" {
+                    c.fire(v * 10); // wakes the third one in turn
+                }
+            }
+        });
+    }
+    let (l, third) = (log.clone(), c.clone());
+    scope.launch(async move {
+        loop {
+            let v = third.wait().await;
+            push(&l, format!("c {v}"));
+        }
+    });
+    // Woken before: it waits for the dispatcher's next run; what the call wakes (and what that wakes) runs in it.
+    a.fire(1);
+    let r = d.run_woken_by(|| {
+        b.fire(2);
+        "done"
+    });
+    assert_eq!(r, "done");
+    assert!(*log.borrow() == ["b 2", "c 20"], "{:?}", log.borrow());
+    assert!(d.has_ready());
+    d.run_ready();
+    assert!(*log.borrow() == ["b 2", "c 20", "a 1"]);
+    // A plain wake waits for the run.
+    b.fire(3);
+    assert_eq!(log.borrow().len(), 3);
+    d.run_ready();
+    assert_eq!(log.borrow().len(), 5);
+    scope.cancel();
+}
+
+fn run_woken_by_from_inside_a_coroutine_keeps_its_own_wake() {
+    // A coroutine that wakes itself and, while being polled, has something resumed in place: its own wake isn't
+    // lost (it can't be polled while it runs), and it goes on at the next run.
+    let d = Dispatcher::new();
+    let scope = CoroutineScope::new(&d);
+    let log = new_log();
+    let other = Signal::default();
+    let (l, o) = (log.clone(), other.clone());
+    scope.launch(async move {
+        loop {
+            let v = o.wait().await;
+            push(&l, format!("other {v}"));
+        }
+    });
+    let (l, o, dd) = (log.clone(), other.clone(), d.clone());
+    scope.launch(async move {
+        let mut yielded = false;
+        std::future::poll_fn(|cx| {
+            if yielded {
+                return std::task::Poll::Ready(());
+            }
+            yielded = true;
+            cx.waker().wake_by_ref();
+            dd.run_woken_by(|| o.fire(7));
+            std::task::Poll::Pending
+        })
+        .await;
+        push(&l, "self resumed");
+    });
+    assert!(*log.borrow() == ["other 7"]);
+    d.run_ready();
+    assert!(*log.borrow() == ["other 7", "self resumed"]);
+    scope.cancel();
+}
+
 tests!(
     launched_effect_ticks_and_is_cancelled_on_leave,
     coroutines_give_back_values_and_work_in_the_background,
@@ -1414,4 +1522,6 @@ tests!(
     remember_updated_state_gives_effects_the_latest_value,
     produce_state_from_a_coroutine,
     launched_effects_and_produce_state_take_several_keys,
+    run_woken_by_resumes_what_it_wakes_before_returning,
+    run_woken_by_from_inside_a_coroutine_keeps_its_own_wake,
 );

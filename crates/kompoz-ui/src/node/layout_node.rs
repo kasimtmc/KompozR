@@ -325,6 +325,9 @@ impl LayoutNode {
         if self.density.get() != density {
             self.density.set(density);
             self.on_density_or_layout_direction_changed();
+            if self.is_attached() {
+                crate::input::on_density_changed(self);
+            }
         }
     }
 
@@ -350,7 +353,13 @@ impl LayoutNode {
 
     /// The composition locals where it is composed, for its nodes' `current_value_of`.
     pub fn set_locals(&self, locals: KompozitionLocalContext) {
+        let view_configuration = &crate::platform::LocalViewConfiguration;
+        let before = self.locals.borrow().get(view_configuration);
         *self.locals.borrow_mut() = locals;
+        // (Compose's `viewConfiguration` setter: pointer input under way is cancelled)
+        if self.is_attached() && self.locals.borrow().get(view_configuration) != before {
+            crate::input::on_view_configuration_changed(self);
+        }
     }
 
     pub fn set_composite_key(&self, key: u64) {

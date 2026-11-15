@@ -109,6 +109,8 @@ pub(crate) struct NodeMeta {
     reads: RefCell<Option<Rc<ReaderScope>>>,
     /// Made while its layout was detached: its insertion invalidations wait for the attach.
     pub(crate) inserted_awaiting_attach: Cell<bool>,
+    /// Told when it is detached, before its `on_detach` (Compose's `detachedListener`: a hit path drops it).
+    pub(crate) detached_listener: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 /// A node and what the chain knows of it (opaque outside the crate).
@@ -140,6 +142,7 @@ impl<N: ModifierNode> NodeCell<N> {
                 delegator: RefCell::new(None),
                 reads: RefCell::new(None),
                 inserted_awaiting_attach: Cell::new(true),
+                detached_listener: RefCell::new(None),
             },
             node: RefCell::new(node),
         })
@@ -205,6 +208,10 @@ impl NodeCell<dyn ModifierNode> {
     pub(crate) fn run_detach_lifecycle(self: &Rc<Self>) {
         assert!(self.meta.detach_run_expected.get(), "kompoz: on_detach without on_attach");
         self.meta.detach_run_expected.set(false);
+        let listener = self.meta.detached_listener.borrow_mut().take();
+        if let Some(l) = listener {
+            l();
+        }
         let cx = NodeCx::new(self);
         self.node.borrow_mut().on_detach(&cx);
         for d in self.immediate_delegates() {

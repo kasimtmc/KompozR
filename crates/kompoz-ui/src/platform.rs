@@ -162,6 +162,10 @@ pub trait PlatformCallbacks {
     fn cursor(&self, icon: PointerIcon) {
         let _ = icon;
     }
+    /// The icon a hovering stylus shows, none for the platform's own (Compose's `setStylusHoverIcon`).
+    fn stylus_hover_icon(&self, icon: Option<PointerIcon>) {
+        let _ = icon;
+    }
     /// Decodes an image asset.
     fn load_image(&self, path: &str) -> Option<ImageBitmap> {
         let _ = path;

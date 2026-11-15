@@ -29,3 +29,7 @@ harness = false
 [[test]]
 name = "window_insets"
 harness = false
+
+[[test]]
+name = "gestures"
+harness = false

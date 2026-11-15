@@ -5,7 +5,7 @@
 use crate::back::BackDispatcher;
 use crate::focus::{FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
-use crate::input::{InputState, Key, KeyModifiers, PointerType};
+use crate::input::{InputState, Key, KeyModifiers, PointerButton, PointerType};
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::node::{LayoutNode, Owner};
 use crate::platform::*;
@@ -398,39 +398,57 @@ impl KompozHost {
     /// frame's). Whether a node took it.
     pub fn pointer_down(&self, position: Offset, time_nanos: i64, pointer_id: i64, pointer_type: PointerType) -> bool {
         let t = self.event_time(time_nanos);
-        crate::input::pointer_down(&mut self.input.borrow_mut(), &self.root, position, t, pointer_id, pointer_type)
+        // (a finger puts the UI in touch mode, as Compose's AndroidComposeView does)
+        if pointer_type == PointerType::Touch && self.input_mode_manager.mode.peek() != InputMode::Touch {
+            self.input_mode_manager.request_input_mode(InputMode::Touch);
+        }
+        crate::input::pointer_down(self, position, t, pointer_id, pointer_type)
     }
 
+    /// A pointer moved: a finger down, else the mouse (hovering, or pressed).
     pub fn pointer_move(&self, position: Offset, time_nanos: i64, pointer_id: i64) -> bool {
         let t = self.event_time(time_nanos);
-        crate::input::pointer_move(&mut self.input.borrow_mut(), &self.root, position, t, pointer_id)
+        crate::input::pointer_move(self, position, t, pointer_id)
+    }
+
+    /// Several fingers moved at once, `(pointer_id, position)` each: one event (a platform batching its pointers).
+    pub fn pointer_moves(&self, moves: &[(i64, Offset)], time_nanos: i64) -> bool {
+        let t = self.event_time(time_nanos);
+        crate::input::pointer_moves(self, moves, t)
     }
 
     pub fn pointer_up(&self, position: Offset, time_nanos: i64, pointer_id: i64) -> bool {
         let t = self.event_time(time_nanos);
-        crate::input::pointer_up(&mut self.input.borrow_mut(), &self.root, position, t, pointer_id)
+        crate::input::pointer_up(self, position, t, pointer_id)
+    }
+
+    /// A mouse button pressed or let go with the mouse at `position`.
+    pub fn mouse_button(&self, position: Offset, time_nanos: i64, button: PointerButton, pressed: bool) -> bool {
+        let t = self.event_time(time_nanos);
+        crate::input::mouse_button(self, position, t, button, pressed, None)
     }
 
     pub fn pointer_cancel(&self) {
-        crate::input::pointer_cancel(&mut self.input.borrow_mut(), &self.root);
+        crate::input::pointer_cancel(self);
     }
 
     pub fn pointer_exit(&self) {
-        crate::input::pointer_exit(&mut self.input.borrow_mut(), &self.root);
+        crate::input::pointer_exit(self);
     }
 
-    /// A wheel or touchpad scrolled by `delta` px at `position`.
+    /// A wheel or touchpad scrolled by `delta` px (down and right positive) with the mouse at `position`; whether
+    /// a node took it.
     pub fn scroll(&self, position: Offset, delta: Offset) -> bool {
-        crate::input::scroll(&mut self.input.borrow_mut(), &self.root, position, delta)
+        crate::input::scroll(self, position, delta)
     }
 
     /// A key went down; whether a node (or the focus) used it.
     pub fn key_down(&self, key: Key, modifiers: KeyModifiers) -> bool {
-        crate::input::key_down(&mut self.input.borrow_mut(), &self.root, key, modifiers)
+        crate::input::key_down(self, key, modifiers)
     }
 
     pub fn key_up(&self, key: Key, modifiers: KeyModifiers) -> bool {
-        crate::input::key_up(&mut self.input.borrow_mut(), &self.root, key, modifiers)
+        crate::input::key_up(self, key, modifiers)
     }
 
     /// Back pressed (or a back gesture done): the most recent enabled back handler; false if none took it.

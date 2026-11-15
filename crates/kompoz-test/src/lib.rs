@@ -11,8 +11,10 @@
 
 #![allow(non_snake_case)]
 
+mod input;
 mod text;
 
+pub use input::{EVENT_PERIOD_MILLIS, InjectionScope, MouseInjectionScope, ScrollWheel, TouchInjectionScope};
 pub use text::{FakeTextMeasurer, FontMetrics, Text};
 
 use kompoz_graphics::{Dp, IntSize, Offset, Rect};
@@ -52,6 +54,8 @@ impl MainClock<'_> {
 pub struct KompozTestRule {
     host: KompozHost,
     clock: Cell<i64>,
+    /// What injected input left (`perform_touch_input`, `perform_mouse_input`).
+    injection: std::cell::RefCell<input::InjectionState>,
 }
 
 impl KompozTestRule {
@@ -65,7 +69,7 @@ impl KompozTestRule {
         let host = KompozHost::new(content);
         host.set_viewport_size(viewport);
         host.set_layout_check(true);
-        let rule = KompozTestRule { host, clock: Cell::new(0) };
+        let rule = KompozTestRule { host, clock: Cell::new(0), injection: Default::default() };
         rule.wait_for_idle_within(0);
         rule
     }
