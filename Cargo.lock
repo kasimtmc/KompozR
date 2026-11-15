@@ -347,6 +347,8 @@ version = "0.1.0"
 dependencies = [
  "ash",
  "kompoz-graphics",
+ "kompoz-text",
+ "skrifa",
 ]
 
 [[package]]
