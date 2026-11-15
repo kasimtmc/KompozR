@@ -396,59 +396,7 @@ pub trait GraphicsContext {
     /// (blurred masks: Android's BlurMaskFilter, Android's sigma for the radius): the masks drawn opaque in layers
     /// that blur them (Decal), in one faded by the color's alpha.
     fn draw_shadow_path(&mut self, outline: &Path, origin: Offset, shadow: &Shadow, inner: bool) {
-        if shadow.color.alpha() <= 0.0 || outline.is_empty() {
-            return;
-        }
-        let b = outline.get_bounds().translate(origin);
-        let opaque = SolidColor(with_alpha(shadow.color, 1.0));
-        let blur_radius = shadow.blur_radius.max(0.0);
-        let blur = BlurEffect(blur_radius, blur_radius, TileMode::Decal);
-        let spread = shadow.spread.max(0.0);
-        let band = PathStroke::new(2.0 * spread); // (mitered, as a Paint's stroke is by default)
-        let fill = PathStroke::default();
-        let moved = origin + shadow.offset;
-        if !inner {
-            let grow = spread * band.miter; // (a miter reaches out that far at most)
-            let at = b.translate(shadow.offset).inflate(grow);
-            let reach = shadow_path_reach(b, shadow, false);
-            if self.quick_reject(reach) {
-                return;
-            }
-            self.push_layer(reach, CornerRadii::Zero, shadow.color.alpha(), LayerTransform::Identity);
-            self.push_effect_layer(at, &blur, 1.0);
-            self.draw_path(outline, moved, &opaque, at, &fill);
-            self.pop_layer();
-            if spread > 0.0 {
-                self.push_effect_layer(at, &blur, 1.0);
-                self.draw_path(outline, moved, &opaque, at, &band);
-                self.pop_layer();
-            }
-            self.pop_layer();
-            return;
-        }
-        if self.quick_reject(b) {
-            return;
-        }
-        // The color 2 px past the bounds (a pixel and a half at the least): what cuts the edge's pixels is the
-        // outline (the clip), not the fill's own edge.
-        let at = shadow_path_reach(b, shadow, true);
-        self.push_clip_path(outline, origin, ClipOp::Intersect);
-        self.push_layer(at, CornerRadii::Zero, shadow.color.alpha(), LayerTransform::Identity);
-        self.fill_round_rect(at, CornerRadii::Zero, with_alpha(shadow.color, 1.0));
-        // Less the hole blurred.
-        let hole = at.translate(shadow.offset);
-        self.push_blend_mode(BlendMode::DstOut);
-        self.push_effect_layer(hole, &blur, 1.0);
-        self.draw_path(outline, moved, &opaque, hole, &fill);
-        if spread > 0.0 {
-            self.push_blend_mode(BlendMode::Clear);
-            self.draw_path(outline, moved, &opaque, hole, &band);
-            self.pop_blend_mode();
-        }
-        self.pop_layer();
-        self.pop_blend_mode();
-        self.pop_layer();
-        self.pop_clip();
+        default_draw_shadow_path(self, outline, origin, shadow, inner);
     }
     /// The light elevation shadows have (set by the platform). By default Android's theme's, over the origin.
     fn light(&self) -> ShadowLight {
@@ -468,53 +416,7 @@ pub trait GraphicsContext {
     /// Lz / (Lz - z) about the light's foot) and blurred by its radius z / (Lz - z) times the light's. Both blurred
     /// as Android blurs (0.57735 r + 0.5 px).
     fn draw_elevation_shadow(&mut self, outline: &Outline, origin: Offset, shadow: &ElevationShadow) {
-        let light = self.light();
-        let alpha = shadow.alpha.clamp(0.0, 1.0);
-        let b = outline.bounds().translate(origin);
-        let (rounded, radii) = rounded_radii(outline);
-        let cast = |g: &mut Self, s: Shadow, scale: f32, by: Offset| {
-            if rounded {
-                let r = Rect::new(
-                    b.left * scale + by.x,
-                    b.top * scale + by.y,
-                    b.right * scale + by.x,
-                    b.bottom * scale + by.y,
-                );
-                g.draw_shadow(r, radii.scaled(scale), &s, false);
-            } else {
-                let mut p = outline_path(outline);
-                p.translate(origin);
-                g.draw_shadow_path(&scaled_path(&p, scale, by), Offset::Zero, &s, false);
-            }
-        };
-        let flat = shadow.plane[0] * origin.x + shadow.plane[1] * origin.y + shadow.plane[2]; // (at the outline's origin, as Skia's)
-        let c = shadow.ambient_color;
-        if c.alpha() * light.ambient_alpha * alpha > 0.0 && flat > 0.0 {
-            let z = flat;
-            let r = (z / 2.0).min(150.0);
-            let one_over_a = 1.0 + z / 128.0;
-            let blur = 0.5 * r * one_over_a;
-            let stroke = (0.5 * (r - blur)).max(0.0); // (a negative width strokes nothing)
-            let s =
-                Shadow::new(with_alpha(c, c.alpha() * light.ambient_alpha * alpha), Offset::Zero, blur, stroke / 2.0);
-            cast(self, s, 1.0, Offset::Zero);
-        }
-        let center = b.center();
-        let z = shadow.plane[0] * center.x + shadow.plane[1] * center.y + shadow.plane[2];
-        let lz = light.z;
-        let c = shadow.spot_color;
-        if c.alpha() * light.spot_alpha * alpha > 0.0 && z > 0.0 && lz > z {
-            let ratio = (z / (lz - z)).clamp(0.0, 0.95);
-            let scale = (lz / (lz - z)).clamp(1.0, 1.95);
-            let l = self.light_center();
-            let s = Shadow::new(
-                with_alpha(c, c.alpha() * light.spot_alpha * alpha),
-                Offset::Zero,
-                light.radius * ratio,
-                0.0,
-            );
-            cast(self, s, scale, Offset::new(-ratio * l.x, -ratio * l.y));
-        }
+        default_draw_elevation_shadow(self, outline, origin, shadow);
     }
     /// A layer clipped to `outline` (from the bounds' top left, any path by its fill type) rather than a rounded
     /// rect. The default clips to the bounds.
@@ -706,6 +608,116 @@ pub fn default_draw_image_mask<G: GraphicsContext + ?Sized>(
     g.draw_image(image, src, dst, 1.0, quality);
     g.pop_blend_mode();
     g.pop_layer();
+}
+
+/// What [`GraphicsContext::draw_shadow_path`] draws by default (see there).
+pub fn default_draw_shadow_path<G: GraphicsContext + ?Sized>(
+    g: &mut G,
+    outline: &Path,
+    origin: Offset,
+    shadow: &Shadow,
+    inner: bool,
+) {
+    if shadow.color.alpha() <= 0.0 || outline.is_empty() {
+        return;
+    }
+    let b = outline.get_bounds().translate(origin);
+    let opaque = SolidColor(with_alpha(shadow.color, 1.0));
+    let blur_radius = shadow.blur_radius.max(0.0);
+    let blur = BlurEffect(blur_radius, blur_radius, TileMode::Decal);
+    let spread = shadow.spread.max(0.0);
+    let band = PathStroke::new(2.0 * spread); // (mitered, as a Paint's stroke is by default)
+    let fill = PathStroke::default();
+    let moved = origin + shadow.offset;
+    if !inner {
+        let grow = spread * band.miter; // (a miter reaches out that far at most)
+        let at = b.translate(shadow.offset).inflate(grow);
+        let reach = shadow_path_reach(b, shadow, false);
+        if g.quick_reject(reach) {
+            return;
+        }
+        g.push_layer(reach, CornerRadii::Zero, shadow.color.alpha(), LayerTransform::Identity);
+        g.push_effect_layer(at, &blur, 1.0);
+        g.draw_path(outline, moved, &opaque, at, &fill);
+        g.pop_layer();
+        if spread > 0.0 {
+            g.push_effect_layer(at, &blur, 1.0);
+            g.draw_path(outline, moved, &opaque, at, &band);
+            g.pop_layer();
+        }
+        g.pop_layer();
+        return;
+    }
+    if g.quick_reject(b) {
+        return;
+    }
+    // The color 2 px past the bounds (a pixel and a half at the least): what cuts the edge's pixels is the
+    // outline (the clip), not the fill's own edge.
+    let at = shadow_path_reach(b, shadow, true);
+    g.push_clip_path(outline, origin, ClipOp::Intersect);
+    g.push_layer(at, CornerRadii::Zero, shadow.color.alpha(), LayerTransform::Identity);
+    g.fill_round_rect(at, CornerRadii::Zero, with_alpha(shadow.color, 1.0));
+    // Less the hole blurred.
+    let hole = at.translate(shadow.offset);
+    g.push_blend_mode(BlendMode::DstOut);
+    g.push_effect_layer(hole, &blur, 1.0);
+    g.draw_path(outline, moved, &opaque, hole, &fill);
+    if spread > 0.0 {
+        g.push_blend_mode(BlendMode::Clear);
+        g.draw_path(outline, moved, &opaque, hole, &band);
+        g.pop_blend_mode();
+    }
+    g.pop_layer();
+    g.pop_blend_mode();
+    g.pop_layer();
+    g.pop_clip();
+}
+
+/// What [`GraphicsContext::draw_elevation_shadow`] draws by default (see there).
+pub fn default_draw_elevation_shadow<G: GraphicsContext + ?Sized>(
+    g: &mut G,
+    outline: &Outline,
+    origin: Offset,
+    shadow: &ElevationShadow,
+) {
+    let light = g.light();
+    let alpha = shadow.alpha.clamp(0.0, 1.0);
+    let b = outline.bounds().translate(origin);
+    let (rounded, radii) = rounded_radii(outline);
+    let cast = |g: &mut G, s: Shadow, scale: f32, by: Offset| {
+        if rounded {
+            let r =
+                Rect::new(b.left * scale + by.x, b.top * scale + by.y, b.right * scale + by.x, b.bottom * scale + by.y);
+            g.draw_shadow(r, radii.scaled(scale), &s, false);
+        } else {
+            let mut p = outline_path(outline);
+            p.translate(origin);
+            g.draw_shadow_path(&scaled_path(&p, scale, by), Offset::Zero, &s, false);
+        }
+    };
+    let flat = shadow.plane[0] * origin.x + shadow.plane[1] * origin.y + shadow.plane[2]; // (at the outline's origin, as Skia's)
+    let c = shadow.ambient_color;
+    if c.alpha() * light.ambient_alpha * alpha > 0.0 && flat > 0.0 {
+        let z = flat;
+        let r = (z / 2.0).min(150.0);
+        let one_over_a = 1.0 + z / 128.0;
+        let blur = 0.5 * r * one_over_a;
+        let stroke = (0.5 * (r - blur)).max(0.0); // (a negative width strokes nothing)
+        let s = Shadow::new(with_alpha(c, c.alpha() * light.ambient_alpha * alpha), Offset::Zero, blur, stroke / 2.0);
+        cast(g, s, 1.0, Offset::Zero);
+    }
+    let center = b.center();
+    let z = shadow.plane[0] * center.x + shadow.plane[1] * center.y + shadow.plane[2];
+    let lz = light.z;
+    let c = shadow.spot_color;
+    if c.alpha() * light.spot_alpha * alpha > 0.0 && z > 0.0 && lz > z {
+        let ratio = (z / (lz - z)).clamp(0.0, 0.95);
+        let scale = (lz / (lz - z)).clamp(1.0, 1.95);
+        let l = g.light_center();
+        let s =
+            Shadow::new(with_alpha(c, c.alpha() * light.spot_alpha * alpha), Offset::Zero, light.radius * ratio, 0.0);
+        cast(g, s, scale, Offset::new(-ratio * l.x, -ratio * l.y));
+    }
 }
 
 /// What [`GraphicsContext::draw_shape_shadow`] draws by default (see there).

@@ -7,7 +7,7 @@ use kompoz_runtime::named;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 
 /// How a bitmap keeps its pixels (Compose's ImageBitmapConfig, Android's Bitmap.Config): 8 bits a channel
 /// (Argb8888; Gpu: the same, kept by the GPU), alpha alone (Alpha8: drawn in a paint's color as a mask), 5, 6 and 5
@@ -51,6 +51,19 @@ struct BitmapData {
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// What reads back the pixels of a bitmap that only a renderer has (C++'s BitmapRenderer::readBack, set by kompoz-ui's
+/// bitmap renderer): asked on the thread that reads them, where it reaches the renderer only on the one the renderer
+/// is set on.
+static READ_BACK: RwLock<Option<fn(&ImageBitmap)>> = RwLock::new(None);
+
+/// Sets what reads back the pixels of a bitmap only a renderer has, when they are read
+/// ([`ImageBitmap::pixels`], [`ImageBitmap::floats`] and what reads through them); none: nothing does (the CPU copy is
+/// read as it is). Kompoz-ui's bitmap renderer sets it.
+#[doc(hidden)]
+pub fn set_bitmap_read_back(read_back: Option<fn(&ImageBitmap)>) {
+    *READ_BACK.write().unwrap_or_else(|e| e.into_inner()) = read_back;
+}
 
 /// A bitmap (Compose's ImageBitmap): decoded pixels ([`decode_image`](super::decode_image),
 /// [`from_pixels`](ImageBitmap::from_pixels)), or pixels to draw into ([`ImageBitmap::new`], then a canvas over
@@ -181,16 +194,31 @@ impl ImageBitmap {
         self.data.pixels.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Its pixels as straight RGBA, 8 bits a channel, the top row first (Alpha8's black; F16's kept to 0..1): what
-    /// its CPU copy holds now ([`pixels_current`](ImageBitmap::pixels_current) says whether that is all that was
-    /// drawn into it).
+    /// Its pixels as straight RGBA, 8 bits a channel, the top row first (Alpha8's black; F16's kept to 0..1): read
+    /// back first where only the renderer has what was drawn into it (see [`set_bitmap_read_back`]), else what its
+    /// CPU copy holds ([`pixels_current`](ImageBitmap::pixels_current) says whether that is all that was drawn into
+    /// it).
     pub fn pixels(&self) -> Arc<Vec<u8>> {
+        self.read_back();
         self.lock().rgba.clone()
     }
 
-    /// F16's pixels as straight RGBA at half floats' precision (another config's: none).
+    /// F16's pixels as straight RGBA at half floats' precision (another config's: none), read back first as
+    /// [`pixels`](ImageBitmap::pixels) are.
     pub fn floats(&self) -> Arc<Vec<f32>> {
+        self.read_back();
         self.lock().floats.clone()
+    }
+
+    /// Its pixels read back from the renderer where only it has them (C++'s ImageBitmap::pixels).
+    fn read_back(&self) {
+        if self.pixels_current() {
+            return;
+        }
+        let read_back = *READ_BACK.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(read_back) = read_back {
+            read_back(self);
+        }
     }
 
     /// Android's hint to upload it now (Compose's prepareToDraw): the renderer uploads it when it is drawn.

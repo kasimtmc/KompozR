@@ -18,10 +18,12 @@ mod window_insets_rulers;
 pub use alignment_line::{AlignmentLine, FirstBaseline, HorizontalAlignmentLine, LastBaseline, VerticalAlignmentLine};
 pub use composables::{Layout, MultiMeasureLayout, layout_into, measure_policy};
 pub use coordinates::LayoutCoordinates;
+#[doc(hidden)]
+pub use layer::LayerGeometry;
 pub use layer::{
     CompositingStrategy, DefaultCameraDistance, GraphicsLayerScope, LayerBlock, LayerOutsets, TransformOrigin,
 };
-pub(crate) use layer::{LayerGeometry, layer_matrix, mul, rotation};
+pub(crate) use layer::{layer_matrix, mul, rotation};
 pub(crate) use measure::{DefaultIntrinsicMeasurable, MinMax, Side};
 pub use measure::{
     IntrinsicMeasurable, IntrinsicMeasureScope, Measurable, MeasurePolicy, MeasureResult, MeasureScope, PlaceTarget,

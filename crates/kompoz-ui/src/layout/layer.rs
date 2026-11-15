@@ -238,17 +238,18 @@ pub type LayerBlock = Rc<dyn Fn(&mut GraphicsLayerScope)>;
 /// What a layer's matrix is made from (C++'s LayerGeometry), in px; the pivot where it is in what the layer is
 /// drawn in.
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub(crate) struct LayerGeometry {
-    pub(crate) scale_x: f32,
-    pub(crate) scale_y: f32,
-    pub(crate) translation_x: f32,
-    pub(crate) translation_y: f32,
-    pub(crate) rotation_x: f32,
-    pub(crate) rotation_y: f32,
-    pub(crate) rotation_z: f32,
-    pub(crate) camera_distance: f32,
-    pub(crate) pivot_x: f32,
-    pub(crate) pivot_y: f32,
+#[doc(hidden)]
+pub struct LayerGeometry {
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub translation_x: f32,
+    pub translation_y: f32,
+    pub rotation_x: f32,
+    pub rotation_y: f32,
+    pub rotation_z: f32,
+    pub camera_distance: f32,
+    pub pivot_x: f32,
+    pub pivot_y: f32,
 }
 
 impl Default for LayerGeometry {

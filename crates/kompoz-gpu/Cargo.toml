@@ -1,0 +1,14 @@
+[package]
+name = "kompoz-gpu"
+description = "KompozR's GPU renderer: the device layer (Vulkan, Metal, WebGPU) and the renderer core that draws a frame's display list"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-graphics = { path = "../kompoz-graphics" }
+ash = "0.38.0"

@@ -17,26 +17,27 @@ use std::rc::Rc;
 /// where it is), how faded, how high (its outline's shadow, in its colors), whether it is cut to its outline (from
 /// the bounds' top left), through what it is composited, and how far past its bounds an offscreen layer reaches.
 #[derive(Clone, Debug)]
-pub(crate) struct LayerDraw {
-    pub(crate) bounds: Rect,
-    pub(crate) geometry: LayerGeometry,
-    pub(crate) alpha: f32,
-    pub(crate) shadow_elevation: f32,
-    pub(crate) ambient_shadow_color: Color,
-    pub(crate) spot_shadow_color: Color,
-    pub(crate) clip: bool,
-    pub(crate) outline: Outline,
-    pub(crate) blend_mode: BlendMode,
-    pub(crate) color_filter: Option<ColorFilter>,
-    pub(crate) render_effect: Option<RenderEffect>,
-    pub(crate) strategy: CompositingStrategy,
+#[doc(hidden)]
+pub struct LayerDraw {
+    pub bounds: Rect,
+    pub geometry: LayerGeometry,
+    pub alpha: f32,
+    pub shadow_elevation: f32,
+    pub ambient_shadow_color: Color,
+    pub spot_shadow_color: Color,
+    pub clip: bool,
+    pub outline: Outline,
+    pub blend_mode: BlendMode,
+    pub color_filter: Option<ColorFilter>,
+    pub render_effect: Option<RenderEffect>,
+    pub strategy: CompositingStrategy,
     /// Left, top, right, bottom.
-    pub(crate) outsets: [f32; 4],
+    pub outsets: [f32; 4],
 }
 
 impl LayerDraw {
     /// A layer over `bounds` that does nothing: drawn straight through.
-    pub(crate) fn plain(bounds: Rect) -> LayerDraw {
+    pub fn plain(bounds: Rect) -> LayerDraw {
         let center = bounds.center();
         LayerDraw {
             bounds,
@@ -56,7 +57,7 @@ impl LayerDraw {
     }
 
     /// A graphics layer's, of `size` at the origin.
-    pub(crate) fn of_scope(layer: &GraphicsLayerScope, size: Size) -> LayerDraw {
+    pub fn of_scope(layer: &GraphicsLayerScope, size: Size) -> LayerDraw {
         let bounds = Rect::from_offset_size(Offset::Zero, size);
         let outline = if layer.clip || layer.shadow_elevation > 0.0 {
             layer.shape.create_outline(size, layer.layout_direction, &layer.density)
@@ -151,11 +152,8 @@ pub(crate) fn push_outline_clip(g: &mut dyn GraphicsContext, o: &Outline, bounds
 /// Draws `content` (over the layer's bounds) through the layer: its matrix, its shadow, its clip to its outline,
 /// its alpha, blend mode, color filter and render effect, offscreen only where it has to be (faded without
 /// ModulateAlpha, blended, filtered, an effect, or Offscreen); nothing at all where nothing of it can show.
-pub(crate) fn draw_layer(
-    g: &mut dyn GraphicsContext,
-    l: &LayerDraw,
-    content: &mut dyn FnMut(&mut dyn GraphicsContext),
-) {
+#[doc(hidden)]
+pub fn draw_layer(g: &mut dyn GraphicsContext, l: &LayerDraw, content: &mut dyn FnMut(&mut dyn GraphicsContext)) {
     let alpha = l.alpha.clamp(0.0, 1.0);
     if alpha <= 0.0 || l.geometry.scale_x == 0.0 || l.geometry.scale_y == 0.0 {
         return;
@@ -265,7 +263,8 @@ pub(crate) fn draw_layer(
 }
 
 /// Draws `content` through a graphics layer of `size` (what a coordinator with a layer draws through).
-pub(crate) fn draw_through_layer(
+#[doc(hidden)]
+pub fn draw_through_layer(
     canvas: &mut dyn GraphicsContext,
     layer: &GraphicsLayerScope,
     size: Size,

@@ -1,12 +1,14 @@
 //! Drawing into bitmaps (C++'s BitmapRenderer): a canvas over a bitmap ([`Canvas::from_image`]) records what it
 //! draws into a [`Picture`] and hands it, as the canvas goes, to the platform's renderer, which draws it into the
 //! bitmap; while there is none, the pictures wait for one to come, the bitmap held weakly (as C++'s: a bitmap no one
-//! holds any more needs nothing drawn into it, and what waited for it goes with it).
+//! holds any more needs nothing drawn into it, and what waited for it goes with it). A renderer may keep what it drew
+//! (a GPU's texture): the bitmap's pixels are read back from it when they are read, on the thread it is set on, and
+//! all such pixels before it goes.
 //!
 //! [`Canvas::from_image`]: super::Canvas::from_image
 
 use super::Picture;
-use kompoz_graphics::{ImageBitmap, WeakImageBitmap};
+use kompoz_graphics::{ImageBitmap, WeakImageBitmap, set_bitmap_read_back};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -15,6 +17,15 @@ pub trait BitmapRenderer {
     /// `bitmap` drawn into by `draws` (over what it holds, a unit a pixel), now: its new pixels stored
     /// (`ImageBitmap::store`) or kept by the renderer (`ImageBitmap::drawn_on_renderer`).
     fn draw(&self, bitmap: &ImageBitmap, draws: &Picture);
+    /// `bitmap`'s pixels, which only the renderer has (it drew into it and kept them), read back into it
+    /// (`ImageBitmap::store`, not drawn: its version kept), as its pixels are read (C++'s readBack). The default
+    /// reads nothing: a renderer that stores all it draws keeps nothing of its own.
+    fn read_back(&self, bitmap: &ImageBitmap) {
+        let _ = bitmap;
+    }
+    /// The renderer goes (another set in its place, or none): every bitmap's pixels that only it has read back into
+    /// them (C++'s releaseBitmaps). The default has none.
+    fn release(&self) {}
 }
 
 thread_local! {
@@ -23,16 +34,32 @@ thread_local! {
     static PENDING: RefCell<Vec<(WeakImageBitmap, Rc<Picture>)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Sets the renderer (none: there is none); what was drawn into bitmaps while there was none is drawn now, in the
-/// order it was drawn (into the bitmaps that still live).
+/// Sets the renderer (none: there is none); the one it replaces is released (what only it has read back), and what
+/// was drawn into bitmaps while there was none is drawn now, in the order it was drawn (into the bitmaps that still
+/// live).
 pub fn set_bitmap_renderer(renderer: Option<Rc<dyn BitmapRenderer>>) {
-    RENDERER.with(|r| *r.borrow_mut() = renderer.clone());
+    set_bitmap_read_back(Some(read_back));
+    let before = RENDERER.with(|r| std::mem::replace(&mut *r.borrow_mut(), renderer.clone()));
+    if let Some(before) = before
+        && !renderer.as_ref().is_some_and(|r| Rc::ptr_eq(r, &before))
+    {
+        before.release();
+    }
     let Some(renderer) = renderer else { return };
     let waiting = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
     for (bitmap, draws) in waiting {
         if let Some(bitmap) = bitmap.upgrade() {
             renderer.draw(&bitmap, &draws);
         }
+    }
+}
+
+/// `bitmap`'s pixels read back from the renderer set on this thread, if any (what `ImageBitmap::pixels` asks for
+/// where only a renderer has them).
+fn read_back(bitmap: &ImageBitmap) {
+    let renderer = RENDERER.try_with(|r| r.borrow().clone()).ok().flatten();
+    if let Some(renderer) = renderer {
+        renderer.read_back(bitmap);
     }
 }
 

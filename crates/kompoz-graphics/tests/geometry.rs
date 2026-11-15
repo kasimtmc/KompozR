@@ -88,3 +88,43 @@ fn matrices_transform_as_composes_do() {
     singular.invert();
     assert_eq!(singular, before); // no inverse: left as it is
 }
+
+#[test]
+fn projective_transforms_map_as_backends_draw() {
+    // A Matrix's plane part: perspective kept, a w the same everywhere made 1.
+    let mut m = Matrix::new();
+    m.translate(5.0, 6.0, 0.0);
+    m.scale(2.0, 3.0, 1.0);
+    let p = Projective::of(&m);
+    assert_eq!(p.m, [2.0, 0.0, 5.0, 0.0, 3.0, 6.0, 0.0, 0.0, 1.0]);
+    assert_eq!(p.apply(1.0, 1.0), m.map(Offset::new(1.0, 1.0)));
+    // Composed: the right one first.
+    let turn = Projective { m: [0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0] };
+    let moved_then_turned = turn * Projective::translation(1.0, 0.0);
+    let q = moved_then_turned.apply(1.0, 0.0);
+    assert!(near(q.x, 0.0) && near(q.y, 2.0));
+    assert!(!moved_then_turned.axis_aligned() && moved_then_turned.affine());
+    // Rects: their mapped bounding box; all of the plane where part is behind the eye.
+    assert_eq!(p.map_rect(Rect::new(0.0, 0.0, 1.0, 1.0)), Rect::new(5.0, 6.0, 7.0, 9.0));
+    let turned = moved_then_turned.map_rect(Rect::new(0.0, 0.0, 2.0, 1.0));
+    assert!(near(turned.left, -1.0) && near(turned.top, 1.0) && near(turned.right, 0.0) && near(turned.bottom, 3.0));
+    let mut seen = Matrix::new();
+    seen.set(0, 3, 0.2); // w = 1 + x / 5
+    let seen = Projective::of(&seen);
+    assert_eq!(seen.map_rect(Rect::new(-10.0, 0.0, 1.0, 1.0)), Rect::new(-1e30, -1e30, 1e30, 1e30));
+    // Inverted; stretched.
+    let back = p.inverse() * p;
+    assert!(back.m.iter().zip(Projective::Identity.m).all(|(a, b)| near(*a, b)));
+    assert!(near(p.max_scale(0.0, 0.0), 3.0) && near(p.min_scale(0.0, 0.0), 2.0));
+    assert!(Projective::default().is_identity());
+    // Polylines: open ones stay open, cut to what is in front of the eye; closed ones as polygons.
+    let points = vec![Offset::new(-10.0, 0.0), Offset::new(0.0, 0.0), Offset::new(10.0, 0.0)];
+    let line = Contour { points, closed: false };
+    let runs = seen.project_polylines(std::slice::from_ref(&line));
+    assert!(runs.len() == 1 && !runs[0].closed && runs[0].points.len() == 3);
+    assert!(runs[0].points[0].x < -1e3 && near(runs[0].points[1].x, 0.0) && near(runs[0].points[2].x, 10.0 / 3.0));
+    let closed = Contour { closed: true, ..line.clone() };
+    assert_eq!(seen.project_polylines(std::slice::from_ref(&closed)), seen.project(&[closed]));
+    let dot = Contour { points: vec![Offset::new(1.0, 1.0)], closed: false };
+    assert_eq!(p.project_polylines(&[dot]), [Contour { points: vec![Offset::new(7.0, 9.0)], closed: false }]);
+}

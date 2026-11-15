@@ -34,7 +34,9 @@ pub use scope::{DrawContext, DrawTransform};
 pub use style::{DefaultAlpha, DefaultBlendMode, DrawStyle, Fill, PointMode, Stroke};
 pub use vector::remember_vector_painter_content;
 
-pub(crate) use layer_draw::draw_through_layer;
+// What drawing through a graphics layer is made of, for a backend's tests (C++'s detail::drawThroughLayer).
+#[doc(hidden)]
+pub use layer_draw::{LayerDraw, draw_layer, draw_through_layer};
 
 use crate::graphics_context::{GraphicsContext, NodeRecording};
 use crate::modifier::{NodeKind, NodeRc};

@@ -2636,6 +2636,56 @@ impl BitmapRenderer for Fake {
     }
 }
 
+/// A renderer that keeps what it draws (as a GPU's texture), red, until it is read back or it goes.
+struct Keeper {
+    kept: RefCell<Vec<ImageBitmap>>,
+    read: Cell<usize>,
+}
+
+impl BitmapRenderer for Keeper {
+    fn draw(&self, bitmap: &ImageBitmap, _: &Picture) {
+        bitmap.drawn_on_renderer();
+        self.kept.borrow_mut().push(bitmap.clone());
+    }
+    fn read_back(&self, bitmap: &ImageBitmap) {
+        self.read.set(self.read.get() + 1);
+        bitmap.store(&[255, 0, 0, 255].repeat((bitmap.width() * bitmap.height()) as usize), false);
+    }
+    fn release(&self) {
+        for bitmap in self.kept.take() {
+            if !bitmap.pixels_current() {
+                self.read_back(&bitmap);
+            }
+        }
+    }
+}
+
+fn bitmaps_a_renderer_keeps_are_read_back() {
+    // C++'s readBackBitmap and releaseBitmaps: pixels only the renderer has are read back as they are read (once,
+    // the version kept), and all of them as it goes.
+    let srgb = &colorspace::ColorSpaces::Srgb;
+    let keeper = Rc::new(Keeper { kept: RefCell::new(Vec::new()), read: Cell::new(0) });
+    set_bitmap_renderer(Some(keeper.clone()));
+    let read = ImageBitmap::new(2, 1, ImageBitmapConfig::Argb8888, true, srgb);
+    let kept = ImageBitmap::new(1, 1, ImageBitmapConfig::Argb8888, true, srgb);
+    for b in [&read, &kept] {
+        let mut c = Canvas::from_image(b);
+        c.draw_rect(Rect::new(0.0, 0.0, 1.0, 1.0), &Paint());
+    }
+    assert!(read.version() == 2 && !read.pixels_current() && keeper.read.get() == 0);
+    assert!(read.pixels()[..8] == [255, 0, 0, 255, 255, 0, 0, 255] && read.version() == 2 && read.pixels_current());
+    assert_eq!(read.to_pixel_map().get(1, 0), Color::Red);
+    assert_eq!(keeper.read.get(), 1);
+    // Set again: not gone, nothing read back.
+    set_bitmap_renderer(Some(keeper.clone()));
+    assert!(keeper.read.get() == 1 && !kept.pixels_current());
+    set_bitmap_renderer(None);
+    assert!(keeper.read.get() == 2 && kept.pixels_current() && kept.pixels()[..4] == [255, 0, 0, 255]);
+    // With no renderer, what the CPU copy holds.
+    kept.drawn_on_renderer();
+    assert!(kept.pixels()[..4] == [255, 0, 0, 255] && !kept.pixels_current() && keeper.read.get() == 2);
+}
+
 fn bitmaps_are_drawn_into_by_canvases() {
     // C++'s bitmaps_are_composes, its drawing half (bitmaps themselves are kompoz-graphics', the display list's
     // damage the display list's): drawn into, kept while there is no renderer, drawn by one as it comes; by one there,
@@ -2872,6 +2922,7 @@ tests!(
     vector_paths_trim_and_vectors_come_from_composable_content,
     render_vector_group_draws_a_tree_through_configs,
     bitmaps_are_drawn_into_by_canvases,
+    bitmaps_a_renderer_keeps_are_read_back,
     a_picture_replays_what_was_drawn_into_it,
     a_cache_reads_and_records_what_it_builds,
     drawn_texts_are_the_texts_drawn,

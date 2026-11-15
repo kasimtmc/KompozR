@@ -41,8 +41,8 @@ use crate::graphics_context::{
 };
 use kompoz_graphics::{
     BlendMode, Brush, BrushKind, Color, ColorFilter, DefaultFilterQuality, Density, FilterQuality, ImageBitmap,
-    LayoutDirection, Matrix, Offset, Outline, Path, PathStroke, Rect, RenderEffect, Shader, ShaderKind, Shape, Size,
-    StrokeCap, StrokeJoin, Vertices,
+    LayoutDirection, Matrix, Offset, Outline, Path, PathStroke, Projective, Rect, RenderEffect, Shader, ShaderKind,
+    Shape, Size, StrokeCap, StrokeJoin, Vertices,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -197,114 +197,40 @@ fn images_in(brush: &Brush, area: Rect) -> u64 {
     }
 }
 
-/// Maps points of what is drawn inside transforms and layers to the screen: (x, y, 1) to (x', y', w), row by row,
-/// the point x' / w, y' / w.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Projective {
-    pub m: [f32; 9],
-}
-
-impl Default for Projective {
-    fn default() -> Projective {
-        Projective::Identity
+/// A layer's compositing (as backends do it): scaled and rotated around its origin, then moved.
+fn layer_projective(bounds: Rect, t: &LayerTransform) -> Projective {
+    if t.is_identity() {
+        return Projective::Identity;
+    }
+    let px = bounds.left + bounds.width() * t.origin.x;
+    let py = bounds.top + bounds.height() * t.origin.y;
+    let rad = t.rotation_z * std::f32::consts::PI / 180.0;
+    let (sn, cs) = rad.sin_cos();
+    let (a, b, c, d) = (t.scale_x * cs, t.scale_x * sn, -t.scale_y * sn, t.scale_y * cs);
+    Projective {
+        m: [
+            a,
+            c,
+            px + t.translation_x - (a * px + c * py),
+            b,
+            d,
+            py + t.translation_y - (b * px + d * py),
+            0.0,
+            0.0,
+            1.0,
+        ],
     }
 }
 
-impl Projective {
-    pub const Identity: Projective = Projective { m: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] };
+/// Whether `m` is `o` but for where it takes things (a translation's difference), in the plane.
+fn same_but_translation(m: &Projective, o: &Projective) -> bool {
+    let (m, n) = (&m.m, &o.m);
+    m[6] == 0.0 && m[7] == 0.0 && m[8] != 0.0 && [0, 1, 3, 4, 6, 7, 8].iter().all(|&i| m[i] == n[i])
+}
 
-    /// The bounding box of the mapped rect; if part of it is behind the eye, all of the plane.
-    pub fn map(&self, r: Rect) -> Rect {
-        let m = &self.m;
-        if m[6] == 0.0 && m[7] == 0.0 && m[1] == 0.0 && m[3] == 0.0 && m[8] != 0.0 {
-            // only scaled and moved: no need for the corners
-            let (x0, x1) = ((m[0] * r.left + m[2]) / m[8], (m[0] * r.right + m[2]) / m[8]);
-            let (y0, y1) = ((m[4] * r.top + m[5]) / m[8], (m[4] * r.bottom + m[5]) / m[8]);
-            return Rect::new(x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1));
-        }
-        let affine = m[6] == 0.0 && m[7] == 0.0; // (w the same everywhere: in front whatever its sign)
-        let (mut l, mut t, mut rr, mut bb) = (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
-        for c in 0..4 {
-            let x = if c & 1 != 0 { r.right } else { r.left };
-            let y = if c & 2 != 0 { r.bottom } else { r.top };
-            let w = m[6] * x + m[7] * y + m[8];
-            let in_front = if affine { w != 0.0 } else { w > 0.0 }; // (NaN: not)
-            if !in_front {
-                return Rect::new(-1e30, -1e30, 1e30, 1e30); // behind the eye
-            }
-            let (px, py) = ((m[0] * x + m[1] * y + m[2]) / w, (m[3] * x + m[4] * y + m[5]) / w);
-            (l, t, rr, bb) = (l.min(px), t.min(py), rr.max(px), bb.max(py));
-        }
-        Rect::new(l, t, rr, bb)
-    }
-
-    /// `a` after `b`.
-    fn compose(a: &Projective, b: &Projective) -> Projective {
-        let mut out = Projective { m: [0.0; 9] };
-        for r in 0..3 {
-            for c in 0..3 {
-                out.m[r * 3 + c] = a.m[r * 3] * b.m[c] + a.m[r * 3 + 1] * b.m[3 + c] + a.m[r * 3 + 2] * b.m[6 + c];
-            }
-        }
-        out
-    }
-
-    fn translation(by: Offset) -> Projective {
-        Projective { m: [1.0, 0.0, by.x, 0.0, 1.0, by.y, 0.0, 0.0, 1.0] }
-    }
-
-    /// A layer's compositing (as backends do it): scaled and rotated around its origin, then moved.
-    fn layer(bounds: Rect, t: &LayerTransform) -> Projective {
-        if t.is_identity() {
-            return Projective::Identity;
-        }
-        let px = bounds.left + bounds.width() * t.origin.x;
-        let py = bounds.top + bounds.height() * t.origin.y;
-        let rad = t.rotation_z * std::f32::consts::PI / 180.0;
-        let (sn, cs) = rad.sin_cos();
-        let (a, b, c, d) = (t.scale_x * cs, t.scale_x * sn, -t.scale_y * sn, t.scale_y * cs);
-        Projective {
-            m: [
-                a,
-                c,
-                px + t.translation_x - (a * px + c * py),
-                b,
-                d,
-                py + t.translation_y - (b * px + d * py),
-                0.0,
-                0.0,
-                1.0,
-            ],
-        }
-    }
-
-    /// A Matrix's plane part (as backends draw through it).
-    fn plane(t: &Matrix) -> Projective {
-        let v = &t.values;
-        Projective {
-            m: [
-                v[Matrix::ScaleX],
-                v[Matrix::SkewX],
-                v[Matrix::TranslateX],
-                v[Matrix::SkewY],
-                v[Matrix::ScaleY],
-                v[Matrix::TranslateY],
-                v[Matrix::Perspective0],
-                v[Matrix::Perspective1],
-                v[Matrix::Perspective2],
-            ],
-        }
-    }
-
-    /// The same but for where it takes things (a translation's difference), in the plane.
-    fn same_but_translation(&self, o: &Projective) -> bool {
-        let (m, n) = (&self.m, &o.m);
-        m[6] == 0.0 && m[7] == 0.0 && m[8] != 0.0 && [0, 1, 3, 4, 6, 7, 8].iter().all(|&i| m[i] == n[i])
-    }
-
-    fn square_to_screen(&self) -> bool {
-        self.m[1] == 0.0 && self.m[3] == 0.0 && self.m[6] == 0.0 && self.m[7] == 0.0 && self.m[8] == 1.0
-    }
+/// Whether `m` only moves things (and scales them) onto the screen's pixels: a rect stays one there.
+fn square_to_screen(m: &Projective) -> bool {
+    m.axis_aligned() && m.m[8] == 1.0
 }
 
 // ---- Commands --------------------------------------------------------------------------------------------------
@@ -925,7 +851,7 @@ impl DisplayList {
         let s = self.state();
         let reach = local.inflate(pad);
         // Two pixels more: anti-aliased edges, and backends snapping to whole pixels.
-        let area = intersect(s.m.map(reach).inflate(2.0), s.clip);
+        let area = intersect(s.m.map_rect(reach).inflate(2.0), s.clip);
         if empty(area) && !self.shows(reach) {
             // Clipped away: it changes no pixel (kept in a layer if it shows there at rest). (A shadow's reach is
             // from the light, not moved with its node.)
@@ -943,8 +869,8 @@ impl DisplayList {
     /// What reaches `reach` (px where drawn) shows on the screen, now or at rest (`draw()`'s test).
     fn shows(&self, reach: Rect) -> bool {
         let s = self.state();
-        !empty(intersect(s.m.map(reach).inflate(2.0), s.clip))
-            || !empty(intersect(s.rest_m.map(reach).inflate(2.0), s.rest_clip))
+        !empty(intersect(s.m.map_rect(reach).inflate(2.0), s.clip))
+            || !empty(intersect(s.rest_m.map_rect(reach).inflate(2.0), s.rest_clip))
     }
 
     /// Records text (any kind of it) whose glyphs may reach `blur` further: what it touches is its glyphs' ink
@@ -1245,7 +1171,7 @@ impl DisplayList {
             )
         };
         let square_clip =
-            |c: &Command| c.kind == Kind::PushClip && c.clip == ClipKind::Rect && !c.flag && c.m.square_to_screen();
+            |c: &Command| c.kind == Kind::PushClip && c.clip == ClipKind::Rect && !c.flag && square_to_screen(&c.m);
         // The innermost rect clip that stayed around command `i` (in this frame's commands, or the last frame's),
         // with only pushes that change pixels in place between.
         let clip_of = |commands: &[Command], moving: &[u32], i: u32| {
@@ -1342,12 +1268,12 @@ impl DisplayList {
             }
             g.by = Offset::new(g.by.x.round(), g.by.y.round());
             let clip = &self.recording[g.clip as usize];
-            let mut c = intersect(clip.m.map(clip.rect), screen);
+            let mut c = intersect(clip.m.map_rect(clip.rect), screen);
             let mut q = clip.parent;
             while q != NONE && g.ok {
                 let qc = &self.recording[q as usize];
                 if square_clip(qc) {
-                    c = intersect(c, qc.m.map(qc.rect));
+                    c = intersect(c, qc.m.map_rect(qc.rect));
                 } else if !in_place(qc) {
                     g.ok = false; // (a layer's texture, a clip of another shape)
                 }
@@ -1815,8 +1741,8 @@ fn cover_before(commands: &[Command], limit: usize, area: Rect, screen: Size) ->
         let mut hides = open.last().is_some_and(|o| o.hides);
         match c.kind {
             Kind::PushClip => {
-                if c.clip == ClipKind::Rect && !c.flag && c.m.square_to_screen() {
-                    clip = intersect(clip, c.m.map(c.rect));
+                if c.clip == ClipKind::Rect && !c.flag && square_to_screen(&c.m) {
+                    clip = intersect(clip, c.m.map_rect(c.rect));
                 } else {
                     hides = true;
                 }
@@ -1830,10 +1756,10 @@ fn cover_before(commands: &[Command], limit: usize, area: Rect, screen: Size) ->
             Kind::FillRoundRect => {
                 let r = c.radii;
                 let square = r.top_left <= 0.0 && r.top_right <= 0.0 && r.bottom_right <= 0.0 && r.bottom_left <= 0.0;
-                if hides || !square || c.color.alpha() < 1.0 || !c.m.square_to_screen() {
+                if hides || !square || c.color.alpha() < 1.0 || !square_to_screen(&c.m) {
                     continue;
                 }
-                if contains(intersect(c.m.map(c.rect), clip), need) {
+                if contains(intersect(c.m.map_rect(c.rect), clip), need) {
                     cover = Some(i);
                 }
             }
@@ -2029,12 +1955,12 @@ impl GraphicsContext for DisplayList {
 
     fn push_layer(&mut self, bounds: Rect, radii: CornerRadii, alpha: f32, transform: LayerTransform) {
         let s = self.state();
-        let m = Projective::compose(&s.m, &Projective::layer(bounds, &transform));
+        let m = s.m * layer_projective(bounds, &transform);
         // Its texture is whole pixels around the bounds, composited with an anti-aliased edge.
-        let area = intersect(m.map(bounds.inflate(1.0)).inflate(2.0), s.clip);
+        let area = intersect(m.map_rect(bounds.inflate(1.0)).inflate(2.0), s.clip);
         let c = self.add(Kind::PushLayer);
         (c.rect, c.radii, c.f2, c.transform, c.bounds) = (bounds, radii, alpha, transform, area);
-        let rest_clip = intersect(s.rest_m.map(bounds.inflate(1.0)).inflate(2.0), s.rest_clip);
+        let rest_clip = intersect(s.rest_m.map_rect(bounds.inflate(1.0)).inflate(2.0), s.rest_clip);
         self.push_state(m, s.rest_m, area, rest_clip);
     }
 
@@ -2044,10 +1970,10 @@ impl GraphicsContext for DisplayList {
 
     fn push_clip(&mut self, rect: Rect) {
         let s = self.state();
-        let area = intersect(s.m.map(rect).inflate(1.0), s.clip); // backends round it to pixels
+        let area = intersect(s.m.map_rect(rect).inflate(1.0), s.clip); // backends round it to pixels
         let c = self.add(Kind::PushClip);
         (c.rect, c.bounds) = (rect, area);
-        let rest_clip = intersect(s.rest_m.map(rect).inflate(1.0), s.rest_clip);
+        let rest_clip = intersect(s.rest_m.map_rect(rect).inflate(1.0), s.rest_clip);
         self.push_state(s.m, s.rest_m, area, rest_clip);
     }
 
@@ -2055,8 +1981,8 @@ impl GraphicsContext for DisplayList {
         let s = self.state();
         // Inside: where the rect is; outside: anywhere the clips around it leave.
         let inside = op == ClipOp::Intersect;
-        let area = if inside { intersect(s.m.map(rect).inflate(1.0), s.clip) } else { s.clip };
-        let rest = if inside { intersect(s.rest_m.map(rect).inflate(1.0), s.rest_clip) } else { s.rest_clip };
+        let area = if inside { intersect(s.m.map_rect(rect).inflate(1.0), s.clip) } else { s.clip };
+        let rest = if inside { intersect(s.rest_m.map_rect(rect).inflate(1.0), s.rest_clip) } else { s.rest_clip };
         let c = self.add(Kind::PushClip);
         (c.rect, c.radii, c.clip, c.flag, c.bounds) = (rect, radii, ClipKind::RoundRect, !inside, area);
         self.push_state(s.m, s.rest_m, area, rest);
@@ -2066,8 +1992,8 @@ impl GraphicsContext for DisplayList {
         let s = self.state();
         let b = path.get_bounds().translate(origin);
         let inside = op == ClipOp::Intersect;
-        let area = if inside { intersect(s.m.map(b).inflate(1.0), s.clip) } else { s.clip };
-        let rest = if inside { intersect(s.rest_m.map(b).inflate(1.0), s.rest_clip) } else { s.rest_clip };
+        let area = if inside { intersect(s.m.map_rect(b).inflate(1.0), s.clip) } else { s.clip };
+        let rest = if inside { intersect(s.rest_m.map_rect(b).inflate(1.0), s.rest_clip) } else { s.rest_clip };
         let c = self.add(Kind::PushClip);
         (c.p1, c.clip, c.flag, c.bounds) = (origin, ClipKind::Path, !inside, area);
         c.path = Some(path.clone());
@@ -2080,10 +2006,10 @@ impl GraphicsContext for DisplayList {
 
     fn push_translation(&mut self, by: Offset) {
         let s = self.state();
-        let shift = Projective::translation(by);
+        let shift = Projective::translation(by.x, by.y);
         let c = self.add(Kind::PushTranslation);
         (c.p1, c.bounds) = (by, s.clip); // (what anything inside can touch: replay skips it when that's outside the area)
-        let (m, rest_m) = (Projective::compose(&s.m, &shift), Projective::compose(&s.rest_m, &shift));
+        let (m, rest_m) = (s.m * shift, s.rest_m * shift);
         self.push_state(m, rest_m, s.clip, s.rest_clip);
     }
 
@@ -2093,10 +2019,10 @@ impl GraphicsContext for DisplayList {
 
     fn push_transform(&mut self, matrix: &Matrix) {
         let s = self.state();
-        let plane = Projective::plane(matrix);
+        let plane = Projective::of(matrix);
         let c = self.add(Kind::PushTransform);
         (c.matrix, c.bounds) = (*matrix, s.clip); // (what anything inside can touch: replay skips it when that's outside the area)
-        let (m, rest_m) = (Projective::compose(&s.m, &plane), Projective::compose(&s.rest_m, &plane));
+        let (m, rest_m) = (s.m * plane, s.rest_m * plane);
         self.push_state(m, rest_m, s.clip, s.rest_clip);
     }
 
@@ -2112,9 +2038,9 @@ impl GraphicsContext for DisplayList {
         // It shows where the effect takes what it draws. That is all of what it draws within its bounds, off the
         // screen too (a blur brings it in): pop_layer() makes each of those commands' area its own, as a change to
         // any of them changes all of it.
-        c.bounds = intersect(s.m.map(effect.output_bounds(bounds)).inflate(2.0), s.clip);
-        let clip = s.m.map(bounds.inflate(1.0)).inflate(2.0);
-        let rest_clip = s.rest_m.map(bounds.inflate(1.0)).inflate(2.0);
+        c.bounds = intersect(s.m.map_rect(effect.output_bounds(bounds)).inflate(2.0), s.clip);
+        let clip = s.m.map_rect(bounds.inflate(1.0)).inflate(2.0);
+        let rest_clip = s.rest_m.map_rect(bounds.inflate(1.0)).inflate(2.0);
         self.push_state(s.m, s.rest_m, clip, rest_clip);
     }
 
@@ -2123,7 +2049,7 @@ impl GraphicsContext for DisplayList {
     /// be drawn anew before it is read.
     fn draw_backdrop(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         let reads = effect.output_bounds(bounds);
-        let on_screen = self.state().m.map(reads).inflate(2.0);
+        let on_screen = self.state().m.map_rect(reads).inflate(2.0);
         if let Some(c) = self.draw(Kind::Backdrop, effect.output_bounds(reads), 0.0) {
             (c.rect, c.f2, c.rect2) = (bounds, alpha, on_screen);
             c.effect = Some(effect.clone());
@@ -2156,8 +2082,8 @@ impl GraphicsContext for DisplayList {
 
     fn quick_reject(&self, rect: Rect) -> bool {
         let s = self.state();
-        let rejected = empty(intersect(s.m.map(rect).inflate(1.0), s.clip))
-            && empty(intersect(s.rest_m.map(rect).inflate(1.0), s.rest_clip));
+        let rejected = empty(intersect(s.m.map_rect(rect).inflate(1.0), s.clip))
+            && empty(intersect(s.rest_m.map_rect(rect).inflate(1.0), s.rest_clip));
         if self.keep_nodes {
             self.event(if rejected { EventKind::Rejected(rect) } else { EventKind::Accepted(rect) });
         }
@@ -2385,8 +2311,8 @@ impl GraphicsContext for DisplayList {
             let entry = r.entry;
             if entry.clip == s.clip
                 && entry.rest_clip == s.rest_clip
-                && s.m.same_but_translation(&entry.m)
-                && s.rest_m.same_but_translation(&entry.rest_m)
+                && same_but_translation(&s.m, &entry.m)
+                && same_but_translation(&s.rest_m, &entry.rest_m)
                 && let Some(at) = r.origin
                 && self.keep(last, origin - at, entry.m == s.m && entry.rest_m == s.rest_m)
             {

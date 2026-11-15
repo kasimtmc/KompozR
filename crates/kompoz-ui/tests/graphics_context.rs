@@ -786,6 +786,32 @@ fn elevation_shadow_reach() {
     assert_eq!(above, RECT.inflate(151.0));
 }
 
+fn shadow_defaults_are_callable() {
+    // What a backend that draws shadows its own way calls where it can't (C++'s GraphicsContext::drawShadowPath and
+    // drawElevationShadow called from its overrides): what the provided methods draw.
+    let path = corner_path();
+    let origin = Offset::new(10.0, 10.0);
+    let shadow = Shadow::new(Color::new(1.0, 0.0, 0.0, 0.5), Offset::new(3.0, 4.0), 6.0, 2.0);
+    for inner in [false, true] {
+        let mut provided = Recorder::default();
+        provided.draw_shadow_path(&path, origin, &shadow, inner);
+        let mut called = Recorder::default();
+        default_draw_shadow_path(&mut called, &path, origin, &shadow, inner);
+        assert!(!called.calls.is_empty() && provided.calls == called.calls);
+    }
+    let light = ShadowLight { center: Offset::new(100.0, -200.0), ..ShadowLight::default() };
+    for outline in [
+        Outline::Rectangle(Rect::new(0.0, 0.0, 100.0, 50.0)),
+        Outline::Generic(triangle_path(100.0, 50.0, Offset::Zero)),
+    ] {
+        let mut provided = Hooked { light, ..Hooked::default() };
+        provided.draw_elevation_shadow(&outline, origin, &ElevationShadow::flat(8.0));
+        let mut called = Hooked { light, ..Hooked::default() };
+        default_draw_elevation_shadow(&mut called, &outline, origin, &ElevationShadow::flat(8.0));
+        assert!(called.calls.len() == 2 && provided.calls == called.calls);
+    }
+}
+
 // ---- The rest of the provided methods ----------------------------------------------------------------------------
 
 fn draw_image_mask_default() {
@@ -925,6 +951,7 @@ tests!(
     draw_shape_shadow_with_a_gradient,
     draw_elevation_shadow_ambient_and_spot,
     elevation_shadow_reach,
+    shadow_defaults_are_callable,
     draw_image_mask_default,
     draw_text_defaults,
     bare_defaults,
