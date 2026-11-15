@@ -82,6 +82,7 @@ pub(crate) fn kinds_of(node: &mut dyn ModifierNode) -> u32 {
     k |= bit(node.as_soft_keyboard_interception().is_some(), NodeKind::SoftKeyboardKeyInput);
     k |= bit(node.as_traversable().is_some(), NodeKind::Traversable);
     k |= bit(node.as_bring_into_view().is_some(), NodeKind::BringIntoView);
+    k |= bit(node.as_beyond_bounds_layout().is_some(), NodeKind::BeyondBoundsLayout);
     k |= bit(node.as_indirect_pointer_input().is_some(), NodeKind::IndirectPointerInput);
     k |= bit(node.as_observer().is_some(), NodeKind::Observer);
     k
@@ -285,6 +286,11 @@ impl NodeCx {
     /// Whether the node is attached (in a layout that is in a host).
     pub fn is_attached(&self) -> bool {
         self.cell.meta.attached.get()
+    }
+
+    /// Whether `other` is the context of the same node.
+    pub fn is_same_node(&self, other: &NodeCx) -> bool {
+        Rc::ptr_eq(&self.cell, &other.cell)
     }
 
     /// The layout node it is in.

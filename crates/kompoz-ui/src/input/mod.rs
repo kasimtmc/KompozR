@@ -11,11 +11,16 @@
 //! [`VelocityTracker`] and nested scrolling ([`Modifier::nested_scroll`]) are here too; the gesture detectors are
 //! foundation's.
 //!
-//! Keys: the capability traits nodes declare; their dispatch is the focus package's.
+//! Keys: [`Key`]s and [`KeyEvent`]s, and the nodes that take them along the focused path ([`Modifier::on_key_event`],
+//! [`Modifier::on_preview_key_event`], the soft keyboard interception and rotary nodes); the focus owner sends
+//! them (previews down, events up), and what none takes does the host's default (Tab and arrows move the focus,
+//! Escape and Back go back).
 
 mod hit_path;
 mod hit_test;
 mod hover_icon;
+mod key;
+mod key_input;
 mod nested_scroll;
 mod on_pointer_event;
 mod pointer;
@@ -25,6 +30,12 @@ mod velocity;
 
 pub use hit_test::{DpTouchBoundsExpansion, TouchBoundsExpansion};
 pub use hover_icon::{HoverIconModifierNode, PointerIconService};
+pub use key::{Key, KeyEvent, KeyEventType, KeyModifiers};
+pub(crate) use key_input::key_handlers;
+pub use key_input::{
+    InterceptedKeyInputNode, KeyHandler, KeyInputModifierNode, KeyInputNode, RotaryInputModifierNode, RotaryInputNode,
+    RotaryScrollEvent, SoftKeyboardInterceptionModifierNode,
+};
 pub use nested_scroll::{
     FlingFuture, NestedScrollConnection, NestedScrollDispatcher, NestedScrollNode, NestedScrollSource,
     nested_scroll_modifier_node,
@@ -85,18 +96,6 @@ pub trait IndirectPointerInputModifierNode {
     /// Its stream of events was cancelled (Compose's `onCancelIndirectPointerInput`).
     fn on_cancel_indirect_pointer_input(&mut self) {}
 }
-
-/// A node that takes key events on the focused path (Compose's KeyInputModifierNode). The input package gives it
-/// `on_key_event` and `on_pre_key_event`.
-pub trait KeyInputModifierNode {}
-
-/// A node that sees a software keyboard's keys before the focused field (Compose's
-/// SoftKeyboardInterceptionModifierNode). The input package gives it its methods.
-pub trait SoftKeyboardInterceptionModifierNode {}
-
-/// A node that takes rotary input (a watch's crown: Compose's RotaryInputModifierNode). The input package gives it
-/// its methods.
-pub trait RotaryInputModifierNode {}
 
 /// An indirect pointer node left its chain: its stream is cancelled (Compose's autoInvalidate of the kind).
 pub(crate) fn on_indirect_pointer_node_removed(node: &NodeRc) {
@@ -175,28 +174,6 @@ pub(crate) fn when_node_released(f: impl FnOnce() + 'static) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Keys
-
-/// A key (Compose's Key): its key code. The input package names the keys.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Key(pub u64);
-
-/// The modifier keys held (Compose's keyboard modifiers), as bits.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct KeyModifiers(pub u32);
-
-impl KeyModifiers {
-    pub const None: KeyModifiers = KeyModifiers(0);
-    pub const Shift: KeyModifiers = KeyModifiers(1);
-    pub const Ctrl: KeyModifiers = KeyModifiers(1 << 1);
-    pub const Alt: KeyModifiers = KeyModifiers(1 << 2);
-    pub const Meta: KeyModifiers = KeyModifiers(1 << 3);
-    pub fn contains(self, other: KeyModifiers) -> bool {
-        self.0 & other.0 == other.0
-    }
-}
-
-// ---------------------------------------------------------------------------------------------------------------
 // The host's input state
 
 /// A finger (or stylus) down, as the host knows it.
@@ -225,6 +202,9 @@ pub struct InputState {
     mouse: RefCell<Option<MouseState>>,
     next_id: Cell<i64>,
     keyboard_modifiers: Cell<KeyModifiers>,
+    /// The host ids of the pointers whose press only dismissed a popup: what they do until they lift goes
+    /// nowhere.
+    swallowed: RefCell<Vec<i64>>,
 }
 
 impl Default for InputState {
@@ -235,6 +215,7 @@ impl Default for InputState {
             mouse: RefCell::new(None),
             next_id: Cell::new(0),
             keyboard_modifiers: Cell::new(KeyModifiers::None),
+            swallowed: RefCell::new(Vec::new()),
         }
     }
 }
@@ -345,10 +326,17 @@ fn data(
     }
 }
 
-/// The roots to hit test, topmost first: the overlays (popups, dialogs) placed, then the main tree.
+/// The roots to hit test, topmost first: the overlays (popups, dialogs) placed, then the main tree; below a
+/// focusable popup or a dialog nothing (it is modal: what it doesn't take goes nowhere).
 fn roots(host: &KompozHost) -> Vec<Rc<LayoutNode>> {
-    let mut roots: Vec<Rc<LayoutNode>> =
-        host.overlays.borrow().roots().into_iter().filter(|n| n.is_placed()).rev().collect();
+    let mut roots = Vec::new();
+    for root in host.overlays.roots().into_iter().filter(|n| n.is_placed()).rev() {
+        let modal = root.is_modal_popup_root();
+        roots.push(root);
+        if modal {
+            return roots;
+        }
+    }
     roots.push(host.root().clone());
     roots
 }
@@ -373,6 +361,22 @@ pub(crate) fn pointer_down(
     if pointer_type == PointerType::Mouse {
         return mouse_button(host, position, time_nanos, PointerButton::Primary, true, Some(pointer_id));
     }
+    {
+        // (a finger joining a press that only dismissed a popup goes nowhere too)
+        let state = host.input.borrow();
+        let mut swallowed = state.swallowed.borrow_mut();
+        if swallowed.iter().any(|p| *p != i64::MIN) {
+            if !swallowed.contains(&pointer_id) {
+                swallowed.push(pointer_id);
+            }
+            return false;
+        }
+    }
+    let first = host.input.borrow().touches.borrow().is_empty();
+    if first && crate::window::press_outside_popup(host, position) {
+        host.input.borrow().swallowed.borrow_mut().push(pointer_id);
+        return true;
+    }
     // A finger hovers nothing: what the mouse hovered ends.
     let hovering = host.input.borrow().mouse.borrow().filter(|m| !m.buttons.are_any_pressed());
     if hovering.is_some() {
@@ -392,6 +396,9 @@ pub(crate) fn pointer_down(
 
 /// A pointer moved: a finger down, else the mouse (hovering, or pressed).
 pub(crate) fn pointer_move(host: &KompozHost, position: Offset, time_nanos: i64, pointer_id: i64) -> bool {
+    if host.input.borrow().swallowed.borrow().contains(&pointer_id) {
+        return false;
+    }
     let event = {
         let state = host.input.borrow();
         let is_touch = {
@@ -437,6 +444,14 @@ pub(crate) fn pointer_moves(host: &KompozHost, moves: &[(i64, Offset)], time_nan
 
 /// A pointer went up: a finger, else the mouse's primary button (or the first one pressed).
 pub(crate) fn pointer_up(host: &KompozHost, position: Offset, time_nanos: i64, pointer_id: i64) -> bool {
+    {
+        let state = host.input.borrow();
+        let mut swallowed = state.swallowed.borrow_mut();
+        if let Some(i) = swallowed.iter().position(|p| *p == pointer_id) {
+            swallowed.remove(i);
+            return false;
+        }
+    }
     let event = {
         let state = host.input.borrow();
         let is_touch = {
@@ -479,6 +494,31 @@ pub(crate) fn mouse_button(
     pressed: bool,
     pointer_id: Option<i64>,
 ) -> bool {
+    const MOUSE: i64 = i64::MIN;
+    {
+        let state = host.input.borrow();
+        let mut swallowed = state.swallowed.borrow_mut();
+        if swallowed.contains(&MOUSE) {
+            state.mouse_at(pointer_id, position);
+            let mut mouse = state.mouse.borrow_mut();
+            let m = mouse.as_mut().expect("the mouse is over the window");
+            m.buttons = m.buttons.with(button, pressed);
+            if !m.buttons.are_any_pressed() {
+                swallowed.retain(|p| *p != MOUSE);
+            }
+            return false;
+        }
+    }
+    let first_press = pressed && !host.input.borrow().mouse_buttons().are_any_pressed();
+    if first_press && crate::window::press_outside_popup(host, position) {
+        let state = host.input.borrow();
+        state.mouse_at(pointer_id, position);
+        let mut mouse = state.mouse.borrow_mut();
+        let m = mouse.as_mut().expect("the mouse is over the window");
+        m.buttons = m.buttons.with(button, true);
+        state.swallowed.borrow_mut().push(MOUSE);
+        return true;
+    }
     let event = {
         let state = host.input.borrow();
         state.mouse_at(pointer_id, position);
@@ -494,7 +534,23 @@ pub(crate) fn mouse_button(
         e.button = Some(button);
         e
     };
-    process(host, event, true).dispatched_to_a_pointer_input_modifier
+    let dispatched = process(host, event, true).dispatched_to_a_pointer_input_modifier;
+    if first_press {
+        clear_focus_pressed_outside(host, position);
+    }
+    dispatched
+}
+
+/// A mouse press outside the focused node clears the focus, after the press is handled (so it can move the focus
+/// elsewhere first: Compose's cursor-based AutoClearFocusBehavior).
+fn clear_focus_pressed_outside(host: &KompozHost, position: Offset) {
+    let Some(focused) = host.focus.focused_layout_node() else { return };
+    if !focused.is_attached() || !focused.is_placed() {
+        return;
+    }
+    if !focused.coordinates().bounds_in_root().contains(position) {
+        host.focus.clear_focus(false);
+    }
 }
 
 /// The gesture under way was cancelled (the platform took it): every node on a hit path is told.
@@ -502,6 +558,7 @@ pub(crate) fn pointer_cancel(host: &KompozHost) {
     let processor = {
         let state = host.input.borrow();
         state.touches.borrow_mut().clear();
+        state.swallowed.borrow_mut().clear();
         if let Some(m) = state.mouse.borrow_mut().as_mut() {
             m.buttons = PointerButtons::None;
         }
@@ -544,15 +601,31 @@ pub(crate) fn scroll(host: &KompozHost, position: Offset, delta: Offset) -> bool
     process(host, event, true).any_change_consumed
 }
 
-/// A key went down; the focus package dispatches it along the focused path. The modifiers held are what pointer
-/// events carry.
-pub(crate) fn key_down(host: &KompozHost, _key: Key, modifiers: KeyModifiers) -> bool {
-    host.input.borrow().keyboard_modifiers.set(modifiers);
+/// A key event (Compose's AndroidComposeView `dispatchKeyEventPreIme` then `dispatchKeyEvent`): the soft
+/// keyboard interception nodes first, then the key nodes along the focused path (previews down, events up); one
+/// none took that is Escape or Back going down goes back (the platform's back). The modifiers held are what pointer
+/// events and the window info carry; a key down puts the UI in keyboard mode. Whether it was taken.
+pub(crate) fn key_event(host: &KompozHost, event: KeyEvent) -> bool {
+    host.input.borrow().keyboard_modifiers.set(event.modifiers);
+    host.window_info_keyboard_modifiers(event.modifiers);
+    if event.r#type == KeyEventType::KeyDown {
+        host.request_keyboard_mode();
+    }
+    let focus = host.focus.clone();
+    if focus.dispatch_intercepted_soft_keyboard_event(&event) {
+        return true;
+    }
+    if focus.dispatch_key_event(&event, &mut || false) {
+        return true;
+    }
+    if event.r#type == KeyEventType::KeyDown && (event.key == Key::Escape || event.key == Key::Back) {
+        return host.back_pressed();
+    }
     false
 }
 
-/// A key went up.
-pub(crate) fn key_up(host: &KompozHost, _key: Key, modifiers: KeyModifiers) -> bool {
-    host.input.borrow().keyboard_modifiers.set(modifiers);
-    false
+/// A rotary scroll along the focused path; whether a node took it.
+pub(crate) fn rotary_event(host: &KompozHost, event: RotaryScrollEvent) -> bool {
+    let focus = host.focus.clone();
+    focus.dispatch_rotary_event(&event, &mut || false)
 }

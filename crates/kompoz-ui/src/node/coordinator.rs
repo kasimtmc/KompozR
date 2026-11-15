@@ -613,6 +613,15 @@ impl NodeCoordinator {
         self.layout_node().and_then(|n| n.owner()).map_or(Offset::Zero, |o| o.window_offset())
     }
 
+    /// The size of the host's window (its root's size; a popup's coordinates are the window's too).
+    pub(crate) fn window_size(&self) -> kompoz_graphics::IntSize {
+        let root = self.layout_node().and_then(|n| n.owner()).and_then(|o| o.root());
+        match root {
+            Some(r) => r.outer_coordinator().measured_size.get(),
+            None => self.find_root().measured_size.get(),
+        }
+    }
+
     /// The root layout node's outermost coordinator (Compose's `findRootCoordinates`).
     pub(crate) fn find_root(&self) -> Rc<NodeCoordinator> {
         let mut c = self.rc();

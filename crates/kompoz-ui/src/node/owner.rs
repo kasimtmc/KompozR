@@ -71,16 +71,22 @@ pub(crate) struct Owner {
     pub(crate) keep_screen_on: Cell<i32>,
     pub(crate) sensitive_content: Cell<i32>,
     pub(crate) frame_rates: RefCell<Vec<(u64, crate::platform::FrameRate)>>,
-    focus: RefCell<Weak<RefCell<crate::focus::FocusOwner>>>,
+    focus: RefCell<Weak<crate::focus::FocusOwner>>,
+    /// The popup roots in the tree, bottom first (the window package's).
+    pub(crate) popups: RefCell<Vec<Weak<LayoutNode>>>,
+    /// Told of semantics changes (the semantics package's), and the layouts whose semantics changed with what
+    /// they were.
+    pub(crate) semantics_listeners: RefCell<Vec<Rc<dyn crate::semantics::SemanticsListener>>>,
+    pub(crate) semantics_pending: RefCell<Vec<(Weak<LayoutNode>, Option<crate::semantics::SemanticsConfiguration>)>>,
 }
 
 impl Owner {
-    pub(crate) fn set_focus_owner(&self, focus: &Rc<RefCell<crate::focus::FocusOwner>>) {
+    pub(crate) fn set_focus_owner(&self, focus: &Rc<crate::focus::FocusOwner>) {
         *self.focus.borrow_mut() = Rc::downgrade(focus);
     }
 
     /// The host's focus state.
-    pub(crate) fn focus(&self) -> Option<Rc<RefCell<crate::focus::FocusOwner>>> {
+    pub(crate) fn focus(&self) -> Option<Rc<crate::focus::FocusOwner>> {
         self.focus.borrow().upgrade()
     }
 
@@ -106,6 +112,9 @@ impl Owner {
             sensitive_content: Cell::new(0),
             frame_rates: RefCell::new(Vec::new()),
             focus: RefCell::new(Weak::new()),
+            popups: RefCell::new(Vec::new()),
+            semantics_listeners: RefCell::new(Vec::new()),
+            semantics_pending: RefCell::new(Vec::new()),
         })
     }
 
@@ -135,10 +144,19 @@ impl Owner {
         self.window_offset.set(offset);
     }
 
-    pub(crate) fn on_attach(&self, _node: &Rc<LayoutNode>) {}
+    /// A node came into the tree: a popup's root is one of its overlays.
+    pub(crate) fn on_attach(&self, node: &Rc<LayoutNode>) {
+        if node.is_popup_root() {
+            self.register_popup(node);
+        }
+    }
 
     /// A node left the tree: nothing of it is waiting any more (Compose's `onNodeDetached`).
     pub(crate) fn on_detach(&self, node: &LayoutNode) {
+        if node.is_popup_root() {
+            self.unregister_popup(node);
+        }
+        self.semantics_pending.borrow_mut().retain(|(w, _)| !std::ptr::eq(w.as_ptr(), node));
         self.measure_set.borrow_mut().remove(node);
         self.place_set.borrow_mut().remove(node);
         self.on_positioned.borrow_mut().retain(|w| !std::ptr::eq(w.as_ptr(), node));
@@ -195,6 +213,11 @@ impl Owner {
             root.mark_measure_pending();
             self.measure_set.borrow_mut().add(&root);
         }
+    }
+
+    /// The constraints the root is measured with (the window's), once set.
+    pub(crate) fn root_constraints(&self) -> Option<Constraints> {
+        self.root_constraints.get()
     }
 
     /// Whether nodes wait to be measured or placed.
@@ -278,14 +301,23 @@ impl Owner {
         self.during_measure_layout.set(true);
         self.during_full_pass.set(true);
         let mut root_resized = false;
-        loop {
+        'passes: loop {
             let (node, relayout) = {
                 let next = self.measure_set.borrow_mut().pop();
                 match next {
                     Some(n) => (n, false),
-                    None => match self.place_set.borrow_mut().pop() {
+                    None => match { self.place_set.borrow_mut().pop() } {
                         Some(n) => (n, true),
-                        None => break,
+                        None => {
+                            // The main tree laid out: the popups against it, then what that set off.
+                            if self.has_popups() {
+                                self.layout_popups();
+                                if !self.measure_set.borrow().is_empty() || !self.place_set.borrow().is_empty() {
+                                    continue 'passes;
+                                }
+                            }
+                            break;
+                        }
                     },
                 }
             };
@@ -316,7 +348,13 @@ impl Owner {
 
     fn root_constraints_for(&self, node: &Rc<LayoutNode>) -> Option<Constraints> {
         let root = self.root()?;
-        if Rc::ptr_eq(node, &root) { self.root_constraints.get() } else { None }
+        if Rc::ptr_eq(node, &root) {
+            self.root_constraints.get()
+        } else if node.parent().is_none() {
+            self.popup_constraints(node)
+        } else {
+            None
+        }
     }
 
     /// Compose's `doRemeasure`: a size change measures (or places) its parent again.
@@ -350,6 +388,11 @@ impl Owner {
             }
             if node.layout_pending.get() {
                 let is_root = self.root().is_some_and(|r| Rc::ptr_eq(&r, node));
+                if node.is_popup_root() {
+                    // (placed by the popups' pass, against its anchor)
+                    self.drain_postponed();
+                    return size_changed;
+                }
                 let placed_by_placed_parent =
                     is_root || (node.parent().is_some_and(|p| p.is_placed()) && node.is_placed_by_parent.get());
                 if placed_by_placed_parent {

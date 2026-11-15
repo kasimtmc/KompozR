@@ -2,15 +2,17 @@
 //! ComposeScene, C++'s KompozHost). It knows nothing of windows or GPUs: a platform calls `frame` and `draw`, sends
 //! input and the environment, and gets the callbacks only it can serve.
 
-use crate::back::BackDispatcher;
+use crate::back::{BackDispatcher, BackDispatcherRef, BackEventCompat, LocalBackDispatcher};
 use crate::display_list::DisplayList;
-use crate::focus::{FocusManager, FocusOwner};
+use crate::focus::{FocusDirection, FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
-use crate::input::{InputState, Key, KeyModifiers, PointerButton, PointerType};
+use crate::input::{
+    InputState, Key, KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerType, RotaryScrollEvent,
+};
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::node::{LayoutNode, Owner};
 use crate::platform::*;
-use crate::semantics::SemanticsOwner;
+use crate::semantics::{AccessibilityNode, SemanticsAction, SemanticsOwner};
 use crate::unit::Constraints;
 use crate::window::Overlays;
 use kompoz_coroutines::{Dispatcher, LocalDispatcher};
@@ -55,6 +57,17 @@ impl MeasurePolicy for RootMeasurePolicy {
                 p.place_relative_with_layer_block(placeable, IntOffset::Zero, layer.clone(), 0.0);
             }
         })
+    }
+}
+
+/// A frame's time on the display's beat, as Android's Choreographer gives it (C++'s `frameTimeOnBeat`): a whole
+/// number of refresh periods after the last frame's (`last`; none yet: `now`), the nearest to `now`, so what
+/// animates moves by equal steps however late in its period each frame starts; at most half a period from `now`,
+/// never before `last` (frames within half a period of it share its time). No period known: `now`.
+pub fn frame_time_on_beat(last: Option<i64>, now: i64, period: i64) -> i64 {
+    match last {
+        Some(last) if period > 0 => last + ((now - last + period / 2) / period).max(0) * period,
+        _ => now,
     }
 }
 
@@ -115,12 +128,12 @@ pub struct KompozHost {
     generation: Rc<Cell<u64>>,
     /// The input package's state.
     pub input: RefCell<InputState>,
-    /// The focus package's state.
-    pub focus: Rc<RefCell<FocusOwner>>,
-    /// The windows package's overlays.
-    pub overlays: RefCell<Overlays>,
+    /// The focus: the active target, moving and clearing it, key dispatch.
+    pub focus: Rc<FocusOwner>,
+    /// The popups' and dialogs' roots.
+    pub overlays: Overlays,
     /// The back handlers.
-    pub back: RefCell<BackDispatcher>,
+    pub back: Rc<BackDispatcher>,
 }
 
 impl KompozHost {
@@ -130,7 +143,9 @@ impl KompozHost {
         let owner = Owner::new(dispatcher.clone());
         let root = LayoutNode::new();
         root.set_measure_policy(Rc::new(RootMeasurePolicy { layer: Rc::new(|_| {}) }));
-        let focus = Rc::new(RefCell::new(FocusOwner::default()));
+        root.set_modifier(crate::focus::window_root_modifier());
+        let focus = Rc::new(FocusOwner::default());
+        *focus.owner.borrow_mut() = Rc::downgrade(&owner);
         owner.set_focus_owner(&focus);
         owner.set_root(root.clone());
         let environment = mutable_state_of(Environment {
@@ -140,6 +155,7 @@ impl KompozHost {
             insets: SystemInsets::default(),
             view_configuration: ViewConfiguration::default(),
         });
+        let overlays = Overlays { owner: Rc::downgrade(&owner) };
         let host = KompozHost {
             owner,
             root: root.clone(),
@@ -163,9 +179,9 @@ impl KompozHost {
             keep_check_mismatches: RefCell::new(Vec::new()),
             generation: Rc::new(Cell::new(0)),
             input: RefCell::new(InputState::default()),
+            overlays,
             focus,
-            overlays: RefCell::new(Overlays::default()),
-            back: RefCell::new(BackDispatcher::default()),
+            back: Rc::new(BackDispatcher::default()),
         };
         let composition = Composition::new(Some(root as Rc<dyn kompoz_runtime::Node>));
         composition.set_content(host.root_content(Rc::new(move || content.compose())));
@@ -183,6 +199,7 @@ impl KompozHost {
         let platform = self.platform.clone();
         let dispatcher = self.dispatcher.clone();
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
+        let back = BackDispatcherRef(Rc::downgrade(&self.back));
         move || {
             let env = environment.get();
             let content = content.clone();
@@ -200,6 +217,7 @@ impl KompozHost {
                 LocalSoftwareKeyboardController.provides(SoftwareKeyboardController(platform.clone())),
                 LocalPlatform.provides(platform.clone()),
                 LocalFocusManager.provides(focus_manager.clone()),
+                LocalBackDispatcher.provides(Some(back.clone())),
                 LocalDispatcher.provides(Some(dispatcher.clone())),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
@@ -334,6 +352,8 @@ impl KompozHost {
         for pass in 0..4 {
             Snapshot::send_apply_notifications();
             self.owner.snapshot_observer().process_changes();
+            // (focus targets whose properties read what changed, worked out)
+            self.focus.process_invalidations();
             if self.handle.invalid.swap(false, Ordering::AcqRel) {
                 self.generation.set(self.generation.get() + 1);
                 composition.invalidate_all();
@@ -345,6 +365,8 @@ impl KompozHost {
             let recomposed = composition.recompose(time_nanos);
             if recomposed {
                 self.owner.run_end_apply_listeners();
+                // (the focus nodes the composition changed, worked out: Compose's FocusInvalidationManager)
+                self.focus.process_invalidations();
                 // (what the composition's own snapshot changed reaches the layout's readers too)
                 self.owner.snapshot_observer().process_changes();
             }
@@ -356,8 +378,8 @@ impl KompozHost {
             }
             self.owner.measure_and_layout();
             self.owner.dispatch_on_positioned_callbacks();
-            self.overlays.borrow_mut().prune();
-            self.focus.borrow_mut().prune();
+            self.focus.process_invalidations();
+            self.focus.prune();
             if global_snapshot_changed() || self.owner.snapshot_observer().has_pending() {
                 continue;
             }
@@ -367,6 +389,7 @@ impl KompozHost {
             }
             break;
         }
+        self.owner.dispatch_semantics_changes();
         let redraw = self.owner.take_needs_draw();
         if self.keep_check.get() {
             self.check_kept();
@@ -388,7 +411,7 @@ impl KompozHost {
         let mut nodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut stack = vec![self.root.clone()];
-        stack.extend(self.overlays.borrow().roots());
+        stack.extend(self.overlays.roots());
         while let Some(n) = stack.pop() {
             if seen.insert(n.id()) {
                 stack.extend(n.children());
@@ -419,7 +442,7 @@ impl KompozHost {
     /// Draws the tree, then the overlays, into `canvas`.
     pub fn draw(&self, canvas: &mut dyn GraphicsContext) {
         self.root.draw(canvas);
-        self.overlays.borrow().draw(canvas);
+        self.overlays.draw(canvas);
     }
 
     /// Whether the next frame has work: states changed and not yet seen, scopes or layouts waiting, coroutines
@@ -433,6 +456,7 @@ impl KompozHost {
             || self.owner.has_pending_measure_or_layout()
             || self.dispatcher.has_ready()
             || self.dispatcher.has_frame_waiters()
+            || self.focus.has_pending_invalidation()
             || !self.handle.posted.lock().is_empty()
             || self.handle.invalid.load(Ordering::Acquire)
     }
@@ -497,18 +521,110 @@ impl KompozHost {
         crate::input::scroll(self, position, delta)
     }
 
-    /// A key went down; whether a node (or the focus) used it.
+    /// A key went down (its character the one it types on a US keyboard); whether a node, the focus or back
+    /// took it.
     pub fn key_down(&self, key: Key, modifiers: KeyModifiers) -> bool {
-        crate::input::key_down(self, key, modifiers)
+        self.send_key_event(KeyEvent::new(key, KeyEventType::KeyDown, modifiers))
     }
 
     pub fn key_up(&self, key: Key, modifiers: KeyModifiers) -> bool {
-        crate::input::key_up(self, key, modifiers)
+        self.send_key_event(KeyEvent::new(key, KeyEventType::KeyUp, modifiers))
     }
 
-    /// Back pressed (or a back gesture done): the most recent enabled back handler; false if none took it.
+    /// A key event (with the platform's character): along the focused path (previews down, events up), then the
+    /// default (the root's: Tab and arrows move the focus; Escape and Back go back). Whether it was taken.
+    pub fn send_key_event(&self, event: KeyEvent) -> bool {
+        crate::input::key_event(self, event)
+    }
+
+    /// A rotary scroll (a crown, a wheel over the focused node) along the focused path; whether a node took it.
+    pub fn rotary_scroll(&self, event: RotaryScrollEvent) -> bool {
+        crate::input::rotary_event(self, event)
+    }
+
+    // ---- Back ----
+
+    /// The back scope of the focusable popup or dialog on top, if any.
+    fn top_back_scope(&self) -> Option<crate::back::BackScope> {
+        self.owner.top_focusable_popup().and_then(|p| p.popup_spec()).map(|s| s.back_scope.clone())
+    }
+
+    /// Back pressed (not a gesture): a focusable popup or a dialog on top takes it (its handlers, else its
+    /// dismissal); else the most recent enabled back handler. False if nothing took it (the platform's default:
+    /// leaving the app).
+    pub(crate) fn back_pressed(&self) -> bool {
+        if let Some(taken) = crate::window::popup_back(self) {
+            return taken;
+        }
+        self.back.pressed(None)
+    }
+
+    /// A back gesture started: it goes to the handler that would take back now (a popup's on top; none there:
+    /// the popup is dismissed when the gesture ends).
+    pub fn back_started(&self, event: BackEventCompat) {
+        let scope = self.top_back_scope();
+        self.back.started(scope.as_ref(), event);
+    }
+
+    /// A step of the back gesture.
+    pub fn back_progressed(&self, event: BackEventCompat) {
+        self.back.progressed(event);
+    }
+
+    /// The back gesture was called off.
+    pub fn back_cancelled(&self) {
+        self.back.cancelled();
+    }
+
+    /// Back invoked (a press, or a gesture's end): the gesture's handler if it still takes back, else as a press.
+    /// False if nothing took it.
     pub fn back_invoked(&self) -> bool {
-        self.back.borrow_mut().back_invoked()
+        let scope = self.top_back_scope();
+        if self.back.gesture_invoked(scope.as_ref()) {
+            return true;
+        }
+        self.back_pressed()
+    }
+
+    /// Whether back would do something (a focusable popup or a dialog on top, or an enabled handler): the
+    /// platform lets the app handle back (Android's predictive back) only then.
+    pub fn wants_back(&self) -> bool {
+        self.owner.top_focusable_popup().is_some() || self.back.target(None).is_some()
+    }
+
+    // ---- Focus ----
+
+    /// The layout node of the focused target, if any.
+    pub fn focused_node(&self) -> Option<Rc<LayoutNode>> {
+        self.focus.focused_layout_node()
+    }
+
+    /// Moves the focus (the focus manager's `move_focus`); whether it moved.
+    pub fn move_focus(&self, direction: FocusDirection) -> bool {
+        self.focus.move_focus(direction)
+    }
+
+    /// Takes the focus from where it is (the focus manager's `clear_focus`); whether it was cleared.
+    pub fn clear_focus(&self, force: bool) -> bool {
+        self.focus.clear_focus(force)
+    }
+
+    pub(crate) fn owner(&self) -> &Rc<Owner> {
+        &self.owner
+    }
+
+    /// The window info's keyboard modifiers (what key events carry).
+    pub(crate) fn window_info_keyboard_modifiers(&self, modifiers: KeyModifiers) {
+        if self.window_info.keyboard_modifiers.peek() != modifiers.0 {
+            self.window_info.keyboard_modifiers.set(modifiers.0);
+        }
+    }
+
+    /// A key puts the UI in keyboard mode (as Android leaves touch mode).
+    pub(crate) fn request_keyboard_mode(&self) {
+        if self.input_mode_manager.mode.peek() != InputMode::Keyboard {
+            self.input_mode_manager.request_input_mode(InputMode::Keyboard);
+        }
     }
 
     /// An event's time on the frame clock: as given, or the last frame's; the dispatcher's clock moved to it.
@@ -525,9 +641,25 @@ impl KompozHost {
         &self.root
     }
 
-    /// The semantics of the tree.
+    /// The semantics of the tree (its window's and its popups').
     pub fn semantics_owner(&self) -> SemanticsOwner {
-        SemanticsOwner { root: Rc::downgrade(&self.root) }
+        SemanticsOwner { owner: Rc::downgrade(&self.owner) }
+    }
+
+    /// The nodes accessibility sees (C++'s `semanticsTree`): see [`SemanticsOwner::accessibility_tree`].
+    pub fn accessibility_tree(&self) -> Vec<AccessibilityNode> {
+        self.semantics_owner().accessibility_tree()
+    }
+
+    /// Performs an accessibility action on the semantics node with `id` (C++'s `performSemanticsAction`);
+    /// whether it was done.
+    pub fn perform_semantics_action(&self, id: u64, action: SemanticsAction) -> bool {
+        self.semantics_owner().perform_semantics_action(id, action)
+    }
+
+    /// How many popups and dialogs are shown (C++'s `overlayCount`).
+    pub fn overlay_count(&self) -> usize {
+        self.overlays.len()
     }
 
     /// The dispatcher the host runs coroutines on.

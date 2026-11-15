@@ -50,3 +50,19 @@ harness = false
 [[test]]
 name = "display_list"
 harness = false
+
+[[test]]
+name = "focus"
+harness = false
+
+[[test]]
+name = "semantics"
+harness = false
+
+[[test]]
+name = "windows"
+harness = false
+
+[[test]]
+name = "test_rule"
+harness = false

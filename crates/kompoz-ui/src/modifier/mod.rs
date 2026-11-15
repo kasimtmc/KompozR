@@ -228,6 +228,9 @@ pub trait ModifierNode: Any {
     fn as_bring_into_view(&mut self) -> Option<&mut dyn crate::focus::BringIntoViewModifierNode> {
         None
     }
+    fn as_beyond_bounds_layout(&mut self) -> Option<&mut dyn crate::focus::BeyondBoundsLayout> {
+        None
+    }
     fn as_traversable(&mut self) -> Option<&mut dyn TraversableNode> {
         None
     }
@@ -241,8 +244,8 @@ pub trait ModifierNode: Any {
 ///
 /// Names: `layout`, `draw`, `semantics`, `parent_data`, `layout_aware`, `global_position_aware`,
 /// `unplaced_aware`, `pointer_input`, `indirect_pointer_input`, `key_input`, `soft_keyboard_interception`,
-/// `rotary_input`, `focus_target`, `focus_properties`, `focus_event`, `bring_into_view`, `traversable`,
-/// `observer`.
+/// `rotary_input`, `focus_target`, `focus_properties`, `focus_event`, `bring_into_view`, `beyond_bounds_layout`,
+/// `traversable`, `observer`.
 #[macro_export]
 macro_rules! node_capabilities {
     ($($cap:ident),* $(,)?) => {
@@ -299,6 +302,9 @@ macro_rules! node_capabilities {
     };
     (@one bring_into_view) => {
         fn as_bring_into_view(&mut self) -> Option<&mut dyn $crate::focus::BringIntoViewModifierNode> { Some(self) }
+    };
+    (@one beyond_bounds_layout) => {
+        fn as_beyond_bounds_layout(&mut self) -> Option<&mut dyn $crate::focus::BeyondBoundsLayout> { Some(self) }
     };
     (@one traversable) => {
         fn as_traversable(&mut self) -> Option<&mut dyn $crate::modifier::TraversableNode> { Some(self) }

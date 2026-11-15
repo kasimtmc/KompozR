@@ -107,6 +107,12 @@ pub struct LayoutNode {
     pub(crate) semantics_reads: RefCell<Option<Rc<ReaderScope>>>,
     /// How many times a `Layout` configured it (tests read it).
     pub(crate) compositions: Cell<u32>,
+    /// A popup's root: what the popup is (the window package's).
+    pub(crate) popup: RefCell<Option<Rc<crate::window::PopupSpec>>>,
+    /// The roots of the popups composed in it, split out of its children (C++'s `overlays`).
+    pub(crate) overlays: RefCell<Vec<Rc<LayoutNode>>>,
+    /// A popup's root: the node it was composed in.
+    pub(crate) anchor: RefCell<Weak<LayoutNode>>,
 }
 
 /// A measure policy measuring nothing, 0 by 0 (a node's until one is set: Compose's ErrorMeasurePolicy stands in
@@ -185,6 +191,9 @@ impl LayoutNode {
                 draw_reads: RefCell::new(None),
                 semantics_reads: RefCell::new(None),
                 compositions: Cell::new(0),
+                popup: RefCell::new(None),
+                overlays: RefCell::new(Vec::new()),
+                anchor: RefCell::new(Weak::new()),
             }
         })
     }
@@ -435,6 +444,9 @@ impl LayoutNode {
         for child in self.children() {
             child.attach(owner);
         }
+        for popup in self.overlays() {
+            popup.attach(owner);
+        }
         self.run_chain_attach_lifecycle();
         self.invalidate_measurements();
         if let Some(p) = &parent {
@@ -469,6 +481,11 @@ impl LayoutNode {
         self.ignore_remeasure_requests.set(true);
         for child in self.children() {
             child.detach();
+        }
+        for popup in self.overlays() {
+            if popup.is_attached() {
+                popup.detach();
+            }
         }
         self.ignore_remeasure_requests.set(false);
         self.mark_chain_detached();
@@ -570,12 +587,13 @@ impl LayoutNode {
         self.invalidate_draw();
     }
 
-    /// Its semantics worked out again (Compose's `invalidateSemantics`).
+    /// Its semantics worked out again (Compose's `invalidateSemantics`); the listeners told after the frame.
     pub fn invalidate_semantics(&self) {
-        self.semantics_invalidated.set(true);
         if let Some(owner) = self.owner() {
+            owner.note_semantics_invalidated(self);
             owner.semantics_changed();
         }
+        self.semantics_invalidated.set(true);
     }
 
     /// Its parent data worked out again, and its parent measured again if it changed (Compose's
@@ -709,10 +727,12 @@ impl Node for LayoutNode {
     /// Compose's applier: the children become `children` (moved, inserted, removed), attached and detached.
     fn set_children(&self, children: &[Rc<dyn Node>]) {
         let me = self.rc();
-        let new: Vec<Rc<LayoutNode>> = children
+        let emitted: Vec<Rc<LayoutNode>> = children
             .iter()
             .map(|c| (c.clone() as Rc<dyn Any>).downcast::<LayoutNode>().expect("kompoz: a node of another kind"))
             .collect();
+        // Popup roots go to its overlays.
+        let new = me.split_overlays(emitted);
         // Those that left, then the new order with those that came.
         let old = self.children();
         for (i, child) in old.iter().enumerate().rev() {

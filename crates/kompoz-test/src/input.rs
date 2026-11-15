@@ -1,13 +1,14 @@
-//! Input injection, as Compose's ui-test `TouchInjectionScope`, `MouseInjectionScope` and `InputDispatcher`:
-//! `perform_touch_input { … }` and `perform_mouse_input { … }` on a node queue events at positions local to it
-//! (each `move` 16 ms after the last, unless told otherwise), then send them to the host's input entry points at
-//! their times, the rule's virtual clock run up to each (frames, delays and timeouts due run first). What a gesture
-//! leaves (pointers still down, the cursor) carries over to the next `perform_*`.
+//! Input injection, as Compose's ui-test `TouchInjectionScope`, `MouseInjectionScope`, `KeyInjectionScope` and
+//! `InputDispatcher`: `perform_touch_input { … }`, `perform_mouse_input { … }` and `perform_key_input { … }` on a
+//! node queue events (at positions local to it; each `move` 16 ms after the last, unless told otherwise), then send
+//! them to the host's input entry points at their times, the rule's virtual clock run up to each (frames, delays
+//! and timeouts due run first). What a gesture leaves (pointers still down, the cursor, keys held, the lock keys)
+//! carries over to the next `perform_*`.
 
 use crate::{FRAME_NANOS, KompozTestRule, SemanticsNodeInteraction};
 use kompoz_graphics::{Density, IntSize, Offset, Rect, lerp_offset};
 use kompoz_runtime::named;
-use kompoz_ui::input::{PointerButton, PointerButtons, PointerType};
+use kompoz_ui::input::{Key, KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerButtons, PointerType};
 use kompoz_ui::platform::{LocalViewConfiguration, ViewConfiguration};
 
 /// The time between two events of a gesture, ms (Compose's `InputDispatcher.eventPeriodMillis`).
@@ -33,6 +34,7 @@ enum InjectedEvent {
     MouseCancel { time: i64 },
     MouseExit { time: i64, position: Offset },
     MouseScroll { time: i64, position: Offset, delta: Offset },
+    Key { time: i64, event: KeyEvent },
 }
 
 /// What injected input leaves between `perform_*` calls (Compose's InputDispatcherState): the fingers of a gesture
@@ -44,6 +46,10 @@ pub(crate) struct InjectionState {
     cursor_in: bool,
     buttons: PointerButtons,
     last_event_time: i64,
+    keys_down: Vec<Key>,
+    caps_lock: bool,
+    num_lock: bool,
+    scroll_lock: bool,
 }
 
 /// What both injection scopes have (Compose's InjectionScope): the node's size and the positions on it (local to
@@ -181,7 +187,8 @@ fn flush(rule: &KompozTestRule, events: Vec<InjectedEvent>, mut state: Injection
             | InjectedEvent::MouseButton { time, .. }
             | InjectedEvent::MouseCancel { time }
             | InjectedEvent::MouseExit { time, .. }
-            | InjectedEvent::MouseScroll { time, .. } => *time,
+            | InjectedEvent::MouseScroll { time, .. }
+            | InjectedEvent::Key { time, .. } => *time,
         };
         let nanos = time * 1_000_000;
         while rule.clock.get() + FRAME_NANOS <= nanos {
@@ -214,6 +221,10 @@ fn flush(rule: &KompozTestRule, events: Vec<InjectedEvent>, mut state: Injection
             InjectedEvent::MouseScroll { position, delta, .. } => {
                 host.dispatcher().advance_to(nanos);
                 host.scroll(position, delta);
+            }
+            InjectedEvent::Key { event, .. } => {
+                host.dispatcher().advance_to(nanos);
+                host.send_key_event(event);
             }
         }
         state.last_event_time = time;
@@ -952,14 +963,208 @@ impl SemanticsNodeInteraction<'_> {
         let mut scope =
             MouseInjectionScope { base, cursor: state.cursor, cursor_in: state.cursor_in, buttons: state.buttons };
         block(&mut scope);
-        let state = InjectionState {
-            touches: state.touches,
-            cursor: scope.cursor,
-            cursor_in: scope.cursor_in,
-            buttons: scope.buttons,
-            last_event_time: state.last_event_time,
-        };
+        let state =
+            InjectionState { cursor: scope.cursor, cursor_in: scope.cursor_in, buttons: scope.buttons, ..state };
         flush(self.rule, scope.base.events, state);
         self
+    }
+
+    /// Injects key input (Compose's `performKeyInput`): `block` queues it, then it is sent to the host (the
+    /// focused path).
+    #[track_caller]
+    pub fn perform_key_input(&self, block: impl FnOnce(&mut KeyInjectionScope)) -> &Self {
+        let (base, mut state) = ScopeBase::new(self);
+        let mut scope = KeyInjectionScope {
+            base,
+            keys_down: std::mem::take(&mut state.keys_down),
+            caps_lock: state.caps_lock,
+            num_lock: state.num_lock,
+            scroll_lock: state.scroll_lock,
+        };
+        block(&mut scope);
+        let state = InjectionState {
+            keys_down: scope.keys_down,
+            caps_lock: scope.caps_lock,
+            num_lock: scope.num_lock,
+            scroll_lock: scope.scroll_lock,
+            ..state
+        };
+        flush(self.rule, scope.base.events, state);
+        self.rule.wait_for_idle();
+        self
+    }
+
+    /// Sends `event` to the host the node is in (Compose's `performKeyPress`); whether it was taken.
+    #[track_caller]
+    pub fn perform_key_press(&self, event: KeyEvent) -> bool {
+        self.fetch_semantics_node();
+        let taken = self.rule.host().send_key_event(event);
+        self.rule.wait_for_idle();
+        taken
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Keys
+
+/// How long a key is held by `press_key`, ms (Compose's DefaultKeyPressDurationMillis).
+const KEY_PRESS_MILLIS: i64 = 50;
+/// The pause between two presses, ms (Compose's DefaultPauseDurationBetweenKeyPressesMillis).
+const KEY_PAUSE_MILLIS: i64 = 50;
+
+/// Where `perform_key_input` injects keys (Compose's KeyInjectionScope): keys pressed and let go at the event
+/// clock's times, the modifier keys held and the lock keys toggled carried in each event.
+pub struct KeyInjectionScope {
+    base: ScopeBase,
+    keys_down: Vec<Key>,
+    caps_lock: bool,
+    num_lock: bool,
+    scroll_lock: bool,
+}
+
+impl InjectionScope for KeyInjectionScope {
+    fn advance_event_time(&mut self, duration_millis: i64) {
+        self.base.advance(duration_millis);
+    }
+    fn visible_size(&self) -> IntSize {
+        self.base.visible_size()
+    }
+    fn view_configuration(&self) -> ViewConfiguration {
+        self.base.view_configuration
+    }
+    fn density(&self) -> Density {
+        self.base.density
+    }
+}
+
+impl KeyInjectionScope {
+    pub fn is_caps_lock_on(&self) -> bool {
+        self.caps_lock
+    }
+    pub fn is_num_lock_on(&self) -> bool {
+        self.num_lock
+    }
+    pub fn is_scroll_lock_on(&self) -> bool {
+        self.scroll_lock
+    }
+
+    pub fn is_key_down(&self, key: Key) -> bool {
+        self.keys_down.contains(&key)
+    }
+
+    fn modifiers(&self) -> KeyModifiers {
+        let mut m = KeyModifiers::None;
+        if self.is_shift_down() {
+            m = m | KeyModifiers::Shift;
+        }
+        if self.is_ctrl_down() {
+            m = m | KeyModifiers::Ctrl;
+        }
+        if self.is_alt_down() {
+            m = m | KeyModifiers::Alt;
+        }
+        if self.is_meta_down() {
+            m = m | KeyModifiers::Meta;
+        }
+        m
+    }
+
+    fn event(&self, key: Key, r#type: KeyEventType) -> KeyEvent {
+        let modifiers = self.modifiers();
+        let letter = (Key::A.0..=Key::Z.0).contains(&key.0);
+        let shifted = self.is_shift_down() != (self.caps_lock && letter);
+        KeyEvent::with_code_point(key, r#type, key.typed_code_point(shifted), modifiers)
+    }
+
+    /// Presses `key` (Compose's `keyDown`); panics if it is down already. A lock key toggles its lock.
+    #[track_caller]
+    pub fn key_down(&mut self, key: Key) {
+        assert!(!self.is_key_down(key), "Cannot send key down event, Key({}) is already pressed down.", key.0 as i64);
+        self.keys_down.push(key);
+        match key {
+            Key::CapsLock => self.caps_lock = !self.caps_lock,
+            Key::NumLock => self.num_lock = !self.num_lock,
+            Key::ScrollLock => self.scroll_lock = !self.scroll_lock,
+            _ => {}
+        }
+        let event = self.event(key, KeyEventType::KeyDown);
+        self.base.events.push(InjectedEvent::Key { time: self.base.current_time, event });
+    }
+
+    /// Lets go of `key` (Compose's `keyUp`); panics if it isn't down.
+    #[track_caller]
+    pub fn key_up(&mut self, key: Key) {
+        assert!(self.is_key_down(key), "Cannot send key up event, Key({}) is not pressed down.", key.0 as i64);
+        let event = self.event(key, KeyEventType::KeyUp);
+        self.keys_down.retain(|k| *k != key);
+        self.base.events.push(InjectedEvent::Key { time: self.base.current_time, event });
+    }
+
+    /// Presses `key`, holds it `press_duration_millis`, lets go (Compose's `pressKey`).
+    pub fn press_key_for(&mut self, key: Key, press_duration_millis: i64) {
+        self.key_down(key);
+        self.advance_event_time(press_duration_millis);
+        self.key_up(key);
+    }
+
+    /// Runs `block` with `key` held (Compose's `withKeyDown`).
+    pub fn with_key_down(&mut self, key: Key, block: impl FnOnce(&mut KeyInjectionScope)) {
+        self.with_keys_down(&[key], block);
+    }
+
+    /// Runs `block` with `keys` held (Compose's `withKeysDown`).
+    pub fn with_keys_down(&mut self, keys: &[Key], block: impl FnOnce(&mut KeyInjectionScope)) {
+        for k in keys {
+            self.key_down(*k);
+        }
+        block(self);
+        for k in keys {
+            self.key_up(*k);
+        }
+    }
+
+    /// Runs `block` with `key` toggled (pressed before and after: Compose's `withKeyToggled`).
+    pub fn with_key_toggled(&mut self, key: Key, block: impl FnOnce(&mut KeyInjectionScope)) {
+        self.with_keys_toggled(&[key], block);
+    }
+
+    /// Runs `block` with `keys` toggled (Compose's `withKeysToggled`).
+    pub fn with_keys_toggled(&mut self, keys: &[Key], block: impl FnOnce(&mut KeyInjectionScope)) {
+        self.press_keys(keys);
+        block(self);
+        self.press_keys(keys);
+    }
+
+    fn press_keys(&mut self, keys: &[Key]) {
+        for (i, k) in keys.iter().enumerate() {
+            if i != 0 {
+                self.advance_event_time(KEY_PAUSE_MILLIS);
+            }
+            self.press_key_for(*k, KEY_PRESS_MILLIS);
+        }
+    }
+
+    pub fn is_fn_down(&self) -> bool {
+        self.is_key_down(Key::Function)
+    }
+    pub fn is_ctrl_down(&self) -> bool {
+        self.is_key_down(Key::CtrlLeft) || self.is_key_down(Key::CtrlRight)
+    }
+    pub fn is_alt_down(&self) -> bool {
+        self.is_key_down(Key::AltLeft) || self.is_key_down(Key::AltRight)
+    }
+    pub fn is_meta_down(&self) -> bool {
+        self.is_key_down(Key::MetaLeft) || self.is_key_down(Key::MetaRight)
+    }
+    pub fn is_shift_down(&self) -> bool {
+        self.is_key_down(Key::ShiftLeft) || self.is_key_down(Key::ShiftRight)
+    }
+}
+
+#[named]
+impl KeyInjectionScope {
+    /// Presses `key` and lets go after `press_duration_millis` (Compose's `pressKey(key, pressDurationMillis = 50)`).
+    pub fn press_key(&mut self, key: Key, #[default(KEY_PRESS_MILLIS)] press_duration_millis: i64) {
+        self.press_key_for(key, press_duration_millis);
     }
 }

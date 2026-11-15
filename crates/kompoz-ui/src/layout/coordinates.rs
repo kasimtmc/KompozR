@@ -80,16 +80,18 @@ impl LayoutCoordinates {
         }
     }
 
-    /// Its bounds in the root's coordinates, cut by the clipping layers above it (Compose's `boundsInRoot`).
+    /// Its bounds in the root's coordinates, cut by the clipping layers above it (Compose's `boundsInRoot`). A
+    /// popup's root is placed in the host's window: its position counts (as it does in `position_in_root`).
     pub fn bounds_in_root(&self) -> Rect {
-        self.find_root_coordinates().local_bounding_box_of(self, true)
+        let root = self.find_root_coordinates();
+        root.local_bounding_box_of(self, true).translate(root.position_in_root())
     }
 
     /// Its bounds in the window's coordinates, also cut by the window (Compose's `boundsInWindow`).
     pub fn bounds_in_window(&self) -> Rect {
         let root = self.find_root_coordinates();
-        let bounds = root.local_bounding_box_of(self, true);
-        let window = root.size().to_size();
+        let bounds = root.local_bounding_box_of(self, true).translate(root.position_in_root());
+        let window = self.coordinator.window_size().to_size();
         let clipped = Rect::new(
             bounds.left.clamp(0.0, window.width),
             bounds.top.clamp(0.0, window.height),
@@ -99,9 +101,8 @@ impl LayoutCoordinates {
         if clipped.width() == 0.0 || clipped.height() == 0.0 {
             return Rect::Zero;
         }
-        let top_left = root.local_to_window(clipped.top_left());
-        let bottom_right = root.local_to_window(clipped.bottom_right());
-        Rect::new(top_left.x, top_left.y, bottom_right.x, bottom_right.y)
+        let offset = self.coordinator.window_offset();
+        clipped.translate(offset)
     }
 
     /// The coordinates of the root (Compose's `findRootCoordinates`): the root layout node's outermost.
