@@ -2,7 +2,9 @@
 //! AnnotatedString with its styles, annotations and links and its HTML reader, fonts and families and what
 //! resolves them, locales, a text field's value, and the contracts the text pipeline is built on — what laid out
 //! text is drawn as ([`TextDraw`], glyph runs naming fonts in the [`FontRegistry`]) and the font backend at its
-//! bottom ([`FontBackend`], with [`FakeBackend`] measuring as the C++ Kompoz's tests did).
+//! bottom ([`FontBackend`]: [`HarfrustBackend`] shaping with harfrust in the fonts of a [`FontCollection`] — the
+//! system's or registered ones — that [`FontFamilyResolverImpl`] resolves families to, and [`FakeBackend`] measuring
+//! as the C++ Kompoz's tests did), and text segmentation ([`segment`]: grapheme clusters, words, sentences, emoji).
 //!
 //! Offsets into text are UTF-8 bytes, always on character boundaries (a [`TextRange`] slices its text directly);
 //! platform bridges convert to UTF-16 or characters at their edge. Lengths are px; what an app writes is in sp and
@@ -24,6 +26,7 @@ pub mod placeholder;
 pub mod platform_style;
 pub mod range;
 mod savers;
+pub mod segment;
 pub mod shape;
 pub mod span_style;
 pub mod style;
@@ -35,9 +38,9 @@ pub use annotated_string::{
 };
 pub use draw::{Glyph, GlyphColorKind, GlyphRun, GlyphSynthesis, TextDraw, TextRunStyle};
 pub use font::{
-    DeviceFontFamilyName, Font, FontFamily, FontFamilyResolver, FontFeature, FontId, FontListFontFamily,
-    FontLoadingStrategy, FontRegistry, FontSource, FontStyle, FontSynthesis, FontVariation, FontVariationSetting,
-    FontVariationSettings, FontWeight, GenericFontFamily, Typeface, lerp_font_weight,
+    DeviceFontFamilyName, Font, FontCollection, FontFamily, FontFamilyResolver, FontFamilyResolverImpl, FontFeature,
+    FontId, FontListFontFamily, FontLoadingStrategy, FontRegistry, FontSource, FontStyle, FontSynthesis, FontVariation,
+    FontVariationSetting, FontVariationSettings, FontWeight, GenericFontFamily, Typeface, lerp_font_weight,
 };
 pub use input::TextFieldValue;
 pub use intl::{Locale, LocaleList};
@@ -46,7 +49,7 @@ pub use paragraph_style::{ParagraphStyle, lerp_paragraph_style};
 pub use placeholder::{Placeholder, PlaceholderVerticalAlign};
 pub use platform_style::{EmojiSupportMatch, PlatformParagraphStyle, PlatformSpanStyle, PlatformTextStyle};
 pub use range::TextRange;
-pub use shape::{FakeBackend, FakeFontFamilyResolver, FontBackend, FontMetrics};
+pub use shape::{FakeBackend, FakeFontFamilyResolver, FontBackend, FontMetrics, HarfrustBackend};
 pub use span_style::{SpanStyle, TextForegroundStyle, lerp_span_style};
 pub use style::{
     BaselineShift, Hyphens, LineBreak, LineHeightStyle, ResolvedTextDirection, TextAlign, TextDecoration,

@@ -195,7 +195,7 @@ impl KompozHost {
             keep_check_lists: RefCell::new(None),
             keep_check_mismatches: RefCell::new(Vec::new()),
             generation: Rc::new(Cell::new(0)),
-            font_family_resolver: Rc::new(RefCell::new(fake_resolver())),
+            font_family_resolver: Rc::new(RefCell::new(system_resolver())),
             input: RefCell::new(InputState::default()),
             overlays,
             focus,
@@ -390,9 +390,9 @@ impl KompozHost {
     }
 
     /// What text resolves its font families with, and shapes and measures through (LocalFontFamilyResolver):
-    /// one over kompoz-text's FakeBackend until a platform or a test installs another (the real one over the
-    /// system's fonts, a collection of bundled ones). Everything composes and measures again with it at the next
-    /// frame.
+    /// the system's fonts' ([`system_resolver`]) until a platform or a test installs another (a collection of
+    /// bundled fonts; the test rule installs the fake one). Everything composes and measures again with it at the
+    /// next frame.
     pub fn set_font_family_resolver(&self, resolver: Rc<dyn FontFamilyResolver>) {
         *self.font_family_resolver.borrow_mut() = resolver;
         self.invalidate();

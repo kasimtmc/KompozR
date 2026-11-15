@@ -3,9 +3,15 @@
 //! ellipsis, hit testing, draw lists) is the same whichever backend is below: the real one over harfrust and
 //! skrifa, or [`FakeBackend`], which measures as the C++ Kompoz's tests did.
 
+mod cache;
+pub(crate) mod face;
 mod fake;
+mod harfrust;
 
+pub use cache::ShapeCacheStats;
+pub use face::fake_bold_strength;
 pub use fake::{FakeBackend, FakeFontFamilyResolver};
+pub use harfrust::HarfrustBackend;
 
 use crate::draw::{GlyphColorKind, GlyphSynthesis};
 use crate::font::{FontFeature, FontId, Typeface};

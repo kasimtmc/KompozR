@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 fontique = { version = "0.13.0", features = ["fontconfig-dlopen"] }
 harfrust = "0.16.0"

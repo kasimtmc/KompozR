@@ -79,9 +79,11 @@ impl KompozTestRule {
         KompozTestRule::with_viewport(content, IntSize::new(400, 800))
     }
 
-    /// The same in a viewport of `viewport` px.
+    /// The same in a viewport of `viewport` px. Text is measured by kompoz-text's fake backend (as the C++ Kompoz's
+    /// tests measured it) unless the test installs another resolver (`host().set_font_family_resolver`).
     pub fn with_viewport(content: impl Content + 'static, viewport: IntSize) -> KompozTestRule {
         let host = KompozHost::new(content);
+        host.set_font_family_resolver(kompoz_ui::platform::fake_resolver());
         host.set_viewport_size(viewport);
         host.set_layout_check(true);
         host.set_keep_check(true);

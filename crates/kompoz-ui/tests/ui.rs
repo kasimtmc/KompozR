@@ -561,8 +561,12 @@ fn the_host_gives_text_its_font_family_resolver() {
         RESOLVERS.with(|r| r.borrow_mut().push(resolver));
     }));
     let last = || RESOLVERS.with(|r| r.borrow().last().cloned().expect("read"));
-    // The host's: one over the fake backend until another is installed.
+    // The test rule's: one over the fake backend until another is installed.
     assert!(Rc::ptr_eq(&last(), &rule.host().font_family_resolver()));
+    // A host on its own starts with the system's fonts' (scanned only when text needs them).
+    let bare = kompoz_ui::KompozHost::new(kompozable_lambda!(|| {}));
+    let system = kompoz_text::FontFamilyResolverImpl::system();
+    assert_eq!(Rc::as_ptr(&bare.font_family_resolver()) as *const (), Rc::as_ptr(&system) as *const ());
     let typeface =
         last().resolve(Some(&FontFamily::Serif), FontWeight::Bold, FontStyle::Italic, FontSynthesis::All).get();
     assert_eq!((typeface.weight, typeface.style), (FontWeight::Bold, FontStyle::Italic));

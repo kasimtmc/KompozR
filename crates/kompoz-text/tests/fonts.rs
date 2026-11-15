@@ -5,7 +5,7 @@
 
 use kompoz_graphics::*;
 use kompoz_runtime::kompozable_block;
-use kompoz_text::font::{FontData, FontMatcher, parse_feature};
+use kompoz_text::font::{FontBytes, FontMatcher, parse_feature};
 use kompoz_text::*;
 use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -207,9 +207,11 @@ fn fonts_are_registered_once() {
     assert_eq!(FontRegistry::register(blob.clone(), 0), a);
     let b = FontRegistry::register(blob.clone(), 1);
     assert_ne!(a, b);
-    let FontData { blob: back, index } = FontRegistry::get(b).expect("registered");
-    assert!(Arc::ptr_eq(&back, &blob) && index == 1);
-    // The same bytes in another allocation are another font.
+    let back = FontRegistry::get(b).expect("registered");
+    assert!(std::ptr::eq(back.bytes(), &*blob) && back.index == 1);
+    // The same memory held another way is the same font; the same bytes in another allocation are another.
+    let held: FontBytes = Arc::new(blob.clone());
+    assert_eq!(FontRegistry::register_bytes(held, 0), a);
     assert_ne!(FontRegistry::register(Arc::from(vec![0u8; 16]), 0), a);
     assert!(FontRegistry::get(FontId(u64::MAX)).is_none());
 }

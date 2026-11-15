@@ -10,7 +10,7 @@ use crate::layout::LayoutCoordinates;
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx};
 use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Path, Rect, Size};
 use kompoz_runtime::{KompozitionLocal, MutableState, SnapshotMutationPolicy, mutable_state_of};
-use kompoz_text::{FakeFontFamilyResolver, FontFamilyResolver};
+use kompoz_text::{FakeFontFamilyResolver, FontFamilyResolver, FontFamilyResolverImpl};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -980,10 +980,16 @@ fn same_resolver(a: &Rc<dyn FontFamilyResolver>, b: &Rc<dyn FontFamilyResolver>)
     Rc::ptr_eq(a, b)
 }
 
-/// A resolver over kompoz-text's FakeBackend: what a host starts with until a platform (or a test) installs a real
-/// one.
+/// A resolver over kompoz-text's FakeBackend: what the test rule installs (text measured as the C++ Kompoz's tests
+/// measured it).
 pub fn fake_resolver() -> Rc<dyn FontFamilyResolver> {
     Rc::new(FakeFontFamilyResolver::new())
+}
+
+/// The thread's resolver over the system's fonts (kompoz-text's `FontFamilyResolverImpl::system()`, the fonts
+/// scanned when text first needs them): what a host starts with (Compose's `createFontFamilyResolver(context)`).
+pub fn system_resolver() -> Rc<dyn FontFamilyResolver> {
+    FontFamilyResolverImpl::system()
 }
 
 /// Whether the system is in its dark theme (Compose's `isSystemInDarkTheme`): reading it recomposes the reader when

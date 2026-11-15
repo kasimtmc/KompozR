@@ -5,17 +5,28 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, LazyLock, RwLock};
 
+/// A font file's bytes, shared between threads however they are held: a `Vec`, an `Arc<[u8]>`, a file mapped
+/// into memory by a font collection (what fontique's blobs and skrifa's fonts hold, without a copy).
+pub type FontBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
+
 /// A font's data: the file's bytes and which face of a collection it is.
 #[derive(Clone)]
 pub struct FontData {
-    pub blob: Arc<[u8]>,
+    pub blob: FontBytes,
     pub index: u32,
+}
+
+impl FontData {
+    /// The file's bytes.
+    pub fn bytes(&self) -> &[u8] {
+        (*self.blob).as_ref()
+    }
 }
 
 /// Its size and index (not its bytes).
 impl fmt::Debug for FontData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "FontData({} bytes, index {})", self.blob.len(), self.index)
+        write!(f, "FontData({} bytes, index {})", self.bytes().len(), self.index)
     }
 }
 
@@ -26,13 +37,13 @@ pub struct FontId(pub u64);
 
 /// The fonts text has been resolved to, by id (the process's one registry): a backend registers each face it
 /// shapes with, and whoever draws a glyph run reads the face's bytes back by the run's [`FontId`]. The same bytes
-/// (the same `Arc`) and index give the same id. A font registered stays for the process's life, as the font
-/// collections that hand fonts out keep them.
+/// (the same memory, however it is held) and index give the same id. A font registered stays for the process's
+/// life, as the font collections that hand fonts out keep them.
 pub struct FontRegistry;
 
 struct Registry {
     fonts: Vec<FontData>,
-    by_data: HashMap<(usize, u32), FontId>,
+    by_data: HashMap<(usize, usize, u32), FontId>,
 }
 
 static REGISTRY: LazyLock<RwLock<Registry>> =
@@ -41,7 +52,15 @@ static REGISTRY: LazyLock<RwLock<Registry>> =
 impl FontRegistry {
     /// The id of face `index` of `blob` (registered now if it wasn't).
     pub fn register(blob: Arc<[u8]>, index: u32) -> FontId {
-        let key = (Arc::as_ptr(&blob) as *const u8 as usize, index);
+        FontRegistry::register_bytes(Arc::new(blob), index)
+    }
+
+    /// The id of face `index` of bytes held any way (registered now if they weren't): the same memory is the same
+    /// font, whatever holds it.
+    pub fn register_bytes(blob: FontBytes, index: u32) -> FontId {
+        let bytes: &[u8] = (*blob).as_ref();
+        // The bytes' address and length: registered fonts are kept, so no other font's bytes can be there.
+        let key = (bytes.as_ptr() as usize, bytes.len(), index);
         if let Some(id) = REGISTRY.read().expect("font registry").by_data.get(&key) {
             return *id;
         }
