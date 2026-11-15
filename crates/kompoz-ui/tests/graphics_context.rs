@@ -255,14 +255,34 @@ fn values_and_defaults() {
         (NodeRecording::Other, LayerContent::Draw, ClipOp::Intersect)
     );
 
-    let text = TextDraw::new("Hello", Offset::new(1.0, 12.0), 14.0, Size::new(30.0, 16.0));
-    assert!(!text.rtl && text.shaped.is_none());
+    // A run of text: equal as long as it shows the same (its glyph runs the same Rc, or of the same content).
+    let style = Rc::new(TextRunStyle::new(14.0));
+    let text = kompoz_text::FakeBackend.text_draw("Hello", Offset::new(1.0, 12.0), style.clone(), false);
+    assert!(!text.rtl && text.size == Size::new(35.0, 17.5) && text.font_size() == 14.0);
+    assert_eq!(text.ink_rect(), Rect::new(1.0, 12.0 - 11.2, 1.0 + 35.0, 12.0 + 2.8));
     let printed = format!("{text:?}");
-    assert!(printed.contains("Hello") && printed.contains("12.0") && printed.contains("30.0"), "{printed}");
+    assert!(printed.contains("Hello") && printed.contains("12.0") && printed.contains("35.0"), "{printed}");
     assert_eq!(text, text.clone());
-    let shaped = TextDraw { shaped: Some(Rc::new(7u32)), ..text.clone() };
-    assert_ne!(text, shaped);
-    assert_eq!(shaped, shaped.clone());
+    let again = kompoz_text::FakeBackend.text_draw("Hello", Offset::new(1.0, 12.0), style, false);
+    assert!(!Rc::ptr_eq(&text.glyphs, &again.glyphs) && text == again);
+    let mut moved: Vec<GlyphRun> = text.glyphs.to_vec();
+    moved[0].glyphs[1].x += 1.0;
+    let reshaped = TextDraw::new(
+        text.text.clone(),
+        text.baseline,
+        text.size,
+        text.ink_bounds,
+        false,
+        text.style.clone(),
+        moved.into(),
+    );
+    assert_ne!(text, reshaped);
+    assert_eq!(reshaped, reshaped.clone());
+    let bolder = TextDraw {
+        style: Rc::new(TextRunStyle { font_weight: kompoz_text::FontWeight::Bold, ..(*text.style).clone() }),
+        ..text.clone()
+    };
+    assert_ne!(text, bolder);
 }
 
 // ---- Shapes ------------------------------------------------------------------------------------------------------
@@ -796,7 +816,8 @@ fn draw_image_mask_default() {
 }
 
 fn draw_text_defaults() {
-    let text = TextDraw::new("Hi", Offset::new(0.0, 10.0), 12.0, Size::new(14.0, 14.0));
+    let text =
+        kompoz_text::FakeBackend.text_draw("Hi", Offset::new(0.0, 10.0), Rc::new(TextRunStyle::new(12.0)), false);
     let brush = Brush::horizontal_gradient(&[Color::Red, Color::Blue], 0.0, f32::INFINITY, TileMode::Clamp);
     let area = Rect::new(0.0, 0.0, 100.0, 10.0);
     let middle = brush.color_at(Offset::new(50.0, 5.0), area);

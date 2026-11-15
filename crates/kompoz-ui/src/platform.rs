@@ -1,14 +1,16 @@
 //! What the UI asks of the platform and what it tells the UI (Compose's `androidx.compose.ui.platform`): the
 //! platform's callbacks (C++'s `KompozHost::Callbacks`, each doing nothing by default, so a headless host works),
 //! the view configuration, what the system UI covers (kept in states the host updates) and moving the keyboard by
-//! hand, the ui composition locals the host provides at the root, and the modifiers whose effect is the window's
+//! hand, the ui composition locals the host provides at the root (the font family resolver text resolves its
+//! families with among them), and the modifiers whose effect is the window's
 //! (`keep_screen_on`, `sensitive_content`, `preferred_frame_rate`, `system_gesture_exclusion`).
 
 use crate::graphics_context::GraphicsContext;
 use crate::layout::LayoutCoordinates;
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx};
 use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Path, Rect, Size};
-use kompoz_runtime::{KompozitionLocal, MutableState, mutable_state_of};
+use kompoz_runtime::{KompozitionLocal, MutableState, SnapshotMutationPolicy, mutable_state_of};
+use kompoz_text::{FakeFontFamilyResolver, FontFamilyResolver};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -968,6 +970,21 @@ pub static LocalSystemInsets: KompozitionLocal<SystemInsetsHolder> =
 pub static LocalImeController: KompozitionLocal<ImeController> = KompozitionLocal::new_static(ImeController::default);
 /// The platform's callbacks, for what calls them directly (images, assets, autofill).
 pub static LocalPlatform: KompozitionLocal<PlatformHandle> = KompozitionLocal::new_static(PlatformHandle::default);
+/// What text resolves its font families with, and shapes and measures through (Compose's
+/// LocalFontFamilyResolver): the host's (see [`crate::KompozHost::set_font_family_resolver`]); readers are told
+/// when it is another one. Without a host: one over kompoz-text's FakeBackend.
+pub static LocalFontFamilyResolver: KompozitionLocal<Rc<dyn FontFamilyResolver>> =
+    KompozitionLocal::with_policy(SnapshotMutationPolicy::new(same_resolver), fake_resolver);
+
+fn same_resolver(a: &Rc<dyn FontFamilyResolver>, b: &Rc<dyn FontFamilyResolver>) -> bool {
+    Rc::ptr_eq(a, b)
+}
+
+/// A resolver over kompoz-text's FakeBackend: what a host starts with until a platform (or a test) installs a real
+/// one.
+pub fn fake_resolver() -> Rc<dyn FontFamilyResolver> {
+    Rc::new(FakeFontFamilyResolver::new())
+}
 
 /// Whether the system is in its dark theme (Compose's `isSystemInDarkTheme`): reading it recomposes the reader when
 /// the platform says otherwise.

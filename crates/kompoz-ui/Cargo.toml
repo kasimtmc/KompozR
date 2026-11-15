@@ -13,6 +13,7 @@ workspace = true
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
 parking_lot.workspace = true
 
 [dev-dependencies]

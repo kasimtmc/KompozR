@@ -23,6 +23,12 @@ use std::sync::Arc;
 
 // ---- Helpers ---------------------------------------------------------------------------------------------------
 
+/// One line of text shaped by kompoz-text's FakeBackend (C++'s FakeTextMeasurer's numbers) at `baseline`, `size`
+/// px.
+fn fake_text(s: &str, baseline: Offset, size: f32) -> TextDraw {
+    kompoz_text::FakeBackend.text_draw(s, baseline, std::rc::Rc::new(kompoz_text::TextRunStyle::new(size)), false)
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() < 0.5 // (C++'s near)
 }
@@ -294,7 +300,7 @@ fn draw_scope_rotation_and_text() {
         d.rotate(30.0, |r| {
             r.draw_rect_with(Color::Black, Offset::Zero, Size::new(10.0, 10.0), 1.0, Fill, None, DefaultBlendMode)
         });
-        d.draw_text(&TextDraw::new("çizim", Offset::new(0.0, 11.2), 14.0, Size::new(35.0, 17.5)), Color::Black);
+        d.draw_text_run(&fake_text("çizim", Offset::new(0.0, 11.2), 14.0), Color::Black);
     });
     assert!(c.layers == 0 && c.transforms.len() == 1 && c.transform_depth == 0);
     let middle = c.transforms[0].map(Offset::new(50.0, 50.0));
@@ -2798,11 +2804,12 @@ fn drawn_texts_are_the_texts_drawn() {
             Text("bir");
             Box(modifier = Modifier.size(50.dp()).draw_behind(|d| {
                 d.inset_all(5.0, |i| {
-                    let text = TextDraw::new("iki", at(0.0, 8.0), 10.0, sz(15.0, 12.5));
-                    i.draw_text(&text, BLUE);
+                    let text = fake_text("iki", at(0.0, 8.0), 10.0);
+                    assert_eq!(text.size, sz(15.0, 12.5));
+                    i.draw_text_run(&text, BLUE);
                     let area = Rect::new(0.0, 0.0, 15.0, 12.5);
-                    i.draw_text_brush(&text, &hgrad(&[RED, BLUE]), area);
-                    i.draw_text_shadow(&text, Color::Black, 2.0);
+                    i.draw_text_run_brush(&text, &hgrad(&[RED, BLUE]), area);
+                    i.draw_text_run_shadow(&text, Color::Black, 2.0);
                 })
             }));
         });

@@ -228,9 +228,9 @@ pub fn has_text(text: &str, substring: bool, ignore_case: bool) -> SemanticsMatc
     SemanticsMatcher::new(d, move |n| {
         let c = n.config();
         let check = |s: &str| if substring { contains(s, &text, ignore_case) } else { eq(s, &text, ignore_case) };
-        c.get(SemanticsProperties::InputText).is_some_and(|t| check(&t))
-            || c.get(SemanticsProperties::EditableText).is_some_and(|t| check(&t))
-            || c.get(SemanticsProperties::Text).is_some_and(|ts| ts.iter().any(|t| check(t)))
+        c.get(SemanticsProperties::InputText).is_some_and(|t| check(t.text()))
+            || c.get(SemanticsProperties::EditableText).is_some_and(|t| check(t.text()))
+            || c.get(SemanticsProperties::Text).is_some_and(|ts| ts.iter().any(|t| check(t.text())))
     })
 }
 
@@ -244,9 +244,9 @@ pub fn has_text_exactly(values: &[&str], include_editable_text: bool) -> Semanti
         let c = n.config();
         let mut actual = Vec::new();
         if include_editable_text && let Some(e) = c.get(SemanticsProperties::EditableText) {
-            actual.push(e);
+            actual.push(e.text().to_string());
         }
-        actual.extend(c.get(SemanticsProperties::Text).unwrap_or_default());
+        actual.extend(c.get(SemanticsProperties::Text).unwrap_or_default().iter().map(|t| t.text().to_string()));
         actual.iter().all(|a| expected.contains(a)) && expected.iter().all(|e| actual.contains(e))
     })
 }

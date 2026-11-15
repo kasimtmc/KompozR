@@ -23,6 +23,7 @@ use kompoz_runtime::{
     SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block, mutable_state_of,
     restartable,
 };
+use kompoz_text::FontFamilyResolver;
 use parking_lot::Mutex;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -134,6 +135,8 @@ pub struct KompozHost {
     keep_check_mismatches: RefCell<Vec<String>>,
     /// Counted up by `invalidate`: the content's scope composes again when it changes.
     generation: Rc<Cell<u64>>,
+    /// What text resolves its families with (LocalFontFamilyResolver).
+    font_family_resolver: Rc<RefCell<Rc<dyn FontFamilyResolver>>>,
     /// The input package's state.
     pub input: RefCell<InputState>,
     /// The focus: the active target, moving and clearing it, key dispatch.
@@ -192,6 +195,7 @@ impl KompozHost {
             keep_check_lists: RefCell::new(None),
             keep_check_mismatches: RefCell::new(Vec::new()),
             generation: Rc::new(Cell::new(0)),
+            font_family_resolver: Rc::new(RefCell::new(fake_resolver())),
             input: RefCell::new(InputState::default()),
             overlays,
             focus,
@@ -217,9 +221,11 @@ impl KompozHost {
         let dispatcher = self.dispatcher.clone();
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
         let back = BackDispatcherRef(Rc::downgrade(&self.back));
+        let font_family_resolver = self.font_family_resolver.clone();
         move || {
             let env = environment.get();
             let content = content.clone();
+            let resolver = font_family_resolver.borrow().clone();
             let values = [
                 LocalDensity.provides(env.density),
                 LocalLayoutDirection.provides(env.layout_direction),
@@ -237,6 +243,7 @@ impl KompozHost {
                 LocalFocusManager.provides(focus_manager.clone()),
                 LocalBackDispatcher.provides(Some(back.clone())),
                 LocalDispatcher.provides(Some(dispatcher.clone())),
+                LocalFontFamilyResolver.provides_unequal(resolver),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
             let g = generation.get();
@@ -380,6 +387,20 @@ impl KompozHost {
     /// What the system UI covers, as last set.
     pub fn system_insets(&self) -> SystemInsets {
         kompoz_runtime::without_read_observation(|| self.system_insets.get())
+    }
+
+    /// What text resolves its font families with, and shapes and measures through (LocalFontFamilyResolver):
+    /// one over kompoz-text's FakeBackend until a platform or a test installs another (the real one over the
+    /// system's fonts, a collection of bundled ones). Everything composes and measures again with it at the next
+    /// frame.
+    pub fn set_font_family_resolver(&self, resolver: Rc<dyn FontFamilyResolver>) {
+        *self.font_family_resolver.borrow_mut() = resolver;
+        self.invalidate();
+    }
+
+    /// What text resolves its font families with now.
+    pub fn font_family_resolver(&self) -> Rc<dyn FontFamilyResolver> {
+        self.font_family_resolver.borrow().clone()
     }
 
     /// The platform's gesture thresholds (LocalViewConfiguration).

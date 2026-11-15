@@ -30,7 +30,7 @@ pub use recording::{
     RecordedArc, RecordedBackdrop, RecordedClipShape, RecordedElevationShadow, RecordedMesh, RecordedPathShadow,
     RecordedShapeShadow, RecordingCanvas,
 };
-pub use text::{FakeTextMeasurer, FontMetrics, Text};
+pub use text::Text;
 
 use kompoz_graphics::IntSize;
 use kompoz_runtime::{Content, named};

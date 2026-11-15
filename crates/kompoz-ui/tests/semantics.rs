@@ -515,7 +515,9 @@ fn listeners_are_told_of_changes_after_the_frame() {
     struct Recorder(RefCell<Vec<String>>);
     impl SemanticsListener for Recorder {
         fn on_semantics_changed(&self, _node: &Rc<LayoutNode>, previous: Option<&SemanticsConfiguration>) {
-            let before = previous.and_then(|p| p.get(SemanticsProperties::Text)).map(|t| t.join(","));
+            let before = previous
+                .and_then(|p| p.get(SemanticsProperties::Text))
+                .map(|t| t.iter().map(|t| t.text()).collect::<Vec<_>>().join(","));
             self.0.borrow_mut().push(format!("önce {}", before.unwrap_or_else(|| "-".into())));
         }
     }
@@ -590,7 +592,7 @@ fn reading_order_groups_rows_and_follows_traversal_groups() {
         .map(|n| {
             let c = n.config();
             c.get(SemanticsProperties::ContentDescription)
-                .or(c.get(SemanticsProperties::Text))
+                .or(c.get(SemanticsProperties::Text).map(|t| t.iter().map(|t| t.text().to_string()).collect()))
                 .map(|v| v.join(""))
                 .unwrap_or_default()
         })

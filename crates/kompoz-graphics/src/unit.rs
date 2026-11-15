@@ -100,7 +100,7 @@ pub fn max(a: Dp, b: Dp) -> Dp {
 }
 
 /// What a scale and a text size are measured in.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum TextUnitType {
     Unspecified,
     /// Scaled pixels: dp times the font scale.
@@ -109,11 +109,27 @@ pub enum TextUnitType {
     Em,
 }
 
-/// A text length in sp or em (Compose's TextUnit).
-#[derive(Clone, Copy, PartialEq)]
+/// A text length in sp or em (Compose's TextUnit). Equal by unit and value, an unspecified one to another (as
+/// Compose's packed values are).
+#[derive(Clone, Copy)]
 pub struct TextUnit {
     value: f32,
     unit: TextUnitType,
+}
+
+impl PartialEq for TextUnit {
+    fn eq(&self, o: &TextUnit) -> bool {
+        self.unit == o.unit && (self.value == o.value || self.value.is_nan() && o.value.is_nan())
+    }
+}
+
+impl std::hash::Hash for TextUnit {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.unit.hash(state);
+        // (0 and -0 alike, every NaN alike: as they compare)
+        let v = if self.value.is_nan() { f32::NAN } else { self.value + 0.0 };
+        v.to_bits().hash(state);
+    }
 }
 
 impl TextUnit {
@@ -178,6 +194,16 @@ impl Neg for TextUnit {
     fn neg(self) -> TextUnit {
         TextUnit { value: -self.value, unit: self.unit }
     }
+}
+
+/// Between two text lengths of one unit (Compose's lerp(TextUnit, TextUnit, fraction)); of two units, or an
+/// unspecified one, panics.
+pub fn lerp_text_unit(start: TextUnit, stop: TextUnit, fraction: f32) -> TextUnit {
+    assert!(
+        start.unit == stop.unit && start.is_specified(),
+        "kompoz: only text lengths of one unit lerp, not {start:?} and {stop:?}"
+    );
+    TextUnit::new(crate::geometry::lerp(start.value, stop.value, fraction), start.unit)
 }
 
 /// `16.dp()`, `14.sp()`, `1.5.em()`: Compose's `16.dp`, `14.sp`, `1.5.em`.

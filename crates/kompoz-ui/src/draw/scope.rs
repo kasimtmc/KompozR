@@ -774,22 +774,22 @@ impl<'a> DrawScope<'a> {
         self.paint_outline(outline, &brush.into(), alpha, &style.path_stroke(), color_filter.as_ref(), blend_mode);
     }
 
-    /// A run of text from its baseline (in this scope's coordinates), in `color`: the text call the text stage's
-    /// drawText goes through, and the test Text's.
-    pub fn draw_text(&mut self, text: &TextDraw, color: Color) {
+    /// A laid out run of text from its baseline (in this scope's coordinates), in `color`: the low-level call
+    /// Compose's drawText (a TextLayoutResult's or a measurer's, the text pipeline's) goes through per run.
+    pub fn draw_text_run(&mut self, text: &TextDraw, color: Color) {
         let moved = self.moved_text(text);
         self.canvas.draw_text(&moved, color);
     }
 
     /// The same painted with `brush` spread over `brush_area` (this scope's coordinates).
-    pub fn draw_text_brush(&mut self, text: &TextDraw, brush: &Brush, brush_area: Rect) {
+    pub fn draw_text_run_brush(&mut self, text: &TextDraw, brush: &Brush, brush_area: Rect) {
         let moved = self.moved_text(text);
         let area = brush_area.translate(self.origin);
         self.canvas.draw_text_brush(&moved, brush, area);
     }
 
     /// Its shadow: its glyphs in `color`, blurred by `blur_radius` px.
-    pub fn draw_text_shadow(&mut self, text: &TextDraw, color: Color, blur_radius: f32) {
+    pub fn draw_text_run_shadow(&mut self, text: &TextDraw, color: Color, blur_radius: f32) {
         let moved = self.moved_text(text);
         self.canvas.draw_text_shadow(&moved, color, blur_radius);
     }

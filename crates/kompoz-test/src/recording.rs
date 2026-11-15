@@ -9,8 +9,9 @@ use kompoz_graphics::{
 use kompoz_ui::draw::vector_drawn_into;
 use kompoz_ui::graphics_context::{
     ClipOp, CornerRadii, ElevationShadow, GraphicsContext, LayerContent, LayerTransform, Shadow, ShadowLight, TextDraw,
-    default_draw_shape_shadow,
+    TextRunStyle, default_draw_shape_shadow,
 };
+use std::rc::Rc;
 
 /// A `draw_shadow` call (drop_shadow, inner_shadow): where, its corners, the shadow, and the blend mode it was drawn
 /// with.
@@ -96,6 +97,9 @@ pub struct RecordingCanvas {
     pub texts: Vec<String>,
     /// Each drawn text itself.
     pub text_draws: Vec<TextDraw>,
+    /// The style each text was drawn in (C++'s `fonts`): its family, weight, style, size, letter spacing, line
+    /// height, features, draw style, geometric transform.
+    pub text_styles: Vec<Rc<TextRunStyle>>,
     pub colors: Vec<Color>,
     /// Where each text starts.
     pub baselines: Vec<Offset>,
@@ -278,6 +282,7 @@ impl GraphicsContext for RecordingCanvas {
         self.text_order.push('t');
         self.texts.push(text.text.to_string());
         self.text_draws.push(text.clone());
+        self.text_styles.push(text.style.clone());
         self.colors.push(self.filtered(color));
         self.baselines.push(text.baseline + self.translation);
         self.rtl.push(text.rtl);

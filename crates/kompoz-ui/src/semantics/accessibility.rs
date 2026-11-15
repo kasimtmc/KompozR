@@ -167,14 +167,14 @@ impl SemanticsOwner {
                 .and_then(|actions| actions.get(i).map(|a| a.action.clone()))
                 .is_some_and(|f| f()),
             SemanticsAction::SetText(text) => {
-                config.get(SemanticsActions::SetText).and_then(|a| a.action).is_some_and(|f| f(text))
+                config.get(SemanticsActions::SetText).and_then(|a| a.action).is_some_and(|f| f(text.into()))
             }
             SemanticsAction::SetSelection { start, end, relative_to_original_text } => config
                 .get(SemanticsActions::SetSelection)
                 .and_then(|a| a.action)
                 .is_some_and(|f| f(start, end, relative_to_original_text)),
             SemanticsAction::InsertTextAtCursor(text) => {
-                config.get(SemanticsActions::InsertTextAtCursor).and_then(|a| a.action).is_some_and(|f| f(text))
+                config.get(SemanticsActions::InsertTextAtCursor).and_then(|a| a.action).is_some_and(|f| f(text.into()))
             }
             SemanticsAction::ImeAction => run0(SemanticsActions::OnImeAction),
             SemanticsAction::CopyText => run0(SemanticsActions::CopyText),
@@ -247,7 +247,7 @@ fn summarize(
         parent,
         bounds: node.bounds_in_window(),
         label: words.join(" "),
-        value: config.get(SemanticsProperties::EditableText).unwrap_or_default(),
+        value: config.get(SemanticsProperties::EditableText).map(|t| t.text().to_string()).unwrap_or_default(),
         state_description: config.get(SemanticsProperties::StateDescription).unwrap_or_default(),
         role: config.get(SemanticsProperties::Role),
         clickable: config.get(SemanticsActions::OnClick).is_some_and(|a| a.action.is_some()),
@@ -283,7 +283,7 @@ fn summarize(
 fn label_of(node: &SemanticsNode, words: &mut Vec<String>) {
     let own = node.unmerged_config();
     words.extend(own.get(SemanticsProperties::ContentDescription).unwrap_or_default());
-    words.extend(own.get(SemanticsProperties::Text).unwrap_or_default());
+    words.extend(own.get(SemanticsProperties::Text).unwrap_or_default().iter().map(|t| t.text().to_string()));
     if !node.is_merging_semantics_of_descendants() {
         return;
     }
@@ -299,7 +299,7 @@ fn label_of(node: &SemanticsNode, words: &mut Vec<String>) {
             }
             let c = child.unmerged_config();
             words.extend(c.get(SemanticsProperties::ContentDescription).unwrap_or_default());
-            words.extend(c.get(SemanticsProperties::Text).unwrap_or_default());
+            words.extend(c.get(SemanticsProperties::Text).unwrap_or_default().iter().map(|t| t.text().to_string()));
             below(&child, words);
         }
     }

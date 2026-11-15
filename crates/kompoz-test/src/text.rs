@@ -1,43 +1,21 @@
-//! Text before the text stage: C++'s `FakeTextMeasurer` and a one-line test `Text` measured by it.
+//! A one-line test `Text` measured and drawn by kompoz-text's [`FakeBackend`] (C++'s FakeTextMeasurer's numbers),
+//! until foundation's BasicText takes its place.
 
-use kompoz_graphics::{Color, Density, IntSize, LayoutDirection, Offset, Size, TextUnit, UnitExt};
+use kompoz_graphics::{Color, Density, IntSize, LayoutDirection, Offset, TextUnit, UnitExt};
 use kompoz_runtime::kompozable;
+use kompoz_text::{FakeBackend, FontBackend, TextRunStyle};
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode};
-use kompoz_ui::graphics_context::TextDraw;
 use kompoz_ui::layout::{
     IntrinsicMeasurable, IntrinsicMeasureScope, LayoutModifierNode, Measurable, MeasureResult, MeasureScope,
 };
 use kompoz_ui::semantics::{SemanticsConfiguration, SemanticsModifierNode};
 use kompoz_ui::{Constraints, FirstBaseline, LastBaseline, Layout, Modifier, ModifierNode, ModifierNodeElement};
 use kompoz_ui::{measure_policy, node_capabilities};
+use std::rc::Rc;
 
-/// Deterministic text metrics (C++'s FakeTextMeasurer): every code point half an em wide (stretched by its scale,
-/// plus its letter spacing); the ascent 0.8 em, the descent 0.2, a line 1.25.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FakeTextMeasurer;
-
-/// A font's metrics in px (C++'s FontMetrics).
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct FontMetrics {
-    pub ascent: f32,
-    pub descent: f32,
-    pub line_height: f32,
-}
-
-impl FakeTextMeasurer {
-    /// How wide `text` is at `font_size` px.
-    pub fn measure_width(&self, text: &str, font_size: f32, scale_x: f32, letter_spacing: f32) -> f32 {
-        text.chars().count() as f32 * (font_size * 0.5 * scale_x + letter_spacing)
-    }
-
-    pub fn metrics(&self, font_size: f32) -> FontMetrics {
-        FontMetrics { ascent: font_size * 0.8, descent: font_size * 0.2, line_height: font_size * 1.25 }
-    }
-}
-
-/// One line of text measured by the [`FakeTextMeasurer`] (the design's test `Text`): as wide as its text (within
-/// the constraints), a line high, its baselines set, its `Text` semantics set, drawn as one text command. Its min
-/// intrinsic width is its widest word's, its max its whole width.
+/// One line of text measured by the [`FakeBackend`] (the design's test `Text`): as wide as its text (within the
+/// constraints), a line high, its baselines set, its `Text` semantics set, drawn as one text run. Its min intrinsic
+/// width is its widest word's, its max its whole width.
 #[kompozable]
 pub fn Text(text: impl Into<String>, #[default(14.sp())] font_size: TextUnit, #[default(Modifier)] modifier: Modifier) {
     let element = TextElement { text, font_size };
@@ -81,16 +59,16 @@ impl TextNode {
     }
 
     fn width(&self, density: &Density) -> f32 {
-        FakeTextMeasurer.measure_width(&self.text, self.font_px(density), 1.0, 0.0)
+        FakeBackend::measure_width(&self.text, self.font_px(density), 1.0, 0.0)
     }
 
     fn widest_word(&self, density: &Density) -> f32 {
         let px = self.font_px(density);
-        self.text.split_whitespace().map(|w| FakeTextMeasurer.measure_width(w, px, 1.0, 0.0)).fold(0.0, f32::max)
+        self.text.split_whitespace().map(|w| FakeBackend::measure_width(w, px, 1.0, 0.0)).fold(0.0, f32::max)
     }
 
     fn line_height(&self, density: &Density) -> f32 {
-        FakeTextMeasurer.metrics(self.font_px(density)).line_height
+        FakeBackend.metrics(&FakeBackend::instance(self.font_px(density))).line_height()
     }
 }
 
@@ -107,7 +85,7 @@ impl LayoutModifierNode for TextNode {
         self.size = IntSize::new(width, height);
         self.px = px;
         let placeable = measurable.measure(Constraints::fixed(width, height));
-        let baseline = (FakeTextMeasurer.metrics(px).ascent).round() as i32;
+        let baseline = FakeBackend.metrics(&FakeBackend::instance(px)).ascent.round() as i32;
         MeasureResult::new(
             width,
             height,
@@ -132,23 +110,17 @@ impl LayoutModifierNode for TextNode {
 
 impl DrawModifierNode for TextNode {
     fn draw(&mut self, scope: &mut ContentDrawScope) {
-        let metrics = FakeTextMeasurer.metrics(self.px);
+        let ascent = FakeBackend.metrics(&FakeBackend::instance(self.px)).ascent;
         let rtl = scope.layout_direction() == LayoutDirection::Rtl;
-        let mut text = TextDraw::new(
-            self.text.as_str(),
-            Offset::new(0.0, metrics.ascent),
-            self.px,
-            Size::new(self.width(&scope.density()), metrics.line_height),
-        )
-        .with_metrics(metrics.ascent, metrics.descent);
-        text.rtl = rtl;
-        scope.draw_text(&text, Color::Black);
+        let style = Rc::new(TextRunStyle::new(self.px));
+        let text = FakeBackend.text_draw(&self.text, Offset::new(0.0, ascent), style, rtl);
+        scope.draw_text_run(&text, Color::Black);
         scope.draw_content();
     }
 }
 
 impl SemanticsModifierNode for TextNode {
     fn apply_semantics(&mut self, config: &mut SemanticsConfiguration) {
-        config.set_text(self.text.clone());
+        config.set_text(self.text.as_str());
     }
 }

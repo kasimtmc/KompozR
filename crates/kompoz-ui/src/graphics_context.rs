@@ -8,9 +8,9 @@ use kompoz_graphics::{
     LayoutDirection, Matrix, Offset, Outline, Path, PathCommand, PathDirection, PathStroke, Rect, RenderEffect,
     RoundRect, Shape, Size, SolidColor, StrokeJoin, TileMode, Vertices,
 };
-use std::any::Any;
-use std::fmt;
-use std::rc::Rc;
+
+pub use kompoz_graphics::{DefaultShadowColor, Shadow};
+pub use kompoz_text::{Glyph, GlyphColorKind, GlyphRun, GlyphSynthesis, TextDraw, TextRunStyle};
 
 // ---- Values ----------------------------------------------------------------------------------------------------
 
@@ -111,47 +111,6 @@ impl Default for LayerTransform {
     }
 }
 
-/// A shadow (Compose's Shadow, for text and, with spread, for dropShadow/innerShadow): its color, how far it is
-/// moved and how much it is blurred (px), and how much bigger (a drop shadow) or smaller (an inner one's hole) the
-/// shape is.
-#[derive(Clone, PartialEq, Debug)]
-pub struct Shadow {
-    pub color: Color,
-    pub offset: Offset,
-    pub blur_radius: f32,
-    /// Not for text.
-    pub spread: f32,
-    /// Not for text either (Compose 1.9's dropShadow and innerShadow): a brush painting it instead of the color
-    /// (spread over what it covers).
-    pub brush: Option<Brush>,
-    /// Its alpha.
-    pub alpha: f32,
-    /// How it goes onto what is under it.
-    pub blend_mode: BlendMode,
-}
-
-impl Shadow {
-    /// One of `color`, moved, blurred and spread, painted by no brush, opaque, over what is under it.
-    pub fn new(color: Color, offset: Offset, blur_radius: f32, spread: f32) -> Shadow {
-        Shadow { color, offset, blur_radius, spread, ..Shadow::default() }
-    }
-}
-
-/// Black, where it is, sharp.
-impl Default for Shadow {
-    fn default() -> Shadow {
-        Shadow {
-            color: DefaultShadowColor,
-            offset: Offset::Zero,
-            blur_radius: 0.0,
-            spread: 0.0,
-            brush: None,
-            alpha: 1.0,
-            blend_mode: BlendMode::SrcOver,
-        }
-    }
-}
-
 /// Where elevation shadows' light is, as Android's theme has it: above the window's top middle (`center`, the
 /// window's px), `z` px up, `radius` px across, the ambient and spot shadows at those alphas. The platform sets the
 /// window's.
@@ -228,9 +187,6 @@ impl ElevationShadow {
     }
 }
 
-/// Compose's default shadow color.
-pub const DefaultShadowColor: Color = Color::Black;
-
 /// What a path's shadow ([`GraphicsContext::draw_shadow_path`]) can draw on, the path's bounds at `bounds` (where
 /// it is drawn): a drop shadow's blur around the path spread and moved, an inner one's within the path (2 px past
 /// its bounds).
@@ -268,79 +224,6 @@ pub enum LayerContent {
     DrawAll,
     /// Nothing: the canvas has the pixels already.
     Kept,
-}
-
-/// A run of text to draw (C++'s utf8 and Font): its text, where its baseline starts, its font size (px), its
-/// advance width and line height, its font's ascent and descent (C++'s FontMetrics, which a display list measures
-/// what it touches by), whether its paragraph goes right to left (which orders its stretches of either direction;
-/// either way the text starts at `baseline.x` and goes right), and what the text stage shaped it into (opaque here).
-#[derive(Clone)]
-pub struct TextDraw {
-    pub text: Rc<str>,
-    pub baseline: Offset,
-    /// Px.
-    pub font_size: f32,
-    /// The run's advance width and line height.
-    pub size: Size,
-    /// How far its glyphs reach above and below the baseline (px; accents, italics and the like aside).
-    pub ascent: f32,
-    pub descent: f32,
-    pub rtl: bool,
-    /// An opaque shaped payload the text stage fills in.
-    pub shaped: Option<Rc<dyn Any>>,
-}
-
-impl TextDraw {
-    /// Left to right, not shaped yet; its metrics as far as fonts' glyphs mostly reach (an em above the baseline,
-    /// 0.3 em below) until told ([`with_metrics`](TextDraw::with_metrics)).
-    pub fn new(text: impl Into<Rc<str>>, baseline: Offset, font_size: f32, size: Size) -> TextDraw {
-        TextDraw {
-            text: text.into(),
-            baseline,
-            font_size,
-            size,
-            ascent: font_size,
-            descent: 0.3 * font_size,
-            rtl: false,
-            shaped: None,
-        }
-    }
-
-    /// The same, its font's ascent and descent these.
-    pub fn with_metrics(self, ascent: f32, descent: f32) -> TextDraw {
-        TextDraw { ascent, descent, ..self }
-    }
-}
-
-/// The same text, placed, sized and measured the same, the same way round, shaped into the same payload (or neither
-/// shaped).
-impl PartialEq for TextDraw {
-    fn eq(&self, o: &TextDraw) -> bool {
-        let same_shaped = match (&self.shaped, &o.shaped) {
-            (None, None) => true,
-            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-            _ => false,
-        };
-        self.text == o.text
-            && self.baseline == o.baseline
-            && self.font_size == o.font_size
-            && self.size == o.size
-            && self.ascent == o.ascent
-            && self.descent == o.descent
-            && self.rtl == o.rtl
-            && same_shaped
-    }
-}
-
-/// Its text, baseline and size.
-impl fmt::Debug for TextDraw {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("TextDraw")
-            .field("text", &self.text)
-            .field("baseline", &self.baseline)
-            .field("size", &self.size)
-            .finish_non_exhaustive()
-    }
 }
 
 // ---- The drawing surface ---------------------------------------------------------------------------------------

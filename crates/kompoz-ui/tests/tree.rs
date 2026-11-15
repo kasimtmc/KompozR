@@ -405,7 +405,7 @@ fn the_semantics_tree_merges_as_compose() {
     }));
     // Merged: the button says both texts (its texts aren't nodes of their own: what says "Tamam" is the button).
     let button = rule.on_node_with_tag("button").fetch_semantics_node();
-    assert_eq!(button.config().get(SemanticsProperties::Text), Some(vec!["Tamam".to_string(), "İptal".to_string()]));
+    assert_eq!(button.config().get(SemanticsProperties::Text), Some(vec!["Tamam".into(), "İptal".into()]));
     let tag = |n: kompoz_ui::semantics::SemanticsNode| n.config().get(SemanticsProperties::TestTag);
     assert_eq!(tag(rule.on_node_with_text("Tamam").fetch_semantics_node()), Some("button".to_string()));
     assert_eq!(button.children().len(), 1);
@@ -472,7 +472,8 @@ impl ModifierNode for LabelNode {
 impl DrawModifierNode for LabelNode {
     fn draw(&mut self, scope: &mut ContentDrawScope) {
         scope.draw_content();
-        let text = TextDraw::new(self.0.get(), Offset::new(1.0, 2.0), 10.0, Size::new(10.0, 10.0));
+        let style = std::rc::Rc::new(kompoz_text::TextRunStyle::new(10.0));
+        let text = kompoz_text::FakeBackend.text_draw(&self.0.get(), Offset::new(1.0, 2.0), style, false);
         scope.context().draw_text(&text, Color::Black);
     }
 }

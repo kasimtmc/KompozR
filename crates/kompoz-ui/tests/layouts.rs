@@ -119,7 +119,7 @@ fn child_texts(node: &LayoutNode) -> Vec<String> {
     node.children()
         .iter()
         .filter_map(|c| c.semantics_configuration().and_then(|s| s.get(SemanticsProperties::Text)))
-        .map(|t| t.join(""))
+        .map(|t| t.iter().map(|t| t.text()).collect::<String>())
         .collect()
 }
 

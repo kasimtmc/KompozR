@@ -947,12 +947,10 @@ impl DisplayList {
             || !empty(intersect(s.rest_m.map(reach).inflate(2.0), s.rest_clip))
     }
 
-    /// Records text (any kind of it) whose glyphs may reach `blur` further.
+    /// Records text (any kind of it) whose glyphs may reach `blur` further: what it touches is its glyphs' ink
+    /// (where they reach past their advances and the line: italics, accents, emoji) and the blur's reach.
     fn text(&mut self, kind: Kind, t: &TextDraw, blur: f32) -> Option<&mut Command> {
-        // Glyphs reach past their advances and the line's metrics (italics, accents, emoji).
-        let pad = 0.3 * t.size.height.max(t.ascent + t.descent) + 3.0 * blur;
-        let r = Rect::new(t.baseline.x, t.baseline.y - t.ascent, t.baseline.x + t.size.width, t.baseline.y + t.descent);
-        let c = self.draw(kind, r, pad)?;
+        let c = self.draw(kind, t.ink_rect(), 3.0 * blur)?;
         c.p1 = t.baseline;
         c.text = Some(TextDraw { baseline: Offset::Zero, ..t.clone() });
         Some(c)

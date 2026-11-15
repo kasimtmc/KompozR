@@ -71,11 +71,10 @@ fn stroke(width: f32) -> DrawStyle {
     DrawStyle::Stroke(Stroke::new(width, 4.0, StrokeCap::Butt, StrokeJoin::Miter, None))
 }
 
-/// A one-line text of the test measurer's metrics (C++'s FakeTextMeasurer) at `baseline`, `size` px.
+/// A one-line text shaped by kompoz-text's FakeBackend (C++'s FakeTextMeasurer's numbers) at `baseline`, `size`
+/// px.
 fn text(s: &str, baseline: Offset, size: f32) -> TextDraw {
-    let m = FakeTextMeasurer.metrics(size);
-    let width = FakeTextMeasurer.measure_width(s, size, 1.0, 0.0);
-    TextDraw::new(s, baseline, size, Size::new(width, m.line_height)).with_metrics(m.ascent, m.descent)
+    kompoz_text::FakeBackend.text_draw(s, baseline, Rc::new(kompoz_text::TextRunStyle::new(size)), false)
 }
 
 /// A path's commands as text: "M0,0 L10,0 …", each end to a hundredth.

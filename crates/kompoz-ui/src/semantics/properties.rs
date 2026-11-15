@@ -1,7 +1,7 @@
 //! The semantics properties and actions (Compose's SemanticsProperties and SemanticsActions), the values they
 //! hold, and their setters on [`SemanticsConfiguration`] (Compose's SemanticsPropertyReceiver extensions).
 //!
-//! Texts are plain strings until the text stage (Compose's are AnnotatedStrings). Setters of properties are
+//! Texts are AnnotatedStrings (kompoz-text's, as Compose's). Setters of properties are
 //! `set_*` (Compose's `x = …`), those Compose writes as functions keep their names (`heading()`, `on_click(…)`);
 //! the actions `SetText` and `SetTextSubstitution`, whose names a property setter has, are set by
 //! `set_text_action` and `set_text_substitution_action`.
@@ -11,6 +11,8 @@ use crate::platform::ImeAction;
 use crate::state::ToggleableState;
 use kompoz_graphics::{Offset, Shape};
 use kompoz_runtime::named;
+use kompoz_text::AnnotatedString;
+pub use kompoz_text::TextRange;
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
@@ -229,40 +231,6 @@ pub enum LiveRegionMode {
     Assertive,
 }
 
-/// A range of a text, `start` to `end` (UTF-16 offsets, as Compose's TextRange; the text stage's ranges are these).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct TextRange {
-    pub start: i32,
-    pub end: i32,
-}
-
-impl TextRange {
-    pub const Zero: TextRange = TextRange { start: 0, end: 0 };
-
-    pub const fn new(start: i32, end: i32) -> TextRange {
-        TextRange { start, end }
-    }
-    /// A caret at `index`.
-    pub const fn at(index: i32) -> TextRange {
-        TextRange { start: index, end: index }
-    }
-    pub fn min(&self) -> i32 {
-        self.start.min(self.end)
-    }
-    pub fn max(&self) -> i32 {
-        self.start.max(self.end)
-    }
-    pub fn collapsed(&self) -> bool {
-        self.start == self.end
-    }
-    pub fn reversed(&self) -> bool {
-        self.start > self.end
-    }
-    pub fn length(&self) -> i32 {
-        self.max() - self.min()
-    }
-}
-
 /// What a field holds, for autofill (Compose's ContentType): the platform's autofill hints. Combined with `+`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ContentType {
@@ -421,7 +389,8 @@ impl fmt::Debug for ScrollByOffsetAction {
     }
 }
 
-/// A text layout as `GetTextLayoutResult` hands it out: the text stage's TextLayoutResult, type-erased here.
+/// A text layout as `GetTextLayoutResult` hands it out: kompoz-text's TextLayoutResult, type-erased until the
+/// paragraph engine defines it (stage 6's WP3 types the action with it).
 pub type TextLayoutResultHandle = Rc<dyn Any>;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -533,17 +502,17 @@ impl SemanticsProperties {
     pub const LinkTestMarker: SemanticsPropertyKey<()> =
         SemanticsPropertyKey::with_merge_policy("LinkTestMarker", keep_parent_only);
     /// What it says; a merging parent's are its own then its children's.
-    pub const Text: SemanticsPropertyKey<Vec<String>> =
+    pub const Text: SemanticsPropertyKey<Vec<AnnotatedString>> =
         SemanticsPropertyKey::accessibility_with_merge_policy("Text", concatenate);
     /// A translation of its text.
-    pub const TextSubstitution: SemanticsPropertyKey<String> = SemanticsPropertyKey::new("TextSubstitution");
+    pub const TextSubstitution: SemanticsPropertyKey<AnnotatedString> = SemanticsPropertyKey::new("TextSubstitution");
     /// Whether the translation shows.
     pub const IsShowingTextSubstitution: SemanticsPropertyKey<bool> =
         SemanticsPropertyKey::new("IsShowingTextSubstitution");
     /// A field's text as typed (before its visual transformation).
-    pub const InputText: SemanticsPropertyKey<String> = SemanticsPropertyKey::accessibility("InputText");
+    pub const InputText: SemanticsPropertyKey<AnnotatedString> = SemanticsPropertyKey::accessibility("InputText");
     /// A field's text as shown.
-    pub const EditableText: SemanticsPropertyKey<String> = SemanticsPropertyKey::accessibility("EditableText");
+    pub const EditableText: SemanticsPropertyKey<AnnotatedString> = SemanticsPropertyKey::accessibility("EditableText");
     pub const TextSelectionRange: SemanticsPropertyKey<TextRange> =
         SemanticsPropertyKey::accessibility("TextSelectionRange");
     pub const TextCompositionRange: SemanticsPropertyKey<Option<TextRange>> =
@@ -576,7 +545,7 @@ impl SemanticsProperties {
 pub struct SemanticsActions;
 
 impl SemanticsActions {
-    /// Hands out its text layouts (the text stage's TextLayoutResults, erased).
+    /// Hands out its text layouts (TextLayoutResults, erased until the paragraph engine defines them).
     pub const GetTextLayoutResult: SemanticsPropertyKey<
         AccessibilityAction<dyn Fn(&mut Vec<TextLayoutResultHandle>) -> bool>,
     > = action_key("GetTextLayoutResult");
@@ -595,14 +564,15 @@ impl SemanticsActions {
     /// Selects from a start to an end (whether relative to the original text).
     pub const SetSelection: SemanticsPropertyKey<AccessibilityAction<dyn Fn(i32, i32, bool) -> bool>> =
         action_key("SetSelection");
-    pub const SetText: SemanticsPropertyKey<AccessibilityAction<dyn Fn(String) -> bool>> = action_key("SetText");
-    pub const SetTextSubstitution: SemanticsPropertyKey<AccessibilityAction<dyn Fn(String) -> bool>> =
+    pub const SetText: SemanticsPropertyKey<AccessibilityAction<dyn Fn(AnnotatedString) -> bool>> =
+        action_key("SetText");
+    pub const SetTextSubstitution: SemanticsPropertyKey<AccessibilityAction<dyn Fn(AnnotatedString) -> bool>> =
         action_key("SetTextSubstitution");
     pub const ShowTextSubstitution: SemanticsPropertyKey<AccessibilityAction<dyn Fn(bool) -> bool>> =
         action_key("ShowTextSubstitution");
     pub const ClearTextSubstitution: SemanticsPropertyKey<AccessibilityAction<ActionFn>> =
         action_key("ClearTextSubstitution");
-    pub const InsertTextAtCursor: SemanticsPropertyKey<AccessibilityAction<dyn Fn(String) -> bool>> =
+    pub const InsertTextAtCursor: SemanticsPropertyKey<AccessibilityAction<dyn Fn(AnnotatedString) -> bool>> =
         action_key("InsertTextAtCursor");
     /// Performs a field's input method action (its key named `PerformImeAction`, as Compose's).
     pub const OnImeAction: SemanticsPropertyKey<AccessibilityAction<ActionFn>> = action_key("PerformImeAction");
@@ -724,11 +694,11 @@ impl SemanticsConfiguration {
         self.set(SemanticsProperties::TestTag, tag.into());
     }
     /// `text = …`: what it says.
-    pub fn set_text(&mut self, text: impl Into<String>) {
+    pub fn set_text(&mut self, text: impl Into<AnnotatedString>) {
         self.set(SemanticsProperties::Text, vec![text.into()]);
     }
     /// `textSubstitution = …`.
-    pub fn set_text_substitution(&mut self, text: impl Into<String>) {
+    pub fn set_text_substitution(&mut self, text: impl Into<AnnotatedString>) {
         self.set(SemanticsProperties::TextSubstitution, text.into());
     }
     /// `isShowingTextSubstitution = …`.
@@ -736,11 +706,11 @@ impl SemanticsConfiguration {
         self.set(SemanticsProperties::IsShowingTextSubstitution, showing);
     }
     /// `inputText = …`.
-    pub fn set_input_text(&mut self, text: impl Into<String>) {
+    pub fn set_input_text(&mut self, text: impl Into<AnnotatedString>) {
         self.set(SemanticsProperties::InputText, text.into());
     }
     /// `editableText = …`.
-    pub fn set_editable_text(&mut self, text: impl Into<String>) {
+    pub fn set_editable_text(&mut self, text: impl Into<AnnotatedString>) {
         self.set(SemanticsProperties::EditableText, text.into());
     }
     /// `textSelectionRange = …`.
@@ -859,7 +829,7 @@ impl SemanticsConfiguration {
     pub fn set_text_action(
         &mut self,
         #[default(None)] label: Option<String>,
-        action: impl Fn(String) -> bool + 'static,
+        action: impl Fn(AnnotatedString) -> bool + 'static,
     ) {
         self.set(SemanticsActions::SetText, AccessibilityAction { label, action: Some(Rc::new(action)) });
     }
@@ -867,7 +837,7 @@ impl SemanticsConfiguration {
     pub fn set_text_substitution_action(
         &mut self,
         #[default(None)] label: Option<String>,
-        action: impl Fn(String) -> bool + 'static,
+        action: impl Fn(AnnotatedString) -> bool + 'static,
     ) {
         self.set(SemanticsActions::SetTextSubstitution, AccessibilityAction { label, action: Some(Rc::new(action)) });
     }
@@ -888,7 +858,7 @@ impl SemanticsConfiguration {
     pub fn insert_text_at_cursor(
         &mut self,
         #[default(None)] label: Option<String>,
-        action: impl Fn(String) -> bool + 'static,
+        action: impl Fn(AnnotatedString) -> bool + 'static,
     ) {
         self.set(SemanticsActions::InsertTextAtCursor, AccessibilityAction { label, action: Some(Rc::new(action)) });
     }

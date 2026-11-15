@@ -550,6 +550,35 @@ fn place_relative_mirrors_right_to_left() {
     assert_eq!(rule.on_node_with_tag("relative").layout_node().layout_direction(), LayoutDirection::Rtl);
 }
 
+thread_local! {
+    static RESOLVERS: RefCell<Vec<Rc<dyn kompoz_text::FontFamilyResolver>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn the_host_gives_text_its_font_family_resolver() {
+    use kompoz_text::{FakeFontFamilyResolver, FontFamily, FontFamilyResolver, FontStyle, FontSynthesis, FontWeight};
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {
+        let resolver = kompoz_ui::platform::LocalFontFamilyResolver.current();
+        RESOLVERS.with(|r| r.borrow_mut().push(resolver));
+    }));
+    let last = || RESOLVERS.with(|r| r.borrow().last().cloned().expect("read"));
+    // The host's: one over the fake backend until another is installed.
+    assert!(Rc::ptr_eq(&last(), &rule.host().font_family_resolver()));
+    let typeface =
+        last().resolve(Some(&FontFamily::Serif), FontWeight::Bold, FontStyle::Italic, FontSynthesis::All).get();
+    assert_eq!((typeface.weight, typeface.style), (FontWeight::Bold, FontStyle::Italic));
+    assert_eq!(typeface.font, kompoz_text::FakeBackend::font_id());
+    // Another installed: what reads it composes again and gets it.
+    let other: Rc<dyn FontFamilyResolver> = Rc::new(FakeFontFamilyResolver::new());
+    rule.host().set_font_family_resolver(other.clone());
+    rule.wait_for_idle();
+    assert!(Rc::ptr_eq(&last(), &other) && Rc::ptr_eq(&rule.host().font_family_resolver(), &other));
+    // Everything composed again keeps it.
+    let reads = RESOLVERS.with(|r| r.borrow().len());
+    rule.host().invalidate();
+    rule.wait_for_idle();
+    assert!(RESOLVERS.with(|r| r.borrow().len()) > reads && Rc::ptr_eq(&last(), &other));
+}
+
 tests!(
     constraints_as_compose,
     the_node_chain_reuses_updates_and_diffs_as_compose,
@@ -564,4 +593,5 @@ tests!(
     state_read_while_placing_places_again_without_measuring_or_composing,
     state_read_while_measuring_measures_again_without_composing,
     the_layout_check_finds_nothing_amiss,
+    the_host_gives_text_its_font_family_resolver,
 );
