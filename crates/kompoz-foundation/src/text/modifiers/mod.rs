@@ -1,16 +1,24 @@
 //! The text nodes and what they lay out with (Compose's `foundation.text.modifiers`): a plain string's node
 //! ([`text_string_simple`]), an annotated string's ([`text_annotated_string`]), the one of a text in a selection
-//! container ([`selectable_text_annotated_string`]) and its bridge to the selection ([`selection_hook`]), the
-//! layout caches, min lines and the constraints a paragraph is given.
+//! container ([`selectable_text_annotated_string`]) and the controller it works with ([`SelectionController`]: what
+//! makes a text selectable, with its gestures' node), the layout caches, min lines and the constraints a paragraph
+//! is given.
 
 pub(crate) mod layout_utils;
 pub(crate) mod min_lines_constrainer;
 pub(crate) mod multi_paragraph_layout_cache;
 pub(crate) mod paragraph_layout_cache;
 pub(crate) mod selectable_text_annotated_string;
-pub mod selection_hook;
+mod selection_controller;
+mod selection_modifier;
 pub(crate) mod text_annotated_string;
 pub(crate) mod text_string_simple;
+
+pub use selection_controller::{SelectionController, StaticTextSelectionParams};
+pub use selection_modifier::{
+    DefaultLongPressDragObserver, DefaultMouseSelectionObserver, LayoutCoordinatesProvider, SelectionModifierNode,
+    selection_modifier,
+};
 
 use kompoz_graphics::{Color, ColorProducer, Fill, Shadow};
 use kompoz_text::{SpanStyle, TextDecoration, TextForegroundStyle, TextPaintStyle, TextStyle};

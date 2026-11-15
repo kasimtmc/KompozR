@@ -1,6 +1,6 @@
 //! BasicText's links and its bridge to a selection: a node over each link opening its URL or telling its listener
 //! by touch, mouse, keyboard and accessibility, its styles as it is focused, hovered or pressed, a hand over it;
-//! a text in a selection container working with its selection controller (a fake selection here).
+//! a text in a selection container working with its selection controller (a fake registrar here).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -8,21 +8,21 @@ mod common;
 
 use common::*;
 use kompoz_foundation::prelude::*;
-use kompoz_foundation::text::{
-    LocalSelectionRegistrar, LocalTextSelectionColors, SelectionController, SelectionRegistrar, SelectionRegistrarRef,
-    TextSelectionColors,
+use kompoz_foundation::text::selection::{
+    AnchorInfo, LocalSelectionRegistrar, LocalTextSelectionColors, Selectable, Selection, SelectionAdjustment,
+    SelectionRegistrar, SelectionRegistrarRef, Subselections, TextSelectionColors,
 };
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
 use kompoz_text::*;
-use kompoz_ui::draw::{DefaultBlendMode, DrawScope, Fill};
 use kompoz_ui::input::{Key, KeyModifiers, PointerType};
-use kompoz_ui::layout::{LayoutCoordinates, PinnableContainerRef};
+use kompoz_ui::layout::LayoutCoordinates;
 use kompoz_ui::platform::{PlatformCallbacks, PointerIcon};
 use kompoz_ui::semantics::{SemanticsAction, SemanticsNode, SemanticsProperties};
 use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -263,118 +263,126 @@ fn links_follow_the_text_when_it_changes() {
 
 // ---- The selection's bridge ------------------------------------------------------------------------------------
 
-/// A selection standing in for a selection container's: it writes down what its texts' controllers are told.
+/// A selection standing in for a selection container's registrar: it writes down what its texts' controllers
+/// tell it, and gives the parts of the selection it is set up with.
 struct FakeSelection {
     log: Rc<RefCell<Vec<String>>>,
-    next: Cell<i64>,
+    next: Cell<u64>,
+    selected: RefCell<HashMap<u64, Selection>>,
+}
+
+impl FakeSelection {
+    fn say(&self, line: String) {
+        self.log.borrow_mut().push(line);
+    }
 }
 
 impl SelectionRegistrar for FakeSelection {
-    fn next_selectable_id(&self) -> i64 {
+    fn subselections(&self) -> Subselections {
+        Arc::new(self.selected.borrow().clone())
+    }
+    fn subscribe(&self, selectable: Rc<dyn Selectable>) -> Rc<dyn Selectable> {
+        let text = selectable.get_text();
+        self.say(format!("subscribed {} {}", selectable.selectable_id(), text.text()));
+        selectable
+    }
+    fn unsubscribe(&self, selectable: &dyn Selectable) {
+        self.say(format!("unsubscribed {}", selectable.selectable_id()));
+    }
+    fn next_selectable_id(&self) -> u64 {
         self.next.set(self.next.get() + 1);
         self.next.get()
     }
-    fn has_selection(&self, _: i64) -> bool {
-        false
+    fn notify_position_change(&self, selectable_id: u64) {
+        self.say(format!("moved {selectable_id}"));
     }
-    fn selection_controller(
+    fn notify_selection_update_start(&self, _: &LayoutCoordinates, at: Offset, _: SelectionAdjustment, touch: bool) {
+        self.say(format!("start {} {} {touch}", at.x, at.y));
+    }
+    fn notify_selection_update_select_all(&self, selectable_id: u64, _: bool) {
+        self.say(format!("select all {selectable_id}"));
+    }
+    fn notify_selection_update(
         &self,
-        selectable_id: i64,
-        background_selection_color: Color,
-    ) -> Rc<dyn SelectionController> {
-        self.log.borrow_mut().push(format!("controller {selectable_id}"));
-        Rc::new(FakeController {
-            id: selectable_id,
-            color: background_selection_color,
-            log: self.log.clone(),
-            modifier: Modifier.semantics(move |c| c.set_state_description(format!("seçim {selectable_id}"))),
-        })
+        _: &LayoutCoordinates,
+        _: Offset,
+        _: Offset,
+        _: bool,
+        _: SelectionAdjustment,
+        _: bool,
+    ) -> bool {
+        true
     }
-}
-
-struct FakeController {
-    id: i64,
-    color: Color,
-    log: Rc<RefCell<Vec<String>>>,
-    modifier: Modifier,
-}
-
-impl SelectionController for FakeController {
-    fn modifier(&self) -> Modifier {
-        self.modifier.clone()
+    fn notify_selection_update_end(&self) {
+        self.say("end".to_string());
     }
-    fn on_placed(&self) {
-        self.log.borrow_mut().push(format!("placed {}", self.id));
-    }
-    fn on_unplaced(&self) {
-        self.log.borrow_mut().push(format!("unplaced {}", self.id));
-    }
-    fn update_text_layout(&self, text_layout_result: &TextLayoutResult) {
-        self.log.borrow_mut().push(format!("laid out {} {}", self.id, text_layout_result.layout_input.text.text()));
-    }
-    fn update_layout_coordinates(&self, coordinates: &LayoutCoordinates) {
-        let at = coordinates.position_in_root();
-        self.log.borrow_mut().push(format!("at {} {}", self.id, at.y));
-    }
-    fn update_pinnable_container(&self, pinnable_container: Option<PinnableContainerRef>) {
-        self.log.borrow_mut().push(format!("pinned {} {}", self.id, pinnable_container.is_some()));
-    }
-    fn draw(&self, scope: &mut DrawScope) {
-        let size = scope.size();
-        scope.draw_rect_with(self.color, Offset::Zero, size, 1.0, Fill, None, DefaultBlendMode);
+    fn notify_selectable_change(&self, selectable_id: u64) {
+        self.say(format!("changed {selectable_id}"));
     }
 }
 
 fn a_text_in_a_selection_works_with_its_controller() {
-    // Where a selection registrar is provided, BasicText takes an id from it, makes its controller (with the
-    // selection colors' background), puts the controller's modifier on its layout and a selectable text node that
-    // tells it where the text is placed, laid out and pinned, and draws the selection under the text.
+    // Where a selection registrar is provided, BasicText takes an id from it and makes its selection controller
+    // (with the selection colors' background): the controller's modifier on its layout (the selection gestures —
+    // a mouse's press starts a selection — and the text cursor), a selectable text node that tells it where the
+    // text is placed, laid out and moved (its selectable subscribed, its text changing told), and its part of the
+    // selection drawn under the text.
     let log = Rc::new(RefCell::new(Vec::<String>::new()));
-    let registrar = SelectionRegistrarRef(Rc::new(FakeSelection { log: log.clone(), next: Cell::new(0) }));
-    let shown = mutable_state_of(true);
-    let s = shown.clone();
+    let fake = Rc::new(FakeSelection { log: log.clone(), next: Cell::new(0), selected: RefCell::new(HashMap::new()) });
+    // The second text's whole text selected.
+    let anchor = |offset| AnchorInfo::new(ResolvedTextDirection::Ltr, offset, 2);
+    fake.selected.borrow_mut().insert(2, Selection::new(anchor(0), anchor("seçilir".len()), false));
+    let registrar = SelectionRegistrarRef(fake.clone());
+    let (shown, text) = (mutable_state_of(true), mutable_state_of("seçilir".to_string()));
+    let (s, t) = (shown.clone(), text.clone());
     let colors = TextSelectionColors { handle_color: BLUE, background_color: YELLOW };
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let s = s.clone();
+        let (s, t) = (s.clone(), t.clone());
         KompozitionLocalProvider(
             &[LocalSelectionRegistrar.provides(Some(registrar.clone())), LocalTextSelectionColors.provides(colors)],
             move || {
                 Column(move || {
                     BasicText("üst", style = sized(16.0));
                     if s.get() {
-                        BasicText("seçilir", modifier = Modifier.test_tag("metin"), style = sized(16.0));
+                        BasicText(t.get(), modifier = Modifier.test_tag("metin"), style = sized(16.0));
                     }
                 });
             },
         );
     }));
+    let platform = Rc::new(Platform::default());
+    rule.host().set_callbacks(platform.clone());
     let taken = || std::mem::take(&mut *log.borrow_mut());
     let first = taken();
-    for expected in [
-        "controller 1",
-        "controller 2",
-        "laid out 1 üst",
-        "laid out 2 seçilir",
-        "placed 2",
-        "at 2 20",
-        "pinned 2 false",
-    ] {
+    for expected in ["subscribed 1 üst", "subscribed 2 seçilir", "moved 1", "moved 2"] {
         assert!(first.iter().any(|l| l == expected), "{expected:?} not in {first:?}");
     }
-    // The controller's modifier on the text's layout.
-    rule.on_node(has_state_description("seçim 2")).assert_exists().assert_text_equals(&["seçilir"]);
-    // The selection drawn under the text, in the selection colors' background.
+    // The selection drawn under the text, in the selection colors' background: the second text's whole line.
     let c = rule.draw();
-    let text = rule.on_node_with_tag("metin").get_unclipped_bounds_in_root();
+    let text_bounds = rule.on_node_with_tag("metin").get_unclipped_bounds_in_root();
     let under: Vec<Rect> =
-        c.rect_colors.iter().zip(&c.rects).filter(|(col, _)| **col == YELLOW).map(|(_, r)| *r).collect();
-    assert_eq!(under.len(), 2); // each text's controller draws (this one the whole text)
-    assert!(under.iter().any(|r| near(r.top, text.top) && near(r.height(), 20.0) && near(r.width(), 7.0 * 8.0)));
-    // Gone: unplaced.
+        c.path_colors.iter().zip(&c.paths).filter(|(col, _)| **col == YELLOW).map(|(_, r)| *r).collect();
+    assert_eq!(under.len(), 1, "{under:?}");
+    assert!(near(under[0].top, text_bounds.top) && near(under[0].height(), 20.0) && near(under[0].width(), 7.0 * 8.0));
+    // Its gestures: a mouse's press starts a selection at it; the text cursor over it.
+    rule.host().pointer_move(text_bounds.center(), -1, 0);
+    rule.wait_for_idle();
+    assert_eq!(platform.cursors.borrow().last(), Some(&PointerIcon::Text));
+    rule.host().pointer_down(at(text_bounds.left + 10.0, text_bounds.top + 5.0), -1, 0, PointerType::Mouse);
+    rule.host().pointer_up(at(text_bounds.left + 10.0, text_bounds.top + 5.0), -1, 0);
+    rule.wait_for_idle();
+    let pressed = taken();
+    assert!(pressed.iter().any(|l| l == "start 10 5 false") && pressed.iter().any(|l| l == "end"), "{pressed:?}");
+    // Another text: told.
+    text.set("başka".to_string());
+    rule.wait_for_idle();
+    let changed = taken();
+    assert!(changed.iter().any(|l| l == "changed 2"), "{changed:?}");
+    // Gone: unsubscribed.
     shown.set(false);
     rule.wait_for_idle();
     let gone = taken();
-    assert!(gone.iter().any(|l| l == "unplaced 2"), "{gone:?}");
+    assert!(gone.iter().any(|l| l == "unsubscribed 2"), "{gone:?}");
 }
 
 tests!(

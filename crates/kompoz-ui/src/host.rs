@@ -222,6 +222,7 @@ impl KompozHost {
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
         let back = BackDispatcherRef(Rc::downgrade(&self.back));
         let font_family_resolver = self.font_family_resolver.clone();
+        let text_toolbar: Rc<dyn TextToolbar> = Rc::new(PlatformTextToolbar::new(platform.clone()));
         move || {
             let env = environment.get();
             let content = content.clone();
@@ -238,6 +239,7 @@ impl KompozHost {
                 LocalHapticFeedback.provides(HapticFeedback(platform.clone())),
                 LocalClipboard.provides(Clipboard(platform.clone())),
                 LocalUriHandler.provides(UriHandler(platform.clone())),
+                LocalTextToolbar.provides_unequal(text_toolbar.clone()),
                 LocalSoftwareKeyboardController.provides(SoftwareKeyboardController(platform.clone())),
                 LocalPlatform.provides(platform.clone()),
                 LocalFocusManager.provides(focus_manager.clone()),

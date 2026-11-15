@@ -1,8 +1,9 @@
 //! What the UI asks of the platform and what it tells the UI (Compose's `androidx.compose.ui.platform`): the
 //! platform's callbacks (C++'s `KompozHost::Callbacks`, each doing nothing by default, so a headless host works),
 //! the view configuration, what the system UI covers (kept in states the host updates) and moving the keyboard by
-//! hand, the ui composition locals the host provides at the root (the font family resolver text resolves its
-//! families with among them), and the modifiers whose effect is the window's
+//! hand, the text toolbar (Compose's TextToolbar, the host's handing it to the platform), the ui composition locals
+//! the host provides at the root (the font family resolver text resolves its families with among them), and the
+//! modifiers whose effect is the window's
 //! (`keep_screen_on`, `sensitive_content`, `preferred_frame_rate`, `system_gesture_exclusion`).
 
 use crate::graphics_context::GraphicsContext;
@@ -247,6 +248,13 @@ pub trait PlatformCallbacks {
         let _ = path;
         None
     }
+    /// Shows (or shows again) the platform's floating text toolbar over `rect` (px in the window) with the actions
+    /// it offers (the host's [`TextToolbar`], Android's floating ActionMode).
+    fn show_text_toolbar(&self, rect: Rect, actions: &TextToolbarActions) {
+        let _ = (rect, actions);
+    }
+    /// Hides the text toolbar.
+    fn hide_text_toolbar(&self) {}
 }
 
 /// The callbacks of a headless host: nothing.
@@ -431,6 +439,106 @@ impl Clipboard {
     }
     pub fn set_text(&self, text: &str) {
         self.0.get().set_clipboard(text);
+    }
+}
+
+/// Whether a text toolbar is shown (Compose's TextToolbarStatus).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum TextToolbarStatus {
+    Shown,
+    Hidden,
+}
+
+/// An action a text toolbar offers: none when it isn't offered.
+pub type TextToolbarAction = Option<Rc<dyn Fn()>>;
+
+/// The floating toolbar over selected text (Compose's TextToolbar): copy, paste, cut, select all and autofill for
+/// a selection or a field. What shows one (a SelectionContainer, a text field) calls `show_menu` with the rect of
+/// the selection (px in the window) and the actions that can be done now — none for the others — while it should
+/// show, again when they change, and `hide` once it shouldn't. Provided through [`LocalTextToolbar`]: the host's
+/// hands it to the platform, an app's own draws it its own way.
+pub trait TextToolbar {
+    /// Shows the toolbar over `rect` with the actions given (Compose's `showMenu`).
+    fn show_menu(
+        &self,
+        rect: Rect,
+        on_copy_requested: TextToolbarAction,
+        on_paste_requested: TextToolbarAction,
+        on_cut_requested: TextToolbarAction,
+        on_select_all_requested: TextToolbarAction,
+        on_autofill_requested: TextToolbarAction,
+    );
+    /// Hides it.
+    fn hide(&self);
+    /// Whether it is shown.
+    fn status(&self) -> TextToolbarStatus;
+}
+
+/// The actions of a text toolbar as the platform is given them ([`PlatformCallbacks::show_text_toolbar`]): each
+/// one it offers, none for those it doesn't.
+#[derive(Clone, Default)]
+pub struct TextToolbarActions {
+    pub on_copy_requested: TextToolbarAction,
+    pub on_paste_requested: TextToolbarAction,
+    pub on_cut_requested: TextToolbarAction,
+    pub on_select_all_requested: TextToolbarAction,
+    pub on_autofill_requested: TextToolbarAction,
+}
+
+impl std::fmt::Debug for TextToolbarActions {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("TextToolbarActions")
+            .field("copy", &self.on_copy_requested.is_some())
+            .field("paste", &self.on_paste_requested.is_some())
+            .field("cut", &self.on_cut_requested.is_some())
+            .field("select_all", &self.on_select_all_requested.is_some())
+            .field("autofill", &self.on_autofill_requested.is_some())
+            .finish()
+    }
+}
+
+/// The host's text toolbar (Compose's AndroidTextToolbar): it hands the menu to the platform
+/// ([`PlatformCallbacks::show_text_toolbar`] and `hide_text_toolbar`, which do nothing on a headless host) and
+/// keeps whether it is shown.
+pub struct PlatformTextToolbar {
+    platform: PlatformHandle,
+    status: Cell<TextToolbarStatus>,
+}
+
+impl PlatformTextToolbar {
+    pub fn new(platform: PlatformHandle) -> PlatformTextToolbar {
+        PlatformTextToolbar { platform, status: Cell::new(TextToolbarStatus::Hidden) }
+    }
+}
+
+impl TextToolbar for PlatformTextToolbar {
+    fn show_menu(
+        &self,
+        rect: Rect,
+        on_copy_requested: TextToolbarAction,
+        on_paste_requested: TextToolbarAction,
+        on_cut_requested: TextToolbarAction,
+        on_select_all_requested: TextToolbarAction,
+        on_autofill_requested: TextToolbarAction,
+    ) {
+        self.status.set(TextToolbarStatus::Shown);
+        let actions = TextToolbarActions {
+            on_copy_requested,
+            on_paste_requested,
+            on_cut_requested,
+            on_select_all_requested,
+            on_autofill_requested,
+        };
+        self.platform.get().show_text_toolbar(rect, &actions);
+    }
+
+    fn hide(&self) {
+        self.status.set(TextToolbarStatus::Hidden);
+        self.platform.get().hide_text_toolbar();
+    }
+
+    fn status(&self) -> TextToolbarStatus {
+        self.status.get()
     }
 }
 
@@ -952,6 +1060,17 @@ pub static LocalHapticFeedback: KompozitionLocal<HapticFeedback> =
     KompozitionLocal::new_static(HapticFeedback::default);
 /// The clipboard (Compose's LocalClipboard).
 pub static LocalClipboard: KompozitionLocal<Clipboard> = KompozitionLocal::new_static(Clipboard::default);
+/// The floating toolbar over selected text (Compose's LocalTextToolbar): the host's, which hands it to the
+/// platform; an app provides its own to draw it itself. Readers are told when it is another one.
+pub static LocalTextToolbar: KompozitionLocal<Rc<dyn TextToolbar>> =
+    KompozitionLocal::with_policy(SnapshotMutationPolicy::new(same_text_toolbar), || {
+        Rc::new(PlatformTextToolbar::new(PlatformHandle::default()))
+    });
+
+fn same_text_toolbar(a: &Rc<dyn TextToolbar>, b: &Rc<dyn TextToolbar>) -> bool {
+    Rc::ptr_eq(a, b)
+}
+
 /// Opening links (Compose's LocalUriHandler).
 pub static LocalUriHandler: KompozitionLocal<UriHandler> = KompozitionLocal::new_static(UriHandler::default);
 /// The software keyboard (Compose's LocalSoftwareKeyboardController).

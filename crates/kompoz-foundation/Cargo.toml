@@ -50,3 +50,7 @@ harness = false
 [[test]]
 name = "text_links"
 harness = false
+
+[[test]]
+name = "selection"
+harness = false

@@ -5,14 +5,13 @@
 use super::auto_size::TextAutoSize;
 use super::inline_content::{InlineChildren, InlineContentMap, has_inline_content, resolve_inline_content};
 use super::link_scope::{LinksComposables, TextLinkScope, TextRangeLayoutMeasureScope, text_range_of};
+use super::modifiers::SelectionController;
 use super::modifiers::selectable_text_annotated_string::SelectableTextAnnotatedStringElement;
-use super::modifiers::selection_hook::{
-    LocalSelectionRegistrar, LocalTextSelectionColors, SelectionController, SelectionRegistrarRef,
-};
 use super::modifiers::text_annotated_string::{
     OnPlaceholderLayout, OnShowTranslation, OnTextLayout, TextAnnotatedStringElement, TextSubstitutionValue,
 };
 use super::modifiers::text_string_simple::TextStringSimpleElement;
+use super::selection::{LocalSelectionRegistrar, LocalTextSelectionColors, SelectionRegistrarRef, has_selection};
 use kompoz_graphics::{ColorProducer, Constraints, IntOffset, Rect};
 use kompoz_runtime::{
     MutableState, SavedValue, Saver, kompozable, mutable_state_of, remember, remember_keyed,
@@ -162,7 +161,7 @@ struct TextArgs {
     max_lines: usize,
     min_lines: usize,
     font_family_resolver: Rc<dyn FontFamilyResolver>,
-    selection_controller: Option<Rc<dyn SelectionController>>,
+    selection_controller: Option<Rc<SelectionController>>,
     color: Option<ColorProducer>,
     auto_size: Option<Rc<dyn TextAutoSize>>,
 }
@@ -181,23 +180,23 @@ fn validate_min_max_lines(min_lines: usize, max_lines: usize) {
 /// registrar, saved while the text has a selection, and the controller for it and the selection's background
 /// color), none outside one.
 #[kompozable]
-fn remember_selection_controller() -> Option<Rc<dyn SelectionController>> {
+fn remember_selection_controller() -> Option<Rc<SelectionController>> {
     let registrar = LocalSelectionRegistrar.current()?;
     let background_selection_color = LocalTextSelectionColors.current().background_color;
     let saver = selection_id_saver(&registrar);
     let r = registrar.clone();
     let selectable_id = remember_saveable_keyed_with(registrar.clone(), &saver, move || r.0.next_selectable_id());
     Some(remember_keyed((selectable_id, registrar.clone(), background_selection_color), move || {
-        registrar.0.selection_controller(selectable_id, background_selection_color)
+        Rc::new(SelectionController::new(selectable_id, registrar.0.clone(), background_selection_color))
     }))
 }
 
 /// Saves a selectable id only while its text has a selection (Compose's selectionIdSaver).
-fn selection_id_saver(registrar: &SelectionRegistrarRef) -> Saver<i64> {
+fn selection_id_saver(registrar: &SelectionRegistrarRef) -> Saver<u64> {
     let registrar = registrar.clone();
     Saver::new(
-        move |id: &i64| if registrar.0.has_selection(*id) { SavedValue::Int(*id) } else { SavedValue::Null },
-        |saved: &SavedValue| saved.as_int(),
+        move |id: &u64| if has_selection(Some(&*registrar.0), *id) { SavedValue::from(*id) } else { SavedValue::Null },
+        |saved: &SavedValue| saved.as_int().map(|id| id as u64),
     )
 }
 

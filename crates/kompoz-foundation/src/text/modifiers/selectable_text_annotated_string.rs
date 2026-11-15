@@ -2,7 +2,7 @@
 //! SelectableTextAnnotatedStringNode): an annotated string's node that also tells its [`SelectionController`]
 //! when it is placed and unplaced, where it is and which pinnable container it is in.
 
-use super::selection_hook::SelectionController;
+use super::selection_controller::SelectionController;
 use super::text_annotated_string::{TextAnnotatedStringElement, TextAnnotatedStringNode, same_rc};
 use kompoz_graphics::Constraints;
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode};
@@ -55,7 +55,7 @@ impl ModifierNodeElement for SelectableTextAnnotatedStringElement {
 /// unplaced, where it is, and the pinnable container it is in (observed: told again when it changes).
 pub(crate) struct SelectableTextAnnotatedStringNode {
     pub(crate) text_node: TextAnnotatedStringNode,
-    selection_controller: Option<Rc<dyn SelectionController>>,
+    selection_controller: Option<Rc<SelectionController>>,
     is_placed: bool,
     handle: Option<NodeHandle>,
 }

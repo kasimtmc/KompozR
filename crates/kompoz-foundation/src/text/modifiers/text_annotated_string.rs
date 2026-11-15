@@ -8,7 +8,7 @@
 use super::layout_utils::round_to_int;
 use super::min_lines_constrainer::same_resolver;
 use super::multi_paragraph_layout_cache::MultiParagraphLayoutCache;
-use super::selection_hook::SelectionController;
+use super::selection_controller::SelectionController;
 use super::{invalidate_for_translate, text_paint_style, with_color};
 use crate::text::auto_size::{TextAutoSize, same_auto_size};
 use kompoz_graphics::{Color, ColorProducer, Constraints, Density, Rect};
@@ -58,7 +58,7 @@ pub(crate) struct TextAnnotatedStringElement {
     pub(crate) min_lines: usize,
     pub(crate) placeholders: Option<Vec<Range<Placeholder>>>,
     pub(crate) on_placeholder_layout: Option<OnPlaceholderLayout>,
-    pub(crate) selection_controller: Option<Rc<dyn SelectionController>>,
+    pub(crate) selection_controller: Option<Rc<SelectionController>>,
     pub(crate) color: Option<ColorProducer>,
     pub(crate) auto_size: Option<Rc<dyn TextAutoSize>>,
     pub(crate) on_show_translation: Option<OnShowTranslation>,
@@ -198,7 +198,7 @@ pub(crate) struct TextAnnotatedStringNode {
     min_lines: usize,
     placeholders: Option<Vec<Range<Placeholder>>>,
     on_placeholder_layout: Option<OnPlaceholderLayout>,
-    selection_controller: Option<Rc<dyn SelectionController>>,
+    selection_controller: Option<Rc<SelectionController>>,
     override_color: Option<ColorProducer>,
     auto_size: Option<Rc<dyn TextAutoSize>>,
     on_show_translation: Option<OnShowTranslation>,
@@ -316,7 +316,7 @@ impl TextAnnotatedStringNode {
         &mut self,
         on_text_layout: Option<OnTextLayout>,
         on_placeholder_layout: Option<OnPlaceholderLayout>,
-        selection_controller: Option<Rc<dyn SelectionController>>,
+        selection_controller: Option<Rc<SelectionController>>,
         on_show_translation: Option<OnShowTranslation>,
     ) -> bool {
         let mut changed = false;

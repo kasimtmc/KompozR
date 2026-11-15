@@ -240,6 +240,42 @@ pub(crate) async fn axis_drag(
     drag_internal(s, pointer_id, on_drag, Some(orientation), |c| c.is_consumed()).await.is_some()
 }
 
+/// Waits until every pointer is up, following the first one down (then another one down when it lifts): whether
+/// any moved past its slop meanwhile (Compose's `awaitAllPointersUpWithSlopDetection`).
+pub(crate) async fn await_all_pointers_up_with_slop_detection(
+    s: &AwaitPointerEventScope,
+    initial_position_change: &PointerInputChange,
+    pass: PointerEventPass,
+) -> bool {
+    if super::for_each::all_pointers_up(s) {
+        return false;
+    }
+    let mut pointer = initial_position_change.id;
+    let mut pointer_slop_reached = false;
+    let touch_slop = pointer_slop(&s.view_configuration(), initial_position_change.r#type);
+    let mut touch_slop_detector = TouchSlopDetector::new(None, Offset::Zero);
+    loop {
+        let event = s.await_pointer_event_with(pass).await;
+        match event.changes.iter().find(|c| c.id == pointer) {
+            Some(drag_event) if !drag_event.changed_to_up_ignore_consumed() => {
+                let post_slop_offset =
+                    touch_slop_detector.get_post_slop_offset(drag_event.position_change_ignore_consumed(), touch_slop);
+                if post_slop_offset.is_specified() {
+                    pointer_slop_reached = true;
+                }
+            }
+            _ => match event.changes.iter().find(|c| c.pressed) {
+                // The last one up.
+                None => return pointer_slop_reached,
+                Some(other_down) => pointer = other_down.id,
+            },
+        }
+        if !event.changes.iter().any(|c| c.pressed) {
+            return pointer_slop_reached;
+        }
+    }
+}
+
 /// Compose's `awaitLongPressOrCancellation`.
 pub(crate) async fn await_long_press_or_cancellation(
     s: &AwaitPointerEventScope,
