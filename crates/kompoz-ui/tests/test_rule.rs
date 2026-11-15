@@ -301,7 +301,7 @@ fn printing_shows_the_tree_as_compose_does() {
     assert!(printed.starts_with("Printing with useUnmergedTree = 'false'\nNode #"), "{printed}");
     assert!(
         printed.contains(", Tag: 'kök'")
-            && printed.contains("Actions = [OnClick]")
+            && printed.contains("Actions = [GetTextLayoutResult, OnClick]")
             && printed.contains("MergeDescendants = 'true'"),
         "{printed}"
     );

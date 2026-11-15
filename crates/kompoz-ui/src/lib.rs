@@ -24,6 +24,7 @@ pub mod platform;
 pub mod semantics;
 pub mod spatial;
 pub mod state;
+pub mod text;
 pub mod unit;
 pub mod window;
 

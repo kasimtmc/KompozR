@@ -146,7 +146,7 @@ fn partial_recomposition_keeps_node_order() {
 
 fn alignment_lines_pass_up_and_set_padding() {
     // C++'s alignment_lines_pass_up_and_set_padding: its column, box and custom layout parts (`paddingFromBaseline`
-    // is the layout modifiers package's; one-line texts until the text stage).
+    // is the layout modifiers package's).
     let seen = Rc::new(Cell::new(0));
     let s = seen.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
@@ -154,7 +154,7 @@ fn alignment_lines_pass_up_and_set_padding() {
         Column(|| {
             Column(modifier = Modifier.test_tag("sütun").padding_sides(top = 10.dp()), || {
                 Text("ilk", font_size = 16.sp());
-                Text("ikinci", font_size = 16.sp());
+                Text("ikinci\nüçüncü", font_size = 16.sp());
             });
             Box(modifier = Modifier.test_tag("boş").size(20.dp()));
             let s = s.clone();
@@ -174,11 +174,17 @@ fn alignment_lines_pass_up_and_set_padding() {
             );
         });
     }));
-    // 16 px text: 20 high, its baseline 13 down. The topmost first baseline and the bottommost last one, the padding
-    // included.
+    // 16 px text: 20 a line, its baseline 13 down. The topmost first baseline and the bottommost last one (the
+    // second text's second line), the padding included; where the texts are drawn.
     let column = rule.on_node_with_tag("sütun").layout_node().coordinates();
     assert_eq!(column.get(FirstBaseline), 10 + 13);
-    assert_eq!(column.get(LastBaseline), 10 + 20 + 13);
+    assert_eq!(column.get(LastBaseline), 10 + 20 + 20 + 13);
+    let drawn = rule.draw();
+    let top = rule.on_node_with_tag("sütun").get_unclipped_bounds_in_root().top;
+    let baseline = |t: &str| drawn.baselines[drawn.texts.iter().position(|x| x == t).expect("drawn")].y - top;
+    assert_eq!(baseline("ilk").round() as i32, column.get(FirstBaseline));
+    assert_eq!(baseline("üçüncü").round() as i32, column.get(LastBaseline));
+    assert!(baseline("üçüncü") > baseline("ikinci"));
     assert_eq!(rule.on_node_with_tag("boş").layout_node().coordinates().get(FirstBaseline), AlignmentLine::Unspecified);
     // A layout of its own: what it measured but didn't place passes nothing on.
     let own = rule.on_node_with_tag("kendi").layout_node().coordinates();
@@ -188,7 +194,8 @@ fn alignment_lines_pass_up_and_set_padding() {
 
 fn a_size_probe_measures_afresh() {
     // C++'s a_size_probe_measures_afresh: Compose measures a child once, so the narrowest it can be is its min
-    // intrinsic width (a word a line), asked after measuring it for real.
+    // intrinsic width (a word a line), asked after measuring it for real. Compose's min intrinsic width keeps the
+    // word's trailing space ("bir " is 32 px; C++'s 24 left it out).
     let full = Rc::new(Cell::new(0));
     let narrowest = Rc::new(Cell::new(0));
     let (f, n) = (full.clone(), narrowest.clone());
@@ -205,7 +212,7 @@ fn a_size_probe_measures_afresh() {
         );
     }));
     assert!(full.get() > 0 && narrowest.get() > 0 && narrowest.get() < full.get() / 2);
-    assert_eq!((full.get(), narrowest.get()), (80, 24));
+    assert_eq!((full.get(), narrowest.get()), (80, 32));
 }
 
 fn recomposing_layouts_with_equal_arguments_measures_nothing_again() {

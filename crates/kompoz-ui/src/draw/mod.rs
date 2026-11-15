@@ -4,7 +4,8 @@
 //! through its layer), its children in z order, what it reads observed, and the node hooks a display list keeps
 //! frames by around it (C++'s `LayoutNode::draw`).
 //!
-//! The drawing API of the scope (`draw_rect` and the rest: [`scope`]), Compose's ui.graphics [`Canvas`] and
+//! The drawing API of the scope (`draw_rect` and the rest: [`scope`]; laid out text, `draw_text`: `text.rs`),
+//! Compose's ui.graphics [`Canvas`] and
 //! [`Paint`], the draw modifiers ([`modifiers`]), [`GraphicsLayer`] recording, painters ([`painter`]) and
 //! composable vector content ([`vector`]) are in this module's other files.
 
@@ -17,6 +18,7 @@ pub mod painter;
 mod picture;
 pub mod scope;
 mod style;
+mod text;
 pub mod vector;
 
 pub use bitmap::{BitmapRenderer, draw_into_bitmap, pending_draws, set_bitmap_renderer};

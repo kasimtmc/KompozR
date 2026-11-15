@@ -106,7 +106,7 @@ impl Face {
     }
 
     /// Its metrics at `coords` and `size` px: the line its OS/2 table asks for (USE_TYPO_METRICS), else hhea's,
-    /// else the typographic one, else the clipping one (no gap); the underline from `post` and the strikeout from
+    /// else the typographic one, else the clipping one (no gap); how far its glyphs reach (its head table's box); the underline from `post` and the strikeout from
     /// OS/2 (Skia's defaults where it has none: an underline a ninth of the size below, a strikeout six
     /// twenty-firsts above, an eighteenth thick), its x-height and cap height (from OS/2, else its `x` and `H`).
     pub(crate) fn metrics(&self, coords: &Rc<[i16]>, size: f32) -> FontMetrics {
@@ -138,12 +138,17 @@ impl Face {
             let extents = font.glyph_metrics().scaled_f32(size).extents(glyph)?;
             Some(extents.y_bearing)
         };
+        // The head table's box: what its glyphs reach (Skia's top and bottom).
+        let bounds = metrics.bounds();
+        let (top, bottom) = (bounds.y_max.max(ascent), (-bounds.y_min).max(descent));
         let x_height = metrics.x_height().filter(|h| *h > 0.0).or_else(|| glyph_top('x')).unwrap_or(0.0);
         let cap_height = metrics.cap_height().filter(|h| *h > 0.0).or_else(|| glyph_top('H')).unwrap_or(0.0);
         FontMetrics {
             ascent,
             descent,
             leading,
+            top,
+            bottom,
             underline_position,
             underline_thickness,
             strikeout_position,

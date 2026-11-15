@@ -16,7 +16,7 @@ mod hyphenation;
 mod opportunities;
 mod optimal;
 
-pub use hyphenation::{EndHyphenEdit, HyphenationType, Hyphenator, StartHyphenEdit};
+pub use hyphenation::{EndHyphenEdit, HyphenationType, Hyphenator, StartHyphenEdit, hyphenator, set_hyphenator};
 pub use opportunities::{BreakOpportunity, break_opportunities};
 
 use crate::intl::Locale;
@@ -117,7 +117,10 @@ impl Default for TabStops {
 /// How a paragraph's lines are broken: the [`LineBreak`] (strategy, strictness, word break; Unspecified parts as
 /// `Simple` and `Default`), hyphenation and what hyphenates, the locale (CJK strictness, phrases, dictionaries),
 /// the lines' widths, whether the text is justified (spaces may squeeze, and lines aren't penalised), tab stops,
-/// and ranges never broken inside (inline content's placeholders, Android's replacement spans).
+/// ranges never broken inside (inline content's placeholders, Android's replacement spans), and whether only line
+/// feeds end lines (Android's StaticLayout, whose paragraphs end at `\n` and nowhere else: a line or paragraph
+/// separator, a next line, a vertical tab, a form feed or a lone carriage return is then an opportunity like any
+/// other; the paragraph engine breaks so).
 #[derive(Clone)]
 pub struct LineBreakParams<'a> {
     pub line_break: LineBreak,
@@ -128,6 +131,7 @@ pub struct LineBreakParams<'a> {
     pub justified: bool,
     pub tab_stops: TabStops,
     pub unbreakable: &'a [Range<usize>],
+    pub line_feed_breaks_only: bool,
 }
 
 impl<'a> LineBreakParams<'a> {
@@ -142,6 +146,7 @@ impl<'a> LineBreakParams<'a> {
             justified: false,
             tab_stops: TabStops::default(),
             unbreakable: &[],
+            line_feed_breaks_only: false,
         }
     }
 }
@@ -338,12 +343,18 @@ pub(crate) struct LineSpec {
     pub(crate) end_edit: EndHyphenEdit,
 }
 
-/// Breaks `text` into lines measured by `measure` with `params`: mandatory breaks first, then each stretch
+/// Breaks `text` into lines measured by `measure` with `params`: mandatory breaks first (line feeds only where
+/// `params` says so), then each stretch
 /// between them by the strategy (`Simple`: greedy; `HighQuality` and `Balanced`: optimal, or greedy where it has
 /// tabs). Empty text is one empty line; text ending in a mandatory break has an empty last line after it.
 pub fn break_lines(text: &str, measure: &dyn LineMeasure, params: &LineBreakParams<'_>) -> Vec<BrokenLine> {
     let line_break = params.line_break;
     let mut points = break_opportunities(text, line_break, &params.locale);
+    if params.line_feed_breaks_only {
+        for p in &mut points {
+            p.mandatory = p.mandatory && text[..p.offset].ends_with('\n');
+        }
+    }
     points.retain(|p| p.mandatory || p.offset == text.len() || !inside(params.unbreakable, p.offset));
     let mut fallback = opportunities::phrase_fallback(text, line_break, &params.locale);
     fallback.retain(|&f| !inside(params.unbreakable, f));

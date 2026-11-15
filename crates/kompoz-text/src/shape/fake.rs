@@ -20,7 +20,7 @@ static FAKE_FONT: LazyLock<FontId> = LazyLock::new(|| FontRegistry::register(Arc
 /// C++'s FakeTextMeasurer as a backend: every code point one glyph (its id the code point) half an em wide,
 /// stretched by the run's `scale_x`, plus the letter spacing (half of it before the glyph, half after); an ascent
 /// of 0.8 em, a descent of 0.2 and a leading of 0.25 (lines 1.25 em apart); every glyph a box from the ascent to
-/// the descent; the underline 2 px below the baseline and the strikeout 0.3 ascents above it, `max(1, size / 14)`
+/// the descent (so its top and bottom are its ascent and descent); the underline 2 px below the baseline and the strikeout 0.3 ascents above it, `max(1, size / 14)`
 /// thick (as C++ drew them). One face has every character, weight and style (its id [`FakeBackend::font_id`]);
 /// sizes come in px, so the font scale reaches it through them.
 #[derive(Clone, Copy, Debug, Default)]
@@ -133,6 +133,8 @@ impl FontBackend for FakeBackend {
             ascent: 0.8 * s,
             descent: 0.2 * s,
             leading: 0.25 * s,
+            top: 0.8 * s,
+            bottom: 0.2 * s,
             underline_position: 2.0,
             underline_thickness: thickness,
             strikeout_position: -0.3 * 0.8 * s,

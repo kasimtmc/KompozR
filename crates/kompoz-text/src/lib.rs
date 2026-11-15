@@ -10,6 +10,11 @@
 //! line breaking ([`line_break`]: UAX #14 opportunities, minikin's greedy and optimal strategies over a measure)
 //! and word boundaries for selection ([`word_boundary`](mod@word_boundary)).
 //!
+//! The paragraph engine over them, as Compose's ui-text on Android: [`ParagraphIntrinsics`] (text shaped once) and
+//! [`Paragraph`] (laid out in a width: lines, ellipsis, line heights, alignment, hit testing, its draw list),
+//! [`MultiParagraph`] (paragraph styles' pieces stacked), [`TextLayoutResult`] and [`TextMeasurer`] (with its
+//! layout cache).
+//!
 //! Offsets into text are UTF-8 bytes, always on character boundaries (a [`TextRange`] slices its text directly);
 //! platform bridges convert to UTF-16 or characters at their edge. Lengths are px; what an app writes is in sp and
 //! em ([`TextUnit`](kompoz_graphics::TextUnit)), turned into px by a [`Density`](kompoz_graphics::Density).
@@ -27,6 +32,8 @@ pub mod input;
 pub mod intl;
 pub mod line_break;
 pub mod link;
+pub mod multi_paragraph;
+pub mod paragraph;
 pub mod paragraph_style;
 pub mod placeholder;
 pub mod platform_style;
@@ -36,6 +43,9 @@ pub mod segment;
 pub mod shape;
 pub mod span_style;
 pub mod style;
+pub mod text_granularity;
+pub mod text_layout_result;
+pub mod text_measurer;
 pub mod text_style;
 pub mod word_boundary;
 
@@ -56,6 +66,8 @@ pub use line_break::{
     BreakOpportunity, BrokenLine, LineBreakParams, LineMeasure, LineWidths, TabStops, break_lines, break_opportunities,
 };
 pub use link::{LinkAnnotation, LinkInteractionListener, TextLinkStyles, TtsAnnotation, UrlAnnotation};
+pub use multi_paragraph::{MultiParagraph, MultiParagraphIntrinsics, ParagraphInfo, ParagraphIntrinsicInfo};
+pub use paragraph::{DefaultMaxLines, Paragraph, ParagraphIntrinsics, TextPaint, TextPaintOp, TextPaintStyle};
 pub use paragraph_style::{ParagraphStyle, lerp_paragraph_style};
 pub use placeholder::{Placeholder, PlaceholderVerticalAlign};
 pub use platform_style::{EmojiSupportMatch, PlatformParagraphStyle, PlatformSpanStyle, PlatformTextStyle};
@@ -66,6 +78,9 @@ pub use style::{
     BaselineShift, Hyphens, LineBreak, LineHeightStyle, ResolvedTextDirection, TextAlign, TextDecoration,
     TextDirection, TextGeometricTransform, TextIndent, TextMotion, TextOverflow, resolve_text_direction,
 };
+pub use text_granularity::{TextGranularity, TextInclusionStrategy};
+pub use text_layout_result::{TextLayoutInput, TextLayoutResult};
+pub use text_measurer::{DefaultCacheSize, TextLayoutCache, TextMeasurer};
 pub use text_style::{TextStyle, lerp_text_style};
 pub use word_boundary::{WordIterator, WordSegmentFinder, word_boundary};
 

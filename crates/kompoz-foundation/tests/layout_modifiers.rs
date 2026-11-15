@@ -198,8 +198,10 @@ fn aspect_ratio_tries_the_constraints_in_composes_order() {
 // ---- Intrinsic sizes -------------------------------------------------------------------------------------------
 
 fn min_intrinsic_widths_are_the_widest_words() {
-    // C++'s min_intrinsic_widths_are_the_widest_words, its parts the one-line test Text can show (the narrow
-    // column's text wrapping waits for the text stage). The FakeTextMeasurer at 16 sp: 8 px a code point.
+    // C++'s min_intrinsic_widths_are_the_widest_words, its parts the test Text can show (its styled part needs
+    // BasicText). The FakeTextMeasurer at 16 sp: 8 px a code point. Compose's min intrinsic width is the widest
+    // piece between line breaks with its trailing space ("kelimeler " 80, "bir " 32, "dört " 40; C++ left the
+    // space out: 72, 24 + 32).
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Column(|| {
             Column(Modifier.width_intrinsic(IntrinsicSize::Min).test_tag("dar"), || {
@@ -216,10 +218,13 @@ fn min_intrinsic_widths_are_the_widest_words() {
             });
         });
     }));
-    // "kelimeler"; "bir" (or "iki") and "dört" side by side; all of it on one line.
-    assert!(near(bounds(&rule, "dar")[2], 9.0 * 8.0) && near(bounds(&rule, "çizgi")[2], 9.0 * 8.0));
-    assert!(near(bounds(&rule, "satır")[2], 3.0 * 8.0 + 4.0 * 8.0));
+    // "kelimeler "; "bir " (or "iki") and "dört " side by side; all of it on one line.
+    assert!(near(bounds(&rule, "dar")[2], 10.0 * 8.0) && near(bounds(&rule, "çizgi")[2], 10.0 * 8.0));
+    assert!(near(bounds(&rule, "satır")[2], 4.0 * 8.0 + 5.0 * 8.0));
     assert!(near(bounds(&rule, "geniş")[2], 21.0 * 8.0));
+    // Laid out for real at that width afterwards: the narrow column's text wraps a word a line (three lines of
+    // 20 and the 2 px line).
+    assert!(near(bounds(&rule, "dar")[3], 3.0 * 20.0 + 2.0));
 }
 
 fn intrinsic_height_makes_a_divider_as_tall_as_the_row() {

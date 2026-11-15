@@ -28,5 +28,5 @@ pub use properties::{
     AccessibilityAction, ActionFn, CollectionInfo, CollectionItemInfo, ContentDataType, ContentType,
     CustomAccessibilityAction, FillableData, IndexForKey, InputTextSuggestionState, LiveRegionMode,
     ProgressBarRangeInfo, Role, ScrollAxisRange, ScrollByOffsetAction, SemanticsActions, SemanticsProperties,
-    TextLayoutResultHandle, TextRange,
+    TextRange,
 };

@@ -112,3 +112,19 @@ pub trait Hyphenator {
     /// boundaries) with what breaking there does; `DontBreak` points are left out or ignored.
     fn hyphenate(&self, word: &str, locale: &Locale) -> Vec<(usize, HyphenationType)>;
 }
+
+thread_local! {
+    static HYPHENATOR: std::cell::RefCell<Option<std::rc::Rc<dyn Hyphenator>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Installs the hyphenator the paragraph engine hyphenates `Hyphens.Auto` text with on this thread (as Android's
+/// Hyphenator.init installs the system's patterns; KompozR ships none, so there is none until one is installed:
+/// `Hyphens.Auto` then hyphenates nothing). None removes it.
+pub fn set_hyphenator(hyphenator: Option<std::rc::Rc<dyn Hyphenator>>) {
+    HYPHENATOR.with(|h| *h.borrow_mut() = hyphenator);
+}
+
+/// The hyphenator installed on this thread.
+pub fn hyphenator() -> Option<std::rc::Rc<dyn Hyphenator>> {
+    HYPHENATOR.with(|h| h.borrow().clone())
+}

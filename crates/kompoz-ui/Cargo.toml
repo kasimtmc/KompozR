@@ -71,3 +71,7 @@ harness = false
 [[test]]
 name = "rulers"
 harness = false
+
+[[test]]
+name = "text"
+harness = false

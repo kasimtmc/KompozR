@@ -413,8 +413,14 @@ impl BidiLine {
     /// Android's getPrimaryHorizontal (`primary`: where text of the paragraph's direction would be inserted) and
     /// getSecondaryHorizontal (where text of the other direction would). `width` measures a piece of one run as
     /// it is laid out (`run.range.start..offset`, or a whole run; tabs reaching their stops).
-    pub fn horizontal(&self, offset: usize, primary: bool, mut width: impl FnMut(Range<usize>) -> f32) -> f32 {
-        let trailing = self.primary_is_trailing_previous(offset) == primary;
+    pub fn horizontal(&self, offset: usize, primary: bool, width: impl FnMut(Range<usize>) -> f32) -> f32 {
+        self.position(offset, self.primary_is_trailing_previous(offset) == primary, width)
+    }
+
+    /// Where a caret at `offset` goes when it takes the trailing edge of the character before `offset`
+    /// (`trailing`) or the leading edge of the one at it (Android's TextLine.measure(offset, trailing)), px from
+    /// the left edge of the line's runs laid side by side; `width` as [`horizontal`](BidiLine::horizontal)'s.
+    pub fn position(&self, offset: usize, trailing: bool, mut width: impl FnMut(Range<usize>) -> f32) -> f32 {
         let rtl_paragraph = self.base_level % 2 == 1;
         // The caret takes the trailing edge of the character before `offset`, or the leading edge of the one at
         // it; before the line, the line's leading edge.

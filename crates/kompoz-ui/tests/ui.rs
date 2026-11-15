@@ -435,7 +435,8 @@ fn intrinsics_come_from_the_policy_and_the_layout_modifiers() {
         let s = s.clone();
         Layout(
             content = || {
-                // A text: min = its widest word, max = all of it.
+                // A text: min = its widest piece between line breaks, its trailing space included as Compose's
+                // ("cdef ": 50), max = all of it.
                 Text("ab cdef g", font_size = 20.sp());
                 // A modifier's default intrinsics measure what it wraps answering with its own: 10 more.
                 Text(
@@ -467,7 +468,7 @@ fn intrinsics_come_from_the_policy_and_the_layout_modifiers() {
         );
     }));
     let seen = seen.borrow();
-    assert_eq!(seen[0], (40, 90, 25));
+    assert_eq!(seen[0], (50, 90, 25));
     assert_eq!(seen[1], (50, 50, 25));
     assert_eq!(seen[2], (40, 40, 50));
 }

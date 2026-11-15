@@ -11,6 +11,7 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
+use kompoz_text::TextMeasurer;
 use kompoz_ui::draw::vector;
 use kompoz_ui::draw::*;
 use kompoz_ui::graphics_context::{ClipOp, CornerRadii, GraphicsContext, Shadow, TextDraw};
@@ -294,13 +295,16 @@ fn draw_scope_strokes_sit_on_the_outline() {
 }
 
 fn draw_scope_rotation_and_text() {
-    // C++ 8417: turned through the context's transform (no layer), about the middle; a text drawn from its
-    // baseline in the scope.
+    // C++ 8417: turned through the context's transform (no layer), about the middle; a text measured and drawn at
+    // the scope's top left (14 px, Compose's default; C++ measured 20 px text: 40 for "abcd").
     let c = canvas_of(100.0, 100.0, |d| {
         d.rotate(30.0, |r| {
             r.draw_rect_with(Color::Black, Offset::Zero, Size::new(10.0, 10.0), 1.0, Fill, None, DefaultBlendMode)
         });
-        d.draw_text_run(&fake_text("çizim", Offset::new(0.0, 11.2), 14.0), Color::Black);
+        let m = TextMeasurer::new(kompoz_ui::platform::fake_resolver(), d.density(), d.layout_direction(), 0);
+        d.draw_text_measurer(&m, "çizim");
+        let measured = m.measure("abcd");
+        assert_eq!(measured.size.width, 28); // 14 px: 7 a letter
     });
     assert!(c.layers == 0 && c.transforms.len() == 1 && c.transform_depth == 0);
     let middle = c.transforms[0].map(Offset::new(50.0, 50.0));
@@ -308,6 +312,7 @@ fn draw_scope_rotation_and_text() {
     assert!(near_by(middle.x, 50.0, 0.01) && near_by(middle.y, 50.0, 0.01));
     assert!(near_by(right.x, 50.0 + 10.0 * (std::f32::consts::PI / 6.0).cos(), 0.01) && near_by(right.y, 55.0, 0.01));
     assert_eq!(c.texts, ["çizim"]);
+    assert!(near(c.baselines[0].y, 11.2) && near(c.baselines[0].x, 0.0));
 }
 
 const P: DrawStyle = Fill;

@@ -102,13 +102,17 @@ pub struct ShapedRun {
 }
 
 /// A face's metrics at a size, in px: how far it reaches above and below the baseline (both positive), the gap
-/// it puts below a line (lines are ascent + descent + leading apart), where its underline's and strikeout's
-/// middles are (from the baseline, positive below) and how thick they are, its x-height and cap height.
+/// it puts below a line (lines are ascent + descent + leading apart), how far its tallest and lowest glyphs reach
+/// (`top` and `bottom`, at least the ascent and descent: Android's FontMetrics top and bottom, which
+/// `include_font_padding` pads a text's first and last lines to), where its underline's and strikeout's middles
+/// are (from the baseline, positive below) and how thick they are, its x-height and cap height.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct FontMetrics {
     pub ascent: f32,
     pub descent: f32,
     pub leading: f32,
+    pub top: f32,
+    pub bottom: f32,
     pub underline_position: f32,
     pub underline_thickness: f32,
     pub strikeout_position: f32,

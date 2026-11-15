@@ -8,6 +8,7 @@
 pub mod brush;
 pub mod color;
 pub mod colorspace;
+pub mod constraints;
 pub mod draw_style;
 pub mod geometry;
 pub mod image;
@@ -22,6 +23,7 @@ pub mod vector;
 
 pub use brush::*;
 pub use color::*;
+pub use constraints::*;
 pub use draw_style::*;
 pub use geometry::*;
 pub use image::*;

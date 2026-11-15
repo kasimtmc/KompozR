@@ -11,8 +11,8 @@ use crate::platform::ImeAction;
 use crate::state::ToggleableState;
 use kompoz_graphics::{Offset, Shape};
 use kompoz_runtime::named;
-use kompoz_text::AnnotatedString;
 pub use kompoz_text::TextRange;
+use kompoz_text::{AnnotatedString, TextLayoutResult};
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
@@ -389,10 +389,6 @@ impl fmt::Debug for ScrollByOffsetAction {
     }
 }
 
-/// A text layout as `GetTextLayoutResult` hands it out: kompoz-text's TextLayoutResult, type-erased until the
-/// paragraph engine defines it (stage 6's WP3 types the action with it).
-pub type TextLayoutResultHandle = Rc<dyn Any>;
-
 // ---------------------------------------------------------------------------------------------------------------
 // Merge policies
 
@@ -545,9 +541,9 @@ impl SemanticsProperties {
 pub struct SemanticsActions;
 
 impl SemanticsActions {
-    /// Hands out its text layouts (TextLayoutResults, erased until the paragraph engine defines them).
+    /// Hands out its text layouts: the action adds them to the list it is given (Compose's GetTextLayoutResult).
     pub const GetTextLayoutResult: SemanticsPropertyKey<
-        AccessibilityAction<dyn Fn(&mut Vec<TextLayoutResultHandle>) -> bool>,
+        AccessibilityAction<dyn Fn(&mut Vec<TextLayoutResult>) -> bool>,
     > = action_key("GetTextLayoutResult");
     pub const OnClick: SemanticsPropertyKey<AccessibilityAction<ActionFn>> = action_key("OnClick");
     pub const OnLongClick: SemanticsPropertyKey<AccessibilityAction<ActionFn>> = action_key("OnLongClick");
@@ -799,7 +795,7 @@ impl SemanticsConfiguration {
     pub fn get_text_layout_result(
         &mut self,
         #[default(None)] label: Option<String>,
-        action: impl Fn(&mut Vec<TextLayoutResultHandle>) -> bool + 'static,
+        action: impl Fn(&mut Vec<TextLayoutResult>) -> bool + 'static,
     ) {
         self.set(SemanticsActions::GetTextLayoutResult, AccessibilityAction { label, action: Some(Rc::new(action)) });
     }
