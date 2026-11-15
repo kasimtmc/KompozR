@@ -8,21 +8,20 @@
 //! still text, at a quarter of a pixel and unhinted for text that moves (the run's TextMotion), outline glyphs in the
 //! text's style, colour glyphs (COLR, bitmaps) as their fonts colour them.
 
-use super::adjust::{self, accent_height_limit, adjustment, reverse_charmap, separate};
 use super::atlas::{AtlasSlot, GlyphAtlas, PageFormat};
+use super::autohint::{Autohinter, Target};
 use super::bitmap::{BitmapImage, bitmap_glyph};
 use super::blur::blurred;
 use super::color::{ColorImage, paint_colr};
-use super::outline::{GlyphStroke, GlyphStyle, Hinting, glyf_tags, load, scaler, styled_coverage};
+use super::outline::{GlyphStroke, GlyphStyle, Hinting, glyf_tags, hint_engine, load, scaler, styled_coverage};
 use super::raster::{Coverage, FixedOutline};
 use kompoz_graphics::{DrawStyle, Offset, PathEffect, StrokeCap, StrokeJoin};
 use kompoz_text::draw::{GlyphColorKind, GlyphRun, TextDraw};
 use kompoz_text::font::{FontBytes, FontId, FontRegistry};
 use kompoz_text::style::Linearity;
 use skrifa::font::glyph::outline::OutlineSource;
-use skrifa::outline::autohint::{GlyphStyles, ScriptGroup};
 use skrifa::raw::types::F2Dot14;
-use skrifa::{Font, FontRef, GlyphId, HintEngine, MetadataProvider, ScalerFont};
+use skrifa::{Font, FontRef, HintEngine, ScalerFont};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
@@ -84,24 +83,16 @@ pub enum GlyphImage {
     Color(ColorImage),
 }
 
-/// A font at a location in its design space, with its scalers by size and hinting (a scaler keeps what its hinting
-/// works out for the size: TrueType's programs run once), and what FreeType 2.14's diacritic adjustments read from
-/// it (made when first needed).
+/// A font at a location in its design space, with skrifa's scalers by size and hinting (a scaler keeps what its
+/// hinting works out for the size: TrueType's programs run once), and the automatic hinter's state for it (its
+/// glyphs' styles and their metrics: made when first needed).
 pub struct Face {
     blob: FontBytes,
     index: u32,
     font: Font,
     scalers: HashMap<(u32, Hinting), ScalerFont>,
     units: Option<ScalerFont>,
-    diacritics: Option<Diacritics>,
-}
-
-/// A face's glyphs by the characters FreeType's adjustment database has, the hinter's styles of its glyphs, and the
-/// accents' height limits by size and style.
-struct Diacritics {
-    reverse: HashMap<u32, u32>,
-    styles: Option<GlyphStyles>,
-    limits: HashMap<(u32, usize), Option<i32>>,
+    autohinter: Option<Autohinter>,
 }
 
 impl Face {
@@ -113,29 +104,34 @@ impl Face {
         } else {
             font.instance_builder().normalized_coords(coords.iter().map(|&c| F2Dot14::from_bits(c))).build()
         };
-        Some(Face { blob, index, font, scalers: HashMap::new(), units: None, diacritics: None })
+        Some(Face { blob, index, font, scalers: HashMap::new(), units: None, autohinter: None })
     }
 
     pub fn font(&self) -> &Font {
         &self.font
     }
 
-    /// Its scaler at `px` px with `hinting`.
+    /// Which hinter fits its outlines with `hinting` ([`HintEngine::Auto`]: our automatic hinter).
+    pub fn hint_engine(&self, hinting: Hinting) -> Option<HintEngine> {
+        hint_engine(&self.font, hinting)
+    }
+
+    /// Its skrifa scaler at `px` px with `hinting`.
     pub fn scaler(&mut self, px: u32, hinting: Hinting) -> &ScalerFont {
         let font = &self.font;
         self.scalers.entry((px, hinting)).or_insert_with(|| scaler(font, px, hinting))
     }
 
-    /// Its scaler drawing in font units.
-    fn units(&mut self) -> &ScalerFont {
-        let font = &self.font;
-        self.units.get_or_insert_with(|| ScalerFont::unhinted(font.clone(), None))
-    }
-
-    /// Glyph `glyph`'s outline at `px` px with `hinting`, as FreeType 2.14's hinter leaves it: when the automatic
-    /// hinter fitted it (the Latin writing system's), its diacritics moved clear of its base by its character's
-    /// adjustment flags (see [`adjust`](super::adjust)).
+    /// Glyph `glyph`'s outline at `px` px with `hinting`, as FreeType hints it: by our automatic hinter (FreeType
+    /// 2.14's, see [`autohint`](super::autohint)) where FreeType hints with it, else by skrifa's scaler (the font's
+    /// own instructions or hints, or none).
     pub fn outline(&mut self, px: u32, hinting: Hinting, glyph: u32) -> Option<FixedOutline> {
+        if self.hint_engine(hinting) == Some(HintEngine::Auto) {
+            let target = if hinting == Hinting::Light { Target::Light } else { Target::Normal };
+            let font = &self.font;
+            let hinter = self.autohinter.get_or_insert_with(|| Autohinter::new(font));
+            return hinter.hint(font, glyph, px, target).map(|hinted| hinted.outline);
+        }
         let blob = self.blob.clone();
         let font_ref = FontRef::from_index((*blob).as_ref(), self.index).ok();
         let scaler = self.scaler(px, hinting);
@@ -143,46 +139,7 @@ impl Face {
             (Some(OutlineSource::Glyf), Some(f)) => glyf_tags(f, glyph),
             _ => None,
         };
-        let mut outline = load(scaler, glyph, tags)?;
-        if scaler.hint_engine() != Some(HintEngine::Auto) {
-            return Some(outline);
-        }
-        let font = self.font.clone();
-        let diacritics = self.diacritics.get_or_insert_with(|| Diacritics {
-            reverse: reverse_charmap(&font),
-            styles: None,
-            limits: HashMap::new(),
-        });
-        let Some(&codepoint) = diacritics.reverse.get(&glyph) else {
-            return Some(outline);
-        };
-        let flags = adjustment(codepoint);
-        if flags & (adjust::UP | adjust::DOWN | adjust::UP2 | adjust::DOWN2) == 0 {
-            return Some(outline);
-        }
-        let Some(font_ref) = font_ref else {
-            return Some(outline);
-        };
-        let styles = diacritics.styles.get_or_insert_with(|| GlyphStyles::new(&font_ref.outline_glyphs()));
-        let Some(style) = styles.get(GlyphId::new(glyph)).and_then(|s| s.style_class()) else {
-            return Some(outline);
-        };
-        if style.script.group != ScriptGroup::Default {
-            return Some(outline);
-        }
-        let limit = if flags & adjust::NO_HEIGHT_CHECK != 0 {
-            // (FreeType leaves its limit at 0 then, so that any diacritic is too tall to move.)
-            Some(0)
-        } else {
-            *diacritics
-                .limits
-                .entry((px, style.index))
-                .or_insert_with(|| accent_height_limit(&font_ref, font.normalized_coords(), styles, glyph, px))
-        };
-        if let Some(limit) = limit {
-            separate(&mut outline, flags, limit as i64);
-        }
-        Some(outline)
+        load(scaler, glyph, tags)
     }
 
     /// Glyph `glyph` rasterized as `spec` asks: an outline glyph (`kind` Outline) at its size, light hinted or not,
@@ -208,13 +165,13 @@ impl Face {
             }
             _ if blurred_shadow => (None, false),
             GlyphColorKind::ColrV0 | GlyphColorKind::ColrV1 => {
-                // (Scalers made first: the painter borrows both.)
-                self.scaler(px, Hinting::Normal);
-                self.units();
-                let layers = &self.scalers[&(px, Hinting::Normal)];
-                let units = self.units.as_ref().expect("made above");
-                let glyf = FontRef::from_index((*self.blob).as_ref(), self.index).ok();
-                match paint_colr(&self.font, glyph, px, spec.foreground, layers, glyf.as_ref(), units) {
+                // (Its scaler drawing in font units, kept with it, taken out while the layers borrow the face.)
+                let font = self.font.clone();
+                let units = self.units.take().unwrap_or_else(|| ScalerFont::unhinted(font.clone(), None));
+                let mut layers = |layer: u32| self.outline(px, Hinting::Normal, layer);
+                let painted = paint_colr(&font, glyph, px, spec.foreground, &mut layers, &units);
+                self.units = Some(units);
+                match painted {
                     Some(painted) => (painted.image.map(GlyphImage::Color), painted.uses_foreground),
                     None => (self.plain(glyph, px), false),
                 }

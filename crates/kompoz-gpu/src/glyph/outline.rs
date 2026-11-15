@@ -1,8 +1,9 @@
-//! Glyph outlines from skrifa at a whole pixel size, hinted as FreeType hints for the C++ Kompoz's text (light:
-//! FreeType's automatic hinter moving points only vertically; the font's own PostScript hints lightly), held as
-//! FreeType holds them (26.6, y up, tagged points) so the rasterizer cuts their curves as FreeType does; then drawn
-//! in a style: stretched and slanted after hinting (FreeType's FT_Set_Transform), faked bold (Skia's stroke and
-//! fill) or italic (Skia's slant), outlined by a stroke.
+//! Glyph outlines at a whole pixel size, hinted as FreeType hints for the C++ Kompoz's text (light: FreeType's
+//! automatic hinter, ours (see [`autohint`](super::autohint)), moving points only vertically; the font's own
+//! PostScript hints lightly, through skrifa), held as FreeType holds them (26.6, y up, tagged points) so the
+//! rasterizer cuts their curves as FreeType does; then drawn in a style: stretched and slanted after hinting
+//! (FreeType's FT_Set_Transform), faked bold (Skia's stroke and fill) or italic (Skia's slant), outlined by a
+//! stroke.
 
 use super::raster::{Coverage, FillRule, FixedMatrix, FixedOutline, FixedPoint, FixedSink, PointTag};
 use kompoz_graphics::{Contour, Offset, Path, PathEffect, PathStroke, StrokeCap, StrokeJoin};
@@ -14,7 +15,7 @@ use skrifa::raw::TableProvider;
 use skrifa::raw::limits::MAX_RECURSION_DEPTH;
 use skrifa::raw::tables::glyf::{Glyf, Glyph as GlyfGlyph};
 use skrifa::raw::tables::loca::Loca;
-use skrifa::{DrawMemory, Font, FontRef, GlyphId, HintOptions, PathSink, RasterTarget, ScalerFont};
+use skrifa::{DrawMemory, Font, FontRef, GlyphId, HintEngine, HintOptions, PathSink, RasterTarget, ScalerFont};
 
 /// How far a curve cut into lines (to be stroked or emboldened) may stray from it: a sixteenth of a pixel, the
 /// flatness FreeType's rasterizer cuts quadratics to.
@@ -32,7 +33,44 @@ pub enum Hinting {
     Normal,
 }
 
-/// A scaler drawing `font`'s outlines at `ppem` px with `hinting`.
+/// Which hinter fits `font`'s outlines with `hinting`, as FreeType chooses for its load flags (skrifa's choice for
+/// its scalers): none unhinted; the font's instructions for a TrueType font that needs them to draw right (a tricky
+/// one); lightly, a PostScript font's own hints (none for a Type 1 font), the automatic hinter otherwise; by
+/// default, a TrueType font's instructions if it has any, a PostScript font's hints, the automatic hinter for a
+/// TrueType font without instructions. [`HintEngine::Auto`] is our automatic hinter, the others skrifa's.
+pub fn hint_engine(font: &Font, hinting: Hinting) -> Option<HintEngine> {
+    if hinting == Hinting::None {
+        return None;
+    }
+    let source = font.outline_glyphs().underlying_source();
+    if source == Some(OutlineSource::Glyf) && font.is_hint_reliant() {
+        return Some(HintEngine::TrueType);
+    }
+    let instructions = match (hinting, source) {
+        (Hinting::Light, Some(OutlineSource::Cff | OutlineSource::Cff2 | OutlineSource::Type1)) => true,
+        (Hinting::Light, _) => false,
+        (_, Some(OutlineSource::Glyf)) => {
+            let tables = font.tables();
+            let max_instructions =
+                tables.selected_maxp().ok().and_then(|maxp| maxp.max_size_of_instructions()).unwrap_or_default();
+            max_instructions != 0
+                || !tables.fpgm().unwrap_or_default().is_empty()
+                || !tables.prep().unwrap_or_default().is_empty()
+        }
+        _ => true,
+    };
+    if !instructions {
+        return Some(HintEngine::Auto);
+    }
+    match source {
+        Some(OutlineSource::Glyf) => Some(HintEngine::TrueType),
+        Some(OutlineSource::Cff | OutlineSource::Cff2) => Some(HintEngine::PostScript),
+        _ => None,
+    }
+}
+
+/// skrifa's scaler drawing `font`'s outlines at `ppem` px with `hinting` (its own automatic hinter where
+/// [`hint_engine`] chooses ours).
 pub fn scaler(font: &Font, ppem: u32, hinting: Hinting) -> ScalerFont {
     let ppem_f = ppem as f32;
     match hinting {

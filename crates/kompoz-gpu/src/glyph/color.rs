@@ -8,12 +8,12 @@
 //! outlines and boxes (coverage from the same rasterizer), solid fills and linear, radial and sweep gradients with
 //! their extend modes, layers composited by each of COLR's composite modes.
 
-use super::outline::{OutlineBuilder, glyf_tags, load};
+use super::outline::OutlineBuilder;
 use super::raster::{Coverage, FixedOutline, FixedPoint};
 use skrifa::font::glyph::color::{Brush, Color as PaletteColor, ColorStop, ColorVersion, CompositeMode, Extend};
 use skrifa::font::glyph::color::{ColorGlyph, PaintSink};
 use skrifa::raw::types::{BoundingBox, Matrix};
-use skrifa::{DrawMemory, Font, FontRef, GlyphId, PathSink, ScalerFont};
+use skrifa::{DrawMemory, Font, GlyphId, PathSink, ScalerFont};
 
 /// The most pixels a colour glyph is painted with each way (an atlas page's side).
 const MAX_SIDE: f32 = 1024.0;
@@ -49,17 +49,15 @@ pub struct PaintedGlyph {
 }
 
 /// `glyph`'s COLR colour glyph in `font` at `px` px (None if the font has none for it, or its paint graph is
-/// malformed: a renderer then draws its outline). `layers` draws version 0 layers' outlines at `px` hinted as
-/// FT_LOAD_DEFAULT (`glyf`, the font's table directory where it has one, gives their points' tags); `units` draws
-/// outlines in font units, unhinted (version 1's clips). `foreground` is the colour of palette index 0xFFFF,
-/// straight sRGB.
+/// malformed: a renderer then draws its outline). `layers` gives version 0 layers' outlines at `px` hinted as
+/// FT_LOAD_DEFAULT hints them (see [`Face::outline`](super::cache::Face::outline)); `units` draws outlines in font
+/// units, unhinted (version 1's clips). `foreground` is the colour of palette index 0xFFFF, straight sRGB.
 pub fn paint_colr(
     font: &Font,
     glyph: u32,
     px: u32,
     foreground: [u8; 4],
-    layers: &ScalerFont,
-    glyf: Option<&FontRef<'_>>,
+    layers: &mut dyn FnMut(u32) -> Option<FixedOutline>,
     units: &ScalerFont,
 ) -> Option<PaintedGlyph> {
     let color_glyph = font.color_glyphs().get(GlyphId::new(glyph))?;
@@ -67,8 +65,7 @@ pub fn paint_colr(
     match color_glyph.version() {
         ColorVersion::V0 => {
             let mut painter = LayerPainter {
-                scaler: layers,
-                glyf,
+                layers,
                 palette,
                 foreground,
                 uses_foreground: false,
@@ -220,8 +217,7 @@ impl Canvas8 {
 
 /// Paints a version 0 glyph: each layer a solid fill of a glyph's outline.
 struct LayerPainter<'a> {
-    scaler: &'a ScalerFont,
-    glyf: Option<&'a FontRef<'a>>,
+    layers: &'a mut dyn FnMut(u32) -> Option<FixedOutline>,
     palette: &'a [PaletteColor],
     foreground: [u8; 4],
     uses_foreground: bool,
@@ -257,8 +253,7 @@ impl PaintSink for LayerPainter<'_> {
             self.failed = true;
             return;
         }
-        let tags = self.glyf.and_then(|f| glyf_tags(f, glyph.to_u32()));
-        let Some(outline) = load(self.scaler, glyph.to_u32(), tags) else {
+        let Some(outline) = (self.layers)(glyph.to_u32()) else {
             self.failed = true;
             return;
         };

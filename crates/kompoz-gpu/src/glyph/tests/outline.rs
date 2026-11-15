@@ -1,11 +1,11 @@
-//! Outlines from skrifa (hinting, the points FreeType holds), styles (synthesis, strokes), FreeType 2.14's diacritic
-//! adjustments, the shadow blur.
+//! Outlines (hinting, the points FreeType holds), styles (synthesis, strokes), FreeType 2.14's diacritic adjustment
+//! database, the shadow blur.
 
 use super::{face, font_bytes};
-use crate::glyph::adjust::{self, adjustment, separate};
+use crate::glyph::autohint::adjust::{self, adjustment};
 use crate::glyph::blur::{blur_padding, blur_sigma, blurred, box_radii};
 use crate::glyph::outline::{GlyphStroke, GlyphStyle, Hinting, glyf_tags, styled_coverage};
-use crate::glyph::raster::{Coverage, FixedOutline, FixedPoint, PointTag};
+use crate::glyph::raster::{Coverage, PointTag};
 use kompoz_graphics::{PathEffect, StrokeCap, StrokeJoin};
 use kompoz_text::draw::GlyphSynthesis;
 use skrifa::{FontRef, HintEngine};
@@ -31,16 +31,22 @@ fn total(c: &Coverage) -> f32 {
 #[test]
 #[cfg_attr(miri, ignore)]
 fn engines_are_freetypes_for_light_and_default_hinting() {
-    // Light: TrueType outlines through the automatic hinter, PostScript ones through their own hints.
+    // Light: TrueType outlines through the automatic hinter, PostScript ones through their own hints; as skrifa's
+    // scalers choose (but for ours being the automatic hinter).
     let mut regular = face(REGULAR);
-    assert_eq!(regular.scaler(16, Hinting::Light).hint_engine(), Some(HintEngine::Auto));
     let mut cff = face("../kompoz-text/tests/fonts/Cantarell-VF-Subset.otf");
-    assert_eq!(cff.scaler(16, Hinting::Light).hint_engine(), Some(HintEngine::PostScript));
-    // Default: a font's own instructions, the automatic hinter for a font with none.
-    assert_eq!(regular.scaler(16, Hinting::Normal).hint_engine(), Some(HintEngine::TrueType));
     let mut unhinted = face("../kompoz-text/tests/fonts/NotoSans-Subset.ttf");
-    assert_eq!(unhinted.scaler(16, Hinting::Normal).hint_engine(), Some(HintEngine::Auto));
-    assert_eq!(regular.scaler(16, Hinting::None).hint_engine(), None);
+    assert_eq!(regular.hint_engine(Hinting::Light), Some(HintEngine::Auto));
+    assert_eq!(cff.hint_engine(Hinting::Light), Some(HintEngine::PostScript));
+    // Default: a font's own instructions, the automatic hinter for a font with none.
+    assert_eq!(regular.hint_engine(Hinting::Normal), Some(HintEngine::TrueType));
+    assert_eq!(unhinted.hint_engine(Hinting::Normal), Some(HintEngine::Auto));
+    assert_eq!(regular.hint_engine(Hinting::None), None);
+    for face in [&mut regular, &mut cff, &mut unhinted] {
+        for hinting in [Hinting::Light, Hinting::Normal, Hinting::None] {
+            assert_eq!(face.hint_engine(hinting), face.scaler(16, hinting).hint_engine(), "{hinting:?}");
+        }
+    }
 }
 
 #[test]
@@ -223,58 +229,19 @@ fn the_adjustment_database_is_freetypes() {
     assert_eq!(adjustment('!' as u32), adjust::UP | adjust::NO_HEIGHT_CHECK);
 }
 
-/// A rectangle contour (26.6 from px, y up).
-fn box_contour(o: &mut FixedOutline, x0: f32, y0: f32, x1: f32, y1: f32) {
-    o.add_polygon([(x0, y0), (x0, y1), (x1, y1), (x1, y0)].map(|(x, y)| FixedPoint::from_px(x, y)));
-}
-
-#[test]
-fn diacritics_are_moved_a_pixel_clear() {
-    // A base 0..10 × 0..5 px and a dot 3..5 × 5.5..7 above it: half a pixel apart, moved up half a pixel more.
-    let mut o = FixedOutline::new();
-    box_contour(&mut o, 0.0, 0.0, 10.0, 5.0);
-    box_contour(&mut o, 3.0, 5.5, 5.0, 7.0);
-    separate(&mut o, adjust::UP, 6 * 64);
-    let dot = o.points[4..].iter().map(|p| p.y).min().unwrap();
-    assert_eq!(dot, 6 * 64);
-    assert_eq!(o.points[..4].iter().map(|p| p.y).max().unwrap(), 5 * 64);
-    // Already a pixel clear: left.
-    let before = o.clone();
-    separate(&mut o, adjust::UP, 6 * 64);
-    assert_eq!(o, before);
-    // Too tall for an accent: left.
-    let mut tall = FixedOutline::new();
-    box_contour(&mut tall, 0.0, 0.0, 10.0, 5.0);
-    box_contour(&mut tall, 3.0, 5.5, 5.0, 12.0);
-    let before = tall.clone();
-    separate(&mut tall, adjust::UP, 6 * 64);
-    assert_eq!(tall, before);
-    // Beside the base, not over it: left.
-    let mut beside = FixedOutline::new();
-    box_contour(&mut beside, 0.0, 0.0, 10.0, 5.0);
-    box_contour(&mut beside, 11.0, 5.5, 12.0, 7.0);
-    let before = beside.clone();
-    separate(&mut beside, adjust::UP, 6 * 64);
-    assert_eq!(beside, before);
-    // Below: a cedilla-like contour moved down.
-    let mut below = FixedOutline::new();
-    box_contour(&mut below, 0.0, 0.0, 10.0, 5.0);
-    box_contour(&mut below, 3.0, -2.0, 5.0, -0.25);
-    separate(&mut below, adjust::DOWN, 6 * 64);
-    assert_eq!(below.points[4..].iter().map(|p| p.y).max().unwrap(), -64);
-}
-
 #[test]
 #[cfg_attr(miri, ignore)]
 fn accents_are_kept_clear_as_freetype_2_14_keeps_them() {
-    // ü at 11 px: the dieresis moved up from the hinted x-height (skrifa's hinter alone leaves it closer).
+    // ü at 11 px: the dieresis moved up from the hinted x-height (skrifa's hinter, FreeType 2.13's, leaves it a
+    // pixel lower); its points are the glyph's own, as FreeType holds them.
     let mut face = face(REGULAR);
     let glyph = face.font().charmap().map_unicode('ü').unwrap().to_u32();
-    let adjusted = face.outline(11, Hinting::Light, glyph).unwrap();
+    let ours = face.outline(11, Hinting::Light, glyph).unwrap();
     let scaler = face.scaler(11, Hinting::Light);
     let bytes = font_bytes(REGULAR);
     let tags = glyf_tags(&FontRef::new(&bytes).unwrap(), glyph);
-    let hinted = crate::glyph::outline::load(scaler, glyph, tags).unwrap();
-    assert_eq!(adjusted.points.len(), hinted.points.len());
-    assert!(adjusted.cbox().unwrap().y_max > hinted.cbox().unwrap().y_max);
+    let skrifas = crate::glyph::outline::load(scaler, glyph, tags.clone()).unwrap();
+    assert_eq!(ours.points.len(), skrifas.points.len());
+    assert_eq!(Some(ours.tags.clone()), tags.map(|t| t.concat()));
+    assert!(ours.cbox().unwrap().y_max > skrifas.cbox().unwrap().y_max);
 }

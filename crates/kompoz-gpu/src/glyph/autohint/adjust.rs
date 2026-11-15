@@ -1,25 +1,17 @@
-//! FreeType 2.14's diacritic adjustments in its automatic hinter (afadjust.c, and aflatin.c's
-//! af_glyph_hints_apply_vertical_separation_adjustments), which skrifa's port of the hinter predates: after hinting,
-//! an accent above (below) its base glyph that has come within a pixel of it is moved up (down) until a pixel lies
-//! between them, by the adjustment database's flags for the glyph's character.
-//!
-//! The glyph's character comes from the font's cmap, as FreeType's reverse character map has it without HarfBuzz
-//! (FreeType with HarfBuzz also follows the script's GSUB substitutions from those characters: a glyph reached only
-//! through one, a small capital, say, isn't adjusted here). The accent's height is checked against the hinter's blue
-//! zones at the size as FreeType checks it. FreeType's other 2.14 diacritic steps run inside the hinter, before edges
-//! are fitted (a tilde stretched and aligned; blue zones ignored below a cedilla or ogonek, above a hook), so they
-//! can't be added after it: glyphs flagged for them are hinted as FreeType 2.13 hinted them.
+//! FreeType 2.14's diacritic adjustment database (`afadjust.c`): characters and how the hinter treats the
+//! diacritics of their glyphs (moved up or down clear of the base, a tilde stretched, blue zones ignored where a
+//! diacritic is attached to the base), and each style's reverse character map from glyphs to those characters.
 //!
 //! The database is FreeType's, in its order (which has `Q` before `?`, so that FreeType's binary search misses `Q`;
-//! the search here is FreeType's too). FreeType is under the FreeType License (or the GPL); this follows its code.
+//! the search here is FreeType's too). The reverse map is the inverse of the character map for the database's
+//! characters, extended as FreeType extends it with HarfBuzz: through the single and alternate substitutions of the
+//! style's script's features in `GSUB`, followed in the order FreeType's hash table gives them, so that a glyph
+//! reached from two characters takes the one FreeType's does.
 
-use super::raster::FixedOutline;
-use skrifa::outline::autohint::{BlueZones, GlyphStyles, Scale, ScaledBlue, UnscaledStyleMetrics};
-use skrifa::outline::{SmoothMode, Target};
-use skrifa::raw::TableProvider;
-use skrifa::raw::types::F2Dot14;
-use skrifa::{Font, FontRef, GlyphId, MetadataProvider};
-use std::collections::HashMap;
+use super::context::AutohintContext;
+use super::gsub::{Bytes, collect_lookups, map_lookup, single_alternate_lookups};
+use super::style::StyleClass;
+use skrifa::raw::tables::layout::ScriptTags;
 
 /// Push the topmost contour up a pixel clear of the others.
 pub const UP: u32 = 0x01;
@@ -1033,329 +1025,193 @@ pub fn adjustment(codepoint: u32) -> u32 {
     0
 }
 
-/// FreeType's reverse character map from the cmap: each glyph the database's characters map to, by the character
-/// (a later one in the database taking a glyph two of them map to).
-pub fn reverse_charmap(font: &Font) -> HashMap<u32, u32> {
-    let charmap = font.charmap();
-    let mut map = HashMap::new();
-    for &(c, _) in DATABASE {
-        if let Some(glyph) = char::from_u32(c).and_then(|ch| charmap.map_unicode(ch))
-            && glyph.to_u32() != 0
-        {
-            map.insert(glyph.to_u32(), c);
-        }
-    }
-    map
+/// FreeType's hash table of numbers (`fthash.c`): open addressing in 241 buckets at first, probing downwards from a
+/// key's Mocklisp hash, doubled when a third full, iterated in bucket order. Kept as FreeType keeps it because the
+/// reverse character map is built in its iteration order.
+pub(crate) struct FtHash {
+    table: Vec<Option<(u32, u64)>>,
+    limit: usize,
+    used: usize,
 }
 
-/// Scripts whose blue zones include an uppercase bottom (the zone after the first top one) and a lowercase bottom
-/// (the zone after the x-height one), as FreeType's afblue.dat marks them; others have neither.
-const BOTTOM_BLUES: &[(&[u8; 4], bool, bool)] = &[
-    (b"Adlm", true, true),
-    (b"Armn", true, true),
-    (b"Cans", false, true),
-    (b"Copt", true, true),
-    (b"Cyrl", true, false),
-    (b"Dsrt", true, true),
-    (b"Glag", true, true),
-    (b"Grek", true, false),
-    (b"Latn", true, true),
-    (b"Latb", true, false),
-    (b"Latp", true, false),
-    (b"Medf", true, true),
-    (b"Nkoo", false, true),
-    (b"Osge", true, true),
-    (b"Shaw", false, true),
-];
+impl FtHash {
+    const INITIAL_SIZE: usize = 241;
 
-/// How tall a diacritic may be and still be moved (FreeType's accent_height_limit, 26.6): two thirds of the
-/// lowercase zones' height, else half the uppercase zones', else four tenths of the em; from the hinter's scaled
-/// blue zones at `ppem` for the style of `glyph`. None when the hinter has no style for the glyph.
-///
-/// FreeType marks the bottom zones in its blue strings; skrifa's blues carry no such mark, and leave out a string
-/// the font has no characters of. So a string counts as present when the font maps any of its characters, the
-/// computed blues are matched to the present strings in order, and the bottom ones are the strings after the first
-/// top one and after the x-height one, where the script has them.
-pub fn accent_height_limit(
-    font: &FontRef,
-    coords: &[F2Dot14],
-    styles: &GlyphStyles,
-    glyph: u32,
-    ppem: u32,
-) -> Option<i32> {
-    let style = styles.get(GlyphId::new(glyph))?.style_class()?;
-    let unscaled = UnscaledStyleMetrics::new(font, coords, style);
-    let units_per_em = font.head().map(|h| h.units_per_em()).unwrap_or(1000) as i32;
-    let target = Target::Smooth { mode: SmoothMode::Light, symmetric_rendering: true, preserve_linear_metrics: false };
-    let scale = Scale::new(ppem as f32, units_per_em, font.attributes().style, target, style.script.group);
-    let scaled = unscaled.scale(scale);
-    let blues = scaled.vertical_metrics().blues();
-    let charmap = font.charmap();
-    let present: Vec<usize> = style
-        .script
-        .blues
-        .iter()
-        .enumerate()
-        .filter(|(_, (s, _))| s.chars().filter(|c| !c.is_whitespace() && *c != '|').any(|c| charmap.map(c).is_some()))
-        .map(|(i, _)| i)
-        .collect();
-    let fallback = super::raster::mul_fix((units_per_em * 4 / 10) as i64, scaled.scale.y_scale as i64) as i32;
-    if present.len() != blues.len() {
-        return Some(fallback);
+    pub fn new() -> FtHash {
+        FtHash { table: vec![None; Self::INITIAL_SIZE], limit: Self::INITIAL_SIZE / 3, used: 0 }
     }
-    let blue_at =
-        |string: usize| -> Option<&ScaledBlue> { present.iter().position(|&i| i == string).map(|k| &blues[k]) };
-    let (capital, small) = BOTTOM_BLUES
-        .iter()
-        .find(|(tag, _, _)| style.script.tag.to_be_bytes() == **tag)
-        .map_or((false, false), |&(_, c, s)| (c, s));
-    let strings = style.script.blues;
-    // The first string with these zones whose blue is active.
-    let first = |zones: BlueZones| -> Option<(usize, &ScaledBlue)> {
-        (0..strings.len())
-            .filter(|&i| strings[i].1.contains(zones))
-            .find_map(|i| blue_at(i).filter(|b| b.is_active).map(|b| (i, b)))
-    };
-    let shoot = |b: &ScaledBlue| b.overshoot.scaled;
-    // The bottom zone: the string after the first one with `zones`, if the script marks it, active.
-    let bottom = |zones: BlueZones, marked: bool| -> Option<&ScaledBlue> {
-        if !marked {
-            return None;
-        }
-        let i = (0..strings.len()).find(|&i| strings[i].1.contains(zones))? + 1;
-        blue_at(i).filter(|b| b.is_active)
-    };
-    let small_top = first(BlueZones::ADJUSTMENT).map(|(_, b)| b);
-    let small_bottom = bottom(BlueZones::ADJUSTMENT, small);
-    if let (Some(top), Some(bottom)) = (small_top, small_bottom) {
-        return Some(2 * (shoot(top) - shoot(bottom)) / 3);
-    }
-    let capital_top = first(BlueZones::TOP).map(|(_, b)| b);
-    let capital_bottom = bottom(BlueZones::TOP, capital);
-    if let (Some(top), Some(bottom)) = (capital_top, capital_bottom) {
-        return Some((shoot(top) - shoot(bottom)) / 2);
-    }
-    Some(fallback)
-}
 
-/// Each contour's lowest and highest y (none: (MAX, MIN) for a contour of two points or fewer).
-fn vertical_extrema(outline: &FixedOutline) -> Vec<(i64, i64)> {
-    let mut first = 0usize;
-    outline
-        .contours
-        .iter()
-        .map(|&last| {
-            let range = first..=last;
-            first = last + 1;
-            if range.end() - range.start() < 2 {
-                return (i64::MAX, i64::MIN);
+    /// `hash_num_lookup`: the Mocklisp hash of a key's four bytes.
+    fn hash(key: u32) -> u64 {
+        let num = key as u64;
+        let mut res = num & 0xFF;
+        res = (res << 5) - res + ((num >> 8) & 0xFF);
+        res = (res << 5) - res + ((num >> 16) & 0xFF);
+        res = (res << 5) - res + ((num >> 24) & 0xFF);
+        res
+    }
+
+    /// `hash_bucket`: where `key` is, or the empty bucket where it would go.
+    fn bucket(table: &[Option<(u32, u64)>], key: u32) -> usize {
+        let size = table.len();
+        let mut i = (Self::hash(key) % size as u64) as usize;
+        while let Some((k, _)) = table[i] {
+            if k == key {
+                break;
             }
-            outline.points[range]
-                .iter()
-                .fold((i64::MAX, i64::MIN), |(lo, hi), p| (lo.min(p.y as i64), hi.max(p.y as i64)))
-        })
-        .collect()
+            i = if i == 0 { size - 1 } else { i - 1 };
+        }
+        i
+    }
+
+    /// `hash_insert`: `data` for `key`, replacing what it had if `overwrite`. Whether the key is new.
+    fn insert_with(&mut self, key: u32, data: u64, overwrite: bool) -> bool {
+        let i = Self::bucket(&self.table, key);
+        match &mut self.table[i] {
+            Some((_, d)) => {
+                if overwrite {
+                    *d = data;
+                }
+                false
+            }
+            empty => {
+                *empty = Some((key, data));
+                if self.used >= self.limit {
+                    // `hash_rehash`: twice the buckets, the nodes moved in bucket order.
+                    let size = self.table.len() * 2;
+                    let old = std::mem::replace(&mut self.table, vec![None; size]);
+                    self.limit = self.table.len() / 3;
+                    for node in old.into_iter().flatten() {
+                        let j = Self::bucket(&self.table, node.0);
+                        self.table[j] = Some(node);
+                    }
+                }
+                self.used += 1;
+                true
+            }
+        }
+    }
+
+    /// `ft_hash_num_insert`.
+    pub fn insert(&mut self, key: u32, data: u64) {
+        self.insert_with(key, data, true);
+    }
+
+    /// `ft_hash_num_insert_no_overwrite`: whether the key is new.
+    pub fn insert_no_overwrite(&mut self, key: u32, data: u64) -> bool {
+        self.insert_with(key, data, false)
+    }
+
+    /// The data of a key already in the table replaced (`*ft_hash_num_lookup(key) = data`).
+    pub fn set(&mut self, key: u32, data: u64) {
+        let i = Self::bucket(&self.table, key);
+        if let Some((_, d)) = &mut self.table[i] {
+            *d = data;
+        }
+    }
+
+    /// `ft_hash_num_lookup`.
+    pub fn lookup(&self, key: u32) -> Option<u64> {
+        self.table[Self::bucket(&self.table, key)].map(|(_, d)| d)
+    }
+
+    /// The entries as `ft_hash_num_iterator` gives them: in bucket order.
+    pub fn entries(&self) -> Vec<(u32, u64)> {
+        self.table.iter().flatten().copied().collect()
+    }
 }
 
-/// The contour indices' point ranges.
-fn contour_ranges(outline: &FixedOutline) -> Vec<std::ops::RangeInclusive<usize>> {
-    let mut first = 0usize;
-    outline
-        .contours
-        .iter()
-        .map(|&last| {
-            let r = first..=last;
-            first = last + 1;
-            r
-        })
-        .collect()
+/// A style's reverse character map (`af_reverse_character_map_new`): from glyphs to the characters of the
+/// adjustment database they render.
+pub(crate) struct ReverseCharmap(Option<FtHash>);
+
+impl ReverseCharmap {
+    /// The map for `style` of the font behind `context`: none for a font without a Unicode character map (FreeType
+    /// builds none then) or a style hinted by another writing system than the Latin one (whose metrics alone make
+    /// one).
+    pub fn new(context: &dyn AutohintContext, style: &StyleClass) -> ReverseCharmap {
+        if context.is_symbol() || style.script.group != super::style::ScriptGroup::Default {
+            return ReverseCharmap(None);
+        }
+        let mut map = FtHash::new();
+        // The cmap's glyphs of the database's characters, all of them (GSUB data needn't keep to a script's
+        // characters), a later character taking a glyph two map to.
+        for &(codepoint, _) in DATABASE {
+            if let Some(glyph) = context.map(codepoint)
+                && glyph.to_u32() != 0
+            {
+                map.insert(glyph.to_u32(), codepoint as u64);
+            }
+        }
+        // With HarfBuzz: the script's single and alternate substitutions, in lookup order, into one table.
+        let gsub = context.gsub();
+        let bytes = Bytes(gsub.as_ref().map_or(&[][..], |g| g.offset_data().as_bytes()));
+        let single_alternate = single_alternate_lookups(bytes);
+        // (A script without a HarfBuzz script, a fallback one, has no OpenType tags: no lookups.)
+        let tag = style
+            .script
+            .layout
+            .then(|| ScriptTags::from_unicode(style.script.tag).first().map(|t| u32::from_be_bytes(t.to_be_bytes())))
+            .flatten();
+        let mut substitutions = FtHash::new();
+        for lookup in collect_lookups(bytes, tag.as_slice()) {
+            if let Some(&offset) = single_alternate.get(lookup as usize)
+                && offset != 0
+            {
+                map_lookup(bytes, &mut substitutions, offset);
+            }
+        }
+        // Each glyph mapped from a character and substituted gives the character to its substitutes, and theirs in
+        // turn, never overwriting (so that the cmap's glyphs keep theirs).
+        for (glyph, value) in substitutions.entries() {
+            // (Keys of the second and later substitutes aren't glyphs.)
+            if glyph & 0xFFFF_0000 != 0 {
+                continue;
+            }
+            let Some(codepoint) = map.lookup(glyph) else {
+                continue;
+            };
+            add_substitute(glyph, value, codepoint, &mut map, &substitutions);
+        }
+        ReverseCharmap(Some(map))
+    }
+
+    /// The database's character `glyph` renders, if any.
+    pub fn codepoint(&self, glyph: u32) -> Option<u32> {
+        self.0.as_ref()?.lookup(glyph).map(|c| c as u32)
+    }
+
+    /// The adjustment flags of `glyph`'s character (0: none).
+    pub fn flags(&self, glyph: u32) -> u32 {
+        self.codepoint(glyph).map_or(0, adjustment)
+    }
 }
 
-/// Whether contour `index` overlaps horizontally the box of the others (contours of two points or fewer left out).
-fn overlaps_horizontally(outline: &FixedOutline, index: usize) -> bool {
-    let (mut c_min, mut c_max, mut o_min, mut o_max) = (i64::MAX, i64::MIN, i64::MAX, i64::MIN);
-    for (i, range) in contour_ranges(outline).into_iter().enumerate() {
-        if range.end() - range.start() < 2 {
+/// `add_substitute`: `codepoint` given to glyph `glyph`'s substitutes (`value`: the first, with the count of the
+/// others above it), each new one's own substitutes in turn, depth first, as FreeType's recursion goes (here with a
+/// stack of its frames: a glyph, its value, the next of its substitutes).
+fn add_substitute(glyph: u32, value: u64, codepoint: u64, map: &mut FtHash, substitutions: &FtHash) {
+    let mut stack = vec![(glyph, value, 0u64)];
+    while let Some(frame) = stack.last_mut() {
+        let (glyph, value, i) = *frame;
+        if i > value >> 16 {
+            stack.pop();
             continue;
         }
-        for p in &outline.points[range] {
-            let x = p.x as i64;
-            if i == index {
-                c_min = c_min.min(x);
-                c_max = c_max.max(x);
-            } else {
-                o_min = o_min.min(x);
-                o_max = o_max.max(x);
+        frame.2 += 1;
+        let substitute = if i == 0 {
+            value & 0xFFFF
+        } else {
+            let key = glyph.wrapping_add((i as u32).wrapping_shl(16));
+            match substitutions.lookup(key) {
+                Some(s) => s,
+                None => continue,
             }
-        }
-    }
-    (o_min <= c_max && c_max <= o_max) || (o_min <= c_min && c_min <= o_max) || (c_max >= o_max && c_min <= o_min)
-}
-
-fn highest(ext: &[(i64, i64)]) -> usize {
-    let (mut best, mut best_min, mut best_max) = (0usize, i64::MAX, i64::MIN);
-    for (i, &(lo, hi)) in ext.iter().enumerate() {
-        if hi > best_max || (hi == best_max && lo > best_min) {
-            (best, best_min, best_max) = (i, lo, hi);
-        }
-    }
-    best
-}
-
-fn second_highest(ext: &[(i64, i64)]) -> usize {
-    if ext.len() < 3 {
-        return 0;
-    }
-    let top = highest(ext);
-    let top_min = ext[top].0;
-    let (mut best, mut best_max) = (0usize, i64::MIN);
-    for (i, &(lo, hi)) in ext.iter().enumerate() {
-        if i != top && hi > best_max && lo < top_min {
-            (best, best_max) = (i, hi);
-        }
-    }
-    best
-}
-
-fn lowest(ext: &[(i64, i64)]) -> usize {
-    let (mut best, mut best_min, mut best_max) = (0usize, i64::MAX, i64::MIN);
-    for (i, &(lo, hi)) in ext.iter().enumerate() {
-        if lo < best_min || (lo == best_min && hi < best_max) {
-            (best, best_min, best_max) = (i, lo, hi);
-        }
-    }
-    best
-}
-
-fn second_lowest(ext: &[(i64, i64)]) -> usize {
-    if ext.len() < 3 {
-        return 0;
-    }
-    let bottom = lowest(ext);
-    let bottom_max = ext[bottom].1;
-    let (mut best, mut best_min) = (0usize, i64::MAX);
-    for (i, &(lo, hi)) in ext.iter().enumerate() {
-        if i != bottom && lo < best_min && hi > bottom_max {
-            (best, best_min) = (i, lo);
-        }
-    }
-    best
-}
-
-/// Contours (not flat) wholly above `limit` (by `ext`) moved `delta` up; below it, with `up` false, moved down.
-fn move_contours(outline: &mut FixedOutline, ext: &[(i64, i64)], limit: i64, delta: i64, up: bool) {
-    for (i, range) in contour_ranges(outline).into_iter().enumerate() {
-        let (lo, hi) = ext[i];
-        let beyond = if up { lo > limit } else { hi < limit };
-        if lo < hi && beyond {
-            let d = if up { delta } else { -delta } as i32;
-            for p in &mut outline.points[range] {
-                p.y = p.y.wrapping_add(d);
-            }
-        }
-    }
-}
-
-fn pix_round(v: i64) -> i64 {
-    (v + 32) & !63
-}
-
-/// FreeType's af_glyph_hints_apply_vertical_separation_adjustments on a hinted outline: with `flags` (the glyph's
-/// character's), the accent above (or the one below the topmost, with UP2) moved up so that a pixel separates its
-/// lowest point from the highest of any contour below it, with whatever lies as high; the same downwards; a tilde
-/// re-centred on the pixel grid; nothing for a diacritic that doesn't overlap the rest across, or is taller than
-/// `accent_height_limit` (26.6).
-pub fn separate(outline: &mut FixedOutline, flags: u32, accent_height_limit: i64) {
-    let (up, up2, down, down2) = (flags & UP != 0, flags & UP2 != 0, flags & DOWN != 0, flags & DOWN2 != 0);
-    let n = outline.contours.len();
-    if !(((up || down) && n >= 2) || ((up2 || down2) && n >= 3)) {
-        return;
-    }
-    let ext = vertical_extrema(outline);
-    if (up && n >= 2) || (up2 && n >= 3) {
-        let high = if up2 { second_highest(&ext) } else { highest(&ext) };
-        if !overlaps_horizontally(outline, high) {
-            return;
-        }
-        let (high_min, high_max) = ext[high];
-        let high_height = high_max.wrapping_sub(high_min);
-        if high_height > accent_height_limit {
-            return;
-        }
-        let mut min_distance = 64i64;
-        for (i, &(lo, hi)) in ext.iter().enumerate() {
-            if i == high {
-                continue;
-            }
-            let distance = high_min.wrapping_sub(hi);
-            if distance < 64 && distance < min_distance && lo < high_min {
-                min_distance = distance;
-            }
-        }
-        let amount = 64 - min_distance;
-        let (is_tilde, is_tilde2) = (flags & TILDE_TOP != 0, flags & TILDE_TOP2 != 0);
-        let mut centering = 0i64;
-        if is_tilde || is_tilde2 {
-            let tilde = if up || is_tilde2 { high } else { highest(&ext) };
-            let tilde_height = ext[tilde].1.wrapping_sub(ext[tilde].0);
-            let mut pos = high_min.wrapping_add(amount);
-            if up2 && is_tilde {
-                pos += high_height;
-            }
-            if pos % 64 == 0 && tilde_height < 3 * 64 {
-                centering = (pix_round(tilde_height) - tilde_height) / 2;
-            }
-        }
-        let calculated = if (up && is_tilde) || (up2 && is_tilde2) { amount + centering } else { amount };
-        if calculated != 0 && calculated >= -2 && (calculated <= 66 || amount <= 66) {
-            let min_y_limit = high_min.wrapping_sub(high_height / 8);
-            move_contours(outline, &ext, min_y_limit, amount, true);
-            if up2 && is_tilde {
-                move_contours(outline, &ext, min_y_limit.wrapping_add(high_height), centering, true);
-            }
-        }
-    }
-    if (down && n >= 2) || (down2 && n >= 3) {
-        let low = if down2 { second_lowest(&ext) } else { lowest(&ext) };
-        if !overlaps_horizontally(outline, low) {
-            return;
-        }
-        let (low_min, low_max) = ext[low];
-        let low_height = low_max.wrapping_sub(low_min);
-        if low_height > accent_height_limit {
-            return;
-        }
-        let mut min_distance = 64i64;
-        for (i, &(lo, hi)) in ext.iter().enumerate() {
-            if i == low {
-                continue;
-            }
-            let distance = lo.wrapping_sub(low_max);
-            if distance < 64 && distance < min_distance && hi > low_max {
-                min_distance = distance;
-            }
-        }
-        let amount = 64 - min_distance;
-        let (is_tilde, is_tilde2) = (flags & TILDE_BOTTOM != 0, flags & TILDE_BOTTOM2 != 0);
-        let mut centering = 0i64;
-        if is_tilde || is_tilde2 {
-            let tilde = if down || is_tilde2 { low } else { lowest(&ext) };
-            let tilde_height = ext[tilde].1.wrapping_sub(ext[tilde].0);
-            let mut pos = low_max.wrapping_sub(amount);
-            if down2 && is_tilde {
-                pos -= low_height;
-            }
-            if pos % 64 == 0 && tilde_height < 3 * 64 {
-                centering = (pix_round(tilde_height) - tilde_height) / 2;
-            }
-        }
-        let calculated = if (down && is_tilde) || (down2 && is_tilde2) { amount + centering } else { amount };
-        if calculated != 0 && calculated >= -2 && (calculated <= 66 || amount <= 66) {
-            let max_y_limit = low_max.wrapping_add(low_height / 8);
-            move_contours(outline, &ext, max_y_limit, amount, false);
-            if down2 && is_tilde {
-                move_contours(outline, &ext, max_y_limit.wrapping_sub(low_height), centering, false);
-            }
+        } as u32;
+        if map.insert_no_overwrite(substitute, codepoint)
+            && let Some(next) = substitutions.lookup(substitute)
+        {
+            stack.push((substitute, next, 0));
         }
     }
 }

@@ -3,7 +3,10 @@
  * what the C++ Kompoz's font system (platform/common/font_system.cpp) made of the same glyphs with FreeType,
  * which its text goldens were drawn with. Light-hinted outlines (FT_LOAD_TARGET_LIGHT, FT_RENDER_MODE_LIGHT),
  * stretched and slanted ones (FT_Set_Transform), stroked ones (FT_Stroker), blurred ones (raster.hpp's
- * blurCoverage), COLRv0 glyphs (FT_LOAD_COLOR, made straight) and CBDT bitmaps (colorBitmap's box filter).
+ * blurCoverage), COLRv0 glyphs (FT_LOAD_COLOR, made straight) and CBDT bitmaps (colorBitmap's box filter). And
+ * more of FreeType's automatic hinter: every character of its diacritic adjustment database, at several sizes;
+ * the glyphs no character maps to (reached through layout features), by index; a font without instructions
+ * hinted by default (the hinter's normal mode); the fonts' glyph style maps.
  *
  * Made again (from the crate's directory, with the FreeType the C++ goldens were made with: Arch Linux's
  * freetype2 2.15.0):
@@ -14,13 +17,16 @@
  * A record: u8 channels (1: coverage, 4: straight RGBA), u16 name length, the name (what was drawn: a mode,
  * the font's path from the crate's directory, px, the character and the mode's parameters, space separated),
  * i32 left, i32 top (FreeType's bitmap_left and bitmap_top: y up), u32 width, u32 height, then the pixels,
- * rows top down. Little endian.
+ * rows top down. Little endian. A `styles` record (2 channels) is a font's glyph style map instead: a row of
+ * u16 values, a glyph's each (the automatic hinter's `glyph-to-script-map` property).
  */
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
 #include FT_STROKER_H
+#include FT_DRIVER_H
+#include FT_MODULE_H
 
 #include <math.h>
 #include <stdint.h>
@@ -80,6 +86,53 @@ static void light(const char* path, int px, unsigned cp) {
     char name[256];
     snprintf(name, sizeof name, "light %s %d %X", path, px, cp);
     gray(name, &face->glyph->bitmap, face->glyph->bitmap_left, face->glyph->bitmap_top);
+}
+
+/* A glyph by its index, light hinted as an outline glyph (glyphs no character maps to: small capitals and other
+ * forms that layout features reach). */
+static void glyph_light(const char* path, int px, unsigned gid) {
+    FT_Face face = face_of(path);
+    FT_Set_Pixel_Sizes(face, 0, (FT_UInt)px);
+    if (FT_Load_Glyph(face, gid, FT_LOAD_TARGET_LIGHT) != 0) exit(2);
+    if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_LIGHT) != 0) exit(3);
+    char name[256];
+    snprintf(name, sizeof name, "glyph %s %d %X", path, px, gid);
+    gray(name, &face->glyph->bitmap, face->glyph->bitmap_left, face->glyph->bitmap_top);
+}
+
+/* An outline glyph hinted by default (FT_LOAD_DEFAULT) and rendered normally: for a font without TrueType
+ * instructions, the automatic hinter in its normal mode, fitting stems across too (as the layers of a COLRv0 glyph
+ * are hinted). */
+static void normal(const char* path, int px, unsigned cp) {
+    FT_Face face = face_of(path);
+    FT_Set_Pixel_Sizes(face, 0, (FT_UInt)px);
+    if (FT_Load_Glyph(face, FT_Get_Char_Index(face, cp), FT_LOAD_DEFAULT) != 0) exit(2);
+    if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) != 0) exit(3);
+    char name[256];
+    snprintf(name, sizeof name, "default %s %d %X", path, px, cp);
+    gray(name, &face->glyph->bitmap, face->glyph->bitmap_left, face->glyph->bitmap_top);
+}
+
+/* The automatic hinter's style of each glyph of a font (its `glyph-to-script-map` property, of a face of its own
+ * so that no glyph's hinting has changed it yet): a style index, 0x2000 if the character map gave it, 0x4000
+ * non-base, 0x8000 a digit. */
+static void styles(const char* path) {
+    FT_Face face;
+    if (FT_New_Face(library, path, 0, &face) != 0) exit(1);
+    FT_Prop_GlyphToScriptMap prop;
+    prop.face = face;
+    if (FT_Property_Get(library, "autofitter", "glyph-to-script-map", &prop) != 0) exit(4);
+    int n = (int)face->num_glyphs;
+    uint8_t* values = malloc((size_t)n * 2 + 1);
+    for (int g = 0; g < n; ++g) {
+        values[2 * g] = (uint8_t)(prop.map[g] & 0xFF);
+        values[2 * g + 1] = (uint8_t)(prop.map[g] >> 8);
+    }
+    char name[256];
+    snprintf(name, sizeof name, "styles %s", path);
+    record(2, name, 0, 0, n, 1, values, n * 2);
+    free(values);
+    FT_Done_Face(face);
 }
 
 /* font_system.cpp's rasterize in a style: stretched and slanted (FT_Set_Transform: hinted, then transformed),
@@ -280,7 +333,7 @@ int main(int argc, char** argv) {
     if (!out) return 1;
     const char* regular = "tests/fonts/Regular.ttf";
     const char* bold = "tests/fonts/Bold.ttf";
-    unsigned cps[256];
+    static unsigned cps[1024];
     /* The text golden's glyphs at its sizes (and at the sizes of a 2.625 density's 14 sp, 37 px). */
     int n = code_points("Kompoz İçerik ğüşöç ÇĞİÖŞÜ Shadow small 11 sp spaced turn", cps, 256);
     int sizes[] = {11, 14, 16, 18, 24, 28, 37};
@@ -317,6 +370,85 @@ int main(int argc, char** argv) {
         bitmap(emoji, colr_sizes[s], 0x1F44D);
         bitmap(emoji, colr_sizes[s], 0x1F600);
     }
+    /* FreeType 2.14's diacritic adjustments: every character of its adjustment database the font has, at two sizes
+     * (and in bold at one); the Turkish letters at many sizes; the characters whose tilde is stretched or whose
+     * blue zones are ignored above or below their base (a cedilla, an ogonek, a hook) at four. */
+    static const char database[] =
+        "!?Qij¡¦ªº¿ÀÁÂÃÄÅÇÈÉÊËÌÍÎÏÑÒÓÔÕÖØÙÚÛÜÝàáâãäåçèéêë"
+        "ìíîïñòóôõöøùúûüýÿĀāĂăĄąĆćĈĉĊċČčĎĒēĔĕĖėĘęĚěĜĝĞğĠġ"
+        "ĢģĤĥĨĩĪīĬĭĮįİĳĴĵĶķĹĺĻļŃńŅņŇňŌōŎŏŐőŔŕŖŗŘřŚśŜŝŞşŠš"
+        "ŢţŤŨũŪūŬŭŮůŰűŲųŴŵŶŷŸŹźŻżŽžƇƈƠơƥƫƮƯưƴǃǄǌǍǎǏǐǑǒǓǔǕ"
+        "ǖǗǘǙǚǛǜǞǟǠǡǢǣǦǧǨǩǪǫǬǭǮǯǰǴǵǸǹǺǻǼǽǾǿȀȁȂȃȄȅȆȇȈȉȊȋȌȍ"
+        "ȎȏȐȑȒȓȔȕȖȗȘșȚțȞȟȤȥȦȧȨȩȪȫȬȭȮȯȰȱȲȳȺȻȿɀɉɖɠɧɨɲɳɻɽʂʈʐ"
+        "ʛʠʲʵΐΪΫάέήίΰϊϋόύώϏϔϗϙϳЀЁЃЇЌЍЎЏЙЦЩйцщѐёѓіїјќѝўџѶѷ"
+        "ѼѽѾѿҀҁҊҋҐґҖҗҘҙҚқҢңҪҫҬҭҲҳҴҵҶҷҾҿӁӂӅӆӉӊӋӌӍӎӐӑӒӓӖӗӚӛ"
+        "ӜӝӞӟӢӣӤӥӦӧӪӫӬӭӮӯӰӱӲӳӴӵӶӷӸӹӺӻԆԇԤԥԦԧԮԯᴉᵎᵑᵢᶀᶁᶂᶄᶅᶆᶇᶉ"
+        "ᶊᶌᶍᶎᶏᶐᶑᶒᶓᶔᶕᶖᶗᶘᶙᶚᶤᶨᶩᶪᶬᶮᶯᶳᶵᶼḀḁḂḃḄḅḆḇḈḉḊḋḌḍḎḏḐḑḒḓḔḕ"
+        "ḖḗḘḙḚḛḜḝḞḟḠḡḢḣḤḥḦḧḨḩḪḫḬḭḮḯḰḱḲḳḴḵḶḷḸḹḺḻḼḽḾḿṀṁṂṃṄṅ"
+        "ṆṇṈṉṊṋṌṍṎṏṐṑṒṓṔṕṖṗṘṙṚṛṜṝṞṟṠṡṢṣṤṥṦṧṨṩṪṫṬṭṮṯṰṱṲṳṴṵ"
+        "ṶṷṸṹṺṻṼṽṾṿẀẁẂẃẄẅẆẇẈẉẊẋẌẍẎẏẐẑẒẓẔẕẖẗẘẙẚẛẠạẢảẤấẦầẨẩ"
+        "ẪẫẬậẮắẰằẲẳẴẵẶặẸẹẺẻẼẽẾếỀềỂểỄễỆệỈỉỊịỌọỎỏỐốỒồỔổỖỗỘộ"
+        "ỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỴỵỶỷỸỹἀἁἂἃἄἅἆἇἐἑἒἓἔἕἠἡ"
+        "ἢἣἤἥἦἧἰἱἲἳἴἵἶἷὀὁὂὃὄὅὐὑὒὓὔὕὖὗὠὡὢὣὤὥὦὧὰάὲέὴήὶίὸόὺύ"
+        "ὼώᾀᾁᾂᾃᾄᾅᾆᾇᾈᾉᾊᾋᾌᾍᾎᾏᾐᾑᾒᾓᾔᾕᾖᾗᾘᾙᾚᾛᾜᾝᾞᾟᾠᾡᾢᾣᾤᾥᾦᾧᾨᾩᾪᾫᾬᾭ"
+        "ᾮᾯᾰᾱᾲᾳᾴᾶᾷᾸᾹᾼῂῃῄῆῇῌῐῑῒΐῖῗῘῙῠῡῢΰῤῥῦῧῨῩῲῳῴῶῷῼ‼‽⁇⁈⁉ⁱ"
+        "₫⃀ⱤⱧⱨⱩⱪⱫⱬⱮⱼⱾⱿ⸘⸮ꙀꙁꙂꙃꚀꚁꚈꚉꚊꚋꚎꚏꚐꚑꚖꚗꜦꜧꝖꝘꝱꝲꝳꝴꝶꞐꞑꞔꞕꟀꟁꟄꟅ"
+        "Ᶎꬼꭆꭜꭦꭧ";
+    n = code_points(database, cps, 1024);
+    for (int i = 0; i < n; ++i) light(regular, 11, cps[i]), light(regular, 16, cps[i]);
+    n = code_points("çşÇŞğĞıİöÖüÜ", cps, 1024);
+    int turkish_sizes[] = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 28, 32, 37, 48};
+    for (size_t s = 0; s < sizeof turkish_sizes / sizeof turkish_sizes[0]; ++s)
+        for (int i = 0; i < n; ++i) light(regular, turkish_sizes[s], cps[i]);
+    static const char tildes_and_attached[] =
+        "ÃÇÑÕØãçñõøĄąĘęĨĩĮįŞşŢţŨũŲųƇƈƠơƥƫƮƯưƴǪǫǬǭȤȥȨȩȺȻȿɀ"
+        "ɖɠɧɲɳɻɽʂʈʐʛʠʵϏϗϙЏЦЩцщџҀҁҊҋҐґҖҗҘҙҚқҢңҪҫҬҭҲҳҴҵҶҷҾҿ"
+        "ӅӆӉӊӋӌӍӎӶӷӺӻԆԇԤԥԦԧԮԯᵑᶀᶁᶂᶄᶅᶆᶇᶉᶊᶌᶍᶎᶏᶐᶑᶒᶓᶔᶕᶖᶗᶘᶙᶚᶩᶪᶬ"
+        "ᶮᶯᶳᶵᶼḈḉḚḛḜḝḨḩḬḭṌṍṎṏṴṵṸṹṼṽẪẫẴẵẼẽỄễỖỗỚớỜờỞởỠỡỢợỨứỪ"
+        "ừỬửỮữỰựỸỹἆἇἦἧἶἷὖὗὦὧᾆᾇᾖᾗᾦᾧᾶᾷῆῇῖῗῦῧῶῷⱤⱧⱨⱩⱪⱫⱬⱮⱾⱿꙀꙁꙂ"
+        "ꙃꚀꚁꚈꚉꚊꚋꚎꚏꚐꚑꚖꚗꜦꜧꝖꝘꝱꝲꝳꝴꝶꞐꞑꞔꞕꟀꟁꟄꟅꟆꬼꭆꭜꭦꭧ";
+    n = code_points(tildes_and_attached, cps, 1024);
+    int special_sizes[] = {9, 12, 15, 21};
+    for (size_t s = 0; s < sizeof special_sizes / sizeof special_sizes[0]; ++s)
+        for (int i = 0; i < n; ++i) light(regular, special_sizes[s], cps[i]);
+    for (int i = 0; i < n; ++i) light(bold, 14, cps[i]);
+    /* The glyphs no character maps to (reached through layout features: their diacritics adjusted by the
+     * characters FreeType's reverse character map follows GSUB's single and alternate substitutions to). */
+    {
+        FT_Face face = face_of(regular);
+        static unsigned char mapped[65536];
+        FT_UInt gid;
+        for (FT_ULong cp = FT_Get_First_Char(face, &gid); gid != 0; cp = FT_Get_Next_Char(face, cp, &gid))
+            if (gid < 65536) mapped[gid] = 1;
+        for (FT_Long g = 1; g < face->num_glyphs && g < 65536; ++g)
+            if (!mapped[g]) glyph_light(regular, 14, (unsigned)g);
+    }
+    /* The automatic hinter in its normal mode (a font without instructions, hinted by default). */
+    const char* unhinted = "../kompoz-text/tests/fonts/NotoSans-Subset.ttf";
+    {
+        FT_Face face = face_of(unhinted);
+        int default_sizes[] = {11, 14, 18, 24};
+        for (size_t s = 0; s < sizeof default_sizes / sizeof default_sizes[0]; ++s) {
+            FT_UInt gid;
+            for (FT_ULong cp = FT_Get_First_Char(face, &gid); gid != 0; cp = FT_Get_Next_Char(face, cp, &gid))
+                if (cp != ' ') normal(unhinted, default_sizes[s], (unsigned)cp);
+        }
+    }
+    /* The style maps of the test fonts. */
+    const char* style_fonts[] = {
+        regular,
+        "tests/fonts/Medium.ttf",
+        bold,
+        unhinted,
+        "../kompoz-text/tests/fonts/NotoSansArabic-Subset.ttf",
+        "../kompoz-text/tests/fonts/NotoSansDevanagari-Subset.ttf",
+        "../kompoz-text/tests/fonts/NotoSansHebrew-Subset.ttf",
+        "../kompoz-text/tests/fonts/KompozTest.ttf",
+        "../kompoz-text/tests/fonts/Cantarell-VF-Subset.otf",
+        colr0,
+        emoji,
+    };
+    for (size_t i = 0; i < sizeof style_fonts / sizeof style_fonts[0]; ++i) styles(style_fonts[i]);
     fclose(out);
     FT_Done_FreeType(library);
     return 0;

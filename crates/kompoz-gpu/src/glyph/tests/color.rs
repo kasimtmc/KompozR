@@ -1,24 +1,22 @@
 //! Colour glyphs: COLR v1 paint graphs (testdata/KompozPaints.ttf), COLR v0 layers, sbix and CBDT bitmaps, the
 //! composite modes.
 
-use super::{face, font_path};
+use super::face;
 use crate::glyph::bitmap::{BitmapImage, bitmap_glyph, multiply_alpha};
 use crate::glyph::color::{ColorImage, composite, paint_colr};
-use crate::glyph::outline::{Hinting, scaler};
+use crate::glyph::outline::Hinting;
 use kompoz_graphics::{BlendMode, Color, blend};
+use skrifa::ScalerFont;
 use skrifa::font::glyph::color::CompositeMode;
-use skrifa::{FontRef, ScalerFont};
 
 /// The paint font's glyph for `c` painted at `px` px with `foreground`.
 fn paint(c: char, px: u32, foreground: [u8; 4]) -> (ColorImage, bool) {
     let mut face = face("src/glyph/testdata/KompozPaints.ttf");
     let font = face.font().clone();
     let glyph = font.charmap().map_unicode(c).unwrap().to_u32();
-    let layers = face.scaler(px, Hinting::Normal);
     let units = ScalerFont::unhinted(font.clone(), None);
-    let bytes = std::fs::read(font_path("src/glyph/testdata/KompozPaints.ttf")).unwrap();
-    let glyf = FontRef::new(&bytes).ok();
-    let painted = paint_colr(&font, glyph, px, foreground, layers, glyf.as_ref(), &units).expect("a colour glyph");
+    let mut layers = |layer: u32| face.outline(px, Hinting::Normal, layer);
+    let painted = paint_colr(&font, glyph, px, foreground, &mut layers, &units).expect("a colour glyph");
     (painted.image.expect("pixels"), painted.uses_foreground)
 }
 
@@ -110,19 +108,19 @@ fn the_foreground_is_the_texts_colour() {
 #[cfg_attr(miri, ignore)]
 fn colr_v0_layers_blend_as_freetype_blends_them() {
     // U+E000: a red square, a blue one inside it (KompozCOLRv0.ttf). FreeType's arithmetic gives exact colours.
-    let face = face("../kompoz-text/tests/fonts/KompozCOLRv0.ttf");
+    let mut face = face("../kompoz-text/tests/fonts/KompozCOLRv0.ttf");
     let font = face.font().clone();
     let glyph = font.charmap().map_unicode('\u{E000}').unwrap().to_u32();
-    let layers = scaler(&font, 20, Hinting::Normal);
     let units = ScalerFont::unhinted(font.clone(), None);
-    let painted = paint_colr(&font, glyph, 20, [0, 0, 0, 255], &layers, None, &units).unwrap();
+    let mut layers = |layer: u32| face.outline(20, Hinting::Normal, layer);
+    let painted = paint_colr(&font, glyph, 20, [0, 0, 0, 255], &mut layers, &units).unwrap();
     let image = painted.image.unwrap();
     // The outer square 100..900 × 0..800 units: 2..18 × 0..16 px.
     assert_eq!((image.left, image.top, image.width, image.height), (2, 16, 16, 16));
     assert_eq!(image.at(1, 1), [255, 0, 0, 255]);
     assert_eq!(image.at(8, 8), [0, 0, 255, 255]);
     // Not a colour glyph: None (drawn as an outline).
-    assert!(paint_colr(&font, 0, 20, [0; 4], &layers, None, &units).is_none());
+    assert!(paint_colr(&font, 0, 20, [0; 4], &mut layers, &units).is_none());
 }
 
 #[test]
