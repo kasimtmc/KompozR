@@ -316,6 +316,33 @@ impl Color {
     }
 }
 
+/// A color given when it is asked for (Compose's ColorProducer): what a composable draws in, read as it draws, so
+/// an animated color redraws it without composing it again. Equal only to itself (a clone of it).
+#[derive(Clone)]
+pub struct ColorProducer(std::rc::Rc<dyn Fn() -> Color>);
+
+impl ColorProducer {
+    pub fn new(produce: impl Fn() -> Color + 'static) -> ColorProducer {
+        ColorProducer(std::rc::Rc::new(produce))
+    }
+    /// The color now (Compose's `invoke`): unspecified for none.
+    pub fn get(&self) -> Color {
+        (self.0)()
+    }
+}
+
+impl PartialEq for ColorProducer {
+    fn eq(&self, other: &ColorProducer) -> bool {
+        std::rc::Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl fmt::Debug for ColorProducer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ColorProducer({:p})", std::rc::Rc::as_ptr(&self.0) as *const ())
+    }
+}
+
 /// Opaque black (Compose's Color has no default).
 impl Default for Color {
     fn default() -> Color {

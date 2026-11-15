@@ -265,9 +265,14 @@ impl<'a> Context<'a> {
         x + piece(piece_start..end, s, end_edit)
     }
 
-    /// Grapheme cluster boundaries of the text.
+    /// Grapheme cluster boundaries of the text where a word may be split: none inside an unbreakable range (a
+    /// placeholder wider than its line stays whole, as Android's replacement spans).
     pub(crate) fn graphemes(&self) -> &[usize] {
-        self.graphemes.get_or_init(|| opportunities::grapheme_boundaries(self.text))
+        self.graphemes.get_or_init(|| {
+            let mut boundaries = opportunities::grapheme_boundaries(self.text);
+            boundaries.retain(|&g| !inside(self.params.unbreakable, g));
+            boundaries
+        })
     }
 
     /// Where a line from `start` that can't break before `end` is split by graphemes: after as many grapheme

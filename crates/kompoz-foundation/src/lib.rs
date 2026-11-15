@@ -3,8 +3,9 @@
 //! intrinsic sizes, alignment line padding), window insets, the gesture detectors, the clickables (`clickable`,
 //! `combined_clickable`, `selectable`, `toggleable`, `tri_state_toggleable`), `focusable`, `hoverable`,
 //! interactions and their sources, indications, `magnifier`, `background` and `border`, `Canvas` and `Image`,
-//! focus groups, progress and selectable group semantics, and bring-into-view requesters. Its modifiers extend
-//! `Modifier` through traits: `use kompoz_foundation::prelude::*`.
+//! focus groups, progress and selectable group semantics, bring-into-view requesters, and text ([`text`]:
+//! `BasicText` with its links, inline content and auto size). Its modifiers extend `Modifier` through traits:
+//! `use kompoz_foundation::prelude::*`.
 
 #![allow(non_upper_case_globals, non_snake_case)]
 
@@ -25,6 +26,7 @@ pub mod magnifier;
 pub mod progress_semantics;
 pub mod relocation;
 pub mod selection;
+pub mod text;
 
 pub use background::BackgroundModifiers;
 pub use border::{BorderModifierNode, BorderModifiers};
@@ -51,5 +53,9 @@ pub mod prelude {
     pub use crate::progress_semantics::ProgressSemanticsModifiers;
     pub use crate::relocation::{BringIntoViewRequester, RelocationModifiers};
     pub use crate::selection::{SelectableModifiers, SelectionModifiers, ToggleableModifiers};
+    pub use crate::text::{
+        BasicText, BasicTextValue, InlineContentMap, InlineTextContent, OnTextLayout, StepBased, TextAutoSize,
+        TextAutoSizeDefaults,
+    };
     pub use crate::{BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, Image, VectorImage};
 }

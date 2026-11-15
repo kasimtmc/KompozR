@@ -1,7 +1,8 @@
 //! Drawing laid out text (Compose's TextPainter: DrawScope.drawText): a [`TextLayoutResult`] at a top left, in a
 //! color or a brush of the draw call's (spread over all of the text) where the text's spans gave none of their
 //! own, with a shadow, a decoration and a draw style of the call's or the text's, blended, clipped to its size where
-//! it overflows and doesn't show what overflows; or text measured by a [`TextMeasurer`] and drawn at once. Each
+//! it overflows and doesn't show what overflows; or text measured by a [`TextMeasurer`] and drawn at once; or a
+//! [`Paragraph`] or [`MultiParagraph`] painted as it is (Compose's Paragraph.paint, what a text node draws). Each
 //! run is drawn as the paragraph's draw list has it (built once per layout), through the [`GraphicsContext`]'s
 //! text calls.
 //!
@@ -15,8 +16,8 @@ use kompoz_graphics::{
 };
 use kompoz_runtime::named;
 use kompoz_text::{
-    AnnotatedString, Placeholder, TextDecoration, TextForegroundStyle, TextLayoutResult, TextMeasurer, TextOverflow,
-    TextPaint, TextPaintOp, TextPaintStyle, TextStyle,
+    AnnotatedString, MultiParagraph, Paragraph, Placeholder, TextDecoration, TextForegroundStyle, TextLayoutResult,
+    TextMeasurer, TextOverflow, TextPaint, TextPaintOp, TextPaintStyle, TextStyle,
 };
 
 impl<'a> DrawScope<'a> {
@@ -85,6 +86,27 @@ impl<'a> DrawScope<'a> {
             .then(|| result.size.to_size());
         let ops = result.multi_paragraph.paint_ops(paint);
         self.paint_text_ops(&ops, top_left, clip, blend_mode);
+    }
+
+    /// Paints `paragraph` from the scope's top left with `paint` (Compose's Paragraph.paint(canvas, color or
+    /// brush, …)): `paint`'s color or brush (a brush spread over the paragraph), shadow, decoration and draw style
+    /// where its spans gave none, blended by `blend_mode`; not clipped (its caller clips what overflows).
+    pub fn paint_paragraph(&mut self, paragraph: &Paragraph, paint: &TextPaintStyle, blend_mode: BlendMode) {
+        let area = Rect::new(0.0, 0.0, paragraph.width(), paragraph.height());
+        let ops = paragraph.paint_ops(paint, area, 0.0);
+        self.paint_text_ops(&ops, Offset::Zero, None, blend_mode);
+    }
+
+    /// Paints `multi_paragraph` the same way (Compose's MultiParagraph.paint): its pieces one under another, a
+    /// brush `paint` gives spread over all of it.
+    pub fn paint_multi_paragraph(
+        &mut self,
+        multi_paragraph: &MultiParagraph,
+        paint: &TextPaintStyle,
+        blend_mode: BlendMode,
+    ) {
+        let ops = multi_paragraph.paint_ops(paint);
+        self.paint_text_ops(&ops, Offset::Zero, None, blend_mode);
     }
 
     /// The constraints text drawn here is measured in (Compose's textLayoutConstraints): `size` where given (its

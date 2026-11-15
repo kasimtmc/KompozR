@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-foundation"
-description = "KompozR's foundation (androidx.compose.foundation and foundation.layout): Box, Row, Column, Spacer, arrangements, padding and size modifiers, clickables, focusables, interactions and indications"
+description = "KompozR's foundation (androidx.compose.foundation and foundation.layout): Box, Row, Column, Spacer, arrangements, padding and size modifiers, clickables, focusables, interactions and indications, BasicText with its links, inline content and auto size"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ workspace = true
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
 
 [dev-dependencies]
@@ -40,4 +41,12 @@ harness = false
 
 [[test]]
 name = "clickable"
+harness = false
+
+[[test]]
+name = "text"
+harness = false
+
+[[test]]
+name = "text_links"
 harness = false

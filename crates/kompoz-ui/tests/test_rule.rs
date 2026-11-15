@@ -299,9 +299,13 @@ fn printing_shows_the_tree_as_compose_does() {
     }));
     let printed = rule.on_node_with_tag("kök").print_to_string();
     assert!(printed.starts_with("Printing with useUnmergedTree = 'false'\nNode #"), "{printed}");
+    // (the text's actions with the column's: BasicText's text substitution ones too, as Compose's)
     assert!(
         printed.contains(", Tag: 'kök'")
-            && printed.contains("Actions = [GetTextLayoutResult, OnClick]")
+            && printed.contains(
+                "Actions = [ClearTextSubstitution, GetTextLayoutResult, OnClick, SetTextSubstitution, \
+                 ShowTextSubstitution]"
+            )
             && printed.contains("MergeDescendants = 'true'"),
         "{printed}"
     );

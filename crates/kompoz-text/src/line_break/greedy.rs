@@ -22,7 +22,7 @@ pub(crate) fn break_segment(cx: &Context<'_>, segment: &Segment<'_>) -> Vec<Line
         segment.ends_email_or_url,
     )]);
     for (offset, inside_email_or_url, word_in_email_or_url) in candidates {
-        loop {
+        'fit: loop {
             let limit = cx.limit(segment.first_line + lines.len());
             let visible = cx.visible_end(line_start, offset);
             if cx.width(line_start, visible, start_edit, EndHyphenEdit::NoEdit) <= limit {
@@ -59,12 +59,13 @@ pub(crate) fn break_segment(cx: &Context<'_>, segment: &Segment<'_>) -> Vec<Line
                 if let Some(f) = fallback {
                     break 'chosen (f, EndHyphenEdit::NoEdit, StartHyphenEdit::NoEdit);
                 }
-                // A word wider than the line: as many grapheme clusters as fit.
-                (
-                    cx.grapheme_break(line_start, visible, start_edit, limit),
-                    EndHyphenEdit::NoEdit,
-                    StartHyphenEdit::NoEdit,
-                )
+                // A word wider than the line: as many grapheme clusters as fit. One that can't be split (a
+                // single cluster, a placeholder) overflows its line, which breaks after it as after any word.
+                let split = cx.grapheme_break(line_start, visible, start_edit, limit);
+                if split >= visible {
+                    break 'fit;
+                }
+                (split, EndHyphenEdit::NoEdit, StartHyphenEdit::NoEdit)
             };
             lines.push(LineSpec { start: line_start, end, start_edit, end_edit });
             line_start = end;
