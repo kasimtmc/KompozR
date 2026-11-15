@@ -12,3 +12,7 @@ CLAUDE.md
 *.keystore
 .env
 .env.*
+
+# The GPU tests' pictures that differ from their goldens (written to look at, never committed)
+*.actual.png
+*.diff.png

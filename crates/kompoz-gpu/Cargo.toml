@@ -10,5 +10,11 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-kompoz-graphics = { path = "../kompoz-graphics" }
 ash = "0.38.0"
+kompoz-graphics = { path = "../kompoz-graphics" }
+
+# The GPU tests: one binary on one device, the tests in sequence (harness = false), as the C++ Kompoz's gpu_tests.
+[[test]]
+name = "gpu"
+path = "tests/gpu/main.rs"
+harness = false
