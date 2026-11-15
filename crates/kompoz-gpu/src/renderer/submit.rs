@@ -312,6 +312,7 @@ impl Renderer {
 
     /// Submits what the targets ended so far recorded (glyphs and images uploaded first).
     pub fn flush(&mut self) {
+        self.draw_waiting_bitmaps(); // (what was drawn into bitmaps while the frame was drawn: see RendererBitmaps)
         if self.order.is_empty() {
             return;
         }

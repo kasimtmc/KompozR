@@ -41,6 +41,8 @@ mod shadow;
 mod submit;
 mod text;
 
+pub use image::RendererBitmaps;
+
 use crate::device::{ClearColor, Device, IRect, Pipeline, Sampler, Texture, TextureId, TextureUsage};
 use crate::path::Edge;
 use crate::shaders::{EdgeInstance, GLYPH, IMAGE, LAYER, MESH, PATH, Prim};

@@ -43,6 +43,7 @@ mod device;
 mod exact;
 mod golden;
 mod harness;
+mod images;
 mod scenes;
 mod submit;
 
@@ -75,6 +76,12 @@ const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
     ("transformed_edges_are_exact", exact::transformed_edges_are_exact),
     ("clips_cut_as_their_shapes", exact::clips_cut_as_their_shapes),
     ("conics_are_exact", exact::conics_are_exact),
+    ("images_are_sampled_as_asked", images::images_are_sampled_as_asked),
+    ("shaders_paint_as_they_are", images::shaders_paint_as_they_are),
+    ("meshes_draw_as_skia_does", images::meshes_draw_as_skia_does),
+    ("bitmaps_are_drawn_into_as_android_does", images::bitmaps_are_drawn_into_as_android_does),
+    ("bitmaps_drawn_into_in_a_frame_wait_their_turn", images::bitmaps_drawn_into_in_a_frame_wait_their_turn),
+    ("vectors_draw_as_compose", images::vectors_draw_as_compose),
     ("aliased_drawing_is_skias", exact::aliased_drawing_is_skias),
     ("path_effects_apply_where_drawn", exact::path_effects_apply_where_drawn),
     ("variants_fall_back_to_the_whole_shader", submit::variants_fall_back_to_the_whole_shader),
@@ -83,6 +90,7 @@ const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
     ("paths_share_their_masks", submit::paths_share_their_masks),
     ("a_path_keeps_its_coverage", submit::a_path_keeps_its_coverage),
     ("scenes_match_their_pictures", scenes::scenes_match_their_pictures),
+    ("images_match_their_picture", images::images_match_their_picture),
 ];
 
 /// Tests that make devices of their own, one after another (after the one device is gone), or need none.
