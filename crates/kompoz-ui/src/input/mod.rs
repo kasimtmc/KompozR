@@ -11,6 +11,9 @@
 //! [`VelocityTracker`] and nested scrolling ([`Modifier::nested_scroll`]) are here too; the gesture detectors are
 //! foundation's.
 //!
+//! Indirect pointers (a touchpad not over the window, a remote's swipe surface): [`IndirectPointerEvent`]s go to
+//! the focused node's [`IndirectPointerInputModifierNode`]s.
+//!
 //! Keys: [`Key`]s and [`KeyEvent`]s, and the nodes that take them along the focused path ([`Modifier::on_key_event`],
 //! [`Modifier::on_preview_key_event`], the soft keyboard interception and rotary nodes); the focus owner sends
 //! them (previews down, events up), and what none takes does the host's default (Tab and arrows move the focus,
@@ -19,6 +22,7 @@
 mod hit_path;
 mod hit_test;
 mod hover_icon;
+mod indirect;
 mod key;
 mod key_input;
 mod nested_scroll;
@@ -30,6 +34,10 @@ mod velocity;
 
 pub use hit_test::{DpTouchBoundsExpansion, TouchBoundsExpansion};
 pub use hover_icon::{HoverIconModifierNode, PointerIconService};
+pub use indirect::{
+    IndirectPointerEvent, IndirectPointerEventPrimaryDirectionalMotionAxis, IndirectPointerEventType,
+    IndirectPointerInputChange, IndirectPointerInputModifierNode,
+};
 pub use key::{Key, KeyEvent, KeyEventType, KeyModifiers};
 pub(crate) use key_input::key_handlers;
 pub use key_input::{
@@ -88,13 +96,6 @@ pub trait PointerInputModifierNode {
     fn touch_bounds_expansion(&self) -> TouchBoundsExpansion {
         TouchBoundsExpansion::None
     }
-}
-
-/// A node that takes indirect pointer events (a touchpad not over the window: Compose's
-/// IndirectPointerInputModifierNode).
-pub trait IndirectPointerInputModifierNode {
-    /// Its stream of events was cancelled (Compose's `onCancelIndirectPointerInput`).
-    fn on_cancel_indirect_pointer_input(&mut self) {}
 }
 
 /// An indirect pointer node left its chain: its stream is cancelled (Compose's autoInvalidate of the kind).
@@ -205,6 +206,8 @@ pub struct InputState {
     /// The host ids of the pointers whose press only dismissed a popup: what they do until they lift goes
     /// nowhere.
     swallowed: RefCell<Vec<i64>>,
+    /// Each indirect pointer's last time (ms), position and press, what the next event of it was from.
+    indirect: RefCell<Vec<(i64, i64, Offset, bool)>>,
 }
 
 impl Default for InputState {
@@ -216,6 +219,7 @@ impl Default for InputState {
             next_id: Cell::new(0),
             keyboard_modifiers: Cell::new(KeyModifiers::None),
             swallowed: RefCell::new(Vec::new()),
+            indirect: RefCell::new(Vec::new()),
         }
     }
 }
@@ -625,6 +629,70 @@ pub(crate) fn key_event(host: &KompozHost, event: KeyEvent) -> bool {
 }
 
 /// A rotary scroll along the focused path; whether a node took it.
+/// An indirect pointer event along the focused path (the platform's touchpad or remote; Compose's
+/// `sendIndirectPointerEvent`).
+pub(crate) fn indirect_pointer_event(host: &KompozHost, event: &IndirectPointerEvent) -> bool {
+    let focus = host.focus.clone();
+    focus.dispatch_indirect_pointer_event(event)
+}
+
+/// One indirect pointer's event, made with where it was from the last one of it (as a platform's motion event
+/// carries it): a press starts it where it is, a release ends it.
+pub(crate) fn indirect_pointer(
+    host: &KompozHost,
+    r#type: IndirectPointerEventType,
+    pointer_id: i64,
+    position: Offset,
+    pressure: f32,
+    time_nanos: i64,
+    axis: IndirectPointerEventPrimaryDirectionalMotionAxis,
+) -> bool {
+    let millis = time_nanos / 1_000_000;
+    let pressed = match r#type {
+        IndirectPointerEventType::Press | IndirectPointerEventType::Move => true,
+        IndirectPointerEventType::Release => false,
+        IndirectPointerEventType::Unknown => false,
+    };
+    let (previous_millis, previous_position, previous_pressed) = {
+        let input = host.input.borrow();
+        let mut tracked = input.indirect.borrow_mut();
+        let at = tracked.iter().position(|t| t.0 == pointer_id);
+        // (a press starts it afresh, where it is)
+        let previous = match at {
+            Some(i) if r#type != IndirectPointerEventType::Press => (tracked[i].1, tracked[i].2, tracked[i].3),
+            _ => (millis, position, false),
+        };
+        match (at, r#type) {
+            (Some(i), IndirectPointerEventType::Release) => {
+                tracked.remove(i);
+            }
+            (Some(i), _) => tracked[i] = (pointer_id, millis, position, pressed),
+            (None, IndirectPointerEventType::Release) => {}
+            (None, _) => tracked.push((pointer_id, millis, position, pressed)),
+        }
+        previous
+    };
+    let change = IndirectPointerInputChange::new(
+        PointerId(pointer_id),
+        millis,
+        position,
+        pressed,
+        pressure,
+        previous_millis,
+        previous_position,
+        previous_pressed,
+    );
+    indirect_pointer_event(host, &IndirectPointerEvent::new(vec![change], r#type, axis))
+}
+
+/// The indirect pointers' stream cancelled (Compose's `dispatchIndirectPointerCancel`): what is tracked of them
+/// forgotten.
+pub(crate) fn indirect_pointer_cancel(host: &KompozHost) {
+    host.input.borrow().indirect.borrow_mut().clear();
+    let focus = host.focus.clone();
+    focus.dispatch_indirect_pointer_cancel();
+}
+
 pub(crate) fn rotary_event(host: &KompozHost, event: RotaryScrollEvent) -> bool {
     let focus = host.focus.clone();
     focus.dispatch_rotary_event(&event, &mut || false)

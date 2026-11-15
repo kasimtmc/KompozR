@@ -10,6 +10,7 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
+use kompoz_ui::layout::WindowInsetsRulers;
 use kompoz_ui::platform::{Insets, LocalLayoutDirection, SystemInsets};
 use kompoz_ui::*;
 use std::cell::RefCell;
@@ -111,54 +112,65 @@ fn window_insets_paddings_consume_what_the_outer_ones_took() {
 }
 
 fn consumed_window_insets_are_told() {
-    // C++'s consumed_window_insets_are_told.
+    // C++'s consumed_window_insets_are_told, with Compose's model: what is consumed is told when it is other insets
+    // (a padding coming or going, a consumed value changing), not when the platform reports other values for the
+    // kinds in it: those are read from the insets told, live (C++ told them again).
     let (outer, inner, first) = (log(), log(), log());
+    let given = Rc::new(RefCell::new(None::<WindowInsets>));
     let padded = mutable_state_of(true);
+    let consumed = mutable_state_of(40);
     // Read during layout only: laid out again, not recomposed.
     let relaid = mutable_state_of(0);
-    let (o, i, f, p, r) = (outer.clone(), inner.clone(), first.clone(), padded.clone(), relaid.clone());
+    let (o, i, f, p, r, c, g) =
+        (outer.clone(), inner.clone(), first.clone(), padded.clone(), relaid.clone(), consumed.clone(), given.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (o, f) = (o.clone(), f.clone());
+        let (o, f, g) = (o.clone(), f.clone(), g.clone());
         let (i, r) = (i.clone(), r.clone());
+        let bottom = c.get();
         Box(
             Modifier
                 .on_consumed_window_insets_changed(move |w| f.borrow_mut().push(sides(w)))
                 .then(if p.get() { Modifier.status_bars_padding() } else { Modifier })
-                .on_consumed_window_insets_changed(move |w| o.borrow_mut().push(sides(w))),
-            content = || {
-                // Skipped when its parent composes again: the same element.
-                restartable((), Some(always as fn(&(), &()) -> bool), move |_| {
-                    let (i, r) = (i.clone(), r.clone());
-                    Box(Modifier
-                        .layout(move |scope, m, c| {
-                            r.get();
-                            let placeable = m.measure(c);
-                            scope.layout(placeable.width(), placeable.height(), move |s| s.place(&placeable, 0, 0))
-                        })
-                        .consume_window_insets(WindowInsets::new(0, 0, 0, 40))
-                        .on_consumed_window_insets_changed(move |w| i.borrow_mut().push(sides(w))));
-                });
+                .on_consumed_window_insets_changed(move |w| {
+                    o.borrow_mut().push(sides(w));
+                    *g.borrow_mut() = Some(w.clone());
+                }),
+            content = move || {
+                let (i, r) = (i.clone(), r.clone());
+                Box(Modifier
+                    .layout(move |scope, m, c| {
+                        r.get();
+                        let placeable = m.measure(c);
+                        scope.layout(placeable.width(), placeable.height(), move |s| s.place(&placeable, 0, 0))
+                    })
+                    .consume_window_insets(WindowInsets::new(0, 0, 0, bottom))
+                    .on_consumed_window_insets_changed(move |w| i.borrow_mut().push(sides(w))));
             },
         );
     }));
-    rule.host().set_system_insets(SystemInsets { status_bars: insets(0, 24, 0, 0), ..Default::default() });
-    rule.wait_for_idle();
     // Before the padding nothing is taken; after it, the status bar; inside, also what it consumed.
     assert_eq!(last(&first), Some([0, 0, 0, 0]));
-    assert_eq!(last(&outer), Some([0, 24, 0, 0]));
-    assert_eq!(last(&inner), Some([0, 24, 0, 40]));
-    // Told again when it changes; not on a layout that leaves it as it was.
-    let told = inner.borrow().len();
-    rule.host().set_system_insets(SystemInsets { status_bars: insets(0, 30, 0, 0), ..Default::default() });
+    assert_eq!(last(&outer), Some([0, 0, 0, 0]));
+    assert_eq!(last(&inner), Some([0, 0, 0, 40]));
+    let (told_outer, told_inner) = (outer.borrow().len(), inner.borrow().len());
+    // The platform reports a status bar: not told again; what was told reads it (the padding measures again).
+    rule.host().set_system_insets(SystemInsets { status_bars: insets(0, 24, 0, 0), ..Default::default() });
     rule.wait_for_idle();
-    assert_eq!(inner.borrow().len(), told + 1);
-    assert_eq!(last(&inner), Some([0, 30, 0, 40]));
+    assert_eq!((outer.borrow().len(), inner.borrow().len()), (told_outer, told_inner));
+    assert_eq!(given.borrow().as_ref().map(sides), Some([0, 24, 0, 0]));
+    // Told again when what is consumed changes (and as its block is given again, composed again); not on a layout
+    // that leaves it as it was.
+    consumed.set(30);
+    rule.wait_for_idle();
+    let told = inner.borrow().len();
+    assert!(told > told_inner);
+    assert_eq!(last(&inner), Some([0, 24, 0, 30]));
     relaid.set(1);
     rule.wait_for_idle();
-    assert_eq!(inner.borrow().len(), told + 1); // laid out again, the same: not told
+    assert_eq!(inner.borrow().len(), told); // laid out again, the same: not told
     padded.set(false);
     rule.wait_for_idle();
-    assert_eq!(last(&inner), Some([0, 0, 0, 40]));
+    assert_eq!(last(&inner), Some([0, 0, 0, 30]));
 }
 
 fn window_insets_kinds_and_arithmetic() {
@@ -656,6 +668,195 @@ fn recalculate_window_insets_takes_what_is_past_the_bounds() {
     assert_eq!((c[0] - b[0], c[1] - b[1]), (10.0, 24.0));
 }
 
+// ---- Compose's model: insets read live ---------------------------------------------------------------------------
+
+fn the_keyboard_sliding_measures_again_without_composing() {
+    // Compose's: the kinds are backed by the host's states, read as the paddings measure; an IME animation
+    // measures again what pads by the keyboard, composing nothing. A padding by a kind made in plain code finds
+    // the host's insets where it is attached.
+    let padded = Modifier.fill_max_size().ime_padding();
+    let composed = Rc::new(std::cell::Cell::new(0));
+    let c = composed.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        c.set(c.get() + 1);
+        Column(padded.clone(), || {
+            Box(Modifier.fill_max_width().weight(1.0).test_tag("içerik"));
+        });
+    }));
+    for height in [40, 120, 300, 0] {
+        rule.host().set_system_insets(SystemInsets {
+            ime: insets(0, 0, 0, height),
+            ime_animating: height != 0,
+            ime_visible: height != 0,
+            ime_animation_target: insets(0, 0, 0, 300),
+            ..Default::default()
+        });
+        rule.wait_for_idle();
+        let b = bounds(&rule, "içerik");
+        assert_eq!(b[1] + b[3], 800.0 - height as f32);
+    }
+    assert_eq!(composed.get(), 1);
+}
+
+fn visibility_and_insets_ignoring_visibility_as_compose() {
+    let seen = Rc::new(RefCell::new(String::new()));
+    let s = seen.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let shown = [
+            WindowInsets::are_status_bars_visible(),
+            WindowInsets::are_navigation_bars_visible(),
+            WindowInsets::are_system_bars_visible(),
+            WindowInsets::is_caption_bar_visible(),
+            WindowInsets::is_tappable_element_visible(),
+            WindowInsets::is_ime_visible(),
+        ];
+        let most = [
+            WindowInsets::status_bars_ignoring_visibility(),
+            WindowInsets::navigation_bars_ignoring_visibility(),
+            WindowInsets::system_bars_ignoring_visibility(),
+            WindowInsets::caption_bar_ignoring_visibility(),
+            WindowInsets::tappable_element_ignoring_visibility(),
+        ];
+        let cutout = WindowInsets::cutout_path().map_or(0.0, |p| p.get_bounds().width());
+        *s.borrow_mut() = format!(
+            "{:?} {:?} {cutout}",
+            shown.map(|v| v as u8),
+            most.iter().map(|w| sides(w)[1] + sides(w)[3]).collect::<Vec<_>>(),
+        );
+    }));
+    assert_eq!(*seen.borrow(), "[1, 1, 1, 1, 1, 0] [0, 0, 0, 0, 0] 0");
+    // The status bars hidden (immersive): they cover nothing now, 24 shown; the system bars aren't all shown.
+    let mut cutout = Path::new();
+    cutout.add_rect(Rect::new(180.0, 0.0, 220.0, 30.0), PathDirection::CounterClockwise);
+    rule.host().set_system_insets(SystemInsets {
+        status_bars_visible: false,
+        status_bars_ignoring_visibility: Some(insets(0, 24, 0, 0)),
+        navigation_bars: insets(0, 0, 0, 48),
+        tappable_element: insets(0, 0, 0, 48),
+        tappable_element_visible: true,
+        cutout_path: Some(cutout),
+        ..Default::default()
+    });
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), "[0, 1, 0, 1, 1, 0] [24, 48, 72, 0, 48] 40");
+    // The kinds are the same kind of the same window whatever they cover: equal.
+    assert_eq!(rule.host().system_insets().status_bars_ignoring_visibility, Some(insets(0, 24, 0, 0)));
+}
+
+fn fit_inside_and_fit_outside_follow_the_rulers() {
+    // Compose's fitInside / fitOutside by the window insets rulers: what they wrap measured, as placing reads the
+    // rulers, to the part inside (outside) them; the insets changing places them again, composing nothing.
+    let composed = Rc::new(std::cell::Cell::new(0));
+    let c = composed.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        c.set(c.get() + 1);
+        Box(
+            Modifier.fill_max_size(),
+            content = || {
+                Box(Modifier
+                    .fill_max_size()
+                    .fit_inside(WindowInsetsRulers::safe_drawing().current())
+                    .test_tag("içinde"));
+                Box(Modifier
+                    .fill_max_size()
+                    .fit_outside(WindowInsetsRulers::status_bars().current())
+                    .test_tag("dışında"));
+            },
+        );
+    }));
+    // Nothing covered: all of it inside, nothing outside.
+    assert_eq!(content_bounds(&rule, "içinde"), [0.0, 0.0, 400.0, 800.0]);
+    assert_eq!(size(&rule, "dışında"), IntSize::new(400, 800));
+    assert_eq!(rule.on_node_with_tag("dışında").layout_node().inner_coordinates().size(), IntSize::new(0, 0));
+    rule.host().set_system_insets(SystemInsets {
+        status_bars: insets(0, 24, 0, 0),
+        navigation_bars: insets(0, 0, 0, 48),
+        ..Default::default()
+    });
+    rule.wait_for_idle();
+    assert_eq!(content_bounds(&rule, "içinde"), [0.0, 24.0, 400.0, 728.0]);
+    assert_eq!(content_bounds(&rule, "dışında"), [0.0, 0.0, 400.0, 24.0]);
+    assert_eq!(composed.get(), 1);
+}
+
+struct Keyboard {
+    moved: std::cell::Cell<f32>,
+    ends: RefCell<Vec<f32>>,
+}
+
+impl kompoz_ui::platform::PlatformCallbacks for Keyboard {
+    fn can_control_ime(&self) -> bool {
+        true
+    }
+    fn ime_control_by(&self, px: f32) {
+        self.moved.set(self.moved.get() + px);
+    }
+    fn ime_control_end(&self, velocity: f32) {
+        self.ends.borrow_mut().push(velocity);
+    }
+}
+
+struct Nothing;
+impl kompoz_ui::input::NestedScrollConnection for Nothing {}
+
+fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
+    // C++'s ime_nested_scroll_moves_the_keyboard_past_the_end, its list's scrolling dispatched by hand (scroll
+    // containers are a later stage's) and a node that says it can be edited in place of its text field.
+    use kompoz_ui::input::{NestedScrollDispatcher, NestedScrollSource::*};
+    use kompoz_ui::unit::Velocity;
+    let dispatcher = NestedScrollDispatcher::default();
+    let field = kompoz_ui::focus::FocusRequester::new();
+    let (d, f) = (dispatcher.clone(), field.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (d, f) = (d.clone(), f.clone());
+        Column(
+            Modifier.fill_max_size(),
+            content = move || {
+                let d = d.clone();
+                Box(
+                    Modifier.ime_nested_scroll(),
+                    content = move || {
+                        Box(Modifier.size(100.dp()).nested_scroll(Rc::new(Nothing), dispatcher = Some(d.clone())));
+                    },
+                );
+                Box(Modifier.size(10.dp()).semantics(|c| c.set_is_editable(true)).focus_requester(&f).focus_target());
+            },
+        );
+    }));
+    let keyboard = Rc::new(Keyboard { moved: std::cell::Cell::new(0.0), ends: RefCell::new(Vec::new()) });
+    rule.host().set_callbacks(keyboard.clone());
+    let up = |px: f32| dispatcher.dispatch_post_scroll(Offset::Zero, Offset::new(0.0, -px), UserInput);
+    let down = |px: f32| dispatcher.dispatch_pre_scroll(Offset::new(0.0, px), UserInput);
+    let fling = |v: f32| {
+        let mut future = dispatcher.dispatch_pre_fling(Velocity::new(0.0, v));
+        let waker = std::task::Waker::noop();
+        match future.as_mut().poll(&mut std::task::Context::from_waker(waker)) {
+            std::task::Poll::Ready(left) => left,
+            std::task::Poll::Pending => panic!("a fling the keyboard takes ends at once"),
+        }
+    };
+    // Nothing that can be edited focused: past the end nothing moves.
+    assert_eq!(up(50.0), Offset::Zero);
+    assert!(keyboard.moved.get() == 0.0 && !rule.host().ime_controlling());
+    // Focused: pulled up past the end, the keyboard comes up with the finger.
+    field.request_focus();
+    rule.wait_for_idle();
+    assert_eq!(up(50.0), Offset::new(0.0, -50.0));
+    assert!(keyboard.moved.get() == 50.0 && rule.host().ime_controlling());
+    // Pushed down while held: it goes down first, never under its bottom (the rest is the list's).
+    assert_eq!(down(20.0), Offset::new(0.0, 20.0));
+    assert_eq!(down(100.0), Offset::new(0.0, 30.0));
+    assert_eq!(keyboard.moved.get(), 0.0);
+    // Not the user's scrolling: left alone.
+    assert_eq!(dispatcher.dispatch_post_scroll(Offset::Zero, Offset::new(0.0, -10.0), SideEffect), Offset::Zero);
+    // Let go: the fling is the keyboard's; the platform finishes it.
+    assert_eq!(fling(-500.0), Velocity::new(0.0, -500.0));
+    assert!(*keyboard.ends.borrow() == [500.0] && !rule.host().ime_controlling());
+    // Pushed down not holding it: nothing.
+    assert_eq!(down(40.0), Offset::Zero);
+    assert_eq!(fling(300.0), Velocity::Zero);
+}
+
 tests!(
     window_insets_paddings_consume_what_the_outer_ones_took,
     consumed_window_insets_are_told,
@@ -667,4 +868,8 @@ tests!(
     window_insets_padding_follows_mutable_insets_and_padding_values,
     consuming_window_insets_as_compose,
     recalculate_window_insets_takes_what_is_past_the_bounds,
+    the_keyboard_sliding_measures_again_without_composing,
+    visibility_and_insets_ignoring_visibility_as_compose,
+    fit_inside_and_fit_outside_follow_the_rulers,
+    ime_nested_scroll_moves_the_keyboard_past_the_end,
 );

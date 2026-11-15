@@ -1,6 +1,6 @@
 //! foundation.layout, as Compose's `androidx.compose.foundation.layout`: the layouts (`Box`, `Row`, `Column`,
 //! `Spacer`), arrangements, the padding, size, offset, aspect ratio, intrinsic size, alignment line padding and
-//! scope modifiers, and window insets.
+//! scope modifiers, window insets, and fitting inside or outside rulers.
 //!
 //! Compose's modifiers are extension functions of `Modifier`; here they are methods of extension traits
 //! implemented for it ([`PaddingModifiers`], [`SizeModifiers`], [`LayoutScopeModifiers`], …), with Compose's
@@ -23,10 +23,12 @@ mod intrinsic;
 mod offset;
 mod padding;
 mod row_column;
+mod ruler_alignment;
 mod scope;
 mod size;
 mod spacer;
 mod window_insets;
+mod window_insets_connection;
 mod window_insets_padding;
 mod window_insets_size;
 
@@ -41,10 +43,12 @@ pub use intrinsic::{IntrinsicSize, IntrinsicSizeModifiers};
 pub use offset::{OffsetFn, OffsetModifiers};
 pub use padding::{CustomPaddingValues, PaddingModifiers, PaddingValues};
 pub use row_column::{Column, Row};
+pub use ruler_alignment::RulerAlignmentModifiers;
 pub use scope::{AlignBy, LayoutScopeModifiers, ScopeAlignment};
 pub use size::SizeModifiers;
 pub use spacer::Spacer;
 pub use window_insets::{CustomWindowInsets, MutableWindowInsets, WindowInsets, WindowInsetsSides};
+pub use window_insets_connection::ImeNestedScrollModifiers;
 pub use window_insets_padding::WindowInsetsPaddingModifiers;
 pub use window_insets_size::WindowInsetsSizeModifiers;
 

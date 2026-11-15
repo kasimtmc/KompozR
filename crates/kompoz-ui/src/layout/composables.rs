@@ -6,7 +6,7 @@ use crate::modifier::Modifier;
 use crate::node::LayoutNode;
 use crate::platform::{LocalDensity, LocalLayoutDirection};
 use crate::unit::Constraints;
-use kompoz_runtime::{current_composite_key_hash, current_kompozition_local_context_unobserved, emit, kompozable};
+use kompoz_runtime::{current_composite_key_hash, current_kompozition_local_map, emit, kompozable};
 use std::rc::Rc;
 
 /// A measure policy from a closure (Compose's `MeasurePolicy { measurables, constraints -> … }`), its parameter
@@ -52,7 +52,7 @@ pub fn layout_into(
 ) {
     let density = LocalDensity.current();
     let layout_direction = LocalLayoutDirection.current();
-    let locals = current_kompozition_local_context_unobserved();
+    let locals = current_kompozition_local_map();
     let key = current_composite_key_hash();
     emit(
         LayoutNode::new,

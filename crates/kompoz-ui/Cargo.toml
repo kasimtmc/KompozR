@@ -66,3 +66,7 @@ harness = false
 [[test]]
 name = "test_rule"
 harness = false
+
+[[test]]
+name = "rulers"
+harness = false

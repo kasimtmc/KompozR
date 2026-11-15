@@ -1,11 +1,12 @@
 //! Drawing into bitmaps (C++'s BitmapRenderer): a canvas over a bitmap ([`Canvas::from_image`]) records what it
 //! draws into a [`Picture`] and hands it, as the canvas goes, to the platform's renderer, which draws it into the
-//! bitmap; while there is none, the pictures wait on the bitmap for one to come.
+//! bitmap; while there is none, the pictures wait for one to come, the bitmap held weakly (as C++'s: a bitmap no one
+//! holds any more needs nothing drawn into it, and what waited for it goes with it).
 //!
 //! [`Canvas::from_image`]: super::Canvas::from_image
 
 use super::Picture;
-use kompoz_graphics::ImageBitmap;
+use kompoz_graphics::{ImageBitmap, WeakImageBitmap};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,32 +19,38 @@ pub trait BitmapRenderer {
 
 thread_local! {
     static RENDERER: RefCell<Option<Rc<dyn BitmapRenderer>>> = const { RefCell::new(None) };
-    /// What was drawn into bitmaps while there was no renderer, in order (the bitmaps kept with it).
-    static PENDING: RefCell<Vec<(ImageBitmap, Rc<Picture>)>> = const { RefCell::new(Vec::new()) };
+    /// What was drawn into bitmaps while there was no renderer, in order, the bitmaps held weakly.
+    static PENDING: RefCell<Vec<(WeakImageBitmap, Rc<Picture>)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Sets the renderer (none: there is none); what was drawn into bitmaps while there was none is drawn now, in the
-/// order it was drawn.
+/// order it was drawn (into the bitmaps that still live).
 pub fn set_bitmap_renderer(renderer: Option<Rc<dyn BitmapRenderer>>) {
     RENDERER.with(|r| *r.borrow_mut() = renderer.clone());
     let Some(renderer) = renderer else { return };
     let waiting = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
     for (bitmap, draws) in waiting {
-        renderer.draw(&bitmap, &draws);
+        if let Some(bitmap) = bitmap.upgrade() {
+            renderer.draw(&bitmap, &draws);
+        }
     }
 }
 
-/// `draws` drawn into `bitmap`: by the renderer now, or kept for one to come.
+/// `draws` drawn into `bitmap`: by the renderer now, or kept for one to come while the bitmap lives.
 pub fn draw_into_bitmap(bitmap: &ImageBitmap, draws: Rc<Picture>) {
     let renderer = RENDERER.with(|r| r.borrow().clone());
     match renderer {
         Some(r) => r.draw(bitmap, &draws),
-        None => PENDING.with(|p| p.borrow_mut().push((bitmap.clone(), draws))),
+        None => PENDING.with(|p| {
+            let mut p = p.borrow_mut();
+            p.retain(|(b, _)| b.is_alive()); // (what waited for bitmaps gone goes)
+            p.push((bitmap.downgrade(), draws));
+        }),
     }
 }
 
 /// What waits to be drawn into `bitmap` for a renderer to come, in order (what tests read of a bitmap a painter
 /// drew into).
 pub fn pending_draws(bitmap: &ImageBitmap) -> Vec<Rc<Picture>> {
-    PENDING.with(|p| p.borrow().iter().filter(|(b, _)| b == bitmap).map(|(_, d)| d.clone()).collect())
+    PENDING.with(|p| p.borrow().iter().filter(|(b, _)| b.is_of(bitmap)).map(|(_, d)| d.clone()).collect())
 }

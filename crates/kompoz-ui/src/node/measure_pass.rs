@@ -568,6 +568,10 @@ impl Measurable for LayoutNode {
     fn measure(&self, constraints: Constraints) -> Placeable {
         self.measure_for_parent(constraints)
     }
+
+    fn retain(&self) -> Option<Rc<dyn Measurable>> {
+        Some(self.rc())
+    }
 }
 
 impl PlaceTarget for LayoutNode {

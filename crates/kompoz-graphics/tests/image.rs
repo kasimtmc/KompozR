@@ -241,6 +241,20 @@ fn bitmaps_are_composes() {
 // ---- Sizes and scales ---------------------------------------------------------------------------------------------
 
 #[test]
+fn a_bitmap_held_weakly_lives_only_while_held() {
+    let srgb: &Rgb = &ColorSpaces::Srgb;
+    let bitmap = ImageBitmap::new(2, 2, ImageBitmapConfig::Argb8888, true, srgb);
+    let other = ImageBitmap::new(2, 2, ImageBitmapConfig::Argb8888, true, srgb);
+    let weak = bitmap.downgrade();
+    assert!(weak.is_alive() && weak.is_of(&bitmap) && !weak.is_of(&other));
+    assert_eq!(weak.upgrade(), Some(bitmap.clone()));
+    assert!(weak == bitmap.clone().downgrade() && weak != other.downgrade());
+    drop(bitmap);
+    assert!(!weak.is_alive() && weak.upgrade().is_none());
+    assert_eq!(format!("{weak:?}"), "WeakImageBitmap(gone)");
+}
+
+#[test]
 fn images_are_decoded_smaller_by_powers_of_two_never_below_the_size() {
     let size = ImageRequestSize::new;
     // Fitted: 1000 x 750. Cropped: 2000 x 1500 covers it.

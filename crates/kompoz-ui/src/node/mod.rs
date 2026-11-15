@@ -6,6 +6,7 @@ mod coordinator;
 mod layout_node;
 mod measure_pass;
 mod owner;
+mod rulers;
 mod snapshot_observer;
 
 pub use coordinator::NodeCoordinator;

@@ -428,6 +428,58 @@ fn focus_restorers_bring_the_focus_back_where_it_left() {
     assert!(at(&rule, "c"), "{}", focused_tag(&rule));
 }
 
+#[kompozable]
+fn RestorableRow(shown: MutableState<bool>) {
+    if shown.get() {
+        Column(
+            content = || {
+                Box(Modifier.size(50.dp()).focus_target().test_tag("x"));
+                Row(
+                    Modifier.focus_restorer().focus_group(),
+                    content = || {
+                        for t in ["a", "b", "c"] {
+                            Box(Modifier.size(50.dp()).focus_target().test_tag(t));
+                        }
+                    },
+                );
+            },
+        );
+    }
+}
+
+/// The same content for both hosts (what a restorer saves is found by where it is composed).
+fn restorable(shown: &MutableState<bool>) -> impl Content + 'static {
+    let s = shown.clone();
+    kompozable_lambda!(move || RestorableRow(s.clone()))
+}
+
+fn focus_restoration_outlives_the_process() {
+    // Compose's FocusRestorer: the child a target noted is registered with the saveable state registry where it is
+    // (the host's), saved with the host's state and consumed back where the target, made anew, restores.
+    let bytes = {
+        let shown = mutable_state_of(true);
+        let rule = KompozTestRule::new(restorable(&shown));
+        for _ in 0..3 {
+            key(&rule, Key::Tab); // x, a, b
+        }
+        key(&rule, Key::DirectionUp); // out of the row: it notes b
+        assert!(at(&rule, "x"), "{}", focused_tag(&rule));
+        rule.host().save_state()
+    };
+    let shown = mutable_state_of(false);
+    let rule = KompozTestRule::new(restorable(&shown));
+    rule.host().restore_state(&bytes);
+    shown.set(true);
+    rule.wait_for_idle();
+    key(&rule, Key::Tab); // x
+    key(&rule, Key::DirectionDown); // into the row: back at b, as the first host left it
+    assert!(at(&rule, "b"), "{}", focused_tag(&rule));
+    // Consumed: what the registry was given back is gone; what is noted now is saved instead.
+    let saved = SavedValue::decode(&rule.host().save_state()).unwrap();
+    let provided = saved.get("composition").get("providers");
+    assert_eq!(provided.as_map().map(|m| m.len()), Some(1));
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Compose's behaviour
 
@@ -753,6 +805,7 @@ fn key_input_injected_on_a_node() {
 }
 
 tests!(
+    focus_restoration_outlives_the_process,
     arrow_keys_move_focus_to_the_nearest_one_that_way,
     focus_groups_keep_arrow_keys_inside_first,
     nested_focus_groups_count_as_their_outermost_from_outside,

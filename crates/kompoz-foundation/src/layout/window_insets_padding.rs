@@ -11,7 +11,7 @@ use kompoz_graphics::{IntOffset, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::named;
 use kompoz_ui::layout::LayoutModifierNode;
 use kompoz_ui::modifier::{TraversableNode, TraversalDecision};
-use kompoz_ui::platform::{Insets, LocalWindowInfo};
+use kompoz_ui::platform::{Insets, LocalSystemInsets, LocalWindowInfo, SystemInsetsHolder};
 use kompoz_ui::{
     Constraints, Measurable, MeasureResult, MeasureScope, Modifier, ModifierNode, ModifierNodeElement, NodeCx,
     NodeHandle, node_capabilities,
@@ -22,15 +22,15 @@ use std::rc::Rc;
 
 /// The window insets padding modifiers (Compose's `windowInsetsPadding`, `consumeWindowInsets`,
 /// `onConsumedWindowInsetsChanged`, `recalculateWindowInsets` and the paddings by each kind). The paddings by a
-/// kind read it where the modifier is made, as [`WindowInsets::status_bars`] and the others are read: in a
-/// kompozable body, which composes again when the platform reports other insets.
+/// kind find the host's insets where they are attached (Compose's SystemInsetsPaddingModifierNode), so they work
+/// made anywhere; they measure again, composing nothing, when the platform reports other insets.
 #[named(trait WindowInsetsPaddingModifiers)]
 impl Modifier {
     /// Padding by `insets`, less what the layouts around consumed already; all of `insets` is consumed for what
     /// is inside (Compose's `windowInsetsPadding`). The window's left and right stay the screen's whatever the
     /// layout direction.
     fn window_insets_padding(self, insets: WindowInsets) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets, name: "windowInsetsPadding" })
+        self.then_element(InsetsPaddingElement { insets: InsetsSource::Given(insets), name: "windowInsetsPadding" })
     }
 
     /// `insets` taken as consumed for what is inside, without padding for them (Compose's
@@ -61,89 +61,128 @@ impl Modifier {
 
     /// Padding by the system bars, the keyboard and the display cutout (Compose's `safeDrawingPadding`).
     fn safe_drawing_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::safe_drawing(), name: "safeDrawingPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::safe_drawing_of, "safeDrawingPadding"))
     }
 
     /// Padding by the gesture edges, the tappable elements and the waterfall (Compose's `safeGesturesPadding`).
     fn safe_gestures_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::safe_gestures(), name: "safeGesturesPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::safe_gestures_of, "safeGesturesPadding"))
     }
 
     /// Padding by everything drawn over or gestured on (Compose's `safeContentPadding`).
     fn safe_content_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::safe_content(), name: "safeContentPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::safe_content_of, "safeContentPadding"))
     }
 
     /// Padding by the system bars (Compose's `systemBarsPadding`).
     fn system_bars_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::system_bars(), name: "systemBarsPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::system_bars_of, "systemBarsPadding"))
     }
 
     /// Padding by the display cutout (Compose's `displayCutoutPadding`).
     fn display_cutout_padding(self) -> Modifier {
-        let insets = WindowInsets::display_cutout();
-        self.then_element(InsetsPaddingElement { insets, name: "displayCutoutPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::display_cutout_of, "displayCutoutPadding"))
     }
 
     /// Padding by the status bars (Compose's `statusBarsPadding`).
     fn status_bars_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::status_bars(), name: "statusBarsPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::status_bars_of, "statusBarsPadding"))
     }
 
     /// Padding by the keyboard, as it slides (Compose's `imePadding`).
     fn ime_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::ime(), name: "imePadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::ime_of, "imePadding"))
     }
 
     /// Padding by the navigation bars (Compose's `navigationBarsPadding`).
     fn navigation_bars_padding(self) -> Modifier {
-        let insets = WindowInsets::navigation_bars();
-        self.then_element(InsetsPaddingElement { insets, name: "navigationBarsPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::navigation_bars_of, "navigationBarsPadding"))
     }
 
     /// Padding by the caption bar (Compose's `captionBarPadding`).
     fn caption_bar_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::caption_bar(), name: "captionBarPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::caption_bar_of, "captionBarPadding"))
     }
 
     /// Padding by the waterfall's curved edges (Compose's `waterfallPadding`).
     fn waterfall_padding(self) -> Modifier {
-        self.then_element(InsetsPaddingElement { insets: WindowInsets::waterfall(), name: "waterfallPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::waterfall_of, "waterfallPadding"))
     }
 
     /// Padding by the system gesture edges (Compose's `systemGesturesPadding`).
     fn system_gestures_padding(self) -> Modifier {
-        let insets = WindowInsets::system_gestures();
-        self.then_element(InsetsPaddingElement { insets, name: "systemGesturesPadding" })
+        self.then_element(InsetsPaddingElement::system(WindowInsets::system_gestures_of, "systemGesturesPadding"))
     }
 
     /// Padding by the mandatory system gesture edges (Compose's `mandatorySystemGesturesPadding`).
     fn mandatory_system_gestures_padding(self) -> Modifier {
-        let insets = WindowInsets::mandatory_system_gestures();
-        self.then_element(InsetsPaddingElement { insets, name: "mandatorySystemGesturesPadding" })
+        self.then_element(InsetsPaddingElement::system(
+            WindowInsets::mandatory_system_gestures_of,
+            "mandatorySystemGesturesPadding",
+        ))
     }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // The elements
 
-#[derive(PartialEq)]
+/// What a padding pads by: insets given, or a kind of the host's, found where the node is attached (by its
+/// getter, known by the modifier's name).
+#[derive(Clone)]
+enum InsetsSource {
+    Given(WindowInsets),
+    System(fn(&SystemInsetsHolder) -> WindowInsets),
+}
+
 struct InsetsPaddingElement {
-    insets: WindowInsets,
+    insets: InsetsSource,
     name: &'static str,
+}
+
+impl InsetsPaddingElement {
+    fn system(getter: fn(&SystemInsetsHolder) -> WindowInsets, name: &'static str) -> InsetsPaddingElement {
+        InsetsPaddingElement { insets: InsetsSource::System(getter), name }
+    }
+}
+
+impl PartialEq for InsetsPaddingElement {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.insets, &other.insets) {
+            (InsetsSource::Given(a), InsetsSource::Given(b)) => a == b,
+            // (Compose's SystemInsetsPaddingModifierElement: the same getter; each kind's modifier has its name)
+            (InsetsSource::System(_), InsetsSource::System(_)) => self.name == other.name,
+            _ => false,
+        }
+    }
 }
 
 impl ModifierNodeElement for InsetsPaddingElement {
     type Node = InsetsConsumingNode;
     fn create(&self) -> InsetsConsumingNode {
-        InsetsConsumingNode::new(Kind::Padding(self.insets.clone()))
+        match &self.insets {
+            InsetsSource::Given(insets) => InsetsConsumingNode::new(Kind::Padding(insets.clone())),
+            InsetsSource::System(getter) => {
+                let mut node = InsetsConsumingNode::new(Kind::Padding(WindowInsets::Zero));
+                node.system_getter = Some(*getter);
+                node
+            }
+        }
     }
     fn update(&self, node: &mut InsetsConsumingNode) {
-        if let Kind::Padding(insets) = &node.kind
-            && *insets != self.insets
-        {
-            node.kind = Kind::Padding(self.insets.clone());
-            node.insets_invalidated_now();
+        match &self.insets {
+            InsetsSource::Given(given) => {
+                node.system_getter = None;
+                if let Kind::Padding(insets) = &node.kind
+                    && insets != given
+                {
+                    node.kind = Kind::Padding(given.clone());
+                    node.insets_invalidated_now();
+                }
+            }
+            InsetsSource::System(getter) => {
+                node.system_getter = Some(*getter);
+                node.resolve_system_insets();
+            }
         }
     }
     fn name(&self) -> &'static str {
@@ -289,6 +328,8 @@ pub(super) struct InsetsConsumingNode {
     ancestor_consumed_insets: WindowInsets,
     /// What it consumes, theirs included.
     consumed_insets: WindowInsets,
+    /// A padding by a kind of the host's: what makes it from the host's insets, where it is attached.
+    system_getter: Option<fn(&SystemInsetsHolder) -> WindowInsets>,
     handle: Option<NodeHandle>,
 }
 
@@ -298,7 +339,20 @@ impl InsetsConsumingNode {
             kind,
             ancestor_consumed_insets: WindowInsets::Zero,
             consumed_insets: WindowInsets::Zero,
+            system_getter: None,
             handle: None,
+        }
+    }
+
+    /// A padding by a kind of the host's pads by that kind of the host its layout is in (Compose's
+    /// SystemInsetsPaddingModifierNode `update`); before it is attached, nothing.
+    fn resolve_system_insets(&mut self) {
+        let Some(getter) = self.system_getter else { return };
+        let Some(cx) = self.handle.as_ref().and_then(|h| h.cx()).filter(|cx| cx.is_attached()) else { return };
+        let insets = getter(&cx.current_value_of(&LocalSystemInsets));
+        if !matches!(&self.kind, Kind::Padding(old) if *old == insets) {
+            self.kind = Kind::Padding(insets);
+            self.insets_invalidated(&cx);
         }
     }
 
@@ -376,6 +430,9 @@ impl ModifierNode for InsetsConsumingNode {
 
     fn on_attach(&mut self, cx: &NodeCx) {
         self.handle = Some(cx.handle());
+        if let Some(getter) = self.system_getter {
+            self.kind = Kind::Padding(getter(&cx.current_value_of(&LocalSystemInsets)));
+        }
         let mut above = None;
         cx.traverse_ancestors(&InsetsConsumingModifierNodeKey, &mut |parent| {
             above = parent.with::<InsetsConsumingNode, _>(|n| n.consumed_insets.clone());

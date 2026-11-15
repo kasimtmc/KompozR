@@ -2661,6 +2661,20 @@ fn bitmaps_are_drawn_into_by_canvases() {
     }
     assert_eq!(fake.drawn.borrow().len(), 3);
     set_bitmap_renderer(None);
+    // Drawn into while there is no renderer, then let go of: what waits for it doesn't keep it (as C++'s), and a
+    // renderer coming finds nothing to draw into it.
+    let gone = ImageBitmap::new(2, 2, ImageBitmapConfig::Argb8888, true, &colorspace::ColorSpaces::Srgb);
+    {
+        let mut c = Canvas::from_image(&gone);
+        c.draw_rect(Rect::new(0.0, 0.0, 1.0, 1.0), &Paint());
+    }
+    let weak = gone.downgrade();
+    assert_eq!(pending_draws(&gone).len(), 1);
+    drop(gone);
+    assert!(weak.upgrade().is_none());
+    set_bitmap_renderer(Some(fake.clone()));
+    assert_eq!(fake.drawn.borrow().len(), 3);
+    set_bitmap_renderer(None);
     // An Alpha8 bitmap drawn as a mask (draw_image_mask): in black from a DrawScope (as Compose's), in a canvas's
     // paint.
     let mask = ImageBitmap::new(4, 4, ImageBitmapConfig::Alpha8, true, &colorspace::ColorSpaces::Srgb);

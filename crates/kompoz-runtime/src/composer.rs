@@ -140,17 +140,62 @@ pub(crate) struct MovableData {
     pub(crate) group: std::cell::Cell<Option<GroupId>>,
 }
 
+/// What a provider gives a local (Compose's ValueHolder): its value, and the key its readers are told under. A
+/// dynamic local's provider keeps one holder and sets the value in it when it gives another (Compose's
+/// DynamicValueHolder): whoever holds the holder (a layout node keeping the locals where it was composed) reads
+/// the value as it is now, and whoever read it (a composable, a measure, a drawing) is told.
+pub(crate) struct ValueHolder {
+    pub(crate) key: StateKey,
+    value: RefCell<Rc<dyn Any>>,
+}
+
+impl ValueHolder {
+    pub(crate) fn new(value: Rc<dyn Any>) -> Rc<ValueHolder> {
+        Rc::new(ValueHolder { key: StateKey::new(), value: RefCell::new(value) })
+    }
+
+    /// The value, the read told to whoever observes reads.
+    pub(crate) fn read(&self) -> Rc<dyn Any> {
+        crate::read::record_read(self.key);
+        self.peek()
+    }
+
+    /// The value, read by no one.
+    pub(crate) fn peek(&self) -> Rc<dyn Any> {
+        self.value.borrow().clone()
+    }
+
+    /// Holds `value` from now on (the old one dropped outside the borrow).
+    fn set(&self, value: Rc<dyn Any>) {
+        let old = self.value.replace(value);
+        drop(old);
+    }
+}
+
 /// A value given to a composition local by a provider.
 #[derive(Clone)]
 pub(crate) struct Provided {
     /// Which local (its address).
     pub(crate) local: usize,
-    pub(crate) value: Rc<dyn Any>,
-    pub(crate) equals: fn(&dyn Any, &dyn Any) -> bool,
+    pub(crate) holder: Rc<ValueHolder>,
+    /// When two values are the same (the local's mutation policy).
+    pub(crate) equals: Rc<dyn Fn(&dyn Any, &dyn Any) -> bool>,
     /// `provides_default`: only where nothing above provides one.
     pub(crate) if_missing: bool,
-    /// The group providing it (its readers are that provider's).
-    pub(crate) provider: Option<GroupId>,
+    /// A dynamic local's (Compose's compositionLocalOf): another value is set in the provider's holder; a static
+    /// local's (staticCompositionLocalOf) comes in a holder of its own, and the scopes that read the old one (and
+    /// the layouts that kept it) compose again.
+    pub(crate) dynamic: bool,
+    /// From a context provided again: the holder is the context's, shared (another one is a holder of its own).
+    pub(crate) shared: bool,
+}
+
+impl Provided {
+    /// Whether a layout keeping it has to be composed again to see another value (a static local's, a context's:
+    /// their holders are replaced, not set).
+    pub(crate) fn replaced_when_changed(&self) -> bool {
+        !self.dynamic || self.shared
+    }
 }
 
 struct Group {
@@ -256,6 +301,9 @@ pub(crate) struct ComposerState {
     timed_scopes: Vec<(i64, ScopeId)>,
     /// Movable contents whose places left: waiting until the composition is over, one may be called further on.
     parked: Vec<GroupId>,
+    /// The holders of dynamic locals its providers set: their readers here were invalidated as they were set, so
+    /// their applied changes aren't taken again.
+    set_holders: Vec<StateKey>,
     pass: u64,
     frame_time: i64,
     stats: RecompositionStats,
@@ -324,6 +372,7 @@ impl Composer {
                     frame_scopes: Vec::new(),
                     timed_scopes: Vec::new(),
                     parked: Vec::new(),
+                    set_holders: Vec::new(),
                     pass: 0,
                     frame_time: 0,
                     stats: RecompositionStats::default(),
@@ -413,8 +462,11 @@ impl Composer {
 
     fn take_pending(&self) {
         let keys = std::mem::take(&mut *self.pending.lock());
+        let set_holders = std::mem::take(&mut self.state.borrow_mut().set_holders);
         for key in keys {
-            self.invalidate_readers(key);
+            if !set_holders.contains(&key) {
+                self.invalidate_readers(key);
+            }
         }
     }
 
@@ -910,34 +962,52 @@ impl Composer {
         providers.iter().rev().flat_map(|pg| st.groups.get(pg.0).provided.iter().cloned()).collect()
     }
 
-    /// A local's key among the readers: theirs who read it from `provider`.
-    fn provided_key(local: usize, provider: Option<GroupId>) -> StateKey {
-        StateKey::hashed(mix_key(local as u64, provider.map_or(u64::MAX, |g| g.0 as u64)))
-    }
-
-    /// Composes `content` with `values` provided, in the current group (the provider's): a provider that now gives
-    /// a different value recomposes the scopes that read it from it.
+    /// Composes `content` with `values` provided, in the current group (the provider's), as Compose's
+    /// `updatedStateOf`: a dynamic local given another value has it set in the provider's holder (its readers
+    /// here are composed again now, and whoever else read it, a layout's measure or drawing, is told as the
+    /// composition's snapshot is applied); a static local given another value, or a context's holder given in
+    /// place of another, comes in a holder of its own, and those that read the old one are composed again.
     pub(crate) fn provide(&self, mut values: Vec<Provided>, content: impl FnOnce()) {
         values.retain(|v| !(v.if_missing && self.find_local(v.local).is_some())); // provided above already
-        let (changed, mark) = {
+        let (changed, set, mark) = {
             let mut st = self.state.borrow_mut();
             let st = &mut *st;
             let g = st.frames.last().unwrap().group;
             let mut changed = Vec::new();
+            let mut set = Vec::new();
             for v in &mut values {
-                v.provider = Some(g);
-                if let Some(old) = st.groups.get(g.0).provided.iter().find(|p| p.local == v.local)
-                    && !(v.equals)(&*old.value, &*v.value)
-                {
-                    changed.push(Self::provided_key(v.local, Some(g)));
+                let Some(old) = st.groups.get(g.0).provided.iter().find(|p| p.local == v.local) else { continue };
+                if v.shared || old.shared {
+                    if !Rc::ptr_eq(&old.holder, &v.holder) {
+                        changed.push(old.holder.key);
+                    }
+                    continue;
+                }
+                let (old_value, value) = (old.holder.peek(), v.holder.peek());
+                let same = (v.equals)(&*old_value, &*value);
+                if v.dynamic && old.dynamic {
+                    if !same {
+                        set.push((old.holder.clone(), value));
+                    }
+                    v.holder = old.holder.clone();
+                } else if same && v.dynamic == old.dynamic {
+                    v.holder = old.holder.clone();
+                } else {
+                    changed.push(old.holder.key);
                 }
             }
+            st.set_holders.extend(set.iter().map(|(h, _)| h.key));
             let old = std::mem::replace(&mut st.groups.get_mut(g.0).provided, values.clone());
             st.garbage.push(Box::new(old));
             let mark = st.locals.len();
             st.locals.extend(values);
-            (changed, mark)
+            (changed, set, mark)
         };
+        for (holder, value) in set {
+            holder.set(value);
+            crate::snapshot::state_changed(holder.key);
+            self.invalidate_readers(holder.key);
+        }
         for key in changed {
             self.invalidate_readers(key);
         }
@@ -952,19 +1022,18 @@ impl Composer {
     /// The value provided for `local` nearest above, if any.
     pub(crate) fn find_local(&self, local: usize) -> Option<Rc<dyn Any>> {
         let st = self.state.borrow();
-        st.locals.iter().rev().find(|p| p.local == local).map(|p| p.value.clone())
+        st.locals.iter().rev().find(|p| p.local == local).map(|p| p.holder.peek())
     }
 
-    /// The same, the running scope subscribed to the provider giving it (recomposed when that gives another
-    /// value).
+    /// The same, the running scope subscribed to the holder giving it (recomposed when that holds another value,
+    /// or its provider gives another holder).
     pub(crate) fn read_local(&self, local: usize) -> Option<Rc<dyn Any>> {
-        let (value, key) = {
+        let holder = {
             let st = self.state.borrow();
-            let p = st.locals.iter().rev().find(|p| p.local == local)?;
-            (p.value.clone(), Self::provided_key(local, p.provider))
+            st.locals.iter().rev().find(|p| p.local == local)?.holder.clone()
         };
-        self.record_read(key);
-        Some(value)
+        self.record_read(holder.key);
+        Some(holder.peek())
     }
 
     /// Everything provided where this runs, outermost first, read by no one.
@@ -972,11 +1041,23 @@ impl Composer {
         self.state.borrow().locals.clone()
     }
 
+    /// Everything provided where this runs, outermost first, as a layout keeps it (Compose's
+    /// `currentCompositionLocalMap`): the running scope subscribed to the holders that are replaced rather than
+    /// set (static locals', contexts'), so it composes again, and keeps the new holder, when one is; the dynamic
+    /// ones are read later, live.
+    pub(crate) fn locals_kept(&self) -> Vec<Provided> {
+        let locals = self.state.borrow().locals.clone();
+        for p in locals.iter().filter(|p| p.replaced_when_changed()) {
+            self.record_read(p.holder.key);
+        }
+        locals
+    }
+
     /// Everything provided where this runs, outermost first (each read, so the reader follows them).
     pub(crate) fn locals(&self) -> Vec<Provided> {
         let locals = self.state.borrow().locals.clone();
         for p in &locals {
-            self.record_read(Self::provided_key(p.local, p.provider));
+            self.record_read(p.holder.key);
         }
         locals
     }

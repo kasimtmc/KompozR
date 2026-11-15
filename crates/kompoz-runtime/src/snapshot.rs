@@ -41,11 +41,6 @@ impl StateKey {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         StateKey(NEXT.fetch_add(1, Relaxed))
     }
-    /// A key made from a hash (a composition local as one provider gives it): the high bit set, so it never
-    /// equals a key from [`StateKey::new`]; one equal to another such key only recomposes more.
-    pub(crate) fn hashed(hash: u64) -> StateKey {
-        StateKey(hash | 1 << 63)
-    }
 }
 
 impl Default for StateKey {

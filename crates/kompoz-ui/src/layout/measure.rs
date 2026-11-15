@@ -2,7 +2,10 @@
 //! [`MeasurePolicy`] measures a layout's children and gives a [`MeasureResult`] — its size, its alignment lines and
 //! the block that places the children (kept, and run again when only the placement changes).
 
-use super::{AlignmentLine, GraphicsLayerScope, LayerBlock, LayoutCoordinates};
+use super::{
+    AlignmentLine, GraphicsLayerScope, IsRulerProvided, LayerBlock, LayoutCoordinates, Ruler, RulerProvider,
+    RulerScope, RulersBlock,
+};
 use crate::node::NodeCoordinator;
 use crate::unit::Constraints;
 use kompoz_graphics::{Density, IntOffset, IntSize, LayoutDirection};
@@ -33,6 +36,13 @@ pub trait IntrinsicMeasurable {
 /// Something a layout measures (Compose's Measurable). Measure each child once per measure pass.
 pub trait Measurable: IntrinsicMeasurable {
     fn measure(&self, constraints: Constraints) -> Placeable;
+
+    /// A handle to measure it later in the same pass, from the placement block (Compose lets a placement block
+    /// measure what its measure block was given: a layout that needs what only placing knows, rulers' values, to
+    /// pick the constraints); none for what only stands in for it (an intrinsic measurement's).
+    fn retain(&self) -> Option<Rc<dyn Measurable>> {
+        None
+    }
 }
 
 /// What a [`Placeable`] places and reads: a layout node, a coordinator, or a fixed size.
@@ -182,26 +192,67 @@ impl std::ops::Deref for MeasureScope {
 
 #[named]
 impl MeasureScope {
-    /// The result of a measurement: `width` by `height`, the alignment lines it provides, and the block that places
-    /// what it measured (run when the layout is placed, and again whenever only its placement changes).
+    /// The result of a measurement: `width` by `height`, the alignment lines it provides, the rulers it provides
+    /// what it places (`rulers`, run as it is placed: Compose's `rulers` parameter), and the block that places what
+    /// it measured (run when the layout is placed, and again whenever only its placement changes).
     #[track_caller]
     pub fn layout(
         &self,
         width: i32,
         height: i32,
         #[default(Vec::new())] alignment_lines: Vec<(AlignmentLine, i32)>,
+        #[default(None)] rulers: Option<RulersBlock>,
         placement_block: impl Fn(&PlacementScope) + 'static,
     ) -> MeasureResult {
-        MeasureResult::new(width, height, alignment_lines, placement_block)
+        let mut result = MeasureResult::new(width, height, alignment_lines, placement_block);
+        result.rulers = rulers;
+        result
+    }
+
+    /// The same providing rulers one at a time as they are read (Compose's `layout(width, height,
+    /// isRulerProvided, rulerProvider)`): `is_ruler_provided` says which `ruler_provider` may provide, and it is run
+    /// for one when it is first read (it may provide others too).
+    #[track_caller]
+    pub fn layout_with_ruler_provider(
+        &self,
+        width: i32,
+        height: i32,
+        is_ruler_provided: impl Fn(&Ruler) -> bool + 'static,
+        ruler_provider: impl Fn(&RulerScope, &Ruler) + 'static,
+        #[default(Vec::new())] alignment_lines: Vec<(AlignmentLine, i32)>,
+        placement_block: impl Fn(&PlacementScope) + 'static,
+    ) -> MeasureResult {
+        let mut result = MeasureResult::new(width, height, alignment_lines, placement_block);
+        result.ruler_provider = Some((Rc::new(is_ruler_provided), Rc::new(ruler_provider)));
+        result
     }
 }
 
-/// What a measurement gives (Compose's MeasureResult): a size, alignment lines, and the placement block.
+impl MeasureScope {
+    /// `layout` with rulers, from plain code: `rulers` provides them.
+    #[track_caller]
+    pub fn layout_with_rulers(
+        &self,
+        width: i32,
+        height: i32,
+        rulers: impl Fn(&RulerScope) + 'static,
+        placement_block: impl Fn(&PlacementScope) + 'static,
+    ) -> MeasureResult {
+        let mut result = MeasureResult::new(width, height, Vec::new(), placement_block);
+        result.rulers = Some(Rc::new(rulers));
+        result
+    }
+}
+
+/// What a measurement gives (Compose's MeasureResult): a size, alignment lines, the rulers it provides (all at
+/// once, or one at a time as they are read), and the placement block.
 #[derive(Clone)]
 pub struct MeasureResult {
     pub width: i32,
     pub height: i32,
     pub(crate) alignment_lines: Rc<Vec<(AlignmentLine, i32)>>,
+    pub(crate) rulers: Option<RulersBlock>,
+    pub(crate) ruler_provider: Option<(IsRulerProvided, RulerProvider)>,
     place: Rc<dyn Fn(&PlacementScope)>,
 }
 
@@ -218,11 +269,23 @@ impl MeasureResult {
             width & !0xFF_FFFF == 0 && height & !0xFF_FFFF == 0,
             "kompoz: Size({width} x {height}) is out of range. Each dimension must be between 0 and 16777215."
         );
-        MeasureResult { width, height, alignment_lines: Rc::new(alignment_lines), place: Rc::new(placement_block) }
+        MeasureResult {
+            width,
+            height,
+            alignment_lines: Rc::new(alignment_lines),
+            rulers: None,
+            ruler_provider: None,
+            place: Rc::new(placement_block),
+        }
     }
 
     pub fn alignment_lines(&self) -> &[(AlignmentLine, i32)] {
         &self.alignment_lines
+    }
+
+    /// The rulers it provides, if it does all at once.
+    pub fn rulers(&self) -> Option<&RulersBlock> {
+        self.rulers.as_ref()
     }
 
     /// Where `line` is, if it provides it.
@@ -280,6 +343,20 @@ impl PlacementScope {
             n.on_coordinates_accessed_in_placement(c);
         }
         Some(LayoutCoordinates::of(c.clone()))
+    }
+
+    /// `ruler`'s value where this places (in the placing layout's coordinates), else `default` (Compose's
+    /// `Ruler.current`): a derived ruler works it out; another is the value the nearest layout around providing it
+    /// gave, and reading it places this again when that changes. None while placing to work out alignment lines.
+    pub fn current(&self, ruler: impl Into<Ruler>, default: f32) -> f32 {
+        let ruler = ruler.into();
+        if let Some(calculate) = ruler.calculation() {
+            return calculate(self, default);
+        }
+        match &self.coordinator {
+            Some(c) => c.find_ruler_value(&ruler, default),
+            None => default,
+        }
     }
 
     fn mirrored(&self, placeable: &Placeable, position: IntOffset) -> IntOffset {

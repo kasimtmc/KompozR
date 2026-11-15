@@ -1,6 +1,13 @@
 //! A recording of drawing (Android's Picture, what a RenderNode's display list holds): a [`GraphicsContext`] that
 //! keeps every call, to replay it into another as often as wanted. A GraphicsLayer records into one, and so does a
 //! canvas over a bitmap until the platform's renderer draws it.
+//!
+//! (C++ recorded both into a DisplayList. That is a frame's recording for damage: it drops what falls outside its
+//! viewport and answers `quick_reject` by it, where a layer's recording has to keep what it draws past its bounds
+//! (a RenderNode clips only when asked) and be replayed wherever it is drawn; it lines frames up by the nodes drawn
+//! but doesn't replay the node hooks, which a layer drawn into the host's display list must hand on so the nodes
+//! in it are kept or drawn as theirs; and it works out screen bounds for each call, which a recording replayed
+//! elsewhere never uses.)
 
 use crate::graphics_context::{
     ClipOp, CornerRadii, ElevationShadow, GraphicsContext, LayerTransform, Shadow, ShadowLight, TextDraw,

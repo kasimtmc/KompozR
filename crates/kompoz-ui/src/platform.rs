@@ -1,12 +1,15 @@
 //! What the UI asks of the platform and what it tells the UI (Compose's `androidx.compose.ui.platform`): the
 //! platform's callbacks (C++'s `KompozHost::Callbacks`, each doing nothing by default, so a headless host works),
-//! the view configuration, the ui composition locals the host provides at the root, and the modifiers whose effect
-//! is the window's (`keep_screen_on`, `sensitive_content`, `preferred_frame_rate`).
+//! the view configuration, what the system UI covers (kept in states the host updates) and moving the keyboard by
+//! hand, the ui composition locals the host provides at the root, and the modifiers whose effect is the window's
+//! (`keep_screen_on`, `sensitive_content`, `preferred_frame_rate`, `system_gesture_exclusion`).
 
 use crate::graphics_context::GraphicsContext;
+use crate::layout::LayoutCoordinates;
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx};
-use kompoz_graphics::{Density, ImageBitmap, IntSize, LayoutDirection, Rect, Size};
+use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Path, Rect, Size};
 use kompoz_runtime::{KompozitionLocal, MutableState, mutable_state_of};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -198,6 +201,11 @@ pub trait PlatformCallbacks {
         let _ = kind;
     }
     fn hide_software_keyboard(&self) {}
+    /// Whether the keyboard can be moved by hand (Android 11+'s WindowInsetsAnimationController): what
+    /// `ime_nested_scroll` drives through `ime_control_by` and `ime_control_end`.
+    fn can_control_ime(&self) -> bool {
+        false
+    }
     /// The keyboard moved by hand (Android 11+): by `px` up (down if negative).
     fn ime_control_by(&self, px: f32) {
         let _ = px;
@@ -226,6 +234,11 @@ pub trait PlatformCallbacks {
     /// Autofill: the form was sent (commit) or dropped.
     fn autofill_done(&self, commit: bool) {
         let _ = commit;
+    }
+    /// Where the system's edge swipes (back, home) are kept off, px in the window: told whenever it changes
+    /// (Android's `View.setSystemGestureExclusionRects`).
+    fn system_gesture_exclusion(&self, rects: &[IntRect]) {
+        let _ = rects;
     }
     /// An asset's bytes (the app's assets, or a file next to the binary).
     fn read_asset(&self, path: &str) -> Option<Vec<u8>> {
@@ -465,8 +478,55 @@ impl Insets {
     }
 }
 
-/// What the system UI covers (C++'s SystemInsets, Android's WindowInsetsCompat types).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// A kind of system UI the platform reports insets for (Android's WindowInsetsCompat types; the waterfall is the
+/// display cutout's curved edges).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum InsetsKind {
+    StatusBars,
+    NavigationBars,
+    CaptionBar,
+    Ime,
+    DisplayCutout,
+    SystemGestures,
+    MandatorySystemGestures,
+    TappableElement,
+    Waterfall,
+}
+
+impl InsetsKind {
+    /// Every kind.
+    pub const All: [InsetsKind; 9] = [
+        InsetsKind::StatusBars,
+        InsetsKind::NavigationBars,
+        InsetsKind::CaptionBar,
+        InsetsKind::Ime,
+        InsetsKind::DisplayCutout,
+        InsetsKind::SystemGestures,
+        InsetsKind::MandatorySystemGestures,
+        InsetsKind::TappableElement,
+        InsetsKind::Waterfall,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// A kind of system UI moving (Android's WindowInsetsAnimationCompat): from where it was to where it goes, how far
+/// along (its interpolated fraction), its alpha and how long it lasts.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct InsetsAnimation {
+    pub kind: InsetsKind,
+    pub source: Insets,
+    pub target: Insets,
+    pub fraction: f32,
+    pub alpha: f32,
+    pub duration_millis: i64,
+}
+
+/// What the system UI covers (C++'s SystemInsets, Android's WindowInsetsCompat types): what each kind covers now,
+/// whether it is shown and what it would cover shown, the display cutouts, and what is moving.
+#[derive(Clone, PartialEq, Debug)]
 pub struct SystemInsets {
     pub status_bars: Insets,
     pub navigation_bars: Insets,
@@ -477,46 +537,437 @@ pub struct SystemInsets {
     pub mandatory_system_gestures: Insets,
     pub tappable_element: Insets,
     pub waterfall: Insets,
+    /// Whether each kind is shown (Android's `isVisible`): one hidden covers nothing now (its insets above are
+    /// none), though it would cover what its `*_ignoring_visibility` says. Shown unless told otherwise; the
+    /// waterfall is shown when it covers something.
+    pub status_bars_visible: bool,
+    pub navigation_bars_visible: bool,
+    pub caption_bar_visible: bool,
+    pub display_cutout_visible: bool,
+    pub system_gestures_visible: bool,
+    pub mandatory_system_gestures_visible: bool,
+    pub tappable_element_visible: bool,
+    /// What each kind would cover shown (Android's `getInsetsIgnoringVisibility`; the keyboard has none): none,
+    /// what it covers now.
+    pub status_bars_ignoring_visibility: Option<Insets>,
+    pub navigation_bars_ignoring_visibility: Option<Insets>,
+    pub caption_bar_ignoring_visibility: Option<Insets>,
+    pub display_cutout_ignoring_visibility: Option<Insets>,
+    pub system_gestures_ignoring_visibility: Option<Insets>,
+    pub mandatory_system_gestures_ignoring_visibility: Option<Insets>,
+    pub tappable_element_ignoring_visibility: Option<Insets>,
+    /// The display cutouts' shape (Android's `DisplayCutout.getCutoutPath`, px in the window), if the platform
+    /// knows it, and each cutout's bounds (`getBoundingRects`).
+    pub cutout_path: Option<Path>,
+    pub cutout_rects: Vec<IntRect>,
     /// The keyboard sliding in or out: `ime` follows it frame by frame from `ime_animation_source` to
     /// `ime_animation_target`.
     pub ime_animating: bool,
+    /// Whether the keyboard is up or on its way up.
     pub ime_visible: bool,
     pub ime_animation_source: Insets,
     pub ime_animation_target: Insets,
+    /// Other kinds moving (and the keyboard's animation in full, in place of `ime_animating`'s).
+    pub animations: Vec<InsetsAnimation>,
+}
+
+impl Default for SystemInsets {
+    /// Nothing covered; every kind shown but the keyboard.
+    fn default() -> Self {
+        SystemInsets {
+            status_bars: Insets::Zero,
+            navigation_bars: Insets::Zero,
+            ime: Insets::Zero,
+            display_cutout: Insets::Zero,
+            system_gestures: Insets::Zero,
+            caption_bar: Insets::Zero,
+            mandatory_system_gestures: Insets::Zero,
+            tappable_element: Insets::Zero,
+            waterfall: Insets::Zero,
+            status_bars_visible: true,
+            navigation_bars_visible: true,
+            caption_bar_visible: true,
+            display_cutout_visible: true,
+            system_gestures_visible: true,
+            mandatory_system_gestures_visible: true,
+            tappable_element_visible: true,
+            status_bars_ignoring_visibility: None,
+            navigation_bars_ignoring_visibility: None,
+            caption_bar_ignoring_visibility: None,
+            display_cutout_ignoring_visibility: None,
+            system_gestures_ignoring_visibility: None,
+            mandatory_system_gestures_ignoring_visibility: None,
+            tappable_element_ignoring_visibility: None,
+            cutout_path: None,
+            cutout_rects: Vec::new(),
+            ime_animating: false,
+            ime_visible: false,
+            ime_animation_source: Insets::Zero,
+            ime_animation_target: Insets::Zero,
+            animations: Vec::new(),
+        }
+    }
+}
+
+impl SystemInsets {
+    /// What `kind` covers now.
+    pub fn insets(&self, kind: InsetsKind) -> Insets {
+        match kind {
+            InsetsKind::StatusBars => self.status_bars,
+            InsetsKind::NavigationBars => self.navigation_bars,
+            InsetsKind::CaptionBar => self.caption_bar,
+            InsetsKind::Ime => self.ime,
+            InsetsKind::DisplayCutout => self.display_cutout,
+            InsetsKind::SystemGestures => self.system_gestures,
+            InsetsKind::MandatorySystemGestures => self.mandatory_system_gestures,
+            InsetsKind::TappableElement => self.tappable_element,
+            InsetsKind::Waterfall => self.waterfall,
+        }
+    }
+
+    /// Whether `kind` is shown.
+    pub fn is_visible(&self, kind: InsetsKind) -> bool {
+        match kind {
+            InsetsKind::StatusBars => self.status_bars_visible,
+            InsetsKind::NavigationBars => self.navigation_bars_visible,
+            InsetsKind::CaptionBar => self.caption_bar_visible,
+            InsetsKind::Ime => self.ime_visible,
+            InsetsKind::DisplayCutout => self.display_cutout_visible,
+            InsetsKind::SystemGestures => self.system_gestures_visible,
+            InsetsKind::MandatorySystemGestures => self.mandatory_system_gestures_visible,
+            InsetsKind::TappableElement => self.tappable_element_visible,
+            InsetsKind::Waterfall => self.waterfall != Insets::Zero,
+        }
+    }
+
+    /// What `kind` would cover shown (the keyboard: none; the waterfall: what it covers).
+    pub fn ignoring_visibility(&self, kind: InsetsKind) -> Option<Insets> {
+        let given = match kind {
+            InsetsKind::StatusBars => self.status_bars_ignoring_visibility,
+            InsetsKind::NavigationBars => self.navigation_bars_ignoring_visibility,
+            InsetsKind::CaptionBar => self.caption_bar_ignoring_visibility,
+            InsetsKind::Ime => return None,
+            InsetsKind::DisplayCutout => self.display_cutout_ignoring_visibility,
+            InsetsKind::SystemGestures => self.system_gestures_ignoring_visibility,
+            InsetsKind::MandatorySystemGestures => self.mandatory_system_gestures_ignoring_visibility,
+            InsetsKind::TappableElement => self.tappable_element_ignoring_visibility,
+            InsetsKind::Waterfall => None,
+        };
+        Some(given.unwrap_or_else(|| self.insets(kind)))
+    }
+
+    /// How `kind` is moving, if it is: its entry in `animations`, else (the keyboard) `ime_animating`'s.
+    pub fn animation(&self, kind: InsetsKind) -> Option<InsetsAnimation> {
+        if let Some(a) = self.animations.iter().find(|a| a.kind == kind) {
+            return Some(*a);
+        }
+        (kind == InsetsKind::Ime && self.ime_animating).then_some(InsetsAnimation {
+            kind,
+            source: self.ime_animation_source,
+            target: self.ime_animation_target,
+            fraction: 0.0,
+            alpha: 1.0,
+            duration_millis: 0,
+        })
+    }
+}
+
+/// One kind's states.
+struct KindStates {
+    insets: MutableState<Insets>,
+    visible: MutableState<bool>,
+    ignoring_visibility: MutableState<Option<Insets>>,
+    animation: MutableState<Option<InsetsAnimation>>,
+}
+
+struct HolderStates {
+    kinds: Vec<KindStates>,
+    cutout_path: MutableState<Option<Path>>,
+    cutout_rects: MutableState<Vec<IntRect>>,
+}
+
+/// What the system UI covers as the host keeps it, each kind in states of its own (Compose's WindowInsetsHolder and
+/// InsetsListener's values): what reads a kind (a layout measuring by it, a composable) is told when the platform
+/// reports another value for it, and only then: the keyboard sliding in measures again what reads the keyboard,
+/// nothing else, and composes nothing. Cheap to clone; equal when the same.
+#[derive(Clone)]
+pub struct SystemInsetsHolder(Rc<HolderStates>);
+
+impl SystemInsetsHolder {
+    /// One holding `insets`.
+    pub fn new(insets: &SystemInsets) -> SystemInsetsHolder {
+        let kinds = InsetsKind::All
+            .iter()
+            .map(|&k| KindStates {
+                insets: mutable_state_of(insets.insets(k)),
+                visible: mutable_state_of(insets.is_visible(k)),
+                ignoring_visibility: mutable_state_of(insets.ignoring_visibility(k)),
+                animation: mutable_state_of(insets.animation(k)),
+            })
+            .collect();
+        SystemInsetsHolder(Rc::new(HolderStates {
+            kinds,
+            cutout_path: mutable_state_of(insets.cutout_path.clone()),
+            cutout_rects: mutable_state_of(insets.cutout_rects.clone()),
+        }))
+    }
+
+    fn kind(&self, kind: InsetsKind) -> &KindStates {
+        &self.0.kinds[kind.index()]
+    }
+
+    /// What `kind` covers now (read: the reader is told when it changes).
+    pub fn insets(&self, kind: InsetsKind) -> Insets {
+        self.kind(kind).insets.get()
+    }
+
+    /// The same, read by no one.
+    pub fn peek_insets(&self, kind: InsetsKind) -> Insets {
+        self.kind(kind).insets.peek()
+    }
+
+    /// Whether `kind` is shown (read).
+    pub fn is_visible(&self, kind: InsetsKind) -> bool {
+        self.kind(kind).visible.get()
+    }
+
+    /// What `kind` would cover shown (read); the keyboard: none.
+    pub fn ignoring_visibility(&self, kind: InsetsKind) -> Option<Insets> {
+        self.kind(kind).ignoring_visibility.get()
+    }
+
+    /// The same, read by no one.
+    pub fn peek_ignoring_visibility(&self, kind: InsetsKind) -> Option<Insets> {
+        self.kind(kind).ignoring_visibility.peek()
+    }
+
+    /// How `kind` is moving, if it is (read).
+    pub fn animation(&self, kind: InsetsKind) -> Option<InsetsAnimation> {
+        self.kind(kind).animation.get()
+    }
+
+    /// The display cutouts' shape, if known (read).
+    pub fn cutout_path(&self) -> Option<Path> {
+        self.0.cutout_path.get()
+    }
+
+    /// Each display cutout's bounds, px in the window (read).
+    pub fn cutout_rects(&self) -> Vec<IntRect> {
+        self.0.cutout_rects.get()
+    }
+
+    /// All of it as one value (every state read).
+    pub fn get(&self) -> SystemInsets {
+        let k = |kind| self.insets(kind);
+        let v = |kind| self.is_visible(kind);
+        let i = |kind| self.ignoring_visibility(kind);
+        let ime = self.animation(InsetsKind::Ime);
+        SystemInsets {
+            status_bars: k(InsetsKind::StatusBars),
+            navigation_bars: k(InsetsKind::NavigationBars),
+            ime: k(InsetsKind::Ime),
+            display_cutout: k(InsetsKind::DisplayCutout),
+            system_gestures: k(InsetsKind::SystemGestures),
+            caption_bar: k(InsetsKind::CaptionBar),
+            mandatory_system_gestures: k(InsetsKind::MandatorySystemGestures),
+            tappable_element: k(InsetsKind::TappableElement),
+            waterfall: k(InsetsKind::Waterfall),
+            status_bars_visible: v(InsetsKind::StatusBars),
+            navigation_bars_visible: v(InsetsKind::NavigationBars),
+            caption_bar_visible: v(InsetsKind::CaptionBar),
+            display_cutout_visible: v(InsetsKind::DisplayCutout),
+            system_gestures_visible: v(InsetsKind::SystemGestures),
+            mandatory_system_gestures_visible: v(InsetsKind::MandatorySystemGestures),
+            tappable_element_visible: v(InsetsKind::TappableElement),
+            status_bars_ignoring_visibility: i(InsetsKind::StatusBars),
+            navigation_bars_ignoring_visibility: i(InsetsKind::NavigationBars),
+            caption_bar_ignoring_visibility: i(InsetsKind::CaptionBar),
+            display_cutout_ignoring_visibility: i(InsetsKind::DisplayCutout),
+            system_gestures_ignoring_visibility: i(InsetsKind::SystemGestures),
+            mandatory_system_gestures_ignoring_visibility: i(InsetsKind::MandatorySystemGestures),
+            tappable_element_ignoring_visibility: i(InsetsKind::TappableElement),
+            cutout_path: self.cutout_path(),
+            cutout_rects: self.cutout_rects(),
+            ime_animating: ime.is_some(),
+            ime_visible: v(InsetsKind::Ime),
+            ime_animation_source: ime.map_or(Insets::Zero, |a| a.source),
+            ime_animation_target: ime.map_or(Insets::Zero, |a| a.target),
+            animations: InsetsKind::All.iter().filter_map(|&kind| self.animation(kind)).collect(),
+        }
+    }
+
+    /// Holds `insets` from now on: the states whose values changed are set (their readers told), the others left
+    /// (a state set to the value it has tells no one).
+    pub fn set(&self, insets: &SystemInsets) {
+        for &kind in &InsetsKind::All {
+            let k = self.kind(kind);
+            k.insets.set(insets.insets(kind));
+            k.visible.set(insets.is_visible(kind));
+            k.ignoring_visibility.set(insets.ignoring_visibility(kind));
+            k.animation.set(insets.animation(kind));
+        }
+        self.0.cutout_path.set(insets.cutout_path.clone());
+        self.0.cutout_rects.set(insets.cutout_rects.clone());
+    }
+}
+
+impl Default for SystemInsetsHolder {
+    /// Holding nothing covered (what nothing provides: a host updates its own).
+    fn default() -> Self {
+        SystemInsetsHolder::new(&SystemInsets::default())
+    }
+}
+
+impl PartialEq for SystemInsetsHolder {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for SystemInsetsHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "SystemInsetsHolder({:?})", kompoz_runtime::without_read_observation(|| self.get()))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Moving the keyboard by hand
+
+struct ImeControlState {
+    platform: PlatformHandle,
+    insets: SystemInsetsHolder,
+    focus: Option<std::rc::Weak<crate::focus::FocusOwner>>,
+    controlling: Cell<bool>,
+    /// Where the keyboard's top is (its height, px) as it is moved.
+    height: Cell<f32>,
+}
+
+/// Moving the software keyboard by hand (C++'s `KompozHost::imeControlBy` / `imeControlEnd`, what
+/// `ime_nested_scroll` drives; Android 11+'s WindowInsetsAnimationController): the host keeps whether it is being
+/// moved and where it is, so content composed again mid-drag loses nothing. Cheap to clone; equal when the same.
+#[derive(Clone)]
+pub struct ImeController(Rc<ImeControlState>);
+
+impl ImeController {
+    pub(crate) fn new(
+        platform: PlatformHandle,
+        insets: SystemInsetsHolder,
+        focus: Option<std::rc::Weak<crate::focus::FocusOwner>>,
+    ) -> ImeController {
+        ImeController(Rc::new(ImeControlState {
+            platform,
+            insets,
+            focus,
+            controlling: Cell::new(false),
+            height: Cell::new(0.0),
+        }))
+    }
+
+    /// Whether the keyboard is being moved by hand.
+    pub fn is_controlling(&self) -> bool {
+        self.0.controlling.get()
+    }
+
+    /// Whether a field that can be edited has the focus (what the keyboard is for).
+    fn editable_focused(&self) -> bool {
+        let Some(focus) = self.0.focus.as_ref().and_then(|f| f.upgrade()) else { return false };
+        let Some(node) = focus.focused_layout_node() else { return false };
+        node.semantics_configuration()
+            .and_then(|c| c.get(crate::semantics::SemanticsProperties::IsEditable))
+            .unwrap_or(false)
+    }
+
+    /// Moves the keyboard by `px` up (down if negative) under the finger, as far as it goes (no lower than hidden,
+    /// no higher than its height when it is sliding up to it); what it moved (C++'s `imeControlBy`). It starts
+    /// being moved only with a field that can be edited focused and a platform that can move it; otherwise
+    /// nothing moves.
+    pub fn control_by(&self, px: f32) -> f32 {
+        let s = &self.0;
+        let platform = s.platform.get();
+        if !s.controlling.get() {
+            if !platform.can_control_ime() || !self.editable_focused() {
+                return 0.0;
+            }
+            s.controlling.set(true);
+            s.height.set(s.insets.peek_insets(InsetsKind::Ime).bottom as f32);
+        }
+        let mut next = (s.height.get() + px).max(0.0);
+        // (shown: its height)
+        if let Some(a) = kompoz_runtime::without_read_observation(|| s.insets.animation(InsetsKind::Ime))
+            && a.target.bottom > 0
+        {
+            next = next.min(a.target.bottom as f32);
+        }
+        let used = next - s.height.get();
+        s.height.set(next);
+        if used != 0.0 {
+            platform.ime_control_by(used);
+        }
+        used
+    }
+
+    /// Lets go of the keyboard with `velocity` (px/s, up positive): the platform finishes it shown or hidden (C++'s
+    /// `imeControlEnd`).
+    pub fn control_end(&self, velocity: f32) {
+        if !self.0.controlling.replace(false) {
+            return;
+        }
+        self.0.platform.get().ime_control_end(velocity);
+    }
+}
+
+impl Default for ImeController {
+    /// One that moves nothing (what nothing provides: headless).
+    fn default() -> Self {
+        ImeController::new(PlatformHandle::default(), SystemInsetsHolder::default(), None)
+    }
+}
+
+impl PartialEq for ImeController {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // The locals
 
 /// Pixels per dp and the font scale (Compose's LocalDensity).
-pub static LocalDensity: KompozitionLocal<Density> = KompozitionLocal::new(Density::default);
+pub static LocalDensity: KompozitionLocal<Density> = KompozitionLocal::new_static(Density::default);
 /// Which way layouts go (Compose's LocalLayoutDirection).
-pub static LocalLayoutDirection: KompozitionLocal<LayoutDirection> = KompozitionLocal::new(|| LayoutDirection::Ltr);
+pub static LocalLayoutDirection: KompozitionLocal<LayoutDirection> =
+    KompozitionLocal::new_static(|| LayoutDirection::Ltr);
 /// The gesture thresholds (Compose's LocalViewConfiguration).
 pub static LocalViewConfiguration: KompozitionLocal<ViewConfiguration> =
-    KompozitionLocal::new(ViewConfiguration::default);
+    KompozitionLocal::new_static(ViewConfiguration::default);
 /// The window (Compose's LocalWindowInfo).
-pub static LocalWindowInfo: KompozitionLocal<WindowInfo> = KompozitionLocal::new(WindowInfo::default);
+pub static LocalWindowInfo: KompozitionLocal<WindowInfo> = KompozitionLocal::new_static(WindowInfo::default);
 /// The input mode (Compose's LocalInputModeManager).
-pub static LocalInputModeManager: KompozitionLocal<InputModeManager> = KompozitionLocal::new(InputModeManager::default);
+pub static LocalInputModeManager: KompozitionLocal<InputModeManager> =
+    KompozitionLocal::new_static(InputModeManager::default);
 /// Haptic feedback (Compose's LocalHapticFeedback).
-pub static LocalHapticFeedback: KompozitionLocal<HapticFeedback> = KompozitionLocal::new(HapticFeedback::default);
+pub static LocalHapticFeedback: KompozitionLocal<HapticFeedback> =
+    KompozitionLocal::new_static(HapticFeedback::default);
 /// The clipboard (Compose's LocalClipboard).
-pub static LocalClipboard: KompozitionLocal<Clipboard> = KompozitionLocal::new(Clipboard::default);
+pub static LocalClipboard: KompozitionLocal<Clipboard> = KompozitionLocal::new_static(Clipboard::default);
 /// Opening links (Compose's LocalUriHandler).
-pub static LocalUriHandler: KompozitionLocal<UriHandler> = KompozitionLocal::new(UriHandler::default);
+pub static LocalUriHandler: KompozitionLocal<UriHandler> = KompozitionLocal::new_static(UriHandler::default);
 /// The software keyboard (Compose's LocalSoftwareKeyboardController).
 pub static LocalSoftwareKeyboardController: KompozitionLocal<SoftwareKeyboardController> =
-    KompozitionLocal::new(SoftwareKeyboardController::default);
+    KompozitionLocal::new_static(SoftwareKeyboardController::default);
 /// The focus manager (Compose's LocalFocusManager).
 pub static LocalFocusManager: KompozitionLocal<crate::focus::FocusManager> =
-    KompozitionLocal::new(crate::focus::FocusManager::default);
-/// The system's theme (Compose desktop's LocalSystemTheme; what `is_system_in_dark_theme` reads).
+    KompozitionLocal::new_static(crate::focus::FocusManager::default);
+/// The system's theme (Compose desktop's LocalSystemTheme; what `is_system_in_dark_theme` reads). Dynamic, unlike
+/// Compose desktop's, as C++'s: the theme changing composes again only what reads it.
 pub static LocalSystemTheme: KompozitionLocal<SystemTheme> = KompozitionLocal::new(SystemTheme::default);
-/// What the system UI covers (what the window insets read).
-pub static LocalSystemInsets: KompozitionLocal<SystemInsets> = KompozitionLocal::new(SystemInsets::default);
+/// What the system UI covers, as the host keeps it (what the window insets read; Compose's WindowInsetsHolder).
+pub static LocalSystemInsets: KompozitionLocal<SystemInsetsHolder> =
+    KompozitionLocal::new_static(SystemInsetsHolder::default);
+/// Moving the keyboard by hand (what `ime_nested_scroll` drives).
+pub static LocalImeController: KompozitionLocal<ImeController> = KompozitionLocal::new_static(ImeController::default);
 /// The platform's callbacks, for what calls them directly (images, assets, autofill).
-pub static LocalPlatform: KompozitionLocal<PlatformHandle> = KompozitionLocal::new(PlatformHandle::default);
+pub static LocalPlatform: KompozitionLocal<PlatformHandle> = KompozitionLocal::new_static(PlatformHandle::default);
 
 /// Whether the system is in its dark theme (Compose's `isSystemInDarkTheme`): reading it recomposes the reader when
 /// the platform says otherwise.
@@ -543,6 +994,109 @@ impl Modifier {
     /// `Modifier.preferredFrameRate`). The host gathers the fastest rate and the highest category asked.
     pub fn preferred_frame_rate(self, frame_rate: impl Into<FrameRate>) -> Modifier {
         self.then_element(FrameRateElement { rate: frame_rate.into() })
+    }
+
+    /// Keeps the system's edge swipes (back, home) off the layout's bounds: a drag starting on it stays the app's
+    /// (Compose's foundation `Modifier.systemGestureExclusion`). The host gathers the rects of all of them and
+    /// tells the platform as they change.
+    pub fn system_gesture_exclusion(self) -> Modifier {
+        self.then_element(GestureExclusionElement { exclusion: None })
+    }
+
+    /// The same for the part of it `exclusion` gives, in its own coordinates (Compose's
+    /// `systemGestureExclusion(exclusion)`): a slider's edge, say.
+    pub fn system_gesture_exclusion_with(self, exclusion: impl Fn(&LayoutCoordinates) -> Rect + 'static) -> Modifier {
+        self.then_element(GestureExclusionElement { exclusion: Some(Rc::new(exclusion)) })
+    }
+}
+
+type GestureExclusion = Rc<dyn Fn(&LayoutCoordinates) -> Rect>;
+
+struct GestureExclusionElement {
+    exclusion: Option<GestureExclusion>,
+}
+
+impl PartialEq for GestureExclusionElement {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.exclusion, &other.exclusion) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl ModifierNodeElement for GestureExclusionElement {
+    type Node = GestureExclusionNode;
+    fn create(&self) -> GestureExclusionNode {
+        GestureExclusionNode { exclusion: self.exclusion.clone(), owner: None }
+    }
+    fn update(&self, node: &mut GestureExclusionNode) {
+        node.exclusion = self.exclusion.clone();
+    }
+    fn name(&self) -> &'static str {
+        "systemGestureExclusion"
+    }
+}
+
+/// The node of `Modifier.system_gesture_exclusion` (Compose's ExcludeFromSystemGestureNode over RectListNode):
+/// where it is in the window after each layout pass that moved it, its rect kept by the host until it is detached.
+pub struct GestureExclusionNode {
+    exclusion: Option<GestureExclusion>,
+    owner: Option<std::rc::Weak<crate::node::Owner>>,
+}
+
+impl GestureExclusionNode {
+    /// Its rect in the root, rounded out as Compose's `calcBounds` (the bounds of the rect's corners).
+    fn rect(&self, coordinates: &LayoutCoordinates) -> IntRect {
+        let round = |v: f32| (v + 0.5).floor() as i32;
+        let bounds = match &self.exclusion {
+            None => coordinates.bounds_in_root(),
+            Some(exclusion) => {
+                let r = exclusion(coordinates);
+                let root = coordinates.find_root_coordinates();
+                let corners = [r.top_left(), r.top_right(), r.bottom_left(), r.bottom_right()]
+                    .map(|c| root.local_position_of(coordinates, c));
+                let xs = corners.map(|c| c.x);
+                let ys = corners.map(|c| c.y);
+                Rect::new(
+                    xs.iter().copied().fold(f32::INFINITY, f32::min),
+                    ys.iter().copied().fold(f32::INFINITY, f32::min),
+                    xs.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+                    ys.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+                )
+            }
+        };
+        IntRect::new(round(bounds.left), round(bounds.top), round(bounds.right), round(bounds.bottom))
+    }
+
+    fn key(&self) -> usize {
+        self as *const GestureExclusionNode as usize
+    }
+}
+
+impl ModifierNode for GestureExclusionNode {
+    crate::node_capabilities!(global_position_aware);
+
+    fn on_attach(&mut self, cx: &NodeCx) {
+        self.owner = cx.layout_node().and_then(|n| n.owner()).map(|o| Rc::downgrade(&o));
+    }
+
+    fn on_detach(&mut self, _: &NodeCx) {
+        if let Some(owner) = self.owner.take().and_then(|o| o.upgrade()) {
+            owner.set_gesture_exclusion(self.key(), None);
+        }
+    }
+}
+
+impl crate::layout::GlobalPositionAwareModifierNode for GestureExclusionNode {
+    fn on_globally_positioned(&mut self, coordinates: &LayoutCoordinates) {
+        let rect = self.rect(coordinates);
+        if let Some(owner) = self.owner.as_ref().and_then(|o| o.upgrade()) {
+            // (an empty rect excludes nothing: none kept)
+            let kept = (rect.right > rect.left && rect.bottom > rect.top).then_some(rect);
+            owner.set_gesture_exclusion(self.key(), kept);
+        }
     }
 }
 

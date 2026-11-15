@@ -2,7 +2,7 @@
 //! and layout ids, semantics, drawing and its observed reads, node traversal and observation, the host's
 //! environment and window modifiers.
 
-#![allow(non_snake_case)]
+#![allow(non_snake_case, non_upper_case_globals)]
 
 mod common;
 
@@ -677,6 +677,24 @@ fn host_environment_changes_recompose_and_measure_only_their_readers() {
     assert!(composed.get() == 2 && measured.get() > measures);
 }
 
+fn set_content_replaces_the_content() {
+    // The content's scope skips while its generation is the same: set_content gives the new content one of its
+    // own, so it is composed though nothing it reads changed.
+    let rule = KompozTestRule::new(kompozable_lambda!(|| Text("ilk")));
+    rule.on_node_with_text("ilk").assert_exists();
+    rule.set_content(kompozable_lambda!(|| Text("ikinci")));
+    rule.on_node_with_text("ikinci").assert_exists();
+    rule.on_node_with_text("ilk").assert_does_not_exist();
+    // Set again to content that shows the same: composed all the same.
+    let runs = Rc::new(Cell::new(0));
+    let r = runs.clone();
+    rule.set_content(kompozable_lambda!(move || {
+        r.set(r.get() + 1);
+        Text("ikinci");
+    }));
+    assert_eq!(runs.get(), 1);
+}
+
 fn window_info_and_layout_direction_reach_their_readers() {
     let focused = Rc::new(Cell::new(true));
     let f = focused.clone();
@@ -778,6 +796,175 @@ fn preferred_frame_rates_gather_the_fastest() {
     assert_eq!(none.host().preferred_frame_rate_category(), FrameRateCategory::Default);
 }
 
+// ---- Composition locals read by nodes ----------------------------------------------------------------------------
+
+static LocalGap: KompozitionLocal<i32> = kompozition_local_of(|| 0);
+static LocalUnit: KompozitionLocal<i32> = static_kompozition_local_of(|| 1);
+
+thread_local! {
+    static GAP_MEASURES: Cell<u32> = const { Cell::new(0) };
+    static GAP_COMPOSED: Cell<u32> = const { Cell::new(0) };
+}
+
+/// A layout modifier node as wide as `LocalGap` times `LocalUnit`, read as it measures.
+struct GapNode {
+    handle: Option<NodeHandle>,
+}
+
+impl ModifierNode for GapNode {
+    node_capabilities!(layout);
+    fn on_attach(&mut self, cx: &NodeCx) {
+        self.handle = Some(cx.handle());
+    }
+}
+
+impl kompoz_ui::layout::LayoutModifierNode for GapNode {
+    fn measure(&mut self, scope: &MeasureScope, m: &dyn Measurable, _: Constraints) -> MeasureResult {
+        GAP_MEASURES.with(|c| c.set(c.get() + 1));
+        let h = self.handle.as_ref().unwrap();
+        let width = h.current_value_of(&LocalGap) * h.current_value_of(&LocalUnit);
+        let p = m.measure(Constraints::fixed(width, 10));
+        scope.layout(width, 10, move |pl| pl.place(&p, 0, 0))
+    }
+}
+
+#[derive(PartialEq)]
+struct GapElement;
+
+impl ModifierNodeElement for GapElement {
+    type Node = GapNode;
+    fn create(&self) -> GapNode {
+        GapNode { handle: None }
+    }
+    fn update(&self, _: &mut GapNode) {}
+}
+
+#[kompozable]
+fn GapLeaf() {
+    GAP_COMPOSED.with(|c| c.set(c.get() + 1));
+    Leaf(0, 0, modifier = Modifier.then_element(GapElement).test_tag("aralık"));
+}
+
+fn a_dynamic_local_read_while_measuring_measures_again_without_composing() {
+    // Compose's DynamicValueHolder: a node reading a dynamic local while it measures is measured again when the
+    // provider gives another value, nothing composed; a static local's new value composes the layout again, and
+    // its nodes are invalidated (Compose's compositionLocalMap setter).
+    GAP_MEASURES.with(|c| c.set(0));
+    GAP_COMPOSED.with(|c| c.set(0));
+    let (gap, unit) = (mutable_state_of(10), mutable_state_of(1));
+    let (g, u) = (gap.clone(), unit.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        KompozitionLocalProvider(&[LocalGap.provides(g.get()), LocalUnit.provides(u.get())], || GapLeaf());
+    }));
+    rule.set_layout_check(false);
+    let width = |rule: &KompozTestRule| rule.on_node_with_tag("aralık").layout_node().size().width;
+    assert_eq!(width(&rule), 10);
+    let measured = GAP_MEASURES.with(|c| c.get());
+    let leaf = rule.on_node_with_tag("aralık").layout_node().compositions();
+    gap.set(25);
+    rule.wait_for_idle();
+    assert_eq!(width(&rule), 25);
+    assert_eq!(GAP_MEASURES.with(|c| c.get()), measured + 1);
+    assert_eq!(rule.on_node_with_tag("aralık").layout_node().compositions(), leaf); // (not composed)
+    unit.set(2);
+    rule.wait_for_idle();
+    assert_eq!(width(&rule), 50);
+    assert_eq!(GAP_COMPOSED.with(|c| c.get()), 1); // (what doesn't read it skipped)
+    assert!(rule.on_node_with_tag("aralık").layout_node().compositions() > leaf);
+}
+
+// ---- The host's saved state --------------------------------------------------------------------------------------
+
+#[kompozable]
+fn Counted(shown: MutableState<bool>, handle: Rc<RefCell<Option<MutableState<i32>>>>) {
+    if shown.get() {
+        let count = remember_saveable(|| mutable_state_of(0));
+        *handle.borrow_mut() = Some(count.clone());
+        Text(format!("sayı {}", count.get()));
+    }
+}
+
+/// The same content for both hosts (its values are found by where they are composed).
+fn counted(shown: &MutableState<bool>, handle: &Rc<RefCell<Option<MutableState<i32>>>>) -> impl Content + 'static {
+    let (s, h) = (shown.clone(), handle.clone());
+    kompozable_lambda!(move || Counted(s.clone(), h.clone()))
+}
+
+fn the_host_saves_and_restores_its_saveable_state() {
+    // C++'s saveState / restoreState: the composition's `remember_saveable` values written out with the host's
+    // state (the host provides the registry at its root), given back to a host made from it before what keeps them
+    // is composed.
+    let bytes = {
+        let (shown, handle) = (mutable_state_of(true), Rc::new(RefCell::new(None)));
+        let rule = KompozTestRule::new(counted(&shown, &handle));
+        handle.borrow().as_ref().unwrap().set(5);
+        rule.wait_for_idle();
+        rule.on_node_with_text("sayı 5").assert_exists();
+        rule.host().save_state()
+    };
+    let (shown, handle) = (mutable_state_of(false), Rc::new(RefCell::new(None)));
+    let rule = KompozTestRule::new(counted(&shown, &handle));
+    rule.host().restore_state(&bytes);
+    shown.set(true);
+    rule.wait_for_idle();
+    rule.on_node_with_text("sayı 5").assert_exists();
+    // Bytes that aren't a saved state change nothing.
+    rule.host().restore_state(b"kompoz");
+    assert_eq!(SavedValue::decode(&rule.host().save_state()), SavedValue::decode(&bytes));
+}
+
+// ---- System gesture exclusion ------------------------------------------------------------------------------------
+
+/// The platform told the system gesture exclusion rects.
+#[derive(Default)]
+struct Exclusions(RefCell<Vec<Vec<IntRect>>>);
+
+impl kompoz_ui::platform::PlatformCallbacks for Exclusions {
+    fn system_gesture_exclusion(&self, rects: &[IntRect]) {
+        self.0.borrow_mut().push(rects.to_vec());
+    }
+}
+
+fn system_gesture_exclusion_tells_the_platform_where_swipes_are_the_apps() {
+    // C++'s system_gesture_exclusion_keeps_the_rects_in_view without its scrolled part (scroll containers are a
+    // later stage's), with Compose's rects: each in the root, all of it or the part given, as nodes come and go.
+    let shown = mutable_state_of(true);
+    let s = shown.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let s = s.clone();
+        Stack(move || {
+            if s.get() {
+                Leaf(100, 50, modifier = Modifier.system_gesture_exclusion()); // 0..50, all of it
+            }
+            // Only its first 30 across (a slider's edge, say).
+            Leaf(
+                200,
+                60,
+                modifier =
+                    Modifier.system_gesture_exclusion_with(|c| Rect::new(0.0, 0.0, 30.0, c.size().height as f32)),
+            );
+            Leaf(50, 80, modifier = padded(Modifier.system_gesture_exclusion(), 10));
+        });
+    }));
+    let exclusions = Rc::new(Exclusions::default());
+    rule.host().set_callbacks(exclusions.clone());
+    assert_eq!(
+        rule.host().system_gesture_exclusion(),
+        [IntRect::new(0, 0, 100, 50), IntRect::new(0, 50, 30, 110), IntRect::new(0, 110, 70, 210)]
+    );
+    // Gone, and the others up 50: the platform told.
+    shown.set(false);
+    rule.wait_for_idle();
+    let expected = vec![IntRect::new(0, 0, 30, 60), IntRect::new(0, 60, 70, 160)];
+    assert_eq!(rule.host().system_gesture_exclusion(), expected);
+    assert_eq!(exclusions.0.borrow().last(), Some(&expected));
+    // A layout pass that moves nothing tells nothing again.
+    let told = exclusions.0.borrow().len();
+    rule.host().invalidate();
+    rule.wait_for_idle();
+    assert_eq!(exclusions.0.borrow().len(), told);
+}
+
 tests!(
     coordinates_tell_where_layouts_are_and_map_between_them,
     a_layer_moves_and_clips_what_coordinates_tell,
@@ -791,8 +978,12 @@ tests!(
     nodes_find_each_other_up_and_down_the_tree,
     a_node_is_told_when_what_it_observed_changes,
     host_environment_changes_recompose_and_measure_only_their_readers,
+    set_content_replaces_the_content,
     window_info_and_layout_direction_reach_their_readers,
     keep_screen_on_while_laid_out,
     sensitive_content_while_laid_out,
     preferred_frame_rates_gather_the_fastest,
+    a_dynamic_local_read_while_measuring_measures_again_without_composing,
+    the_host_saves_and_restores_its_saveable_state,
+    system_gesture_exclusion_tells_the_platform_where_swipes_are_the_apps,
 );

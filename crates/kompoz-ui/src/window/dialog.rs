@@ -6,7 +6,7 @@ use super::{PopupKind, PopupSpec};
 use crate::back::BackScope;
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope};
 use crate::modifier::Modifier;
-use crate::platform::{Insets, LocalDensity, LocalLayoutDirection, LocalSystemInsets};
+use crate::platform::{Insets, InsetsKind, LocalDensity, LocalLayoutDirection, LocalSystemInsets};
 use crate::unit::Constraints;
 use kompoz_graphics::Dp;
 use kompoz_runtime::{kompozable, remember, remember_keyed};
@@ -62,7 +62,8 @@ pub fn Dialog(
         margins = Insets::new(x, y, x, y);
     }
     if properties.decor_fits_system_windows {
-        for i in [insets.status_bars, insets.navigation_bars, insets.display_cutout] {
+        let kinds = [InsetsKind::StatusBars, InsetsKind::NavigationBars, InsetsKind::DisplayCutout];
+        for i in kinds.map(|kind| insets.insets(kind)) {
             margins.left = margins.left.max(i.left);
             margins.top = margins.top.max(i.top);
             margins.right = margins.right.max(i.right);

@@ -60,7 +60,7 @@ fn layout_coordinates_tell_their_parent_and_map_between_nodes() {
 }
 
 fn layout_measures_again_only_what_changed() {
-    // C++'s layout_measures_again_only_what_changed: `offset {}` is `layout {}` reading the state while placing.
+    // C++'s layout_measures_again_only_what_changed: `offset {}` reads the state while placing.
     let (measured_a, measured_b) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
     let width = mutable_state_of(50);
     let shift = mutable_state_of(0);
@@ -80,11 +80,7 @@ fn layout_measures_again_only_what_changed() {
                 Box(modifier = Modifier.width((w.get() as f32).dp()).height(10.dp()).test_tag("b"));
             });
             let s = s.clone();
-            let moved = Modifier.layout(move |scope, m, c| {
-                let p = m.measure(c);
-                let s = s.clone();
-                scope.layout(p.width(), p.height(), move |pl| pl.place(&p, s.get(), 0))
-            });
+            let moved = Modifier.offset_px(move |_| IntOffset::new(s.get(), 0));
             let b = b.clone();
             Box(modifier = moved, || {
                 let b = b.clone();

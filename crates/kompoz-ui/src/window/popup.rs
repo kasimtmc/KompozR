@@ -11,8 +11,8 @@ use crate::platform::{LocalDensity, LocalLayoutDirection};
 use crate::unit::Constraints;
 use kompoz_graphics::{IntOffset, IntRect, IntSize, LayoutDirection};
 use kompoz_runtime::{
-    KompozitionLocalProvider, current_composite_key_hash, current_kompozition_local_context_unobserved, emit,
-    kompozable, kompozable_block, remember,
+    KompozitionLocalProvider, current_composite_key_hash, current_kompozition_local_map, emit, kompozable,
+    kompozable_block, remember,
 };
 use std::rc::Rc;
 
@@ -119,7 +119,9 @@ pub(crate) fn emit_popup_root(
 ) {
     let density = LocalDensity.current();
     let layout_direction = LocalLayoutDirection.current();
-    let locals = current_kompozition_local_context_unobserved();
+    let locals = current_kompozition_local_map();
+    let window_root = crate::focus::window_root_modifier()
+        .then(crate::layout::window_insets_rulers(crate::platform::LocalSystemInsets.current()));
     let key = current_composite_key_hash();
     emit(
         LayoutNode::new,
@@ -129,7 +131,7 @@ pub(crate) fn emit_popup_root(
             node.set_density(density);
             node.set_layout_direction(layout_direction);
             node.set_locals(locals);
-            node.modifier_set(crate::focus::window_root_modifier());
+            node.modifier_set(window_root);
             node.set_composite_key(key);
             node.note_composed();
         },

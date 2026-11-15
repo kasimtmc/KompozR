@@ -26,7 +26,10 @@ pub use interaction::{
     print_nodes,
 };
 pub use matcher::*;
-pub use recording::{Arc, Backdrop, ClipShape, Elevated, Mesh, PathShadow, RecordingCanvas, ShapeShadow};
+pub use recording::{
+    RecordedArc, RecordedBackdrop, RecordedClipShape, RecordedElevationShadow, RecordedMesh, RecordedPathShadow,
+    RecordedShapeShadow, RecordingCanvas,
+};
 pub use text::{FakeTextMeasurer, FontMetrics, Text};
 
 use kompoz_graphics::IntSize;

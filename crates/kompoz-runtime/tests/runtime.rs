@@ -637,6 +637,121 @@ fn local_change_reaches_reader_under_skipped_parent() {
     assert_eq!(runs(&READER_RUNS), 2);
 }
 
+static LocalSpeed: KompozitionLocal<i32> = kompozition_local_of(|| 0);
+static LocalUnit: KompozitionLocal<String> = static_kompozition_local_of(|| "m".into());
+/// Values the same when they round to the same ten.
+static LocalRounded: KompozitionLocal<i32> =
+    kompozition_local_of_with_policy(SnapshotMutationPolicy::new(|a, b| a / 10 == b / 10), || 0);
+
+thread_local! {
+    static KEEPER_RUNS: Cell<u32> = const { Cell::new(0) };
+    static SPEED_RUNS: Cell<u32> = const { Cell::new(0) };
+    static KEPT: RefCell<KompozitionLocalContext> = RefCell::new(KompozitionLocalContext::default());
+}
+
+/// Keeps the locals where it is as a layout node does.
+#[kompozable]
+fn Keeper() {
+    bump(&KEEPER_RUNS);
+    let map = current_kompozition_local_map();
+    KEPT.with(|k| *k.borrow_mut() = map);
+}
+
+#[kompozable]
+fn SpeedReader() {
+    bump(&SPEED_RUNS);
+    Text(format!("speed={}", LocalSpeed.current()));
+}
+
+fn kept(f: impl FnOnce(&KompozitionLocalContext) -> String) -> String {
+    KEPT.with(|k| f(&k.borrow()))
+}
+
+fn dynamic_locals_are_read_live_and_static_ones_compose_their_keepers_again() {
+    // Compose's DynamicValueHolder: a dynamic local's provider sets the value in its holder; what kept the locals
+    // reads it as it is now, observed as a state read is (a layout's measure runs again, nothing composes); its
+    // readers in the composition compose again once. A static local's new value comes in a holder of its own: what
+    // kept the locals composes again to keep it.
+    reset(&KEEPER_RUNS);
+    reset(&SPEED_RUNS);
+    let (speed, unit, rounded) = (mutable_state_of(1), mutable_state_of("m".to_string()), mutable_state_of(11));
+    let (s, u, r) = (speed.clone(), unit.clone(), rounded.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        KompozitionLocalProvider(
+            &[LocalSpeed.provides(s.get()), LocalUnit.provides(u.get()), LocalRounded.provides(r.get())],
+            || {
+                Keeper();
+                SpeedReader();
+            },
+        );
+    }));
+    assert_eq!((runs(&KEEPER_RUNS), runs(&SPEED_RUNS)), (1, 1));
+    // Read outside the composition: observed (the key told to the observer), as it is now.
+    let read_keys = Rc::new(RefCell::new(Vec::<StateKey>::new()));
+    let rk = read_keys.clone();
+    let observed =
+        observe_reads(Rc::new(move |k| rk.borrow_mut().push(k)), || kept(|k| k.get(&LocalSpeed).to_string()));
+    assert!(observed == "1" && read_keys.borrow().len() == 1);
+    let changed = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<StateKey>::new()));
+    let c = changed.clone();
+    let _observer = Snapshot::register_apply_observer(move |keys| c.lock().extend_from_slice(keys));
+    speed.set(2);
+    rule.wait_for_idle();
+    assert!(rule.has("speed=2"));
+    assert_eq!((runs(&KEEPER_RUNS), runs(&SPEED_RUNS)), (1, 2)); // (the reader once, the keeper not at all)
+    assert_eq!(kept(|k| k.get(&LocalSpeed).to_string()), "2");
+    assert!(changed.lock().contains(&read_keys.borrow()[0])); // (the measure that read it would run again)
+    // A static local: the keeper composes again and keeps the new holder.
+    unit.set("km".into());
+    rule.wait_for_idle();
+    assert_eq!(runs(&KEEPER_RUNS), 2);
+    assert_eq!(kept(|k| k.get(&LocalUnit)), "km");
+    // A static local read from what was kept is read by no one.
+    let static_keys = Rc::new(RefCell::new(Vec::<StateKey>::new()));
+    let sk = static_keys.clone();
+    observe_reads(Rc::new(move |k| sk.borrow_mut().push(k)), || kept(|k| k.get(&LocalUnit)));
+    assert!(static_keys.borrow().is_empty());
+    // The local's mutation policy: a value it takes as the same sets nothing.
+    changed.lock().clear();
+    rounded.set(15);
+    rule.wait_for_idle();
+    assert_eq!(kept(|k| k.get(&LocalRounded).to_string()), "11");
+    rounded.set(25);
+    rule.wait_for_idle();
+    assert_eq!(kept(|k| k.get(&LocalRounded).to_string()), "25");
+    assert_eq!(runs(&KEEPER_RUNS), 2);
+}
+
+#[kompozable]
+fn ContextUser() {
+    Text(format!("ctx={}/{}", LocalSpeed.current(), LocalUnit.current()));
+}
+
+fn a_context_provided_again_follows_its_provider() {
+    // A context provided elsewhere shares its dynamic holders: what reads them there follows the provider here
+    // (Compose's DynamicValueHolder.toProvided keeps the state).
+    let speed = mutable_state_of(3);
+    let s = speed.clone();
+    let context = Rc::new(RefCell::new(None::<KompozitionLocalContext>));
+    let c = context.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let c2 = c.clone();
+        KompozitionLocalProvider(&[LocalSpeed.provides(s.get()), LocalUnit.provides("km".into())], move || {
+            let map = current_kompozition_local_map();
+            c2.borrow_mut().get_or_insert(map);
+        });
+    }));
+    let taken = context.borrow().clone().unwrap();
+    let elsewhere = Rule::new(kompozable_lambda!(move || {
+        KompozitionLocalProviderContext(&taken, || ContextUser());
+    }));
+    assert!(elsewhere.has("ctx=3/km"));
+    speed.set(4);
+    rule.wait_for_idle();
+    elsewhere.wait_for_idle();
+    assert!(elsewhere.has("ctx=4/km"), "{:?}", elsewhere.names());
+}
+
 #[kompozable]
 fn Items(n: MutableState<i32>) {
     for i in 0..n.get() {
@@ -1037,6 +1152,50 @@ fn remember_saveable_with_a_saver_of_its_own() {
     assert!(rule.has("Izmir/Türkiye"), "{:?}", rule.names());
 }
 
+fn values_registered_by_key_are_saved_and_given_back_once() {
+    // Compose's SaveableStateRegistry provider API: what isn't a composable's registers a provider by key, asked for
+    // its value as the registry saves; a registry restored gives each value back once; an entry unregistered is
+    // saved no more; several providers of one key are saved in order.
+    let registry = SaveableStateRegistry::new(None);
+    let value = Rc::new(Cell::new(7));
+    let v = value.clone();
+    let entry = registry.register_provider("seçili", move || Some(SavedValue::Int(v.get() as i64)));
+    let _none = registry.register_provider("boş", || None);
+    let first = registry.register_provider("çift", || Some(SavedValue::String("bir".into())));
+    let _second = registry.register_provider("çift", || Some(SavedValue::String("iki".into())));
+    value.set(9);
+    let saved = registry.perform_save();
+    assert!(registry.can_be_saved(&SavedValue::Int(1)));
+    let restored = SaveableStateRegistry::new(Some(&saved));
+    assert_eq!(restored.consume_restored("seçili"), Some(SavedValue::Int(9)));
+    assert_eq!(restored.consume_restored("seçili"), None); // (once)
+    assert_eq!(restored.consume_restored("boş"), None); // (a provider giving nothing saved nothing)
+    assert_eq!(restored.consume_restored("çift"), Some(SavedValue::String("bir".into())));
+    // What wasn't asked for yet is saved again as it was.
+    let again = SaveableStateRegistry::new(Some(&restored.save()));
+    assert_eq!(again.consume_restored("çift"), Some(SavedValue::String("iki".into())));
+    // Unregistered: no longer saved.
+    entry.unregister();
+    first.unregister();
+    let after = SaveableStateRegistry::new(Some(&registry.save()));
+    assert_eq!(after.consume_restored("seçili"), None);
+    assert_eq!(after.consume_restored("çift"), Some(SavedValue::String("iki".into())));
+    // A registry saving only what its check takes.
+    let strict = SaveableStateRegistry::with_can_be_saved(None, |v| v.as_int().is_some());
+    assert!(strict.can_be_saved(&SavedValue::Int(3)) && !strict.can_be_saved(&SavedValue::Bool(true)));
+    // The registry where `remember_saveable` keeps its values is the one provided (Compose's
+    // LocalSaveableStateRegistry).
+    let host = SaveableStateRegistry::new(None);
+    let seen = Rc::new(RefCell::new(None));
+    let (h, s) = (host.clone(), seen.clone());
+    let _rule = Rule::new(kompozable_lambda!(move || {
+        let s = s.clone();
+        ProvideSaveableStateRegistry(&h, move || *s.borrow_mut() = LocalSaveableStateRegistry.current());
+    }));
+    assert!(seen.borrow().as_ref() == Some(&host));
+    assert!(quietly(|| host.register_provider("  ", || None)).is_err());
+}
+
 tests!(
     nodes_are_retained_across_recompositions,
     key_keeps_state_with_its_item,
@@ -1056,6 +1215,9 @@ tests!(
     parent_recomposition_skips_unchanged_children,
     changed_argument_reruns_child,
     local_change_reaches_reader_under_skipped_parent,
+    dynamic_locals_are_read_live_and_static_ones_compose_their_keepers_again,
+    a_context_provided_again_follows_its_provider,
+    values_registered_by_key_are_saved_and_given_back_once,
     partial_recomposition_keeps_node_order,
     a_restarted_scope_leaves_nothing_provided_held,
     restarted_scope_disposes_what_it_no_longer_calls,

@@ -170,8 +170,9 @@ impl ImageBitmap {
         self.lock().version
     }
 
-    /// It held without being kept alive (for what is made of it and kept while it lives).
-    pub(crate) fn downgrade(&self) -> WeakImageBitmap {
+    /// It held without being kept alive (for what is made of it and kept while it lives: a filtered copy, draws
+    /// waiting for a renderer).
+    pub fn downgrade(&self) -> WeakImageBitmap {
         WeakImageBitmap(Arc::downgrade(&self.data))
     }
 
@@ -390,13 +391,39 @@ impl fmt::Debug for ImageBitmap {
     }
 }
 
-/// A bitmap held without being kept alive.
-pub(crate) struct WeakImageBitmap(Weak<BitmapData>);
+/// A bitmap held without being kept alive ([`ImageBitmap::downgrade`]). Equal when of the same bitmap.
+#[derive(Clone)]
+pub struct WeakImageBitmap(Weak<BitmapData>);
 
 impl WeakImageBitmap {
     /// Whether the bitmap still lives.
-    pub(crate) fn is_alive(&self) -> bool {
+    pub fn is_alive(&self) -> bool {
         self.0.strong_count() > 0
+    }
+
+    /// The bitmap, while it lives.
+    pub fn upgrade(&self) -> Option<ImageBitmap> {
+        self.0.upgrade().map(|data| ImageBitmap { data })
+    }
+
+    /// Whether it is `bitmap`'s.
+    pub fn is_of(&self, bitmap: &ImageBitmap) -> bool {
+        std::ptr::eq(self.0.as_ptr(), Arc::as_ptr(&bitmap.data))
+    }
+}
+
+impl PartialEq for WeakImageBitmap {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.ptr_eq(&other.0)
+    }
+}
+
+impl fmt::Debug for WeakImageBitmap {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.upgrade() {
+            Some(bitmap) => write!(f, "WeakImageBitmap({bitmap:?})"),
+            None => write!(f, "WeakImageBitmap(gone)"),
+        }
     }
 }
 

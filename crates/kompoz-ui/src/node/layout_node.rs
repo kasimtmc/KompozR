@@ -319,7 +319,9 @@ impl LayoutNode {
         }
     }
 
-    /// `local`'s value where it was composed, subscribing nothing (what a node's `current_value_of` reads).
+    /// `local`'s value where it was composed (what a node's `current_value_of` reads): a dynamic local's as it is
+    /// now, the read told to whoever observes reads (a measure, a placement, a drawing runs again when it changes);
+    /// a static local's as it was when this was last composed.
     pub fn current_value_of<T: Clone + 'static>(&self, local: &'static KompozitionLocal<T>) -> T {
         self.locals.borrow().get(local)
     }
@@ -366,14 +368,28 @@ impl LayoutNode {
         }
     }
 
-    /// The composition locals where it is composed, for its nodes' `current_value_of`.
+    /// The composition locals where it is composed, for its nodes' `current_value_of` (Compose's
+    /// `compositionLocalMap` setter): when they are others (a static local given another value), its nodes are
+    /// invalidated as an update would, so what they read of them is read again.
     pub fn set_locals(&self, locals: KompozitionLocalContext) {
+        if *self.locals.borrow() == locals {
+            return;
+        }
         let view_configuration = &crate::platform::LocalViewConfiguration;
-        let before = self.locals.borrow().get(view_configuration);
-        *self.locals.borrow_mut() = locals;
+        let before = self.locals.borrow().peek(view_configuration);
+        let old = self.locals.replace(locals);
+        drop(old);
+        if !self.is_attached() {
+            return;
+        }
         // (Compose's `viewConfiguration` setter: pointer input under way is cancelled)
-        if self.is_attached() && self.locals.borrow().get(view_configuration) != before {
+        if self.locals.borrow().peek(view_configuration) != before {
             crate::input::on_view_configuration_changed(self);
+        }
+        for node in self.chain_nodes() {
+            if node.meta.attached.get() {
+                crate::modifier::chain::auto_invalidate(&node, crate::modifier::chain::Phase::Updated);
+            }
         }
     }
 

@@ -348,8 +348,11 @@ impl NodeCx {
         self.cell.coordinator().map(LayoutCoordinates::of)
     }
 
-    /// `local`'s value where its layout was composed, without subscribing anything (Compose's
-    /// CompositionLocalConsumerModifierNode.currentValueOf): read when needed, as it is then.
+    /// `local`'s value where its layout was composed (Compose's CompositionLocalConsumerModifierNode.currentValueOf),
+    /// subscribing no composable: a dynamic local's as it is now, read as a state is (in a measure, a placement, a
+    /// drawing or `observe_reads`, that runs again when its provider gives another value); a static local's as
+    /// it was when the layout was last composed (the layout composes again, and its nodes are invalidated, when
+    /// it changes).
     pub fn current_value_of<T: Clone + 'static>(&self, local: &'static KompozitionLocal<T>) -> T {
         match self.cell.layout_node() {
             Some(n) => n.current_value_of(local),

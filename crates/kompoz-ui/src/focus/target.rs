@@ -28,6 +28,8 @@ pub struct FocusTargetNode {
     /// The composite key of the child that had the focus when it left (Compose's `previouslyFocusedChildHash`):
     /// where a focus restorer brings it back.
     pub(crate) previously_focused_child_hash: Option<u64>,
+    /// Where that child is saved with the host's state (Compose's `focusRestorationEntry`).
+    pub(crate) focus_restoration_entry: Option<kompoz_runtime::SaveableStateRegistryEntry>,
     /// Its context, kept from its attach (its observed reads and detach work on it).
     cx: Option<NodeCx>,
 }
@@ -42,6 +44,7 @@ impl FocusTargetNode {
             is_processing_custom_exit: false,
             is_processing_custom_enter: false,
             previously_focused_child_hash: None,
+            focus_restoration_entry: None,
             cx: None,
         }
     }
@@ -83,6 +86,9 @@ impl ModifierNode for FocusTargetNode {
             owner.clear_focus_with(true, true, false, FocusDirection::Exit);
         }
         self.previously_focused_child_hash = None;
+        if let Some(entry) = self.focus_restoration_entry.take() {
+            entry.unregister();
+        }
         self.cx = None;
     }
 

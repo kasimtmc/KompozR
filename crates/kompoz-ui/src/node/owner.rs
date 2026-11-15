@@ -71,6 +71,9 @@ pub(crate) struct Owner {
     pub(crate) keep_screen_on: Cell<i32>,
     pub(crate) sensitive_content: Cell<i32>,
     pub(crate) frame_rates: RefCell<Vec<(u64, crate::platform::FrameRate)>>,
+    /// The system gesture exclusion nodes' rects, by node, and whether they changed since the platform was told.
+    gesture_exclusion: RefCell<Vec<(usize, kompoz_graphics::IntRect)>>,
+    gesture_exclusion_changed: Cell<bool>,
     focus: RefCell<Weak<crate::focus::FocusOwner>>,
     /// The popup roots in the tree, bottom first (the window package's).
     pub(crate) popups: RefCell<Vec<Weak<LayoutNode>>>,
@@ -111,6 +114,8 @@ impl Owner {
             keep_screen_on: Cell::new(0),
             sensitive_content: Cell::new(0),
             frame_rates: RefCell::new(Vec::new()),
+            gesture_exclusion: RefCell::new(Vec::new()),
+            gesture_exclusion_changed: Cell::new(false),
             focus: RefCell::new(Weak::new()),
             popups: RefCell::new(Vec::new()),
             semantics_listeners: RefCell::new(Vec::new()),
@@ -126,6 +131,38 @@ impl Owner {
 
     pub(crate) fn root(&self) -> Option<Rc<LayoutNode>> {
         self.root.borrow().clone()
+    }
+
+    /// A system gesture exclusion node's rect (`key`: the node): kept in its place, or dropped (Compose's
+    /// RectListNode `replaceRect` on the view's list).
+    pub(crate) fn set_gesture_exclusion(&self, key: usize, rect: Option<kompoz_graphics::IntRect>) {
+        let mut rects = self.gesture_exclusion.borrow_mut();
+        let at = rects.iter().position(|(k, _)| *k == key);
+        let changed = match (at, rect) {
+            (Some(i), Some(r)) => std::mem::replace(&mut rects[i].1, r) != r,
+            (Some(i), None) => {
+                rects.remove(i);
+                true
+            }
+            (None, Some(r)) => {
+                rects.push((key, r));
+                true
+            }
+            (None, None) => false,
+        };
+        if changed {
+            self.gesture_exclusion_changed.set(true);
+        }
+    }
+
+    /// The system gesture exclusion rects, px in the window.
+    pub(crate) fn gesture_exclusion(&self) -> Vec<kompoz_graphics::IntRect> {
+        self.gesture_exclusion.borrow().iter().map(|(_, r)| *r).collect()
+    }
+
+    /// Whether they changed since this was last asked.
+    pub(crate) fn take_gesture_exclusion_changed(&self) -> bool {
+        self.gesture_exclusion_changed.replace(false)
     }
 
     pub(crate) fn snapshot_observer(&self) -> &Rc<SnapshotObserver> {

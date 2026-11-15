@@ -1030,7 +1030,108 @@ fn nested_scroll_connections_pre_outer_first_post_inner_first_and_flings_suspend
     assert!(!dispatcher.coroutine_scope().is_active());
 }
 
+/// An indirect pointer node logging what reaches it, consuming in the Main pass if it takes them.
+struct IndirectNode {
+    name: &'static str,
+    log: Log,
+    takes: bool,
+}
+
+impl ModifierNode for IndirectNode {
+    node_capabilities!(indirect_pointer_input);
+}
+
+impl IndirectPointerInputModifierNode for IndirectNode {
+    fn on_indirect_pointer_event(&mut self, event: &IndirectPointerEvent, pass: PointerEventPass) {
+        let c = &event.changes[0];
+        push(
+            &self.log,
+            format!("{} {pass:?} {:?} {}>{}", self.name, event.r#type, c.previous_position.x, c.position.x),
+        );
+        if self.takes && pass == PointerEventPass::Main {
+            c.consume();
+        }
+    }
+    fn on_cancel_indirect_pointer_input(&mut self) {
+        push(&self.log, format!("{} cancel", self.name));
+    }
+}
+
+struct IndirectElement {
+    name: &'static str,
+    log: Log,
+    takes: bool,
+}
+
+impl PartialEq for IndirectElement {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && Rc::ptr_eq(&self.log, &other.log) && self.takes == other.takes
+    }
+}
+
+impl ModifierNodeElement for IndirectElement {
+    type Node = IndirectNode;
+    fn create(&self) -> IndirectNode {
+        IndirectNode { name: self.name, log: self.log.clone(), takes: self.takes }
+    }
+    fn update(&self, _: &mut IndirectNode) {}
+}
+
+fn indirect_pointer_events_go_along_the_focused_path() {
+    // Compose's dispatchIndirectPointerEvent: the nearest indirect pointer node at or above the focused target and
+    // those above it, the Initial pass down, the Main pass up, the Final pass down; consumption is the answer. A
+    // cancel goes from it up; the focus leaving cancels the stream of what it left.
+    let log = new_log();
+    let focus = kompoz_ui::focus::FocusRequester::new();
+    let (l, f) = (log.clone(), focus.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (l, f) = (l.clone(), f.clone());
+        Box(
+            Modifier.then_element(IndirectElement { name: "dış", log: l.clone(), takes: false }),
+            content = move || {
+                Box(Modifier
+                    .then_element(IndirectElement { name: "iç", log: l.clone(), takes: true })
+                    .focus_requester(&f)
+                    .focus_target()
+                    .size(20.dp()));
+                Box(Modifier.focus_target().size(20.dp()).test_tag("öbür"));
+            },
+        );
+    }));
+    use IndirectPointerEventPrimaryDirectionalMotionAxis::X;
+    let send = |t, x: f32| rule.host().indirect_pointer(t, 0, Offset::new(x, 0.0), 1.0, -1, X);
+    // Nothing focused: nowhere to go.
+    assert!(!send(IndirectPointerEventType::Press, 5.0));
+    assert!(taken(&log).is_empty());
+    focus.request_focus();
+    rule.wait_for_idle();
+    assert!(send(IndirectPointerEventType::Press, 10.0));
+    assert_eq!(
+        taken(&log),
+        [
+            "dış Initial Press 10>10",
+            "iç Initial Press 10>10",
+            "iç Main Press 10>10",
+            "dış Main Press 10>10",
+            "dış Final Press 10>10",
+            "iç Final Press 10>10"
+        ]
+    );
+    // A move comes from where the press was.
+    assert!(send(IndirectPointerEventType::Move, 30.0));
+    assert!(taken(&log).iter().all(|l| l.ends_with("Move 10>30")));
+    rule.host().indirect_pointer_cancel();
+    assert_eq!(taken(&log), ["iç cancel", "dış cancel"]);
+    // The focus moves elsewhere: the stream of what it left cancelled.
+    send(IndirectPointerEventType::Press, 0.0);
+    taken(&log);
+    rule.host().move_focus(kompoz_ui::focus::FocusDirection::Next);
+    rule.wait_for_idle();
+    assert!(taken(&log).contains(&"iç cancel".to_string()));
+}
+
 tests!(
+    indirect_pointer_events_go_along_the_focused_path,
     pointer_event_passes_reach_parents_before_and_after_their_children,
     pointer_input_restarts_on_key_change_and_stops_when_removed,
     a_new_block_with_the_same_keys_goes_on_until_restarted,

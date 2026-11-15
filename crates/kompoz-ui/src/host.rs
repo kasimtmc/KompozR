@@ -7,7 +7,8 @@ use crate::display_list::DisplayList;
 use crate::focus::{FocusDirection, FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
 use crate::input::{
-    InputState, Key, KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerType, RotaryScrollEvent,
+    IndirectPointerEvent, IndirectPointerEventPrimaryDirectionalMotionAxis, IndirectPointerEventType, InputState, Key,
+    KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerType, RotaryScrollEvent,
 };
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::node::{LayoutNode, Owner};
@@ -18,8 +19,9 @@ use crate::window::Overlays;
 use kompoz_coroutines::{Dispatcher, LocalDispatcher};
 use kompoz_graphics::{Density, IntOffset, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::{
-    Composition, Content, KompozitionLocalProvider, MutableState, RecompositionStats, Snapshot,
-    global_snapshot_changed, kompozable_block, mutable_state_of, restartable,
+    Composition, Content, KompozitionLocalProvider, MutableState, ProvideSaveableStateRegistry, RecompositionStats,
+    SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block, mutable_state_of,
+    restartable,
 };
 use parking_lot::Mutex;
 use std::cell::{Cell, RefCell};
@@ -33,7 +35,6 @@ struct Environment {
     density: Density,
     layout_direction: LayoutDirection,
     theme: SystemTheme,
-    insets: SystemInsets,
     view_configuration: ViewConfiguration,
 }
 
@@ -115,6 +116,13 @@ pub struct KompozHost {
     environment: MutableState<Environment>,
     window_info: WindowInfo,
     input_mode_manager: InputModeManager,
+    /// What the system UI covers, in states of its own (read live by what measures by the insets).
+    system_insets: SystemInsetsHolder,
+    /// Moving the keyboard by hand.
+    ime_controller: ImeController,
+    /// The composition's saveable values (`remember_saveable` outside any holder, what nodes register), written out
+    /// with the host's state.
+    saveable: SaveableStateRegistry,
     viewport: Cell<IntSize>,
     frame_time: Cell<i64>,
     layout_check: Cell<bool>,
@@ -143,7 +151,10 @@ impl KompozHost {
         let owner = Owner::new(dispatcher.clone());
         let root = LayoutNode::new();
         root.set_measure_policy(Rc::new(RootMeasurePolicy { layer: Rc::new(|_| {}) }));
-        root.set_modifier(crate::focus::window_root_modifier());
+        let system_insets = SystemInsetsHolder::default();
+        root.set_modifier(
+            crate::focus::window_root_modifier().then(crate::layout::window_insets_rulers(system_insets.clone())),
+        );
         let focus = Rc::new(FocusOwner::default());
         *focus.owner.borrow_mut() = Rc::downgrade(&owner);
         owner.set_focus_owner(&focus);
@@ -152,16 +163,16 @@ impl KompozHost {
             density: Density::default(),
             layout_direction: LayoutDirection::Ltr,
             theme: SystemTheme::Light,
-            insets: SystemInsets::default(),
             view_configuration: ViewConfiguration::default(),
         });
         let overlays = Overlays { owner: Rc::downgrade(&owner) };
+        let platform = PlatformHandle::default();
         let host = KompozHost {
             owner,
             root: root.clone(),
             composition: RefCell::new(None),
             dispatcher,
-            platform: PlatformHandle::default(),
+            platform: platform.clone(),
             handle: HostHandle {
                 posted: Arc::new(Mutex::new(Vec::new())),
                 waker: Arc::new(Mutex::new(None)),
@@ -170,6 +181,9 @@ impl KompozHost {
             environment,
             window_info: WindowInfo::default(),
             input_mode_manager: InputModeManager::default(),
+            ime_controller: ImeController::new(platform.clone(), system_insets.clone(), Some(Rc::downgrade(&focus))),
+            system_insets,
+            saveable: SaveableStateRegistry::new(None),
             viewport: Cell::new(IntSize::Zero),
             frame_time: Cell::new(0),
             layout_check: Cell::new(false),
@@ -196,6 +210,9 @@ impl KompozHost {
         let environment = self.environment.clone();
         let window_info = self.window_info.clone();
         let input_mode_manager = self.input_mode_manager.clone();
+        let system_insets = self.system_insets.clone();
+        let ime_controller = self.ime_controller.clone();
+        let saveable = self.saveable.clone();
         let platform = self.platform.clone();
         let dispatcher = self.dispatcher.clone();
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
@@ -208,7 +225,8 @@ impl KompozHost {
                 LocalLayoutDirection.provides(env.layout_direction),
                 LocalViewConfiguration.provides(env.view_configuration),
                 LocalSystemTheme.provides(env.theme),
-                LocalSystemInsets.provides(env.insets),
+                LocalSystemInsets.provides(system_insets.clone()),
+                LocalImeController.provides(ime_controller.clone()),
                 LocalWindowInfo.provides(window_info.clone()),
                 LocalInputModeManager.provides(input_mode_manager.clone()),
                 LocalHapticFeedback.provides(HapticFeedback(platform.clone())),
@@ -222,14 +240,21 @@ impl KompozHost {
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
             let g = generation.get();
+            let saveable = saveable.clone();
             kompozable_block!({
-                KompozitionLocalProvider(&values, move || restartable(g, Some(same_generation), move |_| content()))
+                KompozitionLocalProvider(&values, move || {
+                    ProvideSaveableStateRegistry(&saveable, move || {
+                        restartable(g, Some(same_generation), move |_| content())
+                    })
+                })
             })
         }
     }
 
-    /// Composes `content` instead (at the next frame).
+    /// Composes `content` instead (at the next frame): a generation of its own, so the content's scope (which
+    /// skips while its generation is the same) composes the new content.
     pub fn set_content(&self, content: impl Content + 'static) {
+        self.generation.set(self.generation.get() + 1);
         let root = self.root_content(Rc::new(move || content.compose()));
         if let Some(c) = self.composition.borrow().as_ref() {
             c.set_content(root);
@@ -314,9 +339,47 @@ impl KompozHost {
         self.update_environment(|e| e.theme = if dark { SystemTheme::Dark } else { SystemTheme::Light });
     }
 
-    /// What each kind of system UI covers (LocalSystemInsets, the window insets).
+    /// What each kind of system UI covers (LocalSystemInsets, the window insets): the kinds that changed are set
+    /// in their states, so what measures by them measures again (an IME animation composes nothing).
     pub fn set_system_insets(&self, insets: SystemInsets) {
-        self.update_environment(|e| e.insets = insets);
+        self.system_insets.set(&insets);
+    }
+
+    /// The state to keep while the platform ends the app (C++'s `saveState`): the composition's saveable values
+    /// (`remember_saveable` outside any holder, what nodes registered: a focus restorer's child), as bytes.
+    pub fn save_state(&self) -> Vec<u8> {
+        SavedValue::map([("composition", self.saveable.save())]).encode()
+    }
+
+    /// Gives back a state `save_state` wrote (C++'s `restoreState`): call it before the first frame, and what
+    /// composes finds its values again. Bytes that aren't such a state are ignored.
+    pub fn restore_state(&self, bytes: &[u8]) {
+        let Some(saved) = SavedValue::decode(bytes) else { return };
+        let composition = saved.get("composition");
+        if composition.as_map().is_some() {
+            self.saveable.restore(composition);
+        }
+    }
+
+    /// Moves the keyboard by `px` up (down if negative) by hand (C++'s `imeControlBy`); what it moved. See
+    /// [`ImeController::control_by`].
+    pub fn ime_control_by(&self, px: f32) -> f32 {
+        self.ime_controller.control_by(px)
+    }
+
+    /// Lets go of the keyboard moved by hand (C++'s `imeControlEnd`).
+    pub fn ime_control_end(&self, velocity: f32) {
+        self.ime_controller.control_end(velocity);
+    }
+
+    /// Whether the keyboard is being moved by hand (C++'s `imeControlling`).
+    pub fn ime_controlling(&self) -> bool {
+        self.ime_controller.is_controlling()
+    }
+
+    /// What the system UI covers, as last set.
+    pub fn system_insets(&self) -> SystemInsets {
+        kompoz_runtime::without_read_observation(|| self.system_insets.get())
     }
 
     /// The platform's gesture thresholds (LocalViewConfiguration).
@@ -390,6 +453,10 @@ impl KompozHost {
             break;
         }
         self.owner.dispatch_semantics_changes();
+        if self.owner.take_gesture_exclusion_changed() {
+            let rects = self.owner.gesture_exclusion();
+            self.platform.get().system_gesture_exclusion(&rects);
+        }
         let redraw = self.owner.take_needs_draw();
         if self.keep_check.get() {
             self.check_kept();
@@ -542,6 +609,32 @@ impl KompozHost {
         crate::input::rotary_event(self, event)
     }
 
+    /// An indirect pointer event (a touchpad not over the window, a remote's swipe surface), along the focused path
+    /// (Compose's `sendIndirectPointerEvent`); whether a node consumed it.
+    pub fn send_indirect_pointer_event(&self, event: &IndirectPointerEvent) -> bool {
+        crate::input::indirect_pointer_event(self, event)
+    }
+
+    /// One indirect pointer pressed, moved or let go at `position` (on its device) at `time_nanos` (-1: the last
+    /// frame's): an event made with where it was before, along the focused path. Whether a node consumed it.
+    pub fn indirect_pointer(
+        &self,
+        r#type: IndirectPointerEventType,
+        pointer_id: i64,
+        position: Offset,
+        pressure: f32,
+        time_nanos: i64,
+        axis: IndirectPointerEventPrimaryDirectionalMotionAxis,
+    ) -> bool {
+        let t = self.event_time(time_nanos);
+        crate::input::indirect_pointer(self, r#type, pointer_id, position, pressure, t, axis)
+    }
+
+    /// The indirect pointers' stream called off (Compose's `dispatchIndirectPointerCancel`).
+    pub fn indirect_pointer_cancel(&self) {
+        crate::input::indirect_pointer_cancel(self);
+    }
+
     // ---- Back ----
 
     /// The back scope of the focusable popup or dialog on top, if any.
@@ -674,6 +767,12 @@ impl KompozHost {
     /// Whether a `keep_screen_on` is in the tree: the platform keeps the screen on.
     pub fn keep_screen_on(&self) -> bool {
         self.owner.keep_screen_on.get() > 0
+    }
+
+    /// Where the system's edge swipes are kept off (`system_gesture_exclusion`), px in the window, as of the last
+    /// layout (C++'s `systemGestureExclusion`): the platform is told them as they change.
+    pub fn system_gesture_exclusion(&self) -> Vec<kompoz_graphics::IntRect> {
+        self.owner.gesture_exclusion()
     }
 
     /// Whether something sensitive is in the tree: the platform protects the window.

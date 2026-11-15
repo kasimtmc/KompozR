@@ -8,7 +8,7 @@ use super::target::{
     invalidate_focus, is_target, perform_custom_clear_focus, prepare_to_clear_focus, request_focus, send_focus_event,
 };
 use super::{FocusDirection, FocusState, ancestors};
-use crate::input::{KeyEvent, KeyEventType, RotaryScrollEvent};
+use crate::input::{IndirectPointerEvent, KeyEvent, KeyEventType, PointerEventPass, RotaryScrollEvent};
 use crate::modifier::{ModifierNode, NodeCell, NodeCx, NodeKind, NodeRc, dispatch_for_kind};
 use crate::node::{LayoutNode, Owner};
 use kompoz_graphics::{LayoutDirection, Rect};
@@ -374,6 +374,61 @@ impl FocusOwner {
             return true;
         }
         outer.iter().any(post)
+    }
+
+    /// Sends an indirect pointer event along the focused path (Compose's `dispatchIndirectPointerEvent`): the
+    /// nearest indirect pointer node at or above the focused target and those above it, in the Initial pass from the
+    /// root down, the Main pass from it up, the Final pass down. Whether a node consumed a change.
+    pub(crate) fn dispatch_indirect_pointer_event(&self, event: &IndirectPointerEvent) -> bool {
+        self.process_invalidations();
+        let Some(node) = self.focused_indirect_pointer_node() else { return false };
+        let outer = ancestors(&node, NodeKind::IndirectPointerInput);
+        let send = |n: &NodeRc, pass: PointerEventPass| {
+            dispatch_kind(n, NodeKind::IndirectPointerInput, &mut |c| {
+                let mut x = c.node.borrow_mut();
+                if let Some(i) = x.as_indirect_pointer_input() {
+                    i.on_indirect_pointer_event(event, pass);
+                }
+                false
+            });
+        };
+        for n in outer.iter().rev() {
+            send(n, PointerEventPass::Initial);
+        }
+        send(&node, PointerEventPass::Initial);
+        send(&node, PointerEventPass::Main);
+        for n in &outer {
+            send(n, PointerEventPass::Main);
+        }
+        for n in outer.iter().rev() {
+            send(n, PointerEventPass::Final);
+        }
+        send(&node, PointerEventPass::Final);
+        event.changes.iter().any(|c| c.is_consumed())
+    }
+
+    /// Cancels the indirect pointer stream along the focused path, from the nearest node up (Compose's
+    /// `dispatchIndirectPointerCancel`).
+    pub(crate) fn dispatch_indirect_pointer_cancel(&self) {
+        let Some(node) = self.focused_indirect_pointer_node() else { return };
+        let mut path = vec![node.clone()];
+        path.extend(ancestors(&node, NodeKind::IndirectPointerInput));
+        for n in &path {
+            dispatch_kind(n, NodeKind::IndirectPointerInput, &mut |c| {
+                let mut x = c.node.borrow_mut();
+                if let Some(i) = x.as_indirect_pointer_input() {
+                    i.on_cancel_indirect_pointer_input();
+                }
+                false
+            });
+        }
+    }
+
+    /// The nearest indirect pointer node at or above the focused target.
+    fn focused_indirect_pointer_node(&self) -> Option<NodeRc> {
+        let root = self.root_focus_node()?;
+        let active = scoped_active(&root)?;
+        nearest_ancestor_including_self(&active, NodeKind::IndirectPointerInput)
     }
 
     /// Compose's `validateKeyEvent`: a key up is passed on only if its down was.

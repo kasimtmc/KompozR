@@ -1,5 +1,6 @@
 //! Focus restoration (Compose's FocusRestorer.kt): a target notes which child had the focus when the focus left
-//! it (by the child's composite key), and `Modifier.focus_restorer` sends the focus back there when it comes in.
+//! it (by the child's composite key, registered with the saveable state registry so it outlives the process), and
+//! `Modifier.focus_restorer` sends the focus back there when it comes in.
 
 use super::requester::FocusRequester;
 use super::target::{self, with_target};
@@ -7,11 +8,17 @@ use super::{FocusPropertiesModifierNode, children};
 use crate::focus::properties::{FocusEnterExitScope, FocusProperties};
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCell, NodeCx, NodeKind, NodeRc};
 use crate::node_capabilities;
-use kompoz_runtime::named;
+use kompoz_runtime::{LocalSaveableStateRegistry, SavedValue, named};
 use std::rc::{Rc, Weak};
 
-/// Notes, at `cell` (a target with the focus in it), the child target the focus is in (Compose's
-/// `saveFocusedChild`).
+/// What the child a target noted is saved under in the host's state: "pfc" and the target's composite key
+/// (Compose's `PrevFocusedChild`).
+fn restoration_key(cell: &NodeRc) -> Option<String> {
+    cell.layout_node().map(|n| format!("pfc{}", n.composite_key()))
+}
+
+/// Notes, at `cell` (a target with the focus in it), the child target the focus is in, and registers it with the
+/// saveable state registry where it is, so it outlives the process (Compose's `saveFocusedChild`).
 pub(crate) fn save_focused_child(cell: &NodeRc) -> bool {
     if !target::focus_state(cell).has_focus() {
         return false;
@@ -19,15 +26,39 @@ pub(crate) fn save_focused_child(cell: &NodeRc) -> bool {
     for child in children(cell, NodeKind::FocusTarget) {
         if target::focus_state(&child).has_focus() {
             let Some(key) = child.layout_node().map(|n| n.composite_key()) else { return false };
-            with_target(cell, |t| t.previously_focused_child_hash = Some(key));
+            let registry = NodeCx::new(cell).current_value_of(&LocalSaveableStateRegistry);
+            let entry = match (registry, restoration_key(cell)) {
+                (Some(registry), Some(name)) => {
+                    Some(registry.register_provider(&name, move || Some(SavedValue::Int(key as i64))))
+                }
+                _ => None,
+            };
+            let old = with_target(cell, |t| {
+                t.previously_focused_child_hash = Some(key);
+                std::mem::replace(&mut t.focus_restoration_entry, entry)
+            });
+            if let Some(old) = old.flatten() {
+                old.unregister();
+            }
             return true;
         }
     }
     false
 }
 
-/// Moves the focus back to the child target noted at `cell` (Compose's `restoreFocusedChild`).
+/// Moves the focus back to the child target noted at `cell` (Compose's `restoreFocusedChild`): noted since it was
+/// made, or, after the host's state was saved and given back, what the registry gives back for it.
 pub(crate) fn restore_focused_child(cell: &NodeRc) -> bool {
+    if with_target(cell, |t| t.previously_focused_child_hash).flatten().is_none() {
+        let registry = NodeCx::new(cell).current_value_of(&LocalSaveableStateRegistry);
+        let restored = registry
+            .zip(restoration_key(cell))
+            .and_then(|(registry, name)| registry.consume_restored(&name))
+            .and_then(|v| v.as_int());
+        if let Some(key) = restored {
+            with_target(cell, |t| t.previously_focused_child_hash = Some(key as u64));
+        }
+    }
     let Some(key) = with_target(cell, |t| t.previously_focused_child_hash).flatten() else { return false };
     for child in children(cell, NodeKind::FocusTarget) {
         if child.meta.attached.get() && child.layout_node().is_some_and(|n| n.composite_key() == key) {

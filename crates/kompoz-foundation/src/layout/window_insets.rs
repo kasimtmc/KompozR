@@ -2,9 +2,9 @@
 //! gesture edges) reaches into the window on each side, the kinds the platform reports, and their arithmetic.
 
 use super::padding::PaddingValues;
-use kompoz_graphics::{Density, Dp, LayoutDirection, UnitExt};
-use kompoz_runtime::{MutableState, mutable_state_of, named};
-use kompoz_ui::platform::{Insets, LocalDensity, LocalSystemInsets, SystemInsets};
+use kompoz_graphics::{Density, Dp, LayoutDirection, Path, UnitExt};
+use kompoz_runtime::{MutableState, mutable_state_of, named, without_read_observation};
+use kompoz_ui::platform::{Insets, InsetsKind, LocalDensity, LocalSystemInsets, SystemInsetsHolder};
 use std::cell::RefCell;
 use std::fmt;
 use std::ops::Add;
@@ -14,8 +14,8 @@ use std::rc::Rc;
 /// direction (Compose's WindowInsets): fixed sides (in px or dp), one of the kinds the platform reports
 /// ([`status_bars`](WindowInsets::status_bars) and the others), one worked out from others (`union`, `exclude`,
 /// `add`, `only`), padding values, a [`MutableWindowInsets`], or what a [`CustomWindowInsets`] works out. Equal
-/// when made the same way of equal parts (a kind: of equal values; a mutable or custom one: when it is the same
-/// one).
+/// when made the same way of equal parts (a kind: the same kind of the same window, whatever it covers now; a
+/// mutable or custom one: when it is the same one).
 #[derive(Clone, PartialEq)]
 pub struct WindowInsets {
     repr: Repr,
@@ -25,8 +25,11 @@ pub struct WindowInsets {
 enum Repr {
     Fixed { left: i32, top: i32, right: i32, bottom: i32 },
     FixedDp { left: Dp, top: Dp, right: Dp, bottom: Dp },
-    // A kind the platform reports (Compose's ValueInsets), by its name.
+    // A fixed value, named (Compose's ValueInsets).
     Value { name: &'static str, insets: Insets },
+    // A kind the platform reports, read live from the host's states (Compose's AndroidWindowInsets and the
+    // holder's ValueInsets), by its name.
+    System { name: &'static str, kind: SystemKind, holder: SystemInsetsHolder },
     Union(Rc<WindowInsets>, Rc<WindowInsets>),
     Exclude(Rc<WindowInsets>, Rc<WindowInsets>),
     Added(Rc<WindowInsets>, Rc<WindowInsets>),
@@ -75,6 +78,7 @@ impl WindowInsets {
             Repr::Fixed { left, .. } => *left,
             Repr::FixedDp { left, .. } => density.round_to_px(*left),
             Repr::Value { insets, .. } => insets.left,
+            Repr::System { kind, holder, .. } => kind.insets(holder).left,
             Repr::Union(a, b) => a.get_left(density, layout_direction).max(b.get_left(density, layout_direction)),
             Repr::Exclude(a, b) => {
                 (a.get_left(density, layout_direction) - b.get_left(density, layout_direction)).max(0)
@@ -100,6 +104,7 @@ impl WindowInsets {
             Repr::Fixed { top, .. } => *top,
             Repr::FixedDp { top, .. } => density.round_to_px(*top),
             Repr::Value { insets, .. } => insets.top,
+            Repr::System { kind, holder, .. } => kind.insets(holder).top,
             Repr::Union(a, b) => a.get_top(density).max(b.get_top(density)),
             Repr::Exclude(a, b) => (a.get_top(density) - b.get_top(density)).max(0),
             Repr::Added(a, b) => a.get_top(density) + b.get_top(density),
@@ -122,6 +127,7 @@ impl WindowInsets {
             Repr::Fixed { right, .. } => *right,
             Repr::FixedDp { right, .. } => density.round_to_px(*right),
             Repr::Value { insets, .. } => insets.right,
+            Repr::System { kind, holder, .. } => kind.insets(holder).right,
             Repr::Union(a, b) => a.get_right(density, layout_direction).max(b.get_right(density, layout_direction)),
             Repr::Exclude(a, b) => {
                 (a.get_right(density, layout_direction) - b.get_right(density, layout_direction)).max(0)
@@ -147,6 +153,7 @@ impl WindowInsets {
             Repr::Fixed { bottom, .. } => *bottom,
             Repr::FixedDp { bottom, .. } => density.round_to_px(*bottom),
             Repr::Value { insets, .. } => insets.bottom,
+            Repr::System { kind, holder, .. } => kind.insets(holder).bottom,
             Repr::Union(a, b) => a.get_bottom(density).max(b.get_bottom(density)),
             Repr::Exclude(a, b) => (a.get_bottom(density) - b.get_bottom(density)).max(0),
             Repr::Added(a, b) => a.get_bottom(density) + b.get_bottom(density),
@@ -245,6 +252,8 @@ impl PartialEq for Repr {
             }
             // (Compose's ValueInsets: equal values, whatever the name)
             (Repr::Value { insets: a, .. }, Repr::Value { insets: b, .. }) => a == b,
+            // (Compose's AndroidWindowInsets: the same kind of the same window)
+            (Repr::System { kind: a, holder: h, .. }, Repr::System { kind: b, holder: g, .. }) => a == b && h == g,
             (Repr::Union(a, b), Repr::Union(c, d))
             | (Repr::Exclude(a, b), Repr::Exclude(c, d))
             | (Repr::Added(a, b), Repr::Added(c, d)) => a == c && b == d,
@@ -272,6 +281,14 @@ impl fmt::Debug for WindowInsets {
                 "{name}(left={}, top={}, right={}, bottom={})",
                 insets.left, insets.top, insets.right, insets.bottom
             ),
+            Repr::System { name, kind, holder } => {
+                let insets = without_read_observation(|| kind.insets(holder));
+                write!(
+                    f,
+                    "{name}(left={}, top={}, right={}, bottom={})",
+                    insets.left, insets.top, insets.right, insets.bottom
+                )
+            }
             Repr::Union(a, b) => write!(f, "({a:?} ∪ {b:?})"),
             Repr::Exclude(a, b) => write!(f, "({a:?} - {b:?})"),
             Repr::Added(a, b) => write!(f, "({a:?} + {b:?})"),
@@ -301,107 +318,251 @@ fn side_max(a: Insets, b: Insets) -> Insets {
     Insets::new(a.left.max(b.left), a.top.max(b.top), a.right.max(b.right), a.bottom.max(b.bottom))
 }
 
+/// What a kind the platform reports reads of the host's states.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SystemKind {
+    Kind(InsetsKind),
+    /// The status bars, the navigation bars and the caption bar (Android's systemBars type).
+    SystemBars,
+    IgnoringVisibility(InsetsKind),
+    SystemBarsIgnoringVisibility,
+    ImeAnimationSource,
+    ImeAnimationTarget,
+}
+
+impl SystemKind {
+    /// Its insets now (each state it reads read: what reads them is told when the platform reports others).
+    fn insets(self, holder: &SystemInsetsHolder) -> Insets {
+        let ignoring = |kind| holder.ignoring_visibility(kind).unwrap_or(Insets::Zero);
+        match self {
+            SystemKind::Kind(kind) => holder.insets(kind),
+            SystemKind::SystemBars => side_max(
+                side_max(holder.insets(InsetsKind::StatusBars), holder.insets(InsetsKind::NavigationBars)),
+                holder.insets(InsetsKind::CaptionBar),
+            ),
+            SystemKind::IgnoringVisibility(kind) => ignoring(kind),
+            SystemKind::SystemBarsIgnoringVisibility => side_max(
+                side_max(ignoring(InsetsKind::StatusBars), ignoring(InsetsKind::NavigationBars)),
+                ignoring(InsetsKind::CaptionBar),
+            ),
+            SystemKind::ImeAnimationSource => {
+                holder.animation(InsetsKind::Ime).map_or_else(|| holder.insets(InsetsKind::Ime), |a| a.source)
+            }
+            SystemKind::ImeAnimationTarget => {
+                holder.animation(InsetsKind::Ime).map_or_else(|| holder.insets(InsetsKind::Ime), |a| a.target)
+            }
+        }
+    }
+}
+
 /// The kinds of insets the platform reports (Compose's `WindowInsets.Companion` properties, Android's
-/// WindowInsetsCompat types), read from `LocalSystemInsets` (what `KompozHost::set_system_insets` sets): read
-/// them in a kompozable body, which composes again when the platform reports others (elsewhere they are what
-/// nothing provides: none).
+/// WindowInsetsCompat types). Each reads the host's states for its kind (what `KompozHost::set_system_insets`
+/// sets) as it is asked for its sides: a layout measuring by one measures again when the platform reports another
+/// value, and nothing composes again (Compose's AndroidWindowInsets, backed by states). These getters find the
+/// host's states through `LocalSystemInsets`, read in a kompozable body (elsewhere they are what nothing provides:
+/// none); the paddings by a kind (`status_bars_padding()` and the others) find them where they are attached.
 impl WindowInsets {
-    fn system() -> SystemInsets {
+    fn system(name: &'static str, kind: SystemKind, holder: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::of(Repr::System { name, kind, holder: holder.clone() })
+    }
+
+    fn holder() -> SystemInsetsHolder {
         LocalSystemInsets.current()
+    }
+
+    pub(super) fn status_bars_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("statusBars", SystemKind::Kind(InsetsKind::StatusBars), h)
+    }
+    pub(super) fn navigation_bars_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("navigationBars", SystemKind::Kind(InsetsKind::NavigationBars), h)
+    }
+    pub(super) fn caption_bar_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("captionBar", SystemKind::Kind(InsetsKind::CaptionBar), h)
+    }
+    pub(super) fn system_bars_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("systemBars", SystemKind::SystemBars, h)
+    }
+    pub(super) fn ime_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("ime", SystemKind::Kind(InsetsKind::Ime), h)
+    }
+    pub(super) fn display_cutout_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("displayCutout", SystemKind::Kind(InsetsKind::DisplayCutout), h)
+    }
+    pub(super) fn system_gestures_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("systemGestures", SystemKind::Kind(InsetsKind::SystemGestures), h)
+    }
+    pub(super) fn mandatory_system_gestures_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("mandatorySystemGestures", SystemKind::Kind(InsetsKind::MandatorySystemGestures), h)
+    }
+    pub(super) fn tappable_element_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("tappableElement", SystemKind::Kind(InsetsKind::TappableElement), h)
+    }
+    pub(super) fn waterfall_of(h: &SystemInsetsHolder) -> WindowInsets {
+        WindowInsets::system("waterfall", SystemKind::Kind(InsetsKind::Waterfall), h)
+    }
+    pub(super) fn safe_drawing_of(h: &SystemInsetsHolder) -> WindowInsets {
+        Self::system_bars_of(h).union(&Self::ime_of(h)).union(&Self::display_cutout_of(h))
+    }
+    pub(super) fn safe_gestures_of(h: &SystemInsetsHolder) -> WindowInsets {
+        Self::tappable_element_of(h)
+            .union(&Self::mandatory_system_gestures_of(h))
+            .union(&Self::system_gestures_of(h))
+            .union(&Self::waterfall_of(h))
+    }
+    pub(super) fn safe_content_of(h: &SystemInsetsHolder) -> WindowInsets {
+        Self::safe_drawing_of(h).union(&Self::safe_gestures_of(h))
     }
 
     /// The status bars (Compose's `statusBars`).
     pub fn status_bars() -> WindowInsets {
-        WindowInsets::value("statusBars", Self::system().status_bars)
+        Self::status_bars_of(&Self::holder())
     }
 
     /// The navigation bars, which interactive UI keeps clear of (Compose's `navigationBars`).
     pub fn navigation_bars() -> WindowInsets {
-        WindowInsets::value("navigationBars", Self::system().navigation_bars)
+        Self::navigation_bars_of(&Self::holder())
     }
 
     /// A freeform window's title bar (Compose's `captionBar`).
     pub fn caption_bar() -> WindowInsets {
-        WindowInsets::value("captionBar", Self::system().caption_bar)
+        Self::caption_bar_of(&Self::holder())
     }
 
     /// The status bars, the navigation bars and the caption bar (Compose's `systemBars`).
     pub fn system_bars() -> WindowInsets {
-        let s = Self::system();
-        WindowInsets::value("systemBars", side_max(side_max(s.status_bars, s.navigation_bars), s.caption_bar))
+        Self::system_bars_of(&Self::holder())
     }
 
     /// The software keyboard, where it is as it slides in or out (Compose's `ime`).
     pub fn ime() -> WindowInsets {
-        WindowInsets::value("ime", Self::system().ime)
+        Self::ime_of(&Self::holder())
     }
 
     /// Where the keyboard was when it started sliding (Compose's `imeAnimationSource`): where it is when it
     /// isn't moving.
     pub fn ime_animation_source() -> WindowInsets {
-        let s = Self::system();
-        WindowInsets::value("imeAnimationSource", if s.ime_animating { s.ime_animation_source } else { s.ime })
+        WindowInsets::system("imeAnimationSource", SystemKind::ImeAnimationSource, &Self::holder())
     }
 
     /// Where the keyboard is sliding to (Compose's `imeAnimationTarget`): where it is when it isn't moving, so a
     /// layout can go straight to where it ends up.
     pub fn ime_animation_target() -> WindowInsets {
-        let s = Self::system();
-        WindowInsets::value("imeAnimationTarget", if s.ime_animating { s.ime_animation_target } else { s.ime })
-    }
-
-    /// Whether the keyboard is up or on its way up, not on its way down (Compose's `isImeVisible`).
-    pub fn is_ime_visible() -> bool {
-        Self::system().ime_visible
+        WindowInsets::system("imeAnimationTarget", SystemKind::ImeAnimationTarget, &Self::holder())
     }
 
     /// Where a display cutout (a camera's) is, which important content keeps clear of (Compose's
     /// `displayCutout`).
     pub fn display_cutout() -> WindowInsets {
-        WindowInsets::value("displayCutout", Self::system().display_cutout)
+        Self::display_cutout_of(&Self::holder())
     }
 
     /// The edges where swipes go to the system: back, home (Compose's `systemGestures`).
     pub fn system_gestures() -> WindowInsets {
-        WindowInsets::value("systemGestures", Self::system().system_gestures)
+        Self::system_gestures_of(&Self::holder())
     }
 
     /// The edges where the system's gestures always win, whatever the app excludes (Compose's
     /// `mandatorySystemGestures`).
     pub fn mandatory_system_gestures() -> WindowInsets {
-        WindowInsets::value("mandatorySystemGestures", Self::system().mandatory_system_gestures)
+        Self::mandatory_system_gestures_of(&Self::holder())
     }
 
     /// What a tap reaches the system through: a taskbar, a three-button navigation bar (Compose's
     /// `tappableElement`).
     pub fn tappable_element() -> WindowInsets {
-        WindowInsets::value("tappableElement", Self::system().tappable_element)
+        Self::tappable_element_of(&Self::holder())
     }
 
     /// The curved edges of a waterfall display (Compose's `waterfall`).
     pub fn waterfall() -> WindowInsets {
-        WindowInsets::value("waterfall", Self::system().waterfall)
+        Self::waterfall_of(&Self::holder())
     }
 
     /// What content may be drawn over by: the system bars, the keyboard and the display cutout (Compose's
     /// `safeDrawing`).
     pub fn safe_drawing() -> WindowInsets {
-        Self::system_bars().union(&Self::ime()).union(&Self::display_cutout())
+        Self::safe_drawing_of(&Self::holder())
     }
 
     /// Where gestures may be taken for the system's: the tappable elements, the mandatory and other system
     /// gestures, the waterfall (Compose's `safeGestures`).
     pub fn safe_gestures() -> WindowInsets {
-        Self::tappable_element()
-            .union(&Self::mandatory_system_gestures())
-            .union(&Self::system_gestures())
-            .union(&Self::waterfall())
+        Self::safe_gestures_of(&Self::holder())
     }
 
     /// Everything drawn over or gestured on: `safe_drawing` and `safe_gestures` (Compose's `safeContent`), what
     /// touch targets keep clear of.
     pub fn safe_content() -> WindowInsets {
-        Self::safe_drawing().union(&Self::safe_gestures())
+        Self::safe_content_of(&Self::holder())
+    }
+
+    /// What the caption bar would cover shown, whether it is or not (Compose's `captionBarIgnoringVisibility`).
+    pub fn caption_bar_ignoring_visibility() -> WindowInsets {
+        let kind = SystemKind::IgnoringVisibility(InsetsKind::CaptionBar);
+        WindowInsets::system("captionBarIgnoringVisibility", kind, &Self::holder())
+    }
+
+    /// What the navigation bars would cover shown (Compose's `navigationBarsIgnoringVisibility`).
+    pub fn navigation_bars_ignoring_visibility() -> WindowInsets {
+        let kind = SystemKind::IgnoringVisibility(InsetsKind::NavigationBars);
+        WindowInsets::system("navigationBarsIgnoringVisibility", kind, &Self::holder())
+    }
+
+    /// What the status bars would cover shown (Compose's `statusBarsIgnoringVisibility`).
+    pub fn status_bars_ignoring_visibility() -> WindowInsets {
+        let kind = SystemKind::IgnoringVisibility(InsetsKind::StatusBars);
+        WindowInsets::system("statusBarsIgnoringVisibility", kind, &Self::holder())
+    }
+
+    /// What the system bars would cover shown (Compose's `systemBarsIgnoringVisibility`).
+    pub fn system_bars_ignoring_visibility() -> WindowInsets {
+        let kind = SystemKind::SystemBarsIgnoringVisibility;
+        WindowInsets::system("systemBarsIgnoringVisibility", kind, &Self::holder())
+    }
+
+    /// What the tappable elements would cover shown (Compose's `tappableElementIgnoringVisibility`).
+    pub fn tappable_element_ignoring_visibility() -> WindowInsets {
+        let kind = SystemKind::IgnoringVisibility(InsetsKind::TappableElement);
+        WindowInsets::system("tappableElementIgnoringVisibility", kind, &Self::holder())
+    }
+
+    /// Whether the keyboard is up or on its way up, not on its way down (Compose's `isImeVisible`). Read in a
+    /// kompozable body, which composes again when it changes, as the visibilities below.
+    pub fn is_ime_visible() -> bool {
+        Self::holder().is_visible(InsetsKind::Ime)
+    }
+
+    /// Whether the caption bar is shown (Compose's `isCaptionBarVisible`).
+    pub fn is_caption_bar_visible() -> bool {
+        Self::holder().is_visible(InsetsKind::CaptionBar)
+    }
+
+    /// Whether the status bars are shown (Compose's `areStatusBarsVisible`).
+    pub fn are_status_bars_visible() -> bool {
+        Self::holder().is_visible(InsetsKind::StatusBars)
+    }
+
+    /// Whether the navigation bars are shown (Compose's `areNavigationBarsVisible`).
+    pub fn are_navigation_bars_visible() -> bool {
+        Self::holder().is_visible(InsetsKind::NavigationBars)
+    }
+
+    /// Whether the system bars are shown: the status bars, the navigation bars and the caption bar all (Compose's
+    /// `areSystemBarsVisible`, Android's `isVisible` of a set of types).
+    pub fn are_system_bars_visible() -> bool {
+        let h = Self::holder();
+        [InsetsKind::StatusBars, InsetsKind::NavigationBars, InsetsKind::CaptionBar].iter().all(|&k| h.is_visible(k))
+    }
+
+    /// Whether the tappable elements are shown (Compose's `isTappableElementVisible`).
+    pub fn is_tappable_element_visible() -> bool {
+        Self::holder().is_visible(InsetsKind::TappableElement)
+    }
+
+    /// The display cutouts' shape, px in the window, where the platform tells it (Compose's `cutoutPath`); read in
+    /// a kompozable body, which composes again when it changes.
+    pub fn cutout_path() -> Option<Path> {
+        Self::holder().cutout_path()
     }
 }
 

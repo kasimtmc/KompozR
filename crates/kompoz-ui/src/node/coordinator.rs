@@ -52,6 +52,8 @@ pub struct NodeCoordinator {
     /// Placing only itself, not what it wraps (Compose's `isShallowPlacing`).
     pub(crate) shallow_placing: Cell<bool>,
     released: Cell<bool>,
+    /// The rulers it provides and who read them (made when first needed).
+    pub(crate) rulers: RefCell<Option<Rc<super::rulers::CoordinatorRulers>>>,
     this: Weak<NodeCoordinator>,
 }
 
@@ -73,6 +75,7 @@ impl NodeCoordinator {
             placing_for_alignment: Cell::new(false),
             shallow_placing: Cell::new(false),
             released: Cell::new(false),
+            rulers: RefCell::new(None),
             this: this.clone(),
         })
     }
@@ -398,6 +401,10 @@ impl NodeCoordinator {
             }
         }
         self.z_index.set(z_index);
+        if !self.placing_for_alignment.get() {
+            let result = self.measure_result();
+            self.capture_rulers_if_needed(result.as_ref());
+        }
     }
 
     /// Compose's `invalidateAlignmentLinesFromPositionChange`: the inner coordinator moving changes its layout
@@ -436,6 +443,7 @@ impl NodeCoordinator {
     /// Its layout modifier node left the chain (Compose's `onRelease`).
     pub(crate) fn on_release(&self) {
         self.released.set(true);
+        self.reset_provided_rulers();
         self.invalidate_parent_layer();
         self.release_layer();
         if self.position.get() != IntOffset::Zero
@@ -899,6 +907,10 @@ impl Measurable for NodeCoordinator {
             CoordinatorKind::Modifier { .. } => self.perform_measure(constraints),
         }
         Placeable::new(self.rc())
+    }
+
+    fn retain(&self) -> Option<Rc<dyn Measurable>> {
+        Some(self.rc())
     }
 }
 

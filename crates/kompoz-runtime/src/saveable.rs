@@ -2,7 +2,8 @@
 //! a [`SaveableStateHolder`]'s provider (a navigation entry on the back stack, a tab that isn't shown). Values are
 //! also written out with the host's state (a [`SaveableStateRegistry`] the host provides), which Android keeps
 //! while it ends the app in the background, and come back with it. Outside any provider a value goes when its
-//! composable leaves.
+//! composable leaves. What isn't a composable's (a node's) registers its values by key with the registry
+//! ([`SaveableStateRegistry::register_provider`], Compose's) and asks for them back by key.
 
 use crate::composer::{Composer, GroupId, key_of, mix_key, stable_hash};
 use crate::kompozable;
@@ -32,13 +33,53 @@ struct Registry {
     /// provider's values as it goes; else gone once the composition settles), and whether the provider is there.
     leaving: Vec<u64>,
     present: bool,
+    /// Values registered by key (Compose's `registerProvider`), in the order they were, each by its entry's id.
+    providers: Vec<(String, u64, Rc<dyn Fn() -> Option<SavedValue>>)>,
+    next_provider: u64,
+    /// From a saved state, the values registered by key not consumed yet (Compose's `restored`).
+    restored_by_key: HashMap<String, Vec<SavedValue>>,
+    /// Which values may be saved (Compose's `canBeSaved`; none: any).
+    can_be_saved: Option<Rc<dyn Fn(&SavedValue) -> bool>>,
 }
+
+/// Where a registry writes the values registered by key, beside those of `remember_saveable` (named by their
+/// positions, all numbers).
+const PROVIDED: &str = "providers";
 
 impl Registry {
     fn save(&self) -> SavedValue {
         let mut out: Vec<(String, SavedValue)> =
             self.restored.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(); // not back yet: kept
         out.extend(self.savers.iter().map(|(k, save)| (k.to_string(), save())));
+        // (Compose's performSave: what was restored and not consumed yet kept, then the providers' values)
+        let mut by_key: std::collections::BTreeMap<String, Vec<SavedValue>> =
+            self.restored_by_key.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut keys: Vec<&String> = Vec::new();
+        for (k, _, _) in &self.providers {
+            if !keys.contains(&k) {
+                keys.push(k);
+            }
+        }
+        for key in keys {
+            let values: Vec<Option<SavedValue>> =
+                self.providers.iter().filter(|(k, _, _)| k == key).map(|(_, _, p)| p()).collect();
+            for v in values.iter().flatten() {
+                assert!(self.can_be_saved(v), "kompoz: a value registered under {key:?} can't be saved");
+            }
+            if values.len() == 1 {
+                if let Some(v) = values.into_iter().next().flatten() {
+                    by_key.insert(key.clone(), vec![v]);
+                }
+            } else {
+                by_key.insert(key.clone(), values.into_iter().map(Option::unwrap_or_default).collect());
+            }
+        }
+        if !by_key.is_empty() {
+            out.push((
+                PROVIDED.to_string(),
+                SavedValue::map(by_key.into_iter().map(|(k, v)| (k, SavedValue::list(v)))),
+            ));
+        }
         SavedValue::map(out)
     }
     fn restore(&mut self, saved: &SavedValue) {
@@ -48,7 +89,15 @@ impl Registry {
                     self.restored.insert(key, value.clone());
                 }
             }
+            if let Some(provided) = saved.get(PROVIDED).as_map() {
+                for (key, values) in provided {
+                    self.restored_by_key.insert(key.clone(), values.as_list().unwrap_or_default().to_vec());
+                }
+            }
         }
+    }
+    fn can_be_saved(&self, value: &SavedValue) -> bool {
+        self.can_be_saved.as_ref().is_none_or(|f| f(value))
     }
     fn drop_value(&mut self, key: u64) -> Option<(TypeId, Box<dyn Any>)> {
         self.savers.remove(&key);
@@ -56,16 +105,10 @@ impl Registry {
     }
 }
 
-#[derive(Clone)]
-struct RegistryRef(Rc<RefCell<Registry>>);
-
-impl PartialEq for RegistryRef {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-static LocalSaveableRegistry: KompozitionLocal<Option<RegistryRef>> = KompozitionLocal::new(|| None);
+/// The registry `remember_saveable` and what registers values by key keep them in (Compose's
+/// LocalSaveableStateRegistry): the host's, or a `SaveableStateHolder` provider's.
+pub static LocalSaveableStateRegistry: KompozitionLocal<Option<SaveableStateRegistry>> =
+    KompozitionLocal::new_static(|| None);
 
 thread_local! {
     /// Registries with values whose composables left.
@@ -213,7 +256,7 @@ pub fn remember_saveable_keyed_with<K: PartialEq + Clone + 'static, T: Clone + '
 
 fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: impl FnOnce() -> T, reset: bool) -> T {
     let c = Composer::require();
-    let registry = LocalSaveableRegistry.current();
+    let registry = LocalSaveableStateRegistry.current();
     c.start_group(key);
     if reset {
         // Its registry entry dropped or noted leaving now: made anew below.
@@ -227,12 +270,12 @@ fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: imp
     let value = match kept {
         Some(v) => v,
         None => {
-            let (value, entry) = match &registry {
+            let (value, entry) = match registry.as_ref().map(|r| &r.inner) {
                 None => (init(), Entry { registry: Weak::new(), key: 0 }),
                 Some(r) => {
-                    let boundary = r.0.borrow().boundary;
+                    let boundary = r.borrow().boundary;
                     let key = c.key_below(boundary);
-                    let mut reg = r.0.borrow_mut();
+                    let mut reg = r.borrow_mut();
                     let mut dropped = None;
                     if let Some(i) = reg.leaving.iter().position(|k| *k == key) {
                         // It left with its composable, its provider still there: a new one.
@@ -253,13 +296,13 @@ fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: imp
                             let v = restored.and_then(|s| (saver.restore)(&s)).unwrap_or_else(init); // after the process ended
                             let save = saver.save.clone();
                             let held = v.clone();
-                            let mut reg = r.0.borrow_mut();
+                            let mut reg = r.borrow_mut();
                             reg.values.insert(key, (TypeId::of::<T>(), Box::new(v.clone())));
                             reg.savers.insert(key, Box::new(move || save(&held)));
                             v
                         }
                     };
-                    (value, Entry { registry: Rc::downgrade(&r.0), key })
+                    (value, Entry { registry: Rc::downgrade(r), key })
                 }
             };
             c.set_remembered(Box::new((value.clone(), Rc::new(entry))), None);
@@ -270,11 +313,42 @@ fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: imp
     value
 }
 
-/// The host's registry: the values of the whole composition, written out with the host's state and given back
-/// when the host is made again from it. Provide it at the root with [`ProvideSaveableStateRegistry`].
+/// A registry of saveable values (Compose's SaveableStateRegistry): the host's (the values of the whole composition,
+/// written out with the host's state and given back when the host is made again from it; provide it at the root
+/// with [`ProvideSaveableStateRegistry`]) or a [`SaveableStateHolder`] provider's. Besides `remember_saveable`'s, it
+/// keeps values registered by key ([`register_provider`](SaveableStateRegistry::register_provider)), asked for as
+/// it saves, and gives back those it was restored with ([`consume_restored`](SaveableStateRegistry::consume_restored)).
+/// Clones are the same registry.
 #[derive(Clone)]
 pub struct SaveableStateRegistry {
     inner: Rc<RefCell<Registry>>,
+}
+
+impl PartialEq for SaveableStateRegistry {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+/// What [`SaveableStateRegistry::register_provider`] gives (Compose's SaveableStateRegistry.Entry): unregister it
+/// when the value goes.
+pub struct SaveableStateRegistryEntry {
+    registry: Weak<RefCell<Registry>>,
+    id: u64,
+}
+
+impl SaveableStateRegistryEntry {
+    /// The value no longer saved (Compose's `unregister`).
+    pub fn unregister(self) {
+        if let Some(r) = self.registry.upgrade() {
+            let removed = {
+                let mut r = r.borrow_mut();
+                let at = r.providers.iter().position(|(_, id, _)| *id == self.id);
+                at.map(|i| r.providers.remove(i))
+            };
+            drop(removed);
+        }
+    }
 }
 
 impl SaveableStateRegistry {
@@ -287,8 +361,61 @@ impl SaveableStateRegistry {
         SaveableStateRegistry { inner: Rc::new(RefCell::new(r)) }
     }
 
+    /// The same, saving only the values `can_be_saved` takes (Compose's `SaveableStateRegistry(restored,
+    /// canBeSaved)`).
+    pub fn with_can_be_saved(saved: Option<&SavedValue>, can_be_saved: impl Fn(&SavedValue) -> bool + 'static) -> Self {
+        let registry = SaveableStateRegistry::new(saved);
+        registry.inner.borrow_mut().can_be_saved = Some(Rc::new(can_be_saved));
+        registry
+    }
+
+    /// What it holds, written out (Compose's `performSave`): the values of its `remember_saveable`s and of its
+    /// providers, and what it was restored with and wasn't asked for yet.
     pub fn save(&self) -> SavedValue {
         self.inner.borrow().save()
+    }
+
+    /// Compose's name of [`save`](SaveableStateRegistry::save).
+    pub fn perform_save(&self) -> SavedValue {
+        self.save()
+    }
+
+    /// Gives back, once, the value saved under `key` (the first of them if several were), if it was restored with
+    /// one (Compose's `consumeRestored`).
+    pub fn consume_restored(&self, key: &str) -> Option<SavedValue> {
+        let mut r = self.inner.borrow_mut();
+        let values = r.restored_by_key.get_mut(key)?;
+        let value = (!values.is_empty()).then(|| values.remove(0));
+        if values.is_empty() {
+            r.restored_by_key.remove(key);
+        }
+        value
+    }
+
+    /// Saves what `provider` gives (none: nothing) under `key` whenever the registry is saved, until the entry is
+    /// unregistered (Compose's `registerProvider`). Panics on a blank key.
+    pub fn register_provider(
+        &self,
+        key: &str,
+        provider: impl Fn() -> Option<SavedValue> + 'static,
+    ) -> SaveableStateRegistryEntry {
+        assert!(!key.trim().is_empty(), "kompoz: registered key is empty or blank");
+        let mut r = self.inner.borrow_mut();
+        let id = r.next_provider;
+        r.next_provider += 1;
+        r.providers.push((key.to_string(), id, Rc::new(provider)));
+        SaveableStateRegistryEntry { registry: Rc::downgrade(&self.inner), id }
+    }
+
+    /// Whether it can save `value` (Compose's `canBeSaved`).
+    pub fn can_be_saved(&self, value: &SavedValue) -> bool {
+        self.inner.borrow().can_be_saved(value)
+    }
+
+    /// Takes `saved` as what to give back (C++'s `restoreState` of a host made already, before its first frame):
+    /// what composes from now on finds it.
+    pub fn restore(&self, saved: &SavedValue) {
+        self.inner.borrow_mut().restore(saved);
     }
 }
 
@@ -296,7 +423,7 @@ impl SaveableStateRegistry {
 #[kompozable(inline)]
 pub fn ProvideSaveableStateRegistry(registry: &SaveableStateRegistry, content: impl FnOnce()) {
     registry.inner.borrow_mut().boundary = Some(Composer::require().current_group());
-    provide_here(vec![LocalSaveableRegistry.provides(Some(RegistryRef(registry.inner.clone()))).0], content);
+    provide_here(vec![LocalSaveableStateRegistry.provides(Some(registry.clone())).0], content);
 }
 
 /// Keeps the `remember_saveable` values of content shown under different keys (Compose's
@@ -343,7 +470,8 @@ impl SaveableStateHolder {
         }
         let presence = remember(|| Rc::new(Presence(RefCell::new(Weak::new()))));
         *presence.0.borrow_mut() = Rc::downgrade(&registry);
-        provide_here(vec![LocalSaveableRegistry.provides(Some(RegistryRef(registry))).0], content);
+        let registry = SaveableStateRegistry { inner: registry };
+        provide_here(vec![LocalSaveableStateRegistry.provides(Some(registry)).0], content);
         c.end_group();
     }
 

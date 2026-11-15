@@ -15,7 +15,7 @@ use kompoz_ui::graphics_context::{
 /// A `draw_shadow` call (drop_shadow, inner_shadow): where, its corners, the shadow, and the blend mode it was drawn
 /// with.
 #[derive(Clone, Debug)]
-pub struct ShapeShadow {
+pub struct RecordedShapeShadow {
     pub rect: Rect,
     pub radii: CornerRadii,
     pub shadow: Shadow,
@@ -25,7 +25,7 @@ pub struct ShapeShadow {
 
 /// A `draw_shadow_path` call (an outline shape's): the outline's bounds where it is.
 #[derive(Clone, Debug)]
-pub struct PathShadow {
+pub struct RecordedPathShadow {
     pub bounds: Rect,
     pub shadow: Shadow,
     pub inner: bool,
@@ -33,13 +33,13 @@ pub struct PathShadow {
 
 /// A `draw_elevation_shadow` call: the outline's bounds where it is, the outline, the shadow.
 #[derive(Clone, Debug)]
-pub struct Elevated {
+pub struct RecordedElevationShadow {
     pub bounds: Rect,
     pub outline: Outline,
     pub shadow: ElevationShadow,
 }
 
-impl Elevated {
+impl RecordedElevationShadow {
     /// How high (a flat one's).
     pub fn elevation(&self) -> f32 {
         self.shadow.plane[2]
@@ -48,7 +48,7 @@ impl Elevated {
 
 /// A `draw_backdrop` call.
 #[derive(Clone, Debug)]
-pub struct Backdrop {
+pub struct RecordedBackdrop {
     pub bounds: Rect,
     pub effect: RenderEffect,
     pub alpha: f32,
@@ -56,7 +56,7 @@ pub struct Backdrop {
 
 /// A `draw_arc` call.
 #[derive(Clone, Copy, Debug)]
-pub struct Arc {
+pub struct RecordedArc {
     pub oval: Rect,
     pub start: f32,
     pub sweep: f32,
@@ -67,7 +67,7 @@ pub struct Arc {
 /// A `push_clip_round_rect` or `push_clip_path` call: its bounds (where it is), corners, path (around the origin it
 /// was clipped at) and op.
 #[derive(Clone, Debug)]
-pub struct ClipShape {
+pub struct RecordedClipShape {
     pub bounds: Rect,
     pub radii: CornerRadii,
     pub path: Option<Path>,
@@ -76,7 +76,7 @@ pub struct ClipShape {
 
 /// A `draw_vertices` call, with the blend mode and the filters in effect.
 #[derive(Clone, Debug)]
-pub struct Mesh {
+pub struct RecordedMesh {
     pub vertices: Vertices,
     pub origin: Offset,
     pub blend_mode: BlendMode,
@@ -166,8 +166,8 @@ pub struct RecordingCanvas {
     pub shadow_baselines: Vec<Offset>,
     pub shadow_colors: Vec<Color>,
     pub shadow_blurs: Vec<f32>,
-    pub shadows: Vec<ShapeShadow>,
-    pub path_shadows: Vec<PathShadow>,
+    pub shadows: Vec<RecordedShapeShadow>,
+    pub path_shadows: Vec<RecordedPathShadow>,
     /// `draw_shape_shadow` calls with a brush (not one color): where the shape is.
     pub brushed_shadows: Vec<Rect>,
     /// Each text painted with a brush (in `texts` too, in the color at the area's center).
@@ -176,7 +176,7 @@ pub struct RecordingCanvas {
     /// white as they make it), faded by its alpha, and where it went.
     pub vector_colors: Vec<Color>,
     pub vector_bounds: Vec<Rect>,
-    pub arcs: Vec<Arc>,
+    pub arcs: Vec<RecordedArc>,
     pub image_qualities: Vec<FilterQuality>,
     pub image_alphas: Vec<f32>,
     pub image_blends: Vec<BlendMode>,
@@ -185,11 +185,11 @@ pub struct RecordingCanvas {
     pub mask_alphas: Vec<f32>,
     /// Each outline layer's outline, from its top left.
     pub layer_outlines: Vec<Path>,
-    pub elevation_shadows: Vec<Elevated>,
-    pub backdrops: Vec<Backdrop>,
+    pub elevation_shadows: Vec<RecordedElevationShadow>,
+    pub backdrops: Vec<RecordedBackdrop>,
     /// Each layer's effect (`push_effect_layer`).
     pub layer_effects: Vec<Option<RenderEffect>>,
-    pub clip_shapes: Vec<ClipShape>,
+    pub clip_shapes: Vec<RecordedClipShape>,
     /// Set: what lies outside isn't drawn (as a real screen culls it).
     pub visible: Option<Rect>,
     /// Each drawn path's color (a gradient's at the path's center), stroke width (0: filled, unless a hairline),
@@ -198,7 +198,7 @@ pub struct RecordingCanvas {
     pub path_strokes: Vec<f32>,
     pub path_stroke_styles: Vec<PathStroke>,
     pub path_shapes: Vec<Path>,
-    pub meshes: Vec<Mesh>,
+    pub meshes: Vec<RecordedMesh>,
     /// The light elevation shadows have.
     pub light: ShadowLight,
     saved_translations: Vec<Offset>,
@@ -294,7 +294,7 @@ impl GraphicsContext for RecordingCanvas {
         self.shadow_blurs.push(blur_radius);
     }
     fn draw_arc(&mut self, oval: Rect, start: f32, sweep: f32, stroke_width: f32, color: Color, _: bool) {
-        self.arcs.push(Arc { oval: self.moved(oval), start, sweep, stroke_width, color });
+        self.arcs.push(RecordedArc { oval: self.moved(oval), start, sweep, stroke_width, color });
     }
     fn draw_image(&mut self, image: &ImageBitmap, src: Rect, dst: Rect, alpha: f32, quality: FilterQuality) {
         let white = self.filtered(Color::White);
@@ -341,12 +341,12 @@ impl GraphicsContext for RecordingCanvas {
     }
     fn push_clip_round_rect(&mut self, rect: Rect, radii: CornerRadii, op: ClipOp) {
         self.stack.push('C');
-        self.clip_shapes.push(ClipShape { bounds: self.moved(rect), radii, path: None, op });
+        self.clip_shapes.push(RecordedClipShape { bounds: self.moved(rect), radii, path: None, op });
     }
     fn push_clip_path(&mut self, path: &Path, origin: Offset, op: ClipOp) {
         self.stack.push('C');
         let b = path.get_bounds().translate(origin);
-        self.clip_shapes.push(ClipShape {
+        self.clip_shapes.push(RecordedClipShape {
             bounds: self.moved(b),
             radii: CornerRadii::Zero,
             path: Some(path.clone()),
@@ -385,7 +385,7 @@ impl GraphicsContext for RecordingCanvas {
     }
     fn draw_backdrop(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         self.order.push('b');
-        self.backdrops.push(Backdrop { bounds: self.moved(bounds), effect: effect.clone(), alpha });
+        self.backdrops.push(RecordedBackdrop { bounds: self.moved(bounds), effect: effect.clone(), alpha });
     }
     fn push_blend_mode(&mut self, mode: BlendMode) {
         self.stack.push('B');
@@ -429,7 +429,7 @@ impl GraphicsContext for RecordingCanvas {
         alpha: f32,
     ) {
         self.order.push('v');
-        self.meshes.push(Mesh {
+        self.meshes.push(RecordedMesh {
             vertices: vertices.clone(),
             origin: origin + self.translation,
             blend_mode,
@@ -461,7 +461,7 @@ impl GraphicsContext for RecordingCanvas {
     }
     fn draw_shadow(&mut self, rect: Rect, radii: CornerRadii, shadow: &Shadow, inner: bool) {
         self.order.push('s');
-        self.shadows.push(ShapeShadow {
+        self.shadows.push(RecordedShapeShadow {
             rect: self.moved(rect),
             radii,
             shadow: shadow.clone(),
@@ -471,7 +471,7 @@ impl GraphicsContext for RecordingCanvas {
     }
     fn draw_shadow_path(&mut self, outline: &Path, origin: Offset, shadow: &Shadow, inner: bool) {
         let b = outline.get_bounds().translate(origin);
-        self.path_shadows.push(PathShadow { bounds: self.moved(b), shadow: shadow.clone(), inner });
+        self.path_shadows.push(RecordedPathShadow { bounds: self.moved(b), shadow: shadow.clone(), inner });
     }
     fn light(&self) -> ShadowLight {
         self.light
@@ -479,7 +479,11 @@ impl GraphicsContext for RecordingCanvas {
     fn draw_elevation_shadow(&mut self, outline: &Outline, origin: Offset, shadow: &ElevationShadow) {
         self.order.push('e');
         let b = outline.bounds().translate(origin);
-        self.elevation_shadows.push(Elevated { bounds: self.moved(b), outline: outline.clone(), shadow: *shadow });
+        self.elevation_shadows.push(RecordedElevationShadow {
+            bounds: self.moved(b),
+            outline: outline.clone(),
+            shadow: *shadow,
+        });
     }
     fn push_outline_layer(&mut self, bounds: Rect, outline: &Path, alpha: f32, transform: LayerTransform) {
         self.layer_outlines.push(outline.clone());

@@ -33,7 +33,7 @@ pub use kompoz_macros::{kompozable, kompozable_block, kompozable_lambda, named};
 pub use local::{
     KompozitionLocal, KompozitionLocalContext, KompozitionLocalProvider, KompozitionLocalProviderContext,
     ProvidedValue, current_kompozition_local_context, current_kompozition_local_context_unobserved,
-    kompozition_local_of, static_kompozition_local_of,
+    current_kompozition_local_map, kompozition_local_of, kompozition_local_of_with_policy, static_kompozition_local_of,
 };
 pub use movable::{MovableContent, MovableContentOf, movable_content_of, movable_content_with_param_of};
 pub use read::{observe_reads, record_read, without_read_observation};
@@ -43,9 +43,9 @@ pub use remember::{
     remember_observer_keyed, remember_updated_state, request_frame, request_frame_at, restartable, scoped,
 };
 pub use saveable::{
-    ProvideSaveableStateRegistry, SaveableStateHolder, SaveableStateRegistry, Saver, list_saver, map_saver,
-    remember_saveable, remember_saveable_keyed, remember_saveable_keyed_with, remember_saveable_state_holder,
-    remember_saveable_with,
+    LocalSaveableStateRegistry, ProvideSaveableStateRegistry, SaveableStateHolder, SaveableStateRegistry,
+    SaveableStateRegistryEntry, Saver, list_saver, map_saver, remember_saveable, remember_saveable_keyed,
+    remember_saveable_keyed_with, remember_saveable_state_holder, remember_saveable_with,
 };
 pub use saved_value::{Saveable, SavedValue};
 pub use snapshot::{
