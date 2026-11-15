@@ -1,344 +1,28 @@
 //! Layers, effects and shadows (the C++ Kompoz's checks of them): a layer's alpha is exact; graphics layers composite
 //! as Compose's; effect layers blur as Skia does (against a Gaussian worked out here), progressively as Compose's,
 //! backdrops too; paths' shadows are Compose's, and kept; elevation shadows are Android's; a layer is kept from its
-//! first frame, and kept layers draw as drawn afresh; layer textures come in few sizes; and the effects and
-//! graphics-layers scenes against their pictures. Tests at another px per dp than 1 give C++'s dp coordinates
-//! through `k`.
+//! first frame, and kept layers draw as drawn afresh; layer textures come in few sizes. (The effects and
+//! graphics-layers scenes are compared with their pictures in scenes.) Tests at another px per dp than 1 give C++'s
+//! dp coordinates through `k`.
 
 use crate::exact::{none, worst_against};
-use crate::golden::matches_golden;
+use crate::fonts::{Font, text_at};
 use crate::harness::{Gpu, Pixels, WatchedDevice, max_difference, near};
-use crate::scenes::{about, fill, rgba, shadow, star, xywh};
+use crate::scenes::{about, fill, linear, mixed, oval, rgba, rounded, shadow, star, through_layer, xywh};
 use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{ClearColor, Device, Format, IRect, TextureUsage};
 use kompoz_graphics::{
-    BlendMode, BlurEffect, BlurRadiusSpec, BlurStop, Brush, Color, ColorFilter, ColorMatrix, CompositeShader,
-    CornerRadius, Density, Dp, FilterQuality, ImageBitmap, LayoutDirection, LinearGradientShader, Matrix, Offset,
-    OffsetEffect, Outline, Path, PathStroke, Rect, RenderEffect, RoundRect, RoundedCornerShape, Size, TileMode, blend,
-};
-use kompoz_text::font::{FontCollection, FontFamilyResolverImpl};
-use kompoz_text::shape::{FontRunRequest, ShapeRequest};
-use kompoz_text::{
-    FontStyle, FontSynthesis, FontWeight, GenericFontFamily, Glyph, GlyphRun, LocaleList, TextDraw, TextRunStyle,
+    BlendMode, BlurEffect, BlurRadiusSpec, BlurStop, Brush, Color, ColorFilter, ColorMatrix, CompositeShader, Density,
+    Dp, LayoutDirection, LinearGradientShader, Matrix, Offset, OffsetEffect, Outline, Path, PathStroke, Rect,
+    RenderEffect, RoundedCornerShape, Size, TileMode, blend,
 };
 use kompoz_ui::DisplayList;
-use kompoz_ui::draw::{LayerDraw, draw_layer};
 use kompoz_ui::graphics_context::{
     ClipOp, CornerRadii, ElevationShadow, GraphicsContext, LayerTransform, ShadowLight, default_draw_shadow_path,
 };
 use kompoz_ui::layout::CompositingStrategy;
-use std::rc::Rc;
 
 const TARGET: TextureUsage = TextureUsage::RENDER_TARGET.union(TextureUsage::SAMPLED);
-
-// ---- What the scenes draw with ----------------------------------------------------------------------------------
-
-/// A 16 x 16 checker, its right half at half alpha (C++'s checker()).
-fn checker() -> ImageBitmap {
-    let mut px = vec![0u8; 16 * 16 * 4];
-    for y in 0..16 {
-        for x in 0..16 {
-            let on = ((x / 4) + (y / 4)) % 2 == 0;
-            let p = &mut px[(y * 16 + x) * 4..][..4];
-            p.copy_from_slice(&[
-                if on { 230 } else { 30 },
-                if on { 120 } else { 30 },
-                if on { 20 } else { 160 },
-                if x < 8 { 255 } else { 128 },
-            ]);
-        }
-    }
-    ImageBitmap::from_pixels(16, 16, px).expect("a bitmap")
-}
-
-/// The test fonts' resolver (Noto Sans as sans-serif), once for the thread.
-fn resolver() -> Rc<FontFamilyResolverImpl> {
-    thread_local! {
-        static RESOLVER: Rc<FontFamilyResolverImpl> = {
-            let resolver = Rc::new(FontFamilyResolverImpl::new(Rc::new(FontCollection::registered_only())));
-            let c = resolver.collection();
-            for f in ["Regular.ttf", "Bold.ttf", "Medium.ttf"] {
-                c.register_file(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fonts").join(f))
-                    .expect("a test font");
-            }
-            c.set_generic_families(GenericFontFamily::SansSerif, &["Noto Sans"]);
-            resolver
-        };
-    }
-    RESOLVER.with(Rc::clone)
-}
-
-/// One line of `text` in Noto Sans at `size` px from `baseline`, shaped as C++'s drawText lays it out (left to
-/// right, no letter spacing).
-fn text_line(text: &str, baseline: Offset, size: f32) -> TextDraw {
-    let resolver = resolver();
-    let backend = resolver.harfrust_backend().clone();
-    let typeface = resolver.typeface(None, FontWeight::Normal, FontStyle::Normal, FontSynthesis::All);
-    let locales = LocaleList::empty();
-    let runs = kompoz_text::FontBackend::font_runs(
-        &*backend,
-        &FontRunRequest {
-            text,
-            range: 0..text.len(),
-            typeface: &typeface,
-            size,
-            density: Density::default(),
-            locales: &locales,
-        },
-    );
-    let mut pen = 0.0f32;
-    let mut glyph_runs = Vec::new();
-    for run in runs {
-        let shaped = kompoz_text::FontBackend::shape(
-            &*backend,
-            &ShapeRequest {
-                text,
-                range: run.range.clone(),
-                font: &run.font,
-                rtl: false,
-                script: None,
-                language: None,
-                features: &[],
-                letter_spacing: 0.0,
-                scale_x: 1.0,
-            },
-        );
-        let mut glyphs = Vec::new();
-        for g in &shaped.glyphs {
-            glyphs.push(Glyph { id: g.id, x: pen + g.x_offset, y: -g.y_offset, cluster: g.cluster as u32 });
-            pen += g.x_advance;
-        }
-        glyph_runs.push(GlyphRun {
-            font: run.font.font,
-            coords: run.font.coords.clone(),
-            size: run.font.size,
-            synthesis: run.font.synthesis,
-            scale_x: 1.0,
-            skew_x: 0.0,
-            color: kompoz_text::FontBackend::color_kind(&*backend, run.font.font),
-            text_motion: Default::default(),
-            glyphs,
-        });
-    }
-    TextDraw::new(
-        text,
-        baseline,
-        Size::new(pen, size * 1.25),
-        Rect::new(0.0, -size, pen, size * 0.3),
-        false,
-        Rc::new(TextRunStyle::new(size)),
-        Rc::from(glyph_runs),
-    )
-}
-
-/// A brush across its area, from one color to the other (C++'s Brush::horizontalGradient).
-fn across(colors: &[Color]) -> Brush {
-    Brush::horizontal_gradient(colors, 0.0, f32::INFINITY, TileMode::Clamp)
-}
-
-/// A brush from the area's top left to its bottom right (C++'s Brush::linearGradient).
-fn diagonal(colors: &[Color]) -> Brush {
-    Brush::linear_gradient(colors, Offset::Zero, Offset::Infinite, TileMode::Clamp)
-}
-
-/// A bit of everything, unevenly placed (96 x 96 px): what a transform must carry exactly (C++'s mixed).
-pub fn mixed(c: &mut dyn GraphicsContext, with_shadow: bool) {
-    thread_local!(static IMAGE: ImageBitmap = checker());
-    let (red, blue, green, ink) =
-        (rgba(0.86, 0.15, 0.15, 1.0), rgba(0.15, 0.3, 0.86, 1.0), rgba(0.1, 0.55, 0.3, 1.0), rgba(0.1, 0.1, 0.12, 1.0));
-    if with_shadow {
-        c.draw_shadow(
-            xywh(52.0, 4.0, 36.0, 20.0),
-            CornerRadii::all(6.0),
-            &shadow(rgba(0.0, 0.0, 0.0, 0.5), Offset::new(0.0, 3.0), 5.0, 0.0),
-            false,
-        );
-    }
-    c.fill_gradient(
-        xywh(6.0, 6.0, 38.0, 22.0),
-        CornerRadii::all(6.0),
-        &diagonal(&[red, blue]),
-        xywh(6.0, 6.0, 38.0, 22.0),
-    );
-    c.stroke_round_rect(xywh(52.0, 4.0, 36.0, 20.0), CornerRadii::all(8.0), 3.0, green);
-    c.draw_line(Offset::new(8.0, 36.0), Offset::new(44.0, 48.0), 3.0, ink);
-    c.draw_arc(xywh(54.0, 32.0, 30.0, 30.0), -60.0, 200.0, 4.0, rgba(0.5, 0.2, 0.6, 1.0), true);
-    c.draw_text_brush(
-        &text_line("Kompoz", Offset::new(6.0, 92.0), 13.0),
-        &across(&[ink, red]),
-        xywh(6.0, 80.0, 50.0, 14.0),
-    );
-    IMAGE.with(|image| {
-        c.draw_image(image, xywh(0.0, 0.0, 16.0, 16.0), xywh(66.0, 72.0, 16.0, 16.0), 1.0, FilterQuality::Low)
-    });
-    let s = star(26.0, 64.0, 13.0);
-    let radial = Brush::radial_gradient(&[Color::White, blue], Offset::Unspecified, f32::INFINITY, TileMode::Clamp);
-    c.draw_path(&s, Offset::Zero, &radial, xywh(13.0, 51.0, 26.0, 26.0), &fill());
-    let mut curve = Path::new();
-    curve.move_to(40.0, 70.0);
-    curve.cubic_to(50.0, 50.0, 60.0, 90.0, 70.0, 60.0);
-    c.draw_path(
-        &curve,
-        Offset::Zero,
-        &Brush::from(red),
-        Rect::Zero,
-        &crate::scenes::stroke(2.5, kompoz_graphics::StrokeCap::Round, kompoz_graphics::StrokeJoin::Round, 4.0),
-    );
-    c.push_layer(xywh(42.0, 76.0, 22.0, 16.0), CornerRadii::all(4.0), 0.6, LayerTransform::Identity);
-    c.fill_round_rect(xywh(36.0, 70.0, 40.0, 30.0), CornerRadii::Zero, rgba(0.95, 0.6, 0.1, 1.0));
-    c.pop_layer();
-    c.push_clip(xywh(70.0, 40.0, 20.0, 14.0));
-    c.fill_round_rect(xywh(60.0, 30.0, 40.0, 40.0), CornerRadii::all(10.0), rgba(0.0, 0.5, 0.5, 1.0));
-    c.pop_clip();
-    c.push_blend_mode(BlendMode::Multiply); // (read from the target, under where it goes)
-    c.fill_round_rect(xywh(30.0, 20.0, 20.0, 14.0), CornerRadii::Zero, rgba(0.9, 0.8, 0.2, 1.0));
-    c.pop_blend_mode();
-}
-
-/// A graphics layer over `bounds` (its pivot their middle) as `set` makes it, drawing `content` through it (C++'s
-/// detail::drawThroughLayer).
-fn through_layer(
-    c: &mut dyn GraphicsContext,
-    bounds: Rect,
-    set: impl FnOnce(&mut LayerDraw),
-    mut content: impl FnMut(&mut dyn GraphicsContext),
-) {
-    let mut l = LayerDraw::plain(bounds);
-    set(&mut l);
-    draw_layer(c, &l, &mut content);
-}
-
-/// A rounded rect's outline from the origin, its corners of one radius.
-fn rounded_outline(w: f32, h: f32, radius: f32) -> Outline {
-    Outline::Rounded(RoundRect::from_rect_radius(Rect::new(0.0, 0.0, w, h), CornerRadius::circular(radius)))
-}
-
-/// graphicsLayer's: in 3D, faded, filtered, blended (192 x 196 px).
-pub fn graphics_layers(c: &mut Renderer) {
-    thread_local!(static IMAGE: ImageBitmap = checker());
-    let (a, b, ink) = (rgba(0.95, 0.45, 0.1, 1.0), rgba(0.3, 0.1, 0.7, 1.0), rgba(0.1, 0.1, 0.12, 1.0));
-    let card = |c: &mut dyn GraphicsContext, r: Rect| {
-        c.fill_gradient(r, CornerRadii::all(10.0), &diagonal(&[a, b]), r);
-        IMAGE.with(|image| {
-            c.draw_image(
-                image,
-                xywh(0.0, 0.0, 16.0, 16.0),
-                xywh(r.left + 8.0, r.top + 8.0, 24.0, 24.0),
-                1.0,
-                FilterQuality::Low,
-            )
-        });
-        c.draw_text(&text_line("3D", Offset::new(r.left + 40.0, r.top + 28.0), 16.0), Color::White);
-    };
-    let r1 = xywh(12.0, 10.0, 76.0, 56.0);
-    through_layer(c, r1, |l| l.geometry.rotation_x = 40.0, |c| card(c, r1));
-    let r2 = xywh(104.0, 10.0, 76.0, 56.0);
-    through_layer(
-        c,
-        r2,
-        |l| {
-            l.geometry.rotation_y = -45.0;
-            l.clip = true;
-            l.outline = rounded_outline(76.0, 56.0, 18.0);
-        },
-        |c| {
-            card(c, r2);
-            c.fill_round_rect(xywh(104.0, 10.0, 30.0, 56.0), CornerRadii::Zero, crate::scenes::alpha(ink, 0.4));
-        },
-    );
-    let r3 = xywh(12.0, 90.0, 76.0, 56.0);
-    through_layer(
-        c,
-        r3,
-        |l| {
-            l.geometry.rotation_z = -12.0;
-            l.geometry.scale_x = 0.9;
-            l.alpha = 0.6;
-        },
-        |c| {
-            card(c, r3);
-            c.fill_round_rect(xywh(50.0, 100.0, 40.0, 40.0), CornerRadii::all(20.0), rgba(0.1, 0.6, 0.4, 1.0));
-        },
-    );
-    let mut gray = ColorMatrix::new();
-    gray.set_to_saturation(0.0);
-    let r4 = xywh(104.0, 90.0, 76.0, 40.0);
-    through_layer(c, r4, |l| l.color_filter = Some(ColorFilter::color_matrix(gray)), |c| card(c, r4));
-    let band = xywh(12.0, 156.0, 168.0, 30.0);
-    c.fill_gradient(band, CornerRadii::all(6.0), &across(&[rgba(0.9, 0.9, 0.3, 1.0), rgba(0.3, 0.8, 0.9, 1.0)]), band);
-    let r5 = xywh(20.0, 150.0, 152.0, 42.0);
-    through_layer(
-        c,
-        r5,
-        |l| {
-            l.blend_mode = BlendMode::Multiply;
-            l.geometry.rotation_x = -30.0;
-        },
-        |c| {
-            c.fill_round_rect(r5, CornerRadii::all(21.0), rgba(0.9, 0.3, 0.5, 1.0));
-            c.draw_text(&text_line("Multiply", Offset::new(64.0, 177.0), 16.0), Color::White);
-        },
-    );
-}
-
-/// Render effects: a blur's tile modes, wide, moved, cut, turned (192 x 192 px).
-pub fn effects(c: &mut Renderer) {
-    thread_local!(static IMAGE: ImageBitmap = checker());
-    let (a, b) = (rgba(0.95, 0.45, 0.1, 1.0), rgba(0.3, 0.1, 0.7, 1.0));
-    let card = |c: &mut dyn GraphicsContext, r: Rect| {
-        c.fill_gradient(r, CornerRadii::all(8.0), &diagonal(&[a, b]), r);
-        IMAGE.with(|image| {
-            c.draw_image(
-                image,
-                xywh(0.0, 0.0, 16.0, 16.0),
-                xywh(r.left + 6.0, r.top + 6.0, 18.0, 18.0),
-                1.0,
-                FilterQuality::Low,
-            )
-        });
-        c.fill_round_rect(
-            xywh(r.right - 16.0, r.top + 4.0, 8.0, r.height() - 8.0),
-            CornerRadii::all(4.0),
-            Color::White,
-        );
-    };
-    let layer = |c: &mut Renderer, bounds: Rect, set: &dyn Fn(&mut LayerDraw)| {
-        through_layer(c, bounds, set, |c| card(c, bounds));
-    };
-    let tiles = [TileMode::Clamp, TileMode::Decal, TileMode::Repeated, TileMode::Mirror];
-    for (i, tile) in tiles.into_iter().enumerate() {
-        // Each cut to what is around it, to show how its edges go.
-        layer(c, xywh(12.0 + i as f32 * 44.0, 12.0, 36.0, 30.0), &|l| {
-            l.render_effect = Some(BlurEffect(3.0, 3.0, tile));
-            l.clip = true;
-            l.outline = Outline::Rectangle(xywh(-4.0, -4.0, 44.0, 38.0));
-        });
-    }
-    layer(c, xywh(16.0, 62.0, 70.0, 40.0), &|l| l.render_effect = Some(BlurEffect(18.0, 6.0, TileMode::Decal)));
-    layer(c, xywh(112.0, 62.0, 56.0, 40.0), &|l| {
-        let blurred = BlurEffect(2.0, 2.0, TileMode::Decal);
-        l.render_effect = Some(RenderEffect::offset_effect(Some(&blurred), Offset::new(6.0, 6.0)));
-        l.alpha = 0.7;
-    });
-    layer(c, xywh(16.0, 122.0, 70.0, 50.0), &|l| {
-        l.render_effect = Some(BlurEffect(5.0, 5.0, TileMode::Clamp));
-        l.clip = true;
-        l.outline = rounded_outline(70.0, 50.0, 25.0);
-    });
-    layer(c, xywh(108.0, 122.0, 64.0, 50.0), &|l| {
-        l.render_effect = Some(BlurEffect(2.0, 2.0, TileMode::Decal));
-        l.geometry.rotation_z = 20.0;
-        l.geometry.rotation_x = 30.0;
-    });
-}
-
-/// The layers' and effects' scenes against their pictures.
-pub fn layer_scenes_match_their_pictures(g: &mut Gpu) {
-    let p = g.render(192, 192, effects);
-    matches_golden("effects", &p);
-    let p = g.render(192, 196, graphics_layers);
-    matches_golden("graphics-layers", &p);
-}
 
 // ---- Exact checks -------------------------------------------------------------------------------------------------
 
@@ -359,9 +43,9 @@ pub fn layer_alpha_is_exact(g: &mut Gpu) {
 /// (ModulateAlpha); blended by Multiply; filtered.
 pub fn graphics_layers_composite_as_compose(g: &mut Gpu) {
     let n = 96;
-    let plain = g.render(n, n, |c| mixed(c, true));
+    let plain = g.render(n, n, |c| mixed(c, 1.0, true));
     let flipped = g.render(n, n, |c| {
-        through_layer(c, xywh(0.0, 0.0, 96.0, 96.0), |l| l.geometry.rotation_y = 180.0, |c| mixed(c, true));
+        through_layer(c, xywh(0.0, 0.0, 96.0, 96.0), |l| l.geometry.rotation_y = 180.0, |c| mixed(c, 1.0, true));
     });
     let (worst, at) = worst_against(&plain, |x, y| flipped.at(n - 1 - x, y), none);
     check!(worst <= 3, "  turned half way about y: off by {worst} at {at:?}");
@@ -1067,7 +751,7 @@ pub fn blurs_are_gaussian(g: &mut Gpu) {
     let unclip = |c: &mut Renderer| c.pop_clip();
     report("backdrop", &backdrop(1.0, &clip_rect, &unclip), &glass(1.0, &rect), 2, all);
     report("backdrop, faded", &backdrop(0.5, &clip_rect, &unclip), &glass(0.5, &rect), 2, all);
-    let ring = crate::scenes::oval(xywh(28.0, 26.0, 44.0, 44.0));
+    let ring = oval(xywh(28.0, 26.0, 44.0, 44.0));
     let in_ring = |x: i32, y: i32| (x as f64 + 0.5 - 50.0).hypot(y as f64 + 0.5 - 48.0) < 22.0;
     let clip_ring = |c: &mut Renderer| {
         c.push_clip_path(&ring, Offset::Zero, ClipOp::Intersect);
@@ -1242,7 +926,7 @@ pub fn path_shadows_are_composes(g: &mut Gpu) {
     // A brush: its color at each pixel over what the shadow covers (out to its radius and spread), times the
     // shadow (as drawn white), times its alpha.
     let card = xywh(24.0, 30.0, 40.0, 26.0);
-    let brush = diagonal(&[rgba(0.9, 0.2, 0.1, 1.0), rgba(0.1, 0.3, 0.9, 1.0)]);
+    let brush = linear(&[rgba(0.9, 0.2, 0.1, 1.0), rgba(0.1, 0.3, 0.9, 1.0)]);
     let plain = shadow(Color::White, Offset::new(2.0, 3.0), 6.0, 2.0);
     let shape = RoundedCornerShape(8.0);
     let density = Density::new(1.0, 1.0);
@@ -1492,7 +1176,7 @@ pub fn elevation_shadows_are_androids(g: &mut Gpu) {
                 ctx.push_transform(&about(mid.x, mid.y, |m| m.rotate_z(c.turn)));
             }
             let o = if c.radius > 0.0 {
-                rounded_outline(at.width(), at.height(), c.radius * k)
+                rounded(at.width(), at.height(), c.radius * k)
             } else {
                 Outline::Rectangle(Rect::new(0.0, 0.0, at.width(), at.height()))
             };
@@ -1521,7 +1205,7 @@ pub fn elevation_shadows_are_androids(g: &mut Gpu) {
                 ctx.push_layer(px_rect(xywh(7.0, 9.0, 40.0, 34.0)), CornerRadii::Zero, 1.0, LayerTransform::Identity);
             }
             ctx.draw_elevation_shadow(
-                &rounded_outline(22.0 * k, 14.0 * k, 4.0 * k),
+                &rounded(22.0 * k, 14.0 * k, 4.0 * k),
                 Offset::new(16.0 * k, 18.0 * k),
                 &ElevationShadow { plane: [0.0, 0.0, 24.0 * k], ambient_color: black, spot_color: black, alpha: 1.0 },
             );
@@ -1544,7 +1228,7 @@ pub fn elevation_shadows_are_androids(g: &mut Gpu) {
         ctx.push_transform(&scaled(2.0));
         ctx.push_layer(px_rect(xywh(0.0, 0.0, 30.0, 30.0)), CornerRadii::Zero, 1.0, LayerTransform::Identity);
         ctx.draw_elevation_shadow(
-            &rounded_outline(14.0 * k, 10.0 * k, 3.0 * k),
+            &rounded(14.0 * k, 10.0 * k, 3.0 * k),
             Offset::new(6.0 * k, 8.0 * k),
             &spot_only(6.0 * k),
         );
@@ -1556,7 +1240,7 @@ pub fn elevation_shadows_are_androids(g: &mut Gpu) {
     g.renderer.set_light(ShadowLight { z: 500.0 * k2, radius: 800.0 * k2, ..light });
     let twice = g.render(n, n, |ctx| {
         ctx.draw_elevation_shadow(
-            &rounded_outline(14.0 * k2, 10.0 * k2, 3.0 * k2),
+            &rounded(14.0 * k2, 10.0 * k2, 3.0 * k2),
             Offset::new(6.0 * k2, 8.0 * k2),
             &spot_only(6.0 * k2),
         );
@@ -1772,7 +1456,7 @@ pub fn kept_layers_draw_as_drawn_afresh(g: &mut Gpu) {
             LayerTransform::Identity,
         );
         into.fill_round_rect(r(s.x, 10.0, 60.0, 44.0), CornerRadii::Zero, rgba(0.3, 0.5, 0.9, 1.0));
-        let text = text_line("Kart", Offset::new((s.x + 6.0) * k, 30.0 * k), 12.0 * k);
+        let text = text_at("Kart", Offset::new(s.x + 6.0, 30.0), Font::new(12.0), k);
         into.draw_text(&text, if s.text { rgba(1.0, 0.9, 0.3, 1.0) } else { Color::White });
         into.draw_path(
             &star_path,
@@ -1787,7 +1471,7 @@ pub fn kept_layers_draw_as_drawn_afresh(g: &mut Gpu) {
         into.push_effect_layer(r(8.0, 60.0, 50.0, 30.0), &BlurEffect(s.blur * k, s.blur * k, TileMode::Clamp), 1.0);
         let look = if s.frosted_look { rgba(0.9, 0.2, 0.3, 1.0) } else { rgba(0.2, 0.7, 0.3, 1.0) };
         into.fill_round_rect(r(12.0, 64.0, 20.0, 20.0), CornerRadii::all(4.0 * k), look);
-        into.draw_text(&text_line("Bulanık", Offset::new(14.0 * k, 82.0 * k), 10.0 * k), Color::Black);
+        into.draw_text(&text_at("Bulanık", Offset::new(14.0, 82.0), Font::new(10.0), k), Color::Black);
         into.pop_layer();
         into.end_node();
         into.begin_node(turned);

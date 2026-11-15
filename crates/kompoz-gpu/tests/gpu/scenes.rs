@@ -458,7 +458,7 @@ pub fn through_layer(
 }
 
 /// A rounded outline of `w` x `h` with corners of `radius`.
-fn rounded(w: f32, h: f32, radius: f32) -> Outline {
+pub fn rounded(w: f32, h: f32, radius: f32) -> Outline {
     Outline::Rounded(RoundRect::from_rect_radius(xywh(0.0, 0.0, w, h), CornerRadius::circular(radius)))
 }
 
@@ -586,7 +586,7 @@ pub fn density(c: &mut Renderer) {
 
 /// What transforms_carry_everything and the other tests draw: one of nearly everything (at `k` px per dp; a shadow
 /// if `with_shadow`).
-pub fn mixed(c: &mut Renderer, k: f32, with_shadow: bool) {
+pub fn mixed(c: &mut dyn GraphicsContext, k: f32, with_shadow: bool) {
     let image = checker();
     let dp = |v: f32| v * k;
     let r = |x: f32, y: f32, w: f32, h: f32| xywh(dp(x), dp(y), dp(w), dp(h));

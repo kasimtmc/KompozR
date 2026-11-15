@@ -1,14 +1,13 @@
 //! Images, shaders, meshes and bitmaps (the C++ Kompoz's imagesAreSampledAsAsked, shadersPaintAsTheyAre,
-//! meshesDrawAsSkiaDoes, bitmapsAreDrawnIntoAsAndroidDoes, vectorsDrawAsCompose and the images scene), each against
-//! a model worked out on the CPU: images sampled as their FilterQuality says, shaders as Shader::color_at says,
-//! meshes as Skia fills them, bitmaps drawn into as Android draws into them.
+//! meshesDrawAsSkiaDoes, bitmapsAreDrawnIntoAsAndroidDoes and vectorsDrawAsCompose), each against a model worked out
+//! on the CPU: images sampled as their FilterQuality says, shaders as Shader::color_at says, meshes as Skia fills
+//! them, bitmaps drawn into as Android draws into them. (The images scene is compared with its picture in scenes.)
 //!
 //! What draws into bitmaps is a renderer of its own on the one device, shared (`Rc<RefCell<Renderer>>`) with the
 //! [`RendererBitmaps`] set as kompoz-ui's bitmap renderer: a canvas over a bitmap going while a frame is drawn finds
 //! the renderer busy, and what it drew waits in it (as C++'s BitmapHook does it `inFrame`).
 
 use crate::exact::{none, worst_against};
-use crate::golden::matches_golden;
 use crate::harness::{Gpu, Pixels, near, render_by};
 use crate::scenes::xywh;
 use kompoz_gpu::Renderer;
@@ -59,40 +58,6 @@ fn over_white(image: &Image) -> Pixels {
 /// A color premultiplied, as floats.
 fn premultiplied(c: Color) -> [f32; 4] {
     [c.red() * c.alpha(), c.green() * c.alpha(), c.blue() * c.alpha(), c.alpha()]
-}
-
-/// The 16 x 16 checker the images scene draws: blocks of 4, its right half at half alpha.
-fn checker() -> ImageBitmap {
-    let mut px = vec![0u8; 16 * 16 * 4];
-    for y in 0..16 {
-        for x in 0..16 {
-            let p = &mut px[(y * 16 + x) * 4..(y * 16 + x) * 4 + 4];
-            let on = ((x / 4) + (y / 4)) % 2 == 0;
-            let rgb = if on { [230, 120, 20] } else { [30, 30, 160] };
-            p.copy_from_slice(&[rgb[0], rgb[1], rgb[2], if x < 8 { 255 } else { 128 }]);
-        }
-    }
-    ImageBitmap::from_pixels(16, 16, px).unwrap()
-}
-
-thread_local! {
-    static CHECKER: ImageBitmap = checker();
-}
-
-/// The images scene: a checker scaled up, at fractions, part of it at half alpha, scaled down.
-pub fn images(c: &mut Renderer) {
-    let image = CHECKER.with(|i| i.clone());
-    let q = kompoz_graphics::DefaultFilterQuality;
-    c.draw_image(&image, xywh(0.0, 0.0, 16.0, 16.0), xywh(8.0, 8.0, 64.0, 64.0), 1.0, q); // scaled up
-    c.draw_image(&image, xywh(0.0, 0.0, 16.0, 16.0), xywh(80.5, 8.5, 16.0, 16.0), 1.0, q); // fractions
-    c.draw_image(&image, xywh(4.0, 4.0, 8.0, 8.0), xywh(110.0, 8.0, 70.0, 70.0), 0.5, q); // part of it, half alpha
-    c.draw_image(&image, xywh(0.0, 0.0, 16.0, 16.0), xywh(8.0, 90.0, 8.0, 8.0), 1.0, q); // scaled down
-}
-
-/// The images scene against its picture.
-pub fn images_match_their_picture(g: &mut Gpu) {
-    let p = g.render(192, 192, images);
-    matches_golden("images", &p);
 }
 
 /// Mitchell's cubic (B = C = 1/3), as Skia's High samples.
