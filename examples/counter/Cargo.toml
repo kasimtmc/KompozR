@@ -1,0 +1,19 @@
+[package]
+name = "counter"
+description = "KompozR's Counter: a count and a button that adds to it, built from foundation's pieces, run on the platform's window (KOMPOZ_HEADLESS=1: without one)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-foundation = { path = "../../crates/kompoz-foundation" }
+kompoz-graphics = { path = "../../crates/kompoz-graphics" }
+kompoz-platform = { path = "../../crates/kompoz-platform" }
+kompoz-runtime = { path = "../../crates/kompoz-runtime" }
+kompoz-text = { path = "../../crates/kompoz-text" }
+kompoz-ui = { path = "../../crates/kompoz-ui" }

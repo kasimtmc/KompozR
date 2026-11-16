@@ -12,19 +12,23 @@
 pub mod alignment;
 pub mod back;
 pub mod display_list;
+pub mod draganddrop;
 pub mod draw;
 pub mod focus;
 pub mod graphics_context;
 pub mod host;
 pub mod input;
 pub mod layout;
+pub mod media_query;
 pub mod modifier;
 pub mod node;
 pub mod platform;
 pub mod semantics;
 pub mod spatial;
 pub mod state;
+pub mod strings;
 pub mod text;
+pub mod text_input;
 pub mod unit;
 pub mod window;
 

@@ -240,6 +240,8 @@ pub struct PointerInputChange {
     pub scroll_delta: Offset,
     /// A trackpad pinch's scale (Compose's `scaleFactor`).
     pub scale_factor: f32,
+    /// A trackpad pinch's twist, degrees clockwise (KompozR's, as C++'s `zoom` rotation: Compose has none).
+    pub rotation: f32,
     /// A trackpad pan's offset (Compose's `panOffset`).
     pub pan_offset: Offset,
     historical: Rc<Vec<HistoricalChange>>,
@@ -273,6 +275,7 @@ impl PointerInputChange {
             r#type: PointerType::Touch,
             scroll_delta: Offset::Zero,
             scale_factor: 1.0,
+            rotation: 0.0,
             pan_offset: Offset::Zero,
             historical: Rc::new(Vec::new()),
             original_event_position: position,
@@ -417,6 +420,8 @@ pub(crate) struct PointerInputEventData {
     pub(crate) active_hover: bool,
     pub(crate) historical: Vec<HistoricalChange>,
     pub(crate) scroll_delta: Offset,
+    pub(crate) scale_factor: f32,
+    pub(crate) rotation: f32,
 }
 
 /// What the platform sent (Compose's PointerInputEvent): its time, its pointers, and the rest of what a

@@ -113,6 +113,8 @@ impl PointerInputEventProcessor {
                 .with_historical(p.historical.clone());
                 change.pressure = p.pressure;
                 change.scroll_delta = p.scroll_delta;
+                change.scale_factor = p.scale_factor;
+                change.rotation = p.rotation;
                 change.set_original_event_position(p.position);
                 changes.push(change);
                 previous.retain(|d| d.id != p.id);

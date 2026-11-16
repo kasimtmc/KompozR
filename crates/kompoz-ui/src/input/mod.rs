@@ -251,6 +251,11 @@ impl InputState {
         self.keyboard_modifiers.get()
     }
 
+    /// The modifiers held, as the platform reported them.
+    pub(crate) fn set_keyboard_modifiers(&self, modifiers: KeyModifiers) {
+        self.keyboard_modifiers.set(modifiers);
+    }
+
     /// Whether a pointer input node of `node`'s chain is on a hit path (tests ask).
     pub fn is_on_hit_path(&self, node: &LayoutNode) -> bool {
         node.chain_nodes().iter().any(|c| self.processor.tracker.contains(c))
@@ -328,6 +333,8 @@ fn data(
         active_hover,
         historical: Vec::new(),
         scroll_delta: Offset::Zero,
+        scale_factor: 1.0,
+        rotation: 0.0,
     }
 }
 
@@ -600,6 +607,23 @@ pub(crate) fn scroll(host: &KompozHost, position: Offset, delta: Offset) -> bool
         let mut pointer = state.mouse_pointer(time).expect("the mouse is over the window");
         pointer.scroll_delta = delta;
         let mut e = state.event(PointerEventType::Scroll, vec![pointer]);
+        e.buttons = state.mouse_buttons();
+        e
+    };
+    process(host, event, true).any_change_consumed
+}
+
+/// A trackpad's pinch with the mouse at `position` (Compose's ScaleStart, ScaleChange and ScaleEnd events): the
+/// change's `scale_factor` and `rotation` (degrees clockwise) since the last; whether a node consumed it.
+pub(crate) fn scale(host: &KompozHost, position: Offset, r#type: PointerEventType, factor: f32, rotation: f32) -> bool {
+    let event = {
+        let state = host.input.borrow();
+        state.mouse_at(None, position);
+        let time = host.dispatcher().now();
+        let mut pointer = state.mouse_pointer(time).expect("the mouse is over the window");
+        pointer.scale_factor = factor;
+        pointer.rotation = rotation;
+        let mut e = state.event(r#type, vec![pointer]);
         e.buttons = state.mouse_buttons();
         e
     };

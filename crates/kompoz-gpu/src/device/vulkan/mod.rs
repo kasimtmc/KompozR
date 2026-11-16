@@ -50,6 +50,23 @@ pub struct VulkanSurface {
     pub native_window: Option<Box<dyn Fn() -> usize>>,
 }
 
+/// A surface presenting nowhere (`VK_EXT_headless_surface`, which lavapipe and Mesa's drivers have): the swapchain's
+/// path without a display, for headless runs and tests (`KOMPOZ_HEADLESS_SWAPCHAIN=1`). It has no size of its own:
+/// the swapchain takes the drawable's.
+pub fn headless_surface() -> VulkanSurface {
+    VulkanSurface {
+        instance_extensions: vec![ash::khr::surface::NAME, ash::ext::headless_surface::NAME],
+        create_surface: Box::new(|entry, instance| {
+            let loader = ash::ext::headless_surface::Instance::new(entry, instance);
+            let info = vk::HeadlessSurfaceCreateInfoEXT::default();
+            // SAFETY: the instance was made with VK_EXT_headless_surface (this surface's instance_extensions); the
+            // info is a valid default (no flags).
+            unsafe { loader.create_headless_surface(&info, None) }.ok()
+        }),
+        native_window: None,
+    }
+}
+
 /// The Vulkan device.
 pub struct VulkanDevice {
     choice: Choice,

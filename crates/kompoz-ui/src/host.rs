@@ -4,20 +4,27 @@
 
 use crate::back::{BackDispatcher, BackDispatcherRef, BackEventCompat, LocalBackDispatcher};
 use crate::display_list::DisplayList;
+use crate::draganddrop::{self, DragAndDropEvent, DragAndDropSession, DragAndDropTransferData, RootDragAndDropElement};
 use crate::focus::{FocusDirection, FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
+use crate::input::PointerEventType;
 use crate::input::{
     IndirectPointerEvent, IndirectPointerEventPrimaryDirectionalMotionAxis, IndirectPointerEventType, InputState, Key,
     KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerType, RotaryScrollEvent,
 };
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
+use crate::media_query::{LocalUiMediaScope, MediaInfo, UiMediaScope};
+use crate::modifier::NodeHandle;
 use crate::node::{LayoutNode, Owner};
 use crate::platform::*;
 use crate::semantics::{AccessibilityNode, SemanticsAction, SemanticsOwner};
+use crate::strings::{LocalStrings, Strings};
+use crate::text_input::{EditCommand, LocalTextInputService, TextInputService};
 use crate::unit::Constraints;
 use crate::window::Overlays;
 use kompoz_coroutines::{Dispatcher, LocalDispatcher};
-use kompoz_graphics::{Density, IntOffset, IntSize, LayoutDirection, Offset};
+use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
+use kompoz_graphics::{Density, Dp, IntOffset, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::{
     Composition, Content, KompozitionLocalProvider, MutableState, ProvideSaveableStateRegistry, RecompositionStats,
     SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block, mutable_state_of,
@@ -37,6 +44,17 @@ struct Environment {
     layout_direction: LayoutDirection,
     theme: SystemTheme,
     view_configuration: ViewConfiguration,
+    strings: Strings,
+    dynamic_palette: Option<DynamicTonalPalette>,
+    wallpaper_palette: Option<DynamicTonalPalette>,
+}
+
+/// Work for the time between frames (C++'s IdleWork): one for each owner.
+struct IdleWork {
+    owner: usize,
+    estimate_nanos: i64,
+    start: Box<dyn FnOnce() -> bool>,
+    took: Box<dyn FnOnce(i64)>,
 }
 
 /// The root's measure policy (Compose's RootMeasurePolicy): the children measured in the window's constraints, as
@@ -145,6 +163,20 @@ pub struct KompozHost {
     pub overlays: Overlays,
     /// The back handlers.
     pub back: Rc<BackDispatcher>,
+    /// The focused editor's input sessions.
+    text_input: TextInputService,
+    /// What the app runs on (LocalUiMediaScope), and the device as the platform last told it.
+    media: UiMediaScope,
+    media_info: Cell<MediaInfo>,
+    /// The root's drag and drop node, and the drag from outside under way (with what it may carry).
+    drag_and_drop_root: Rc<RefCell<Option<NodeHandle>>>,
+    drag_session: RefCell<Option<(DragAndDropSession, Vec<String>)>>,
+    /// The links the app is opened with.
+    deep_links: DeepLinks,
+    /// Work waiting for the time between frames, in the order asked.
+    idle_work: RefCell<Vec<IdleWork>>,
+    /// A trackpad's pinch under way (ScaleStart sent, ScaleEnd not yet).
+    scaling: Cell<bool>,
 }
 
 impl KompozHost {
@@ -155,8 +187,11 @@ impl KompozHost {
         let root = LayoutNode::new();
         root.set_measure_policy(Rc::new(RootMeasurePolicy { layer: Rc::new(|_| {}) }));
         let system_insets = SystemInsetsHolder::default();
+        let drag_and_drop_root = Rc::new(RefCell::new(None));
         root.set_modifier(
-            crate::focus::window_root_modifier().then(crate::layout::window_insets_rulers(system_insets.clone())),
+            crate::focus::window_root_modifier()
+                .then(crate::layout::window_insets_rulers(system_insets.clone()))
+                .then_element(RootDragAndDropElement(drag_and_drop_root.clone())),
         );
         let focus = Rc::new(FocusOwner::default());
         *focus.owner.borrow_mut() = Rc::downgrade(&owner);
@@ -167,6 +202,9 @@ impl KompozHost {
             layout_direction: LayoutDirection::Ltr,
             theme: SystemTheme::Light,
             view_configuration: ViewConfiguration::default(),
+            strings: Strings::english(),
+            dynamic_palette: None,
+            wallpaper_palette: None,
         });
         let overlays = Overlays { owner: Rc::downgrade(&owner) };
         let platform = PlatformHandle::default();
@@ -200,6 +238,14 @@ impl KompozHost {
             overlays,
             focus,
             back: Rc::new(BackDispatcher::default()),
+            text_input: TextInputService::new(platform.clone()),
+            media: UiMediaScope::new(),
+            media_info: Cell::new(MediaInfo::default()),
+            drag_and_drop_root,
+            drag_session: RefCell::new(None),
+            deep_links: DeepLinks::new(),
+            idle_work: RefCell::new(Vec::new()),
+            scaling: Cell::new(false),
         };
         let composition = Composition::new(Some(root as Rc<dyn kompoz_runtime::Node>));
         composition.set_content(host.root_content(Rc::new(move || content.compose())));
@@ -223,6 +269,9 @@ impl KompozHost {
         let back = BackDispatcherRef(Rc::downgrade(&self.back));
         let font_family_resolver = self.font_family_resolver.clone();
         let text_toolbar: Rc<dyn TextToolbar> = Rc::new(PlatformTextToolbar::new(platform.clone()));
+        let text_input = self.text_input.clone();
+        let media = self.media.clone();
+        let deep_links = self.deep_links.clone();
         move || {
             let env = environment.get();
             let content = content.clone();
@@ -238,7 +287,13 @@ impl KompozHost {
                 LocalInputModeManager.provides(input_mode_manager.clone()),
                 LocalHapticFeedback.provides(HapticFeedback(platform.clone())),
                 LocalClipboard.provides(Clipboard(platform.clone())),
-                LocalUriHandler.provides(UriHandler(platform.clone())),
+                LocalUriHandler.provides(UriHandler(platform.clone(), deep_links.clone())),
+                LocalDeepLinks.provides(deep_links.clone()),
+                LocalTextInputService.provides(text_input.clone()),
+                LocalUiMediaScope.provides(media.clone()),
+                LocalStrings.provides(env.strings.clone()),
+                LocalDynamicTonalPalette.provides(env.dynamic_palette),
+                LocalWallpaperTonalPalette.provides(env.wallpaper_palette),
                 LocalTextToolbar.provides_unequal(text_toolbar.clone()),
                 LocalSoftwareKeyboardController.provides(SoftwareKeyboardController(platform.clone())),
                 LocalPlatform.provides(platform.clone()),
@@ -307,6 +362,7 @@ impl KompozHost {
         self.viewport.set(size);
         self.owner.update_root_constraints(Constraints::new(0, size.width, 0, size.height));
         self.window_info.container_size.set(size);
+        self.update_media();
     }
 
     pub fn viewport_size(&self) -> IntSize {
@@ -327,6 +383,7 @@ impl KompozHost {
             e.density = density;
             e.view_configuration = ViewConfiguration::for_density(density);
         });
+        self.update_media();
     }
 
     pub fn density(&self) -> Density {
@@ -352,6 +409,7 @@ impl KompozHost {
     /// in their states, so what measures by them measures again (an IME animation composes nothing).
     pub fn set_system_insets(&self, insets: SystemInsets) {
         self.system_insets.set(&insets);
+        self.update_media();
     }
 
     /// The state to keep while the platform ends the app (C++'s `saveState`): the composition's saveable values
@@ -862,6 +920,279 @@ impl KompozHost {
     /// Whether the semantics changed since this was last asked (what an accessibility bridge sends on).
     pub fn take_semantics_changed(&self) -> bool {
         self.owner.take_semantics_dirty()
+    }
+}
+
+// ---- What the platform tells and asks besides (C++'s setters and entry points) ----
+
+impl KompozHost {
+    /// The media scope from the viewport, the density, the keyboard and the device.
+    fn update_media(&self) {
+        let density = self.environment.peek().density.density.max(f32::MIN_POSITIVE);
+        let size = self.viewport.get();
+        let ime_visible = kompoz_runtime::without_read_observation(|| self.system_insets.is_visible(InsetsKind::Ime));
+        let dp = |px: i32| Dp(px as f32 / density);
+        self.media.update(dp(size.width), dp(size.height), ime_visible, self.media_info.get());
+    }
+
+    /// The library's texts in the system's language (C++'s `setStrings`; LocalStrings at the root).
+    pub fn set_strings(&self, strings: Strings) {
+        self.update_environment(|e| e.strings = strings);
+    }
+
+    /// The library's texts as last set.
+    pub fn strings(&self) -> Strings {
+        self.environment.peek().strings
+    }
+
+    /// The system's palettes (C++'s `setDynamicTonalPalette`; LocalDynamicTonalPalette): Android 12+'s, or a
+    /// desktop's made from its accent color; none where it has none.
+    pub fn set_dynamic_tonal_palette(&self, palette: Option<DynamicTonalPalette>) {
+        self.update_environment(|e| e.dynamic_palette = palette);
+    }
+
+    /// Palettes made from the wallpaper's colors (C++'s `setWallpaperTonalPalette`; LocalWallpaperTonalPalette).
+    pub fn set_wallpaper_tonal_palette(&self, palette: Option<DynamicTonalPalette>) {
+        self.update_environment(|e| e.wallpaper_palette = palette);
+    }
+
+    /// The device as the media scope tells it (C++'s `setMediaInfo`): the pointer, the keyboard, a microphone and a
+    /// camera, the viewing distance, the posture (the window's size and the on-screen keyboard come from the
+    /// viewport and the insets).
+    pub fn set_media_info(&self, info: MediaInfo) {
+        self.media_info.set(info);
+        self.update_media();
+    }
+
+    pub fn media_info(&self) -> MediaInfo {
+        self.media_info.get()
+    }
+
+    /// The keys held down (Shift, Ctrl, Alt, Meta), as the platform last reported them (C++'s
+    /// `setKeyboardModifiers`): pointer events carry them, and the window info.
+    pub fn set_keyboard_modifiers(&self, modifiers: KeyModifiers) {
+        self.input.borrow().set_keyboard_modifiers(modifiers);
+        self.window_info_keyboard_modifiers(modifiers);
+    }
+
+    pub fn keyboard_modifiers(&self) -> KeyModifiers {
+        self.input.borrow().keyboard_modifiers()
+    }
+
+    /// The next frame draws (C++'s `requestRedraw`): what the window shows went (exposed, shown again).
+    pub fn request_redraw(&self) {
+        self.owner.request_draw();
+    }
+
+    /// Of the next frame's work, what it has to show (C++'s `wantsFrame`): states changed, scopes to compose,
+    /// layouts to measure, a redraw, coroutines waiting for a frame (not a timer to wait for, work on another thread
+    /// to come back, a task posted).
+    pub fn wants_frame(&self) -> bool {
+        let composition = self.composition.borrow();
+        let composing = composition.as_ref().is_some_and(|c| c.has_invalidations() || c.has_frame_scopes());
+        composing
+            || global_snapshot_changed()
+            || self.owner.snapshot_observer().has_pending()
+            || self.owner.has_pending_measure_or_layout()
+            || self.owner.needs_draw()
+            || self.dispatcher.has_frame_waiters()
+            || self.handle.invalid.load(Ordering::Acquire)
+    }
+
+    /// Work for the time between frames (C++'s `requestIdleWork`, as Compose's prefetch: a lazy list's next item
+    /// composed before it scrolls in), one request for each `owner` (a later one replaces it). `idle` does it when
+    /// it fits: `estimate_nanos` is what such work took before (0: never timed); `start` makes its change (false:
+    /// nothing to do any more), which is composed then (laid out and drawn by the next frame); `took` hears how long
+    /// it took.
+    pub fn request_idle_work(
+        &self,
+        owner: usize,
+        estimate_nanos: i64,
+        start: impl FnOnce() -> bool + 'static,
+        took: impl FnOnce(i64) + 'static,
+    ) {
+        let work = IdleWork { owner, estimate_nanos, start: Box::new(start), took: Box::new(took) };
+        let mut queue = self.idle_work.borrow_mut();
+        match queue.iter_mut().find(|w| w.owner == owner) {
+            Some(w) => *w = work,
+            None => queue.push(work),
+        }
+    }
+
+    pub fn has_idle_work(&self) -> bool {
+        !self.idle_work.borrow().is_empty()
+    }
+
+    /// Does the idle work that fits in `budget_nanos` (the platform's, until the next frame is due), in order: one
+    /// whose estimate is more than the time left waits for the next pause (C++'s `idle`).
+    pub fn idle(&self, budget_nanos: i64) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_nanos(budget_nanos.max(0) as u64);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now()).as_nanos() as i64;
+            let work = {
+                let mut queue = self.idle_work.borrow_mut();
+                match queue.first() {
+                    Some(w) if left > 0 && w.estimate_nanos <= left => queue.remove(0),
+                    _ => return,
+                }
+            };
+            let started = std::time::Instant::now();
+            if !(work.start)() {
+                continue;
+            }
+            // What it changed composed now, as a frame would (laid out by the next frame).
+            Snapshot::send_apply_notifications();
+            self.owner.snapshot_observer().process_changes();
+            let recomposed = self.composition.borrow().as_ref().is_some_and(|c| c.recompose(self.frame_time.get()));
+            if recomposed {
+                self.owner.run_end_apply_listeners();
+                self.owner.snapshot_observer().process_changes();
+            }
+            (work.took)(started.elapsed().as_nanos() as i64);
+        }
+    }
+
+    /// A link the app was opened with, or that was sent to it while it runs (C++'s `openDeepLink`): the first
+    /// navigation host with a destination for it goes there.
+    pub fn open_deep_link(&self, link: &str) {
+        self.deep_links.open(link);
+    }
+
+    /// The links the app is opened with (LocalDeepLinks).
+    pub fn deep_links(&self) -> DeepLinks {
+        self.deep_links.clone()
+    }
+
+    // ---- Text input ----
+
+    /// The focused editor's input sessions (LocalTextInputService).
+    pub fn text_input_service(&self) -> TextInputService {
+        self.text_input.clone()
+    }
+
+    /// Text typed (a keyboard's, or an input method's commit), put in place of the composition or the selection of
+    /// the editor whose session is open (C++'s `textInput`, Compose's CommitTextCommand); false if none is.
+    pub fn text_input(&self, text: &str) -> bool {
+        self.send_edit_commands(&[EditCommand::CommitText { text: text.to_string(), new_cursor_position: 1 }])
+    }
+
+    /// An input method's composing text (its preedit; empty: none), the caret `new_cursor_position` from it as
+    /// [`EditCommand::SetComposingText`] has it; false if no session is open.
+    pub fn set_composing_text(&self, text: &str, new_cursor_position: i32) -> bool {
+        self.send_edit_commands(&[EditCommand::SetComposingText { text: text.to_string(), new_cursor_position }])
+    }
+
+    /// What an input method did, to the open session's editor (Compose's `onEditCommand`); false if none is open.
+    pub fn send_edit_commands(&self, commands: &[EditCommand]) -> bool {
+        self.text_input.send(commands)
+    }
+
+    /// The input method's action key (Done, Next, Search, …: C++'s `imeAction`) to the open session's editor;
+    /// false if none is open.
+    pub fn ime_action(&self, action: ImeAction) -> bool {
+        self.text_input.perform_ime_action(action)
+    }
+
+    // ---- Zoom ----
+
+    /// A trackpad's pinch with the mouse at `position` (px): its start (`ScaleStart`), each step (`ScaleChange`, by
+    /// `factor` and `rotation` degrees clockwise since the last) and end (`ScaleEnd`), as Compose's trackpad scale
+    /// events; whether a node consumed it.
+    pub fn scale(&self, position: Offset, r#type: PointerEventType, factor: f32, rotation: f32) -> bool {
+        match r#type {
+            PointerEventType::ScaleStart => self.scaling.set(true),
+            PointerEventType::ScaleEnd => self.scaling.set(false),
+            _ => {}
+        }
+        crate::input::scale(self, position, r#type, factor, rotation)
+    }
+
+    /// Zooms what is under `position` (px) by `factor` and turns it by `rotation` degrees clockwise (C++'s `zoom`:
+    /// Ctrl+wheel, Ctrl+Shift+wheel, a trackpad's pinch): a scale step, in a pinch of its own unless one is under
+    /// way. Whether something took it.
+    pub fn zoom(&self, position: Offset, factor: f32, rotation: f32) -> bool {
+        if factor.is_nan() || factor <= 0.0 || (factor == 1.0 && rotation == 0.0) {
+            return false;
+        }
+        if self.scaling.get() {
+            return self.scale(position, PointerEventType::ScaleChange, factor, rotation);
+        }
+        self.scale(position, PointerEventType::ScaleStart, 1.0, 0.0);
+        let taken = self.scale(position, PointerEventType::ScaleChange, factor, rotation);
+        self.scale(position, PointerEventType::ScaleEnd, 1.0, 0.0);
+        taken
+    }
+
+    // ---- Drags from outside the app ----
+
+    /// The root's drag and drop node, while attached.
+    fn drag_and_drop_root(&self) -> Option<crate::modifier::NodeCx> {
+        self.drag_and_drop_root.borrow().as_ref().and_then(|h| h.cx())
+    }
+
+    /// A drag from outside the app (files from a file manager, text from a browser) came over the window, carrying
+    /// one of `mime_types` (C++'s `externalDragEntered`): the drag and drop targets that want it are told it
+    /// started. Whether any wants it.
+    pub fn external_drag_entered(&self, mime_types: Vec<String>) -> bool {
+        self.end_external_drag(None);
+        let Some(root) = self.drag_and_drop_root() else { return false };
+        let event = DragAndDropEvent { mime_types: mime_types.clone(), ..DragAndDropEvent::default() };
+        let mut session = DragAndDropSession::default();
+        let accepted = draganddrop::accept(&root, &event, &mut session);
+        draganddrop::started(&session, &event);
+        *self.drag_session.borrow_mut() = Some((session, mime_types));
+        accepted
+    }
+
+    /// It moved over the window, to `position` (px): the targets it enters, moves over and leaves are told (C++'s
+    /// `externalDragMoved`).
+    pub fn external_drag_moved(&self, position: Offset) {
+        let Some(root) = self.drag_and_drop_root() else { return };
+        let session = self.drag_session.borrow_mut().take();
+        let Some((session, mime_types)) = session else { return };
+        let event =
+            DragAndDropEvent { mime_types: mime_types.clone(), position_in_root: position, transfer_data: None };
+        draganddrop::moved(&root, &event, &session);
+        *self.drag_session.borrow_mut() = Some((session, mime_types));
+    }
+
+    /// It was dropped at `position` (px) with `data` (C++'s `externalDrop`): the target under it takes it, then
+    /// every target is told the drag ended. Whether it was taken.
+    pub fn external_drop(&self, data: DragAndDropTransferData, position: Offset) -> bool {
+        if self.drag_session.borrow().is_none() {
+            self.external_drag_entered(data.mime_types.clone());
+        }
+        self.external_drag_moved(position);
+        let Some(root) = self.drag_and_drop_root() else { return false };
+        let event = DragAndDropEvent {
+            mime_types: data.mime_types.clone(),
+            position_in_root: position,
+            transfer_data: Some(data),
+        };
+        let taken = draganddrop::dropped(&root, &event);
+        self.end_external_drag(Some(event));
+        taken
+    }
+
+    /// It left the window, or ended without a drop (C++'s `externalDragLeft`): the target it was over is told it
+    /// left, every one that it ended.
+    pub fn external_drag_left(&self) {
+        let mime_types = self.drag_session.borrow().as_ref().map(|(_, m)| m.clone());
+        let Some(mime_types) = mime_types else { return };
+        let event = DragAndDropEvent { mime_types, ..DragAndDropEvent::default() };
+        if let Some(root) = self.drag_and_drop_root() {
+            draganddrop::exited(&root, &event);
+        }
+        self.end_external_drag(Some(event));
+    }
+
+    /// The drag under way (if any) ended: every target that took part told.
+    fn end_external_drag(&self, event: Option<DragAndDropEvent>) {
+        let Some((_, mime_types)) = self.drag_session.borrow_mut().take() else { return };
+        let event = event.unwrap_or(DragAndDropEvent { mime_types, ..DragAndDropEvent::default() });
+        if let Some(root) = self.drag_and_drop_root() {
+            draganddrop::ended(&root, &event);
+        }
     }
 }
 

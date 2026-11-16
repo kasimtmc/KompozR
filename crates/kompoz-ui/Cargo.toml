@@ -75,3 +75,7 @@ harness = false
 [[test]]
 name = "text"
 harness = false
+
+[[test]]
+name = "platform"
+harness = false

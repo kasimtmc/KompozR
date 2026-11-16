@@ -39,6 +39,11 @@ fn straight8(color: Color) -> [u8; 4] {
 }
 
 impl Renderer {
+    /// How many glyphs were rasterized onto the atlas so far (C++'s `rasterized`: KOMPOZ_PROFILE's count).
+    pub fn glyphs_rasterized(&self) -> usize {
+        self.text.glyphs.rasterized()
+    }
+
     /// Page `index`'s texture, made (and the page marked to go up whole) if it wasn't.
     fn page_texture(&mut self, index: usize) -> Option<TextureId> {
         if self.text.pages.len() <= index {

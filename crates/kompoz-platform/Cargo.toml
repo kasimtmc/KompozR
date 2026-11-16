@@ -1,0 +1,35 @@
+[package]
+name = "kompoz-platform"
+description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts), the app entry, the headless platform, and Linux's event loop and keyboards (Wayland and X11 to come)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-gpu = { path = "../kompoz-gpu" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-ui = { path = "../kompoz-ui" }
+libc = "0.2"
+
+[dev-dependencies]
+kompoz-foundation = { path = "../kompoz-foundation" }
+
+# The app core on the headless platform (a GPU device: lavapipe in CI), one thread, in sequence.
+[[test]]
+name = "app_core"
+harness = false
+
+# xkbcommon's keymaps, compose and the keysym table.
+[[test]]
+name = "xkb"
+harness = false
+
+# The event loop: wakes from other threads, timers, signals.
+[[test]]
+name = "event_loop"
+harness = false

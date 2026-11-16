@@ -406,6 +406,31 @@ impl Key {
     pub const F11: Key = Key::native(141);
     /// Android's `KEYCODE_F12`.
     pub const F12: Key = Key::native(142);
+    // F13 to F24: Android has no key codes for them (Compose desktop takes AWT's); KompozR's own, past Android's.
+    /// F13 (KompozR's: Android has none).
+    pub const F13: Key = Key::native(1013);
+    /// F14 (KompozR's: Android has none).
+    pub const F14: Key = Key::native(1014);
+    /// F15 (KompozR's: Android has none).
+    pub const F15: Key = Key::native(1015);
+    /// F16 (KompozR's: Android has none).
+    pub const F16: Key = Key::native(1016);
+    /// F17 (KompozR's: Android has none).
+    pub const F17: Key = Key::native(1017);
+    /// F18 (KompozR's: Android has none).
+    pub const F18: Key = Key::native(1018);
+    /// F19 (KompozR's: Android has none).
+    pub const F19: Key = Key::native(1019);
+    /// F20 (KompozR's: Android has none).
+    pub const F20: Key = Key::native(1020);
+    /// F21 (KompozR's: Android has none).
+    pub const F21: Key = Key::native(1021);
+    /// F22 (KompozR's: Android has none).
+    pub const F22: Key = Key::native(1022);
+    /// F23 (KompozR's: Android has none).
+    pub const F23: Key = Key::native(1023);
+    /// F24 (KompozR's: Android has none).
+    pub const F24: Key = Key::native(1024);
     /// Android's `KEYCODE_NUM_LOCK`.
     pub const NumLock: Key = Key::native(143);
     /// Android's `KEYCODE_NUMPAD_0`.

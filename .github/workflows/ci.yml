@@ -18,9 +18,17 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # The platform's keyboards: libxkbcommon, xkeyboard-config's keymaps, libX11's compose tables (its tests need
+      # them: KOMPOZ_XKB_REQUIRED).
+      - name: xkbcommon and its data
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon0 libxkbcommon-x11-0 xkb-data libx11-data
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
+        env:
+          KOMPOZ_XKB_REQUIRED: "1"
 
   # The GPU renderer's tests on Vulkan on lavapipe (Mesa's, on the CPU), with the validation layers: no device is a
   # failure, so is an error the layers report; the scenes against tests/golden (lavapipe's pictures).
@@ -33,7 +41,8 @@ jobs:
       - name: Vulkan (the loader, Mesa's lavapipe, the validation layers)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-validationlayers
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-validationlayers \
+            fonts-dejavu-core
       - name: kompoz-gpu's tests (Vulkan on lavapipe, validated, against tests/golden)
         env:
           KOMPOZ_GPU_REQUIRED: "1"
@@ -41,6 +50,42 @@ jobs:
         run: |
           export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
           cargo test -p kompoz-gpu
+      # The app core on the headless platform: scripts, the state file, frames, events, the kept frame through a
+      # swapchain's images.
+      - name: kompoz-platform's app core tests (Vulkan on lavapipe, validated)
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+        run: |
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          cargo test -p kompoz-platform --test app_core
+      # The Counter run headless with C++'s CI script, a click changing its shot: drawing only into its kept frame,
+      # then presenting to a Vulkan headless surface (VK_EXT_headless_surface) as a window would.
+      - name: The Counter, headless, clicked by a script
+        env:
+          KOMPOZ_GPU_VALIDATION: "1"
+          KOMPOZ_HEADLESS: "1"
+        run: |
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          cargo build -p counter
+          for swapchain in 0 1; do
+            rm -f before.png shot.png
+            KOMPOZ_HEADLESS_SWAPCHAIN=$swapchain \
+              KOMPOZ_SCRIPT="wait 30;shot before.png;click 70 70;wait 30;shot shot.png;quit" \
+              target/debug/counter 2>&1 | tee counter.log
+            test -s before.png && test -s shot.png
+            if cmp -s before.png shot.png; then echo "the click changed nothing"; exit 1; fi
+            if grep -q "GPU validation" counter.log; then exit 1; fi
+          done
+      - name: The Counter's shots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: counter-shots
+          path: |
+            before.png
+            shot.png
+          if-no-files-found: ignore
       - name: The pictures that differ from their goldens
         if: failure()
         uses: actions/upload-artifact@v4

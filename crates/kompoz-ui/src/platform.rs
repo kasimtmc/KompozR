@@ -9,6 +9,7 @@
 use crate::graphics_context::GraphicsContext;
 use crate::layout::LayoutCoordinates;
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx};
+use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Path, Rect, Size};
 use kompoz_runtime::{KompozitionLocal, MutableState, SnapshotMutationPolicy, mutable_state_of};
 use kompoz_text::{FakeFontFamilyResolver, FontFamilyResolver, FontFamilyResolverImpl};
@@ -542,13 +543,93 @@ impl TextToolbar for PlatformTextToolbar {
     }
 }
 
-/// Opens links (Compose's UriHandler).
+/// Opens links (Compose's UriHandler): the app's own (those a navigation host answers, see [`DeepLinks`]) in it,
+/// the others by the platform (C++'s `openUri`).
 #[derive(Clone, PartialEq, Default)]
-pub struct UriHandler(pub(crate) PlatformHandle);
+pub struct UriHandler(pub(crate) PlatformHandle, pub(crate) DeepLinks);
 
 impl UriHandler {
     pub fn open_uri(&self, uri: &str) {
-        self.0.get().open_uri(uri);
+        if self.1.answers(uri) {
+            self.1.open(uri);
+        } else {
+            self.0.get().open_uri(uri);
+        }
+    }
+}
+
+struct DeepLinkState {
+    /// The link the app was opened with or sent, until a navigation host takes it.
+    pending: std::cell::RefCell<Option<String>>,
+    /// Counted up as links come: what takes them reads it, and is composed again when one comes.
+    generation: MutableState<u64>,
+    /// What the navigation hosts in the composition answer, by owner.
+    handlers: std::cell::RefCell<Vec<(usize, Rc<dyn Fn(&str) -> bool>)>>,
+}
+
+/// The links the app is opened with or sent while it runs (C++'s deep links: a URI such as "kompoz://item/42",
+/// or a route's path), for navigation's deep links: the first navigation host with a destination for one takes it.
+/// Provided at the root by the host ([`LocalDeepLinks`]); cheap to clone, equal when the same.
+#[derive(Clone)]
+pub struct DeepLinks(Rc<DeepLinkState>);
+
+impl DeepLinks {
+    pub fn new() -> DeepLinks {
+        DeepLinks(Rc::new(DeepLinkState {
+            pending: std::cell::RefCell::new(None),
+            generation: mutable_state_of(0),
+            handlers: std::cell::RefCell::new(Vec::new()),
+        }))
+    }
+
+    /// A link to go to (C++'s `openDeepLink`): kept until something takes it; what reads the links is composed
+    /// again.
+    pub fn open(&self, link: &str) {
+        *self.0.pending.borrow_mut() = Some(link.to_string());
+        self.0.generation.set(self.0.generation.peek() + 1);
+    }
+
+    /// The link waiting, taken, if `accepts` it (C++'s `takeDeepLink`); the caller is composed again when another
+    /// comes.
+    pub fn take(&self, accepts: impl FnOnce(&str) -> bool) -> Option<String> {
+        self.0.generation.get();
+        let mut pending = self.0.pending.borrow_mut();
+        if pending.as_deref().is_some_and(accepts) { pending.take() } else { None }
+    }
+
+    /// The link waiting, if any (read by no one).
+    pub fn pending(&self) -> Option<String> {
+        self.0.pending.borrow().clone()
+    }
+
+    /// `owner` (a navigation host) answers the links `accepts` says (C++'s `addDeepLinkHandler`): opening one
+    /// ([`UriHandler::open_uri`]) goes to it rather than to the platform; a later call of the same owner replaces
+    /// it.
+    pub fn add_handler(&self, owner: usize, accepts: impl Fn(&str) -> bool + 'static) {
+        self.remove_handler(owner);
+        self.0.handlers.borrow_mut().push((owner, Rc::new(accepts)));
+    }
+
+    pub fn remove_handler(&self, owner: usize) {
+        self.0.handlers.borrow_mut().retain(|(o, _)| *o != owner);
+    }
+
+    /// Whether a handler answers `uri`.
+    pub fn answers(&self, uri: &str) -> bool {
+        let handlers: Vec<Rc<dyn Fn(&str) -> bool>> = self.0.handlers.borrow().iter().map(|(_, h)| h.clone()).collect();
+        handlers.iter().any(|h| h(uri))
+    }
+}
+
+impl Default for DeepLinks {
+    fn default() -> Self {
+        DeepLinks::new()
+    }
+}
+
+impl PartialEq for DeepLinks {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -1087,6 +1168,14 @@ pub static LocalSystemInsets: KompozitionLocal<SystemInsetsHolder> =
     KompozitionLocal::new_static(SystemInsetsHolder::default);
 /// Moving the keyboard by hand (what `ime_nested_scroll` drives).
 pub static LocalImeController: KompozitionLocal<ImeController> = KompozitionLocal::new_static(ImeController::default);
+/// The links the app is opened with (the host's; what navigation's deep links take).
+pub static LocalDeepLinks: KompozitionLocal<DeepLinks> = KompozitionLocal::new_static(DeepLinks::new);
+/// The system's palettes as Android 12+ gives them ("Material You", C++'s `setDynamicTonalPalette`; on a Linux
+/// desktop made from its accent color): what a dynamic color scheme reads; none where the system has none.
+pub static LocalDynamicTonalPalette: KompozitionLocal<Option<DynamicTonalPalette>> = KompozitionLocal::new(|| None);
+/// Palettes made from the wallpaper's own colors where the platform reads them (C++'s
+/// `setWallpaperTonalPalette`): what a wallpaper color scheme reads; none where it can't.
+pub static LocalWallpaperTonalPalette: KompozitionLocal<Option<DynamicTonalPalette>> = KompozitionLocal::new(|| None);
 /// The platform's callbacks, for what calls them directly (images, assets, autofill).
 pub static LocalPlatform: KompozitionLocal<PlatformHandle> = KompozitionLocal::new_static(PlatformHandle::default);
 /// What text resolves its font families with, and shapes and measures through (Compose's

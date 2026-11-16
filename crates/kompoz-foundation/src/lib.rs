@@ -13,6 +13,7 @@ mod background;
 mod border;
 mod canvas;
 pub mod clickable;
+pub mod draganddrop;
 pub mod focusable;
 pub mod focused_bounds;
 pub mod gesture_node;
@@ -37,6 +38,7 @@ pub use image::{BitmapImage, Image, VectorImage};
 /// detectors, interactions and indications.
 pub mod prelude {
     pub use crate::clickable::{Callback, ClickableModifiers};
+    pub use crate::draganddrop::DragAndDropModifiers;
     pub use crate::focusable::FocusableModifiers;
     pub use crate::focused_bounds::FocusedBoundsModifiers;
     pub use crate::gestures::*;
