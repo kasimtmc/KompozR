@@ -323,6 +323,11 @@ fn check_editor(out: &str) {
     // (Asked for where the compositor has tablets: KWin does, Weston's headless backend doesn't.)
     let tablets = out.lines().any(|l| l.contains(".global(") && l.contains("zwp_tablet_manager_v2"));
     assert_eq!(sent(".get_tablet_seat("), usize::from(tablets), "the tablet seat asked for");
+    // (Weston has no text-input-v3: there the app runs without an input method and asks for none.)
+    if !out.lines().any(|l| l.contains(".global(") && l.contains("zwp_text_input_manager_v3")) {
+        assert_eq!(sent("zwp_text_input_v3#"), 0, "a text input asked of a compositor without them");
+        return;
+    }
     let entered = out.lines().any(|l| !l.contains(" -> ") && l.contains("zwp_text_input_v3") && l.contains(".enter("));
     assert!(entered, "the compositor's text input entered the window");
     // The text input's requests, in order (a long text's end only).
