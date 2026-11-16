@@ -28,7 +28,7 @@ impl Default for LineHeightStyle {
 }
 
 /// Compose's `LineHeightStyle(alignment, trim, mode = Mode.Fixed)`.
-#[kompoz_runtime::named]
+#[kompoz_runtime::named(type)]
 pub fn LineHeightStyle(alignment: Alignment, trim: Trim, #[default(Mode::Fixed)] mode: Mode) -> LineHeightStyle {
     LineHeightStyle::new(alignment, trim, mode)
 }

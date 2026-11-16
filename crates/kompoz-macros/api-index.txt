@@ -14,6 +14,7 @@ kompoz-ui/semantics kompozable Button rr crates/kompoz-ui/tests/semantics.rs
 * kompozable Canvas rdr crates/kompoz-foundation/src/canvas.rs
 kompoz-foundation/layout kompozable Child r crates/kompoz-foundation/tests/layout.rs
 kompoz-runtime/runtime kompozable CityText r crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/macros kompozable Clicker rr crates/kompoz-runtime/tests/macros.rs
 * kompozable Column dddr crates/kompoz-foundation/src/layout/row_column.rs
 kompoz-coroutines/coroutines kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/macros kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
@@ -33,6 +34,7 @@ kompoz-platform/wayland_display kompozable Editor - crates/kompoz-platform/tests
 kompoz-runtime/macros kompozable Equal rr crates/kompoz-runtime/tests/macros.rs
 kompoz-coroutines/coroutines kompozable FlowReader r crates/kompoz-coroutines/tests/coroutines.rs
 * fn Font rdddd crates/kompoz-text/src/font/font.rs
+kompoz-runtime/macros kompozable Forwarding rr crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/tree kompozable GapLeaf - crates/kompoz-ui/tests/tree.rs
 kompoz-runtime/macros kompozable GradientCard r crates/kompoz-runtime/tests/macros.rs
 * kompozable Group dddddddddr crates/kompoz-ui/src/draw/vector.rs
@@ -40,6 +42,7 @@ kompoz-runtime/macros kompozable GradientCard r crates/kompoz-runtime/tests/macr
 * kompozable Image rrddddd crates/kompoz-foundation/src/image.rs
 * fn ImageBitmap rrddd crates/kompoz-graphics/src/image/bitmap.rs
 * kompozable InlineChildren rr crates/kompoz-foundation/src/text/inline_content.rs
+kompoz-runtime/macros fn Insets dd crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/layout kompozable Intrinsics rrr crates/kompoz-foundation/tests/layout.rs
 kompoz-foundation/layout_modifiers kompozable Intrinsics rrr crates/kompoz-foundation/tests/layout_modifiers.rs
 kompoz-foundation/clickable kompozable Item r crates/kompoz-foundation/tests/clickable.rs
@@ -48,6 +51,7 @@ kompoz-runtime/macros kompozable Items rdr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable Items r crates/kompoz-runtime/tests/runtime.rs
 kompoz-ui/layouts kompozable Items r crates/kompoz-ui/tests/layouts.rs
 kompoz-runtime/runtime kompozable Keeper - crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/macros kompozable Keeping r crates/kompoz-runtime/tests/macros.rs
 * kompozable KompozitionLocalProvider rr crates/kompoz-runtime/src/local.rs
 * kompozable KompozitionLocalProviderContext rr crates/kompoz-runtime/src/local.rs
 kompoz-runtime/macros kompozable Label rdd crates/kompoz-runtime/tests/macros.rs
@@ -80,6 +84,7 @@ kompoz-runtime/macros kompozable Remembering r crates/kompoz-runtime/tests/macro
 kompoz-ui/focus kompozable RestorableRow r crates/kompoz-ui/tests/focus.rs
 kompoz-runtime/macros fn RoundedCornerShape r crates/kompoz-runtime/tests/macros.rs
 * kompozable Row dddr crates/kompoz-foundation/src/layout/row_column.rs
+kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/macros.rs
@@ -100,6 +105,7 @@ kompoz-runtime/runtime kompozable StaticView - crates/kompoz-runtime/tests/runti
 * fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
 * fn Stroke ddddd crates/kompoz-graphics/src/draw_style.rs
 * kompozable StyleAnnotation rrr crates/kompoz-foundation/src/text/link_scope.rs
+kompoz-runtime/macros kompozable Tagged rdd crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/windows kompozable Tappable rrrr crates/kompoz-ui/tests/windows.rs
 kompoz-ui/focus kompozable Target rrrr crates/kompoz-ui/tests/focus.rs
 * kompozable Text rdd crates/kompoz-test/src/text.rs

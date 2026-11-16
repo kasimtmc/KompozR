@@ -94,7 +94,7 @@ impl TextFieldValue {
 }
 
 /// Compose's `TextFieldValue(text = "", selection = TextRange.Zero, composition = null)`.
-#[named]
+#[named(type)]
 pub fn TextFieldValue(
     #[default(String::new())] text: String,
     #[default(TextRange::Zero)] selection: TextRange,

@@ -388,7 +388,7 @@ impl ImageBitmap {
 /// Compose's ImageBitmap(width, height, config, hasAlpha, colorSpace), with its defaults, in a `#[kompozable]` body:
 /// `ImageBitmap(4, 3, config = ImageBitmapConfig::Rgb565)` (from plain code: [`ImageBitmap::new`]). Panics as that
 /// does.
-#[named]
+#[named(type)]
 pub fn ImageBitmap(
     width: i32,
     height: i32,

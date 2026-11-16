@@ -345,7 +345,7 @@ impl TextStyle {
 
 /// Compose's `TextStyle(color = …, fontSize = …, …)` (or `TextStyle(brush, alpha, …)`): each attribute and setting
 /// not given the style's around it.
-#[named]
+#[named(type)]
 #[allow(clippy::too_many_arguments)]
 pub fn TextStyle(
     #[default(Color::Unspecified)] color: Color,

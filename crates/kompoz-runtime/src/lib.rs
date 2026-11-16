@@ -30,7 +30,7 @@ mod state;
 pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
 pub use composer::{Composition, Content, Node, RecompositionStats, RememberObserver};
 pub use derived::{DerivedState, derived_state_of, derived_state_of_with_policy};
-pub use kompoz_macros::{KotlinProperties, kompozable, kompozable_block, kompozable_lambda, named};
+pub use kompoz_macros::{KotlinProperties, kompozable, kompozable_block, kompozable_lambda, named, named_args};
 pub use local::{
     KompozitionLocal, KompozitionLocalContext, KompozitionLocalProvider, KompozitionLocalProviderContext,
     ProvidedValue, current_kompozition_local_context, current_kompozition_local_context_unobserved,
@@ -39,7 +39,7 @@ pub use local::{
 pub use movable::{MovableContent, MovableContentOf, movable_content_of, movable_content_with_param_of};
 pub use read::{observe_reads, record_read, without_read_observation};
 pub use remember::{
-    DisposableEffect, DisposableEffectResult, SideEffect, UpdatedState, current_composite_key_hash, emit,
+    DisposableEffect, DisposableEffectResult, Memoized, SideEffect, UpdatedState, current_composite_key_hash, emit,
     frame_time_nanos, group, in_composition, key, on_dispose, remember, remember_keyed, remember_observer,
     remember_observer_keyed, remember_updated_state, request_frame, request_frame_at, restartable, scoped,
 };

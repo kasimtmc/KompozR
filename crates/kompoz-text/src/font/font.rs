@@ -152,7 +152,7 @@ impl Font {
 
 /// Compose's `Font(file, weight = Normal, style = Normal, variationSettings = Settings(weight, style))` and its
 /// asset, bytes and device kinds, from a [`FontSource`] (`loading_strategy` Compose's ResourceFont's).
-#[named]
+#[named(type)]
 pub fn Font(
     source: FontSource,
     #[default(FontWeight::Normal)] weight: FontWeight,

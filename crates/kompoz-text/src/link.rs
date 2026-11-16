@@ -53,7 +53,7 @@ impl TextLinkStyles {
 }
 
 /// Compose's `TextLinkStyles(style = null, focusedStyle = null, hoveredStyle = null, pressedStyle = null)`.
-#[kompoz_runtime::named]
+#[kompoz_runtime::named(type)]
 pub fn TextLinkStyles(
     #[default(None)] style: Option<SpanStyle>,
     #[default(None)] focused_style: Option<SpanStyle>,

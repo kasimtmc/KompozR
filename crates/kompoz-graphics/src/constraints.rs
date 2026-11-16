@@ -169,7 +169,7 @@ impl Constraints {
 
 /// Compose's `Constraints(minWidth = 0, maxWidth = Infinity, minHeight = 0, maxHeight = Infinity)`, with named
 /// arguments in a kompozable body (`Constraints(max_width = 100)`); plain code calls [`Constraints::new`].
-#[named]
+#[named(type)]
 pub fn Constraints(
     #[default(0)] min_width: i32,
     #[default(Constraints::Infinity)] max_width: i32,

@@ -415,7 +415,7 @@ pub(crate) fn copied_foreground(
 
 /// Compose's `SpanStyle(color = …, fontSize = …, …)` (or `SpanStyle(brush, alpha, …)`): each attribute not given
 /// the style's around it.
-#[named]
+#[named(type)]
 #[allow(clippy::too_many_arguments)]
 pub fn SpanStyle(
     #[default(Color::Unspecified)] color: Color,

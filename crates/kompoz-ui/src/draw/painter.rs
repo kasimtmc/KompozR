@@ -113,7 +113,7 @@ pub struct BitmapPainter {
 
 /// Compose's `BitmapPainter(image, srcOffset = …, srcSize = …, filterQuality = …)`: all of it, sampled Low, by
 /// default.
-#[named]
+#[named(type)]
 pub fn BitmapPainter(
     image: ImageBitmap,
     #[default(IntOffset::Zero)] src_offset: IntOffset,

@@ -549,6 +549,13 @@ impl Composer {
         key
     }
 
+    /// Whether what runs now is composed in a group (and so can remember): not a derived state computed outside
+    /// a composition, not an effect run after one.
+    pub(crate) fn in_group(&self) -> bool {
+        let st = self.state.borrow();
+        st.composing && !st.frames.is_empty()
+    }
+
     pub(crate) fn current_group(&self) -> GroupId {
         self.state.borrow().frames.last().expect("kompoz: no group").group
     }

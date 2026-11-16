@@ -3,6 +3,7 @@
 use crate::composer::{Composer, RememberObserver, key_of, mix_key, stable_hash};
 use crate::kompozable;
 use std::any::Any;
+use std::cell::Cell;
 use std::hash::Hash;
 use std::panic::Location;
 use std::rc::Rc;
@@ -88,6 +89,85 @@ pub fn remember_observer_keyed<K: PartialEq + 'static, T: RememberObserver + 'st
     };
     c.end_group();
     value
+}
+
+thread_local! {
+    /// The last memoized closure identity given out (identities are unique on their thread, the UI's).
+    static LAST_ID: Cell<u64> = const { Cell::new(0) };
+}
+
+fn new_id() -> u64 {
+    LAST_ID.with(|l| {
+        l.set(l.get() + 1);
+        l.get()
+    })
+}
+
+/// The identity of a closure memoized at `site` by `keys` (see `__private::memo_id`).
+pub(crate) fn memo_id_at<K: crate::private::Keys + 'static>(site: &Location<'_>, keys: K) -> Option<u64> {
+    let c = Composer::current()?;
+    if !c.in_group() {
+        return None;
+    }
+    c.start_group(key_of(site));
+    let kept = slot_get::<(K, u64), _>(&c, |(k, id)| k.same(&keys).then_some(*id));
+    let id = match kept {
+        Some(id) => id,
+        None => {
+            let id = new_id();
+            c.set_remembered(Box::new((keys, id)), None);
+            id
+        }
+    };
+    c.end_group();
+    Some(id)
+}
+
+/// A `#[memoized]` parameter: the value given and its identity as a memoized closure (Compose's strong skipping
+/// remembers a lambda by what it captures): the same identity while what the closure captures stays the same,
+/// none when it wasn't one (or outside a composition).
+pub struct Memoized<T> {
+    value: T,
+    id: Option<u64>,
+}
+
+impl<T> Memoized<T> {
+    pub fn new(value: T, id: Option<u64>) -> Memoized<T> {
+        Memoized { value, id }
+    }
+
+    /// Its identity, if it has one.
+    pub fn id(&self) -> Option<u64> {
+        self.id
+    }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub fn into_value(self) -> T {
+        self.value
+    }
+
+    /// What `make` makes of it, remembered while its identity stays the same (made again from a closure that
+    /// captures other values, or from a value without an identity): `Layout` keeps its measure policy so.
+    #[track_caller]
+    pub fn remember<R: Clone + 'static>(self, make: impl FnOnce(T) -> R) -> R {
+        let Some(c) = Composer::current().filter(|c| c.in_group()) else { return make(self.value) };
+        c.start_group(key_of(Location::caller()));
+        let id = self.id;
+        let kept = slot_get::<(Option<u64>, R), _>(&c, |(k, v)| (id.is_some() && *k == id).then(|| v.clone()));
+        let value = match kept {
+            Some(v) => v,
+            None => {
+                let v = make(self.value);
+                c.set_remembered(Box::new((id, v.clone())), None);
+                v
+            }
+        };
+        c.end_group();
+        value
+    }
 }
 
 /// Gives `content` an explicit identity, e.g. for list items that can move or be removed: its state goes with

@@ -1,0 +1,23 @@
+error[E0277]: `fn() -> i32 {Corner}` isn't known to take named arguments
+  --> tests/ui/named_call_unknown.rs:12:13
+   |
+12 |     let _ = Corner(radius = 2);
+   |             ^^^^^^ called with named arguments here
+   |
+   = help: the trait `kompoz_runtime::__private::NamedArgumentsUnknown` is not implemented for fn item `fn() -> i32 {Corner}`
+   = note: a #[named] PascalCase function's named calls go through its type (`Name::__kz_builder()`): the macros know it from the API index (`cargo xtask kotlin-index`) or when it is defined in the same body
+   = note: outside those, call its builder yourself: `Name::__kz_builder().param(value).__call()`
+note: required by a bound in `kompoz_runtime::__private::ViaFn::__kz_named`
+  --> src/private.rs
+   |
+   |     fn __kz_named(&self) -> Positional<Self::F, ()>
+   |        ---------- required by a bound in this associated function
+   |     where
+   |         Self::F: NamedArgumentsUnknown;
+   |                  ^^^^^^^^^^^^^^^^^^^^^ required by this bound in `ViaFn::__kz_named`
+
+error[E0599]: no method named `radius` found for struct `kompoz_runtime::__private::Positional<F, A>` in the current scope
+  --> tests/ui/named_call_unknown.rs:12:20
+   |
+12 |     let _ = Corner(radius = 2);
+   |                    ^^^^^^ method not found in `kompoz_runtime::__private::Positional<fn() -> i32 {Corner}, ()>`

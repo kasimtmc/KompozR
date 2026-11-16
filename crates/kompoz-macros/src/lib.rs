@@ -3,31 +3,48 @@
 //! `#[kompozable]` on a function:
 //! - gives each call its identity (the call site, `#[track_caller]`) and, for a function returning nothing, a
 //!   restartable scope: it runs again on its own when a state it read changes, and is skipped when its parent runs
-//!   with arguments equal to the last ones (every parameter's type `PartialEq`; otherwise it is restartable but
-//!   never skipped). `#[kompozable(inline)]` (and a function returning a value) runs in its caller's scope, as
-//!   Compose's inline composables (`Column`, `Row`) do;
+//!   with arguments equal to the last ones (as Compose's strong skipping compares them: by `==`, an `Rc` or `Arc`
+//!   without one by instance, a closure by its identity as a memoized closure; with an argument that can't be
+//!   compared it is restartable but never skipped). `#[kompozable(inline)]` (and a function returning a value)
+//!   runs in its caller's scope, as Compose's inline composables (`Column`, `Row`) do;
 //! - lets its parameters have defaults, `#[default(expr)]`, and be named at the call (`Text("x", style = s)`);
 //! - rewrites its body: calls into the callees' builders, closures passed to calls into ones capturing clones of
-//!   the locals they use (see `transform`).
+//!   the locals they use, memoized by them (see `transform`). `#[kompozable(plain(name, …))]` leaves the calls of
+//!   those names as written (methods of other types named as a `#[named]` one of the API index).
 //!
 //! `#[named]` gives the same named and defaulted parameters to a plain function or to the methods of an impl block;
 //! `#[named(trait Name)]` on an impl puts its methods into a trait implemented for the type, so a crate can add
-//! them to a type of another (Compose's extension functions: foundation's `Modifier.padding`).
+//! them to a type of another (Compose's extension functions: foundation's `Modifier.padding`). A function keeps its
+//! name for a plain call with the parameters it has without a default, callable anywhere (`TextStyle()`,
+//! `RoundedCornerShape(8.dp())`); its builder is reached through a type of its name: a hidden `struct Name {}`, or
+//! with `#[named(type)]` the type of that name it makes (`TextStyle`: an associated function of it). A
+//! `#[memoized]` parameter is given to the body as a `Memoized`: the value and its identity as a memoized closure
+//! (what `Layout` keeps its measure policy by).
+//!
 //! `kompozable_lambda!(|| …)` is a closure written as a `#[kompozable]` body (content given from plain code);
-//! `kompozable_block!({ … })` an expression written as one, in place (in a method).
+//! `kompozable_block!({ … })` an expression written as one, in place (in a method); `named_args!(…)` an expression
+//! of plain code whose calls take named arguments (`named_args!(RoundedCornerShape(top_start = 4.dp()))`).
+//!
+//! `api_index` is the API index's format (shared with its writer, `cargo xtask kotlin-index`), `known` what the
+//! macros read of it.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Ts;
 use quote::{format_ident, quote};
+use std::collections::HashSet;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
 use syn::*;
 
+mod api_index;
 mod builder;
+mod known;
 mod kotlin_properties;
 mod transform;
 
 use builder::{Param, Receiver, Spec, builder, fn_sugar, generics, take_params};
+use known::Known;
 use transform::{Transformer, is_pascal, pattern_names};
 
 /// The runtime's path in the calling crate: through the umbrella crate (`::kompoz::runtime`) when it depends on
@@ -51,34 +68,81 @@ fn runtime() -> Ts {
     }
 }
 
+/// `#[kompozable(…)]`'s options.
+#[derive(Default)]
+struct Options {
+    inline: bool,
+    /// The names whose calls the body leaves as written.
+    plain: HashSet<String>,
+}
+
+impl syn::parse::Parse for Options {
+    fn parse(input: syn::parse::ParseStream) -> Result<Self> {
+        let mut options = Options::default();
+        for meta in Punctuated::<Meta, Token![,]>::parse_terminated(input)? {
+            match &meta {
+                Meta::Path(p) if p.is_ident("inline") => options.inline = true,
+                Meta::List(l) if l.path.is_ident("plain") => {
+                    let names = l.parse_args_with(Punctuated::<Ident, Token![,]>::parse_terminated)?;
+                    options.plain.extend(names.iter().map(|n| n.to_string()));
+                }
+                _ => {
+                    return Err(Error::new(
+                        meta.span(),
+                        "kompoz: unknown option (`inline`; `plain(name, …)`: calls of those names left as written)",
+                    ));
+                }
+            }
+        }
+        Ok(options)
+    }
+}
+
 #[proc_macro_attribute]
 pub fn kompozable(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let inline = match attr.to_string().as_str() {
-        "" => false,
-        "inline" => true,
-        other => {
-            return Error::new(
-                proc_macro2::Span::call_site(),
-                format!("kompoz: unknown option `{other}` (only `inline`)"),
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
+    let options = parse_macro_input!(attr as Options);
     let f = parse_macro_input!(item as ItemFn);
-    expand_fn(f, Some(inline)).unwrap_or_else(|e| e.to_compile_error()).into()
+    expand_fn(f, Some(options), false).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 #[proc_macro_attribute]
 pub fn named(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ext = if attr.is_empty() { None } else { Some(parse_macro_input!(attr as ExtensionTrait)) };
-    let out = match parse_macro_input!(item as Item) {
-        Item::Fn(f) if ext.is_none() => expand_fn(f, None),
-        Item::Fn(f) => Err(Error::new(f.sig.span(), "kompoz: #[named(trait …)] goes on an impl block")),
-        Item::Impl(i) => expand_impl(i, ext),
-        other => Err(Error::new(other.span(), "kompoz: #[named] goes on a function or an impl block")),
+    let option = if attr.is_empty() { None } else { Some(parse_macro_input!(attr as NamedOption)) };
+    let out = match (parse_macro_input!(item as Item), option) {
+        (Item::Fn(f), None) => expand_fn(f, None, false),
+        (Item::Fn(f), Some(NamedOption::Type)) => expand_fn(f, None, true),
+        (Item::Fn(f), Some(NamedOption::Trait(_))) => {
+            Err(Error::new(f.sig.span(), "kompoz: #[named(trait …)] goes on an impl block"))
+        }
+        (Item::Impl(i), None) => expand_impl(i, None),
+        (Item::Impl(i), Some(NamedOption::Trait(t))) => expand_impl(i, Some(t)),
+        (Item::Impl(i), Some(NamedOption::Type)) => {
+            Err(Error::new(i.self_ty.span(), "kompoz: #[named(type)] goes on a function"))
+        }
+        (other, _) => Err(Error::new(other.span(), "kompoz: #[named] goes on a function or an impl block")),
     };
     out.unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+/// `#[named(…)]`'s option.
+enum NamedOption {
+    /// `#[named(type)]` on a function: its builder is an associated function of the type of its name.
+    Type,
+    /// `#[named(trait Name)]` on an impl.
+    Trait(ExtensionTrait),
+}
+
+impl syn::parse::Parse for NamedOption {
+    fn parse(input: syn::parse::ParseStream) -> Result<Self> {
+        if input.peek(Token![type]) {
+            input.parse::<Token![type]>()?;
+            if !input.is_empty() {
+                return Err(input.error("kompoz: #[named(type)] takes nothing else"));
+            }
+            return Ok(NamedOption::Type);
+        }
+        Ok(NamedOption::Trait(input.parse()?))
+    }
 }
 
 /// `#[named(trait Name)]` (or `#[named(pub(crate) trait Name)]`): the impl's methods go into a trait of that name
@@ -103,6 +167,13 @@ impl syn::parse::Parse for ExtensionTrait {
     }
 }
 
+/// What the calls in an expression may call: the API index's items, and those defined in it.
+fn known_in_expr(e: &Expr) -> Result<Known> {
+    let mut known = Known::for_crate()?;
+    known.add_items_in_expr(e);
+    Ok(known)
+}
+
 /// `#[derive(KotlinProperties)]`: getters (and, `#[kotlin(set)]`, setters) of a struct's public fields, for the
 /// Kotlin syntax's property reads and writes (see `kotlin_properties`).
 #[proc_macro_derive(KotlinProperties, attributes(kotlin))]
@@ -114,7 +185,11 @@ pub fn kotlin_properties(item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn kompozable_lambda(item: TokenStream) -> TokenStream {
     let mut e = parse_macro_input!(item as Expr);
-    let mut t = Transformer::lambda(runtime());
+    let known = match known_in_expr(&e) {
+        Ok(k) => k,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    let mut t = Transformer::lambda(runtime(), known);
     t.transform_lambda(&mut e);
     quote!(#e).into()
 }
@@ -124,7 +199,26 @@ pub fn kompozable_lambda(item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn kompozable_block(item: TokenStream) -> TokenStream {
     let mut e = parse_macro_input!(item as Expr);
-    let mut t = Transformer::lambda(runtime());
+    let known = match known_in_expr(&e) {
+        Ok(k) => k,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    let mut t = Transformer::lambda(runtime(), known);
+    t.visit_expr_mut(&mut e);
+    quote!(#e).into()
+}
+
+/// An expression of plain code whose calls take named arguments (or more positional ones than the parameters
+/// without a default): those calls go through their builders, nothing else is touched
+/// (`named_args!(TextStyle(font_size = 14.sp()))`, `named_args!(color.copy(0.5))`).
+#[proc_macro]
+pub fn named_args(item: TokenStream) -> TokenStream {
+    let mut e = parse_macro_input!(item as Expr);
+    let known = match known_in_expr(&e) {
+        Ok(k) => k,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    let mut t = Transformer::plain(runtime(), known);
     t.visit_expr_mut(&mut e);
     quote!(#e).into()
 }
@@ -142,7 +236,7 @@ fn param_names(sig: &Signature) -> Vec<String> {
 }
 
 /// What a restartable composable keeps of a parameter: its value as given, an `impl Into<T>`'s `T`, an
-/// `impl Fn`'s closure in an `Rc`.
+/// `impl Fn`'s closure in an `Rc` (with its identity as a memoized closure).
 enum Kept {
     Plain(Type),
     Into(Type),
@@ -181,47 +275,65 @@ fn kept(p: &Param) -> Result<Kept> {
     ))
 }
 
+/// How a kept argument of type `t` compares, `(&&&EqProbe::<t>::new()).__kz_eq()`.
+fn eq_probe(rt: &Ts, t: &Type) -> Ts {
+    quote!({
+        #[allow(unused_imports)]
+        use #rt::__private::{EqViaPartialEq as _, EqViaInstance as _, EqFallback as _};
+        (&&&#rt::__private::EqProbe::<#t>::new()).__kz_eq()
+    })
+}
+
 /// The body of a restartable composable: its arguments kept (as `kept` says), the body run in a scope of its own.
+/// A closure is kept with its identity (`__kz_ids`), its parameter's name bound to a closure calling it and
+/// `__kz_id_<name>` to the identity (what the body's memoized closures key a capture of it by).
 fn restartable_body(rt: &Ts, params: &[Param], body: &Block) -> Result<Ts> {
     let mut converts = Vec::new();
-    let mut types = Vec::new();
+    let mut types: Vec<Ts> = Vec::new();
+    let mut eqs = Vec::new();
+    let mut somes = Vec::new();
+    let mut patterns = Vec::new();
     let mut rebinds = Vec::new();
-    for p in params {
-        let i = &p.ident;
+    for (k, p) in params.iter().enumerate() {
+        let (m, i) = (&p.mutability, &p.ident);
+        let index = Index::from(k);
         match kept(p)? {
-            Kept::Plain(t) => types.push(t),
+            Kept::Plain(t) => {
+                let eq = eq_probe(rt, &t);
+                eqs.push(quote!(#rt::__private::eq_by(#eq, &a.#index, &b.#index)));
+                somes.push(quote!(#eq.is_some()));
+                types.push(quote!(#t));
+                patterns.push(quote!(#m #i));
+            }
             Kept::Into(t) => {
                 converts.push(quote!(let #i: #t = ::core::convert::Into::into(#i);));
-                types.push(t);
+                let eq = eq_probe(rt, &t);
+                eqs.push(quote!(#rt::__private::eq_by(#eq, &a.#index, &b.#index)));
+                somes.push(quote!(#eq.is_some()));
+                types.push(quote!(#t));
+                patterns.push(quote!(#m #i));
             }
             Kept::Closure(t, args) => {
-                converts.push(quote!(let #i: #t = ::std::rc::Rc::new(#i);));
+                converts
+                    .push(quote!(let #i: (#t, ::core::option::Option<u64>) = (::std::rc::Rc::new(#i), __kz_ids[#k]);));
+                eqs.push(quote!(#rt::__private::same_id(a.#index.1, b.#index.1)));
+                types.push(quote!((#t, ::core::option::Option<u64>)));
+                let id = format_ident!("__kz_id_{}", i);
+                patterns.push(quote!((#i, #id)));
                 let names: Vec<Ident> = (0..args.inputs.len()).map(|k| format_ident!("__kz_a{k}")).collect();
                 let tys = args.inputs.iter().map(|a| &a.ty);
                 let out = &args.output;
                 rebinds.push(quote! {
-                    let #i = {
+                    #[allow(unused_mut)]
+                    let #m #i = {
                         let __kz_f = #i;
                         move |#(#names: #tys),*| #out { __kz_f(#(#names),*) }
                     };
                 });
-                types.push(t);
             }
         }
     }
-    let names: Vec<Ts> = params
-        .iter()
-        .map(|p| {
-            let (m, i) = (&p.mutability, &p.ident);
-            quote!(#m #i)
-        })
-        .collect();
     let idents = params.iter().map(|p| &p.ident);
-    let eqs = types.iter().enumerate().map(|(k, t)| {
-        let k = Index::from(k);
-        quote!(#rt::__private::eq_by({ use #rt::__private::{EqViaPartialEq as _, EqFallback as _}; (&&#rt::__private::EqProbe::<#t>::new()).__kz_eq() }, &a.#k, &b.#k))
-    });
-    let somes = types.iter().map(|t| quote!({ use #rt::__private::{EqViaPartialEq as _, EqFallback as _}; (&&#rt::__private::EqProbe::<#t>::new()).__kz_eq() }.is_some()));
     let stmts = &body.stmts;
     Ok(quote! {
         #(#converts)*
@@ -234,19 +346,41 @@ fn restartable_body(rt: &Ts, params: &[Param], body: &Block) -> Result<Ts> {
             };
         #rt::__private::restartable(__kz_args, __kz_equals, move |__kz_args: &(#(#types,)*)| {
             #[allow(unused_variables, unused_mut)]
-            let (#(#names,)*) = ::core::clone::Clone::clone(__kz_args);
+            let (#(#patterns,)*) = ::core::clone::Clone::clone(__kz_args);
             #(#rebinds)*
             #(#stmts)*
         });
     })
 }
 
-/// `#[kompozable]` (`composable` is `Some(inline)`) or `#[named]` (`None`) on a function.
-fn expand_fn(mut f: ItemFn, composable: Option<bool>) -> Result<Ts> {
+/// `#[kompozable]` (`composable` holds its options) or `#[named]` (`None`; `own_type`: `#[named(type)]`) on a
+/// function.
+fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Result<Ts> {
     let rt = runtime();
     let mut params = take_params(&mut f.sig)?;
-    let mut t = Transformer::new(rt.clone(), param_names(&f.sig));
-    if composable.is_some() {
+    let output = f.sig.output.clone();
+    let returns_unit = matches!(output, ReturnType::Default);
+    let restartable = composable.as_ref().is_some_and(|o| !o.inline) && returns_unit;
+    if restartable && let Some(span) = params.iter().find_map(|p| p.memoized) {
+        return Err(Error::new(
+            span,
+            "kompoz: #[memoized] is for a parameter of an inline composable or a #[named] function (a restartable composable keeps its closures by their identities already)",
+        ));
+    }
+    // The parameters keeping the identity of a memoized closure given to them.
+    let wants_id: Vec<bool> =
+        params.iter().map(|p| p.memoized.is_some() || (restartable && fn_sugar(p).is_some())).collect();
+    let pass_ids = wants_id.contains(&true);
+    let n = params.len();
+    if let Some(options) = &composable {
+        let mut known = Known::for_crate()?;
+        known.add_items_in_block(&f.block);
+        let kept_closures: HashSet<String> = if restartable {
+            params.iter().filter(|p| fn_sugar(p).is_some()).map(|p| p.ident.to_string()).collect()
+        } else {
+            HashSet::new()
+        };
+        let mut t = Transformer::new(rt.clone(), param_names(&f.sig), known, options.plain.clone(), kept_closures);
         t.visit_block_mut(&mut f.block);
     }
 
@@ -256,8 +390,6 @@ fn expand_fn(mut f: ItemFn, composable: Option<bool>) -> Result<Ts> {
     let marker = format_ident!("__kz_{}_Marker", name);
     let new_fn = format_ident!("__kz_{}_new", name);
     let imp = format_ident!("__kz_impl_{}", name);
-    let output = f.sig.output.clone();
-    let returns_unit = matches!(output, ReturnType::Default);
 
     // The function itself, under another name, its body wrapped as a composable's.
     // The docs go on what callers see; the function itself is hidden.
@@ -265,8 +397,17 @@ fn expand_fn(mut f: ItemFn, composable: Option<bool>) -> Result<Ts> {
     let mut imp_fn = f.clone();
     imp_fn.sig.ident = imp.clone();
     imp_fn.attrs.retain(|a| !a.path().is_ident("doc"));
-    if let Some(inline) = composable {
-        if !inline && returns_unit {
+    if pass_ids {
+        imp_fn.sig.inputs.push(parse_quote!(__kz_ids: [::core::option::Option<u64>; #n]));
+    }
+    // `#[memoized]` parameters, as the body gets them.
+    let memoized = params.iter().enumerate().filter(|(_, p)| p.memoized.is_some()).map(|(k, p)| {
+        let i = &p.ident;
+        quote!(let #i = #rt::__private::memoized(#i, __kz_ids[#k]);)
+    });
+    let memoized: Vec<Ts> = memoized.collect();
+    match &composable {
+        Some(_) if restartable => {
             for (arg, p) in imp_fn.sig.inputs.iter_mut().zip(&params) {
                 // Closures it keeps are kept for good.
                 if fn_sugar(p).is_some()
@@ -287,32 +428,41 @@ fn expand_fn(mut f: ItemFn, composable: Option<bool>) -> Result<Ts> {
             }
             let body = restartable_body(&rt, &params, &f.block)?;
             imp_fn.block = parse_quote!({ #body });
-        } else {
-            let block = &f.block;
-            imp_fn.block = parse_quote!({ #rt::__private::group(|| #block) });
         }
+        Some(_) => {
+            let block = &f.block;
+            imp_fn.block = parse_quote!({ #rt::__private::group(|| { #(#memoized)* #block }) });
+        }
+        None if !memoized.is_empty() => {
+            let block = &f.block;
+            imp_fn.block = parse_quote!({ #(#memoized)* #block });
+        }
+        None => {}
     }
 
     let original: Vec<(Ident, Type, bool)> =
         params.iter().map(|p| (p.ident.clone(), p.ty.clone(), p.default.is_some())).collect();
     let gens = generics(&rt, &f.sig.generics, None, &mut params)?;
     let args: Vec<Ident> = (0..params.len()).map(|i| format_ident!("__a{i}")).collect();
+    let ids = pass_ids.then(|| quote!(__kz_ids));
     let built = builder(Spec {
         rt: &rt,
         params: &params,
         generics: &gens,
         where_clause: f.sig.generics.where_clause.as_ref(),
         output: &output,
-        call: quote!(#imp(#(#args),*)),
+        call: quote!(#imp(#(#args,)* #ids)),
         recv: None,
         prefix: &prefix,
         vis: &vis,
+        wants_id: &wants_id,
     })?;
     let (items, new_type) = (built.items, built.new_type);
 
-    // A PascalCase function is a constant of a marker type, which `Probe` turns into the builder; a lowercase one
-    // stays a function taking the parameters without a default, and a struct of its name hands out the builder.
-    // Taking nothing it must be given (and no generics): content a composition can be given.
+    // A PascalCase composable is a constant of a marker type, which `Probe` turns into the builder; any other
+    // function stays a function taking the parameters without a default, and a type of its name (a hidden struct,
+    // or with `#[named(type)]` the one it makes) hands out the builder. A composable taking nothing it must be
+    // given (and no generics) is content a composition can be given.
     let content = (composable.is_some()
         && returns_unit
         && f.sig.generics.params.is_empty()
@@ -326,7 +476,8 @@ fn expand_fn(mut f: ItemFn, composable: Option<bool>) -> Result<Ts> {
             }
         }
     });
-    let entry = if is_pascal(&name.to_string()) {
+    let pascal = is_pascal(&name.to_string());
+    let entry = if composable.is_some() && pascal {
         quote! {
             #[doc(hidden)]
             #[allow(non_camel_case_types)]
@@ -350,18 +501,32 @@ fn expand_fn(mut f: ItemFn, composable: Option<bool>) -> Result<Ts> {
                 quote!(#i)
             }
         });
+        let no_ids = pass_ids.then(|| quote!([::core::option::Option::None; #n]));
         let (gi, _, wc) = f.sig.generics.split_for_impl();
         let attrs = &docs;
-        quote! {
-            #[allow(non_camel_case_types)]
-            #[doc(hidden)]
-            #vis struct #name {}
-            impl #name {
-                pub fn __kz_builder() -> #new_type { #new_fn() }
+        let ty = if own_type {
+            quote! {
+                impl #name {
+                    #[doc(hidden)]
+                    #vis fn __kz_builder() -> #new_type { #new_fn() }
+                }
             }
+        } else {
+            quote! {
+                #[allow(non_camel_case_types)]
+                #[doc(hidden)]
+                #vis struct #name {}
+                impl #name {
+                    pub fn __kz_builder() -> #new_type { #new_fn() }
+                }
+            }
+        };
+        quote! {
+            #ty
             #(#attrs)*
             #[track_caller]
-            #vis fn #name #gi(#(#req),*) #output #wc { #imp(#(#all),*) }
+            #[allow(non_snake_case, clippy::too_many_arguments)]
+            #vis fn #name #gi(#(#req),*) #output #wc { #imp(#(#all,)* #no_ids) }
         }
     };
     Ok(quote! {
@@ -418,6 +583,9 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             continue;
         };
         let mut params = take_params(&mut m.sig)?;
+        if let Some(span) = params.iter().find_map(|p| p.memoized) {
+            return Err(Error::new(span, "kompoz: #[memoized] goes on a parameter of a function, not a method"));
+        }
         if params.iter().all(|p| p.default.is_none()) {
             if ext.is_some() {
                 m.vis = Visibility::Inherited;
@@ -473,6 +641,7 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             recv: Some(&recv),
             prefix: &prefix,
             vis: &vis,
+            wants_id: &vec![false; params.len()],
         })?;
         gens.clear();
         let (b, new_type) = (built.items, built.new_type);

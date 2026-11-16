@@ -6,7 +6,7 @@ use crate::modifier::Modifier;
 use crate::node::LayoutNode;
 use crate::platform::{LocalDensity, LocalLayoutDirection};
 use crate::unit::Constraints;
-use kompoz_runtime::{current_composite_key_hash, current_kompozition_local_map, emit, kompozable};
+use kompoz_runtime::{Memoized, current_composite_key_hash, current_kompozition_local_map, emit, kompozable};
 use std::rc::Rc;
 
 /// A measure policy from a closure (Compose's `MeasurePolicy { measurables, constraints -> … }`), its parameter
@@ -19,15 +19,17 @@ where
 }
 
 /// A layout: the children `content` emits, measured and placed by `measure_policy`, decorated by `modifier`
-/// (Compose's `Layout`). Without content, a leaf (Compose's `Layout(modifier, measurePolicy)`). A policy made anew
-/// at each composition (a closure) measures the layout again whenever this composes again.
+/// (Compose's `Layout`). Without content, a leaf (Compose's `Layout(modifier, measurePolicy)`). A closure policy
+/// written in a kompozable body is memoized by what it captures, as Compose's strong skipping remembers a lambda:
+/// while those values stay the same, the policy kept is the one the layout has, which isn't measured again for it;
+/// a new one (other values captured, or one the body can't compare) measures it again.
 #[kompozable(inline)]
 pub fn Layout(
     #[default(|| {})] content: impl FnOnce(),
     #[default(Modifier)] modifier: Modifier,
-    measure_policy: impl MeasurePolicy,
+    #[memoized] measure_policy: impl MeasurePolicy,
 ) {
-    layout_into(modifier, Rc::new(measure_policy), false, content);
+    layout_into(modifier, kept_policy(measure_policy), false, content);
 }
 
 /// A layout whose policy may measure a child more than once (Compose's deprecated `MultiMeasureLayout`).
@@ -35,9 +37,16 @@ pub fn Layout(
 pub fn MultiMeasureLayout(
     #[default(Modifier)] modifier: Modifier,
     content: impl FnOnce(),
-    measure_policy: impl MeasurePolicy,
+    #[memoized] measure_policy: impl MeasurePolicy,
 ) {
-    layout_into(modifier, Rc::new(measure_policy), true, content);
+    layout_into(modifier, kept_policy(measure_policy), true, content);
+}
+
+/// The policy a layout keeps for `policy`: the one it has while `policy` is the same memoized closure (so the
+/// node, comparing policies by identity, isn't measured again), else a new one.
+#[track_caller]
+fn kept_policy<P: MeasurePolicy>(policy: Memoized<P>) -> Rc<dyn MeasurePolicy> {
+    policy.remember(|p| Rc::new(p) as Rc<dyn MeasurePolicy>)
 }
 
 /// Emits a layout node (what `Layout` does, for composables that keep their measure policy: `Box`, `Row`, …):

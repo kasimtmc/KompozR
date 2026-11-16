@@ -126,7 +126,7 @@ impl ParagraphStyle {
 
 /// Compose's `ParagraphStyle(textAlign = …, lineHeight = …, …)`: each setting not given the style's around it.
 /// A negative line height panics (as Compose's).
-#[named]
+#[named(type)]
 #[allow(clippy::too_many_arguments)]
 pub fn ParagraphStyle(
     #[default(TextAlign::Unspecified)] text_align: TextAlign,

@@ -328,6 +328,8 @@ impl LayoutNode {
 
     // ---- What the composition sets (Compose's ComposeUiNode setters) ----
 
+    /// Its measure policy, which measures it again unless it is the one it has (the same `Rc`: what `Layout`
+    /// keeps while its closure policy is the same memoized closure, and composables keep of their own policies).
     pub fn set_measure_policy(&self, policy: Rc<dyn MeasurePolicy>) {
         let same = Rc::ptr_eq(&*self.measure_policy.borrow(), &policy);
         if !same {

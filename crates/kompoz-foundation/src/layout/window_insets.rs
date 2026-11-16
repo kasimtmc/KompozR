@@ -216,7 +216,7 @@ impl WindowInsets {
 /// Compose's `WindowInsets(left = 0.dp, top = 0.dp, right = 0.dp, bottom = 0.dp)`, with named arguments in a
 /// kompozable body (`WindowInsets(top = 24.dp())`); plain code calls [`WindowInsets::of_dp`] (or
 /// [`WindowInsets::new`] for pixels).
-#[named]
+#[named(type)]
 pub fn WindowInsets(
     #[default(0.dp())] left: Dp,
     #[default(0.dp())] top: Dp,

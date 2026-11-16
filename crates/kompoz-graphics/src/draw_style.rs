@@ -51,7 +51,7 @@ impl Default for Stroke {
 }
 
 /// Compose's `Stroke(width = …, miter = …, cap = …, join = …, pathEffect = …)`, each defaulted: a hairline.
-#[named]
+#[named(type)]
 pub fn Stroke(
     #[default(Stroke::HairlineWidth)] width: f32,
     #[default(Stroke::DefaultMiter)] miter: f32,

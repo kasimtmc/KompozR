@@ -5,7 +5,6 @@
 use kompoz_graphics::*;
 use kompoz_runtime::{Saveable, SavedValue, kompozable_block};
 use kompoz_text::annotated_string::{contains, intersect};
-use kompoz_text::input::TextFieldValue as TextFieldValueFn;
 use kompoz_text::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex};
@@ -449,7 +448,7 @@ fn text_field_values_keep_their_ranges_within_the_text() {
     assert_eq!(v.get_selected_text().text(), "dü");
     assert_eq!(v.get_text_after_selection(2).text(), "ny");
     assert_eq!(v.get_text_after_selection(100).text(), "nya");
-    let named = kompozable_block!(TextFieldValueFn(text = "xy".to_string(), selection = TextRange::at(1)));
+    let named = kompozable_block!(TextFieldValue(text = "xy".to_string(), selection = TextRange::at(1)));
     assert_eq!((named.text(), named.selection()), ("xy", TextRange::at(1)));
     assert_eq!(kompozable_block!(named.copy(selection = TextRange::new(0, 2))).selection(), TextRange::new(0, 2));
     assert_eq!(named.with_text("x").selection(), TextRange::at(1));

@@ -1,0 +1,11 @@
+error[E0428]: the name `Insets` is defined multiple times
+ --> tests/ui/named_type_needed.rs:9:1
+  |
+5 | struct Insets {
+  | ------------- previous definition of the type `Insets` here
+...
+9 | #[named]
+  | ^^^^^^^^ `Insets` redefined here
+  |
+  = note: `Insets` must be defined only once in the type namespace of this module
+  = note: this error originates in the attribute macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)

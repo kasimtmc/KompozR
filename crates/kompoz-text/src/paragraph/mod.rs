@@ -232,7 +232,7 @@ impl fmt::Debug for Paragraph {
 /// Compose's `Paragraph(text, style, constraints, density, fontFamilyResolver, spanStyles = listOf(), placeholders
 /// = listOf(), maxLines = DefaultMaxLines, overflow = TextOverflow.Clip)` by name; plain code calls
 /// [`Paragraph::of_text`] or [`Paragraph::new`].
-#[named]
+#[named(type)]
 #[allow(clippy::too_many_arguments)]
 pub fn Paragraph(
     text: &str,

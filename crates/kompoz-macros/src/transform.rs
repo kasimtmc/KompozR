@@ -1,23 +1,41 @@
 //! What a `#[kompozable]` body goes through: calls with named arguments (and every PascalCase call) rewritten into
-//! the callee's builder, and closures and async blocks passed to calls made to capture clones of the locals they
-//! use (Kotlin's lambdas share what they capture; Rust's `move` would take it away).
+//! the callee's builder, closures and async blocks passed to calls made to capture clones of the locals they use
+//! (Kotlin's lambdas share what they capture; Rust's `move` would take it away), and closures passed to rewritten
+//! calls memoized by what they capture (Compose's strong skipping).
 //!
 //! ```text
 //! Column(modifier = m, || Text(format!("{count}")))
-//!   →  { (&&Probe(Column)).__kz_builder() }.modifier(m).__last({ let count = capture(&count); move || … }).__call()
+//!   →  { (&&Probe(Column)).__kz_builder() }.modifier(m)
+//!        .__kz_memo___last(|| (key(&count), ()), { let count = capture(&count); move || … }).__call()
 //! ```
 //!
-//! - every call of a PascalCase path goes through `Probe`, which picks the builder of a `#[kompozable]` or
-//!   `#[named]` function and falls back to a positional call for anything else (`Some(x)`, a tuple struct);
-//! - a lowercase path call or a method call is rewritten only when an argument is named (`name = value`);
+//! - every call of a PascalCase path goes through `Probe`, which picks the builder of a `#[kompozable]` function
+//!   (its marker) and falls back to a positional call for anything else (`Some(x)`, a tuple struct, a `#[named]`
+//!   function called with the parameters it has without a default); a PascalCase `#[named]` function that isn't a
+//!   composable is reached through its type (`TextStyle::__kz_builder()`) when called with named arguments or more
+//!   positional ones than its parameters without a default, as the API index or the body's own items tell;
+//! - a lowercase path call or a method call is rewritten when an argument is named (`name = value`), or when it
+//!   gives more positional arguments than the callee's parameters without a default (and no more than all), the
+//!   callee known from the API index (`known`) or the body's own items (`color.copy(0.5)`,
+//!   `top_app_bar_colors(red)`). A function's name counts only on a path of modules (`f(…)`, `module::f(…)`), not a
+//!   type's (`Type::f(…)`). A raw name keeps a call as written (`x.r#copy(1)`, `r#Font(a, b)`), and so do the
+//!   names `#[kompozable(plain(copy, …))]` lists: methods of other types with the name of an indexed one;
 //! - positional arguments fill the parameters in order, except a last unnamed closure, which goes to the last
 //!   parameter (Kotlin's trailing lambda);
 //! - a closure or async block passed to a rewritten call is made `move` and captures clones of the locals it uses
 //!   (they must be `Clone`: states and `Rc`s share what they hold), as Kotlin's lambdas share what they capture;
 //!   so does a `move` one passed to any call inside another closure (`on_click = || scope.launch(async move { … })`:
 //!   moving would take the value away from a closure that runs again). Written `move` at the top of the body, a
-//!   closure moves what it captures, as in plain Rust (to hand over what can't be cloned).
+//!   closure moves what it captures, as in plain Rust (to hand over what can't be cloned);
+//! - a closure passed to a rewritten call is memoized by the values it captures: each one's key (`KeyProbe`: by
+//!   `==`, by instance for an `Rc`/`Arc` without `==`, else never equal) goes with it to the setter's twin
+//!   (`__kz_memo_x(keys, closure)`), which, where the parameter keeps the closure, gives it an identity that stays
+//!   while the keys are equal (Compose 2's strong skipping: a lambda remembered by its captures). A closure given
+//!   through a function of it alone (`measure_policy(move |…| …)`) counts as that closure; a restartable
+//!   composable's closure parameter passed on (`Child(on_click)`) or captured keeps its own identity. A closure that
+//!   uses `self`, or (in `kompozable_lambda!`) a macro whose names can't be told, is never equal.
 
+use crate::known::Known;
 use proc_macro2::{TokenStream as Ts, TokenTree};
 use quote::{format_ident, quote, quote_spanned};
 use std::collections::HashSet;
@@ -328,7 +346,45 @@ fn make_move(e: &mut Expr) {
     }
 }
 
-/// Rewrites a body: calls into builders, captures into clones. `rt` is the runtime's path.
+/// Whether a name is written raw (`r#copy`): a call of it is left as written.
+fn is_raw(i: &Ident) -> bool {
+    i.to_string().starts_with("r#")
+}
+
+/// A function's path as the index's names count on it: a name, or one in a module (`kompoz_graphics::Font`), not
+/// an associated function of a type (`Constraints::fixed`).
+fn module_path(p: &Path) -> bool {
+    let n = p.segments.len();
+    n == 1 || !is_pascal(&p.segments[n - 2].ident.to_string())
+}
+
+/// How a call is rewritten.
+#[derive(Clone, Copy, PartialEq)]
+enum Route {
+    /// As written.
+    Keep,
+    /// Through `Probe`: a composable's marker gives its builder, anything else a positional call. `named`: for
+    /// named arguments (an error unless a builder).
+    Probe { named: bool },
+    /// Through its type: `path::__kz_builder()`.
+    Type,
+}
+
+/// What is done with an argument of a call.
+enum Plan {
+    Keep,
+    /// Made `move`, its captures cloned.
+    Wrap(Vec<(String, proc_macro2::Span)>),
+    /// Memoized: given with `keys` (the closure making its keys), and wrapped if `wrap`.
+    Memo {
+        wrap: Option<Vec<(String, proc_macro2::Span)>>,
+        keys: Ts,
+    },
+    /// A kept closure parameter passed on: shared (a clone of it, as Kotlin passes a lambda), with its identity.
+    PassOn(Ts),
+}
+
+/// Rewrites a body: calls into builders, captures into clones, closures memoized. `rt` is the runtime's path.
 pub(crate) struct Transformer {
     pub(crate) rt: Ts,
     scopes: Vec<HashSet<String>>,
@@ -337,6 +393,15 @@ pub(crate) struct Transformer {
     /// A lambda (`kompozable_lambda!`): the locals around it aren't known, so any lowercase name used as a value
     /// may be one.
     outer_unknown: bool,
+    /// Plain code (`named_args!`): only calls with named arguments, or with more positional ones than the
+    /// callee's parameters without a default, are rewritten; closures stay as written.
+    plain: bool,
+    /// The functions and methods with defaulted parameters the calls may call.
+    known: Known,
+    /// Names whose calls are left as written (`#[kompozable(plain(…))]`).
+    left: HashSet<String>,
+    /// A restartable composable's closure parameters: each kept with its identity, `__kz_id_<name>`.
+    kept_closures: HashSet<String>,
 }
 
 const KEYWORDS: &[&str] = &[
@@ -346,13 +411,44 @@ const KEYWORDS: &[&str] = &[
 ];
 
 impl Transformer {
-    pub(crate) fn new(rt: Ts, params: impl IntoIterator<Item = String>) -> Self {
-        Transformer { rt, scopes: vec![params.into_iter().collect()], depth: 0, outer_unknown: false }
+    /// For a `#[kompozable]` function's body: `params` its parameters, `left` the names its calls of are left as
+    /// written, `kept_closures` its closure parameters kept with their identities (a restartable composable's).
+    pub(crate) fn new(
+        rt: Ts,
+        params: impl IntoIterator<Item = String>,
+        known: Known,
+        left: HashSet<String>,
+        kept_closures: HashSet<String>,
+    ) -> Self {
+        Transformer {
+            rt,
+            scopes: vec![params.into_iter().collect()],
+            depth: 0,
+            outer_unknown: false,
+            plain: false,
+            known,
+            left,
+            kept_closures,
+        }
     }
 
     /// For a lambda: the names around it aren't known.
-    pub(crate) fn lambda(rt: Ts) -> Self {
-        Transformer { rt, scopes: vec![HashSet::new()], depth: 0, outer_unknown: true }
+    pub(crate) fn lambda(rt: Ts, known: Known) -> Self {
+        Transformer {
+            rt,
+            scopes: vec![HashSet::new()],
+            depth: 0,
+            outer_unknown: true,
+            plain: false,
+            known,
+            left: HashSet::new(),
+            kept_closures: HashSet::new(),
+        }
+    }
+
+    /// For plain code (`named_args!`).
+    pub(crate) fn plain(rt: Ts, known: Known) -> Self {
+        Transformer { plain: true, ..Transformer::lambda(rt, known) }
     }
 
     /// A lambda: its body is a composable's (its own closures nested in it, not it in itself).
@@ -379,14 +475,21 @@ impl Transformer {
             || (self.outer_unknown && name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && name != "_")
     }
 
+    /// Whether `name` here is a kept closure parameter (not a local hiding it).
+    fn kept_closure(&self, name: &str) -> bool {
+        self.kept_closures.contains(name) && !self.scopes[1..].iter().any(|s| s.contains(name))
+    }
+
     fn bind(&mut self, names: Vec<String>) {
         self.scopes.last_mut().unwrap().extend(names);
     }
 
-    /// The locals a closure or async block captures, with where each is used.
-    fn captures(&self, e: &Expr) -> Vec<(String, proc_macro2::Span)> {
+    /// The locals a closure or async block captures, with where each is used; and whether it uses what its keys
+    /// can't tell (`self`; in a lambda, the names of a macro whose arguments aren't expressions).
+    fn captures(&self, e: &Expr) -> (Vec<(String, proc_macro2::Span)>, bool) {
         let mut free = FreeNames::new();
         free.visit_expr(e);
+        let uncertain = free.used.contains("self") || (self.outer_unknown && !free.raw.is_empty());
         if !self.outer_unknown {
             // (where the locals are known, a name in a macro's tokens is one only if it is one)
             free.used.extend(free.raw.iter().cloned());
@@ -402,7 +505,7 @@ impl Transformer {
             })
             .collect();
         names.sort_by(|a, b| a.0.cmp(&b.0));
-        names
+        (names, uncertain)
     }
 
     /// `{ let a = capture(&a); …; e }`
@@ -418,24 +521,143 @@ impl Transformer {
         parse_quote!({ #(#lets)* #e })
     }
 
-    /// The capture lists of `args` (by index), for the closures and async blocks to wrap.
-    fn plan(
-        &self,
-        args: &Punctuated<Expr, Token![,]>,
-        rewritten: bool,
-    ) -> Vec<Option<Vec<(String, proc_macro2::Span)>>> {
+    /// The keys of a closure capturing `names` (a list, `(k1, (k2, ()))`), never equal if `uncertain`.
+    fn keys(&self, names: &[(String, proc_macro2::Span)], uncertain: bool) -> Ts {
+        let rt = &self.rt;
+        let mut list = if uncertain { quote!((#rt::__private::Unequal, ())) } else { quote!(()) };
+        for (n, span) in names.iter().rev() {
+            let key = if self.kept_closure(n) {
+                let id = format_ident!("__kz_id_{}", n);
+                quote!(#rt::__private::IdKey(#id))
+            } else {
+                let i = Ident::new(n, *span);
+                quote_spanned!(*span=> {
+                    #[allow(unused_imports)]
+                    use #rt::__private::{KeyViaPartialEq as _, KeyViaInstance as _, KeyFallback as _};
+                    (&&&#rt::__private::KeyProbe(&#i)).__kz_key()
+                })
+            };
+            list = quote!((#key, #list));
+        }
+        list
+    }
+
+    /// How a call of `func` with `args` is rewritten.
+    fn route(&self, func: &Expr, args: &Punctuated<Expr, Token![,]>) -> Route {
+        let Expr::Path(p) = func else { return Route::Keep };
+        if p.qself.is_some() {
+            return Route::Keep;
+        }
+        let seg = p.path.segments.last().unwrap();
+        let name = seg.ident.to_string();
+        if is_raw(&seg.ident) || self.left.contains(&name) {
+            return Route::Keep;
+        }
+        let named = args.iter().any(|a| named_arg(a).is_some());
+        let overflows = !named
+            && seg.arguments.is_none()
+            && module_path(&p.path)
+            && self.known.function_overflows(&name, args.len(), args.last().is_some_and(last_is_closure));
+        if is_pascal(&name) {
+            if named || overflows {
+                if self.known.is_plain_function(&name) { Route::Type } else { Route::Probe { named } }
+            } else if self.plain {
+                Route::Keep
+            } else {
+                Route::Probe { named: false }
+            }
+        } else if named || overflows {
+            Route::Type
+        } else {
+            Route::Keep
+        }
+    }
+
+    /// Whether a method call is rewritten.
+    fn method_rewritten(&self, m: &ExprMethodCall) -> bool {
+        let name = m.method.to_string();
+        if is_raw(&m.method) || self.left.contains(&name) {
+            return false;
+        }
+        m.args.iter().any(|a| named_arg(a).is_some())
+            || (m.turbofish.is_none()
+                && self.known.method_overflows(&name, m.args.len(), m.args.last().is_some_and(last_is_closure)))
+    }
+
+    /// What is done with each of `args` (a rewritten call's if `rewritten`).
+    fn plan(&self, args: &Punctuated<Expr, Token![,]>, rewritten: bool) -> Vec<Plan> {
+        if self.plain {
+            return args.iter().map(|_| Plan::Keep).collect();
+        }
         args.iter()
             .map(|a| {
                 let v = named_arg(a).map_or(a, |(_, v)| v);
-                (capturing(v) && ((rewritten && !(is_move(v) && self.depth == 0)) || (is_move(v) && self.depth > 0)))
-                    .then(|| self.captures(v))
+                match v {
+                    Expr::Closure(_) if rewritten => {
+                        let (names, uncertain) = self.captures(v);
+                        let keys = self.keys(&names, uncertain);
+                        if is_move(v) && self.depth == 0 {
+                            // (it moves what it captures: the keys are taken first)
+                            Plan::Memo { wrap: None, keys: quote!({ let __kz_keys = #keys; move || __kz_keys }) }
+                        } else {
+                            Plan::Memo { wrap: Some(names), keys: quote!(|| #keys) }
+                        }
+                    }
+                    _ if capturing(v) => {
+                        if (rewritten && !(is_move(v) && self.depth == 0)) || (is_move(v) && self.depth > 0) {
+                            Plan::Wrap(self.captures(v).0)
+                        } else {
+                            Plan::Keep
+                        }
+                    }
+                    // A closure given through a function of it alone (`measure_policy(move |…| …)`).
+                    Expr::Call(inner)
+                        if rewritten
+                            && inner.args.len() == 1
+                            && matches!(inner.args.first(), Some(Expr::Closure(_)))
+                            && self.route(&inner.func, &inner.args) == Route::Keep =>
+                    {
+                        let (names, uncertain) = self.captures(&inner.args[0]);
+                        let keys = self.keys(&names, uncertain);
+                        Plan::Memo { wrap: None, keys: quote!({ let __kz_keys = #keys; move || __kz_keys }) }
+                    }
+                    // A kept closure parameter passed on: its identity.
+                    Expr::Path(p)
+                        if rewritten
+                            && p.qself.is_none()
+                            && p.path.get_ident().is_some_and(|i| self.kept_closure(&i.to_string())) =>
+                    {
+                        let rt = &self.rt;
+                        let id = format_ident!("__kz_id_{}", p.path.get_ident().unwrap());
+                        Plan::PassOn(quote!(move || (#rt::__private::IdKey(#id), ())))
+                    }
+                    _ => Plan::Keep,
+                }
             })
             .collect()
     }
 
-    fn apply(&self, args: &mut Punctuated<Expr, Token![,]>, plan: Vec<Option<Vec<(String, proc_macro2::Span)>>>) {
-        for (a, names) in args.iter_mut().zip(plan) {
-            let Some(names) = names else { continue };
+    /// Wraps what `plan` says; the keys of the memoized arguments.
+    fn apply(&self, args: &mut Punctuated<Expr, Token![,]>, plan: Vec<Plan>) -> Vec<Option<Ts>> {
+        let mut keys = Vec::new();
+        for (a, p) in args.iter_mut().zip(plan) {
+            let (wrap, k) = match p {
+                Plan::Keep => (None, None),
+                Plan::Wrap(names) => (Some(names), None),
+                Plan::Memo { wrap, keys } => (wrap, Some(keys)),
+                Plan::PassOn(k) => {
+                    keys.push(Some(k));
+                    let rt = &self.rt;
+                    let v = match named_arg_mut(a) {
+                        Some(v) => v,
+                        None => a,
+                    };
+                    *v = parse_quote!(#rt::__private::capture(&#v));
+                    continue;
+                }
+            };
+            keys.push(k);
+            let Some(names) = wrap else { continue };
             let v = match named_arg_mut(a) {
                 Some(v) => v,
                 None => a,
@@ -444,23 +666,31 @@ impl Transformer {
             let taken = std::mem::replace(v, parse_quote!(()));
             *v = self.wrap(taken, &names);
         }
+        keys
     }
 
-    /// `.name(v)` / `.__argN(v)` / `.__last(v)` for each argument.
-    fn chain(args: &Punctuated<Expr, Token![,]>) -> Vec<Ts> {
+    /// `.name(v)` / `.__argN(v)` / `.__last(v)` for each argument (`.__kz_memo_name(keys, v)`, … for a memoized
+    /// one).
+    fn chain(args: &Punctuated<Expr, Token![,]>, keys: &[Option<Ts>]) -> Vec<Ts> {
         let n = args.len();
         let mut out = Vec::new();
-        let mut position = 0;
+        let mut position: usize = 0;
         for (k, a) in args.iter().enumerate() {
-            if let Some((name, v)) = named_arg(a) {
-                out.push(quote_spanned!(a.span()=> .#name(#v)));
+            let (setter, v) = if let Some((name, v)) = named_arg(a) {
+                (name.clone(), v)
             } else if k == n - 1 && last_is_closure(a) {
-                out.push(quote_spanned!(a.span()=> .__last(#a)));
+                (format_ident!("__last", span = a.span()), a)
             } else {
-                let m = format_ident!("__arg{position}", span = a.span());
-                out.push(quote_spanned!(a.span()=> .#m(#a)));
                 position += 1;
-            }
+                (format_ident!("__arg{}", position - 1, span = a.span()), a)
+            };
+            out.push(match &keys[k] {
+                Some(keys) => {
+                    let twin = format_ident!("__kz_memo_{}", setter, span = setter.span());
+                    quote_spanned!(a.span()=> .#twin(#keys, #v))
+                }
+                None => quote_spanned!(a.span()=> .#setter(#v)),
+            });
         }
         out
     }
@@ -496,6 +726,24 @@ impl Transformer {
             mac.tokens = quote!(#items);
         }
     }
+}
+
+/// `tokens` with every span made `span`.
+fn respanned(tokens: Ts, span: proc_macro2::Span) -> Ts {
+    tokens
+        .into_iter()
+        .map(|t| match t {
+            TokenTree::Group(g) => {
+                let mut group = proc_macro2::Group::new(g.delimiter(), respanned(g.stream(), span));
+                group.set_span(span);
+                TokenTree::Group(group)
+            }
+            mut t => {
+                t.set_span(span);
+                t
+            }
+        })
+        .collect()
 }
 
 /// A closure, or one wrapped with its captures.
@@ -593,39 +841,41 @@ impl VisitMut for Transformer {
         let rt = self.rt.clone();
         match e {
             Expr::Call(c) => {
-                let pascal = matches!(&*c.func, Expr::Path(p) if p.path.segments.last().is_some_and(|s| is_pascal(&s.ident.to_string())));
-                let named = c.args.iter().any(|a| named_arg(a).is_some());
-                let rewritten = matches!(&*c.func, Expr::Path(_)) && (pascal || named);
-                let plan = self.plan(&c.args, rewritten);
+                let route = self.route(&c.func, &c.args);
+                let plan = self.plan(&c.args, route != Route::Keep);
                 visit_mut::visit_expr_call_mut(self, c);
-                self.apply(&mut c.args, plan);
-                if !rewritten {
+                let keys = self.apply(&mut c.args, plan);
+                if route == Route::Keep {
                     return;
                 }
                 let Expr::Path(p) = &*c.func else { unreachable!() };
                 let span = c.span();
-                let links = Self::chain(&c.args);
+                let links = Self::chain(&c.args, &keys);
                 let path = &p.path;
-                *e = if pascal {
-                    parse_quote_spanned!(span=> {
-                        #[allow(unused_imports)]
-                        use #rt::__private::{ViaBuilder as _, ViaFn as _};
-                        (&&#rt::__private::Probe(#path)).__kz_builder()
-                    } #(#links)* .__call())
-                } else {
-                    parse_quote_spanned!(span=> #path::__kz_builder() #(#links)* .__call())
+                *e = match route {
+                    Route::Probe { named } => {
+                        let entry = Ident::new(if named { "__kz_named" } else { "__kz_builder" }, span);
+                        // (the probe at the call, so what rustc says of it is said there)
+                        let probe = respanned(quote!(#rt::__private::Probe), span);
+                        parse_quote_spanned!(span=> {
+                            #[allow(unused_imports)]
+                            use #rt::__private::{ViaBuilder as _, ViaFn as _};
+                            (&&#probe(#path)).#entry()
+                        } #(#links)* .__call())
+                    }
+                    _ => parse_quote_spanned!(span=> #path::__kz_builder() #(#links)* .__call()),
                 };
             }
             Expr::MethodCall(m) => {
-                let named = m.args.iter().any(|a| named_arg(a).is_some());
-                let plan = self.plan(&m.args, named);
+                let rewritten = self.method_rewritten(m);
+                let plan = self.plan(&m.args, rewritten);
                 visit_mut::visit_expr_method_call_mut(self, m);
-                self.apply(&mut m.args, plan);
-                if !named {
+                let keys = self.apply(&mut m.args, plan);
+                if !rewritten {
                     return;
                 }
                 let span = m.span();
-                let links = Self::chain(&m.args);
+                let links = Self::chain(&m.args, &keys);
                 let recv = &m.receiver;
                 let kz_name = format_ident!("__kz_{}", m.method, span = m.method.span());
                 *e = parse_quote_spanned!(span=> #recv.#kz_name() #(#links)* .__call());

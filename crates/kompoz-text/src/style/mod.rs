@@ -113,7 +113,7 @@ impl Default for TextIndent {
 }
 
 /// Compose's `TextIndent(firstLine = 0.sp, restLine = 0.sp)`.
-#[kompoz_runtime::named]
+#[kompoz_runtime::named(type)]
 pub fn TextIndent(
     #[default(TextUnit::new(0.0, TextUnitType::Sp))] first_line: TextUnit,
     #[default(TextUnit::new(0.0, TextUnitType::Sp))] rest_line: TextUnit,
@@ -287,7 +287,7 @@ impl Default for TextGeometricTransform {
 }
 
 /// Compose's `TextGeometricTransform(scaleX = 1f, skewX = 0f)`.
-#[kompoz_runtime::named]
+#[kompoz_runtime::named(type)]
 pub fn TextGeometricTransform(#[default(1.0)] scale_x: f32, #[default(0.0)] skew_x: f32) -> TextGeometricTransform {
     TextGeometricTransform::new(scale_x, skew_x)
 }

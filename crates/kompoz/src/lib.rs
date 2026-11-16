@@ -36,7 +36,7 @@ pub use kompoz_text as text;
 pub use kompoz_ui as ui;
 
 pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
-pub use kompoz_runtime::{kompozable, kompozable_block, kompozable_lambda, named};
+pub use kompoz_runtime::{kompozable, kompozable_block, kompozable_lambda, named, named_args};
 
 /// What an app writes with: the runtime (states, `remember`, effects, locals, the macros), coroutines (effects,
 /// flows), graphics (units — `16.dp()` —, colors, geometry, shapes, brushes, paths, images), text (styles, fonts,

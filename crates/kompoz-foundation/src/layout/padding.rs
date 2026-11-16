@@ -257,7 +257,7 @@ impl PaddingValues {
 
 /// Compose's `PaddingValues(start = 0.dp, top = 0.dp, end = 0.dp, bottom = 0.dp)`, with named arguments in a
 /// kompozable body (`PaddingValues(top = 8.dp())`); plain code calls [`PaddingValues::new`] and the others.
-#[named]
+#[named(type)]
 pub fn PaddingValues(
     #[default(0.dp())] start: Dp,
     #[default(0.dp())] top: Dp,

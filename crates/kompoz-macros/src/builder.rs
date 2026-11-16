@@ -5,6 +5,11 @@
 //! position (`__argN`) or as the trailing closure (`__last`); a setter of a parameter whose type names a generic
 //! parameter fixes it, so a closure parameter set after it (`items(list, |item| …)`) gets its types inferred.
 //! `__call` checks every slot, fills the defaults and calls the function.
+//!
+//! Each setter has a twin for a memoized closure, `__kz_memo_<setter>(keys, closure)` (see `transform`): where the
+//! parameter keeps its closure (`wants_id`), it turns the keys into the closure's identity (`memo_id`) and hands
+//! it to the function with the arguments; elsewhere it drops them. A parameter of type `Option<T>` is set from
+//! anything `Into<Option<T>>` (`role = Role::Button`, `role = None`), as Kotlin passes a `T` to a `T?`.
 
 use proc_macro2::{Span, TokenStream as Ts};
 use quote::{format_ident, quote};
@@ -20,6 +25,8 @@ pub(crate) struct Param {
     pub(crate) mutability: Option<Token![mut]>,
     pub(crate) ty: Type,
     pub(crate) default: Option<Expr>,
+    /// `#[memoized]`: its body gets it as a `Memoized` (with its identity as a memoized closure).
+    pub(crate) memoized: Option<Span>,
 }
 
 impl Param {
@@ -40,16 +47,26 @@ pub(crate) fn take_params(sig: &mut Signature) -> Result<Vec<Param>> {
             return Err(Error::new(pt.pat.span(), "kompoz: a parameter here is a plain name (no pattern)"));
         };
         let mut default = None;
+        let mut memoized = None;
         let mut kept = Vec::new();
         for a in pt.attrs.drain(..) {
             if a.path().is_ident("default") {
                 default = Some(a.parse_args::<Expr>()?);
+            } else if a.path().is_ident("memoized") {
+                a.meta.require_path_only()?;
+                memoized = Some(a.path().span());
             } else {
                 kept.push(a);
             }
         }
         pt.attrs = kept;
-        params.push(Param { ident: pi.ident.clone(), mutability: pi.mutability, ty: (*pt.ty).clone(), default });
+        params.push(Param {
+            ident: pi.ident.clone(),
+            mutability: pi.mutability,
+            ty: (*pt.ty).clone(),
+            default,
+            memoized,
+        });
     }
     Ok(params)
 }
@@ -135,6 +152,31 @@ impl VisitMut for ElideTo {
     fn visit_parenthesized_generic_arguments_mut(&mut self, _: &mut ParenthesizedGenericArguments) {
         // (and an `Fn(&T) -> &U`'s)
     }
+}
+
+/// `T` of an `Option<T>` (written `Option`, `core::option::Option` or `std::option::Option`) with no `impl Trait`
+/// in it.
+fn option_of(ty: &Type) -> Option<&Type> {
+    let Type::Path(p) = ty else { return None };
+    if p.qself.is_some() {
+        return None;
+    }
+    let names: Vec<String> = p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    if !matches!(names.as_slice(), ["Option"] | ["core" | "std", "option", "Option"]) {
+        return None;
+    }
+    let PathArguments::AngleBracketed(a) = &p.path.segments.last().unwrap().arguments else { return None };
+    let (1, Some(GenericArgument::Type(t))) = (a.args.len(), a.args.first()) else { return None };
+    struct HasImpl(bool);
+    impl<'ast> Visit<'ast> for HasImpl {
+        fn visit_type_impl_trait(&mut self, _: &'ast TypeImplTrait) {
+            self.0 = true;
+        }
+    }
+    let mut h = HasImpl(false);
+    h.visit_type(t);
+    (!h.0).then_some(t)
 }
 
 /// Whether `ty` names `name` (a type or lifetime parameter).
@@ -270,11 +312,15 @@ pub(crate) struct Spec<'a> {
     pub(crate) recv: Option<&'a Receiver>,
     pub(crate) prefix: &'a Ident,
     pub(crate) vis: &'a Visibility,
+    /// The parameters that keep the identity of a memoized closure given to them (by index). If any does, the
+    /// builder carries the identities, which `__call` binds to `__kz_ids: [Option<u64>; n]` for `call` to use.
+    pub(crate) wants_id: &'a [bool],
 }
 
 /// The builder of a function or method.
 pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
-    let Spec { rt, params, generics, where_clause, output, call, recv, prefix, vis } = spec;
+    let Spec { rt, params, generics, where_clause, output, call, recv, prefix, vis, wants_id } = spec;
+    let pass_ids = wants_id.iter().any(|w| *w);
     let mut output = output.clone();
     let own_lifetimes: Vec<&Generic> = generics.iter().filter(|g| g.lifetime && g.inferred).collect();
     let elided = match (recv, own_lifetimes.as_slice()) {
@@ -312,6 +358,9 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     let recv_lt = matches!(recv, Some(Receiver::Ref(..))).then(|| quote!('__kzr,));
     let recv_field = recv_ty.as_ref().map(|t| quote!(recv: #t,));
     let recv_move = recv.map(|_| quote!(recv: self.recv,));
+    let ids_field = pass_ids.then(|| quote!(__kz_ids: [::core::option::Option<u64>; #n],));
+    let ids_move = pass_ids.then(|| quote!(__kz_ids: self.__kz_ids,));
+    let ids_init = pass_ids.then(|| quote!(__kz_ids: [::core::option::Option::None; #n],));
 
     let mut missing = Vec::new();
     let mut initial = Vec::new();
@@ -390,9 +439,10 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             }
             lts.into_iter().chain(tys).collect()
         };
-        let (generic, value) = match p.bounds() {
-            Some(_) => {
-                let mut b = p.bounds().unwrap().clone();
+        // The setter's own generic parameters, what it takes, what its slot keeps and how it makes that.
+        let (own, value, kept, convert) = match (p.bounds(), option_of(&set_ty)) {
+            (Some(b), _) => {
+                let mut b = b.clone();
                 for bound in b.iter_mut() {
                     struct InBound<'a>(&'a HashMap<String, String>);
                     impl VisitMut for InBound<'_> {
@@ -402,35 +452,83 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
                     }
                     InBound(&renames).visit_type_param_bound_mut(bound);
                 }
-                (quote!(<#(#fresh,)* __V: #b>), quote!(__V))
+                (Some(quote!(__V: #b)), quote!(__V), quote!(__V), quote!(v))
             }
-            None if fresh.is_empty() => (quote!(), quote!(#set_ty)),
-            None => (quote!(<#(#fresh),*>), quote!(#set_ty)),
+            // (an `Option<T>` whose `T` the setter fixes stays as it is: `Into` couldn't tell what `T` is)
+            (None, Some(t)) if fresh.is_empty() => (
+                Some(quote!(__V: ::core::convert::Into<::core::option::Option<#t>>)),
+                quote!(__V),
+                quote!(#set_ty),
+                quote!(::core::convert::Into::into(v)),
+            ),
+            (None, _) => (None, quote!(#set_ty), quote!(#set_ty), quote!(v)),
         };
+        // (`fresh` holds the lifetimes first, as a generic parameter list wants them)
+        let (fresh_lts, fresh_tys): (Vec<&Ts>, Vec<&Ts>) = fresh.iter().partition(|t| t.to_string().starts_with('\''));
+        let generic = {
+            let all: Vec<&Ts> = fresh.iter().chain(own.iter()).collect();
+            if all.is_empty() { quote!() } else { quote!(<#(#all),*>) }
+        };
+        let memo_generic = quote!(<#(#fresh_lts,)* __KzK, __KzKeys, #(#fresh_tys,)* #own>);
         let out_p: Vec<Ts> = ps
             .iter()
             .enumerate()
-            .map(|(j, pj)| if j == i { quote!(#rt::__private::Set<#value>) } else { quote!(#pj) })
+            .map(|(j, pj)| if j == i { quote!(#rt::__private::Set<#kept>) } else { quote!(#pj) })
             .collect();
         let fields = fs
             .iter()
             .enumerate()
-            .map(|(j, f)| if j == i { quote!(#f: #rt::__private::Set(v)) } else { quote!(#f: self.#f) });
+            .map(|(j, f)| if j == i { quote!(#f: #rt::__private::Set(#convert)) } else { quote!(#f: self.#f) });
         let ret = quote!(#builder_name<#recv_lt #(#out_g,)* #(#out_p),*>);
         let arg = format_ident!("__arg{i}");
+        let last = format_ident!("__last");
+        // `setter`'s twin for a memoized closure.
+        let memo = |setter: &Ident| {
+            let twin = format_ident!("__kz_memo_{}", setter);
+            if wants_id[i] {
+                quote! {
+                    #[track_caller]
+                    pub fn #twin #memo_generic(self, keys: __KzK, v: #value) -> #ret
+                    where
+                        __KzK: ::core::ops::FnOnce() -> __KzKeys,
+                        __KzKeys: #rt::__private::Keys + 'static,
+                    {
+                        let id = #rt::__private::memo_id(keys());
+                        let mut b = self.#setter(v);
+                        b.__kz_ids[#i] = id;
+                        b
+                    }
+                }
+            } else {
+                quote! {
+                    pub fn #twin #memo_generic(self, keys: __KzK, v: #value) -> #ret
+                    where
+                        __KzK: ::core::ops::FnOnce() -> __KzKeys,
+                    {
+                        let _ = keys;
+                        self.#setter(v)
+                    }
+                }
+            }
+        };
+        let (memo_name, memo_arg) = (memo(name), memo(&arg));
         setters.push(quote! {
             pub fn #name #generic(self, v: #value) -> #ret {
-                #builder_name { _g: ::core::marker::PhantomData, #recv_move #(#fields),* }
+                #builder_name { _g: ::core::marker::PhantomData, #recv_move #ids_move #(#fields),* }
             }
             pub fn #arg #generic(self, v: #value) -> #ret {
                 self.#name(v)
             }
+            #memo_name
+            #memo_arg
         });
         if i == n - 1 {
+            let memo_last = memo(&last);
             setters.push(quote! {
                 pub fn __last #generic(self, v: #value) -> #ret {
                     self.#name(v)
                 }
+                #memo_last
             });
         }
     }
@@ -468,6 +566,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         }
     }
     let recv_let = recv.map(|_| quote!(let __self = self.recv;));
+    let ids_let = pass_ids.then(|| quote!(let __kz_ids = self.__kz_ids;));
     let new_param = recv_ty.as_ref().map(|t| quote!(recv: #t));
     let new_init = recv.map(|_| quote!(recv,));
     let _ = gnames;
@@ -482,14 +581,15 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         #vis struct #builder_name<#recv_lt #(#all_g,)* #(#ps),*> {
             _g: #phantom,
             #recv_field
+            #ids_field
             #(#fs: #ps),*
         }
         #[doc(hidden)]
         #[allow(non_snake_case, clippy::needless_lifetimes)]
         #vis fn #new_name<#recv_lt #(#outer_g,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> {
-            #builder_name { _g: ::core::marker::PhantomData, #new_init #(#fs: #initial),* }
+            #builder_name { _g: ::core::marker::PhantomData, #new_init #ids_init #(#fs: #initial),* }
         }
-        #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+        #[allow(clippy::type_complexity, clippy::too_many_arguments, non_snake_case)]
         impl<#recv_lt #(#all_g,)* #(#ps),*> #builder_name<#recv_lt #(#all_g,)* #(#ps),*> {
             #(#setters)*
         }
@@ -498,6 +598,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             #[track_caller]
             #[allow(clippy::needless_lifetimes)]
             pub fn __call(self) #output {
+                #ids_let
                 #recv_let
                 #(#lets)*
                 #call

@@ -384,14 +384,151 @@ fn composables_whose_arguments_compare_are_skipped() {
     let rule = Rule::new(kompozable_lambda!(move || {
         Label(format!("tick {t}"));
         Equal(1, "n".into()); // equal arguments: skipped when the parent runs again
-        WithContent(1, || Label("in")); // a closure can't be compared: run again
+        WithContent(1, || Label("in")); // a closure capturing nothing is the same closure: skipped too
     }));
     let runs = || RUNS.with(|r| r.get());
     assert_eq!(runs(), 2);
     tick.set(1);
     rule.wait_for_idle();
     assert!(rule.has("tick 1"));
-    assert_eq!(runs(), 3);
+    assert_eq!(runs(), 2);
+}
+
+// ---- Strong skipping: closures memoized by what they capture ---------------------------------------------------
+
+thread_local! {
+    static CHILD_RUNS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn child_runs() -> Vec<String> {
+    CHILD_RUNS.with(|r| r.borrow().clone())
+}
+
+/// A child taking a click handler: noted each time it runs, its handler kept for `click`.
+#[kompozable]
+fn Clicker(name: &'static str, on_click: impl Fn()) {
+    CHILD_RUNS.with(|r| r.borrow_mut().push(name.to_string()));
+    CLICKS.with(|c| c.borrow_mut().push(Rc::new(on_click)));
+}
+
+/// What a parent passes its own handler on to (and runs on its own when `tick` changes).
+#[kompozable]
+fn Forwarding(tick: MutableState<i32>, on_click: impl Fn()) {
+    Label(format!("forwarding {tick}"));
+    Clicker("forwarded", on_click);
+    Clicker("wrapped", || on_click());
+}
+
+/// No `==`: a closure capturing it is a new one each time.
+#[derive(Clone)]
+struct Opaque(i32);
+
+fn closures_are_the_same_while_what_they_capture_is() {
+    CHILD_RUNS.with(|r| r.borrow_mut().clear());
+    clear_clicks();
+    let tick = mutable_state_of(0);
+    let step = mutable_state_of(1);
+    let (t, s) = (tick.clone(), step.clone());
+    let total = Rc::new(Cell::new(0));
+    let sum = total.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        Label(format!("tick {t}"));
+        let step = s.get();
+        let sum = sum.clone();
+        // Captures a value with `==` and an `Rc` (by `==` of what it holds): the same while they are.
+        Clicker("by value", on_click = || sum.set(sum.get() + step));
+        // Captures a value without `==`: never the same.
+        let opaque = Opaque(step);
+        Clicker("opaque", || {
+            let _ = opaque.0;
+        });
+        // A handle without `==`, by instance: the same one, the same closure.
+        let log: Rc<RefCell<Vec<i32>>> = remember(|| Rc::new(RefCell::new(Vec::new())));
+        let shared: Rc<dyn Fn(i32)> = remember(|| {
+            let log = log.clone();
+            Rc::new(move |v| log.borrow_mut().push(v)) as Rc<dyn Fn(i32)>
+        });
+        Clicker("by instance", move || shared(step));
+    }));
+    let runs = |name: &str| child_runs().iter().filter(|n| *n == name).count();
+    assert_eq!((runs("by value"), runs("opaque"), runs("by instance")), (1, 1, 1));
+    // The parent runs again, nothing captured changed: only the closure capturing what can't be compared is new.
+    tick.set(1);
+    rule.wait_for_idle();
+    assert!(rule.has("tick 1"));
+    assert_eq!((runs("by value"), runs("opaque"), runs("by instance")), (1, 2, 1));
+    // A captured value changed: the closures capturing it are new, their children run again with them.
+    step.set(5);
+    rule.wait_for_idle();
+    assert_eq!((runs("by value"), runs("opaque"), runs("by instance")), (2, 3, 2));
+    clear_clicks();
+    tick.set(2);
+    rule.wait_for_idle();
+    // (only the opaque child ran, so it alone handed its handler over)
+    assert_eq!(CLICKS.with(|c| c.borrow().len()), 1);
+    // The kept handler is the newest: it adds the step it captured.
+    CLICKS.with(|c| c.borrow_mut().clear());
+    step.set(7);
+    rule.wait_for_idle();
+    click(0);
+    assert_eq!(total.get(), 7);
+}
+
+fn a_closure_parameter_passed_on_keeps_its_identity() {
+    CHILD_RUNS.with(|r| r.borrow_mut().clear());
+    let tick = mutable_state_of(0);
+    let t = tick.clone();
+    let other = mutable_state_of(0);
+    let o = other.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        Label(format!("other {o}"));
+        Forwarding(t.clone(), on_click = || {});
+    }));
+    assert_eq!(child_runs(), ["forwarded", "wrapped"]);
+    // Running on its own, it passes on the handler it was given, the same one: its children are skipped.
+    tick.set(1);
+    rule.wait_for_idle();
+    assert!(rule.has("forwarding 1"));
+    assert_eq!(child_runs(), ["forwarded", "wrapped"]);
+    // Its parent running again gives it the same handler: it is skipped.
+    other.set(1);
+    rule.wait_for_idle();
+    assert!(rule.has("other 1"));
+    assert_eq!(child_runs(), ["forwarded", "wrapped"]);
+}
+
+/// An inline composable keeping what it makes of a `#[memoized]` closure while it is the same.
+#[kompozable(inline)]
+fn Keeping(#[memoized] make: impl Fn() -> String + 'static) {
+    let made = make.remember(|f| Rc::new(f()));
+    Label(made.to_string());
+}
+
+fn a_memoized_parameter_is_kept_by_its_identity() {
+    let tick = mutable_state_of(0);
+    let word = mutable_state_of("a".to_string());
+    let (t, w) = (tick.clone(), word.clone());
+    let made = Rc::new(Cell::new(0));
+    let m = made.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        Label(format!("tick {t}"));
+        let word = w.get();
+        let m = m.clone();
+        Keeping(|| {
+            m.set(m.get() + 1);
+            format!("made of {word}")
+        });
+    }));
+    assert_eq!((rule.names(), made.get()), (vec!["tick 0".to_string(), "made of a".to_string()], 1));
+    tick.set(1);
+    rule.wait_for_idle();
+    assert_eq!(made.get(), 1);
+    word.set("b".into());
+    rule.wait_for_idle();
+    assert_eq!((rule.has("made of b"), made.get()), (true, 2));
+    // Outside a composition, nothing to keep it by: made each time.
+    let plain = Memoized::new(|| 3, None);
+    assert_eq!((plain.id(), plain.remember(|f| f())), (None, 3));
 }
 
 // ---- Captures ------------------------------------------------------------------------------------------------
@@ -478,6 +615,119 @@ fn calls_inside_macros_are_rewritten() {
     assert_eq!(rule.names(), ["8 5"]);
 }
 
+// ---- Positional arguments past the ones without a default ------------------------------------------------------
+
+/// A type of its own with a method named as an indexed one (`copy`), without defaults.
+#[derive(Clone, Copy)]
+struct Ruler(i32);
+
+impl Ruler {
+    fn copy(&self, length: i32) -> Ruler {
+        Ruler(self.0 + length)
+    }
+}
+
+fn positional_arguments_past_the_required_ones_go_through_the_builder() {
+    let rule = Rule::new(kompozable_lambda!(|| {
+        let c = Color::rgb(0, 0, 0);
+        // Methods: `copy(alpha, red, …)` of the API index (this crate's), with what an extension trait adds.
+        Label(format!("{:?} {:?}", c.copy(0.5), c.copy(1.0, 1.0)));
+        Label(Modifier.background(c, Shape::Rounded(2)).padding_sides(1, 2).size(3, 4).to_string());
+        // Functions: lowercase and PascalCase (`Twice` isn't a composable: through its type).
+        Label(format!("{:?} {}", top_app_bar_colors(c).container, Twice(3, 5)));
+        // Defined in the body: its own items are known.
+        #[named]
+        fn Scaled(n: i32, #[default(10)] by: i32) -> i32 {
+            n * by
+        }
+        struct Meters(i32);
+        #[named]
+        impl Meters {
+            fn plus(&self, #[default(1)] more: i32) -> i32 {
+                self.0 + more
+            }
+        }
+        Label(format!("{} {} {}", Scaled(2), Scaled(2, 3), Meters(4).plus(5)));
+    }));
+    assert_eq!(
+        rule.names(),
+        [
+            "#80000000 #FFFF0000",
+            "Modifier.background(#FF000000, Rounded(2)).padding(1, 2, 0, 0).size(3, 4)",
+            "#FF000000 15",
+            "20 6 9"
+        ]
+    );
+}
+
+/// `copy` here is `Ruler`'s, not the indexed one: left as written.
+#[kompozable(plain(copy))]
+fn RulerLabel(ruler: Ruler) {
+    Label(format!("ruler {}", ruler.copy(2).0));
+}
+
+fn a_call_can_be_kept_as_written() {
+    let rule = Rule::new(kompozable_lambda!(|| {
+        // A raw name keeps a call as written: `Ruler::copy`, not the indexed `copy` with defaults.
+        Label(format!("{}", Ruler(1).r#copy(3).0));
+        RulerLabel(Ruler(5));
+    }));
+    assert_eq!(rule.names(), ["4", "ruler 7"]);
+}
+
+// ---- PascalCase functions anywhere --------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Insets {
+    left: i32,
+    top: i32,
+}
+
+/// Compose's `Insets(left = 0, top = 0)`: its builder an associated function of the type it makes.
+#[named(type)]
+fn Insets(#[default(0)] left: i32, #[default(0)] top: i32) -> Insets {
+    Insets { left, top }
+}
+
+fn pascal_case_functions_are_functions_everywhere() {
+    // Plain code: the parameters without a default, or named arguments through `named_args!`.
+    assert_eq!(RoundedCornerShape(3), Shape::Rounded(3));
+    assert_eq!(Insets(), Insets { left: 0, top: 0 });
+    assert_eq!(named_args!(Insets(top = 2)), Insets { left: 0, top: 2 });
+    assert_eq!(named_args!(Insets(1, 2)), Insets { left: 1, top: 2 });
+    assert_eq!(named_args!(Twice(4, times = 3)), 12);
+    assert_eq!(named_args!(Color::rgb(0, 0, 0).copy(0.5)), named_args!(Color::rgb(0, 0, 0).copy(alpha = 0.5)));
+    // A function value as any other.
+    let shapes: Vec<Shape> = [1, 2].into_iter().map(RoundedCornerShape).collect();
+    assert_eq!(shapes, [Shape::Rounded(1), Shape::Rounded(2)]);
+    let rule = Rule::new(kompozable_lambda!(|| {
+        Label(format!("{:?} {:?} {:?}", Insets(left = 3), Insets(4), RoundedCornerShape(radius = 5)));
+    }));
+    assert_eq!(rule.names(), ["Insets { left: 3, top: 0 } Insets { left: 4, top: 0 } Rounded(5)"]);
+}
+
+// ---- Option parameters ---------------------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Role {
+    Button,
+}
+
+#[kompozable]
+fn Tagged(text: &'static str, #[default(None)] role: Option<Role>, #[default(Some(1))] weight: Option<i32>) {
+    Label(format!("{text} {role:?} {weight:?}"));
+}
+
+fn an_option_parameter_takes_what_it_holds() {
+    let rule = Rule::new(kompozable_lambda!(|| {
+        Tagged("a", role = Role::Button);
+        Tagged("b", role = None, weight = 2);
+        Tagged("c", role = Some(Role::Button), weight = None);
+        Tagged("d");
+    }));
+    assert_eq!(rule.names(), ["a Some(Button) Some(1)", "b None Some(2)", "c Some(Button) None", "d None Some(1)"]);
+}
+
 // ---- Identity ------------------------------------------------------------------------------------------------
 
 #[kompozable]
@@ -513,4 +763,11 @@ tests!(
     calls_inside_macros_are_rewritten,
     methods_of_a_type_from_elsewhere_take_named_arguments_through_a_trait,
     a_name_bound_inside_a_closure_hides_the_outer_one_only_after_its_binding,
+    closures_are_the_same_while_what_they_capture_is,
+    a_closure_parameter_passed_on_keeps_its_identity,
+    a_memoized_parameter_is_kept_by_its_identity,
+    positional_arguments_past_the_required_ones_go_through_the_builder,
+    a_call_can_be_kept_as_written,
+    pascal_case_functions_are_functions_everywhere,
+    an_option_parameter_takes_what_it_holds,
 );

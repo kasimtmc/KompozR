@@ -107,7 +107,8 @@ fn constraints_as_compose() {
     let seen = Rc::new(Cell::new(Constraints::default()));
     let s = seen.clone();
     let _rule = KompozTestRule::new(kompozable_lambda!(move || {
-        s.set(Constraints(max_width = 30, min_height = 4).copy(min_width = 2).offset(0, 6));
+        // (`r#offset`: the constraints' own, not `Modifier.offset`, which the API index lists with defaults)
+        s.set(Constraints(max_width = 30, min_height = 4).copy(min_width = 2).r#offset(0, 6));
     }));
     assert_eq!(seen.get(), Constraints::new(2, 30, 10, Constraints::Infinity));
 }
@@ -443,7 +444,7 @@ fn intrinsics_come_from_the_policy_and_the_layout_modifiers() {
                     "abcd",
                     font_size = 20.sp(),
                     modifier = Modifier.layout(|scope, m, c| {
-                        let p = m.measure(c.offset(-10, 0));
+                        let p = m.measure(c.r#offset(-10, 0));
                         scope.layout(p.width() + 10, p.height(), move |pl| pl.place(&p, 10, 0))
                     }),
                 );

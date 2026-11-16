@@ -4,11 +4,8 @@
 
 use kompoz_graphics::*;
 use kompoz_runtime::kompozable_block;
-use kompoz_text::paragraph_style::ParagraphStyle as ParagraphStyleFn;
-use kompoz_text::span_style::SpanStyle as SpanStyleFn;
 use kompoz_text::style::line_height_style::{Alignment, Mode, Trim};
 use kompoz_text::style::{Linearity, lerp_baseline_shift, lerp_text_geometric_transform, lerp_text_indent, line_break};
-use kompoz_text::text_style::TextStyle as TextStyleFn;
 use kompoz_text::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -129,7 +126,7 @@ fn paragraph_styles_merge_and_resolve() {
     assert_eq!(resolve_text_direction(LayoutDirection::Rtl, TextDirection::Ltr), TextDirection::Ltr);
     // A negative line height is refused.
     assert!(panics(|| {
-        kompozable_block!(ParagraphStyleFn(line_height = (-1).sp()));
+        kompozable_block!(ParagraphStyle(line_height = (-1).sp()));
     }));
 }
 
@@ -179,7 +176,7 @@ fn text_styles_are_a_span_style_and_a_paragraph_style() {
 
 #[test]
 fn styles_take_composes_named_arguments_and_copy() {
-    let style = kompozable_block!(TextStyleFn(color = Color::Red, font_size = 20.sp(), text_align = TextAlign::Center));
+    let style = kompozable_block!(TextStyle(color = Color::Red, font_size = 20.sp(), text_align = TextAlign::Center));
     assert_eq!((style.color, style.font_size, style.text_align), (Color::Red, 20.sp(), TextAlign::Center));
     let copied = kompozable_block!(style.copy(font_size = 24.sp()));
     assert_eq!((copied.color, copied.font_size, copied.text_align), (Color::Red, 24.sp(), TextAlign::Center));
@@ -190,10 +187,10 @@ fn styles_take_composes_named_arguments_and_copy() {
     assert_eq!(brushed.foreground(), TextForegroundStyle::Brush { brush: g.clone(), alpha: 1.0 });
     let recolored = kompozable_block!(brushed.copy(color = Color::Green));
     assert_eq!(recolored.foreground(), TextForegroundStyle::Color(Color::Green));
-    let span = kompozable_block!(SpanStyleFn(font_weight = Some(FontWeight::Bold), background = Color::Yellow));
+    let span = kompozable_block!(SpanStyle(font_weight = Some(FontWeight::Bold), background = Color::Yellow));
     assert_eq!((span.font_weight, span.background), (Some(FontWeight::Bold), Color::Yellow));
     assert_eq!(kompozable_block!(span.copy(font_weight = None)).font_weight, None);
-    let p = kompozable_block!(ParagraphStyleFn(hyphens = Hyphens::Auto));
+    let p = kompozable_block!(ParagraphStyle(hyphens = Hyphens::Auto));
     assert_eq!(kompozable_block!(p.copy(text_align = TextAlign::Justify)).text_align, TextAlign::Justify);
     assert_eq!(kompozable_block!(p.copy(text_align = TextAlign::Justify)).hyphens, Hyphens::Auto);
 }

@@ -240,6 +240,36 @@ fn recomposing_layouts_with_equal_arguments_measures_nothing_again() {
     assert_eq!(measured.get(), before);
 }
 
+fn a_closure_policy_capturing_the_same_values_measures_nothing_again() {
+    // Compose's strong skipping remembers a measure policy lambda by what it captures: composed again with the
+    // same values, the layout keeps its policy and isn't measured again; with others, it is.
+    let measured = Rc::new(Cell::new(0));
+    let (tick, width) = (mutable_state_of(0), mutable_state_of(10));
+    let (m, t, w) = (measured.clone(), tick.clone(), width.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let _ = t.get();
+        let (m, size) = (m.clone(), w.get());
+        Layout(
+            modifier = Modifier.test_tag("leaf"),
+            measure_policy = measure_policy(move |scope, _, _| {
+                m.set(m.get() + 1);
+                scope.layout(size, size, |_| {})
+            }),
+        );
+    }));
+    rule.set_layout_check(false);
+    let before = measured.get();
+    tick.set(1);
+    rule.wait_for_idle();
+    tick.set(2);
+    rule.wait_for_idle();
+    assert_eq!(measured.get(), before);
+    width.set(20);
+    rule.wait_for_idle();
+    assert_eq!(measured.get(), before + 1);
+    assert_eq!(rule.on_node_with_tag("leaf").get_unclipped_bounds_in_root().width(), 20.0);
+}
+
 tests!(
     layout_coordinates_tell_their_parent_and_map_between_nodes,
     layout_measures_again_only_what_changed,
@@ -247,4 +277,5 @@ tests!(
     alignment_lines_pass_up_and_set_padding,
     a_size_probe_measures_afresh,
     recomposing_layouts_with_equal_arguments_measures_nothing_again,
+    a_closure_policy_capturing_the_same_values_measures_nothing_again,
 );
