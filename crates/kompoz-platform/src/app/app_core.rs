@@ -19,6 +19,7 @@
 use super::profile::{DrawCounts, Profile};
 use super::regions::{ShownChanges, drawn_area, frame_changes};
 use super::script::{Command, Script, WindowEvent, parse_command};
+use super::title_bar::{WindowActions, WindowFrame};
 use super::{AppConfig, Event, MouseButton, Platform, TitleBar, WindowAction};
 use crate::image_loader::{load_image_async, load_image_file, save_pixels, start_image_disk_cache, stop_image_loader};
 use crate::system::{app_cache_directory, file_uri, log, read_file};
@@ -26,7 +27,7 @@ use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{self, Backend, ClearColor, Device, Format, IRect, Surface, Texture, TextureUsage};
 use kompoz_gpu::renderer::RendererBitmaps;
 use kompoz_graphics::{Color, Density, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
-use kompoz_runtime::{Content, MutableState, RecompositionStats, mutable_state_of};
+use kompoz_runtime::{Content, MutableState, RecompositionStats, kompozable_lambda, mutable_state_of};
 use kompoz_ui::draganddrop::DragAndDropTransferData;
 use kompoz_ui::graphics_context::{CornerRadii, GraphicsContext, ShadowLight};
 use kompoz_ui::input::{Key, KeyEvent, KeyEventType, PointerButton, PointerEventType, PointerType};
@@ -114,6 +115,8 @@ pub struct AppCore<P: Platform> {
     point_to_px: f32,
     /// KompozR's title bar, as the platform says (Metrics::title_bar).
     title_bar: MutableState<Option<TitleBar>>,
+    /// What the title bar asked of the window while the host was busy (its input, its frame), done after.
+    window_actions: Rc<RefCell<Vec<(WindowAction, Offset)>>>,
     quit: bool,
     script: Script,
     /// Added to the platform's clock after a script whose virtual time got ahead of it.
@@ -164,6 +167,7 @@ impl<P: Platform> AppCore<P> {
             scale: 1.0,
             point_to_px: 1.0,
             title_bar: mutable_state_of(None),
+            window_actions: Rc::default(),
             quit: false,
             script: Script::default(),
             clock_offset: 0,
@@ -221,6 +225,15 @@ impl<P: Platform> AppCore<P> {
     pub fn window_action(&mut self, action: WindowAction, at: Offset) {
         let k = 1.0 / self.point_to_px;
         self.platform.window_action(action, at.x * k, at.y * k);
+    }
+
+    /// What the title bar asked while the host was busy, done in order (C++'s WindowFrame called the platform from
+    /// inside the host; here the platform is the core's, so the bar's requests wait for the host to be done).
+    fn do_window_actions(&mut self) {
+        let asked = std::mem::take(&mut *self.window_actions.borrow_mut());
+        for (action, at) in asked {
+            self.window_action(action, at);
+        }
     }
 
     fn logf(&self, message: &str) {
@@ -297,8 +310,15 @@ impl<P: Platform> AppCore<P> {
             gpu.renderer.borrow_mut().warm_pipelines(&dir.join(format!("pipelines-{}.list", backend.name())));
         }
         kompoz_ui::draw::set_bitmap_renderer(Some(gpu.bitmaps.clone()));
+        // The app's content in the window's frame: below KompozR's title bar while the platform reports one, what
+        // the bar asks of the window queued for the core to do once the host is done.
         let content = self.content.clone();
-        let host = KompozHost::new(move || content.compose());
+        let (title_bar, title) = (self.title_bar.clone(), self.config.title.clone());
+        let queue = self.window_actions.clone();
+        let act: WindowActions = Rc::new(move |action, at| queue.borrow_mut().push((action, at)));
+        let host = KompozHost::new(kompozable_lambda!(move || {
+            WindowFrame(title_bar.get(), title.clone(), act.clone(), content.clone());
+        }));
         let callbacks = AppCallbacks {
             platform: self.platform.attach(&host),
             renderer: Rc::downgrade(&gpu.renderer),
@@ -475,6 +495,7 @@ impl<P: Platform> AppCore<P> {
     pub fn handle(&mut self, event: &Event) {
         let start = if self.flags.profile { self.now() } else { 0 };
         self.handle_event(event);
+        self.do_window_actions();
         if let Some(host) = &self.host {
             self.platform.handled(host, event);
         }
@@ -693,6 +714,7 @@ impl<P: Platform> AppCore<P> {
         {
             host.idle(budget_nanos);
         }
+        self.do_window_actions();
     }
 
     /// A frame (C++'s `frame`): a script's next step, composition, what changed drawn and shown. `display_time`:
@@ -728,6 +750,8 @@ impl<P: Platform> AppCore<P> {
         let t0 = if self.flags.profile { self.now() } else { 0 };
         let glyphs_before = self.gpu.as_ref().map_or(0, |g| g.renderer.borrow().glyphs_rasterized());
         let redraw = host.frame(now);
+        self.do_window_actions();
+        let Some(host) = &self.host else { return Next { quit: true, ..Next::default() } };
         let t1 = if self.flags.profile { self.now() } else { 0 };
         let (mut t2, mut t3) = (t1, t1);
         self.platform.composed(host, redraw, now);

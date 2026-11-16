@@ -213,7 +213,8 @@ impl TextInput {
 }
 
 impl WaylandPlatform {
-    /// The pointer's event (C++'s pointer listener), on the window's surface (its edges are WP5's decorations').
+    /// The pointer's event (C++'s pointer listener): on the window's surface the app's; over one of KompozR's edges
+    /// ([`decorations`](super::decorations)) the resize cursor, the left button resizing the window by it.
     pub(super) fn on_pointer(&mut self, e: WlPointerEvent) {
         let window = self.window.as_ref().map(|w| w.surface.id());
         let on_window = |id| window.is_some_and(|w| w == id);
@@ -222,6 +223,10 @@ impl WaylandPlatform {
         match e {
             WlPointerEvent::Enter { serial, surface, surface_x, surface_y } => {
                 self.pointer_on = surface;
+                if let Some(edge) = self.edge_of(surface) {
+                    self.over_edge(edge, surface_x, surface_y, Some(serial));
+                    return;
+                }
                 self.shared.cursor.borrow_mut().entered(serial);
                 if !on_window(surface) {
                     return;
@@ -238,6 +243,10 @@ impl WaylandPlatform {
                 }
             }
             WlPointerEvent::Motion { surface_x, surface_y, .. } => {
+                if let Some(edge) = self.edge_of(self.pointer_on) {
+                    self.over_edge(edge, surface_x, surface_y, None);
+                    return;
+                }
                 if !on_window(self.pointer_on) {
                     return;
                 }
@@ -251,6 +260,13 @@ impl WaylandPlatform {
                 if pressed {
                     self.press_serial = serial;
                     self.press_touch = None;
+                }
+                if self.edge_of(self.pointer_on).is_some() {
+                    // (An edge: the left button resizes the window by it.)
+                    if pressed && mouse_button(button) == Some(MouseButton::Left) {
+                        self.resize_from_edge(serial, self.edge_x, self.edge_y);
+                    }
+                    return;
                 }
                 if !on_window(self.pointer_on) {
                     return;
@@ -333,12 +349,18 @@ impl WaylandPlatform {
         }
     }
 
-    /// A finger's event (C++'s touch listener): on the window's surface only; a cancel lifts them all.
+    /// A finger's event (C++'s touch listener): on the window's surface the app's; one put down on an edge resizes
+    /// the window by it (nothing more of it is the app's); a cancel lifts them all.
     pub(super) fn on_touch(&mut self, e: WlTouchEvent) {
         let time = sys::monotonic_now();
         match e {
             WlTouchEvent::Down { serial, surface, id, x, y, .. } => {
                 self.last_serial = serial;
+                if let Some(edge) = self.edge_of(surface) {
+                    let [ex, ey, ..] = self.window.as_ref().map_or([0; 4], |w| w.edges.place(edge));
+                    self.resize_from_edge(serial, ex as f64 + x, ey as f64 + y);
+                    return;
+                }
                 if !self.window.as_ref().is_some_and(|w| w.surface.id() == surface) {
                     return;
                 }
@@ -348,7 +370,7 @@ impl WaylandPlatform {
                 self.events.push_back(Event::TouchDown { pointer: id as i64, x: x as f32, y: y as f32, time });
             }
             WlTouchEvent::Up { id, .. } => {
-                // (Not one of the window's, or one let go for a move.)
+                // (Not one of the window's (an edge's), or one let go for a move.)
                 let Some((x, y)) = self.touches.remove(&id) else { return };
                 self.events.push_back(Event::TouchUp { pointer: id as i64, x: x as f32, y: y as f32, time });
             }

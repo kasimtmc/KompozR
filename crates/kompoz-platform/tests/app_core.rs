@@ -1,7 +1,8 @@
 //! The app core on the headless platform, with a GPU device (lavapipe in CI): scripts drive it (a click changes
 //! the shot; a resize gives the window its size; the checks find nothing wrong; a full redraw draws the same), the
 //! saved state goes to its file and comes back, frames are paced on the display's beat, the platform's events
-//! reach the host as its input (in px: points and notches turned), metrics are read once before input, and the
+//! reach the host as its input (in px: points and notches turned), KompozR's title bar frames the content while the
+//! platform reports one and what it asks reaches the platform, metrics are read once before input, and the
 //! kept frame reaches swapchain images of every age through only what changed (a swapchain faked over the device).
 //! One device-holding test after another on this thread; without a device they are skipped, unless
 //! `KOMPOZ_GPU_REQUIRED=1`.
@@ -15,7 +16,9 @@ use kompoz_gpu::device::{
 };
 use kompoz_graphics::*;
 use kompoz_platform::headless::{EventQueue, HeadlessPlatform, run_core};
-use kompoz_platform::{AppConfig, AppCore, Event, Metrics, MouseButton, Platform};
+use kompoz_platform::{
+    AppConfig, AppCore, Event, Metrics, MouseButton, Platform, TitleBar, WindowAction, WindowButton,
+};
 use kompoz_runtime::*;
 use kompoz_ui::KompozHost;
 use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropTarget};
@@ -61,6 +64,9 @@ struct TestPlatform {
     metrics_read: Rc<Cell<u32>>,
     probes: Rc<Cell<u32>>,
     log: Log,
+    /// KompozR's title bar, as the platform reports it; what it asked of the window.
+    title_bar: Option<TitleBar>,
+    window_actions: Log,
 }
 
 impl TestPlatform {
@@ -76,6 +82,8 @@ impl TestPlatform {
             metrics_read: Rc::new(Cell::new(0)),
             probes: Rc::new(Cell::new(0)),
             log: new_log(),
+            title_bar: None,
+            window_actions: new_log(),
         }
     }
 }
@@ -112,8 +120,12 @@ impl Platform for TestPlatform {
             point_height: (m.pixel_height as f32 / self.point_to_px) as i32,
             safe_area: None,
             language: "en".into(),
+            title_bar: self.title_bar.clone(),
             ..m
         }
+    }
+    fn window_action(&mut self, action: WindowAction, x: f32, y: f32) {
+        push(&self.window_actions, format!("{action:?} {x},{y}"));
     }
     fn pixel_size(&self) -> (i32, i32) {
         self.inner.pixel_size()
@@ -441,6 +453,46 @@ fn the_platforms_events_are_the_hosts_input() {
     assert!(core.frame(None).quit);
 }
 
+fn the_title_bar_frames_the_content_and_asks_the_window() {
+    // C++'s WindowFrame around the app's content while the platform reports a title bar: 40 dp across the top (80
+    // px at 2 px a dp), the content below; what it asks goes to the platform in its points (1.5 px each).
+    let seen = Rc::new(Cell::new(-1));
+    let mut platform = TestPlatform::new(&[]);
+    platform.scale = 2.0;
+    platform.point_to_px = 1.5;
+    platform.title_bar = Some(TitleBar { start: vec![], end: vec![WindowButton::Close], maximized: false });
+    let actions = platform.window_actions.clone();
+    let mut core = started(platform, 300.0, 300.0, counter(&seen));
+    core.frame(None);
+    assert!(core.title_bar().get().is_some());
+    let click = |core: &mut AppCore<TestPlatform>, x: f32, y: f32, button: MouseButton| {
+        let none = KeyModifiers::None;
+        core.handle(&Event::MouseMove { x, y, modifiers: none, time: -1 });
+        core.handle(&Event::MouseDown { x, y, button, modifiers: none, time: -1 });
+        core.handle(&Event::MouseUp { x, y, button, modifiers: none, time: -1 });
+        core.frame(None);
+    };
+    assert_eq!(seen.get(), 0);
+    // The bar where the counter's button was; the button below it.
+    click(&mut core, 70.0, 40.0, MouseButton::Left);
+    assert_eq!(seen.get(), 0);
+    click(&mut core, 70.0, 120.0, MouseButton::Left);
+    assert_eq!(seen.get(), 1);
+    // The menu where the bar was pressed with the secondary button; the close button (28 dp, 8 from the end).
+    click(&mut core, 100.0, 20.0, MouseButton::Right);
+    click(&mut core, 170.0, 25.0, MouseButton::Left);
+    assert_eq!(taken(&actions), ["Menu 100,20", "Close 0,0"]);
+    // No bar (the compositor decorates the window now): the content the whole window again, its count kept.
+    core.platform_mut().title_bar = None;
+    core.handle(&Event::MetricsChanged);
+    core.frame(None);
+    assert!(core.title_bar().get().is_none());
+    click(&mut core, 70.0, 40.0, MouseButton::Left);
+    assert_eq!(seen.get(), 2);
+    click(&mut core, 100.0, 20.0, MouseButton::Right);
+    assert!(taken(&actions).is_empty());
+}
+
 fn metrics_are_read_once_before_the_next_input_or_frame() {
     let seen = Rc::new(Cell::new(-1));
     let platform = TestPlatform::new(&[]);
@@ -671,6 +723,7 @@ fn main() {
         ("the_saved_state_goes_to_its_file_and_comes_back", the_saved_state_goes_to_its_file_and_comes_back),
         ("frames_are_paced_on_the_displays_beat", frames_are_paced_on_the_displays_beat),
         ("the_platforms_events_are_the_hosts_input", the_platforms_events_are_the_hosts_input),
+        ("the_title_bar_frames_the_content_and_asks_the_window", the_title_bar_frames_the_content_and_asks_the_window),
         ("metrics_are_read_once_before_the_next_input_or_frame", metrics_are_read_once_before_the_next_input_or_frame),
         ("the_kept_frame_reaches_swapchain_images_of_every_age", the_kept_frame_reaches_swapchain_images_of_every_age),
     ];

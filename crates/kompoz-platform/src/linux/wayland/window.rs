@@ -1,8 +1,8 @@
 //! The window (C++'s openWindow, sizes and scale, configure and decoration listeners, window actions): an
 //! xdg-shell toplevel, its size in the compositor's points, its scale (fractional-scale's 120ths shown through a
-//! viewport, else the whole scale the surface prefers or its outputs have), its state, and the hooks KompozR's own
-//! decorations need (the title bar, its buttons as the desktop lays them out; the window's actions and geometry;
-//! the edges and their shadows are WP5's).
+//! viewport, else the whole scale the surface prefers or its outputs have), its state, and what KompozR's own
+//! decorations need of it (the title bar, its buttons as the desktop lays them out; the window's actions; its
+//! edges, [`decorations`](super::decorations), kept as it is).
 
 use super::generated::*;
 use super::{OutputObject, WaylandPlatform, Window};
@@ -126,6 +126,7 @@ impl WaylandPlatform {
         }
         surface.commit();
         self.window = Some(Window {
+            edges: Default::default(),
             frame_callback: None,
             inhibitor: None,
             _decoration: decoration,
@@ -146,7 +147,7 @@ impl WaylandPlatform {
             return Err("the compositor didn't configure the window".into());
         }
         self.apply_size();
-        self.update_geometry();
+        self.update_edges();
         Ok(())
     }
 
@@ -179,15 +180,9 @@ impl WaylandPlatform {
         }
     }
 
-    /// The window's geometry: its surface (what KompozR's edges, outside it, aren't part of).
-    pub(super) fn update_geometry(&self) {
-        if let Some(w) = &self.window {
-            w.xdg_surface.set_window_geometry(0, 0, self.width, self.height);
-        }
-    }
-
     fn scale_changed(&mut self) {
         self.apply_size();
+        self.update_edges(); // (their shadows drawn at the new scale)
         self.events.push_back(Event::MetricsChanged);
         self.events.push_back(Event::Resized);
     }
@@ -295,8 +290,10 @@ impl WaylandPlatform {
         }
         if resized {
             self.apply_size();
-            self.update_geometry();
             self.events.push_back(Event::Resized);
+        }
+        if resized || state_changed {
+            self.update_edges(); // (where they are, whether they are, how active their shadows are)
         }
         if state_changed {
             self.events.push_back(Event::MetricsChanged); // (the title bar's)
@@ -334,7 +331,7 @@ impl WaylandPlatform {
         }
         self.own_decorations = own;
         if self.configured {
-            self.update_geometry();
+            self.update_edges();
             self.events.push_back(Event::MetricsChanged);
         }
     }

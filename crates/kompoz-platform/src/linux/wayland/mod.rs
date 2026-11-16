@@ -2,8 +2,9 @@
 //! ([`ffi`]) and the protocols generated from their XML ([`generated`], `cargo xtask wayland`). One xdg-shell
 //! toplevel drawn into by Vulkan (`VK_KHR_wayland_surface`), its frames paced by the compositor's frame callbacks;
 //! its scale fractional (fractional-scale + viewporter) or whole (the surface's preferred buffer scale, else its
-//! outputs'); the compositor's decorations (xdg-decoration) or, without them, the hooks KompozR's own need (the
-//! title bar in the metrics, the window's actions, its geometry); the seat's pointer (wheel notches, touchpad
+//! outputs'); the compositor's decorations (xdg-decoration) or, without them, KompozR's own (the title bar in the
+//! metrics, the window's actions; edges around the window with shadows, resizing it: [`decorations`]); the seat's
+//! pointer (wheel notches, touchpad
 //! scrolls and pinches), keyboard (xkbcommon, compose sequences, client-side repeat), touch screen and input method
 //! (text-input-v3); cursors by shape (cursor-shape-v1) or from the cursor theme (libwayland-cursor); the clipboard
 //! and drops from other apps (wl_data_device); the screen kept on (idle-inhibit); and the desktop's services
@@ -24,6 +25,7 @@
 
 mod cursor;
 mod data_device;
+mod decorations;
 pub mod ffi;
 pub mod generated;
 mod input;
@@ -154,9 +156,10 @@ struct Globals {
     registry: Option<WlRegistry>,
 }
 
-/// The window's objects (destroyed in this order: roles before the surface). The decoration and the fractional
-/// scale are only kept: their events come to the platform, dropping them would end them.
+/// The window's objects (destroyed in this order: KompozR's edges and roles before the surface). The decoration and
+/// the fractional scale are only kept: their events come to the platform, dropping them would end them.
 struct Window {
+    edges: decorations::Edges,
     frame_callback: Option<WlCallback>,
     inhibitor: Option<ZwpIdleInhibitorV1>,
     _decoration: Option<ZxdgToplevelDecorationV1>,
@@ -261,8 +264,11 @@ pub struct WaylandPlatform {
     can_minimize: bool,
     can_maximize: bool,
     /// KompozR decorates the window (the compositor has no decorations, or KOMPOZ_DECORATIONS=kompoz): the title bar
-    /// in the metrics, the window geometry set; the edges around it are KompozR's own decorations' (WP5).
+    /// in the metrics, the edges around it ([`decorations`]).
     own_decorations: bool,
+    /// The pointer over an edge: where, in the window's points (what a press resizes from).
+    edge_x: f64,
+    edge_y: f64,
     /// The drawable's size, px (the GPU device reads it).
     drawable: Rc<Cell<(i32, i32)>>,
     /// The serial of the last input event (what the clipboard is set with), and of the last press (what a move or
@@ -337,6 +343,8 @@ impl WaylandPlatform {
             can_minimize: true,
             can_maximize: true,
             own_decorations: false,
+            edge_x: 0.0,
+            edge_y: 0.0,
             drawable: Rc::new(Cell::new((1, 1))),
             last_serial: 0,
             press_serial: 0,
@@ -533,6 +541,7 @@ impl WaylandPlatform {
             E::WlDataOffer(e) => self.on_data_offer(sender, e),
             E::WlDataDevice(e) => self.on_data_device(e),
             E::WlDataSource(e) => self.on_data_source(sender, e),
+            E::WlBuffer(WlBufferEvent::Release) => self.buffer_released(sender),
             _ => {}
         }
     }
@@ -747,6 +756,7 @@ impl Platform for WaylandPlatform {
         self.width = width.max(1);
         self.height = height.max(1);
         self.apply_size();
+        self.update_edges();
         self.events.push_back(Event::Resized);
     }
 

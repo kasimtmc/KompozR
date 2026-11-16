@@ -1,7 +1,9 @@
 //! The pointer's cursor (C++'s showCursor): by shape where the compositor has cursor-shape-v1, else drawn from the
 //! cursor theme (`XCURSOR_THEME`, `XCURSOR_SIZE`) through libwayland-cursor on a surface of its own, at the
-//! window's scale, an animated cursor's frames shown in turn. Shared with the host's `cursor` callback.
+//! window's scale, an animated cursor's frames shown in turn: the host's over the window, a resize cursor over
+//! KompozR's edges around it. Shared with the host's `cursor` callback.
 
+use super::decorations::{resize_shape, resize_theme_names};
 use super::ffi::{Connection, CursorTheme};
 use super::generated::*;
 use kompoz_ui::platform::PointerIcon;
@@ -65,6 +67,8 @@ pub(crate) struct Cursors {
     /// The pointer's enter's serial (0: not over the window).
     serial: u32,
     icon: PointerIcon,
+    /// Over one of KompozR's edges: the resize cursor for where it would resize from, instead of the host's.
+    resize: Option<XdgToplevelResizeEdge>,
     /// The window's scale, whole (the theme's cursors are drawn at it).
     scale: i32,
 }
@@ -80,6 +84,7 @@ impl Cursors {
             shm: None,
             serial: 0,
             icon: PointerIcon::Default,
+            resize: None,
             scale: 1,
         }
     }
@@ -115,7 +120,24 @@ impl Cursors {
     /// The pointer entered a surface of the window with `serial`: its cursor shown.
     pub fn entered(&mut self, serial: u32) {
         self.serial = serial;
+        self.resize = None;
         self.show();
+    }
+
+    /// The pointer entered one of KompozR's edges with `serial`, where it would resize the window from `edge`: the
+    /// resize cursor shown.
+    pub fn entered_edge(&mut self, serial: u32, edge: XdgToplevelResizeEdge) {
+        self.serial = serial;
+        self.resize = Some(edge);
+        self.show();
+    }
+
+    /// The pointer moved over an edge to where it would resize from `edge`: its cursor shown, if another.
+    pub fn over_edge(&mut self, edge: XdgToplevelResizeEdge) {
+        if self.resize != Some(edge) {
+            self.resize = Some(edge);
+            self.show();
+        }
     }
 
     pub fn left(&mut self) {
@@ -129,7 +151,9 @@ impl Cursors {
     pub fn set_icon(&mut self, icon: PointerIcon) {
         if icon != self.icon {
             self.icon = icon;
-            self.show();
+            if self.resize.is_none() {
+                self.show();
+            }
         }
     }
 
@@ -148,7 +172,7 @@ impl Cursors {
             return;
         }
         if let Some(device) = &self.device {
-            device.set_shape(self.serial, shape_of(self.icon));
+            device.set_shape(self.serial, self.resize.map_or(shape_of(self.icon), resize_shape));
             return;
         }
         let start = crate::linux::sys::monotonic_now();
@@ -170,7 +194,8 @@ impl Cursors {
             };
         }
         let Some((theme, _)) = &themed.theme else { return };
-        let Some(cursor) = theme_names(self.icon).iter().find_map(|n| theme.cursor(n)) else { return };
+        let names = self.resize.map_or(theme_names(self.icon), resize_theme_names);
+        let Some(cursor) = names.iter().find_map(|n| theme.cursor(n)) else { return };
         let elapsed_ms = ((now - start).max(0) / 1_000_000) as u32;
         let (frame, duration) = cursor.frame_at(elapsed_ms);
         let Some(image) = cursor.image(frame) else { return };

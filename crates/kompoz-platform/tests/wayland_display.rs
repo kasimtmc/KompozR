@@ -6,7 +6,10 @@
 //! resize, the GPU's validation on. On lavapipe, on the Intel GPU where there is one, and with the compositor's
 //! cursor-shape, fractional-scale, viewporter and decoration globals ignored (the fallbacks: the theme's cursor,
 //! the whole buffer scale, KompozR's decorations). Checks: the app ran and quit as its script says, the click changed
-//! what is shown, the resized frame is the new size, no validation errors, the connection never broke.
+//! what is shown, the resized frame is the new size, no validation errors, the connection never broke. And with
+//! KompozR's decorations asked for, its title bar: drawn across the top in the system's colors (the baseline light
+//! scheme: no desktop services), double-clicked to maximize the window and again to restore it, its close button
+//! ending the app.
 
 #![allow(non_snake_case)]
 
@@ -119,13 +122,36 @@ fn png_size(path: &Path) -> (u32, u32) {
     (word(16), word(20))
 }
 
-/// The Counter on `compositor` with `env`: what it logged.
-fn run_counter(compositor: &Compositor, work: &Path, env: &[(&str, &str)]) -> String {
-    let script = format!(
+/// What a run does: the Counter's script (shots before and after a click, a resize) or the title bar's.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Drive {
+    Counter,
+    TitleBar,
+}
+
+/// The Counter's script: shots before and after a click on its button (70, 70 dp: in it with a title bar above it
+/// or without), and after a resize.
+fn counter_script(work: &Path) -> String {
+    format!(
         "wait 30;shot {0}/before.png;click 70 70;wait 30;shot {0}/after.png;resize 500 400;wait 30;shot \
          {0}/resized.png;quit",
         work.display()
-    );
+    )
+}
+
+/// The title bar's script (a 360 dp wide window, the default buttons on the right: Close's middle 22 dp from the
+/// end): a shot, a double click on the bar (two taps 4 frames apart) and a shot of the window maximized, another
+/// and one restored, a click on Close; a shot after it (and a quit) only if it didn't end the app.
+fn title_bar_script(work: &Path) -> String {
+    format!(
+        "wait 30;shot {0}/bar.png;click 120 20;wait 4;click 120 20;wait 60;shot {0}/maximized.png;click 120 20;wait \
+         4;click 120 20;wait 60;shot {0}/restored.png;click 338 20;wait 60;shot {0}/not-closed.png;quit",
+        work.display()
+    )
+}
+
+/// The Counter on `compositor` with `env`, driven by `script`: what it logged.
+fn run_counter(compositor: &Compositor, work: &Path, env: &[(&str, &str)], script: String) -> String {
     let mut c = Command::new(std::env::current_exe().unwrap());
     c.env(CHILD, "1")
         .env("WAYLAND_DISPLAY", &compositor.socket)
@@ -173,6 +199,45 @@ fn check(work: &Path, out: &str) {
     assert_ne!(before, after, "the click changed nothing");
 }
 
+/// A PNG's pixel at (x, y): RGBA.
+fn pixel(path: &Path, x: usize, y: usize) -> [u8; 4] {
+    let bytes = std::fs::read(path).unwrap_or_else(|_| panic!("no {}", path.display()));
+    let image = decode_image(&bytes, ImageRequestSize::default()).expect("a PNG");
+    let pixels = image.pixels();
+    let at = (y * image.width() as usize + x) * 4;
+    [pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]]
+}
+
+/// Whether `pixel` is `color` (within 2 a channel: the GPU's rounding).
+fn near(pixel: [u8; 4], color: u32) -> bool {
+    let want = color.to_be_bytes(); // (ARGB)
+    let rgba = [want[1], want[2], want[3], want[0]];
+    pixel.iter().zip(rgba).all(|(a, b)| a.abs_diff(b) <= 2)
+}
+
+/// The title bar's run checked: the bar across the top in the baseline light scheme's surfaceContainer (F3EDF7),
+/// its buttons' circles in surfaceContainerHighest (E6E0E9), the Counter's white below it; maximized by a double
+/// click (bigger than the window was), restored by another; Close ended the app (no shot after it).
+fn check_title_bar(work: &Path, out: &str) {
+    for line in ["the connection broke", "GPU validation:", "no window"] {
+        assert!(!out.lines().any(|l| l.contains(line)), "{line:?} in:\n{out}");
+    }
+    let bar = work.join("bar.png");
+    assert_eq!(png_size(&bar), (360, 480));
+    for (x, y) in [(5, 5), (120, 20), (180, 34), (355, 39)] {
+        assert!(near(pixel(&bar, x, y), 0xFFF3EDF7), "the bar at {x},{y}: {:?}", pixel(&bar, x, y));
+    }
+    // Close's circle (28 dp round its middle at 338, 20), left of its icon (16 dp); Maximize's and Minimize's.
+    for (x, y) in [(327, 20), (291, 20), (255, 20)] {
+        assert!(near(pixel(&bar, x, y), 0xFFE6E0E9), "a button at {x},{y}: {:?}", pixel(&bar, x, y));
+    }
+    assert!(near(pixel(&bar, 180, 45), 0xFFFFFFFF), "the Counter below the bar: {:?}", pixel(&bar, 180, 45));
+    let (w, h) = png_size(&work.join("maximized.png"));
+    assert!(w > 360 && h > 480, "the double click didn't maximize the window ({w} by {h})");
+    assert_eq!(png_size(&work.join("restored.png")), (360, 480));
+    assert!(!work.join("not-closed.png").exists(), "Close didn't end the app");
+}
+
 fn intel_icd() -> Option<&'static str> {
     let path = "/usr/share/vulkan/icd.d/intel_icd.json";
     Path::new(path).exists().then_some(path)
@@ -187,12 +252,14 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let lavapipe = "/usr/share/vulkan/icd.d/lvp_icd.json";
-    let mut runs: Vec<(&str, Vec<(&str, &str)>)> = vec![("lavapipe", vec![("VK_DRIVER_FILES", lavapipe)])];
+    let mut runs: Vec<(&str, Drive, Vec<(&str, &str)>)> =
+        vec![("lavapipe", Drive::Counter, vec![("VK_DRIVER_FILES", lavapipe)])];
     if let Some(intel) = intel_icd() {
-        runs.push(("intel", vec![("VK_DRIVER_FILES", intel)]));
+        runs.push(("intel", Drive::Counter, vec![("VK_DRIVER_FILES", intel)]));
     }
     runs.push((
         "fallbacks",
+        Drive::Counter,
         vec![
             ("VK_DRIVER_FILES", lavapipe),
             (
@@ -203,11 +270,17 @@ fn main() -> ExitCode {
     ));
     runs.push((
         "kompoz decorations, scale 1.5",
+        Drive::Counter,
         vec![("VK_DRIVER_FILES", lavapipe), ("KOMPOZ_DECORATIONS", "kompoz"), ("KOMPOZ_SCALE", "1.5")],
+    ));
+    runs.push((
+        "kompoz title bar",
+        Drive::TitleBar,
+        vec![("VK_DRIVER_FILES", lavapipe), ("KOMPOZ_DECORATIONS", "kompoz")],
     ));
     let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
     let mut failed = 0;
-    for (name, env) in runs {
+    for (name, drive, env) in runs {
         if !filters.is_empty() && !filters.iter().any(|f| name.contains(f.as_str())) {
             continue;
         }
@@ -217,8 +290,16 @@ fn main() -> ExitCode {
         std::fs::create_dir_all(&work).unwrap();
         let ok = std::panic::catch_unwind(|| {
             let compositor = Compositor::start(&work, &format!("kompoz-test-{}", std::process::id()));
-            let out = run_counter(&compositor, &work, &env);
-            check(&work, &out);
+            match drive {
+                Drive::Counter => {
+                    let out = run_counter(&compositor, &work, &env, counter_script(&work));
+                    check(&work, &out);
+                }
+                Drive::TitleBar => {
+                    let out = run_counter(&compositor, &work, &env, title_bar_script(&work));
+                    check_title_bar(&work, &out);
+                }
+            }
         })
         .is_ok();
         if ok {

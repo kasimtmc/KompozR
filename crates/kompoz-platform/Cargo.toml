@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-platform"
-description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts), the app entry, the headless platform, and on Linux the event loop, keyboards, desktop services and the Wayland and X11 platforms"
+description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts, its own title bar), the app entry, the headless platform, and on Linux the event loop, keyboards, desktop services and the Wayland (with its own decorations) and X11 platforms"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,19 +10,26 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
 libc = "0.2"
 
 [dev-dependencies]
-kompoz-foundation = { path = "../kompoz-foundation" }
-kompoz-text = { path = "../kompoz-text" }
+kompoz-test = { path = "../kompoz-test" }
 
 # The app core on the headless platform (a GPU device: lavapipe in CI), one thread, in sequence.
 [[test]]
 name = "app_core"
+harness = false
+
+# KompozR's title bar (WindowFrame) in a test rule: its layout, its buttons as the desktop lays them out, what it
+# asks of the window, its labels, colors and direction.
+[[test]]
+name = "title_bar"
 harness = false
 
 # xkbcommon's keymaps, compose and the keysym table.

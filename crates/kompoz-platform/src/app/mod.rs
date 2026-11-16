@@ -1,6 +1,7 @@
 //! A KompozR app on a platform (C++'s platform/app and main.cpp): the app's entry ([`App`]), what a platform is to
-//! the app core ([`Platform`], [`Metrics`], [`Event`]), the core every platform runs the app with ([`AppCore`]), and
-//! the display platforms built in ([`DISPLAY_PLATFORMS`]).
+//! the app core ([`Platform`], [`Metrics`], [`Event`]), the core every platform runs the app with ([`AppCore`]), the
+//! title bar it draws where the platform leaves the window undecorated ([`WindowFrame`]), and the display platforms
+//! built in ([`DISPLAY_PLATFORMS`]).
 //!
 //! ```text
 //! fn main() -> ExitCode {
@@ -14,10 +15,15 @@ mod platform;
 mod profile;
 pub mod regions;
 mod script;
+mod title_bar;
 
 pub use app_core::{AppCore, DeviceFactory, Next, WHEEL_NOTCH_DP};
 pub use event::{Event, MouseButton};
 pub use platform::{Metrics, Platform, TitleBar, WindowAction, WindowButton};
+pub use title_bar::{
+    TITLE_BAR_BUTTON, TITLE_BAR_GAP, TITLE_BAR_HEIGHT, TITLE_BAR_ID, TitleBarColors, WindowActions, WindowFrame,
+    button_action, button_icon,
+};
 
 use crate::system::log;
 use kompoz_graphics::Dp;

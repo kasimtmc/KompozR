@@ -20,5 +20,5 @@ pub mod system;
 
 pub use app::{
     App, AppConfig, AppCore, DISPLAY_PLATFORMS, DisplayPlatform, Event, Metrics, MouseButton, Next, Platform, TitleBar,
-    WindowAction, WindowButton,
+    TitleBarColors, WindowAction, WindowActions, WindowButton, WindowFrame, button_action, button_icon,
 };
