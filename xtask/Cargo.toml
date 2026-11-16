@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "KompozR's development tasks: `cargo xtask shaders [--check]` compiles the GPU renderer's shaders"
+description = "KompozR's development tasks: `cargo xtask shaders [--check]` compiles the GPU renderer's shaders, `cargo xtask wayland [--check]` generates the Wayland protocols' Rust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

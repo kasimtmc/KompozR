@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-platform"
-description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts), the app entry, the headless platform, and Linux's event loop, keyboards and X11 platform (Wayland to come)"
+description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts), the app entry, the headless platform, and on Linux the event loop, keyboards, desktop services and the Wayland and X11 platforms"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,6 +18,7 @@ libc = "0.2"
 
 [dev-dependencies]
 kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-text = { path = "../kompoz-text" }
 
 # The app core on the headless platform (a GPU device: lavapipe in CI), one thread, in sequence.
 [[test]]
@@ -43,4 +44,9 @@ harness = false
 # The wallpaper's colors: KDE's config read, changes followed by inotify.
 [[test]]
 name = "wallpaper"
+harness = false
+
+# The Wayland platform on a compositor of its own (kwin_wayland --virtual), running the Counter: KOMPOZ_DISPLAY_TESTS=1.
+[[test]]
+name = "wayland_display"
 harness = false

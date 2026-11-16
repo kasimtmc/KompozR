@@ -1,18 +1,29 @@
 //! The swapchain: made at the drawable's size (UNORM, sRGB non-linear, FIFO, turned as the display is), its image
-//! acquired lazily, presented at the frame's end with how old what it holds is, made again when the window changes
-//! size, turns, or gets another native window.
+//! acquired lazily (waiting a while at most: a window the compositor holds every image of misses a frame instead of
+//! hanging the app), presented at the frame's end with how old what it holds is, made again when the drawable
+//! changes size, the display turns, a present says it no longer fits as well as it could (once: Wayland's after its
+//! buffers' best format changes), or the window gets another native window.
 
 use super::VulkanDevice;
 use super::texture::VkTexture;
 use crate::device::{Format, TextureId, TextureUsage, log};
 use ash::vk;
+use std::time::Duration;
+
+/// How long an acquire waits for an image at most (the frame isn't shown if none comes).
+const ACQUIRE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// The swapchain and its images.
 pub(super) struct Swapchain {
     pub handle: vk::SwapchainKHR,
     pub format: Format,
-    /// The drawable's size it was made for (its images are turned: `turns`).
+    /// The surface's size it was made at (its images are turned: `turns`).
     pub extent: vk::Extent2D,
+    /// The drawable's size it was made for (what tells a resize; `extent` may differ from it: the surface's own
+    /// size, or clamped to what the surface takes); (0, 0): to be made again.
+    pub drawable: (i32, i32),
+    /// Made again because a present said the last one was suboptimal (if this one is too, it stays).
+    pub for_suboptimal: bool,
     /// The display's transform when it was made.
     pub transform: vk::SurfaceTransformFlagsKHR,
     pub turns: i32,
@@ -34,6 +45,8 @@ impl Default for Swapchain {
             handle: vk::SwapchainKHR::null(),
             format: Format::Bgra8,
             extent: vk::Extent2D::default(),
+            drawable: (0, 0),
+            for_suboptimal: false,
             transform: vk::SurfaceTransformFlagsKHR::IDENTITY,
             turns: 0,
             images: Vec::new(),
@@ -201,6 +214,7 @@ impl VulkanDevice {
         };
         self.swapchain.handle = swapchain;
         self.swapchain.extent = extent;
+        self.swapchain.drawable = (w, h);
         self.swapchain.transform = caps.current_transform;
         // SAFETY: the swapchain was just made.
         let images = unsafe { swapchain_fn.get_swapchain_images(swapchain) }.unwrap_or_default();
@@ -283,12 +297,15 @@ impl VulkanDevice {
             if w <= 0 || h <= 0 {
                 return None; // minimized
             }
-            if (self.swapchain.handle == vk::SwapchainKHR::null()
-                || self.swapchain.extent.width as i32 != w
-                || self.swapchain.extent.height as i32 != h)
-                && !self.make_swapchain()
-            {
-                return None;
+            // (Made again when the drawable changed, not whenever the surface's size differs from it: a window
+            // system whose size lags the drawable's would have it made every frame.)
+            if self.swapchain.handle == vk::SwapchainKHR::null() || self.swapchain.drawable != (w, h) {
+                if self.swapchain.drawable != (0, 0) {
+                    self.swapchain.for_suboptimal = false; // (resized: a new start)
+                }
+                if !self.make_swapchain() {
+                    return None;
+                }
             }
             // What was recorded so far (the kept frame drawn) goes to the GPU now: in the submit that waits for the
             // image, it would wait for it too.
@@ -298,9 +315,10 @@ impl VulkanDevice {
             }
             let swapchain_fn = self.swapchain_fn.as_ref()?;
             let semaphore = self.frames[self.frame_index].image_available;
+            let timeout = ACQUIRE_TIMEOUT.as_nanos() as u64;
             // SAFETY: the swapchain is the device's; the frame's semaphore is unsignaled (its last wait was submitted).
             let result = unsafe {
-                swapchain_fn.acquire_next_image(self.swapchain.handle, u64::MAX, semaphore, vk::Fence::null())
+                swapchain_fn.acquire_next_image(self.swapchain.handle, timeout, semaphore, vk::Fence::null())
             };
             match result {
                 Ok((index, _suboptimal)) => {
@@ -313,6 +331,7 @@ impl VulkanDevice {
                     self.destroy_swapchain();
                 }
                 Err(vk::Result::ERROR_SURFACE_LOST_KHR) => self.surface_lost = true,
+                // (TIMEOUT, NOT_READY: no image free yet; the frame isn't shown, the next one tries again.)
                 Err(_) => {}
             }
             self.wait_image = self.swapchain.acquired;
@@ -343,20 +362,27 @@ impl VulkanDevice {
         // SAFETY: the image was acquired and its frame submitted, signaling the semaphore waited for.
         match unsafe { swapchain_fn.queue_present(self.queue, &info) } {
             Ok(true) => {
-                // Made again if the display turned since (else it is the compositor's to fit).
-                if let Some(surface_fn) = &self.instance.surface_fn {
+                // Made again if the display turned since; else once (a Wayland compositor's buffers' best format
+                // changed: one made now gets it), and not again if that one is suboptimal too (then it is the
+                // compositor's to fit, as it can).
+                let turned = self.instance.surface_fn.as_ref().is_some_and(|surface_fn| {
                     // SAFETY: a query of the surface.
                     let caps = unsafe {
                         surface_fn.get_physical_device_surface_capabilities(self.choice.physical, self.instance.surface)
                     };
-                    if caps.is_ok_and(|c| c.current_transform != self.swapchain.transform) {
-                        self.swapchain.extent = vk::Extent2D::default();
-                    }
+                    caps.is_ok_and(|c| c.current_transform != self.swapchain.transform)
+                });
+                if turned || !self.swapchain.for_suboptimal {
+                    self.swapchain.drawable = (0, 0);
+                    self.swapchain.for_suboptimal = !turned;
                 }
             }
-            Ok(false) => {}
+            Ok(false) => self.swapchain.for_suboptimal = false,
             // Made again next frame.
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.swapchain.extent = vk::Extent2D::default(),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                self.swapchain.drawable = (0, 0);
+                self.swapchain.for_suboptimal = false;
+            }
             Err(vk::Result::ERROR_SURFACE_LOST_KHR) => self.surface_lost = true,
             Err(_) => {}
         }
