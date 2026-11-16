@@ -33,3 +33,14 @@ harness = false
 [[test]]
 name = "event_loop"
 harness = false
+
+# Our D-Bus client, the settings portal, the desktop services and the AT-SPI bridge, on a dbus-daemon of their own
+# (skipped without one unless KOMPOZ_DBUS_REQUIRED=1).
+[[test]]
+name = "dbus"
+harness = false
+
+# The wallpaper's colors: KDE's config read, changes followed by inotify.
+[[test]]
+name = "wallpaper"
+harness = false

@@ -19,16 +19,18 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # The platform's keyboards: libxkbcommon, xkeyboard-config's keymaps, libX11's compose tables (its tests need
-      # them: KOMPOZ_XKB_REQUIRED).
-      - name: xkbcommon and its data
+      # them: KOMPOZ_XKB_REQUIRED); dbus-daemon, the private bus our D-Bus client, the portal and the AT-SPI bridge
+      # are tested on (KOMPOZ_DBUS_REQUIRED).
+      - name: xkbcommon and its data, dbus-daemon
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon0 libxkbcommon-x11-0 xkb-data libx11-data
+          sudo apt-get install -y --no-install-recommends libxkbcommon0 libxkbcommon-x11-0 xkb-data libx11-data dbus
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
         env:
           KOMPOZ_XKB_REQUIRED: "1"
+          KOMPOZ_DBUS_REQUIRED: "1"
 
   # The GPU renderer's tests on Vulkan on lavapipe (Mesa's, on the CPU), with the validation layers: no device is a
   # failure, so is an error the layers report; the scenes against tests/golden (lavapipe's pictures).
