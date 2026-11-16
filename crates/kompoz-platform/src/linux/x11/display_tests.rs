@@ -3,7 +3,7 @@
 //! connection and a thread of its own: the owner answers while the reader waits) as UTF-8, Latin-1, its targets and
 //! in INCR parts both ways, ownership lost to another; a drop from another client (an XDND 5 source written here)
 //! with its status and finish; the keyboard's keys and text through xkbcommon-x11, and through the input method's
-//! context. The windows are never mapped.
+//! context; the input context's preedit style (on the spot where the method can). The windows are never mapped.
 
 use super::ffi::{self, Decoded, Display, InputMethod, KeyEvent, NONE, Window, XEvent};
 use super::selection::{Encoding, decode};
@@ -218,4 +218,31 @@ fn keys_and_text_are_waylands() {
         ime.focus(false, ffi::XPoint::default());
         ime.destroy_context();
     }
+}
+
+#[test]
+fn input_contexts_compose_on_the_spot_where_the_method_can() {
+    if !enabled() {
+        return;
+    }
+    let p = platform();
+    let d = p.shared.display.clone();
+    let mut ime = InputMethod::new(d);
+    assert!(ime.open(), "the desktop's input method, or X's own");
+    ime.create_context(p.window(), ffi::XPoint { x: 10, y: 20 });
+    assert!(ime.has_context(), "a context for the window");
+    // On the spot (XIMPreeditCallbacks) if the method has it, else over the spot (XIMPreeditPosition), else its own
+    // way (XIMPreeditNothing); the status always its own (XIMStatusNothing).
+    let (style, styles) = ime.preedit_styles();
+    let has = |preedit: std::ffi::c_ulong| styles.contains(&(preedit | 0x0400));
+    let expected = [0x0002, 0x0004].into_iter().find(|&s| has(s)).unwrap_or(0x0008);
+    assert_eq!(style, expected, "styles {styles:x?}");
+    // Told where the caret is, focused, given up and unfocused: nothing composed, nothing told.
+    ime.focus(true, ffi::XPoint { x: 12, y: 40 });
+    ime.reset();
+    assert_eq!(ime.take_preedit(), None);
+    assert_eq!(ime.preedit_text(), "");
+    ime.focus(false, ffi::XPoint::default());
+    ime.destroy_context();
+    assert!(!ime.has_context());
 }

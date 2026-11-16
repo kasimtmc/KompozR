@@ -71,19 +71,30 @@ fn after_delete(range: (usize, usize), deleted: (usize, usize)) -> (usize, usize
     (shift(range.0), shift(range.1))
 }
 
+/// The selection of `state`, ordered and on whole characters.
+fn selection_of(state: &TextEditState) -> (usize, usize) {
+    let len = state.text.len();
+    let sel = (state.selection_start.min(state.selection_end), state.selection_start.max(state.selection_end));
+    (floor_boundary(&state.text, sel.0.min(len)), ceil_boundary(&state.text, sel.1.min(len)))
+}
+
+/// What a commit or a composing text replaces in `state`: the composition, else the selection.
+fn replaced_by_text(state: &TextEditState) -> (usize, usize) {
+    match state.composition {
+        Some((s, e)) => (floor_boundary(&state.text, s.min(e)), ceil_boundary(&state.text, s.max(e))),
+        None => selection_of(state),
+    }
+}
+
 impl EditCommand {
     /// Applies it to `state`, as Compose's command applies to its EditingBuffer.
     pub fn apply(&self, state: &mut TextEditState) {
         let len = state.text.len();
-        let sel = (state.selection_start.min(state.selection_end), state.selection_start.max(state.selection_end));
-        let sel = (floor_boundary(&state.text, sel.0.min(len)), ceil_boundary(&state.text, sel.1.min(len)));
+        let sel = selection_of(state);
         match self {
             EditCommand::CommitText { text, new_cursor_position }
             | EditCommand::SetComposingText { text, new_cursor_position } => {
-                let (start, end) = match state.composition {
-                    Some((s, e)) => (floor_boundary(&state.text, s.min(e)), ceil_boundary(&state.text, s.max(e))),
-                    None => sel,
-                };
+                let (start, end) = replaced_by_text(state);
                 state.text.replace_range(start..end, text);
                 let composing = matches!(self, EditCommand::SetComposingText { .. }) && !text.is_empty();
                 state.composition = composing.then_some((start, start + text.len()));
@@ -173,7 +184,9 @@ impl TextInputService {
         });
         let before = self.0.session.replace(Some(session.clone()));
         if let Some(before) = before {
+            // (The platform hears the one before close, then this one open: another field's typing begins.)
             before.open.set(false);
+            self.tell(&before, false);
         }
         self.tell(&session, true);
         TextInputSession { service: self.clone(), session }
@@ -228,6 +241,21 @@ impl TextInputService {
         let on_edit_command = session.on_edit_command.clone();
         on_edit_command(commands);
         true
+    }
+
+    /// An input method's composing text with its caret at byte `start` of it, or bytes `start` to `end` of it
+    /// selected (on whole characters): Compose's SetComposingTextCommand, then a SetSelectionCommand inside the
+    /// composition (as an Android input method's `setComposingText` and `setSelection`), to the open session's
+    /// editor; false if none is open.
+    pub(crate) fn set_composing_text_with_selection(&self, text: &str, start: usize, end: usize) -> bool {
+        let Some(session) = self.current() else { return false };
+        // The composition will begin where what it replaces begins.
+        let at = replaced_by_text(&session.state.borrow()).0;
+        let (start, end) = (floor_boundary(text, start.min(end)), floor_boundary(text, start.max(end)));
+        self.send(&[
+            EditCommand::SetComposingText { text: text.to_string(), new_cursor_position: 1 },
+            EditCommand::SetSelection { start: at + start, end: at + end },
+        ])
     }
 
     /// The input method's action key to the open session's editor; false if none is open.

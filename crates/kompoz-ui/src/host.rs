@@ -10,7 +10,7 @@ use crate::graphics_context::GraphicsContext;
 use crate::input::PointerEventType;
 use crate::input::{
     IndirectPointerEvent, IndirectPointerEventPrimaryDirectionalMotionAxis, IndirectPointerEventType, InputState, Key,
-    KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerType, RotaryScrollEvent,
+    KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerButtons, PointerType, RotaryScrollEvent,
 };
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::media_query::{LocalUiMediaScope, MediaInfo, UiMediaScope};
@@ -663,6 +663,35 @@ impl KompozHost {
         crate::input::pointer_exit(self);
     }
 
+    /// A stylus (`PointerType::Stylus`, or `Eraser`: its other end) at `position` (px), at `time_nanos`: near the
+    /// window (hovering), or touching it while `down` with `pressure` (0 to 1), its barrel `buttons` held (Android's
+    /// stylus: the first button primary, the second secondary). One stream from its coming near until
+    /// [`stylus_exit`](Self::stylus_exit): its touches are Presses and Releases, the rest Moves (hover enters and
+    /// exits worked out from them). Whether a node took it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stylus(
+        &self,
+        position: Offset,
+        time_nanos: i64,
+        pointer_id: i64,
+        pointer_type: PointerType,
+        down: bool,
+        pressure: f32,
+        buttons: PointerButtons,
+    ) -> bool {
+        let t = self.event_time(time_nanos);
+        // (a touching stylus puts the UI in touch mode, as on Android)
+        if down && self.input_mode_manager.mode.peek() != InputMode::Touch {
+            self.input_mode_manager.request_input_mode(InputMode::Touch);
+        }
+        crate::input::stylus(self, position, t, pointer_id, pointer_type, down, pressure, buttons)
+    }
+
+    /// The stylus `pointer_id` went away (out of its tablet's range, or off the window): what it hovered is exited.
+    pub fn stylus_exit(&self, pointer_id: i64) {
+        crate::input::stylus_exit(self, pointer_id);
+    }
+
     /// A wheel or touchpad scrolled by `delta` px (down and right positive) with the mouse at `position`; whether
     /// a node took it.
     pub fn scroll(&self, position: Offset, delta: Offset) -> bool {
@@ -1080,6 +1109,13 @@ impl KompozHost {
     /// [`EditCommand::SetComposingText`] has it; false if no session is open.
     pub fn set_composing_text(&self, text: &str, new_cursor_position: i32) -> bool {
         self.send_edit_commands(&[EditCommand::SetComposingText { text: text.to_string(), new_cursor_position }])
+    }
+
+    /// An input method's composing text with its caret at byte `start` of it, or bytes `start` to `end` of it
+    /// selected (Compose's SetComposingTextCommand and a SetSelectionCommand inside the composition); false if no
+    /// session is open.
+    pub fn set_composing_text_with_selection(&self, text: &str, start: usize, end: usize) -> bool {
+        self.text_input.set_composing_text_with_selection(text, start, end)
     }
 
     /// What an input method did, to the open session's editor (Compose's `onEditCommand`); false if none is open.

@@ -42,7 +42,7 @@ pub(super) fn theme_names(icon: PointerIcon) -> &'static [&'static str] {
 }
 
 /// The theme's size for cursors at scale 1 (`XCURSOR_SIZE`, else 24).
-fn theme_size() -> i32 {
+pub(super) fn theme_size() -> i32 {
     std::env::var("XCURSOR_SIZE").ok().and_then(|s| s.trim().parse().ok()).filter(|&s: &i32| s > 0).unwrap_or(24)
 }
 

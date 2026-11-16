@@ -11,7 +11,10 @@
 //! what is shown, the resized frame is the new size, no validation errors, the connection never broke. And with
 //! KompozR's decorations asked for, its title bar: drawn across the top in the system's colors (the baseline light
 //! scheme: no desktop services), double-clicked to maximize the window and again to restore it, its close button
-//! ending the app.
+//! ending the app. And an editor's input sessions (what a focused text field opens) on the compositor's text-input-v3, the protocol's traffic logged
+//! (`WAYLAND_DEBUG`): enabled with the field's text, kind and caret, its changes (more than the protocol's 4000 bytes:
+//! cut around the caret) told and committed, another field enabled afresh, disabled at the end; the tablet seat asked
+//! for. (No input method or tablet can be scripted on the compositor: what they send is unit-tested.)
 
 #![allow(non_snake_case)]
 
@@ -20,10 +23,14 @@ use kompoz_graphics::*;
 use kompoz_platform::App;
 use kompoz_runtime::*;
 use kompoz_text::TextStyle;
+use kompoz_ui::platform::{ImeOptions, KeyboardType, PointerIcon, TextEditState};
 use kompoz_ui::semantics::Role;
+use kompoz_ui::text_input::{EditCommand, LocalTextInputService, TextInputSession};
 use kompoz_ui::{Alignment, Modifier};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -56,7 +63,39 @@ fn Counter() {
     );
 }
 
-/// The child's mark: it runs the app.
+/// An editor's input sessions, as a focused text field opens them: one for a field holding "merhaba"; at the first
+/// typing, its caret's place told and its text replaced by the app (6003 bytes, the caret at the end); then another
+/// field's (an e-mail address's) closing it; closed as the editor goes. A stylus's icon over all of it.
+#[kompozable]
+fn Editor() {
+    let service = LocalTextInputService.current();
+    Box(modifier = Modifier.fill_max_size().background(Color::White).stylus_hover_icon(PointerIcon::Crosshair));
+    DisposableEffect(0, move || {
+        let open: Rc<RefCell<Option<TextInputSession>>> = Rc::default();
+        let (o, s) = (open.clone(), service.clone());
+        let first = service.start_input(
+            TextEditState::caret_at_end("merhaba"),
+            ImeOptions::default(),
+            move |_: &[EditCommand]| {
+                let Some(first) = o.borrow_mut().take() else { return };
+                first.notify_focused_rect(Rect::new(10.0, 20.0, 12.0, 40.0));
+                first.update_state(&TextEditState::caret_at_end("ğ".repeat(3000) + "son"));
+                let email = ImeOptions { keyboard_type: KeyboardType::Email, ..ImeOptions::default() };
+                let next = s.start_input(TextEditState::caret_at_end("a@b"), email, |_: &[EditCommand]| {}, |_| {});
+                *o.borrow_mut() = Some(next);
+            },
+            |_| {},
+        );
+        *open.borrow_mut() = Some(first);
+        on_dispose(move || {
+            if let Some(session) = open.borrow_mut().take() {
+                session.dispose();
+            }
+        })
+    });
+}
+
+/// The child's mark: it runs the app (`editor`: the Editor, else the Counter).
 const CHILD: &str = "KOMPOZ_WAYLAND_TEST_CHILD";
 
 /// A compositor of the test's own, stopped (its whole process group) when dropped.
@@ -149,6 +188,7 @@ fn png_size(path: &Path) -> (u32, u32) {
 enum Drive {
     Counter,
     TitleBar,
+    Editor,
 }
 
 /// The Counter's script: shots before and after a click on its button (70, 70 dp: in it with a title bar above it
@@ -174,8 +214,13 @@ fn title_bar_script(work: &Path) -> String {
 
 /// The Counter on `compositor` with `env`, driven by `script`: what it logged.
 fn run_counter(compositor: &Compositor, work: &Path, env: &[(&str, &str)], script: String) -> String {
+    run_app(compositor, work, "counter", &script, env)
+}
+
+/// The app `app` on `compositor` running `script` with `env`: what it logged.
+fn run_app(compositor: &Compositor, work: &Path, app: &str, script: &str, env: &[(&str, &str)]) -> String {
     let mut c = Command::new(std::env::current_exe().unwrap());
-    c.env(CHILD, "1")
+    c.env(CHILD, app)
         .env("WAYLAND_DISPLAY", &compositor.socket)
         .env("KOMPOZ_SCRIPT", script)
         .env("KOMPOZ_GPU_VALIDATION", "1")
@@ -198,12 +243,12 @@ fn run_counter(compositor: &Compositor, work: &Path, env: &[(&str, &str)], scrip
         if start.elapsed() > Duration::from_secs(120) {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("the Counter didn't quit");
+            panic!("the {app} didn't quit");
         }
         std::thread::sleep(Duration::from_millis(50));
     };
     let out = std::fs::read_to_string(work.join("counter.err")).unwrap_or_default();
-    assert!(status.success(), "the Counter failed ({status}):\n{out}");
+    assert!(status.success(), "the {app} failed ({status}):\n{out}");
     out
 }
 
@@ -271,13 +316,69 @@ fn lavapipe_icd() -> String {
         .expect("lavapipe (Mesa's lvp_icd.json) for the display tests")
 }
 
+/// The editor's run checked from the protocol's traffic (libwayland's `WAYLAND_DEBUG` lines: `->` the requests).
+fn check_editor(out: &str) {
+    assert!(!out.lines().any(|l| l.contains("the connection broke")), "the connection broke:\n{out}");
+    let sent = |what: &str| out.lines().filter(|l| l.contains(" -> ") && l.contains(what)).count();
+    assert_eq!(sent(".get_tablet_seat("), 1, "the tablet seat asked for");
+    let entered = out.lines().any(|l| !l.contains(" -> ") && l.contains("zwp_text_input_v3") && l.contains(".enter("));
+    assert!(entered, "the compositor's text input entered the window");
+    // The text input's requests, in order (a long text's end only).
+    let requests: Vec<String> = out
+        .lines()
+        .filter_map(|l| l.split_once(" -> zwp_text_input_v3#")?.1.split_once('.').map(|(_, r)| r))
+        .map(|r| {
+            if r.len() > 60 {
+                format!("…{}", r.chars().skip(r.chars().count() - 20).collect::<String>())
+            } else {
+                r.to_string()
+            }
+        })
+        .collect();
+    assert_eq!(
+        requests,
+        [
+            // The first field: enabled with its text (the caret at its end) and kind (auto-correction: completion and
+            // spell checking); its place not known yet.
+            "enable()",
+            "set_surrounding_text(\"merhaba\", 7, 7)",
+            "set_content_type(3, 0)",
+            "commit()",
+            // The script's typing (the keyboard's: the app's doing) and the caret's place (px / the scale: points).
+            "set_surrounding_text(\"merhabaa\", 8, 8)",
+            "set_text_change_cause(1)",
+            "set_cursor_rectangle(10, 20, 2, 20)",
+            "commit()",
+            // The app's text of 6003 bytes: its last 3999 (whole characters), the caret at the end.
+            "…ğğğson\", 3999, 3999)",
+            "set_text_change_cause(1)",
+            "commit()",
+            // Another field: the first disabled, it enabled afresh (an e-mail address's kind).
+            "disable()",
+            "commit()",
+            "enable()",
+            "set_surrounding_text(\"a@b\", 3, 3)",
+            "set_content_type(3, 6)",
+            "commit()",
+            // Disabled as the app quits, the text input destroyed with the platform.
+            "disable()",
+            "commit()",
+            "destroy()",
+        ],
+        "the text input's requests"
+    );
+}
+
 fn intel_icd() -> Option<&'static str> {
     let path = "/usr/share/vulkan/icd.d/intel_icd.json";
     Path::new(path).exists().then_some(path)
 }
 
 fn main() -> ExitCode {
-    if std::env::var_os(CHILD).is_some() {
+    if let Some(child) = std::env::var_os(CHILD) {
+        if child == "editor" {
+            return App::new("Düzenleyici").size(360.dp(), 480.dp()).run(Editor);
+        }
         return App::new("Sayaç").size(360.dp(), 480.dp()).run(Counter);
     }
     if std::env::var("KOMPOZ_DISPLAY_TESTS").as_deref() != Ok("1") {
@@ -312,6 +413,11 @@ fn main() -> ExitCode {
         Drive::TitleBar,
         vec![("VK_DRIVER_FILES", lavapipe), ("KOMPOZ_DECORATIONS", "kompoz")],
     ));
+    runs.push((
+        "editor: lavapipe, the protocol logged",
+        Drive::Editor,
+        vec![("VK_DRIVER_FILES", lavapipe), ("WAYLAND_DEBUG", "1")],
+    ));
     let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
     let mut failed = 0;
     for (name, drive, env) in runs {
@@ -322,6 +428,7 @@ fn main() -> ExitCode {
             std::env::temp_dir().join(format!("kompoz-wayland-test-{}-{}", std::process::id(), name.replace(' ', "-")));
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work).unwrap();
+        let (app, on) = name.split_once(": ").unwrap_or(("counter", name));
         let ok = std::panic::catch_unwind(|| {
             let compositor = Compositor::start(&work, &format!("kompoz-test-{}", std::process::id()));
             match drive {
@@ -333,6 +440,10 @@ fn main() -> ExitCode {
                     let out = run_counter(&compositor, &work, &env, title_bar_script(&work));
                     check_title_bar(&work, &out);
                 }
+                Drive::Editor => {
+                    let out = run_app(&compositor, &work, "editor", "wait 30;type a;wait 10;quit", &env);
+                    check_editor(&out);
+                }
             }
         })
         .is_ok();
@@ -341,7 +452,7 @@ fn main() -> ExitCode {
         }
         failed += usize::from(!ok);
         println!(
-            "{} counter on {name}{}",
+            "{} {app} on {on}{}",
             if ok { "ok    " } else { "FAILED" },
             if ok { String::new() } else { format!(" (kept: {})", work.display()) }
         );

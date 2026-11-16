@@ -196,12 +196,27 @@ struct MouseState {
     buttons: PointerButtons,
 }
 
-/// The host's input state: the pointers down and the mouse as the platform reported them, and Compose's
+/// A stylus near the window (its tip, or its eraser): one hover stream from its coming near until it goes, pressed
+/// while it touches (Android's stylus: its hover events and its touches between them, which Compose keeps as one
+/// active hover).
+#[derive(Clone, Copy, Debug)]
+struct StylusState {
+    host_id: i64,
+    id: PointerId,
+    position: Offset,
+    r#type: PointerType,
+    down: bool,
+    pressure: f32,
+    buttons: PointerButtons,
+}
+
+/// The host's input state: the pointers down, the mouse and a stylus as the platform reported them, and Compose's
 /// PointerInputEventProcessor with its hit paths.
 pub struct InputState {
     pub(crate) processor: Rc<PointerInputEventProcessor>,
     touches: RefCell<Vec<TrackedPointer>>,
     mouse: RefCell<Option<MouseState>>,
+    stylus: RefCell<Option<StylusState>>,
     next_id: Cell<i64>,
     keyboard_modifiers: Cell<KeyModifiers>,
     /// The host ids of the pointers whose press only dismissed a popup: what they do until they lift goes
@@ -217,6 +232,7 @@ impl Default for InputState {
             processor: Rc::new(PointerInputEventProcessor::default()),
             touches: RefCell::new(Vec::new()),
             mouse: RefCell::new(None),
+            stylus: RefCell::new(None),
             next_id: Cell::new(0),
             keyboard_modifiers: Cell::new(KeyModifiers::None),
             swallowed: RefCell::new(Vec::new()),
@@ -226,7 +242,7 @@ impl Default for InputState {
 }
 
 impl InputState {
-    /// The pointers down (a pressed mouse too), by the host's ids.
+    /// The pointers down (a pressed mouse and a touching stylus too), by the host's ids.
     pub fn pointers_down(&self) -> Vec<(i64, Offset)> {
         let mut out: Vec<(i64, Offset)> = self.touches.borrow().iter().map(|p| (p.host_id, p.position)).collect();
         if let Some(m) = *self.mouse.borrow()
@@ -234,7 +250,17 @@ impl InputState {
         {
             out.push((m.host_id, m.position));
         }
+        if let Some(s) = *self.stylus.borrow()
+            && s.down
+        {
+            out.push((s.host_id, s.position));
+        }
         out
+    }
+
+    /// The stylus near the window, if one is: its host id, kind and where it is.
+    pub fn stylus(&self) -> Option<(i64, PointerType, Offset)> {
+        self.stylus.borrow().map(|s| (s.host_id, s.r#type, s.position))
     }
 
     /// Where the mouse is, while it is over the window.
@@ -285,6 +311,14 @@ impl InputState {
             .iter()
             .map(|p| data(p.id, time_nanos, p.position, Some(p.host_id) != lifted, p.r#type, false))
             .collect()
+    }
+
+    /// The stylus as an event's pointer: of its hover stream, pressed while it touches, with its pressure.
+    fn stylus_pointer(&self, time_nanos: i64) -> Option<PointerInputEventData> {
+        self.stylus.borrow().map(|s| PointerInputEventData {
+            pressure: s.pressure,
+            ..data(s.id, time_nanos, s.position, s.down, s.r#type, true)
+        })
     }
 
     fn mouse_pointer(&self, time_nanos: i64) -> Option<PointerInputEventData> {
@@ -574,6 +608,9 @@ pub(crate) fn pointer_cancel(host: &KompozHost) {
         if let Some(m) = state.mouse.borrow_mut().as_mut() {
             m.buttons = PointerButtons::None;
         }
+        if let Some(s) = state.stylus.borrow_mut().as_mut() {
+            s.down = false;
+        }
         state.processor.clone()
     };
     processor.process_cancel();
@@ -595,6 +632,86 @@ pub(crate) fn pointer_exit(host: &KompozHost) {
     if mouse.is_some_and(|m| !m.buttons.are_any_pressed()) {
         *mouse = None;
     }
+}
+
+/// A stylus (its tip, `Stylus`, or its `Eraser`) at `position`: near the window, or touching it while `down` with
+/// `pressure` (0 to 1), its barrel `buttons` held. Its first report is its hover's start (another stylus near
+/// before it is gone first); a touch is its Press, a lift its Release, the rest its Moves (Enter and Exit worked
+/// out from them, as for the mouse). A touch outside a popup dismisses it, and the stylus goes nowhere until it
+/// lifts.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stylus(
+    host: &KompozHost,
+    position: Offset,
+    time_nanos: i64,
+    pointer_id: i64,
+    r#type: PointerType,
+    down: bool,
+    pressure: f32,
+    buttons: PointerButtons,
+) -> bool {
+    let other = host.input.borrow().stylus.borrow().filter(|s| s.host_id != pointer_id).map(|s| s.host_id);
+    if let Some(other) = other {
+        stylus_exit(host, other);
+    }
+    let was_down = host.input.borrow().stylus.borrow().is_some_and(|s| s.down);
+    let update = |state: &InputState| {
+        let mut stylus = state.stylus.borrow_mut();
+        let id = stylus.map_or_else(|| state.fresh_id(), |s| s.id);
+        let pressure = if down { pressure.clamp(0.0, 1.0) } else { 0.0 };
+        *stylus = Some(StylusState { host_id: pointer_id, id, position, r#type, down, pressure, buttons });
+    };
+    {
+        let state = host.input.borrow();
+        let mut swallowed = state.swallowed.borrow_mut();
+        if let Some(i) = swallowed.iter().position(|p| *p == pointer_id) {
+            update(&state);
+            if !down {
+                swallowed.remove(i);
+            }
+            return false;
+        }
+    }
+    let first_press = down && !was_down;
+    if first_press && crate::window::press_outside_popup(host, position) {
+        let state = host.input.borrow();
+        update(&state);
+        state.swallowed.borrow_mut().push(pointer_id);
+        return true;
+    }
+    let event = {
+        let state = host.input.borrow();
+        update(&state);
+        let r#type = match (was_down, down) {
+            (false, true) => PointerEventType::Press,
+            (true, false) => PointerEventType::Release,
+            _ => PointerEventType::Move,
+        };
+        let mut e = state.event(r#type, state.stylus_pointer(time_nanos).into_iter().collect());
+        e.buttons = buttons;
+        e
+    };
+    process(host, event, true).dispatched_to_a_pointer_input_modifier
+}
+
+/// The stylus `pointer_id` went away (out of the tablet's range, or off the window): lifted if it touched, then
+/// what it hovered is exited.
+pub(crate) fn stylus_exit(host: &KompozHost, pointer_id: i64) {
+    let Some(s) = host.input.borrow().stylus.borrow().filter(|s| s.host_id == pointer_id) else { return };
+    let time = host.dispatcher().now();
+    if s.down {
+        stylus(host, s.position, time, pointer_id, s.r#type, false, 0.0, s.buttons);
+    }
+    let event = {
+        let state = host.input.borrow();
+        state.swallowed.borrow_mut().retain(|p| *p != pointer_id);
+        let Some(pointer) = state.stylus_pointer(time) else { return };
+        let mut e = state.event(PointerEventType::Exit, vec![pointer]);
+        e.buttons = s.buttons;
+        e
+    };
+    process(host, event, false);
+    host.input.borrow().stylus.borrow_mut().take();
 }
 
 /// A wheel or touchpad scrolled by `delta` px (down and right positive: the change's `scroll_delta`) with the

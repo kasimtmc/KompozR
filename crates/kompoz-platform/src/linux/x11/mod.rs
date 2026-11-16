@@ -2,8 +2,9 @@
 //! with Vulkan (`VK_KHR_xlib_surface`), at the desktop's scale (`Xft.dpi`, followed as it changes; `KOMPOZ_SCALE`
 //! instead), its frames on the display's beat (the present waits for it; the refresh rate from XRandR's mode under
 //! the window); the pointer, its wheel (smooth, as XInput 2 tells it), touch and touchpad pinches through XInput 2
-//! (`input`), the keyboard through xkbcommon with an input method (XIM, `keyboard`), the clipboard and drops as
-//! selections (ICCCM with INCR, `selection`; XDND 5, `dnd`), the cursors of the desktop's theme (libXcursor).
+//! (`input`), the keyboard through xkbcommon with an input method (XIM, `keyboard`; what it composes shown in the
+//! field on the spot where it can, `preedit`), the clipboard and drops as selections (ICCCM with INCR, `selection`;
+//! XDND 5, `dnd`), the cursors of the desktop's theme (libXcursor).
 //! libX11, libXi, libXcursor, libXrandr and libX11-xcb are loaded at run time (`ffi`); where libX11 or XInput 2.2
 //! isn't there, or `$DISPLAY` isn't set, the app runs on another platform.
 //!
@@ -20,6 +21,7 @@ mod ffi;
 mod input;
 mod keyboard;
 mod metrics;
+mod preedit;
 mod selection;
 
 use self::dnd::{DropTypes, XdndTarget};
@@ -173,18 +175,37 @@ const DISPLAY_SOURCE: u32 = 0;
 const SELECTION_WAIT_NS: i64 = 1_000_000_000;
 
 /// The input method and what it is told: whether a field takes typing, whether the window has the focus, where the
-/// field is (what is composed shows under its start).
+/// field's caret is (what is composed shows under it); whether what it composes on the spot is shown in the field.
 struct Ime {
     method: InputMethod,
     active: bool,
     focused: bool,
     spot: XPoint,
+    composing: bool,
 }
 
 impl Ime {
     /// The context focused while a field takes typing in the focused window, told where (C++'s `tellInputMethod`).
     fn tell(&mut self) {
         self.method.focus(self.active && self.focused, self.spot);
+    }
+
+    /// What the input method composes on the spot, if it changed: as the core's event while a field takes typing
+    /// (none composed: told only if something was shown — an empty composing text takes the field's selection).
+    fn preedit(&mut self) -> Option<Event> {
+        let (text, (start, end)) = self.method.take_preedit()?;
+        if !self.active || (text.is_empty() && !self.composing) {
+            return None;
+        }
+        self.composing = !text.is_empty();
+        let cursor = (!text.is_empty()).then_some((start, end));
+        Some(Event::Preedit { text, cursor })
+    }
+
+    /// What the input method composes given up, not told (the field it was for went, or the app changed it).
+    fn reset(&mut self) {
+        self.method.reset();
+        self.composing = false;
     }
 }
 
@@ -401,13 +422,29 @@ impl PlatformCallbacks for X11Callbacks {
     }
 
     /// The input method's context focused while a field takes typing, what is composed shown under the field's
-    /// start (`area`, px: the window's pixels).
+    /// caret (`area`, px: the window's pixels); what it composed for a field that no longer takes typing given up.
     fn text_input(&self, active: bool, area: Rect, _: &TextEditState, _: &ImeOptions) {
         let spot = |v: f32| v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
         let mut ime = self.0.ime.borrow_mut();
+        if !active && ime.active {
+            ime.reset();
+        }
         ime.active = active;
         ime.spot = XPoint { x: spot(area.left), y: spot(area.bottom) };
         ime.tell();
+    }
+
+    /// The app changed the field's text: what the input method composes on the spot given up unless the field
+    /// still holds it as its composition.
+    fn text_input_changed(&self, state: &TextEditState) {
+        let mut ime = self.0.ime.borrow_mut();
+        if !ime.composing {
+            return;
+        }
+        let held = state.composition.and_then(|(a, b)| state.text.get(a.min(b)..a.max(b)));
+        if held != Some(ime.method.preedit_text().as_str()) {
+            ime.reset();
+        }
     }
 
     fn cursor(&self, icon: PointerIcon) {
@@ -477,6 +514,7 @@ impl X11Platform {
                 active: false,
                 focused: false,
                 spot: XPoint::default(),
+                composing: false,
             }),
             waker: event_loop.waker(),
             display,
@@ -548,10 +586,13 @@ impl X11Platform {
     fn pump(&mut self) {
         while self.display().pending() > 0 {
             let mut e = self.display().next_event();
-            if self.display().filter_event(&mut e) {
-                continue;
+            if !self.display().filter_event(&mut e) {
+                self.handle(&e);
             }
-            self.handle(&e);
+            // (What the input method composes, told in its place among the events: its callbacks ran in the filter
+            // or the key's lookup.)
+            let preedit = self.shared.ime.borrow_mut().preedit();
+            self.events.extend(preedit);
         }
         let window = Some(self.window()).filter(|&w| w != NONE);
         let mut ime = self.shared.ime.borrow_mut();
@@ -559,7 +600,9 @@ impl X11Platform {
         if ime.method.update(window, spot) {
             ime.tell();
         }
+        let preedit = ime.preedit(); // (a method gone takes what it composed with it)
         drop(ime);
+        self.events.extend(preedit);
         self.events.extend(self.desktop.take_events());
     }
 

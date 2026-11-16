@@ -30,7 +30,7 @@ use kompoz_graphics::{Color, Density, ImageBitmap, IntSize, LayoutDirection, Mat
 use kompoz_runtime::{Content, MutableState, RecompositionStats, kompozable_lambda, mutable_state_of};
 use kompoz_ui::draganddrop::DragAndDropTransferData;
 use kompoz_ui::graphics_context::{CornerRadii, GraphicsContext, ShadowLight};
-use kompoz_ui::input::{Key, KeyEvent, KeyEventType, PointerButton, PointerEventType, PointerType};
+use kompoz_ui::input::{Key, KeyEvent, KeyEventType, PointerButton, PointerButtons, PointerEventType, PointerType};
 use kompoz_ui::platform::{
     HapticFeedbackType, ImageRequestSize, ImeOptions, Insets, PlatformCallbacks, PointerIcon, TextEditState,
     TextToolbarActions,
@@ -601,6 +601,13 @@ impl<P: Platform> AppCore<P> {
                 host.pointer_up(self.to_px(x, y), self.event_time(time), pointer);
                 host.pointer_exit(); // (a lifted finger doesn't hover)
             }
+            &Event::Stylus { pointer, eraser, x, y, down, pressure, buttons, time } => {
+                let r#type = if eraser { PointerType::Eraser } else { PointerType::Stylus };
+                let at = self.to_px(x, y);
+                let t = self.event_time(time);
+                host.stylus(at, t, pointer, r#type, down, pressure, PointerButtons(buttons));
+            }
+            &Event::StylusLeft { pointer } => host.stylus_exit(pointer),
             &Event::Wheel { x, y, dx, dy, modifiers, .. } => {
                 let at = self.to_px(x, y);
                 // Ctrl+wheel zooms (a transformable), as touchpad pinches do; Ctrl+Shift turns it, 15° a notch.
@@ -626,11 +633,16 @@ impl<P: Platform> AppCore<P> {
             Event::Text(text) => {
                 host.text_input(text);
             }
-            Event::Preedit { text, cursor } => {
-                // (The caret at the composing text's start or after it: Compose's commands place it no other way.)
-                let at_start = !text.is_empty() && *cursor == Some(0);
-                host.set_composing_text(text, if at_start { 0 } else { 1 });
-            }
+            Event::Preedit { text, cursor } => match *cursor {
+                // (The caret after the composing text: Compose's plain SetComposingTextCommand; inside it, or a part
+                // of it highlighted: the selection set inside the composition after it.)
+                Some((start, end)) if !text.is_empty() && (start, end) != (text.len(), text.len()) => {
+                    host.set_composing_text_with_selection(text, start, end);
+                }
+                _ => {
+                    host.set_composing_text(text, 1);
+                }
+            },
             &Event::DeleteSurroundingText { before, after } => {
                 host.send_edit_commands(&[EditCommand::DeleteSurroundingText { before, after }]);
             }

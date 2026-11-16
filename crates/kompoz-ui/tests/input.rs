@@ -885,6 +885,102 @@ fn pointer_hover_icon_picks_the_innermost_say_unless_overridden() {
     assert_eq!(over(20.0, 140.0), PointerIcon::Default);
 }
 
+/// A platform that writes down the cursors and the stylus's icons it is told.
+struct Icons(Log);
+
+impl PlatformCallbacks for Icons {
+    fn cursor(&self, icon: PointerIcon) {
+        push(&self.0, format!("cursor {icon:?}"));
+    }
+    fn stylus_hover_icon(&self, icon: Option<PointerIcon>) {
+        push(&self.0, format!("stylus {icon:?}"));
+    }
+}
+
+fn a_stylus_hovers_touches_with_pressure_and_goes() {
+    // Android's stylus as Compose sees it: one hover stream from its coming near until it goes, its touches
+    // Presses and Releases with their pressure, its barrel buttons the event's, its kind the changes'; a stylus
+    // icon of its own while it hovers a node asking for one (not the mouse's cursor).
+    let log = new_log();
+    let l = log.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let l = l.clone();
+        Column(move || {
+            Box(modifier = Modifier.size(50.dp()));
+            let l = l.clone();
+            Box(modifier = Modifier.size(100.dp()).stylus_hover_icon(PointerIcon::Crosshair).pointer_input(
+                0,
+                move |scope: PointerInputScope| -> Block {
+                    let l = l.clone();
+                    Box::pin(async move {
+                        scope
+                            .await_pointer_event_scope(|s| async move {
+                                loop {
+                                    let e = s.await_pointer_event().await;
+                                    let c = &e.changes[0];
+                                    push(
+                                        &l,
+                                        format!(
+                                            "{} {},{} {:?} p{} b{}",
+                                            name(e.r#type),
+                                            c.position.x,
+                                            c.position.y,
+                                            c.r#type,
+                                            c.pressure,
+                                            e.buttons.0
+                                        ),
+                                    );
+                                }
+                            })
+                            .await
+                    })
+                },
+            ));
+        });
+    }));
+    let icons = new_log();
+    let h = rule.host();
+    h.set_callbacks(Rc::new(Icons(icons.clone())));
+    let none = PointerButtons::None;
+    h.stylus(at(20.0, 70.0), -1, 9, PointerType::Stylus, false, 0.0, none); // near, over the box
+    h.stylus(at(25.0, 75.0), -1, 9, PointerType::Stylus, true, 0.5, none); // touching
+    assert_eq!(h.input.borrow().pointers_down(), [(9, at(25.0, 75.0))]);
+    h.stylus(at(30.0, 75.0), -1, 9, PointerType::Stylus, true, 0.75, PointerButtons::of(&[PointerButton::Secondary]));
+    h.stylus(at(30.0, 75.0), -1, 9, PointerType::Stylus, false, 0.3, none); // lifted (no pressure)
+    h.stylus_exit(9);
+    rule.wait_for_idle();
+    assert_eq!(
+        taken(&log),
+        [
+            "giriş 20,20 Stylus p0 b0",
+            "basış 25,25 Stylus p0.5 b0",
+            "hareket 30,25 Stylus p0.75 b2",
+            "bırakış 30,25 Stylus p0 b0",
+            "çıkış 30,25 Stylus p0 b0",
+        ]
+    );
+    assert_eq!(taken(&icons), ["stylus Some(Crosshair)", "stylus None"]);
+    assert!(h.input.borrow().stylus().is_none() && h.input.borrow().mouse_position().is_none());
+    // The eraser, touching as it comes: pressed at once; going while it touches: lifted, then gone. Another
+    // stylus coming ends the one before.
+    h.stylus(at(20.0, 60.0), -1, 10, PointerType::Eraser, true, 1.0, none);
+    h.stylus_exit(10);
+    h.stylus(at(20.0, 60.0), -1, 11, PointerType::Stylus, false, 0.0, none);
+    h.stylus(at(20.0, 61.0), -1, 12, PointerType::Eraser, false, 0.0, none);
+    assert_eq!(h.input.borrow().stylus().map(|s| (s.0, s.1)), Some((12, PointerType::Eraser)));
+    assert_eq!(
+        taken(&log),
+        [
+            "basış 20,10 Eraser p1 b0",
+            "bırakış 20,10 Eraser p0 b0",
+            "çıkış 20,10 Eraser p0 b0",
+            "giriş 20,10 Stylus p0 b0",
+            "çıkış 20,10 Stylus p0 b0",
+            "giriş 20,11 Eraser p0 b0",
+        ]
+    );
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The velocity tracker
 
@@ -1167,6 +1263,7 @@ tests!(
     pointer_events_enter_move_exit_press_release_and_scroll,
     mouse_input_injected_on_a_node_hovers_presses_and_scrolls_it,
     pointer_hover_icon_picks_the_innermost_say_unless_overridden,
+    a_stylus_hovers_touches_with_pressure_and_goes,
     velocity_tracker_measures_the_last_stretch,
     velocity_trackers_follow_changes_and_one_dimension_by_impulse,
     nested_scroll_connections_pre_outer_first_post_inner_first_and_flings_suspend,

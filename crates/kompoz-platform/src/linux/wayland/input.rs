@@ -2,10 +2,9 @@
 //! and wheel (notches and a touchpad's scrolls gathered until its frame), the keyboard through xkbcommon (its
 //! keymap handed over, compose sequences, repeated client-side by the event loop's timer), fingers on a touch
 //! screen, a touchpad's pinches, and an input method's typing (text-input-v3: what it commits, its composing text
-//! and what it deletes, applied at its `done` as the protocol orders them).
-//!
-//! What KompozR tells the input method of the field (its surrounding text, why it changed) is WP4's, at the seam
-//! [`TextInput::changed`]; here: whether a field takes typing, where it is, and what it takes.
+//! with its caret and what it deletes, applied at its `done` as the protocol orders them; told whether a field takes
+//! typing, where it is, what it takes, its text around the caret and why that changed, each change committed and
+//! the commits counted against its `done`s).
 
 use super::WaylandPlatform;
 use super::ffi::Object;
@@ -120,17 +119,114 @@ pub(super) fn content_type(options: &ImeOptions) -> (ZwpTextInputV3ContentHint, 
     (hint, purpose)
 }
 
+/// The most of a field's text an input method is told (`set_surrounding_text`: a Wayland message can't be longer).
+pub(super) const SURROUNDING_MAX: usize = 4000;
+
+/// The nearest character boundary of `text` at or before `at` (clamped to it).
+fn floor_char(text: &str, at: usize) -> usize {
+    let mut at = at.min(text.len());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    at
+}
+
+/// The nearest character boundary of `text` at or after `at` (clamped to it).
+fn ceil_char(text: &str, at: usize) -> usize {
+    let mut at = at.min(text.len());
+    while !text.is_char_boundary(at) {
+        at += 1;
+    }
+    at
+}
+
+/// What text-input-v3's `set_surrounding_text` tells of a field: its text around the caret and the selection, at
+/// most `max` bytes, cut at whole characters, and the caret's and the selection's other end's bytes in it.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub(super) struct Surrounding {
+    pub text: String,
+    pub cursor: i32,
+    pub anchor: i32,
+}
+
+/// The surrounding text of a field (the protocol's rules): its composing text left out with the caret in its place
+/// (the input method has it), the caret and the whole selection in it with as much text before and after them as
+/// fits in `max` bytes (shared between the two sides, a side's unused share the other's); a selection longer than
+/// that: the part of it at the caret. (A selection's anchor is its start, the caret its end: Compose's.)
+pub(super) fn surrounding(state: &TextEditState, max: usize) -> Surrounding {
+    let full = &state.text;
+    let (mut anchor, mut cursor) = (floor_char(full, state.selection_start), floor_char(full, state.selection_end));
+    let without;
+    let text = match state.composition {
+        Some((a, b)) if a != b => {
+            let (a, b) = (floor_char(full, a.min(b)), ceil_char(full, a.max(b)));
+            without = format!("{}{}", &full[..a], &full[b..]);
+            (anchor, cursor) = (a, a);
+            without.as_str()
+        }
+        _ => full.as_str(),
+    };
+    let (lo, hi) = (anchor.min(cursor), anchor.max(cursor));
+    let (start, end) = if hi - lo <= max {
+        let spare = max - (hi - lo);
+        let after = (spare - (spare / 2).min(lo)).min(text.len() - hi);
+        let before = (spare - after).min(lo);
+        (lo - before, hi + after)
+    } else if cursor == hi {
+        (cursor - max, cursor)
+    } else {
+        (cursor, cursor + max)
+    };
+    let (start, end) = (ceil_char(text, start), floor_char(text, end));
+    let anchor = anchor.clamp(start, end);
+    Surrounding { text: text[start..end].to_string(), cursor: (cursor - start) as i32, anchor: (anchor - start) as i32 }
+}
+
+/// A preedit's caret (`preedit_string`'s cursor_begin and cursor_end, bytes) as the core's: none if hidden (-1, or
+/// any other negative), else in order, on whole characters of `text` (the end rounded out).
+pub(super) fn preedit_cursor(text: &str, begin: i32, end: i32) -> Option<(usize, usize)> {
+    let (begin, end) = (usize::try_from(begin).ok()?, usize::try_from(end).ok()?);
+    let (a, b) = (floor_char(text, begin.min(end)), ceil_char(text, begin.max(end)));
+    Some(if begin == end { (a, a) } else { (a, b) })
+}
+
 /// What an input method sent since its last `done`.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub(super) struct Pending {
     /// The composing text and its caret (bytes; none: hidden).
-    preedit: Option<(String, Option<usize>)>,
+    preedit: Option<(String, Option<(usize, usize)>)>,
     commit: Option<String>,
     /// Bytes before and after the caret.
     delete: Option<(usize, usize)>,
 }
 
-/// The input method on the window (text-input-v3), as the host's callbacks and the platform share it.
+/// A request to the input method (text-input-v3's).
+#[derive(Clone, PartialEq, Debug)]
+enum Request {
+    Enable,
+    Disable,
+    SurroundingText(Surrounding),
+    TextChangeCause(ZwpTextInputV3ChangeCause),
+    ContentType(ZwpTextInputV3ContentHint, ZwpTextInputV3ContentPurpose),
+    CursorRectangle([i32; 4]),
+    Commit,
+}
+
+/// How what came since the core's last events is answered to the input method.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum Answer {
+    /// No `done` came: the field's changes are the app's (or the keyboard's): told as `other`.
+    #[default]
+    Other,
+    /// A `done` of the state the input method was last told: the field after it told as its own doing.
+    InputMethod,
+    /// A `done` of an older state (more was committed since): applied, not answered (the protocol's rule).
+    Stale,
+}
+
+/// The input method on the window (text-input-v3), as the host's callbacks and the platform share it: enabled while
+/// a field takes typing (again for each field), told the field's place, kind and surrounding text — why it changed
+/// too —, each change committed and counted; what it sends applied at its `done`, as the protocol orders it.
 #[derive(Default)]
 pub(crate) struct TextInput {
     pub input: Option<ZwpTextInputV3>,
@@ -138,64 +234,178 @@ pub(crate) struct TextInput {
     entered: bool,
     /// A field takes typing.
     pub active: bool,
-    /// The field, in points.
+    /// The field: its place (points), what it takes, its text as last known.
     area: [i32; 4],
     options: ImeOptions,
+    field: TextEditState,
+    /// What the input method was last told (none: it isn't enabled).
+    told: Option<(Surrounding, [i32; 4], ImeOptions)>,
+    /// The commits sent: what the input method's `done` counts.
+    commits: u32,
     pending: Pending,
+    answer: Answer,
     /// A composing text shown (one to clear when the next `done` has none).
     composing: bool,
+    /// The requests made (the tests read them).
+    #[cfg(test)]
+    sent: Vec<Request>,
 }
 
 impl TextInput {
-    /// The host's `text_input`: a field takes typing (or none does), over `area` (points), wanting `options`.
+    /// The host's `text_input`: a field takes typing (or none does), over `area` (points), wanting `options`; a
+    /// field beginning to take it (after none did: the host tells a field's end before another's start) enables the
+    /// input method afresh, a field going on taking it tells it what changed.
     pub fn set(&mut self, active: bool, area: [i32; 4], state: &TextEditState, options: &ImeOptions) {
+        let begins = active && !self.active;
         self.active = active;
         self.area = area;
         self.options = options.clone();
-        self.changed(state);
-        self.tell();
+        self.field = state.clone();
+        if !active {
+            self.composing = false;
+            self.pending = Pending::default();
+        }
+        if begins {
+            self.told = None;
+        }
+        self.tell_now();
     }
 
-    /// The host's `text_input_changed`: the field's text changed by the app. What the input method is told of it
-    /// (`set_surrounding_text`, `set_text_change_cause`) is WP4's full text-input-v3; here nothing more than the
-    /// field's place and type.
+    /// The host's `text_input_changed`: the field's text changed by the app.
     pub fn changed(&mut self, state: &TextEditState) {
-        let _ = state;
+        self.field = state.clone();
+        self.tell_now();
     }
 
-    /// The input method told whether a field takes typing, where it is and what it takes, while it is on the window
-    /// (C++'s tellTextInput).
-    fn tell(&self) {
+    /// The input method told what changed, as the app's doing, unless a `done` waits for its answer (what changes
+    /// while the core applies it is told with the answer).
+    fn tell_now(&mut self) {
+        if self.answer == Answer::Other {
+            self.tell(ZwpTextInputV3ChangeCause::OTHER);
+        }
+    }
+
+    /// The field as it is after the core handled what came (`state`: the open session's, none if none is open):
+    /// the input method told it (as its own doing after its `done`, else as the app's), unless the `done` was stale.
+    pub fn answer(&mut self, state: Option<TextEditState>) {
+        let answer = std::mem::take(&mut self.answer);
+        if let Some(state) = state {
+            self.field = state;
+        }
+        match answer {
+            Answer::Other => self.tell(ZwpTextInputV3ChangeCause::OTHER),
+            Answer::InputMethod => self.tell(ZwpTextInputV3ChangeCause::INPUT_METHOD),
+            Answer::Stale => {}
+        }
+    }
+
+    /// The input method told what changed (as [`requests`](Self::requests) has it).
+    fn tell(&mut self, cause: ZwpTextInputV3ChangeCause) {
+        let requests = self.requests(cause);
+        #[cfg(test)]
+        self.sent.extend(requests.iter().cloned());
         let Some(input) = &self.input else { return };
-        if !self.entered {
-            return;
+        for r in requests {
+            match r {
+                Request::Enable => input.enable(),
+                Request::Disable => input.disable(),
+                Request::SurroundingText(s) => input.set_surrounding_text(&s.text, s.cursor, s.anchor),
+                Request::TextChangeCause(cause) => input.set_text_change_cause(cause),
+                Request::ContentType(hint, purpose) => input.set_content_type(hint, purpose),
+                Request::CursorRectangle([x, y, w, h]) => input.set_cursor_rectangle(x, y, w, h),
+                Request::Commit => input.commit(),
+            }
         }
-        if self.active {
-            input.enable();
-            let [x, y, w, h] = self.area;
-            input.set_cursor_rectangle(x, y, w, h);
-            let (hint, purpose) = content_type(&self.options);
-            input.set_content_type(hint, purpose);
-        } else {
-            input.disable();
-        }
-        input.commit();
     }
 
-    /// The input method's `done`: what it sent, in the protocol's order (the composing text replaced; the text
-    /// around the caret deleted; the commit inserted; the new composing text), as the core's events.
-    fn done(&mut self) -> Vec<Event> {
+    /// What the input method is to be told, while it is on the window, of what changed since it was last told
+    /// (C++'s tellTextInput): enabled with all of it for a field beginning to take typing (or when it came to the
+    /// window), else the field's place, kind and surrounding text where they changed (why the text changed:
+    /// `cause`); disabled when no field takes typing. Committed (and the commit counted) if anything changed.
+    fn requests(&mut self, cause: ZwpTextInputV3ChangeCause) -> Vec<Request> {
+        let mut requests = Vec::new();
+        if !self.entered {
+            return requests;
+        }
+        if !self.active {
+            if self.told.take().is_some() {
+                requests.push(Request::Disable);
+            }
+        } else {
+            let surrounding = surrounding(&self.field, SURROUNDING_MAX);
+            let content_type = |options: &ImeOptions| {
+                let (hint, purpose) = content_type(options);
+                Request::ContentType(hint, purpose)
+            };
+            // (A field's place not told yet (none): not told the input method, which would keep it.)
+            let place = (self.area != [0; 4]).then_some(Request::CursorRectangle(self.area));
+            match &self.told {
+                None => {
+                    requests.push(Request::Enable);
+                    requests.push(Request::SurroundingText(surrounding.clone()));
+                    requests.push(content_type(&self.options));
+                    requests.extend(place);
+                }
+                Some((told, area, options)) => {
+                    if *told != surrounding {
+                        requests.push(Request::SurroundingText(surrounding.clone()));
+                        requests.push(Request::TextChangeCause(cause));
+                    }
+                    if *options != self.options {
+                        requests.push(content_type(&self.options));
+                    }
+                    if *area != self.area {
+                        requests.extend(place);
+                    }
+                }
+            }
+            self.told = Some((surrounding, self.area, self.options.clone()));
+        }
+        if !requests.is_empty() {
+            requests.push(Request::Commit);
+            self.commits = self.commits.wrapping_add(1);
+        }
+        requests
+    }
+
+    /// The input method came to the window: told the field, if one takes typing.
+    fn enter(&mut self) {
+        self.entered = true;
+        self.told = None;
+        self.tell(ZwpTextInputV3ChangeCause::INPUT_METHOD);
+    }
+
+    /// The input method left the window: its composing text gone (the protocol's), what it sent since its last
+    /// `done` dropped; it isn't told anything until it comes back.
+    fn leave(&mut self) -> Vec<Event> {
+        self.entered = false;
+        self.told = None;
+        self.pending = Pending::default();
+        self.answer = Answer::Other;
+        let composing = std::mem::take(&mut self.composing) && self.active;
+        if composing { vec![Event::Preedit { text: String::new(), cursor: None }] } else { Vec::new() }
+    }
+
+    /// The input method's `done` (of the state its `serial`th commit gave it): what it sent, in the protocol's order —
+    /// the composing text replaced by the caret (done here only before text deleted around it: a commit or a new
+    /// composing text replace it themselves), the text around the caret deleted, the commit inserted with the caret
+    /// after it, the new composing text with its caret in it — as the core's events.
+    fn done(&mut self, serial: u32) -> Vec<Event> {
         let pending = std::mem::take(&mut self.pending);
         let mut events = Vec::new();
         if !self.active {
             return events;
         }
-        if let Some((before, after)) = pending.delete {
+        self.answer = if serial == self.commits { Answer::InputMethod } else { Answer::Stale };
+        if let Some((before, after)) = pending.delete.filter(|&(before, after)| before > 0 || after > 0) {
+            if std::mem::take(&mut self.composing) {
+                events.push(Event::Preedit { text: String::new(), cursor: None });
+            }
             events.push(Event::DeleteSurroundingText { before, after });
         }
         if let Some(text) = pending.commit.filter(|t| !t.is_empty()) {
             events.push(Event::Text(text));
-            self.composing = false; // (a commit replaces the composing text)
+            self.composing = false;
         }
         match pending.preedit.filter(|(text, _)| !text.is_empty()) {
             Some((text, cursor)) => {
@@ -207,6 +417,9 @@ impl TextInput {
                 self.composing = false;
             }
             None => {}
+        }
+        if events.is_empty() {
+            self.answer = Answer::Other; // (nothing changed: nothing to answer)
         }
         events
     }
@@ -397,34 +610,44 @@ impl WaylandPlatform {
             .collect()
     }
 
-    /// An input method's typing (text-input-v3): gathered until its `done`.
+    /// An input method's typing (text-input-v3): gathered until its `done`; it coming to the window (on the window's
+    /// surface: told the field) and leaving it.
     pub(super) fn on_text_input(&mut self, e: ZwpTextInputV3Event) {
+        let window = self.window.as_ref().map(|w| w.surface.id());
         let mut text = self.shared.text.borrow_mut();
-        match e {
-            ZwpTextInputV3Event::Enter { .. } => {
-                text.entered = true;
-                text.tell();
-            }
-            ZwpTextInputV3Event::Leave { .. } => {
-                text.entered = false;
-                if let Some(input) = &text.input {
-                    input.disable();
-                    input.commit();
+        let events = match e {
+            ZwpTextInputV3Event::Enter { surface } => {
+                if window == Some(surface) {
+                    text.enter();
                 }
+                Vec::new()
             }
-            ZwpTextInputV3Event::PreeditString { text: preedit, cursor_begin, .. } => {
-                text.pending.preedit = Some((preedit.unwrap_or_default(), usize::try_from(cursor_begin).ok()));
+            ZwpTextInputV3Event::Leave { .. } => text.leave(),
+            ZwpTextInputV3Event::PreeditString { text: preedit, cursor_begin, cursor_end } => {
+                let preedit = preedit.unwrap_or_default();
+                let cursor = preedit_cursor(&preedit, cursor_begin, cursor_end);
+                text.pending.preedit = Some((preedit, cursor));
+                Vec::new()
             }
-            ZwpTextInputV3Event::CommitString { text: commit } => text.pending.commit = commit,
+            ZwpTextInputV3Event::CommitString { text: commit } => {
+                text.pending.commit = commit;
+                Vec::new()
+            }
             ZwpTextInputV3Event::DeleteSurroundingText { before_length, after_length } => {
                 text.pending.delete = Some((before_length as usize, after_length as usize));
+                Vec::new()
             }
-            ZwpTextInputV3Event::Done { .. } => {
-                let events = text.done();
-                drop(text);
-                self.events.extend(events);
-            }
-        }
+            ZwpTextInputV3Event::Done { serial } => text.done(serial),
+        };
+        drop(text);
+        self.events.extend(events);
+    }
+
+    /// After the core handled typing (an input method's, or the keyboard's): the input method told the field as it
+    /// is now (`state`, the open session's).
+    pub(super) fn answer_input_method(&mut self, state: Option<TextEditState>) {
+        self.shared.text.borrow_mut().answer(state);
+        let _ = self.connection.flush();
     }
 }
 
@@ -494,23 +717,208 @@ mod tests {
         assert_eq!(content_type(&options(KeyboardType::Number, true, false)).1, Purpose::DIGITS);
     }
 
+    fn field(text: &str, selection: (usize, usize), composition: Option<(usize, usize)>) -> TextEditState {
+        TextEditState { text: text.into(), selection_start: selection.0, selection_end: selection.1, composition }
+    }
+
+    fn told(text: &str, cursor: i32, anchor: i32) -> Surrounding {
+        Surrounding { text: text.into(), cursor, anchor }
+    }
+
     #[test]
-    fn input_methods_are_applied_at_done() {
+    fn surrounding_text_is_cut_around_the_caret_at_whole_characters() {
+        // All of a short field: the caret its selection's end, the anchor its start (Compose's).
+        assert_eq!(surrounding(&field("merhaba", (2, 5), None), 4000), told("merhaba", 5, 2));
+        // The composing text left out, the caret in its place.
+        assert_eq!(surrounding(&field("abşeyc", (4, 4), Some((2, 6))), 4000), told("abc", 2, 2));
+        // At most `max` bytes, half before the caret and half after; near an end, the other side gets the rest.
+        let digits = "0123456789";
+        assert_eq!(surrounding(&field(digits, (5, 5), None), 4), told("3456", 2, 2));
+        assert_eq!(surrounding(&field(digits, (1, 1), None), 4), told("0123", 1, 1));
+        assert_eq!(surrounding(&field(digits, (9, 9), None), 4), told("6789", 3, 3));
+        // A selection with room: around it.
+        assert_eq!(surrounding(&field(digits, (2, 6), None), 6), told("123456", 5, 1));
+        // A selection longer than fits: its part at the caret, the anchor at the far edge, either way round.
+        assert_eq!(surrounding(&field(digits, (1, 9), None), 4), told("5678", 4, 0));
+        assert_eq!(surrounding(&field(digits, (9, 1), None), 4), told("1234", 0, 4));
+        // Cut inward at whole characters (ş and ğ are two bytes each); a caret a byte into one: at its start.
+        assert_eq!(surrounding(&field("aşbğc", (3, 3), None), 4), told("şb", 2, 2));
+        assert_eq!(surrounding(&field("aşb", (2, 2), None), 4000), told("aşb", 1, 1));
+        // The protocol's 4000 bytes.
+        let long = "ç".repeat(3000);
+        let s = surrounding(&field(&long, (3001, 3001), None), SURROUNDING_MAX);
+        assert_eq!((s.text.len(), s.cursor, s.anchor), (4000, 2000, 2000));
+        assert_eq!(surrounding(&TextEditState::default(), SURROUNDING_MAX), told("", 0, 0));
+    }
+
+    #[test]
+    fn preedit_carets_are_whole_characters_in_order() {
+        assert_eq!(preedit_cursor("şey", -1, -1), None);
+        assert_eq!(preedit_cursor("şey", 0, -1), None);
+        assert_eq!(preedit_cursor("şey", 2, 2), Some((2, 2)));
+        assert_eq!(preedit_cursor("şey", 1, 1), Some((0, 0))); // (a byte into ş: its start)
+        assert_eq!(preedit_cursor("şey", 3, 1), Some((0, 3))); // (in order, out to whole characters)
+        assert_eq!(preedit_cursor("şey", 0, 1), Some((0, 2)));
+        assert_eq!(preedit_cursor("şey", 9, 9), Some((4, 4)));
+    }
+
+    #[test]
+    fn input_methods_are_applied_at_done_in_the_protocols_order() {
         let mut t = TextInput { active: true, ..TextInput::default() };
-        t.pending.preedit = Some(("ş".into(), Some(2)));
-        assert_eq!(t.done(), [Event::Preedit { text: "ş".into(), cursor: Some(2) }]);
-        // A commit replacing it, after the text before the caret is deleted.
+        t.pending.preedit = Some(("ş".into(), Some((2, 2))));
+        assert_eq!(t.done(0), [Event::Preedit { text: "ş".into(), cursor: Some((2, 2)) }]);
+        // Text before the caret deleted and a commit: the composing text gone first (the caret in its place), the
+        // deletion, then the commit.
         t.pending.delete = Some((1, 0));
         t.pending.commit = Some("şu".into());
-        assert_eq!(t.done(), [Event::DeleteSurroundingText { before: 1, after: 0 }, Event::Text("şu".into())]);
-        // A composing text gone with nothing committed: cleared.
+        assert_eq!(
+            t.done(0),
+            [
+                Event::Preedit { text: String::new(), cursor: None },
+                Event::DeleteSurroundingText { before: 1, after: 0 },
+                Event::Text("şu".into())
+            ]
+        );
+        // A commit replaces the composing text itself; a new composing text after it.
         t.pending.preedit = Some(("x".into(), None));
-        t.done();
-        assert_eq!(t.done(), [Event::Preedit { text: String::new(), cursor: None }]);
-        assert_eq!(t.done(), []);
+        t.done(0);
+        t.pending.commit = Some("y".into());
+        t.pending.preedit = Some(("z".into(), Some((0, 1))));
+        assert_eq!(t.done(0), [Event::Text("y".into()), Event::Preedit { text: "z".into(), cursor: Some((0, 1)) }]);
+        // A composing text gone with nothing committed: cleared.
+        assert_eq!(t.done(0), [Event::Preedit { text: String::new(), cursor: None }]);
+        assert_eq!(t.done(0), []);
+        // Nothing to delete: nothing.
+        t.pending.delete = Some((0, 0));
+        assert_eq!(t.done(0), []);
         // No field takes typing: nothing.
         t.active = false;
         t.pending.commit = Some("y".into());
-        assert_eq!(t.done(), []);
+        assert_eq!(t.done(0), []);
+    }
+
+    #[test]
+    fn the_input_method_is_told_the_field_and_its_changes_and_answered() {
+        type Cause = ZwpTextInputV3ChangeCause;
+        let mut t = TextInput::default();
+        let text = ImeOptions::default();
+        let content = |options: &ImeOptions| {
+            let (hint, purpose) = content_type(options);
+            Request::ContentType(hint, purpose)
+        };
+        let surrounding = |text: &str, cursor, anchor| Request::SurroundingText(told(text, cursor, anchor));
+        // A field takes typing before the input method is on the window: told when it comes, all of it.
+        t.set(true, [1, 2, 3, 4], &field("ab", (2, 2), None), &text);
+        assert_eq!(t.sent, []);
+        t.enter();
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [
+                Request::Enable,
+                surrounding("ab", 2, 2),
+                content(&text),
+                Request::CursorRectangle([1, 2, 3, 4]),
+                Request::Commit
+            ]
+        );
+        // The caret's place moved: only that; the same again: nothing.
+        t.set(true, [5, 2, 3, 4], &field("ab", (2, 2), None), &text);
+        t.set(true, [5, 2, 3, 4], &field("ab", (2, 2), None), &text);
+        assert_eq!(std::mem::take(&mut t.sent), [Request::CursorRectangle([5, 2, 3, 4]), Request::Commit]);
+        // The app changed the text: told as the app's doing.
+        t.changed(&field("abc", (3, 3), None));
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [surrounding("abc", 3, 3), Request::TextChangeCause(Cause::OTHER), Request::Commit]
+        );
+        assert_eq!(t.commits, 3);
+        // The input method's commit, at its done of the third commit: answered with the field after it, as its own
+        // doing. Composing changes nothing it is told (the composing text is left out).
+        t.pending.commit = Some("d".into());
+        assert_eq!(t.done(3), [Event::Text("d".into())]);
+        t.answer(Some(field("abcd", (4, 4), None)));
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [surrounding("abcd", 4, 4), Request::TextChangeCause(Cause::INPUT_METHOD), Request::Commit]
+        );
+        t.pending.preedit = Some(("ş".into(), None));
+        assert_eq!(t.done(4).len(), 1);
+        t.answer(Some(field("abcdş", (6, 6), Some((4, 6)))));
+        assert_eq!(t.sent, []);
+        // While a done waits for its answer, what the app changes meanwhile (the caret's place) goes with it.
+        t.pending.commit = Some("e".into());
+        assert_eq!(t.done(4), [Event::Text("e".into())]);
+        t.set(true, [6, 2, 3, 4], &field("abcde", (5, 5), None), &text);
+        assert_eq!(t.sent, []);
+        t.answer(Some(field("abcde", (5, 5), None)));
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [
+                surrounding("abcde", 5, 5),
+                Request::TextChangeCause(Cause::INPUT_METHOD),
+                Request::CursorRectangle([6, 2, 3, 4]),
+                Request::Commit
+            ]
+        );
+        // A done of an older commit (more was committed since): applied, not answered; the app's next change tells
+        // all that changed.
+        t.pending.commit = Some("f".into());
+        assert_eq!(t.done(2), [Event::Text("f".into())]);
+        t.answer(Some(field("abcdef", (6, 6), None)));
+        assert_eq!(t.sent, []);
+        t.changed(&field("abcdefg", (7, 7), None));
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [surrounding("abcdefg", 7, 7), Request::TextChangeCause(Cause::OTHER), Request::Commit]
+        );
+        // Keyboard typing (no done): told as the app's.
+        t.answer(Some(field("abcdefgh", (8, 8), None)));
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [surrounding("abcdefgh", 8, 8), Request::TextChangeCause(Cause::OTHER), Request::Commit]
+        );
+        // Another field (the host ends one before the next begins): disabled, enabled afresh for it.
+        let email = ImeOptions { keyboard_type: KeyboardType::Email, ..ImeOptions::default() };
+        t.set(false, [6, 2, 3, 4], &field("abcdefgh", (8, 8), None), &text);
+        t.set(true, [0, 0, 1, 1], &field("x", (0, 1), None), &email);
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [
+                Request::Disable,
+                Request::Commit,
+                Request::Enable,
+                surrounding("x", 1, 0),
+                content(&email),
+                Request::CursorRectangle([0, 0, 1, 1]),
+                Request::Commit
+            ]
+        );
+        assert_eq!(t.commits, 9);
+        // It leaves while composing: the composing text gone; nothing told until it comes back, then all again.
+        t.pending.preedit = Some(("k".into(), None));
+        assert_eq!(t.done(9).len(), 1);
+        assert_eq!(t.leave(), [Event::Preedit { text: String::new(), cursor: None }]);
+        t.set(true, [0, 0, 2, 2], &field("x", (1, 1), None), &email);
+        assert_eq!(t.sent, []);
+        t.enter();
+        assert_eq!(std::mem::take(&mut t.sent)[0], Request::Enable);
+        // A field whose place isn't known yet: none told (the input method would keep it).
+        t.set(false, [0, 0, 2, 2], &field("x", (1, 1), None), &email);
+        t.set(true, [0, 0, 0, 0], &field("y", (1, 1), None), &text);
+        assert_eq!(
+            std::mem::take(&mut t.sent),
+            [
+                Request::Disable,
+                Request::Commit,
+                Request::Enable,
+                surrounding("y", 1, 1),
+                content(&text),
+                Request::Commit
+            ]
+        );
+        // No field takes typing when it leaves: nothing to clear.
+        t.set(false, [0, 0, 0, 0], &field("y", (1, 1), None), &text);
+        assert_eq!(std::mem::take(&mut t.sent), [Request::Disable, Request::Commit]);
+        assert_eq!(t.leave(), []);
     }
 }

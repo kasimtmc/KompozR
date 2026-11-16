@@ -4,17 +4,17 @@
 //! its scale fractional (fractional-scale + viewporter) or whole (the surface's preferred buffer scale, else its
 //! outputs'); the compositor's decorations (xdg-decoration) or, without them, KompozR's own (the title bar in the
 //! metrics, the window's actions; edges around the window with shadows, resizing it: [`decorations`]); the seat's
-//! pointer (wheel notches, touchpad
-//! scrolls and pinches), keyboard (xkbcommon, compose sequences, client-side repeat), touch screen and input method
-//! (text-input-v3); cursors by shape (cursor-shape-v1) or from the cursor theme (libwayland-cursor); the clipboard
-//! and drops from other apps (wl_data_device); the screen kept on (idle-inhibit); and the desktop's services
-//! ([`DesktopServices`]: the theme, the accent, the text size, the title bar's buttons, the wallpaper's colors,
-//! screen readers, a microphone and a camera).
+//! pointer (wheel notches, touchpad scrolls and pinches), keyboard (xkbcommon, compose sequences, client-side repeat),
+//! touch screen, input method (text-input-v3) and graphics tablets (tablet-v2: styluses, erasers, tablet mice, pads);
+//! cursors by shape (cursor-shape-v1) or from the cursor theme (libwayland-cursor); the clipboard and drops from other
+//! apps (wl_data_device); the screen kept on (idle-inhibit); and the desktop's services ([`DesktopServices`]: the
+//! theme, the accent, the text size, the title bar's buttons, the wallpaper's colors, screen readers, a microphone and
+//! a camera).
 //!
 //! Re-entrancy: protocol events are only queued while libwayland dispatches ([`ffi`]); the platform reads them
 //! between the core's calls, gathering the core's [`Event`](crate::Event)s. What the host's callbacks need (the
-//! cursor, the input method, the clipboard) is kept apart ([`Shared`]), borrowed only briefly, never across a call
-//! into the host.
+//! cursor, the input method, the tablets' cursors, the clipboard) is kept apart ([`Shared`]), borrowed only briefly,
+//! never across a call into the host.
 //!
 //! The environment:
 //! - `KOMPOZ_SCALE`: px per dp instead of the compositor's scale; `KOMPOZ_FONT_SCALE`: the system's text size.
@@ -29,6 +29,7 @@ mod decorations;
 pub mod ffi;
 pub mod generated;
 mod input;
+mod tablet;
 mod vulkan;
 mod window;
 
@@ -37,6 +38,7 @@ use self::data_device::Clipboard;
 use self::ffi::{Connection, Object, ObjectId};
 use self::generated::*;
 use self::input::{Pinch, TextInput, Wheel};
+use self::tablet::Tablets;
 use self::window::{Output, WindowState};
 use super::desktop::DesktopServices;
 use super::event_loop::{EventLoop, Waker};
@@ -89,10 +91,17 @@ fn run_loop(core: &mut AppCore<WaylandPlatform>) {
     loop {
         let events = core.platform_mut().take_events();
         let mut quit = false;
+        let mut typed = false;
         for e in events {
             quit |= e == Event::Quit;
+            typed |= matches!(e, Event::Text(_) | Event::Preedit { .. } | Event::DeleteSurroundingText { .. });
             core.handle(&e);
             need_frame = true;
+        }
+        if typed {
+            // (The input method told the field as the typing left it.)
+            let state = core.host().and_then(|h| h.text_input_service().session_state());
+            core.platform_mut().answer_input_method(state);
         }
         if quit || core.platform().broken {
             break;
@@ -147,6 +156,7 @@ struct Globals {
     viewporter: Option<WpViewporter>,
     cursor_shapes: Option<WpCursorShapeManagerV1>,
     text_inputs: Option<ZwpTextInputManagerV3>,
+    tablets: Option<ZwpTabletManagerV2>,
     idle_inhibits: Option<ZwpIdleInhibitManagerV1>,
     gestures: Option<ZwpPointerGesturesV1>,
     shm: Option<Rc<WlShm>>,
@@ -187,6 +197,7 @@ pub(crate) struct Shared {
     scale: Cell<f64>,
     cursor: RefCell<Cursors>,
     text: RefCell<TextInput>,
+    tablet: RefCell<Tablets>,
     clipboard: RefCell<Clipboard>,
 }
 
@@ -213,6 +224,12 @@ impl PlatformCallbacks for WaylandCallbacks {
 
     fn cursor(&self, icon: PointerIcon) {
         self.0.cursor.borrow_mut().set_icon(icon);
+        self.0.tablet.borrow_mut().set_pointer_icon(icon);
+        let _ = self.0.connection.flush();
+    }
+
+    fn stylus_hover_icon(&self, icon: Option<PointerIcon>) {
+        self.0.tablet.borrow_mut().set_stylus_icon(icon);
         let _ = self.0.connection.flush();
     }
 
@@ -317,6 +334,7 @@ impl WaylandPlatform {
             scale: Cell::new(1.0),
             cursor: RefCell::new(Cursors::new(connection.clone())),
             text: RefCell::new(TextInput::default()),
+            tablet: RefCell::new(Tablets::new(connection.clone())),
             clipboard: RefCell::new(Clipboard::default()),
         });
         let mut p = WaylandPlatform {
@@ -450,6 +468,7 @@ impl WaylandPlatform {
         }
         if ready.deadline {
             self.shared.cursor.borrow_mut().animate(sys::monotonic_now());
+            self.shared.tablet.borrow_mut().animate(sys::monotonic_now());
         }
         // What the desktop's services told meanwhile (they wake the loop).
         self.events.extend(self.desktop.take_events());
@@ -467,13 +486,12 @@ impl WaylandPlatform {
         }
     }
 
-    /// When the loop is to wake by itself: the next coroutine delay, the cursor's next animation frame.
+    /// When the loop is to wake by itself: the next coroutine delay, the cursors' next animation frame (the
+    /// pointer's, the tablet tools').
     fn deadline(&self) -> Option<i64> {
         let cursor = self.shared.cursor.borrow().next_frame_at();
-        match (self.wake_at, cursor) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let tools = self.shared.tablet.borrow().next_frame_at();
+        [self.wake_at, cursor, tools].into_iter().flatten().min()
     }
 
     /// A repeat timer's change, done.
@@ -538,6 +556,10 @@ impl WaylandPlatform {
             E::WlTouch(e) => self.on_touch(e),
             E::ZwpPointerGesturePinchV1(e) => self.on_pinch(e),
             E::ZwpTextInputV3(e) => self.on_text_input(e),
+            E::ZwpTabletSeatV2(e) => self.on_tablet_seat(e),
+            E::ZwpTabletV2(e) => self.on_tablet(sender, e),
+            E::ZwpTabletToolV2(e) => self.on_tablet_tool(sender, e),
+            E::ZwpTabletPadV2(e) => self.on_tablet_pad(sender, e),
             E::WlDataOffer(e) => self.on_data_offer(sender, e),
             E::WlDataDevice(e) => self.on_data_device(e),
             E::WlDataSource(e) => self.on_data_source(sender, e),
@@ -570,6 +592,7 @@ impl WaylandPlatform {
                     "wp_viewporter" => g.viewporter = bind(registry, name, version, 1),
                     "wp_cursor_shape_manager_v1" => g.cursor_shapes = bind(registry, name, version, 1),
                     "zwp_text_input_manager_v3" => g.text_inputs = bind(registry, name, version, 1),
+                    "zwp_tablet_manager_v2" => g.tablets = bind(registry, name, version, 1),
                     "wl_data_device_manager" => {
                         self.shared.clipboard.borrow_mut().manager = bind(registry, name, version, 3);
                     }
@@ -595,11 +618,12 @@ impl WaylandPlatform {
     }
 
     /// The seat's objects that need a manager as well (whichever came first): the data device, the text input, the
-    /// cursor's shape device or theme, the touchpad's pinch.
+    /// tablets, the cursor's shape device or theme, the touchpad's pinch.
     fn attach_seat(&mut self) {
         let g = &self.globals;
         let Some(seat) = &g.seat else { return };
         self.shared.clipboard.borrow_mut().attach(seat);
+        self.shared.tablet.borrow_mut().attach(g.tablets.as_ref(), seat, g.compositor.clone(), g.shm.clone());
         {
             let mut text = self.shared.text.borrow_mut();
             if let Some(manager) = &g.text_inputs
@@ -670,6 +694,7 @@ impl Drop for WaylandPlatform {
         // (What the callbacks hold goes with the platform's objects, before the globals they came from.)
         self.shared.cursor.borrow_mut().release_pointer();
         *self.shared.text.borrow_mut() = TextInput::default();
+        *self.shared.tablet.borrow_mut() = Tablets::new(self.connection.clone());
         *self.shared.clipboard.borrow_mut() = Clipboard::default();
         self.devices = Devices::default();
         let _ = self.connection.flush();

@@ -115,6 +115,23 @@ pub enum Event {
         y: f32,
         time: i64,
     },
+    /// A stylus near the window (`eraser`: its other end, or an eraser of its own; `pointer` its id): where it is,
+    /// whether it touches (`down`) and how hard (`pressure`, 0 to 1), its barrel buttons held (a bit each: the
+    /// first, the second, the third), as one report of the tablet's.
+    Stylus {
+        pointer: i64,
+        eraser: bool,
+        x: f32,
+        y: f32,
+        down: bool,
+        pressure: f32,
+        buttons: u32,
+        time: i64,
+    },
+    /// The stylus `pointer` went away (out of its tablet's range, or off the window).
+    StylusLeft {
+        pointer: i64,
+    },
     /// A key pressed (or repeated) or let go: the key, the character it types (a Unicode scalar, 0 for none: what
     /// Compose's key event carries), the modifiers held.
     KeyDown {
@@ -131,11 +148,11 @@ pub enum Event {
     },
     /// Text typed (a key's, or an input method's commit).
     Text(String),
-    /// An input method's composing text (its preedit; empty: none), its caret at byte `cursor` of it (none:
-    /// hidden).
+    /// An input method's composing text (its preedit; empty: none), its caret at byte `cursor.0` of it, or the part
+    /// of it from `cursor.0` to `cursor.1` highlighted (none: the caret hidden, after it).
     Preedit {
         text: String,
-        cursor: Option<usize>,
+        cursor: Option<(usize, usize)>,
     },
     /// An input method deleted `before` bytes before the caret and `after` after it.
     DeleteSurroundingText {

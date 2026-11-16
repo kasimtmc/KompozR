@@ -351,6 +351,9 @@ fn the_platforms_events_are_the_hosts_input() {
                     "scale" => entry += &format!(" x{:.4} r{}", c.scale_factor, c.rotation),
                     _ => entry += &format!(" {:?}", c.r#type),
                 }
+                if matches!(c.r#type, PointerType::Stylus | PointerType::Eraser) {
+                    entry += &format!(" p{} b{}", c.pressure, e.buttons.0);
+                }
                 if let Some(b) = e.button {
                     entry += &format!(" b{}", b.index());
                 }
@@ -402,6 +405,36 @@ fn the_platforms_events_are_the_hosts_input() {
     core.handle(&Event::TouchDown { pointer: 3, x: 40.0, y: 40.0, time: -1 });
     core.handle(&Event::TouchUp { pointer: 3, x: 40.0, y: 40.0, time: -1 });
     assert_eq!(taken(&log), ["press 60,60 Touch", "release 60,60 Touch"]);
+    // A stylus: near, touching (its pressure and barrel buttons), lifted, gone; its eraser touching as it comes.
+    let stylus = |pointer, eraser, down, pressure, buttons| Event::Stylus {
+        pointer,
+        eraser,
+        x: 40.0,
+        y: 40.0,
+        down,
+        pressure,
+        buttons,
+        time: -1,
+    };
+    for e in [
+        stylus(7, false, false, 0.0, 0),
+        stylus(7, false, true, 0.5, 2),
+        stylus(7, false, false, 0.0, 0),
+        Event::StylusLeft { pointer: 7 },
+        stylus(8, true, true, 1.0, 0),
+        Event::StylusLeft { pointer: 8 },
+    ] {
+        core.handle(&e);
+    }
+    assert_eq!(
+        taken(&log),
+        [
+            "press 60,60 Stylus p0.5 b2",
+            "release 60,60 Stylus p0 b0",
+            "press 60,60 Eraser p1 b0",
+            "release 60,60 Eraser p0 b0"
+        ]
+    );
     // Keys carry their modifiers; text and an input method's go to the editor's session.
     let edits = new_log();
     let e = edits.clone();
@@ -414,15 +447,22 @@ fn the_platforms_events_are_the_hosts_input() {
     core.handle(&Event::KeyDown { key: Key::A, code_point: 'a' as i32, modifiers: KeyModifiers::Shift, time: -1 });
     assert_eq!(core.host().unwrap().keyboard_modifiers(), KeyModifiers::Shift);
     core.handle(&Event::Text("ş".into()));
-    core.handle(&Event::Preedit { text: "ka".into(), cursor: Some(2) });
-    core.handle(&Event::Preedit { text: "ka".into(), cursor: Some(0) });
+    // The composing text's caret after it (or hidden), at its start, or a part of it highlighted.
+    core.handle(&Event::Preedit { text: "ka".into(), cursor: Some((2, 2)) });
+    core.handle(&Event::Preedit { text: "ka".into(), cursor: None });
+    core.handle(&Event::Preedit { text: "ka".into(), cursor: Some((0, 0)) });
+    core.handle(&Event::Preedit { text: "kar".into(), cursor: Some((1, 3)) });
+    core.handle(&Event::Preedit { text: String::new(), cursor: None });
     core.handle(&Event::DeleteSurroundingText { before: 1, after: 0 });
     assert_eq!(
         taken(&edits),
         [
             "[CommitText { text: \"ş\", new_cursor_position: 1 }]",
             "[SetComposingText { text: \"ka\", new_cursor_position: 1 }]",
-            "[SetComposingText { text: \"ka\", new_cursor_position: 0 }]",
+            "[SetComposingText { text: \"ka\", new_cursor_position: 1 }]",
+            "[SetComposingText { text: \"ka\", new_cursor_position: 1 }, SetSelection { start: 2, end: 2 }]",
+            "[SetComposingText { text: \"kar\", new_cursor_position: 1 }, SetSelection { start: 3, end: 5 }]",
+            "[SetComposingText { text: \"\", new_cursor_position: 1 }]",
             "[DeleteSurroundingText { before: 1, after: 0 }]",
         ]
     );

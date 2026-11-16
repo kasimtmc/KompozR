@@ -170,6 +170,7 @@ impl WaylandPlatform {
         self.shared.scale.set(scale);
         self.drawable.set((pixels(self.width, scale), pixels(self.height, scale)));
         self.shared.cursor.borrow_mut().set_scale(scale.ceil() as i32);
+        self.shared.tablet.borrow_mut().set_scale(scale.ceil() as i32);
         let Some(w) = &self.window else { return };
         match &w.viewport {
             Some(viewport) => {

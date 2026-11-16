@@ -97,6 +97,48 @@ fn edit_commands_apply_as_composes_editing_buffer() {
     assert_eq!(applied(state("ab", (1, 1), None), d(9, 9)), state("", (0, 0), None));
     let sel = |start, end| EditCommand::SetSelection { start, end };
     assert_eq!(applied(state("ağ", (0, 0), None), sel(2, 99)), state("ağ", (1, 3), None));
+    // A caret inside the composing text (an input method's): the composition set, then the selection moved into
+    // it; the composition stays, and the next composing text or commit still replaces all of it.
+    let s = applied(applied(state("ab", (2, 2), None), compose("şey", 1)), sel(4, 4));
+    assert_eq!(s, state("abşey", (4, 4), Some((2, 6))));
+    let s = applied(s, sel(3, 5));
+    assert_eq!(s, state("abşey", (2, 5), Some((2, 6))), "(a byte into ş: its start)");
+    assert_eq!(applied(s.clone(), compose("şu", 1)), state("abşu", (5, 5), Some((2, 5))));
+    assert_eq!(applied(s, commit("şu", 1)), state("abşu", (5, 5), None));
+}
+
+fn input_methods_place_the_caret_inside_their_composing_text() {
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {}));
+    let host = rule.host();
+    // Nothing editing: nowhere to compose.
+    assert!(!host.set_composing_text_with_selection("x", 0, 0));
+    let edits = new_log();
+    let e = edits.clone();
+    let service = host.text_input_service();
+    let session = service.start_input(
+        TextEditState { text: "abXc".into(), selection_start: 2, selection_end: 3, composition: None },
+        ImeOptions::default(),
+        move |commands: &[EditCommand]| push(&e, format!("{commands:?}")),
+        |_| {},
+    );
+    // Composing in place of the selection, the caret after its first character (bytes, whole characters).
+    assert!(host.set_composing_text_with_selection("şey", 2, 2));
+    assert_eq!(service.session_state(), Some(state("abşeyc", (4, 4), Some((2, 6)))));
+    // Again (the composition replaced), part of it selected (in order); a byte into a character: its start.
+    assert!(host.set_composing_text_with_selection("çay", 3, 1));
+    assert_eq!(service.session_state(), Some(state("abçayc", (2, 5), Some((2, 6)))));
+    // Past its end: at its end.
+    assert!(host.set_composing_text_with_selection("ka", 9, 9));
+    assert_eq!(service.session_state(), Some(state("abkac", (4, 4), Some((2, 4)))));
+    assert_eq!(
+        taken(&edits),
+        [
+            "[SetComposingText { text: \"şey\", new_cursor_position: 1 }, SetSelection { start: 4, end: 4 }]",
+            "[SetComposingText { text: \"çay\", new_cursor_position: 1 }, SetSelection { start: 2, end: 5 }]",
+            "[SetComposingText { text: \"ka\", new_cursor_position: 1 }, SetSelection { start: 4, end: 4 }]",
+        ]
+    );
+    session.dispose();
 }
 
 fn text_input_sessions_take_what_the_input_method_does() {
@@ -139,12 +181,13 @@ fn text_input_sessions_take_what_the_input_method_does() {
     session.update_state(&TextEditState::caret_at_end("x"));
     session.notify_focused_rect(Rect::new(30.0, 40.0, 50.0, 60.0));
     assert_eq!(taken(&platform), ["changed \"x\"", "text_input true \"x\" 30"]);
-    // Another session closes this one; disposing it closes the input method.
+    // Another session closes this one (the platform told so first: another field's typing begins); disposing it
+    // closes the input method.
     let other = service.start_input(TextEditState::default(), ImeOptions::default(), |_: &[EditCommand]| {}, |_| {});
     assert!(!session.is_open() && other.is_open());
     session.dispose();
     other.dispose();
-    assert_eq!(taken(&platform), ["text_input true \"\" 0", "text_input false \"\" 0"]);
+    assert_eq!(taken(&platform), ["text_input false \"x\" 30", "text_input true \"\" 0", "text_input false \"\" 0"]);
     assert!(!host.text_input("y") && !host.ime_action(ImeAction::Go));
 }
 
@@ -422,6 +465,7 @@ fn frames_are_wanted_for_what_shows() {
 
 tests!(
     edit_commands_apply_as_composes_editing_buffer,
+    input_methods_place_the_caret_inside_their_composing_text,
     text_input_sessions_take_what_the_input_method_does,
     zooms_and_pinches_are_scale_events,
     drags_from_outside_reach_the_targets_under_them,

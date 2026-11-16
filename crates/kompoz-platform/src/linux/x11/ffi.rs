@@ -11,11 +11,12 @@
 
 #![allow(unsafe_code)]
 
+use super::preedit::{CaretDirection, MARKING_FEEDBACK, Preedit, text_chars};
 use crate::linux::sys::Library;
 use crate::linux::xkb::{Context, KeyboardState, Keymap};
 use kompoz_gpu::device::vulkan::VulkanSurface;
 use kompoz_gpu::device::vulkan::ash::{khr, vk};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ulong, c_ushort, c_void};
 use std::os::fd::RawFd;
 use std::panic::AssertUnwindSafe;
@@ -120,6 +121,7 @@ pub const XC_WATCH: c_uint = 150;
 pub const XC_XTERM: c_uint = 152;
 
 // The input method's styles and lookups.
+const XIM_PREEDIT_CALLBACKS: c_ulong = 0x0002;
 const XIM_PREEDIT_POSITION: c_ulong = 0x0004;
 const XIM_PREEDIT_NOTHING: c_ulong = 0x0008;
 const XIM_STATUS_NOTHING: c_ulong = 0x0400;
@@ -133,6 +135,10 @@ const XN_PREEDIT_ATTRIBUTES: &CStr = c"preeditAttributes";
 const XN_SPOT_LOCATION: &CStr = c"spotLocation";
 const XN_QUERY_INPUT_STYLE: &CStr = c"queryInputStyle";
 const XN_DESTROY_CALLBACK: &CStr = c"destroyCallback";
+const XN_PREEDIT_START_CALLBACK: &CStr = c"preeditStartCallback";
+const XN_PREEDIT_DONE_CALLBACK: &CStr = c"preeditDoneCallback";
+const XN_PREEDIT_DRAW_CALLBACK: &CStr = c"preeditDrawCallback";
+const XN_PREEDIT_CARET_CALLBACK: &CStr = c"preeditCaretCallback";
 
 // XInput 2.
 pub const XI_BUTTON_PRESS: c_int = 4;
@@ -397,6 +403,40 @@ struct XimStyles {
 struct XimCallback {
     client_data: XPointer,
     callback: Option<unsafe extern "C" fn(Xim, XPointer, XPointer)>,
+}
+
+/// `XICCallback`: an input context's callback (the preedit's; what it returns counts only for the start's).
+#[repr(C)]
+struct XicCallback {
+    client_data: XPointer,
+    callback: Option<unsafe extern "C" fn(Xic, XPointer, XPointer) -> c_int>,
+}
+
+/// `XIMText`: what a preedit draw puts in (its string none: only the feedback changed).
+#[repr(C)]
+struct XimText {
+    length: c_ushort,
+    feedback: *mut c_ulong,
+    encoding_is_wchar: Bool,
+    /// `multi_byte` (a C string), or `wide_char` (`length` wchar_t's).
+    string: *mut c_void,
+}
+
+/// `XIMPreeditDrawCallbackStruct`.
+#[repr(C)]
+struct XimPreeditDraw {
+    caret: c_int,
+    chg_first: c_int,
+    chg_length: c_int,
+    text: *mut XimText,
+}
+
+/// `XIMPreeditCaretCallbackStruct` (its position given back).
+#[repr(C)]
+struct XimPreeditCaret {
+    position: c_int,
+    direction: c_int,
+    style: c_int,
 }
 
 /// `XPoint`: where an input method shows what is being composed.
@@ -679,6 +719,7 @@ struct X11Functions {
     destroy_ic: unsafe extern "C" fn(Xic),
     set_ic_focus: unsafe extern "C" fn(Xic),
     unset_ic_focus: unsafe extern "C" fn(Xic),
+    utf8_reset_ic: unsafe extern "C" fn(Xic) -> *mut c_char,
     set_ic_values: unsafe extern "C" fn(Xic, ...) -> *mut c_char,
     set_im_values: unsafe extern "C" fn(Xim, ...) -> *mut c_char,
     get_im_values: unsafe extern "C" fn(Xim, ...) -> *mut c_char,
@@ -788,6 +829,7 @@ impl Xlib {
                 destroy_ic: function(l, c"XDestroyIC")?,
                 set_ic_focus: function(l, c"XSetICFocus")?,
                 unset_ic_focus: function(l, c"XUnsetICFocus")?,
+                utf8_reset_ic: function(l, c"Xutf8ResetIC")?,
                 set_ic_values: function(l, c"XSetICValues")?,
                 set_im_values: function(l, c"XSetIMValues")?,
                 get_im_values: function(l, c"XGetIMValues")?,
@@ -1754,6 +1796,105 @@ struct ImSignals {
     destroyed: Cell<bool>,
     /// An input method came (after none could be opened).
     instantiated: Cell<bool>,
+    /// What an on-the-spot input method is composing (its preedit callbacks').
+    preedit: RefCell<Preedit>,
+}
+
+/// The signals a callback's client data is.
+///
+/// # Safety
+/// `client` must be the boxed signals the callback was registered with, alive while it can be called.
+unsafe fn signals<'a>(client: XPointer) -> &'a ImSignals {
+    // SAFETY: as the caller says.
+    unsafe { &*client.cast::<ImSignals>() }
+}
+
+/// The preedit, unless it is being read (never: it is only read between Xlib's calls; a callback can't unwind).
+fn with_preedit<T: Default>(signals: &ImSignals, f: impl FnOnce(&mut Preedit) -> T) -> T {
+    signals.preedit.try_borrow_mut().map(|mut p| f(&mut p)).unwrap_or_default()
+}
+
+unsafe extern "C" fn preedit_start(_: Xic, client: XPointer, _: XPointer) -> c_int {
+    // SAFETY: the context's preedit callbacks were given the input method's boxed signals, alive while it is.
+    with_preedit(unsafe { signals(client) }, Preedit::clear);
+    -1 // (no limit to what it composes)
+}
+
+unsafe extern "C" fn preedit_done(_: Xic, client: XPointer, _: XPointer) -> c_int {
+    // SAFETY: as preedit_start's.
+    with_preedit(unsafe { signals(client) }, Preedit::clear);
+    0
+}
+
+unsafe extern "C" fn preedit_draw(_: Xic, client: XPointer, call: XPointer) -> c_int {
+    // SAFETY: as preedit_start's.
+    let signals = unsafe { signals(client) };
+    // SAFETY: Xlib calls a draw callback with its draw (or none).
+    let Some(draw) = (unsafe { call.cast::<XimPreeditDraw>().as_ref() }) else { return 0 };
+    // SAFETY: the draw's text, if any, is Xlib's for the call: `length` feedbacks, a C string or `length` wchar_t's.
+    let text = unsafe { draw.text.as_ref() }.map(|t| {
+        let length = usize::from(t.length);
+        let marked: Vec<bool> = if t.feedback.is_null() {
+            Vec::new()
+        } else {
+            // SAFETY: as above.
+            let feedback = unsafe { std::slice::from_raw_parts(t.feedback, length) };
+            feedback.iter().map(|&f| f & MARKING_FEEDBACK != 0).collect()
+        };
+        let chars = if t.string.is_null() {
+            None
+        } else if t.encoding_is_wchar != 0 {
+            // SAFETY: as above (wchar_t is 32 bits on Linux).
+            let wide = unsafe { std::slice::from_raw_parts(t.string.cast::<i32>(), length) };
+            Some(text_chars(Some(wide), None, length))
+        } else {
+            // SAFETY: as above.
+            let bytes = unsafe { CStr::from_ptr(t.string.cast::<c_char>()) }.to_bytes();
+            Some(text_chars(None, Some(bytes), length))
+        };
+        (chars, marked)
+    });
+    with_preedit(signals, |p| match &text {
+        // (No text: the stretch deleted.)
+        None => p.draw(draw.caret, draw.chg_first, draw.chg_length, Some(&[]), &[]),
+        Some((chars, marked)) => p.draw(draw.caret, draw.chg_first, draw.chg_length, chars.as_deref(), marked),
+    });
+    0
+}
+
+unsafe extern "C" fn preedit_caret(_: Xic, client: XPointer, call: XPointer) -> c_int {
+    // SAFETY: as preedit_start's.
+    let signals = unsafe { signals(client) };
+    // SAFETY: Xlib calls a caret callback with its caret move, the position written back.
+    let Some(caret) = (unsafe { call.cast::<XimPreeditCaret>().as_mut() }) else { return 0 };
+    if let Some(direction) = CaretDirection::of(caret.direction) {
+        let position = caret.position;
+        caret.position = with_preedit(signals, |p| p.move_caret(position, direction)) as c_int;
+    }
+    0
+}
+
+/// How the window's input context shows what is being composed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum PreeditStyle {
+    /// Where the input method shows it (its own window).
+    #[default]
+    Nothing,
+    /// Over the spot it is told (the input method's window there).
+    Position,
+    /// In the field itself (on the spot): the preedit callbacks.
+    Callbacks,
+}
+
+impl PreeditStyle {
+    /// Its `XIMPreedit…` bit.
+    fn value(self) -> c_ulong {
+        match self {
+            PreeditStyle::Nothing => XIM_PREEDIT_NOTHING,
+            PreeditStyle::Position => XIM_PREEDIT_POSITION,
+            PreeditStyle::Callbacks => XIM_PREEDIT_CALLBACKS,
+        }
+    }
 }
 
 unsafe extern "C" fn im_destroyed(_: Xim, client: XPointer, _: XPointer) {
@@ -1768,17 +1909,16 @@ unsafe extern "C" fn im_instantiated(_: *mut RawDisplay, client: XPointer, _: XP
 
 /// The input method (XIM) and the window's input context (C++'s `openInputMethod`, `makeInputContext`,
 /// `tellInputMethod`): opened in the desktop's locale (else X's own, `@im=none`, for compose keys), or once one comes;
-/// opened again if it goes. What is being composed is shown by the input method at the field where it can be told
-/// where (over the spot: `XIMPreeditPosition`), else where it shows it (`XIMPreeditNothing`).
-///
-/// (On-the-spot preedit, `XIMPreeditCallbacks` → [`Event::Preedit`](crate::app::Event), is the next step for X11's
-/// input methods: its styles are asked for here.)
+/// opened again if it goes. What is being composed is shown in the field itself where the method can (on the spot:
+/// `XIMPreeditCallbacks`, its callbacks changing a [`Preedit`] the platform reads after Xlib's calls:
+/// [`take_preedit`](Self::take_preedit)), else by the input method over the field where it can be told where (over
+/// the spot: `XIMPreeditPosition`), else where it shows it (`XIMPreeditNothing`). The spot follows the field's caret
+/// (for its candidates too, where the method takes it in the on-the-spot style).
 pub struct InputMethod {
     display: Rc<Display>,
     im: Xim,
     ic: Xic,
-    /// The context shows what is composed over the spot it is told.
-    spot_style: bool,
+    style: PreeditStyle,
     /// The instantiate callback is registered.
     waiting: bool,
     signals: Box<ImSignals>,
@@ -1791,10 +1931,44 @@ impl InputMethod {
             display,
             im: std::ptr::null_mut(),
             ic: std::ptr::null_mut(),
-            spot_style: false,
+            style: PreeditStyle::Nothing,
             waiting: false,
             signals: Box::default(),
         }
+    }
+
+    /// What the on-the-spot input method composes, if it changed since asked: its text and its caret (or the part
+    /// of it being converted) in its bytes.
+    pub fn take_preedit(&self) -> Option<(String, (usize, usize))> {
+        self.signals.preedit.borrow_mut().take_change()
+    }
+
+    /// The context's preedit style (`XIMPreedit…`), and the input method's styles (the tests ask).
+    #[cfg(test)]
+    pub(super) fn preedit_styles(&self) -> (c_ulong, Vec<c_ulong>) {
+        (self.style.value(), self.styles())
+    }
+
+    /// What the on-the-spot input method is composing now.
+    pub fn preedit_text(&self) -> String {
+        self.signals.preedit.borrow().text()
+    }
+
+    /// The context's composing given up (`Xutf8ResetIC`: the field it was for is gone, or the app changed its
+    /// text): what it was composing is dropped (the field has it as it was, or as the app made it) and not told.
+    pub fn reset(&mut self) {
+        if self.has_context() {
+            // SAFETY: the context is alive; what it returns is Xlib's, freed once.
+            unsafe {
+                let left = (self.display.x.x.utf8_reset_ic)(self.ic);
+                if !left.is_null() {
+                    (self.display.x.x.free)(left.cast());
+                }
+            }
+        }
+        let mut preedit = self.signals.preedit.borrow_mut();
+        preedit.clear();
+        preedit.take_change();
     }
 
     fn signals_ptr(&self) -> XPointer {
@@ -1901,6 +2075,7 @@ impl InputMethod {
             self.im = std::ptr::null_mut();
             self.ic = std::ptr::null_mut();
             self.signals.destroyed.set(false);
+            self.signals.preedit.borrow_mut().clear();
             self.wait_for_one();
             changed = true;
         }
@@ -1916,15 +2091,10 @@ impl InputMethod {
         changed
     }
 
-    /// The window's input context (C++'s `makeInputContext`): over the spot if the method can, else its own way.
-    pub fn create_context(&mut self, window: Window, spot: XPoint) {
-        if !self.is_open() || !self.ic.is_null() {
-            return;
-        }
+    /// The styles the input method has (`XNQueryInputStyle`).
+    fn styles(&self) -> Vec<c_ulong> {
         let x = &self.display.x.x;
-        let position = XIM_PREEDIT_POSITION | XIM_STATUS_NOTHING;
         let mut styles: *mut XimStyles = std::ptr::null_mut();
-        self.spot_style = false;
         // SAFETY: the input method is open; `styles` is set to Xlib's allocation (freed below); a null ends the list.
         let failed = unsafe {
             (x.get_im_values)(
@@ -1934,31 +2104,93 @@ impl InputMethod {
                 std::ptr::null_mut::<c_void>(),
             )
         };
-        if failed.is_null() && !styles.is_null() {
-            // SAFETY: Xlib's styles: `count_styles` of them.
-            let s = unsafe { &*styles };
-            for i in 0..s.count_styles as usize {
-                // SAFETY: as above.
-                self.spot_style |= unsafe { *s.supported_styles.add(i) } == position;
-            }
-            // SAFETY: Xlib's allocation, freed once.
-            unsafe { (x.free)(styles.cast()) };
+        if !failed.is_null() || styles.is_null() {
+            return Vec::new();
         }
+        // SAFETY: Xlib's styles: `count_styles` of them.
+        let all = unsafe {
+            let s = &*styles;
+            std::slice::from_raw_parts(s.supported_styles, usize::from(s.count_styles)).to_vec()
+        };
+        // SAFETY: Xlib's allocation, freed once.
+        unsafe { (x.free)(styles.cast()) };
+        all
+    }
+
+    /// The window's input context (C++'s `makeInputContext`): on the spot if the method can, else over the spot,
+    /// else its own way (each tried in turn should the method refuse one).
+    pub fn create_context(&mut self, window: Window, spot: XPoint) {
+        if !self.is_open() || !self.ic.is_null() {
+            return;
+        }
+        let styles = self.styles();
+        for style in [PreeditStyle::Callbacks, PreeditStyle::Position, PreeditStyle::Nothing] {
+            let value = style.value() | XIM_STATUS_NOTHING;
+            if style != PreeditStyle::Nothing && !styles.contains(&value) {
+                continue;
+            }
+            self.ic = self.make_context(window, style, spot);
+            if !self.ic.is_null() {
+                self.style = style;
+                return;
+            }
+        }
+    }
+
+    /// An input context for `window` of `style` (null if the method refuses it).
+    fn make_context(&self, window: Window, style: PreeditStyle, spot: XPoint) -> Xic {
+        let x = &self.display.x.x;
+        let input_style = style.value() | XIM_STATUS_NOTHING;
+        let client = self.signals_ptr();
+        let callback = |f: unsafe extern "C" fn(Xic, XPointer, XPointer) -> c_int| XicCallback {
+            client_data: client,
+            callback: Some(f),
+        };
+        let (mut start, mut done) = (callback(preedit_start), callback(preedit_done));
+        let (mut draw, mut caret) = (callback(preedit_draw), callback(preedit_caret));
         let mut spot = spot;
         // SAFETY: the input method is open; the values are of the types their names take (an XIMStyle and windows as
-        // unsigned longs, a nested list), each list ended by a null; the nested list is freed after.
-        self.ic = unsafe {
-            if self.spot_style {
-                let list = (x.va_create_nested_list)(
+        // unsigned longs, a nested list of a point or of XICCallbacks, which Xlib copies: their client data the boxed
+        // signals, alive while the method is, its contexts destroyed first), each list ended by a null; the nested
+        // list is freed after.
+        unsafe {
+            let list = match style {
+                PreeditStyle::Callbacks => (x.va_create_nested_list)(
+                    0,
+                    XN_PREEDIT_START_CALLBACK.as_ptr(),
+                    &mut start as *mut XicCallback,
+                    XN_PREEDIT_DONE_CALLBACK.as_ptr(),
+                    &mut done as *mut XicCallback,
+                    XN_PREEDIT_DRAW_CALLBACK.as_ptr(),
+                    &mut draw as *mut XicCallback,
+                    XN_PREEDIT_CARET_CALLBACK.as_ptr(),
+                    &mut caret as *mut XicCallback,
+                    std::ptr::null_mut::<c_void>(),
+                ),
+                PreeditStyle::Position => (x.va_create_nested_list)(
                     0,
                     XN_SPOT_LOCATION.as_ptr(),
                     &mut spot as *mut XPoint,
                     std::ptr::null_mut::<c_void>(),
-                );
+                ),
+                PreeditStyle::Nothing => std::ptr::null_mut(),
+            };
+            if list.is_null() {
+                (x.create_ic)(
+                    self.im,
+                    XN_INPUT_STYLE.as_ptr(),
+                    input_style,
+                    XN_CLIENT_WINDOW.as_ptr(),
+                    window,
+                    XN_FOCUS_WINDOW.as_ptr(),
+                    window,
+                    std::ptr::null_mut::<c_void>(),
+                )
+            } else {
                 let ic = (x.create_ic)(
                     self.im,
                     XN_INPUT_STYLE.as_ptr(),
-                    position,
+                    input_style,
                     XN_CLIENT_WINDOW.as_ptr(),
                     window,
                     XN_FOCUS_WINDOW.as_ptr(),
@@ -1967,36 +2199,25 @@ impl InputMethod {
                     list,
                     std::ptr::null_mut::<c_void>(),
                 );
-                if !list.is_null() {
-                    (x.free)(list);
-                }
+                (x.free)(list);
                 ic
-            } else {
-                (x.create_ic)(
-                    self.im,
-                    XN_INPUT_STYLE.as_ptr(),
-                    XIM_PREEDIT_NOTHING | XIM_STATUS_NOTHING,
-                    XN_CLIENT_WINDOW.as_ptr(),
-                    window,
-                    XN_FOCUS_WINDOW.as_ptr(),
-                    window,
-                    std::ptr::null_mut::<c_void>(),
-                )
             }
-        };
+        }
     }
 
-    /// The window's context goes (the window is closing).
+    /// The window's context goes (the window is closing), with what it was composing.
     pub fn destroy_context(&mut self) {
         if !self.ic.is_null() && self.is_open() {
             // SAFETY: a context of the open method, destroyed once.
             unsafe { (self.display.x.x.destroy_ic)(self.ic) };
         }
         self.ic = std::ptr::null_mut();
+        self.signals.preedit.borrow_mut().clear();
     }
 
-    /// The context focused (a field takes typing in the focused window: told where it is) or not (C++'s
-    /// `tellInputMethod`).
+    /// The context focused (a field takes typing in the focused window: told where its caret is — on the spot as
+    /// well, for the method's candidates, though Xlib may refuse the spot in that style: then the method places
+    /// them itself) or not (C++'s `tellInputMethod`).
     pub fn focus(&mut self, on: bool, spot: XPoint) {
         if !self.has_context() {
             return;
@@ -2006,7 +2227,7 @@ impl InputMethod {
         // list is ended by a null.
         unsafe {
             if on {
-                if self.spot_style {
+                if self.style != PreeditStyle::Nothing {
                     let mut spot = spot;
                     let list = (x.va_create_nested_list)(
                         0,
@@ -2158,6 +2379,12 @@ mod tests {
         assert_eq!(offset_of!(XimStyles, supported_styles), 8);
         assert_eq!(size_of::<XimCallback>(), 16);
         assert_eq!(offset_of!(XimCallback, callback), 8);
+        assert_eq!((size_of::<XicCallback>(), offset_of!(XicCallback, callback)), (16, 8));
+        assert_eq!(size_of::<XimText>(), 32);
+        assert_eq!((offset_of!(XimText, feedback), offset_of!(XimText, encoding_is_wchar)), (8, 16));
+        assert_eq!(offset_of!(XimText, string), 24);
+        assert_eq!((size_of::<XimPreeditDraw>(), offset_of!(XimPreeditDraw, text)), (24, 16));
+        assert_eq!((size_of::<XimPreeditCaret>(), offset_of!(XimPreeditCaret, style)), (12, 8));
         assert_eq!((size_of::<XPoint>(), std::mem::align_of::<XPoint>()), (4, 2));
     }
 
@@ -2236,5 +2463,60 @@ mod tests {
     fn xi_masks_cover_xinput_2_4() {
         assert_eq!(XI_MASK_LEN, 5);
         assert!((XI_GESTURE_PINCH_END as usize >> 3) < XI_MASK_LEN);
+    }
+
+    #[test]
+    fn preedit_callbacks_apply_what_xlib_gives_them() {
+        let signals = Box::<ImSignals>::default();
+        let client: XPointer = (&*signals as *const ImSignals).cast_mut().cast();
+        let ic: Xic = std::ptr::null_mut();
+        let none: XPointer = std::ptr::null_mut();
+        let take = || signals.preedit.borrow_mut().take_change();
+        let draw = |caret, first, length, text: *mut XimText| {
+            let mut d = XimPreeditDraw { caret, chg_first: first, chg_length: length, text };
+            // SAFETY: a draw as Xlib gives one, with the signals the callbacks are registered with.
+            unsafe { preedit_draw(ic, client, (&mut d as *mut XimPreeditDraw).cast()) };
+        };
+        // SAFETY: as Xlib calls it.
+        assert_eq!(unsafe { preedit_start(ic, client, none) }, -1, "no limit");
+        // Multibyte (the locale's UTF-8), its first two characters reversed (being converted): that part marked.
+        let utf8 = c"çay";
+        let mut feedback: [c_ulong; 3] = [1, 1, 2];
+        let mut text = XimText {
+            length: 3,
+            feedback: feedback.as_mut_ptr(),
+            encoding_is_wchar: 0,
+            string: utf8.as_ptr().cast_mut().cast(),
+        };
+        draw(3, 0, 0, &mut text);
+        assert_eq!(take(), Some(("çay".into(), (0, 3))));
+        // Wide characters in place of all of it, nothing marked; the caret after the first.
+        let mut wide: [i32; 3] = ['ç' as i32, 'ğ' as i32, 'ı' as i32];
+        let mut text = XimText {
+            length: 3,
+            feedback: std::ptr::null_mut(),
+            encoding_is_wchar: 1,
+            string: wide.as_mut_ptr().cast(),
+        };
+        draw(1, 0, 3, &mut text);
+        assert_eq!(take(), Some(("çğı".into(), (2, 2))));
+        // Only the feedback (no string): the last one highlighted.
+        let mut feedback: [c_ulong; 1] = [4];
+        let mut text =
+            XimText { length: 1, feedback: feedback.as_mut_ptr(), encoding_is_wchar: 0, string: none.cast() };
+        draw(1, 2, 1, &mut text);
+        assert_eq!(take(), Some(("çğı".into(), (4, 6))));
+        // No text: deleted.
+        draw(0, 0, 1, std::ptr::null_mut());
+        assert_eq!(take(), Some(("ğı".into(), (2, 4))));
+        // The caret moved to the end: its position told back.
+        let mut caret = XimPreeditCaret { position: 0, direction: 9, style: 0 };
+        // SAFETY: as Xlib calls it.
+        unsafe { preedit_caret(ic, client, (&mut caret as *mut XimPreeditCaret).cast()) };
+        assert_eq!(caret.position, 2);
+        // Done: nothing composed.
+        // SAFETY: as Xlib calls it.
+        unsafe { preedit_done(ic, client, none) };
+        assert_eq!(take(), Some((String::new(), (0, 0))));
     }
 }
