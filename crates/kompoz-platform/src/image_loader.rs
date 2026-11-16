@@ -255,11 +255,18 @@ fn forget(s: &mut CacheState, name: &str) {
 /// What fetches an http(s) URL's body (none if it failed): the platform's HTTP client.
 pub type HttpGet = fn(&str) -> Option<Vec<u8>>;
 
-static HTTP: RwLock<Option<HttpGet>> = RwLock::new(None);
+/// The platform's own HTTP client, used until [`set_http_client`] says otherwise: libcurl on Linux (as C++ Kompoz's
+/// Linux builds link it, the headless platform's too), loaded when a URL is first fetched.
+#[cfg(target_os = "linux")]
+const PLATFORM_HTTP: Option<HttpGet> = Some(crate::linux::curl::http_get);
+#[cfg(not(target_os = "linux"))]
+const PLATFORM_HTTP: Option<HttpGet> = None;
+
+static HTTP: RwLock<Option<HttpGet>> = RwLock::new(PLATFORM_HTTP);
 static DISK: RwLock<Option<Arc<DiskCache>>> = RwLock::new(None);
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
-/// The platform's HTTP client from now on (Linux's libcurl, the web's fetch); none: URLs load only from the disk
+/// The HTTP client from now on (the platform's own until then: Linux's libcurl); none: URLs load only from the disk
 /// cache.
 pub fn set_http_client(get: Option<HttpGet>) {
     *HTTP.write().unwrap_or_else(|e| e.into_inner()) = get;

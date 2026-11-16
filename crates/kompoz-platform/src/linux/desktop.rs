@@ -321,7 +321,8 @@ impl DesktopServices {
         }
     }
 
-    /// Their threads ended (before the loop they wake goes), the screen saver let go.
+    /// Their threads ended (before the loop they wake goes), the screen saver let go; at once, a wallpaper's palette
+    /// still being worked out told to stop and not waited for (it wakes nothing).
     pub fn stop(&mut self) {
         self.keep_screen_on(false, "");
         self.a11y = None;

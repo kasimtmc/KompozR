@@ -3,8 +3,10 @@
 //! settings, Cinnamon's, MATE's, Xfce's), decoded small and its palette picked
 //! ([`DynamicTonalPalette::from_image`]) on a thread of its own, and again whenever it changes — told by inotify
 //! when the desktop's settings files are written, looked at again every 30 seconds (a picture replaced in place);
-//! it notifies as each palette comes. `KOMPOZ_NO_WALLPAPER_COLORS` leaves it out (screenshots the same on every
-//! machine).
+//! it notifies as each palette comes. A palette is worked out on a thread of its own again, which stopping (the app
+//! quitting) never waits for: decoding a big picture is one long call (seconds in a debug build), so it is told to
+//! stop at its next step and left to end by itself. `KOMPOZ_NO_WALLPAPER_COLORS` leaves it out (screenshots the
+//! same on every machine).
 
 use super::desktop::Notify;
 use super::sys::{self, PollFd};
@@ -255,8 +257,15 @@ pub fn find_wallpaper(dark: bool, options: &WallpaperOptions) -> Option<String> 
 /// The wallpaper's palette, if it is a picture that can be read: decoded as big as a screen (as the wallpaper
 /// Android takes its colors from is; decoders scale down as they go).
 pub fn palette_of(path: &str) -> Option<DynamicTonalPalette> {
-    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty())?;
-    let image = kompoz_graphics::decode_image(&bytes, ImageRequestSize::new(1920, 1080, true))?;
+    palette_unless_stopped(path, &AtomicBool::new(false))
+}
+
+/// [`palette_of`], given up (none) at the step after `stop` is set: read, decoded, made ARGB, its palette picked.
+fn palette_unless_stopped(path: &str, stop: &AtomicBool) -> Option<DynamicTonalPalette> {
+    let go = || !stop.load(Ordering::SeqCst);
+    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty() && go())?;
+    let image = kompoz_graphics::decode_image(&bytes, ImageRequestSize::new(1920, 1080, true)).filter(|_| go())?;
+    drop(bytes);
     let rgba = image.pixels();
     let argb: Vec<u32> = rgba
         .as_chunks::<4>()
@@ -264,7 +273,51 @@ pub fn palette_of(path: &str) -> Option<DynamicTonalPalette> {
         .iter()
         .map(|p| u32::from(p[3]) << 24 | u32::from(p[0]) << 16 | u32::from(p[1]) << 8 | u32::from(p[2]))
         .collect();
-    Some(DynamicTonalPalette::from_image(&argb, image.width() as usize, image.height() as usize))
+    go().then(|| DynamicTonalPalette::from_image(&argb, image.width() as usize, image.height() as usize))
+}
+
+/// A palette being worked out on a thread of its own, told to stop when dropped (its result then goes nowhere): the
+/// wallpaper's thread waits for it on its wake eventfd, which it writes when done, so that it still hears the theme
+/// changing, the wallpaper changing again, and stopping, which never waits for it.
+struct Work {
+    stop: Arc<AtomicBool>,
+    /// The palette once worked out (none in it: the picture couldn't be read).
+    result: Arc<Mutex<Option<Option<DynamicTonalPalette>>>>,
+}
+
+impl Work {
+    fn start(path: String, wake: &Arc<OwnedFd>) -> Work {
+        let work = Work { stop: Arc::new(AtomicBool::new(false)), result: Arc::new(Mutex::new(None)) };
+        let (stop, result, wake) = (work.stop.clone(), work.result.clone(), wake.clone());
+        let done = move |palette| {
+            *result.lock().unwrap_or_else(|e| e.into_inner()) = Some(palette);
+            let _ = sys::eventfd_write(wake.as_fd(), 1);
+        };
+        let spawned = std::thread::Builder::new().name("kompoz-wallpaper-palette".into()).spawn({
+            let (path, stop, done) = (path.clone(), stop.clone(), done.clone());
+            move || {
+                let palette = palette_unless_stopped(&path, &stop);
+                if !stop.load(Ordering::SeqCst) {
+                    done(palette);
+                }
+            }
+        });
+        if spawned.is_err() {
+            done(palette_unless_stopped(&path, &stop)); // (no thread to be had: here, then)
+        }
+        work
+    }
+
+    /// The palette, once it was worked out.
+    fn take(&self) -> Option<Option<DynamicTonalPalette>> {
+        self.result.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+impl Drop for Work {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
 }
 
 struct Shared {
@@ -363,23 +416,43 @@ impl Drop for WallpaperColors {
     }
 }
 
-/// The thread: the wallpaper read whenever it may have changed (its path or its file's time differ).
-fn run(shared: &Shared, wake: &OwnedFd, mut inotify: Option<File>, options: &WallpaperOptions) {
-    let mut last = None;
+/// Which wallpaper: its path and its file's time.
+type Key = (Option<String>, Option<SystemTime>);
+
+/// The thread: the wallpaper read whenever it may have changed (its path or its file's time differ), its palette
+/// worked out on a thread of its own ([`Work`]) and told when it comes, unless the wallpaper changed again by then.
+fn run(shared: &Shared, wake: &Arc<OwnedFd>, mut inotify: Option<File>, options: &WallpaperOptions) {
+    // The wallpaper whose palette was told last, and the one whose palette is being worked out.
+    let mut told: Option<Key> = None;
+    let mut working: Option<(Key, Work)> = None;
     while shared.running.load(Ordering::SeqCst) {
         let path = find_wallpaper(shared.dark.load(Ordering::SeqCst), options);
         let stamp = path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-        let key: Option<(Option<String>, Option<SystemTime>)> = Some((path.clone(), stamp));
-        if key != last {
-            last = key;
-            shared.tell(path.as_deref().and_then(palette_of));
+        let key: Key = (path.clone(), stamp);
+        let ready = working.as_ref().filter(|(k, _)| *k == key).and_then(|(_, work)| work.take());
+        if let Some(palette) = ready {
+            working = None;
+            told = Some(key);
+            shared.tell(palette);
+        } else if told.as_ref() == Some(&key) {
+            working = None; // (back to the one told before another's palette came: that one stops)
+        } else if working.as_ref().is_none_or(|(k, _)| *k != key) {
+            working = None; // (one for a wallpaper no longer shown stops)
+            match path {
+                Some(path) => working = Some((key, Work::start(path, wake))),
+                None => {
+                    told = Some(key);
+                    shared.tell(None);
+                }
+            }
         }
         wait_for_change(wake, inotify.as_mut());
     }
+    // (A palette still being worked out is told to stop as `working` goes, and not waited for.)
 }
 
-/// Waits for a change: a settings file written (then the rest of the change, 300 ms), the theme changed or
-/// stopping, or a while (30 seconds with inotify, else 3).
+/// Waits for a change: a settings file written (then the rest of the change, 300 ms), the theme changed, a palette
+/// worked out or stopping, or a while (30 seconds with inotify, else 3).
 fn wait_for_change(wake: &OwnedFd, inotify: Option<&mut File>) {
     let Some(inotify) = inotify else {
         let mut fds = [PollFd::readable(wake.as_raw_fd())];
@@ -403,7 +476,9 @@ fn wait_for_change(wake: &OwnedFd, inotify: Option<&mut File>) {
             return;
         }
         if fds[1].ready && settings_written(inotify) {
-            std::thread::sleep(Duration::from_millis(300)); // (the rest of the change)
+            // The rest of the change (unless woken meanwhile: then the next wait returns at once).
+            let mut fds = [PollFd::readable(wake.as_raw_fd())];
+            let _ = sys::poll(&mut fds, Some(Duration::from_millis(300)));
             settings_written(inotify);
             return;
         }

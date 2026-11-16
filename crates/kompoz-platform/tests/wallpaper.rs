@@ -1,13 +1,16 @@
 //! The wallpaper's colors (C++'s platform tests): KDE Plasma's config read, and the wallpaper followed as it
-//! changes, from a KDE config of the tests' own in a scratch config directory, changed as KConfig does. One thread,
-//! in sequence.
+//! changes, from a KDE config of the tests' own in a scratch config directory, changed as KConfig does; the desktop's
+//! services stopped at once while a big wallpaper's palette is still being worked out. One thread, in sequence.
 
 #[cfg(target_os = "linux")]
 mod linux {
     use kompoz_graphics::Color;
     use kompoz_graphics::material_color::hct::Hct;
     use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
-    use kompoz_platform::linux::wallpaper::{WallpaperColors, WallpaperOptions, kde_wallpaper_from_config};
+    use kompoz_platform::linux::atspi::AtspiOptions;
+    use kompoz_platform::linux::desktop::{DesktopOptions, DesktopServices};
+    use kompoz_platform::linux::portal::PortalOptions;
+    use kompoz_platform::linux::wallpaper::{WallpaperColors, WallpaperOptions, kde_wallpaper_from_config, palette_of};
     use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -15,7 +18,11 @@ mod linux {
 
     /// A 24-bit BMP of one color.
     fn write_bmp(path: &Path, rgb: u32) {
-        let (w, h) = (64u32, 48u32);
+        write_bmp_sized(path, rgb, 64, 48);
+    }
+
+    /// A 24-bit BMP of one color, `w` × `h`.
+    fn write_bmp_sized(path: &Path, rgb: u32, w: u32, h: u32) {
         let row = (w * 3).div_ceil(4) * 4;
         let size = 54 + row * h;
         let mut b = vec![0u8; size as usize];
@@ -122,6 +129,21 @@ PreviewImage=/ignored.png
         assert_eq!(read(slideshow, "", false), None);
     }
 
+    /// A KDE config showing `image` on the first screen's desktop, written into `home` as KConfig writes one
+    /// (another file renamed over it).
+    fn write_kde_config(home: &Path, image: &str) {
+        let tmp = home.join("tmp-appletsrc");
+        std::fs::write(
+            &tmp,
+            format!(
+                "[Containments][9]\nlastScreen=0\nlocation=0\nwallpaperplugin=org.kde.image\n\n\
+                 [Containments][9][Wallpaper][org.kde.image][General]\nImage={image}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::rename(&tmp, home.join("plasma-org.kde.plasma.desktop-appletsrc")).unwrap();
+    }
+
     /// The wallpaper changed while the app runs: told by inotify, once the change settled.
     pub fn wallpaper_changes_are_followed() {
         let home = std::env::temp_dir().join(format!("kompoz-platform-tests-{}", std::process::id()));
@@ -131,18 +153,7 @@ PreviewImage=/ignored.png
         write_bmp(&red, 0xD32F2F);
         write_bmp(&blue, 0x1976D2);
         write_bmp(&blue2, 0x1976D2);
-        let write_config = |image: &str| {
-            let tmp = home.join("tmp-appletsrc");
-            std::fs::write(
-                &tmp,
-                format!(
-                    "[Containments][9]\nlastScreen=0\nlocation=0\nwallpaperplugin=org.kde.image\n\n\
-                     [Containments][9][Wallpaper][org.kde.image][General]\nImage={image}\n"
-                ),
-            )
-            .unwrap();
-            std::fs::rename(&tmp, home.join("plasma-org.kde.plasma.desktop-appletsrc")).unwrap(); // as KConfig writes
-        };
+        let write_config = |image: &str| write_kde_config(&home, image);
         write_config(red.to_str().unwrap());
         let notified = Arc::new(AtomicUsize::new(0));
         let n = notified.clone();
@@ -191,6 +202,74 @@ PreviewImage=/ignored.png
         drop(colors);
         let _ = std::fs::remove_dir_all(&home);
     }
+
+    /// The app quits while a big wallpaper's palette is being worked out (decoding it takes seconds in a debug build,
+    /// most of it in one call): the desktop's services stop at once all the same, the palette never told. And the
+    /// wallpaper changed meanwhile: the new one's palette comes without waiting for the big one's.
+    pub fn stopping_never_waits_for_a_palette() {
+        let home = std::env::temp_dir().join(format!("kompoz-platform-stop-tests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        let big = home.join("big.bmp");
+        write_bmp_sized(&big, 0x1976D2, 4000, 3000);
+        write_kde_config(&home, big.to_str().unwrap());
+        // How long its palette takes here (else the stop below would prove nothing).
+        let t0 = Instant::now();
+        assert!(palette_of(big.to_str().unwrap()).is_some());
+        let alone = t0.elapsed();
+        println!("  the big wallpaper's palette alone: {alone:?}");
+        if alone < Duration::from_millis(300) {
+            println!("  (too quick to stop while it is being worked out: an optimized build)");
+            let _ = std::fs::remove_dir_all(&home);
+            return;
+        }
+
+        let notified = Arc::new(AtomicUsize::new(0));
+        let n = notified.clone();
+        let mut desktop = DesktopServices::new();
+        let options = DesktopOptions {
+            portal: PortalOptions { address: None, accent: false },
+            atspi: AtspiOptions { forced: Some(false), ..AtspiOptions::default() },
+            wallpaper: WallpaperOptions { config_home: home.clone(), desktop: "KDE".into(), enabled: true },
+        };
+        let wake = Arc::new(move || {
+            n.fetch_add(1, Ordering::SeqCst);
+        });
+        desktop.start_with("Test app", wake, options);
+        std::thread::sleep(Duration::from_millis(100)); // (its palette being worked out)
+        let t0 = Instant::now();
+        desktop.stop();
+        let stopping = t0.elapsed();
+        println!("  stopped in {stopping:?}");
+        assert!(stopping < Duration::from_millis(100), "stopping took {stopping:?}");
+        assert_eq!(notified.load(Ordering::SeqCst), 0, "the palette came before the stop: nothing was proved");
+        // Never told afterwards either (its result goes nowhere).
+        std::thread::sleep(alone + Duration::from_millis(300));
+        assert_eq!(notified.load(Ordering::SeqCst), 0);
+
+        // Changed while the big one's is being worked out: that one stops, the new one's is told.
+        let red = home.join("red.bmp");
+        write_bmp(&red, 0xD32F2F);
+        let options = WallpaperOptions { config_home: home.clone(), desktop: "KDE".into(), enabled: true };
+        let colors = WallpaperColors::new(false, Arc::new(|| {}), options);
+        std::thread::sleep(Duration::from_millis(100));
+        let start = Instant::now();
+        write_kde_config(&home, red.to_str().unwrap());
+        let mut hue = None;
+        while start.elapsed() < Duration::from_secs(5) && hue.is_none() {
+            hue = colors.palette().map(|p| Hct::from_color(p.accent1[8]).hue());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let took = start.elapsed();
+        let red_hue = Hct::from_color(DynamicTonalPalette::from_seed(Color::hex(0xD32F2F)).accent1[8]).hue();
+        let hue = hue.expect("the new wallpaper's palette");
+        assert!((hue - red_hue).abs() < 8.0, "the red one's palette, not the big blue one's: hue {hue}");
+        assert!(took < alone, "the red one waited for the big one: {took:?} (the big one's alone: {alone:?})");
+        let t0 = Instant::now();
+        drop(colors);
+        assert!(t0.elapsed() < Duration::from_millis(100), "stopping took {:?}", t0.elapsed());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
 
 fn main() {
@@ -199,6 +278,7 @@ fn main() {
         let tests: &[(&str, fn())] = &[
             ("kde_config_is_read", linux::kde_config_is_read),
             ("wallpaper_changes_are_followed", linux::wallpaper_changes_are_followed),
+            ("stopping_never_waits_for_a_palette", linux::stopping_never_waits_for_a_palette),
         ];
         let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
         let mut failed = 0;

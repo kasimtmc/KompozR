@@ -20,17 +20,111 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # The platform's keyboards: libxkbcommon, xkeyboard-config's keymaps, libX11's compose tables (its tests need
       # them: KOMPOZ_XKB_REQUIRED); dbus-daemon, the private bus our D-Bus client, the portal and the AT-SPI bridge
-      # are tested on (KOMPOZ_DBUS_REQUIRED).
-      - name: xkbcommon and its data, dbus-daemon
+      # are tested on (KOMPOZ_DBUS_REQUIRED); libcurl (curl's), the images' HTTP client, tested against a server on
+      # 127.0.0.1 (KOMPOZ_CURL_REQUIRED).
+      - name: xkbcommon and its data, dbus-daemon, libcurl
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon0 libxkbcommon-x11-0 xkb-data libx11-data dbus
+          sudo apt-get install -y --no-install-recommends libxkbcommon0 libxkbcommon-x11-0 xkb-data libx11-data dbus \
+            curl
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
         env:
           KOMPOZ_XKB_REQUIRED: "1"
           KOMPOZ_DBUS_REQUIRED: "1"
+          KOMPOZ_CURL_REQUIRED: "1"
+
+  # The Linux platforms on display servers, on lavapipe with the validation layers (an error they report fails the
+  # run, so does their absence): the Counter clicked and resized by a script on Weston's headless backend (Wayland:
+  # lavapipe's WSI presents through wl_shm, which needs no GPU) and on Xvfb (X11), its shots compared and kept; then
+  # the display tests (KOMPOZ_DISPLAY_TESTS=1): the Wayland platform's on a Weston of their own, the X11 platform's
+  # and the Counter's on Xvfb. The wallpaper isn't looked for (the same shots everywhere), nor the desktop's services
+  # (no session bus).
+  linux-display:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      KOMPOZ_GPU_VALIDATION: "1"
+      KOMPOZ_NO_WALLPAPER_COLORS: "1"
+      KOMPOZ_SCALE: "1"
+      DBUS_SESSION_BUS_ADDRESS: unix:path=/nonexistent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Weston, Xvfb, dbus, Vulkan on lavapipe with the validation layers, the platforms' libraries, a font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends weston xvfb xauth dbus mesa-vulkan-drivers libvulkan1 \
+            vulkan-validationlayers libwayland-client0 libwayland-cursor0 libxkbcommon0 libxkbcommon-x11-0 xkb-data \
+            libx11-6 libxi6 libxcursor1 libxrandr2 libx11-xcb1 fonts-dejavu-core
+      # Lavapipe for every run; a runtime directory of the job's own (Weston's socket goes there); what checks a run.
+      - name: Lavapipe, a runtime directory, the runs' checks
+        run: |
+          echo "VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)" >> "$GITHUB_ENV"
+          mkdir -p -m 0700 "$RUNNER_TEMP/runtime"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/runtime" >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/check-shots.sh" <<'EOF'
+          # A run's directory checked: drawn with Vulkan, its three shots there, the click and the resize seen in them
+          # (the resized one 500x400), no validation errors (nor validation missing) in its log.
+          set -euo pipefail
+          dir=$1
+          grep -q "kompoz: renderer: KompozR on vulkan" "$dir/counter.log" || { echo "no renderer"; exit 1; }
+          size() { local hex; hex=$(od -An -j16 -N8 -tx1 "$1" | tr -d ' \n'); echo "$((16#${hex:0:8}))x$((16#${hex:8:8}))"; }
+          for shot in before after resized; do
+            test -s "$dir/$shot.png" || { echo "no $shot.png"; exit 1; }
+          done
+          if cmp -s "$dir/before.png" "$dir/after.png"; then echo "the click changed nothing"; exit 1; fi
+          test "$(size "$dir/before.png")" = 360x480 || { echo "before.png is $(size "$dir/before.png")"; exit 1; }
+          test "$(size "$dir/resized.png")" = 500x400 || { echo "resized.png is $(size "$dir/resized.png")"; exit 1; }
+          if grep -E "kompoz: GPU validation:|there is no VK_LAYER_KHRONOS_validation" "$dir/counter.log"; then exit 1; fi
+          EOF
+          echo 'KOMPOZ_CI_SCRIPT=wait 30;shot SHOTS/before.png;click 70 70;wait 30;shot SHOTS/after.png;resize 500 400;sleep 1500;wait 10;shot SHOTS/resized.png;quit' >> "$GITHUB_ENV"
+      - run: cargo build -p counter
+      - name: The Counter on Weston (headless backend), clicked and resized by a script
+        run: |
+          mkdir -p shots/wayland
+          weston --backend=headless --renderer=pixman --width=800 --height=600 --idle-time=0 --no-config \
+            --socket=kompoz-ci > shots/wayland/weston.log 2>&1 &
+          weston=$!
+          trap 'kill "$weston" 2>/dev/null || true' EXIT
+          for i in $(seq 100); do test -S "$XDG_RUNTIME_DIR/kompoz-ci" && break; sleep 0.1; done
+          test -S "$XDG_RUNTIME_DIR/kompoz-ci" || { cat shots/wayland/weston.log; exit 1; }
+          WAYLAND_DISPLAY=kompoz-ci KOMPOZ_SCRIPT="${KOMPOZ_CI_SCRIPT//SHOTS/$PWD/shots/wayland}" \
+            target/debug/counter 2>&1 | tee shots/wayland/counter.log
+          bash "$RUNNER_TEMP/check-shots.sh" shots/wayland
+      - name: The Counter on Xvfb (X11), clicked and resized by a script
+        run: |
+          mkdir -p shots/x11
+          KOMPOZ_PLATFORM=x11 KOMPOZ_SCRIPT="${KOMPOZ_CI_SCRIPT//SHOTS/$PWD/shots/x11}" \
+            xvfb-run -a -s "-screen 0 1280x1024x24" target/debug/counter 2>&1 | tee shots/x11/counter.log
+          bash "$RUNNER_TEMP/check-shots.sh" shots/x11
+      - name: The Counter's shots on Weston and Xvfb
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: display-shots
+          path: shots/
+          if-no-files-found: ignore
+      - name: The display tests (Wayland on Weston; X11 and the Counter's on Xvfb)
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_TEST_COMPOSITOR: weston
+          KOMPOZ_XKB_REQUIRED: "1"
+        run: |
+          cargo test -p kompoz-platform --test wayland_display
+          xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p kompoz-platform --lib display_tests
+          xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p counter --test x11
+      - name: The Wayland display tests' runs that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayland-display-test-runs
+          path: /tmp/kompoz-wayland-test-*/
+          if-no-files-found: ignore
 
   # The GPU renderer's tests on Vulkan on lavapipe (Mesa's, on the CPU), with the validation layers: no device is a
   # failure, so is an error the layers report; the scenes against tests/golden (lavapipe's pictures).

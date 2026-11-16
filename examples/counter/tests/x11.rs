@@ -9,7 +9,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const LAVAPIPE: &str = "/usr/share/vulkan/icd.d/lvp_icd.json";
+/// Mesa's lavapipe's ICD file: `lvp_icd.json`, or `lvp_icd.x86_64.json` as Debian and Ubuntu name it.
+fn lavapipe_icd() -> String {
+    let dir = Path::new("/usr/share/vulkan/icd.d");
+    ["lvp_icd.json".to_string(), format!("lvp_icd.{}.json", std::env::consts::ARCH)]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+        .map(|path| path.display().to_string())
+        .expect("lavapipe (Mesa's lvp_icd.json) for the display tests")
+}
 
 /// The counter run with `script` on X11 (`env` added), in `dir`; its stderr. Fails if it doesn't end well within a
 /// minute.
@@ -77,9 +86,7 @@ fn the_counter_runs_on_x11() {
         return;
     }
     assert!(std::env::var_os("DISPLAY").is_some(), "KOMPOZ_DISPLAY_TESTS=1 but DISPLAY isn't set");
-    if Path::new(LAVAPIPE).exists() {
-        counter_on("lavapipe", &[("VK_DRIVER_FILES", LAVAPIPE)]);
-    }
+    counter_on("lavapipe", &[("VK_DRIVER_FILES", &lavapipe_icd())]);
     if let Ok(gpu) = std::env::var("KOMPOZ_DISPLAY_GPU")
         && !gpu.is_empty()
     {

@@ -48,12 +48,19 @@ harness = false
 name = "dbus"
 harness = false
 
-# The wallpaper's colors: KDE's config read, changes followed by inotify.
+# The wallpaper's colors: KDE's config read, changes followed by inotify, stopping while a palette is worked out.
 [[test]]
 name = "wallpaper"
 harness = false
 
-# The Wayland platform on a compositor of its own (kwin_wayland --virtual), running the Counter: KOMPOZ_DISPLAY_TESTS=1.
+# Images from http URLs through libcurl, against a server of the test's own on 127.0.0.1 (skipped without libcurl
+# unless KOMPOZ_CURL_REQUIRED=1).
+[[test]]
+name = "http_images"
+harness = false
+
+# The Wayland platform on a compositor of its own (kwin_wayland --virtual; KOMPOZ_TEST_COMPOSITOR=weston: Weston's
+# headless backend, as CI runs it), running the Counter: KOMPOZ_DISPLAY_TESTS=1.
 [[test]]
 name = "wayland_display"
 harness = false

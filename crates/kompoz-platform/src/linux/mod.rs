@@ -3,9 +3,10 @@
 //! links, dropped files and services ([`desktop`]: [`DesktopServices`](desktop::DesktopServices), what a platform
 //! runs them with), and what those are made of: our own D-Bus client ([`dbus`]), the settings portal ([`portal`]),
 //! the screen readers' AT-SPI bridge ([`atspi`]), the wallpaper's colors ([`wallpaper`]), a microphone and a camera
-//! ([`media`]).
+//! ([`media`]); and the images' HTTP client, libcurl ([`curl`]).
 
 pub mod atspi;
+pub mod curl;
 pub mod dbus;
 pub mod desktop;
 pub mod event_loop;

@@ -1,7 +1,9 @@
 //! The Wayland platform on a real compositor (`KOMPOZ_DISPLAY_TESTS=1`; skipped otherwise): KDE's kwin_wayland
 //! with a virtual output and no screen locker (else it starts locked while the desktop is, and the window stays
-//! suspended) (or `KOMPOZ_TEST_COMPOSITOR`, a command taking `--socket NAME`), on a session bus and a
-//! configuration of its own (it writes its outputs' settings: never into the user's), running the Counter in a
+//! suspended), or as `KOMPOZ_TEST_COMPOSITOR` says: `kwin` (the default), `weston` (Weston's headless backend, as CI
+//! runs it: lavapipe's WSI presents through wl_shm, which needs no GPU), or a command taking `--socket NAME`; on a
+//! session bus and a configuration of its own (kwin writes its outputs' settings: never into the user's), running
+//! the Counter in a
 //! process of its own (this test run again) with a script: shots before and after a click on its button and after a
 //! resize, the GPU's validation on. On lavapipe, on the Intel GPU where there is one, and with the compositor's
 //! cursor-shape, fractional-scale, viewporter and decoration globals ignored (the fallbacks: the theme's cursor,
@@ -67,13 +69,33 @@ impl Compositor {
     fn start(work: &Path, socket: &str) -> Compositor {
         let config = work.join("config");
         std::fs::create_dir_all(&config).unwrap();
-        let command = std::env::var("KOMPOZ_TEST_COMPOSITOR").unwrap_or_else(|_| {
-            "kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --no-kactivities --width 800 --height 600"
-                .to_string()
-        });
-        let mut words = command.split_whitespace();
+        let chosen = std::env::var("KOMPOZ_TEST_COMPOSITOR").unwrap_or_default();
+        let command: Vec<String> = match chosen.trim() {
+            "" | "kwin" => {
+                "kwin_wayland --virtual --no-lockscreen --no-global-shortcuts --no-kactivities --width 800 --height 600"
+                    .split(' ')
+                    .chain(["--socket", socket])
+                    .map(str::to_string)
+                    .collect()
+            }
+            // (Its options take their values after '='; pixman draws what clients show, from wl_shm buffers.)
+            "weston" => [
+                "weston",
+                "--backend=headless",
+                "--renderer=pixman",
+                "--width=800",
+                "--height=600",
+                "--idle-time=0",
+                "--no-config",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .chain([format!("--socket={socket}")])
+            .collect(),
+            other => other.split_whitespace().chain(["--socket", socket]).map(str::to_string).collect(),
+        };
         let mut c = Command::new("dbus-run-session");
-        c.arg("--").arg(words.next().unwrap()).args(words).args(["--socket", socket]);
+        c.arg("--").args(&command);
         c.env("XDG_CONFIG_HOME", &config)
             .env("XDG_DATA_HOME", work.join("data"))
             .env("XDG_CACHE_HOME", work.join("cache"));
@@ -238,6 +260,17 @@ fn check_title_bar(work: &Path, out: &str) {
     assert!(!work.join("not-closed.png").exists(), "Close didn't end the app");
 }
 
+/// Mesa's lavapipe's ICD file: `lvp_icd.json`, or `lvp_icd.x86_64.json` as Debian and Ubuntu name it.
+fn lavapipe_icd() -> String {
+    let dir = Path::new("/usr/share/vulkan/icd.d");
+    ["lvp_icd.json".to_string(), format!("lvp_icd.{}.json", std::env::consts::ARCH)]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.exists())
+        .map(|path| path.display().to_string())
+        .expect("lavapipe (Mesa's lvp_icd.json) for the display tests")
+}
+
 fn intel_icd() -> Option<&'static str> {
     let path = "/usr/share/vulkan/icd.d/intel_icd.json";
     Path::new(path).exists().then_some(path)
@@ -251,7 +284,8 @@ fn main() -> ExitCode {
         println!("skipped: the Wayland display tests run with KOMPOZ_DISPLAY_TESTS=1");
         return ExitCode::SUCCESS;
     }
-    let lavapipe = "/usr/share/vulkan/icd.d/lvp_icd.json";
+    let lavapipe = lavapipe_icd();
+    let lavapipe = lavapipe.as_str();
     let mut runs: Vec<(&str, Drive, Vec<(&str, &str)>)> =
         vec![("lavapipe", Drive::Counter, vec![("VK_DRIVER_FILES", lavapipe)])];
     if let Some(intel) = intel_icd() {
