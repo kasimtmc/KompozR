@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-platform"
-description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts), the app entry, the headless platform, and Linux's event loop and keyboards (Wayland and X11 to come)"
+description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts), the app entry, the headless platform, and Linux's event loop, keyboards and X11 platform (Wayland to come)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

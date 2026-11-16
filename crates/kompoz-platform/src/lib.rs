@@ -5,8 +5,8 @@
 //! Linux what its platforms share: the event loop, the kernel's facilities, keyboards through xkbcommon
 //! ([`linux`]).
 //!
-//! `unsafe` code is confined to `linux::sys` and the FFI modules (`linux::xkb`'s), each block with a `// SAFETY:`
-//! comment; everything else is safe.
+//! `unsafe` code is confined to `linux::sys` and the FFI modules (`linux::xkb`'s, `linux::x11`'s), each block with a
+//! `// SAFETY:` comment; everything else is safe.
 
 #![deny(unsafe_code, unsafe_op_in_unsafe_fn, clippy::undocumented_unsafe_blocks)]
 
