@@ -29,23 +29,25 @@ mod transform;
 use builder::{Param, Receiver, Spec, builder, fn_sugar, generics, take_params};
 use transform::{Transformer, is_pascal, pattern_names};
 
-/// The runtime's path in the calling crate.
+/// The runtime's path in the calling crate: through the umbrella crate (`::kompoz::runtime`) when it depends on
+/// it, else `::kompoz_runtime` as it names it (both crates have `extern crate self as …`, for themselves).
 fn runtime() -> Ts {
     use proc_macro_crate::{FoundCrate, crate_name};
-    for name in ["kompoz-runtime", "kompoz"] {
-        match crate_name(name) {
-            Ok(FoundCrate::Itself) => {
-                let i = format_ident!("{}", name.replace('-', "_"));
-                return quote!(::#i);
-            }
-            Ok(FoundCrate::Name(n)) => {
-                let i = format_ident!("{n}");
-                return quote!(::#i);
-            }
-            Err(_) => {}
+    match crate_name("kompoz") {
+        Ok(FoundCrate::Itself) => return quote!(::kompoz::runtime),
+        Ok(FoundCrate::Name(n)) => {
+            let i = format_ident!("{n}");
+            return quote!(::#i::runtime);
         }
+        Err(_) => {}
     }
-    quote!(::kompoz_runtime)
+    match crate_name("kompoz-runtime") {
+        Ok(FoundCrate::Name(n)) => {
+            let i = format_ident!("{n}");
+            quote!(::#i)
+        }
+        Ok(FoundCrate::Itself) | Err(_) => quote!(::kompoz_runtime),
+    }
 }
 
 #[proc_macro_attribute]

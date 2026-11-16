@@ -1,0 +1,36 @@
+[package]
+name = "kompoz"
+description = "KompozR: Jetpack Compose's UI toolkit in Rust, its crates under one name, a prelude, and Kotlin's syntax (kompoz! { … }, kompoz_file!)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# `kompoz::test`: the headless test rule (androidx.compose.ui.test), for a crate's tests:
+# `[dev-dependencies] kompoz = { …, features = ["test"] }`.
+test = ["dep:kompoz-test"]
+
+[dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-gpu = { path = "../kompoz-gpu" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-kotlin-macro = { path = "../kompoz-kotlin-macro" }
+kompoz-platform = { path = "../kompoz-platform" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-test = { path = "../kompoz-test", optional = true }
+kompoz-text = { path = "../kompoz-text" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+# (its own tests use `kompoz::test`)
+kompoz = { path = ".", features = ["test"] }
+
+# Kotlin's syntax end to end: kompoz! { … } compiled and composed, one thread, in sequence.
+[[test]]
+name = "kotlin"
+harness = false

@@ -1,0 +1,20 @@
+[package]
+name = "kompoz-kotlin-macro"
+description = "KompozR's kompoz! { … } and kompoz_file!(\"ui.kt\"): Kotlin's syntax in Rust sources, translated by kompoz-kotlin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-kotlin = { path = "../kompoz-kotlin" }
+proc-macro-crate = "3"
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
