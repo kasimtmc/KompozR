@@ -42,6 +42,11 @@ pub(super) fn words(array: &[u8]) -> impl Iterator<Item = u32> + '_ {
 }
 
 impl WindowState {
+    /// Whether the window floats: its size its own, neither maximized, fullscreen nor tiled on any side.
+    pub fn floating(&self) -> bool {
+        !self.maximized && !self.fullscreen && !self.tiled.iter().any(|t| *t)
+    }
+
     /// The states of a toplevel's configure.
     pub fn from_states(states: &[u8]) -> WindowState {
         let mut s = WindowState::default();
@@ -269,6 +274,16 @@ impl WaylandPlatform {
         let Some(w) = &self.window else { return };
         w.xdg_surface.ack_configure(serial);
         let mut resized = false;
+        if self.pending_width <= 0
+            && self.pending_height <= 0
+            && self.pending_state.floating()
+            && !self.state.floating()
+            && self.floating_width > 0
+        {
+            // Back from maximized, fullscreen or tiled with the size left to the app: the size it floated at.
+            self.pending_width = self.floating_width;
+            self.pending_height = self.floating_height;
+        }
         if self.pending_width > 0
             && self.pending_height > 0
             && (self.pending_width != self.width || self.pending_height != self.height)
@@ -280,6 +295,9 @@ impl WaylandPlatform {
         let was = self.state;
         self.state = self.pending_state;
         let state_changed = was != self.state;
+        if self.state.floating() {
+            (self.floating_width, self.floating_height) = (self.width, self.height);
+        }
         if !self.configured {
             self.configured = true;
             self.events.push_back(Event::Shown);
@@ -428,5 +446,15 @@ mod tests {
         assert_eq!(s.tiled, [false, false, true, true]);
         assert!(WindowState::from_states(&array(&[2, 9])).suspended);
         assert_eq!(WindowState::from_states(&[1, 0]), WindowState::default()); // (not a whole word)
+    }
+
+    #[test]
+    fn a_window_floats_unless_maximized_fullscreen_or_tiled() {
+        let array = |states: &[u32]| -> Vec<u8> { states.iter().flat_map(|s| s.to_ne_bytes()).collect() };
+        assert!(WindowState::default().floating());
+        assert!(WindowState::from_states(&array(&[4])).floating()); // (activated only)
+        for state in [1, 2, 5, 6, 7, 8] {
+            assert!(!WindowState::from_states(&array(&[state])).floating(), "state {state}");
+        }
     }
 }

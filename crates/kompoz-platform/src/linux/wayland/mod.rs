@@ -269,6 +269,10 @@ pub struct WaylandPlatform {
     /// A configure's size (0: the app's own).
     pending_width: i32,
     pending_height: i32,
+    /// Its size the last time it floated (neither maximized, fullscreen nor tiled): what it goes back to when a
+    /// configure leaves the size to it on the way back from one of those (Weston's 0 by 0; KWin tells the size).
+    floating_width: i32,
+    floating_height: i32,
     configured: bool,
     /// fractional-scale's scale, in 120ths (0: none told).
     scale120: u32,
@@ -353,6 +357,8 @@ impl WaylandPlatform {
             height: 1,
             pending_width: 0,
             pending_height: 0,
+            floating_width: 0,
+            floating_height: 0,
             configured: false,
             scale120: 0,
             buffer_scale: 1,
@@ -780,6 +786,9 @@ impl Platform for WaylandPlatform {
     fn set_window_size(&mut self, width: i32, height: i32) {
         self.width = width.max(1);
         self.height = height.max(1);
+        if self.state.floating() {
+            (self.floating_width, self.floating_height) = (self.width, self.height);
+        }
         self.apply_size();
         self.update_edges();
         self.events.push_back(Event::Resized);

@@ -320,7 +320,9 @@ fn lavapipe_icd() -> String {
 fn check_editor(out: &str) {
     assert!(!out.lines().any(|l| l.contains("the connection broke")), "the connection broke:\n{out}");
     let sent = |what: &str| out.lines().filter(|l| l.contains(" -> ") && l.contains(what)).count();
-    assert_eq!(sent(".get_tablet_seat("), 1, "the tablet seat asked for");
+    // (Asked for where the compositor has tablets: KWin does, Weston's headless backend doesn't.)
+    let tablets = out.lines().any(|l| l.contains(".global(") && l.contains("zwp_tablet_manager_v2"));
+    assert_eq!(sent(".get_tablet_seat("), usize::from(tablets), "the tablet seat asked for");
     let entered = out.lines().any(|l| !l.contains(" -> ") && l.contains("zwp_text_input_v3") && l.contains(".enter("));
     assert!(entered, "the compositor's text input entered the window");
     // The text input's requests, in order (a long text's end only).
@@ -369,9 +371,15 @@ fn check_editor(out: &str) {
     );
 }
 
+/// Mesa's Intel ICD, where there is an Intel GPU to drive (a CI runner has the ICD's file but no GPU).
 fn intel_icd() -> Option<&'static str> {
     let path = "/usr/share/vulkan/icd.d/intel_icd.json";
-    Path::new(path).exists().then_some(path)
+    let intel_gpu = std::fs::read_dir("/sys/class/drm")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|card| std::fs::read_to_string(card.path().join("device/vendor")).is_ok_and(|v| v.trim() == "0x8086"));
+    (intel_gpu && Path::new(path).exists()).then_some(path)
 }
 
 fn main() -> ExitCode {
@@ -424,8 +432,11 @@ fn main() -> ExitCode {
         if !filters.is_empty() && !filters.iter().any(|f| name.contains(f.as_str())) {
             continue;
         }
-        let work =
-            std::env::temp_dir().join(format!("kompoz-wayland-test-{}-{}", std::process::id(), name.replace(' ', "-")));
+        let work = std::env::temp_dir().join(format!(
+            "kompoz-wayland-test-{}-{}",
+            std::process::id(),
+            name.replace([' ', ':', ','], "-")
+        ));
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work).unwrap();
         let (app, on) = name.split_once(": ").unwrap_or(("counter", name));
