@@ -141,14 +141,17 @@ mod tests {
     #[test]
     fn diagnostics_at_kotlin_positions() {
         let t = translate(
-            "@Kompozable fun A() {}\n  fun B(x: Int) {}\nfun `a b`() {}",
+            "@Kompozable fun A() {}\n  fun B(x: ) {}\nfun `a b`() {}",
             Pos::start(10, 1),
             &OneSpan::default(),
             &Options::default(),
         );
         let found: Vec<(String, u32, u32)> =
             t.diagnostics.iter().map(|d| (d.message.clone(), d.loc.start.line, d.loc.start.column)).collect();
-        assert_eq!(found, [("expected `)`".to_string(), 11, 9), ("`a b` can't be a name in Rust".to_string(), 12, 5)]);
+        assert_eq!(
+            found,
+            [("expected a type, found `)`".to_string(), 11, 12), ("`a b` can't be a name in Rust".to_string(), 12, 5)]
+        );
         let expected = quote! { #[allow(non_snake_case)] #[::kompoz_runtime::kompozable] pub fn A() {} };
         assert_eq!(t.tokens.to_string(), expected.to_string());
     }

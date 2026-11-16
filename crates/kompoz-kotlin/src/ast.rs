@@ -869,6 +869,12 @@ pub enum ExprKind {
     },
     /// `throw value`.
     Throw(Box<Expr>),
+    /// `@Ann expr`: annotations on an expression (`@Composable { … }`, `@Suppress("x") a + b` at a statement's
+    /// start, where they are the whole statement's).
+    Annotated {
+        annotations: Vec<Annotation>,
+        expr: Box<Expr>,
+    },
     /// What the parser left where it recovered (a diagnostic says why).
     Error,
 }

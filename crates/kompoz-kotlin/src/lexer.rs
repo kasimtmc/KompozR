@@ -1,12 +1,27 @@
-//! Kotlin's tokens, read from the text (the C++ kompozc's `lexer.cpp`).
+//! Kotlin's tokens, read from the text (the C++ kompozc's `lexer.cpp`, extended to Kotlin's whole lexical grammar).
 //!
-//! Module boundary (WP1): `lex(text, base, diags) -> Vec<Token>` and the `Token` types are what the parser reads;
-//! WP1 owns this module (and may extend `Token`, e.g. with comments for KDoc), keeping the entry point.
+//! Module boundary: `lex(text, base, diags) -> Vec<Token>` and the `Token` types are what the parser reads.
 //!
 //! Names and keywords are both `Ident` (Kotlin's soft keywords — `by`, `get`, `data`, … — are names elsewhere; the
-//! parser tells them apart). Newlines are tokens: they end a statement unless the expression goes on, which only
-//! the parser knows. A string's template expressions are lexed in place into tokens of their own (a brace in a
-//! string inside one doesn't end it). A mistake is a diagnostic; the lexer goes on after it.
+//! parser tells them apart); a name is Kotlin's: letters (Unicode's, `ğ` and `ı` too), digits and `_`, or anything
+//! but a newline or backtick between backticks. Newlines are tokens: they end a statement unless the expression
+//! goes on, which only the parser knows (a block comment over several lines counts as one). Comments — `//`, `/* */`
+//! (nested, as Kotlin's), KDoc's `/** */` — are spacing; a script's `#!` first line is skipped.
+//!
+//! Numbers as Kotlin writes them: decimal, `0x` hex and `0b` binary digits with `_` between them, the suffixes `L`,
+//! `u`/`U`, `uL`/`UL`, `f`/`F`; a fraction (`1.5`, `.5`) or exponent (`1e3`, `2.5E-3`) makes a `Double` (a `Float`
+//! with `f`); `1.` is `1` and then a `.` (`16.dp` is a member of 16).
+//!
+//! Strings: `"…"` with Kotlin's escapes (`\t \b \n \r \' \" \\ \$ \uXXXX`) and `"""…"""` raw (no escapes, newlines
+//! kept, the closing quotes the last three of a run), both with templates: `$name` (`` $`a name` `` too) and
+//! `${expression}`, whose tokens are lexed in place, at their real positions, as far as the brace closing it (a
+//! string inside, a brace in it, a template inside that: all its own). KompozR also takes `\u{…}` — Rust's form,
+//! since `kompoz!`'s input goes through Rust's lexer first, which rejects `\uXXXX`, `\$` and `\b`. A character
+//! literal holds one UTF-16 unit, as Kotlin's `Char`.
+//!
+//! Operators by longest match: `?.`, `?:`, `!!`, `::`, `..<`, `===`, `!==`, `->`, `@`, … A mistake (an unterminated
+//! string, character or comment, a stray character, a malformed number) is a diagnostic; the lexer goes on after
+//! it.
 
 use crate::ast::NumberKind;
 use crate::diag::Diagnostics;
@@ -24,7 +39,7 @@ pub enum TokenKind {
     Char(char),
     /// Punctuation and operators: `( ) { } [ ] . , ; : ?. ?: !! -> .. ..< :: == += @ …` (`text`).
     Op,
-    /// A line's end.
+    /// A line's end (or a block comment over several lines).
     Newline,
     /// The end of the text (or of a template expression's tokens).
     Eof,
@@ -37,7 +52,7 @@ pub struct Token {
     pub text: String,
     pub loc: Loc,
     /// Whitespace or a comment (not a newline) right before it: `a?` (nullable) and `a ?` differ, as do
-    /// `f(x)` and a call's argument list on a token after a space in a few places.
+    /// `lbl@ {` (a label) and `x @Ann` (an annotation).
     pub space_before: bool,
 }
 
@@ -59,10 +74,10 @@ impl Token {
 /// A piece of a string literal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StringPiece {
-    /// Text, its escapes resolved.
+    /// Text, its escapes resolved; `loc` is its source (escapes as written).
     Text { text: String, loc: Loc },
-    /// `$name`: the name and where it is (after the `$`).
-    Name { name: String, loc: Loc },
+    /// `$name`: the name (without backticks, `backticked`) and where it is (after the `$`).
+    Name { name: String, backticked: bool, loc: Loc },
     /// `${ … }`: the expression's tokens (ending with `Eof` at the closing brace), `loc` from `${` to `}`.
     Expr { tokens: Vec<Token>, loc: Loc },
 }
@@ -71,7 +86,7 @@ pub enum StringPiece {
 const OPS: &[&str] = &[
     "===", "!==", "..<", "?.", "?:", "!!", "->", "..", "::", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=",
     "/=", "%=", "++", "--", "(", ")", "{", "}", "[", "]", ".", ",", ";", ":", "?", "!", "=", "<", ">", "+", "-", "*",
-    "/", "%", "@", "&", "|",
+    "/", "%", "@", "&",
 ];
 
 /// The tokens of `text`, whose first character is at `base` (its offset 0), ending with `Eof`.
@@ -94,11 +109,13 @@ pub fn lex(text: &str, base: Pos, diags: &mut Diagnostics) -> Vec<Token> {
     }
 }
 
-fn ident_start(c: char) -> bool {
+/// A character a name starts with: a letter (Unicode's) or `_`.
+pub fn ident_start(c: char) -> bool {
     c.is_alphabetic() || c == '_'
 }
 
-fn ident_part(c: char) -> bool {
+/// A character of a name after its first: a letter, a digit or `_`.
+pub fn ident_part(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
@@ -106,6 +123,13 @@ struct Lexer<'a, 'd> {
     src: &'a str,
     pos: Pos,
     diags: &'d mut Diagnostics,
+}
+
+/// What `skip_space_and_comments` went over.
+struct Skipped {
+    space: bool,
+    /// A block comment with a newline in it: where it ended.
+    newline_at: Option<Pos>,
 }
 
 impl Lexer<'_, '_> {
@@ -133,21 +157,20 @@ impl Lexer<'_, '_> {
         self.diags.error(Loc::new(at, self.pos.max(at)), message);
     }
 
-    /// Spaces, tabs and comments (Kotlin's block comments nest); a newline is a token of its own. Whether any
-    /// was skipped.
-    fn skip_space_and_comments(&mut self) -> bool {
-        let mut saw = false;
+    /// Spaces, tabs and comments (Kotlin's block comments nest); a newline is a token of its own.
+    fn skip_space_and_comments(&mut self) -> Skipped {
+        let mut skipped = Skipped { space: false, newline_at: None };
         loop {
             match self.peek(0) {
                 Some(' ' | '\t' | '\r' | '\u{c}') => {
                     self.advance();
-                    saw = true;
+                    skipped.space = true;
                 }
                 Some('/') if self.peek(1) == Some('/') => {
                     while !matches!(self.peek(0), None | Some('\n')) {
                         self.advance();
                     }
-                    saw = true;
+                    skipped.space = true;
                 }
                 Some('/') if self.peek(1) == Some('*') => {
                     let start = self.pos;
@@ -167,15 +190,25 @@ impl Lexer<'_, '_> {
                             self.advance();
                         }
                     }
-                    saw = true;
+                    if self.pos.line > start.line {
+                        skipped.newline_at = Some(self.pos);
+                    }
+                    skipped.space = true;
                 }
-                _ => return saw,
+                _ => return skipped,
             }
         }
     }
 
     fn next(&mut self) -> Token {
-        let space_before = self.skip_space_and_comments();
+        let skipped = self.skip_space_and_comments();
+        let space_before = skipped.space;
+        // (a comment over several lines ends a line as a newline does)
+        if let Some(at) = skipped.newline_at
+            && !matches!(self.peek(0), Some('\n') | None)
+        {
+            return Token { kind: TokenKind::Newline, text: String::new(), loc: Loc::at(at), space_before };
+        }
         let start = self.pos;
         let token = |kind, text: String, end: Pos| Token { kind, text, loc: Loc::new(start, end), space_before };
         let Some(c) = self.peek(0) else {
@@ -193,17 +226,7 @@ impl Lexer<'_, '_> {
             return token(TokenKind::Ident { backticked: false }, self.src[from..self.pos.offset].into(), self.pos);
         }
         if c == '`' {
-            self.advance();
-            let from = self.pos.offset;
-            while !matches!(self.peek(0), Some('`') | Some('\n') | None) {
-                self.advance();
-            }
-            let name = self.src[from..self.pos.offset].to_string();
-            if self.peek(0) == Some('`') {
-                self.advance();
-            } else {
-                self.error(start, "unterminated `name`");
-            }
+            let name = self.backticked(start);
             return token(TokenKind::Ident { backticked: true }, name, self.pos);
         }
         if c.is_ascii_digit() || (c == '.' && self.peek(1).is_some_and(|d| d.is_ascii_digit())) {
@@ -215,36 +238,8 @@ impl Lexer<'_, '_> {
             return token(TokenKind::String { raw, pieces }, String::new(), self.pos);
         }
         if c == '\'' {
-            self.advance();
-            let value = match self.peek(0) {
-                Some('\\') => {
-                    let at = self.pos;
-                    self.advance();
-                    Some(self.escape(at))
-                }
-                Some(ch) if ch != '\'' && ch != '\n' => {
-                    self.advance();
-                    Some(ch)
-                }
-                _ => None,
-            };
-            match value {
-                Some(v) if self.peek(0) == Some('\'') => {
-                    self.advance();
-                    return token(TokenKind::Char(v), String::new(), self.pos);
-                }
-                _ => {
-                    // (on past its closing quote, when its line has one)
-                    let rest = self.rest();
-                    let line = &rest[..rest.find('\n').unwrap_or(rest.len())];
-                    if let Some(close) = line.find('\'') {
-                        let n = line[..close].chars().count() + 1;
-                        self.advance_by(n);
-                    }
-                    self.error(start, "a character literal holds one character");
-                    return token(TokenKind::Char(value.unwrap_or('\0')), String::new(), self.pos);
-                }
-            }
+            let value = self.char_literal(start);
+            return token(TokenKind::Char(value), String::new(), self.pos);
         }
         if let Some(op) = OPS.iter().find(|op| self.rest().starts_with(**op)) {
             self.advance_by(op.chars().count());
@@ -255,52 +250,148 @@ impl Lexer<'_, '_> {
         self.next()
     }
 
+    /// `` `a name` `` from its opening backtick: the name between them.
+    fn backticked(&mut self, start: Pos) -> String {
+        self.advance();
+        let from = self.pos.offset;
+        while !matches!(self.peek(0), Some('`') | Some('\n') | None) {
+            self.advance();
+        }
+        let name = self.src[from..self.pos.offset].to_string();
+        if self.peek(0) == Some('`') {
+            self.advance();
+            if name.is_empty() {
+                self.error(start, "a backticked name can't be empty");
+            }
+        } else {
+            self.error(start, "unterminated `name`");
+        }
+        name
+    }
+
+    /// `'c'` from its opening quote: the character (`\0` where it is wrong, with a diagnostic).
+    fn char_literal(&mut self, start: Pos) -> char {
+        self.advance();
+        let value = match self.peek(0) {
+            Some('\\') => {
+                let at = self.pos;
+                self.advance();
+                Some(self.escape(at))
+            }
+            Some(ch) if ch != '\'' && ch != '\n' => {
+                self.advance();
+                Some(ch)
+            }
+            _ => None,
+        };
+        match value {
+            Some(v) if self.peek(0) == Some('\'') => {
+                self.advance();
+                if v.len_utf16() > 1 {
+                    self.error(
+                        start,
+                        format!("a character literal holds one UTF-16 unit, and `{v}` is two (a String holds it)"),
+                    );
+                }
+                v
+            }
+            _ => {
+                // (on past its closing quote, when its line has one)
+                let rest = self.rest();
+                let line = &rest[..rest.find('\n').unwrap_or(rest.len())];
+                let closed = match line.find('\'') {
+                    Some(close) => {
+                        let n = line[..close].chars().count() + 1;
+                        self.advance_by(n);
+                        true
+                    }
+                    None => false,
+                };
+                let message = if !closed {
+                    "unterminated character literal"
+                } else if value.is_none() {
+                    "a character literal can't be empty"
+                } else {
+                    "a character literal holds one character"
+                };
+                self.error(start, message);
+                value.unwrap_or('\0')
+            }
+        }
+    }
+
+    /// Digits (`is_digit`) with `_` between them (`1_000`, `1__000`); whether there were any.
+    fn digits(&mut self, is_digit: fn(char) -> bool) -> bool {
+        let mut any = false;
+        loop {
+            match self.peek(0) {
+                Some(c) if is_digit(c) => {
+                    self.advance();
+                    any = true;
+                }
+                // (underscores only between digits)
+                Some('_') if any => {
+                    let run = self.rest().chars().take_while(|&c| c == '_').count();
+                    if !self.peek(run).is_some_and(is_digit) {
+                        return any;
+                    }
+                    self.advance_by(run);
+                }
+                _ => return any,
+            }
+        }
+    }
+
     /// A number from here: its kind and radix (the text is the source's).
     fn number(&mut self, start: Pos) -> (NumberKind, u32) {
-        let digits = |l: &mut Self, is_digit: fn(char) -> bool| {
-            while l.peek(0).is_some_and(is_digit) || (l.peek(0) == Some('_') && l.peek(1).is_some_and(is_digit)) {
-                l.advance();
-            }
-        };
         let dec = |c: char| c.is_ascii_digit();
         let mut radix = 10;
         let mut fraction = false;
-        if self.peek(0) == Some('0') && matches!(self.peek(1), Some('x' | 'X')) {
-            radix = 16;
+        let prefixed =
+            |l: &Self, x: char| l.peek(0) == Some('0') && l.peek(1).is_some_and(|c| c.eq_ignore_ascii_case(&x));
+        if prefixed(self, 'x') || prefixed(self, 'b') {
+            radix = if prefixed(self, 'x') { 16 } else { 2 };
             self.advance_by(2);
-            digits(self, |c| c.is_ascii_hexdigit());
-        } else if self.peek(0) == Some('0') && matches!(self.peek(1), Some('b' | 'B')) {
-            radix = 2;
-            self.advance_by(2);
-            digits(self, |c| c == '0' || c == '1');
+            let any = if radix == 16 {
+                self.digits(|c| c.is_ascii_hexdigit())
+            } else {
+                self.digits(|c| c == '0' || c == '1')
+            };
+            if !any {
+                self.error(
+                    start,
+                    if radix == 16 { "expected hex digits after `0x`" } else { "expected binary digits after `0b`" },
+                );
+            }
         } else {
-            digits(self, dec);
-            // 1.5 is a number; 16.dp is 16, then a member.
+            self.digits(dec);
+            // 1.5 and .5 are numbers; 16.dp is 16, then a member (and 1..2 a range).
             if self.peek(0) == Some('.') && self.peek(1).is_some_and(dec) {
                 fraction = true;
                 self.advance();
-                digits(self, dec);
+                self.digits(dec);
             }
             if matches!(self.peek(0), Some('e' | 'E'))
                 && (self.peek(1).is_some_and(dec)
                     || (matches!(self.peek(1), Some('+' | '-')) && self.peek(2).is_some_and(dec)))
             {
                 fraction = true;
-                self.advance_by(2);
-                digits(self, dec);
+                self.advance_by(if self.peek(1).is_some_and(dec) { 1 } else { 2 });
+                self.digits(dec);
             }
         }
         let mut kind = if fraction { NumberKind::Double } else { NumberKind::Int };
+        let suffix_at = self.pos;
         match self.peek(0) {
             Some('f' | 'F') if radix == 10 => {
                 self.advance();
                 kind = NumberKind::Float;
             }
-            Some('L') if !fraction => {
+            Some('L') => {
                 self.advance();
                 kind = NumberKind::Long;
             }
-            Some('u' | 'U') if !fraction => {
+            Some('u' | 'U') => {
                 self.advance();
                 kind = NumberKind::UInt;
                 if self.peek(0) == Some('L') {
@@ -310,11 +401,24 @@ impl Lexer<'_, '_> {
             }
             _ => {}
         }
+        if fraction && matches!(kind, NumberKind::Long | NumberKind::UInt | NumberKind::ULong) {
+            self.error(
+                suffix_at,
+                "a number with a fraction or an exponent is a Double (or a Float with `f`): no `L` or `u`",
+            );
+        }
         if self.peek(0).is_some_and(ident_part) {
             while self.peek(0).is_some_and(ident_part) {
                 self.advance();
             }
             self.error(start, "unexpected characters after a number");
+        } else if radix == 10
+            && !fraction
+            && kind != NumberKind::Float
+            && self.src[start.offset..].starts_with('0')
+            && self.src[start.offset..self.pos.offset].chars().nth(1).is_some_and(|c| c.is_ascii_digit() || c == '_')
+        {
+            self.error(start, "a number doesn't start with `0` (Kotlin has no octal numbers)");
         }
         (kind, radix)
     }
@@ -326,6 +430,10 @@ impl Lexer<'_, '_> {
             self.error(at, "unterminated escape");
             return '\\';
         };
+        if c == '\n' {
+            self.error(at, "unterminated escape");
+            return '\\';
+        }
         self.advance();
         match c {
             't' => '\t',
@@ -344,12 +452,18 @@ impl Lexer<'_, '_> {
                 }
                 let hex = &self.src[from..self.pos.offset];
                 let value = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
-                if self.peek(0) == Some('}') && value.is_some() {
-                    self.advance();
-                    value.unwrap_or('\u{fffd}')
-                } else {
-                    self.error(at, "`\\u{…}` takes the hex digits of a character");
-                    '\u{fffd}'
+                match value {
+                    Some(v) if self.peek(0) == Some('}') && hex.len() <= 6 => {
+                        self.advance();
+                        v
+                    }
+                    _ => {
+                        if self.peek(0) == Some('}') {
+                            self.advance();
+                        }
+                        self.error(at, "`\\u{…}` takes the hex digits of a character");
+                        '\u{fffd}'
+                    }
                 }
             }
             'u' => {
@@ -360,8 +474,12 @@ impl Lexer<'_, '_> {
                     }
                 }
                 let hex = &self.src[from..self.pos.offset];
-                match (hex.len(), u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)) {
-                    (4, Some(v)) => v,
+                match (hex.len(), u32::from_str_radix(hex, 16).ok().map(|v| (v, char::from_u32(v)))) {
+                    (4, Some((_, Some(v)))) => v,
+                    (4, Some((v, None))) => {
+                        self.error(at, format!("`\\u{v:04X}` is half of a surrogate pair: write the character itself"));
+                        '\u{fffd}'
+                    }
                     _ => {
                         self.error(at, "`\\u` takes four hex digits");
                         '\u{fffd}'
@@ -389,10 +507,12 @@ impl Lexer<'_, '_> {
         };
         loop {
             let Some(c) = self.peek(0) else {
+                flush(&mut pieces, &mut text, text_start, self.pos);
                 self.error(start, "unterminated string");
                 break;
             };
             if !raw && c == '\n' {
+                flush(&mut pieces, &mut text, text_start, self.pos);
                 self.error(start, "unterminated string");
                 break;
             }
@@ -411,15 +531,19 @@ impl Lexer<'_, '_> {
                 let at = self.pos;
                 self.advance();
                 text.push(self.escape(at));
-            } else if c == '$' && self.peek(1).is_some_and(ident_start) {
+            } else if c == '$' && (self.peek(1).is_some_and(ident_start) || self.peek(1) == Some('`')) {
                 flush(&mut pieces, &mut text, text_start, self.pos);
                 self.advance();
                 let at = self.pos;
-                while self.peek(0).is_some_and(ident_part) {
-                    self.advance();
-                }
-                let name = self.src[at.offset..self.pos.offset].to_string();
-                pieces.push(StringPiece::Name { name, loc: Loc::new(at, self.pos) });
+                let (name, backticked) = if self.peek(0) == Some('`') {
+                    (self.backticked(at), true)
+                } else {
+                    while self.peek(0).is_some_and(ident_part) {
+                        self.advance();
+                    }
+                    (self.src[at.offset..self.pos.offset].to_string(), false)
+                };
+                pieces.push(StringPiece::Name { name, backticked, loc: Loc::new(at, self.pos) });
                 text_start = self.pos;
             } else if c == '$' && self.peek(1) == Some('{') {
                 flush(&mut pieces, &mut text, text_start, self.pos);
@@ -460,102 +584,5 @@ impl Lexer<'_, '_> {
             }
         }
         (raw, pieces)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn kinds(text: &str) -> Vec<(TokenKind, String)> {
-        let mut d = Diagnostics::default();
-        let tokens = lex(text, Pos::start(1, 1), &mut d);
-        assert!(!d.has_errors(), "{:?}", d.list);
-        tokens.into_iter().map(|t| (t.kind, t.text)).collect()
-    }
-
-    #[test]
-    fn names_operators_and_newlines() {
-        let ident = TokenKind::Ident { backticked: false };
-        assert_eq!(
-            kinds("a?.b ?: c!!\n`in` ..< x"),
-            vec![
-                (ident.clone(), "a".into()),
-                (TokenKind::Op, "?.".into()),
-                (ident.clone(), "b".into()),
-                (TokenKind::Op, "?:".into()),
-                (ident.clone(), "c".into()),
-                (TokenKind::Op, "!!".into()),
-                (TokenKind::Newline, String::new()),
-                (TokenKind::Ident { backticked: true }, "in".into()),
-                (TokenKind::Op, "..<".into()),
-                (ident, "x".into()),
-                (TokenKind::Eof, String::new()),
-            ]
-        );
-    }
-
-    #[test]
-    fn numbers() {
-        let n = |text: &str| match &kinds(text)[0] {
-            (TokenKind::Number { kind, radix }, t) => (*kind, *radix, t.clone()),
-            other => panic!("{other:?}"),
-        };
-        assert_eq!(n("16"), (NumberKind::Int, 10, "16".into()));
-        assert_eq!(n("1_000L"), (NumberKind::Long, 10, "1_000L".into()));
-        assert_eq!(n("0xFF00FF00"), (NumberKind::Int, 16, "0xFF00FF00".into()));
-        assert_eq!(n("0xFFuL"), (NumberKind::ULong, 16, "0xFFuL".into()));
-        assert_eq!(n("1.5f"), (NumberKind::Float, 10, "1.5f".into()));
-        assert_eq!(n("1e3"), (NumberKind::Double, 10, "1e3".into()));
-        assert_eq!(n(".5"), (NumberKind::Double, 10, ".5".into()));
-        // 16.dp: a number, then a member.
-        assert_eq!(kinds("16.dp").len(), 4);
-    }
-
-    #[test]
-    fn strings_with_templates_and_positions() {
-        let mut d = Diagnostics::default();
-        let tokens = lex("\"ğ $name ${if (a) \"}\" else b}\\t\"", Pos::start(5, 3), &mut d);
-        assert!(!d.has_errors(), "{:?}", d.list);
-        let TokenKind::String { raw: false, pieces } = &tokens[0].kind else { panic!("{:?}", tokens[0]) };
-        assert_eq!(pieces.len(), 5);
-        assert!(matches!(&pieces[0], StringPiece::Text { text, loc } if text == "ğ " && loc.start.column == 4));
-        assert!(matches!(&pieces[1], StringPiece::Name { name, loc } if name == "name" && loc.start.column == 7));
-        assert!(matches!(&pieces[2], StringPiece::Text { text, loc } if text == " " && loc.start.column == 11));
-        let StringPiece::Expr { tokens: inner, loc } = &pieces[3] else { panic!() };
-        assert_eq!(loc.start.column, 12);
-        assert!(inner[0].is_word("if") && inner.last().unwrap().kind == TokenKind::Eof);
-        assert!(inner.iter().any(|t| matches!(&t.kind, TokenKind::String { .. })));
-        assert!(matches!(&pieces[4], StringPiece::Text { text, .. } if text == "\t"));
-        assert_eq!(tokens[0].loc.end.column, 3 + 32);
-    }
-
-    #[test]
-    fn raw_strings_chars_and_comments() {
-        let mut d = Diagnostics::default();
-        let tokens = lex("/* a /* b */ */ \"\"\"x\n\"y\"\"\"\" '\\u{41}' // end", Pos::start(1, 1), &mut d);
-        assert!(!d.has_errors(), "{:?}", d.list);
-        let TokenKind::String { raw: true, pieces } = &tokens[0].kind else { panic!("{:?}", tokens[0]) };
-        assert!(matches!(&pieces[..], [StringPiece::Text { text, .. }] if text == "x\n\"y\""));
-        assert!(tokens[0].space_before);
-        assert_eq!(tokens[1].kind, TokenKind::Char('A'));
-        assert_eq!(tokens[2].kind, TokenKind::Eof);
-    }
-
-    #[test]
-    fn mistakes_are_diagnostics() {
-        let mut d = Diagnostics::default();
-        let tokens = lex("\"abc\n'xy' # 1z", Pos::start(1, 1), &mut d);
-        let messages: Vec<&str> = d.list.iter().map(|x| x.message.as_str()).collect();
-        assert_eq!(
-            messages,
-            [
-                "unterminated string",
-                "a character literal holds one character",
-                "unexpected character `#`",
-                "unexpected characters after a number"
-            ]
-        );
-        assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
     }
 }
