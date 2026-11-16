@@ -363,6 +363,7 @@ pub(crate) fn shape_ellipsis(p: &ParagraphIntrinsics, style: &RunStyle) -> Ellip
         features: &style.features,
         letter_spacing: style.drawn.letter_spacing,
         scale_x: style.drawn.scale_x,
+        linear: p.settings.linear(),
     });
     EllipsisGlyphs { font, width: shaped.advance, glyphs: shaped.glyphs }
 }

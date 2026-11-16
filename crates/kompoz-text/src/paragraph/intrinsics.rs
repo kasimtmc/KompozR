@@ -17,7 +17,7 @@ use crate::segment::{is_common_or_inherited, script_tag};
 use crate::shape::{FontBackend, FontInstance, FontMetrics, FontRunRequest, ShapeRequest, ShapedGlyph, ShapedRun};
 use crate::span_style::{SpanStyle, TextForegroundStyle};
 use crate::style::{
-    BaselineShift, Hyphens, LineBreak, LineHeightStyle, TextAlign, TextDecoration, TextIndent, TextMotion,
+    BaselineShift, Hyphens, LineBreak, LineHeightStyle, Linearity, TextAlign, TextDecoration, TextIndent, TextMotion,
 };
 use crate::text_style::TextStyle;
 use kompoz_graphics::{Color, Density, Shadow, TextUnit};
@@ -132,6 +132,14 @@ pub(crate) struct ParagraphSettings {
     pub(crate) line_height_style: Option<LineHeightStyle>,
     pub(crate) include_font_padding: bool,
     pub(crate) text_motion: TextMotion,
+}
+
+impl ParagraphSettings {
+    /// Whether its text is linear (Android's LINEAR_TEXT_FLAG, which Compose sets for Linearity.Linear): its
+    /// letter spacing as it is, not in whole pixels.
+    pub(crate) fn linear(&self) -> bool {
+        self.text_motion.linearity == Linearity::Linear
+    }
 }
 
 /// A paragraph's text measured once (Compose's ParagraphIntrinsics): its text, style (its defaults resolved, as
@@ -445,6 +453,7 @@ impl ParagraphIntrinsics {
             features: &style.features,
             letter_spacing: style.drawn.letter_spacing,
             scale_x: style.drawn.scale_x,
+            linear: self.settings.linear(),
         });
         if shaped.glyphs.iter().any(|g| matches!(text.as_bytes().get(g.cluster), Some(b'\n' | b'\r'))) {
             for g in &mut shaped.glyphs {
@@ -578,6 +587,7 @@ impl ParagraphIntrinsics {
             features: &style.features,
             letter_spacing: style.drawn.letter_spacing,
             scale_x: style.drawn.scale_x,
+            linear: self.settings.linear(),
         });
         let middle_end = prefix.len() + middle.len();
         for g in &mut shaped.glyphs {

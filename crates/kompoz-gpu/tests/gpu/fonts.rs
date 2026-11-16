@@ -142,6 +142,7 @@ pub fn text_at(text: &str, baseline: Offset, font: Font, scale: f32) -> TextDraw
                 features: &[],
                 letter_spacing: 0.0,
                 scale_x: 1.0,
+                linear: false,
             });
             height = height.max(backend.metrics(&run.font).line_height());
             let hb = HbFt::new(run.font.font, px);

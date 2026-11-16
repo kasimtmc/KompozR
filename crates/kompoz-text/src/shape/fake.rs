@@ -1,7 +1,10 @@
 //! A backend that measures as the C++ Kompoz's FakeTextMeasurer did (`testing.hpp`): what tests lay text out with
 //! when their numbers must not depend on fonts.
 
-use super::{FontBackend, FontInstance, FontMetrics, FontRun, FontRunRequest, ShapeRequest, ShapedGlyph, ShapedRun};
+use super::{
+    FontBackend, FontInstance, FontMetrics, FontRun, FontRunRequest, ShapeRequest, ShapedGlyph, ShapedRun,
+    letter_spacing_sides,
+};
 use crate::draw::{Glyph, GlyphColorKind, GlyphRun, GlyphSynthesis, TextDraw, TextRunStyle};
 use crate::font::{
     FontFamily, FontFamilyResolver, FontId, FontLoadError, FontMatcher, FontRegistry, FontStyle, FontSynthesis,
@@ -18,10 +21,11 @@ use std::sync::{Arc, LazyLock};
 static FAKE_FONT: LazyLock<FontId> = LazyLock::new(|| FontRegistry::register(Arc::from(Vec::<u8>::new()), 0));
 
 /// C++'s FakeTextMeasurer as a backend: every code point one glyph (its id the code point) half an em wide,
-/// stretched by the run's `scale_x`, plus the letter spacing (half of it before the glyph, half after); an ascent
-/// of 0.8 em, a descent of 0.2 and a leading of 0.25 (lines 1.25 em apart); every glyph a box from the ascent to
-/// the descent (so its top and bottom are its ascent and descent); the underline 2 px below the baseline and the strikeout 0.3 ascents above it, `max(1, size / 14)`
-/// thick (as C++ drew them). One face has every character, weight and style (its id [`FakeBackend::font_id`]);
+/// stretched by the run's `scale_x`, plus the letter spacing (before and after the glyph as minikin spaces
+/// clusters: [`letter_spacing_sides`]); an ascent of 0.8 em, a descent of 0.2 and a leading of 0.25 (lines 1.25 em
+/// apart); every glyph a box from the ascent to the descent (so its top and bottom are its ascent and descent); the
+/// underline 2 px below the baseline and the strikeout 0.3 ascents above it, `max(1, size / 14)` thick (as C++ drew
+/// them). One face has every character, weight and style (its id [`FakeBackend::font_id`]);
 /// sizes come in px, so the font scale reaches it through them.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FakeBackend;
@@ -37,9 +41,10 @@ impl FakeBackend {
         FontInstance { font: FakeBackend::font_id(), coords: Rc::from([]), size, synthesis: GlyphSynthesis::None }
     }
 
-    /// How wide `text` is at `size` px (C++'s measureWidth).
+    /// How wide `text` is at `size` px (C++'s measureWidth), as still text (TextMotion.Static) is spaced.
     pub fn measure_width(text: &str, size: f32, scale_x: f32, letter_spacing: f32) -> f32 {
-        text.chars().count() as f32 * (size * 0.5 * scale_x + letter_spacing)
+        let (before, after) = letter_spacing_sides(letter_spacing, scale_x, false);
+        text.chars().count() as f32 * (size * 0.5 * scale_x + before + after)
     }
 
     /// One line of `text` drawn in `style` from `baseline`, shaped as one run (left to right unless `rtl`, its
@@ -56,6 +61,7 @@ impl FakeBackend {
             features: &[],
             letter_spacing: style.letter_spacing,
             scale_x: style.scale_x,
+            linear: false,
         });
         let metrics = self.metrics(&font);
         let mut pen = 0.0;
@@ -106,7 +112,8 @@ impl FontBackend for FakeBackend {
 
     fn shape(&self, request: &ShapeRequest<'_>) -> ShapedRun {
         let size = request.font.size;
-        let advance = size * 0.5 * request.scale_x + request.letter_spacing;
+        let (before, after) = letter_spacing_sides(request.letter_spacing, request.scale_x, request.linear);
+        let advance = size * 0.5 * request.scale_x + before + after;
         let mut glyphs: Vec<ShapedGlyph> = request.text[request.range.clone()]
             .char_indices()
             .map(|(i, c)| ShapedGlyph {
@@ -114,7 +121,7 @@ impl FontBackend for FakeBackend {
                 cluster: request.range.start + i,
                 x_advance: advance,
                 y_advance: 0.0,
-                x_offset: request.letter_spacing / 2.0,
+                x_offset: before,
                 y_offset: 0.0,
                 unsafe_to_break: false,
             })

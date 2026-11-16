@@ -7,7 +7,7 @@ use super::cache::{PlanKey, RawGlyph, RawRun, RunKey, ShapeCaches};
 use super::face::Faces;
 use super::{
     FontBackend, FontInstance, FontMetrics, FontRun, FontRunRequest, ShapeCacheStats, ShapeRequest, ShapedGlyph,
-    ShapedRun,
+    ShapedRun, letter_spacing_sides,
 };
 use crate::draw::GlyphColorKind;
 use crate::font::FontCollection;
@@ -223,7 +223,11 @@ impl FontBackend for HarfrustBackend {
         let upem = self.faces.get(request.font.font).map_or(1000.0, |f| f.upem);
         let scale = request.font.size / upem;
         let sx = scale * request.scale_x;
-        let spacing = if NOT_LETTER_SPACED.contains(&&raw.script) { 0.0 } else { request.letter_spacing };
+        let (before, after) = if NOT_LETTER_SPACED.contains(&&raw.script) {
+            (0.0, 0.0)
+        } else {
+            letter_spacing_sides(request.letter_spacing, request.scale_x, request.linear)
+        };
         let mut glyphs: Vec<ShapedGlyph> = raw
             .glyphs
             .iter()
@@ -237,17 +241,18 @@ impl FontBackend for HarfrustBackend {
                 unsafe_to_break: g.unsafe_to_break,
             })
             .collect();
-        if spacing != 0.0 {
-            // Half before each cluster, half after (minikin's): its glyphs move half in, its last one carries all.
+        if before != 0.0 || after != 0.0 {
+            // Some before each cluster, the rest after (minikin's): its glyphs (a base and its marks alike) move in
+            // by what is before, its last one carries all.
             let mut i = 0;
             while i < glyphs.len() {
                 let cluster = glyphs[i].cluster;
                 let mut j = i;
                 while j < glyphs.len() && glyphs[j].cluster == cluster {
-                    glyphs[j].x_offset += spacing / 2.0;
+                    glyphs[j].x_offset += before;
                     j += 1;
                 }
-                glyphs[j - 1].x_advance += spacing;
+                glyphs[j - 1].x_advance += before + after;
                 i = j;
             }
         }

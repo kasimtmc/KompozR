@@ -23,6 +23,7 @@ fn shape(text: &str, size: f32, rtl: bool, letter_spacing: f32, scale_x: f32) ->
         features: &[],
         letter_spacing,
         scale_x,
+        linear: false,
     })
 }
 
@@ -32,6 +33,10 @@ fn the_fake_measures_as_cpps_fake_text_measurer() {
     assert!(near(FakeBackend::measure_width("abç", 16.0, 1.0, 0.0), 24.0));
     assert!(near(FakeBackend::measure_width("abç", 16.0, 2.0, 0.0), 48.0));
     assert!(near(FakeBackend::measure_width("abç", 16.0, 1.0, 1.0), 27.0));
+    // The letter spacing as still text is spaced (minikin's): stretched too, in whole pixels.
+    assert!(near(FakeBackend::measure_width("abç", 16.0, 2.0, 1.0), 54.0));
+    assert!(near(FakeBackend::measure_width("abç", 16.0, 1.0, 0.4), 24.0));
+    assert!(near(FakeBackend::measure_width("abç", 16.0, 1.0, 1.6), 30.0));
     let m = FakeBackend.metrics(&FakeBackend::instance(16.0));
     assert!(near(m.ascent, 12.8) && near(m.descent, 3.2) && near(m.leading, 4.0) && near(m.line_height(), 20.0));
     assert!(near(m.underline_position, 2.0) && near(m.underline_thickness, 16.0 / 14.0));
@@ -52,6 +57,25 @@ fn the_fake_shapes_a_glyph_a_code_point() {
     // The letter spacing half before, half after.
     assert!(run.glyphs.iter().all(|g| near(g.x_advance, 10.0) && near(g.x_offset, 1.0) && !g.unsafe_to_break));
     assert!(near(run.advance, 20.0));
+    // In whole pixels, the half before rounded down (minikin's, for still text): 3 px one before, two after; 0.4
+    // px none. Linear text keeps it as it is.
+    let run = shape("aç", 16.0, false, 3.0, 1.0);
+    assert!(run.glyphs.iter().all(|g| near(g.x_advance, 11.0) && near(g.x_offset, 1.0)));
+    assert!(shape("aç", 16.0, false, 0.4, 1.0).glyphs.iter().all(|g| near(g.x_advance, 8.0) && g.x_offset == 0.0));
+    let font = FakeBackend::instance(16.0);
+    let linear = FakeBackend.shape(&ShapeRequest {
+        text: "aç",
+        range: 0..3,
+        font: &font,
+        rtl: false,
+        script: None,
+        language: None,
+        features: &[],
+        letter_spacing: 0.4,
+        scale_x: 1.0,
+        linear: true,
+    });
+    assert!(linear.glyphs.iter().all(|g| near(g.x_advance, 8.4) && near(g.x_offset, 0.2)));
     // Right to left: in visual order, the last cluster first.
     let rtl = shape("aç", 16.0, true, 0.0, 1.0);
     assert_eq!(rtl.glyphs.iter().map(|g| g.cluster).collect::<Vec<_>>(), vec![1, 0]);
@@ -69,6 +93,7 @@ fn the_fake_shapes_a_glyph_a_code_point() {
         features: &[],
         letter_spacing: 0.0,
         scale_x: 1.0,
+        linear: false,
     });
     assert_eq!(part.glyphs.iter().map(|g| g.cluster).collect::<Vec<_>>(), vec![1, 2]);
 }

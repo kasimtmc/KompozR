@@ -64,8 +64,10 @@ pub struct FontRun {
 
 /// What to shape: `text[range]` (the whole `text` its context, which joining and kerning across the cut see) in
 /// one face, one direction and one script (None: the backend works it out), in a language (it picks localized
-/// forms), with OpenType features, `letter_spacing` px added around each cluster (half before, half after; none
-/// in cursive scripts) and advances stretched by `scale_x`.
+/// forms), with OpenType features, `letter_spacing` px added around each cluster (see [`letter_spacing_sides`];
+/// none in cursive scripts) and advances stretched by `scale_x`; `linear`: the text's positions aren't snapped to
+/// pixels (Compose's TextMotion with Linearity.Linear, Android's LINEAR_TEXT_FLAG), which keeps the letter
+/// spacing as it is instead of in whole pixels.
 #[derive(Clone, Debug)]
 pub struct ShapeRequest<'a> {
     pub text: &'a str,
@@ -77,6 +79,22 @@ pub struct ShapeRequest<'a> {
     pub features: &'a [FontFeature],
     pub letter_spacing: f32,
     pub scale_x: f32,
+    pub linear: bool,
+}
+
+/// How much room letter spacing of `letter_spacing` px puts before and after each cluster, px (minikin's
+/// LayoutCore): stretched with the text by `scale_x`, and unless the text is `linear` rounded to whole pixels, the
+/// half before rounded down (0.1 sp at density 1 is then none at all: glyphs drawn on whole pixels would otherwise
+/// gather its tenths into a pixel's jump between two letters).
+pub fn letter_spacing_sides(letter_spacing: f32, scale_x: f32, linear: bool) -> (f32, f32) {
+    let spacing = letter_spacing * scale_x;
+    if linear {
+        (spacing / 2.0, spacing / 2.0)
+    } else {
+        let spacing = spacing.round();
+        let before = (spacing / 2.0).floor();
+        (before, spacing - before)
+    }
 }
 
 /// A glyph shaped: its id, the byte offset in the request's text of the cluster it is for, its advance and offset

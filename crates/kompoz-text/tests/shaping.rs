@@ -25,6 +25,7 @@ fn fake(text: &str, size: f32, rtl: bool, letter_spacing: f32, scale_x: f32) -> 
         features: &[],
         letter_spacing,
         scale_x,
+        linear: false,
     })
 }
 
@@ -446,11 +447,122 @@ fn features_scale_and_letter_spacing_shape_as_asked() {
         features: &[],
         letter_spacing: 0.0,
         scale_x: 1.0,
+        linear: false,
     });
     assert_eq!(localized.glyphs.len(), plain.glyphs.len());
     // A size scales everything.
     let big = FontRun { range: run.range.clone(), font: FontInstance { size: 40.0, ..run.font.clone() } };
     assert!(near(shape_run(&*b, text, &big, false).advance, plain.advance * 2.0));
+}
+
+/// All of `text` (one run) shaped `spacing` px apart, stretched by `scale_x`, as linear text or still.
+fn spaced(
+    b: &dyn FontBackend,
+    text: &str,
+    run: &FontRun,
+    rtl: bool,
+    spacing: f32,
+    scale_x: f32,
+    linear: bool,
+) -> ShapedRun {
+    b.shape(&ShapeRequest {
+        text,
+        range: run.range.clone(),
+        font: &run.font,
+        rtl,
+        script: None,
+        language: None,
+        features: &[],
+        letter_spacing: spacing,
+        scale_x,
+        linear,
+    })
+}
+
+/// Whether `spaced` is `plain` spaced as minikin spaces clusters, `before` px before each and `after` after it:
+/// the same glyphs, each moved in by `before` (a cluster's marks with its base), each cluster's last glyph
+/// carrying both, its others' advances as they were.
+fn spaced_as_minikin(plain: &ShapedRun, spaced: &ShapedRun, before: f32, after: f32) -> bool {
+    let n = plain.glyphs.len();
+    let clusters = plain.glyphs.windows(2).filter(|w| w[0].cluster != w[1].cluster).count() + usize::from(n > 0);
+    spaced.glyphs.len() == n
+        && near(spaced.advance, plain.advance + (before + after) * clusters as f32)
+        && plain.glyphs.iter().zip(&spaced.glyphs).enumerate().all(|(i, (p, s))| {
+            let last_of_cluster = plain.glyphs.get(i + 1).is_none_or(|next| next.cluster != p.cluster);
+            let carried = if last_of_cluster { before + after } else { 0.0 };
+            p.id == s.id
+                && p.cluster == s.cluster
+                && near(s.x_offset, p.x_offset + before)
+                && near(s.y_offset, p.y_offset)
+                && near(s.x_advance, p.x_advance + carried)
+        })
+}
+
+#[test]
+fn letter_spacing_goes_around_clusters_in_whole_pixels_unless_linear() {
+    let r = resolver();
+    let b = r.backend();
+    let t = default_typeface(&r);
+    let one_run = |text: &str| {
+        let runs = runs(&*b, text, &t, 14.0);
+        assert_eq!(runs.len(), 1, "{text}");
+        runs.into_iter().next().unwrap()
+    };
+    // Material 3's titleSmall at density 1: 14 px, 0.1 px apart. Still text is spaced in whole pixels (minikin's,
+    // unless the text is linear), so 0.1 px is none: "Sayaç" shaped as it is without it, nothing gathering into a
+    // pixel's jump before the "ç" where its glyphs are drawn on whole pixels.
+    let title = "Sayaç";
+    let run = one_run(title);
+    let plain = shape_run(&*b, title, &run, false);
+    assert_eq!(plain.glyphs.len(), 5, "the ç one glyph, as all the others");
+    assert_eq!(spaced(&*b, title, &run, false, 0.1, 1.0, false), plain);
+    // Linear text keeps it, half before each cluster, half after.
+    assert!(spaced_as_minikin(&plain, &spaced(&*b, title, &run, false, 0.1, 1.0, true), 0.05, 0.05));
+    // 0.1 em of 14 px: 1.4 px, one whole pixel, after each cluster (the half before rounded down); 3 px: one
+    // before, two after; half a pixel is a whole one (rounded half away from zero, as C's round).
+    let cases = [(1.4, false, 0.0, 1.0), (1.4, true, 0.7, 0.7), (3.0, false, 1.0, 2.0), (0.5, false, 0.0, 1.0)];
+    for (spacing, linear, before, after) in cases {
+        let s = spaced(&*b, title, &run, false, spacing, 1.0, linear);
+        assert!(spaced_as_minikin(&plain, &s, before, after), "{spacing} {linear}: {s:?}");
+    }
+    // The spacing is stretched with the text (minikin's letterSpacing · size · scaleX), then rounded.
+    let wide = spaced(&*b, title, &run, false, 0.0, 1.5, false);
+    assert!(spaced_as_minikin(&wide, &spaced(&*b, title, &run, false, 2.0, 1.5, true), 1.5, 1.5));
+    assert!(spaced_as_minikin(&wide, &spaced(&*b, title, &run, false, 2.0, 1.5, false), 1.0, 2.0));
+    assert!(spaced_as_minikin(&wide, &spaced(&*b, title, &run, false, 0.3, 1.5, false), 0.0, 0.0));
+
+    // Decomposed, the cedilla is composed into the same glyph, one cluster with its c: spaced once.
+    let decomposed = "Sayac\u{327}";
+    let run = one_run(decomposed);
+    let composed = shape_run(&*b, decomposed, &run, false);
+    assert_eq!(glyph_ids(&composed), glyph_ids(&plain));
+    for (spacing, linear, before, after) in cases {
+        let s = spaced(&*b, decomposed, &run, false, spacing, 1.0, linear);
+        assert!(spaced_as_minikin(&composed, &s, before, after), "{decomposed:?} {spacing} {linear}: {s:?}");
+    }
+    // Turkish letters with marks, precomposed, and a letter with a mark the font has no composition for (s and
+    // an acute: two glyphs, one cluster): a cluster's mark moves with its base and adds no spacing of its own.
+    let accented = "s\u{301}";
+    let s_acute = shape_run(&*b, accented, &one_run(accented), false);
+    assert!(s_acute.glyphs.len() == 2 && s_acute.glyphs.iter().all(|g| g.cluster == 0), "{s_acute:?}");
+    for text in ["şğİ", "Iİıi", "ŞĞÜÖÇ", accented, "kas\u{301}a"] {
+        let run = one_run(text);
+        let plain = shape_run(&*b, text, &run, false);
+        for (spacing, linear, before, after) in cases {
+            let s = spaced(&*b, text, &run, false, spacing, 1.0, linear);
+            assert!(spaced_as_minikin(&plain, &s, before, after), "{text:?} {spacing} {linear}: {s:?}");
+        }
+    }
+
+    // Scripts whose letters join or hang from a line aren't spaced at all (minikin's isScriptOkForLetterspacing):
+    // Arabic (a harakah with its letter too), Devanagari (a vowel sign reordered before its consonant).
+    for (text, rtl) in [("بب ب", true), ("بَت", true), ("कि नमस्ते", false)] {
+        let run = one_run(text);
+        let plain = shape_run(&*b, text, &run, rtl);
+        for (spacing, linear) in [(1.4, false), (3.0, false), (1.4, true)] {
+            assert_eq!(spaced(&*b, text, &run, rtl, spacing, 1.0, linear), plain, "{text} {spacing} {linear}");
+        }
+    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! The paragraph engine over real fonts (the test fonts through the harfrust backend): Kompoz Test laying out as
 //! the fake does, Arabic joined and right to left (its carets and selection where its letters are drawn, a word
 //! cut across lines shaped again), Devanagari reordered and kept whole, emoji in their color font, lines growing
-//! for the fallback fonts on them, an Arabic line ellipsized at its left.
+//! for the fallback fonts on them, an Arabic line ellipsized at its left, a title letter spaced in whole pixels.
 
 mod common;
 
@@ -188,4 +188,53 @@ fn an_arabic_line_is_ellipsized_at_its_left() {
     assert!(drawn.iter().any(|d| d.0.ends_with('…') && d.3));
     // At the paragraph's end (its left): the ellipsis is the leftmost glyph.
     assert!(r.get_line_left(0) >= -0.5 && r.get_line_right(0) <= (full.size.width / 2) as f32 + 0.5);
+}
+
+/// Each drawn glyph's x (its run's baseline's and its own), in order.
+fn glyph_xs(r: &TextLayoutResult) -> Vec<f32> {
+    r.multi_paragraph
+        .paint_ops(&TextPaintStyle::default())
+        .into_iter()
+        .filter_map(|op| match op {
+            TextPaintOp::Text { text, .. } => Some(
+                text.glyphs.iter().flat_map(|g| g.glyphs.iter().map(|g| text.baseline.x + g.x)).collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+#[test]
+fn a_title_letter_spaced_a_tenth_of_a_pixel_is_drawn_where_it_is_without_it() {
+    // Material 3's titleSmall at density 1: 14 sp, 0.1 sp apart. Still text is spaced in whole pixels (minikin's,
+    // unless the text is linear), so 0.1 px is none. Spaced by the tenths, its glyphs drawn on whole pixels jumped
+    // a pixel apart where the tenths added up past a half (in Noto Sans Medium before the "ç": at 31.56 after the
+    // "a" at 23.45, drawn at 32 and 23, where without the spacing they are at 31.11 and 23.1, drawn at 31 and 23).
+    let title = |spacing: f32, motion: TextMotion| TextStyle {
+        letter_spacing: spacing.sp(),
+        font_weight: Some(FontWeight::Medium),
+        text_motion: Some(motion),
+        ..style(14.0)
+    };
+    let lay_title =
+        |style: TextStyle| lay(resolver(), "Sayaç", style, Constraints::Infinity, TextOverflow::Ellipsis, 1);
+    let plain = lay_title(title(0.0, TextMotion::Static));
+    let xs = glyph_xs(&plain);
+    assert_eq!(xs.len(), 5);
+    let spaced = lay_title(title(0.1, TextMotion::Static));
+    assert_eq!(glyph_xs(&spaced), xs);
+    assert!(near(spaced.get_horizontal_position(4, true), plain.get_horizontal_position(4, true)));
+    // Compose still measures it as letter spaced: half a pixel wider (so StaticLayout won't wrap it).
+    let widest = |r: &TextLayoutResult| r.multi_paragraph.intrinsics().max_intrinsic_width();
+    assert!(near(widest(&spaced), widest(&plain) + 0.5));
+    // Linear text (TextMotion.Animated) keeps the tenths: half of one before each letter, half after.
+    let animated = glyph_xs(&lay_title(title(0.1, TextMotion::Animated)));
+    assert!(
+        xs.iter().zip(&animated).enumerate().all(|(i, (x, a))| near(*a, x + 0.05 + 0.1 * i as f32)),
+        "{animated:?}"
+    );
+    // 0.1 em (1.4 px): one whole pixel after each letter.
+    let em = glyph_xs(&lay_title(TextStyle { letter_spacing: 0.1.em(), ..title(0.0, TextMotion::Static) }));
+    assert!(xs.iter().zip(&em).enumerate().all(|(i, (x, e))| near(*e, x + i as f32)), "{em:?}");
 }

@@ -93,6 +93,7 @@ pub fn shape_with(
         features,
         letter_spacing,
         scale_x,
+        linear: false,
     })
 }
 
