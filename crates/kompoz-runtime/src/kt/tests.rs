@@ -468,6 +468,6 @@ fn numbers_and_math() {
     assert_eq!(sqrt(16f32), 4.0f32);
     assert!((sin(PI / 2.0) - 1.0).abs() < 1e-12);
     assert_eq!(sign(-3.0f32), -1.0);
-    assert_eq!(2f32.pow(3.0), 8.0);
+    assert!((2f32.pow(3.0) - 8.0).abs() < 1e-5); // (Miri adds its noise to powf)
     assert_eq!(to_char(65), 'A');
 }
