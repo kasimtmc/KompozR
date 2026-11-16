@@ -10,7 +10,7 @@ use crate::style::{
     TextGeometricTransform, TextIndent, TextMotion,
 };
 use kompoz_graphics::{Brush, Color, DrawStyle, LayoutDirection, Shadow, TextUnit};
-use kompoz_runtime::named;
+use kompoz_runtime::{KotlinProperties, named};
 use std::fmt;
 
 /// A text's whole style (Compose's TextStyle): what a [`SpanStyle`](struct@SpanStyle) gives a stretch of text
@@ -19,7 +19,7 @@ use std::fmt;
 /// end Compose's default ([`resolve_defaults`](TextStyle::resolve_defaults)). What paints it is `color`, or
 /// `brush` at `alpha`, as a span style's. Write one as `TextStyle { font_size: 20.sp(), ..TextStyle::Default }`,
 /// or by name in a kompozable body: `TextStyle(font_size = 20.sp())`.
-#[derive(Clone)]
+#[derive(Clone, KotlinProperties)]
 pub struct TextStyle {
     pub color: Color,
     pub brush: Option<Brush>,

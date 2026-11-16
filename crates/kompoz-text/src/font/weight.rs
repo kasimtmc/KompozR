@@ -3,7 +3,7 @@
 use std::fmt;
 
 /// How heavy glyphs are, 1 to 1000 (Compose's FontWeight): 400 regular, 700 bold.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, kompoz_runtime::KotlinProperties)]
 pub struct FontWeight {
     pub weight: i32,
 }

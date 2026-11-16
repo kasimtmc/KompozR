@@ -28,6 +28,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends libxkbcommon0 libxkbcommon-x11-0 xkb-data libx11-data dbus \
             curl
       - run: cargo fmt --all --check
+      # The API index (the macros' api-index.txt, the Kotlin syntax's index/generated.rs) as the sources say.
+      - run: cargo xtask kotlin-index --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
         env:

@@ -16,6 +16,7 @@ pub mod __private {
 mod collections;
 mod composer;
 mod derived;
+pub mod kt;
 mod local;
 mod movable;
 mod private;
@@ -29,7 +30,7 @@ mod state;
 pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
 pub use composer::{Composition, Content, Node, RecompositionStats, RememberObserver};
 pub use derived::{DerivedState, derived_state_of, derived_state_of_with_policy};
-pub use kompoz_macros::{kompozable, kompozable_block, kompozable_lambda, named};
+pub use kompoz_macros::{KotlinProperties, kompozable, kompozable_block, kompozable_lambda, named};
 pub use local::{
     KompozitionLocal, KompozitionLocalContext, KompozitionLocalProvider, KompozitionLocalProviderContext,
     ProvidedValue, current_kompozition_local_context, current_kompozition_local_context_unobserved,

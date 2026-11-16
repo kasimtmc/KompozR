@@ -115,6 +115,11 @@ impl<T: Clone + 'static> DerivedState<T> {
     pub fn peek(&self) -> T {
         self.inner.read(false).clone()
     }
+
+    /// Its value (Compose's `state.value`): the same as [`get`](DerivedState::get).
+    pub fn value(&self) -> T {
+        self.get()
+    }
 }
 
 impl<T> PartialEq for DerivedState<T> {

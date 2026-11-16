@@ -103,6 +103,81 @@ pub struct Color {
     value: u64,
 }
 
+/// Compose's `Color(…)`, its overloads by their arguments: `Color(0xFF6200EE)` (a `Long`: ARGB in its low 32 bits),
+/// `Color(argb: Int)`, `Color((red, green, blue))` and `Color((red, green, blue, alpha))` of `Int`s (0..255, masked)
+/// or of `Float`s (0..1, kept within, in sRGB), `Color((red, green, blue, alpha, color_space))`; a `u32` is ARGB, a
+/// `u64` the packed bits (Compose's `Color(value: ULong)`).
+pub fn Color(args: impl ColorArgs) -> Color {
+    args.color()
+}
+
+/// What [`Color()`](fn@Color) is given: Kotlin's arguments, one as itself, several as a tuple, each overload by its
+/// types.
+pub trait ColorArgs {
+    fn color(self) -> Color;
+}
+/// Kotlin: `Color(color: Int)`
+impl ColorArgs for i32 {
+    fn color(self) -> Color {
+        Color::from_argb(self as u32)
+    }
+}
+/// Kotlin: `Color(color: Long)`
+impl ColorArgs for i64 {
+    fn color(self) -> Color {
+        Color::from_argb(self as u32)
+    }
+}
+/// 0xAARRGGBB (Rust's, as [`Color::from_argb`]).
+impl ColorArgs for u32 {
+    fn color(self) -> Color {
+        Color::from_argb(self)
+    }
+}
+/// Kotlin: `Color(value: ULong)`
+impl ColorArgs for u64 {
+    fn color(self) -> Color {
+        Color::from_value(self)
+    }
+}
+/// Kotlin: `Color(red: Int, green: Int, blue: Int)`
+impl ColorArgs for (i32, i32, i32) {
+    fn color(self) -> Color {
+        (self.0, self.1, self.2, 0xFF).color()
+    }
+}
+/// Kotlin: `Color(red: Int, green: Int, blue: Int, alpha: Int)`
+impl ColorArgs for (i32, i32, i32, i32) {
+    fn color(self) -> Color {
+        let (r, g, b, a) = self;
+        Color::from_argb(((a & 0xFF) << 24 | (r & 0xFF) << 16 | (g & 0xFF) << 8 | (b & 0xFF)) as u32)
+    }
+}
+/// Kotlin: `Color(red: Float, green: Float, blue: Float)`
+impl ColorArgs for (f32, f32, f32) {
+    fn color(self) -> Color {
+        Color::new(self.0, self.1, self.2, 1.0)
+    }
+}
+/// Kotlin: `Color(red: Float, green: Float, blue: Float, alpha: Float)`
+impl ColorArgs for (f32, f32, f32, f32) {
+    fn color(self) -> Color {
+        Color::new(self.0, self.1, self.2, self.3)
+    }
+}
+/// Kotlin: `Color(red: Float, green: Float, blue: Float, alpha: Float, colorSpace: ColorSpace)`
+impl<S: ColorSpace> ColorArgs for (f32, f32, f32, f32, &S) {
+    fn color(self) -> Color {
+        Color::new_in(self.0, self.1, self.2, self.3, self.4)
+    }
+}
+/// Kotlin: `Color(red: Float, green: Float, blue: Float, alpha: Float, colorSpace: ColorSpace)`
+impl ColorArgs for (f32, f32, f32, f32, &dyn ColorSpace) {
+    fn color(self) -> Color {
+        Color::new_in(self.0, self.1, self.2, self.3, self.4)
+    }
+}
+
 impl Color {
     pub const Transparent: Color = Color::from_argb(0x00000000);
     pub const Black: Color = Color::from_argb(0xFF000000);

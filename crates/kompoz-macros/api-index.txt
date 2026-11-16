@@ -1,0 +1,308 @@
+# KompozR's API index: the #[named] and #[kompozable] functions and the #[named] methods with defaults.
+# Written by `cargo xtask kotlin-index` (don't edit by hand); read by kompoz-macros and kompoz-kotlin.
+# The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one.
+# <scope> <kind> <name> <parameters> <owner>
+* kompozable BackHandler dr crates/kompoz-ui/src/back.rs
+* kompozable Bar rrr crates/kompoz-platform/src/app/title_bar.rs
+* kompozable BasicText rdddddddddd crates/kompoz-foundation/src/text/basic_text.rs
+* kompozable BitmapImage rrdddddd crates/kompoz-foundation/src/image.rs
+* fn BitmapPainter rddd crates/kompoz-ui/src/draw/painter.rs
+* kompozable Box dddd crates/kompoz-foundation/src/layout/box_.rs
+kompoz-runtime/macros kompozable Boxed dr crates/kompoz-runtime/tests/macros.rs
+kompoz-runtime/macros kompozable Button rdr crates/kompoz-runtime/tests/macros.rs
+kompoz-ui/semantics kompozable Button rr crates/kompoz-ui/tests/semantics.rs
+* kompozable Canvas rdr crates/kompoz-foundation/src/canvas.rs
+kompoz-foundation/layout kompozable Child r crates/kompoz-foundation/tests/layout.rs
+kompoz-runtime/runtime kompozable CityText r crates/kompoz-runtime/tests/runtime.rs
+* kompozable Column dddr crates/kompoz-foundation/src/layout/row_column.rs
+kompoz-coroutines/coroutines kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
+kompoz-runtime/macros kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
+kompoz-runtime/runtime kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
+* fn Constraints dddd crates/kompoz-graphics/src/constraints.rs
+kompoz-runtime/runtime kompozable ContextUser - crates/kompoz-runtime/tests/runtime.rs
+kompoz-ui/tree kompozable Counted rr crates/kompoz-ui/tests/tree.rs
+counter/counter kompozable Counter - examples/counter/src/main.rs
+kompoz-platform/app_core kompozable Counter r crates/kompoz-platform/tests/app_core.rs
+kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/tests/wayland_display.rs
+kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
+kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runtime.rs
+* kompozable Dialog rdr crates/kompoz-ui/src/window/dialog.rs
+* kompozable DisableSelection r crates/kompoz-foundation/src/text/selection/container.rs
+* kompozable DisposableEffect rr crates/kompoz-runtime/src/remember.rs
+kompoz-platform/wayland_display kompozable Editor - crates/kompoz-platform/tests/wayland_display.rs
+kompoz-runtime/macros kompozable Equal rr crates/kompoz-runtime/tests/macros.rs
+kompoz-coroutines/coroutines kompozable FlowReader r crates/kompoz-coroutines/tests/coroutines.rs
+* fn Font rdddd crates/kompoz-text/src/font/font.rs
+kompoz-ui/tree kompozable GapLeaf - crates/kompoz-ui/tests/tree.rs
+kompoz-runtime/macros kompozable GradientCard r crates/kompoz-runtime/tests/macros.rs
+* kompozable Group dddddddddr crates/kompoz-ui/src/draw/vector.rs
+* kompozable HandlePopup rrr crates/kompoz-foundation/src/text/selection/handles.rs
+* kompozable Image rrddddd crates/kompoz-foundation/src/image.rs
+* fn ImageBitmap rrddd crates/kompoz-graphics/src/image/bitmap.rs
+* kompozable InlineChildren rr crates/kompoz-foundation/src/text/inline_content.rs
+kompoz-foundation/layout kompozable Intrinsics rrr crates/kompoz-foundation/tests/layout.rs
+kompoz-foundation/layout_modifiers kompozable Intrinsics rrr crates/kompoz-foundation/tests/layout_modifiers.rs
+kompoz-foundation/clickable kompozable Item r crates/kompoz-foundation/tests/clickable.rs
+kompoz-runtime/runtime kompozable Item rr crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/macros kompozable Items rdr crates/kompoz-runtime/tests/macros.rs
+kompoz-runtime/runtime kompozable Items r crates/kompoz-runtime/tests/runtime.rs
+kompoz-ui/layouts kompozable Items r crates/kompoz-ui/tests/layouts.rs
+kompoz-runtime/runtime kompozable Keeper - crates/kompoz-runtime/tests/runtime.rs
+* kompozable KompozitionLocalProvider rr crates/kompoz-runtime/src/local.rs
+* kompozable KompozitionLocalProviderContext rr crates/kompoz-runtime/src/local.rs
+kompoz-runtime/macros kompozable Label rdd crates/kompoz-runtime/tests/macros.rs
+* kompozable LaunchedEffect rr crates/kompoz-coroutines/src/compose.rs
+* kompozable Layout ddr crates/kompoz-ui/src/layout/composables.rs
+* kompozable LayoutWithLinksAndInlineContent rrrrrrr crates/kompoz-foundation/src/text/basic_text.rs
+kompoz-ui/tree kompozable Leaf rrd crates/kompoz-ui/tests/tree.rs
+kompoz-ui/ui kompozable Leaf rrrd crates/kompoz-ui/tests/ui.rs
+* fn LineHeightStyle rrd crates/kompoz-text/src/style/line_height_style.rs
+kompoz-foundation/layout kompozable LineLeaf rrr crates/kompoz-foundation/tests/layout.rs
+* kompozable LinkNode rrr crates/kompoz-foundation/src/text/link_scope.rs
+* kompozable LinksComposables r crates/kompoz-foundation/src/text/link_scope.rs
+kompoz-runtime/macros kompozable Local d crates/kompoz-runtime/tests/macros.rs
+kompoz-foundation/clickable kompozable LogInteractions rr crates/kompoz-foundation/tests/clickable.rs
+kompoz-runtime/runtime kompozable Middle - crates/kompoz-runtime/tests/runtime.rs
+* kompozable MultiMeasureLayout drr crates/kompoz-ui/src/layout/composables.rs
+* fn PaddingValues dddd crates/kompoz-foundation/src/layout/padding.rs
+* fn Paragraph rrrrrdddd crates/kompoz-text/src/paragraph/mod.rs
+* fn ParagraphStyle ddddddddd crates/kompoz-text/src/paragraph_style.rs
+* kompozable Path rddddddddddddd crates/kompoz-ui/src/draw/vector.rs
+kompoz-platform/dbus kompozable Plus r crates/kompoz-platform/tests/dbus.rs
+* kompozable Popup dddddr crates/kompoz-ui/src/window/popup.rs
+* kompozable PredictiveBackHandler dr crates/kompoz-ui/src/back.rs
+kompoz-runtime/macros kompozable Provide rr crates/kompoz-runtime/tests/macros.rs
+* kompozable ProvideSaveableStateRegistry rr crates/kompoz-runtime/src/saveable.rs
+kompoz-runtime/runtime kompozable Reader - crates/kompoz-runtime/tests/runtime.rs
+* kompozable RegisterBackCallback r crates/kompoz-ui/src/back.rs
+kompoz-runtime/macros kompozable Remembering r crates/kompoz-runtime/tests/macros.rs
+* kompozable RenderVectorGroup rd crates/kompoz-ui/src/draw/vector.rs
+kompoz-ui/focus kompozable RestorableRow r crates/kompoz-ui/tests/focus.rs
+kompoz-runtime/macros fn RoundedCornerShape r crates/kompoz-runtime/tests/macros.rs
+* kompozable Row dddr crates/kompoz-foundation/src/layout/row_column.rs
+kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
+kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/macros.rs
+* kompozable SelectionContainer dr crates/kompoz-foundation/src/text/selection/container.rs
+* kompozable SelectionContainerWithSelection rrdr crates/kompoz-foundation/src/text/selection/container.rs
+* kompozable SelectionContainerWithState rdr crates/kompoz-foundation/src/text/selection/container.rs
+* kompozable SelectionHandle rrrrdrr crates/kompoz-foundation/src/text/selection/handles.rs
+* kompozable SelectionHandleIcon rrrr crates/kompoz-foundation/src/text/selection/handles.rs
+kompoz-runtime/runtime kompozable Shown r crates/kompoz-runtime/tests/runtime.rs
+* kompozable SideEffect r crates/kompoz-runtime/src/remember.rs
+* kompozable SimpleLayout dr crates/kompoz-foundation/src/text/selection/container.rs
+* kompozable Spacer r crates/kompoz-foundation/src/layout/spacer.rs
+* fn SpanStyle dddddddddddddddddd crates/kompoz-text/src/span_style.rs
+kompoz-runtime/runtime kompozable SpeedReader - crates/kompoz-runtime/tests/runtime.rs
+kompoz-ui/tree kompozable Stack dr crates/kompoz-ui/tests/tree.rs
+kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
+kompoz-runtime/runtime kompozable StaticView - crates/kompoz-runtime/tests/runtime.rs
+* fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
+* fn Stroke ddddd crates/kompoz-graphics/src/draw_style.rs
+* kompozable StyleAnnotation rrr crates/kompoz-foundation/src/text/link_scope.rs
+kompoz-ui/windows kompozable Tappable rrrr crates/kompoz-ui/tests/windows.rs
+kompoz-ui/focus kompozable Target rrrr crates/kompoz-ui/tests/focus.rs
+* kompozable Text rdd crates/kompoz-test/src/text.rs
+kompoz-coroutines/coroutines kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
+kompoz-foundation/selection kompozable Text rdd crates/kompoz-foundation/tests/selection.rs
+kompoz-runtime/macros kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
+kompoz-runtime/runtime kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
+* fn TextFieldValue ddd crates/kompoz-text/src/input.rs
+* fn TextGeometricTransform dd crates/kompoz-text/src/style/mod.rs
+* fn TextIndent dd crates/kompoz-text/src/style/mod.rs
+* fn TextLinkStyles dddd crates/kompoz-text/src/link.rs
+* fn TextStyle dddddddddddddddddddddddddd crates/kompoz-text/src/text_style.rs
+kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros.rs
+kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
+* kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
+kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-foundation/tests/layout_modifiers.rs
+* kompozable WindowButtonView rrrr crates/kompoz-platform/src/app/title_bar.rs
+* kompozable WindowButtons rrrrr crates/kompoz-platform/src/app/title_bar.rs
+* kompozable WindowFrame rrrr crates/kompoz-platform/src/app/title_bar.rs
+* fn WindowInsets dddd crates/kompoz-foundation/src/layout/window_insets.rs
+kompoz-runtime/macros kompozable WithContent rr crates/kompoz-runtime/tests/macros.rs
+kompoz-foundation/selection kompozable WithToolbar rr crates/kompoz-foundation/tests/selection.rs
+* method absolute_offset dd crates/kompoz-foundation/src/layout/offset.rs Modifier as OffsetModifiers
+* method absolute_padding dddd crates/kompoz-foundation/src/layout/padding.rs Modifier as PaddingModifiers
+kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
+* method add_group ddddddddd crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method add_path rddddddddddddd crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method animate_move_by rd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method animate_move_to rd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method append_inline_content rd crates/kompoz-text/src/annotated_string.rs AnnotatedStringBuilder
+* method aspect_ratio rd crates/kompoz-foundation/src/layout/aspect_ratio.rs Modifier as AspectRatioModifiers
+* method background rd crates/kompoz-foundation/src/background.rs Modifier as BackgroundModifiers
+kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs Modifier
+* method background_brush rdd crates/kompoz-foundation/src/background.rs Modifier as BackgroundModifiers
+* method blur rdd crates/kompoz-ui/src/draw/modifiers.rs Modifier
+* method blur_spec rddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
+* method blur_xy rrdd crates/kompoz-ui/src/draw/modifiers.rs Modifier
+* method border rrd crates/kompoz-foundation/src/border.rs Modifier as BorderModifiers
+* method border_stroke rd crates/kompoz-foundation/src/border.rs Modifier as BorderModifiers
+* method bring_into_view d crates/kompoz-foundation/src/relocation.rs BringIntoViewRequester
+* method clear_text_substitution dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method click d crates/kompoz-test/src/input.rs TouchInjectionScope
+* method click dd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method clickable ddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method clickable_indication rrdddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method clip_path rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method clip_rect ddddd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method collapse dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method combined_clickable ddddddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method combined_clickable_indication rrdddddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method copy dd crates/kompoz-graphics/src/brush.rs BorderStroke
+* method copy ddd crates/kompoz-text/src/input.rs TextFieldValue
+* method copy dddd crates/kompoz-graphics/src/color.rs Color
+* method copy dddd crates/kompoz-graphics/src/constraints.rs Constraints
+* method copy dddd crates/kompoz-graphics/src/shape.rs CornerBasedShape
+* method copy ddddddddd crates/kompoz-text/src/paragraph_style.rs ParagraphStyle
+* method copy dddddddddddddddddd crates/kompoz-text/src/span_style.rs SpanStyle
+* method copy dddddddddddddddddddddddddd crates/kompoz-text/src/text_style.rs TextStyle
+kompoz-runtime/macros method copy dddd crates/kompoz-runtime/tests/macros.rs Color
+* method copy_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method cut_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method default_min_size dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* kompozable derived_media_query r crates/kompoz-ui/src/media_query.rs
+* method dismiss dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method double_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method double_click dd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method drag_and_drop rrdd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method draw_arc rrrrdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_circle rdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_image rddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_image_rect rddddddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_image_rect rddddr crates/kompoz-ui/src/draw/canvas.rs Canvas
+* method draw_line rrrdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_outline rrdddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_oval rdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_path rrdddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_points rrrdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_rect rdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_round_rect rddddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
+* method draw_text rddddddd crates/kompoz-ui/src/draw/text.rs DrawScope
+* method draw_text_brush rrdddddd crates/kompoz-ui/src/draw/text.rs DrawScope
+* method draw_text_measurer rrdddddddd crates/kompoz-ui/src/draw/text.rs DrawScope
+kompoz-runtime/runtime kompozable effect rrr crates/kompoz-runtime/tests/runtime.rs
+* method enter d crates/kompoz-test/src/input.rs MouseInjectionScope
+* method exit d crates/kompoz-test/src/input.rs MouseInjectionScope
+* method expand dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method fill_max_height d crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+kompoz-runtime/macros method fill_max_height d crates/kompoz-runtime/tests/macros.rs Modifier
+* method fill_max_size d crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method fill_max_width d crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
+* method focus_restorer d crates/kompoz-ui/src/focus/restorer.rs Modifier
+* method focusable dd crates/kompoz-foundation/src/focusable.rs Modifier as FocusableModifiers
+* method get_text_layout_result dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method graphics_layer dddddddddddddddddddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
+* method group dddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method height_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method hoverable rd crates/kompoz-foundation/src/hoverable.rs Modifier as HoverableModifiers
+* method insert_text_at_cursor dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method inset_hv dd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method layout rrddr crates/kompoz-ui/src/layout/measure.rs MeasureScope
+* method layout_with_ruler_provider rrrrdr crates/kompoz-ui/src/layout/measure.rs MeasureScope
+* method long_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method long_click dd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method magnifier rddddddd crates/kompoz-foundation/src/magnifier.rs Modifier as MagnifierModifiers
+* method measure rdddddddddd crates/kompoz-text/src/text_measurer.rs TextMeasurer
+* method nested_scroll rd crates/kompoz-ui/src/input/nested_scroll.rs Modifier
+* method offset dd crates/kompoz-foundation/src/layout/offset.rs Modifier as OffsetModifiers
+* method on_all_nodes rd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_all_nodes_with_content_description rddd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_all_nodes_with_tag rd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_all_nodes_with_text rddd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_click dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method on_fill_data dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method on_first_visible dddr crates/kompoz-ui/src/layout/visibility.rs Modifier
+* method on_ime_action rdr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method on_layout_rect_changed ddr crates/kompoz-ui/src/layout/visibility.rs Modifier
+* method on_long_click dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method on_node rd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_node_with_content_description rddd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_node_with_tag rd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_node_with_text rddd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_pointer_event rdr crates/kompoz-ui/src/input/on_pointer_event.rs Modifier
+* method on_visibility_changed dddr crates/kompoz-ui/src/layout/visibility.rs Modifier
+* method padding_from rdd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
+* method padding_from_baseline dd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
+* method padding_from_baseline_sp dd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
+* method padding_from_sp rdd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
+* method padding_hv dd crates/kompoz-foundation/src/layout/padding.rs Modifier as PaddingModifiers
+* method padding_sides dddd crates/kompoz-foundation/src/layout/padding.rs Modifier as PaddingModifiers
+kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macros.rs Modifier as LayoutModifiers
+* method page_down dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method page_left dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method page_right dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method page_up dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method paint rddddd crates/kompoz-ui/src/draw/painter.rs Modifier
+* method paste_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method path ddddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method pinch rrrrd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method place rrrd crates/kompoz-ui/src/layout/measure.rs PlacementScope
+* method place_relative rrrd crates/kompoz-ui/src/layout/measure.rs PlacementScope
+* method place_relative_with_layer rrrdr crates/kompoz-ui/src/layout/measure.rs PlacementScope
+* method place_with_layer rrrdr crates/kompoz-ui/src/layout/measure.rs PlacementScope
+* method pointer_hover_icon rd crates/kompoz-ui/src/input/hover_icon.rs Modifier
+* method press d crates/kompoz-test/src/input.rs MouseInjectionScope
+* method press_key rd crates/kompoz-test/src/input.rs KeyInjectionScope
+* kompozable produce_state rrr crates/kompoz-coroutines/src/compose.rs
+* method progress_semantics rdd crates/kompoz-foundation/src/progress_semantics.rs Modifier as ProgressSemanticsModifiers
+* method read_pixels rdddddd crates/kompoz-graphics/src/image/bitmap.rs ImageBitmap
+* method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs ContentDrawScope
+* method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs DrawScope
+* method release d crates/kompoz-test/src/input.rs MouseInjectionScope
+* kompozable remember_graphics_layer - crates/kompoz-ui/src/draw/graphics_layer.rs
+* kompozable remember_on_text_layout r crates/kompoz-foundation/src/text/basic_text.rs
+* kompozable remember_selection_controller - crates/kompoz-foundation/src/text/basic_text.rs
+* kompozable remember_selection_state - crates/kompoz-foundation/src/text/selection/state.rs
+* kompozable remember_text_measurer d crates/kompoz-ui/src/text.rs
+* kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
+* kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
+* method request_focus d crates/kompoz-ui/src/focus/requester.rs FocusRequester
+* method request_focus dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method required_height_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method required_size_in dddd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method required_width_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method right_click d crates/kompoz-test/src/input.rs MouseInjectionScope
+* method rotate rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method rotate_rad rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tests/layout_modifiers.rs
+* method scale rrd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method scale_uniform rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method scroll rd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method scroll_by dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method scroll_to_index dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method selectable rdddr crates/kompoz-foundation/src/selection/selectable.rs Modifier as SelectableModifiers
+* method selectable_indication rrrddr crates/kompoz-foundation/src/selection/selectable.rs Modifier as SelectableModifiers
+* method semantics dr crates/kompoz-ui/src/semantics/modifier.rs Modifier
+* method set_progress dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method set_selection dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method set_text_action dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method set_text_substitution_action dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method shadow rdddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
+* method show_text_substitution dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+kompoz-runtime/macros method size d crates/kompoz-runtime/tests/macros.rs Modifier as OtherModifiers
+kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modifier as LayoutModifiers
+* method size_in dddd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method smooth_scroll rdd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method stylus_hover_icon rdd crates/kompoz-ui/src/input/hover_icon.rs Modifier
+* method swipe rrd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method swipe_down ddd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method swipe_left ddd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method swipe_right ddd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method swipe_up ddd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method to_pixel_map dddd crates/kompoz-graphics/src/image/bitmap.rs ImageBitmap
+* method toggleable rdddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
+* method toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
+kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macros.rs
+* method translate dd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method tri_state_toggleable rdddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
+* method tri_state_toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
+* method triple_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method weight rd crates/kompoz-foundation/src/layout/scope.rs Modifier as LayoutScopeModifiers
+* method width_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method wrap_content_height dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method wrap_content_size dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method wrap_content_width dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers

@@ -78,6 +78,27 @@ impl<T: Clone + Send + Sync + 'static> MutableState<T> {
         self.cell.set(value);
     }
 
+    /// Its value (Compose's `state.value`, a read that subscribes): the same as [`get`](MutableState::get).
+    pub fn value(&self) -> T {
+        self.get()
+    }
+
+    /// `state.value = v` (Compose's): the same as [`set`](MutableState::set).
+    pub fn set_value(&self, value: T) {
+        self.set(value);
+    }
+
+    /// `val (value, setValue) = state`'s first part (Compose's `component1`): its value.
+    pub fn component1(&self) -> T {
+        self.get()
+    }
+
+    /// `val (value, setValue) = state`'s second part (Compose's `component2`): what sets it.
+    pub fn component2(&self) -> impl Fn(T) + 'static {
+        let state = self.clone();
+        move |value| state.set(value)
+    }
+
     /// Changes the value in place: `todos.update(|list| list.push(todo))`.
     pub fn update(&self, mutate: impl FnOnce(&mut T)) {
         self.cell.update(mutate);
@@ -185,6 +206,14 @@ impl<T: Clone + 'static> State<T> {
     /// Without subscribing.
     pub fn peek(&self) -> T {
         read_with(&*self.source, false, T::clone)
+    }
+    /// Its value (Compose's `state.value`): the same as [`get`](State::get).
+    pub fn value(&self) -> T {
+        self.get()
+    }
+    /// Who it is: its source's identity.
+    pub(crate) fn identity(&self) -> *const () {
+        self.source.identity()
     }
 }
 

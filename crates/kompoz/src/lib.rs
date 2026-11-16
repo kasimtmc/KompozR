@@ -28,6 +28,8 @@ pub use kompoz_gpu as gpu;
 pub use kompoz_graphics as graphics;
 pub use kompoz_platform as platform;
 pub use kompoz_runtime as runtime;
+/// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
+pub use kompoz_runtime::kt;
 #[cfg(feature = "test")]
 pub use kompoz_test as test;
 pub use kompoz_text as text;

@@ -30,6 +30,14 @@ impl<T: Clone + Send + Sync + 'static> SnapshotStateList<T> {
     pub fn len(&self) -> usize {
         self.with(|v| v.len())
     }
+    /// Runs `f` with the items, without subscribing the running composable.
+    pub(crate) fn peek_with<R>(&self, f: impl FnOnce(&[T]) -> R) -> R {
+        self.state.peek_with(|v| f(v))
+    }
+    /// Who it is (the state behind it).
+    pub(crate) fn identity(&self) -> *const () {
+        crate::StateSource::identity(&self.state)
+    }
     pub fn is_empty(&self) -> bool {
         self.with(|v| v.is_empty())
     }
@@ -97,6 +105,14 @@ impl<K: Ord + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static> S
 
     pub fn with<R>(&self, f: impl FnOnce(&BTreeMap<K, V>) -> R) -> R {
         self.state.with(f)
+    }
+    /// Runs `f` with the entries, without subscribing the running composable.
+    pub(crate) fn peek_with<R>(&self, f: impl FnOnce(&BTreeMap<K, V>) -> R) -> R {
+        self.state.peek_with(f)
+    }
+    /// Who it is (the state behind it).
+    pub(crate) fn identity(&self) -> *const () {
+        crate::StateSource::identity(&self.state)
     }
     /// The entries (a copy).
     pub fn to_map(&self) -> BTreeMap<K, V> {

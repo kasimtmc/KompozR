@@ -1,0 +1,20 @@
+error: kompoz: KotlinProperties is for a struct with named fields (a tuple struct's or an enum's have no Kotlin property names)
+  --> tests/ui/kotlin_property_collision.rs:18:12
+   |
+18 | pub struct Pair(pub i32, pub i32);
+   |            ^^^^
+
+error: kompoz: #[kotlin(…)] here takes `set`, `ref` or `skip`
+  --> tests/ui/kotlin_property_collision.rs:22:14
+   |
+22 |     #[kotlin(get)]
+   |              ^^^
+
+error[E0592]: duplicate definitions with name `value`
+  --> tests/ui/kotlin_property_collision.rs:7:5
+   |
+ 7 |     pub value: f32,
+   |     ^^^^^^^^^^^^^^ duplicate definitions for `value`
+...
+11 |     pub fn value(&self) -> f32 {
+   |     -------------------------- other definition for `value`

@@ -19,6 +19,7 @@
 pub mod ast;
 pub mod codegen;
 pub mod diag;
+pub mod index;
 pub mod lexer;
 pub mod parser;
 pub mod pos;

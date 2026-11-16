@@ -133,7 +133,7 @@ pub fn lerp_text_foreground_style(
 /// around it. What paints it is `color`, or `brush` at `alpha` (a brush wins over a color; a solid color brush is
 /// that color; `alpha` NaN is the brush's own) — [`foreground`](SpanStyle::foreground) is what they come to, and
 /// what styles compare by.
-#[derive(Clone)]
+#[derive(Clone, kompoz_runtime::KotlinProperties)]
 pub struct SpanStyle {
     pub color: Color,
     pub brush: Option<Brush>,

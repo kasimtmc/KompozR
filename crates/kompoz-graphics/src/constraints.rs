@@ -2,14 +2,14 @@
 //! itself to, and what text is laid out in.
 
 use crate::geometry::IntSize;
-use kompoz_runtime::named;
+use kompoz_runtime::{KotlinProperties, named};
 use std::fmt;
 
 /// The range of sizes a layout may measure itself to, in whole pixels (Compose's Constraints): a width from
 /// `min_width` to `max_width` and a height from `min_height` to `max_height`; a max of [`Constraints::Infinity`]
 /// leaves that side unbounded. Compose packs the four into a `Long` (which caps them at 2^18 px); here they are
 /// plain `i32`s, so any size goes.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, KotlinProperties)]
 pub struct Constraints {
     pub min_width: i32,
     pub max_width: i32,

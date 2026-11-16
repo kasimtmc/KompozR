@@ -2,6 +2,7 @@
 //! which turns them into pixels. Layout and drawing work in pixels; what an app writes is in dp and sp.
 
 use crate::geometry::{Offset, Rect, Size};
+use kompoz_runtime::KotlinProperties;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// A density-independent length: 1 dp is 1 px at 160 dpi.
@@ -231,10 +232,15 @@ macro_rules! unit_ext {
 unit_ext!(i32 i64 u32 usize f32 f64);
 
 /// A position in dp (Compose's DpOffset).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct DpOffset {
     pub x: Dp,
     pub y: Dp,
+}
+
+/// Compose's `DpOffset(x, y)`.
+pub const fn DpOffset(x: Dp, y: Dp) -> DpOffset {
+    DpOffset { x, y }
 }
 
 impl DpOffset {
@@ -262,10 +268,15 @@ impl Sub for DpOffset {
 }
 
 /// A size in dp (Compose's DpSize).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct DpSize {
     pub width: Dp,
     pub height: Dp,
+}
+
+/// Compose's `DpSize(width, height)`.
+pub const fn DpSize(width: Dp, height: Dp) -> DpSize {
+    DpSize { width, height }
 }
 
 impl DpSize {
@@ -290,12 +301,35 @@ impl Mul<f32> for DpSize {
 }
 
 /// A rectangle in dp (Compose's DpRect).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct DpRect {
     pub left: Dp,
     pub top: Dp,
     pub right: Dp,
     pub bottom: Dp,
+}
+
+/// Compose's `DpRect(…)`: `(left, top, right, bottom)` or `(origin, size)`.
+pub fn DpRect(args: impl DpRectArgs) -> DpRect {
+    args.dp_rect()
+}
+
+/// What [`DpRect()`](fn@DpRect) is given: Kotlin's arguments as a tuple, each overload by its types.
+pub trait DpRectArgs {
+    fn dp_rect(self) -> DpRect;
+}
+/// Kotlin: `DpRect(left: Dp, top: Dp, right: Dp, bottom: Dp)`
+impl DpRectArgs for (Dp, Dp, Dp, Dp) {
+    fn dp_rect(self) -> DpRect {
+        DpRect { left: self.0, top: self.1, right: self.2, bottom: self.3 }
+    }
+}
+/// Kotlin: `DpRect(origin: DpOffset, size: DpSize)`
+impl DpRectArgs for (DpOffset, DpSize) {
+    fn dp_rect(self) -> DpRect {
+        let (o, s) = self;
+        DpRect { left: o.x, top: o.y, right: o.x + s.width, bottom: o.y + s.height }
+    }
 }
 
 impl DpRect {
@@ -325,7 +359,7 @@ pub fn lerp_dp(start: Dp, stop: Dp, fraction: f32) -> Dp {
 
 /// How many pixels a dp is and how much bigger sp are than dp (Compose's Density): what turns dp and sp into
 /// pixels and back.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, KotlinProperties)]
 pub struct Density {
     pub density: f32,
     pub font_scale: f32,
@@ -334,6 +368,28 @@ pub struct Density {
 impl Default for Density {
     fn default() -> Self {
         Density { density: 1.0, font_scale: 1.0 }
+    }
+}
+
+/// Compose's `Density(density, fontScale = 1f)`.
+pub fn Density(args: impl DensityArgs) -> Density {
+    args.density()
+}
+
+/// What [`Density()`](fn@Density) is given: Kotlin's arguments, one as itself, two as a pair.
+pub trait DensityArgs {
+    fn density(self) -> Density;
+}
+/// Kotlin: `Density(density: Float)`
+impl DensityArgs for f32 {
+    fn density(self) -> Density {
+        Density { density: self, font_scale: 1.0 }
+    }
+}
+/// Kotlin: `Density(density: Float, fontScale: Float)`
+impl DensityArgs for (f32, f32) {
+    fn density(self) -> Density {
+        Density { density: self.0, font_scale: self.1 }
     }
 }
 

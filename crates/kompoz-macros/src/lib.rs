@@ -24,6 +24,7 @@ use syn::visit_mut::VisitMut;
 use syn::*;
 
 mod builder;
+mod kotlin_properties;
 mod transform;
 
 use builder::{Param, Receiver, Spec, builder, fn_sugar, generics, take_params};
@@ -100,6 +101,13 @@ impl syn::parse::Parse for ExtensionTrait {
         }
         Ok(ExtensionTrait { vis, name })
     }
+}
+
+/// `#[derive(KotlinProperties)]`: getters (and, `#[kotlin(set)]`, setters) of a struct's public fields, for the
+/// Kotlin syntax's property reads and writes (see `kotlin_properties`).
+#[proc_macro_derive(KotlinProperties, attributes(kotlin))]
+pub fn kotlin_properties(item: TokenStream) -> TokenStream {
+    kotlin_properties::derive(parse_macro_input!(item as DeriveInput)).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 /// A closure written as a `#[kompozable]` body: `set_content(kompozable_lambda!(move || App()))`.

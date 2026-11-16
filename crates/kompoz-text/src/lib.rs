@@ -30,6 +30,7 @@ pub mod font;
 mod html;
 pub mod input;
 pub mod intl;
+mod kotlin;
 pub mod line_break;
 pub mod link;
 pub mod multi_paragraph;

@@ -235,6 +235,10 @@ impl<T: Clone> UpdatedState<T> {
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         f(&self.0.borrow())
     }
+    /// Its value (Compose's `state.value`, a `State` there): the same as [`get`](UpdatedState::get).
+    pub fn value(&self) -> T {
+        self.get()
+    }
 }
 
 #[track_caller]

@@ -130,6 +130,7 @@ impl PaddingValues {
         PaddingValues::of(Repr::Absolute { left: Dp(0.0), top: Dp(0.0), right: Dp(0.0), bottom: Dp(0.0) });
 
     /// `all` on each side (Compose's `PaddingValues(all)`).
+    /// Kotlin: `PaddingValues(all: Dp)`
     #[track_caller]
     pub fn all(all: Dp) -> PaddingValues {
         PaddingValues::new(all, all, all, all)
@@ -137,6 +138,7 @@ impl PaddingValues {
 
     /// `horizontal` at the start and the end, `vertical` at the top and the bottom (Compose's
     /// `PaddingValues(horizontal, vertical)`).
+    /// Kotlin: `PaddingValues(horizontal: Dp = 0.dp, vertical: Dp = 0.dp)`
     #[track_caller]
     pub fn hv(horizontal: Dp, vertical: Dp) -> PaddingValues {
         PaddingValues::new(horizontal, vertical, horizontal, vertical)
@@ -152,6 +154,7 @@ impl PaddingValues {
 
     /// Each side its own, left and right whatever the layout direction (Compose's `PaddingValues.Absolute`).
     /// Panics on a negative side.
+    /// Kotlin: `PaddingValues.Absolute(left: Dp = 0.dp, top: Dp = 0.dp, right: Dp = 0.dp, bottom: Dp = 0.dp)`
     #[track_caller]
     pub fn absolute(left: Dp, top: Dp, right: Dp, bottom: Dp) -> PaddingValues {
         check_non_negative([left, top, right, bottom]);

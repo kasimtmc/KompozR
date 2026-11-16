@@ -21,4 +21,4 @@ pub use executor::{Cancelled, CoroutineScope, Deferred, Dispatcher, Failure, Job
 pub use flow::{Flow, FlowCollector, combine, empty_flow, flow, flow_of};
 pub use hot::{AsFlow, MutableSharedFlow, MutableStateFlow, SharedFlow, SharingStarted, StateFlow};
 pub use scope::{TimeoutCancellation, coroutine_scope, supervisor_scope, with_timeout, with_timeout_or_null};
-pub use time::{AwaitFrame, Delay, await_frame, delay, delay_ms, with_frame_millis, with_frame_nanos};
+pub use time::{AwaitFrame, Delay, DelayTime, await_frame, delay, delay_ms, with_frame_millis, with_frame_nanos};

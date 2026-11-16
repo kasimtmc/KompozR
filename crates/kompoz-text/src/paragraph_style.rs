@@ -12,7 +12,7 @@ use kompoz_runtime::named;
 /// A style for paragraphs (Compose's ParagraphStyle): what is not given (unspecified, None) is the style's around
 /// it. In an AnnotatedString a paragraph style's range is a paragraph of its own (a line break before and after
 /// it); nested ones merge, the inner winning, and they may not partly overlap.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, kompoz_runtime::KotlinProperties)]
 pub struct ParagraphStyle {
     pub text_align: TextAlign,
     pub text_direction: TextDirection,

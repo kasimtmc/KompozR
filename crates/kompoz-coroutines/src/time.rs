@@ -8,9 +8,37 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-/// `delay(duration).await`: waits that long on the dispatcher's clock (the frames' time).
-pub fn delay(duration: Duration) -> Delay {
-    Delay { nanos: duration.as_nanos().min(i64::MAX as u128) as i64, fired: None }
+/// `delay(duration).await`: waits that long on the dispatcher's clock (the frames' time): a `Duration`, or
+/// milliseconds as Kotlin's `delay(timeMillis: Long)` takes them (`delay(300)`; none at all for zero or less).
+pub fn delay(duration: impl DelayTime) -> Delay {
+    Delay { nanos: duration.nanos(), fired: None }
+}
+
+/// How long [`delay`] waits: a `Duration`, or a number of milliseconds (Kotlin's `Long`, an `Int` as Kotlin widens
+/// it).
+pub trait DelayTime {
+    /// In nanoseconds, within `i64` (zero or less: no wait).
+    fn nanos(self) -> i64;
+}
+impl DelayTime for Duration {
+    fn nanos(self) -> i64 {
+        self.as_nanos().min(i64::MAX as u128) as i64
+    }
+}
+impl DelayTime for i64 {
+    fn nanos(self) -> i64 {
+        self.saturating_mul(1_000_000)
+    }
+}
+impl DelayTime for i32 {
+    fn nanos(self) -> i64 {
+        (self as i64).saturating_mul(1_000_000)
+    }
+}
+impl DelayTime for u64 {
+    fn nanos(self) -> i64 {
+        (self.min(i64::MAX as u64) as i64).saturating_mul(1_000_000)
+    }
 }
 
 /// A delay of `ms` milliseconds.

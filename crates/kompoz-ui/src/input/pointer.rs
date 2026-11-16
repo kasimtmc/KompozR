@@ -225,7 +225,7 @@ impl HistoricalChange {
 /// One pointer in an event (Compose's PointerInputChange): where it is and was, whether it is pressed and was,
 /// when. Its consumption is shared by its clones — the copies every handler under the pointer gets, positions
 /// local to each — so a handler that consumes it tells all the others (Compose's shallow `copy`).
-#[derive(Clone)]
+#[derive(Clone, kompoz_runtime::KotlinProperties)]
 pub struct PointerInputChange {
     pub id: PointerId,
     pub uptime_millis: i64,
@@ -454,7 +454,7 @@ impl InternalPointerEvent {
 
 /// An event: the changes of the pointers in it (every pointer down, the ones that didn't change too), what
 /// happened, the buttons and keyboard modifiers (Compose's PointerEvent; `button` is desktop's).
-#[derive(Clone)]
+#[derive(Clone, kompoz_runtime::KotlinProperties)]
 pub struct PointerEvent {
     pub changes: Vec<PointerInputChange>,
     pub buttons: PointerButtons,

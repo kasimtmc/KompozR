@@ -1,6 +1,7 @@
 //! Geometry (Compose's `androidx.compose.ui.geometry` and the Int types of `ui.unit`): offsets, sizes, rectangles
 //! and rounded rectangles, in pixels.
 
+use kompoz_runtime::KotlinProperties;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 /// Between two values.
@@ -9,10 +10,15 @@ pub fn lerp(start: f32, stop: f32, fraction: f32) -> f32 {
 }
 
 /// A point or a displacement.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct Offset {
     pub x: f32,
     pub y: f32,
+}
+
+/// Compose's `Offset(x, y)`.
+pub const fn Offset(x: f32, y: f32) -> Offset {
+    Offset { x, y }
 }
 
 impl Offset {
@@ -98,10 +104,15 @@ pub fn lerp_offset(start: Offset, stop: Offset, fraction: f32) -> Offset {
 }
 
 /// A width and a height.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct Size {
     pub width: f32,
     pub height: f32,
+}
+
+/// Compose's `Size(width, height)`.
+pub const fn Size(width: f32, height: f32) -> Size {
+    Size { width, height }
 }
 
 impl Size {
@@ -160,12 +171,47 @@ pub fn lerp_size(start: Size, stop: Size, fraction: f32) -> Size {
 }
 
 /// A rectangle by its edges.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct Rect {
     pub left: f32,
     pub top: f32,
     pub right: f32,
     pub bottom: f32,
+}
+
+/// Compose's `Rect(…)`: `(left, top, right, bottom)`, `(offset, size)`, `(top_left, bottom_right)` or
+/// `(center, radius)`.
+pub fn Rect(args: impl RectArgs) -> Rect {
+    args.rect()
+}
+
+/// What [`Rect()`](fn@Rect) is given: Kotlin's arguments as a tuple, each overload by its types.
+pub trait RectArgs {
+    fn rect(self) -> Rect;
+}
+/// Kotlin: `Rect(left: Float, top: Float, right: Float, bottom: Float)`
+impl RectArgs for (f32, f32, f32, f32) {
+    fn rect(self) -> Rect {
+        Rect { left: self.0, top: self.1, right: self.2, bottom: self.3 }
+    }
+}
+/// Kotlin: `Rect(offset: Offset, size: Size)`
+impl RectArgs for (Offset, Size) {
+    fn rect(self) -> Rect {
+        Rect::from_offset_size(self.0, self.1)
+    }
+}
+/// Kotlin: `Rect(topLeft: Offset, bottomRight: Offset)`
+impl RectArgs for (Offset, Offset) {
+    fn rect(self) -> Rect {
+        Rect::from_corners(self.0, self.1)
+    }
+}
+/// Kotlin: `Rect(center: Offset, radius: Float)`
+impl RectArgs for (Offset, f32) {
+    fn rect(self) -> Rect {
+        Rect::from_center(self.0, self.1)
+    }
 }
 
 impl Rect {
@@ -297,10 +343,32 @@ pub fn lerp_rect(start: Rect, stop: Rect, fraction: f32) -> Rect {
 }
 
 /// The radii of a corner's ellipse.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct CornerRadius {
     pub x: f32,
     pub y: f32,
+}
+
+/// Compose's `CornerRadius(x, y = x)`: one radius both ways, or `(x, y)`.
+pub fn CornerRadius(args: impl CornerRadiusArgs) -> CornerRadius {
+    args.corner_radius()
+}
+
+/// What [`CornerRadius()`](fn@CornerRadius) is given: Kotlin's arguments, one as itself, two as a pair.
+pub trait CornerRadiusArgs {
+    fn corner_radius(self) -> CornerRadius;
+}
+/// Kotlin: `CornerRadius(x: Float)`
+impl CornerRadiusArgs for f32 {
+    fn corner_radius(self) -> CornerRadius {
+        CornerRadius { x: self, y: self }
+    }
+}
+/// Kotlin: `CornerRadius(x: Float, y: Float)`
+impl CornerRadiusArgs for (f32, f32) {
+    fn corner_radius(self) -> CornerRadius {
+        CornerRadius { x: self.0, y: self.1 }
+    }
 }
 
 impl CornerRadius {
@@ -326,7 +394,7 @@ pub fn lerp_corner_radius(start: CornerRadius, stop: CornerRadius, fraction: f32
 }
 
 /// A rectangle with rounded corners (Compose's RoundRect).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct RoundRect {
     pub left: f32,
     pub top: f32,
@@ -480,10 +548,15 @@ impl RoundRect {
 }
 
 /// A position in whole pixels.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, KotlinProperties)]
 pub struct IntOffset {
     pub x: i32,
     pub y: i32,
+}
+
+/// Compose's `IntOffset(x, y)`.
+pub const fn IntOffset(x: i32, y: i32) -> IntOffset {
+    IntOffset { x, y }
 }
 
 impl IntOffset {
@@ -516,10 +589,15 @@ impl Neg for IntOffset {
 }
 
 /// A size in whole pixels.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, KotlinProperties)]
 pub struct IntSize {
     pub width: i32,
     pub height: i32,
+}
+
+/// Compose's `IntSize(width, height)`.
+pub const fn IntSize(width: i32, height: i32) -> IntSize {
+    IntSize { width, height }
 }
 
 impl IntSize {
@@ -536,12 +614,48 @@ impl IntSize {
 }
 
 /// A rectangle in whole pixels, by its edges.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, KotlinProperties)]
 pub struct IntRect {
     pub left: i32,
     pub top: i32,
     pub right: i32,
     pub bottom: i32,
+}
+
+/// Compose's `IntRect(…)`: `(left, top, right, bottom)`, `(offset, size)`, `(top_left, bottom_right)` or
+/// `(center, radius)`.
+pub fn IntRect(args: impl IntRectArgs) -> IntRect {
+    args.int_rect()
+}
+
+/// What [`IntRect()`](fn@IntRect) is given: Kotlin's arguments as a tuple, each overload by its types.
+pub trait IntRectArgs {
+    fn int_rect(self) -> IntRect;
+}
+/// Kotlin: `IntRect(left: Int, top: Int, right: Int, bottom: Int)`
+impl IntRectArgs for (i32, i32, i32, i32) {
+    fn int_rect(self) -> IntRect {
+        IntRect { left: self.0, top: self.1, right: self.2, bottom: self.3 }
+    }
+}
+/// Kotlin: `IntRect(offset: IntOffset, size: IntSize)`
+impl IntRectArgs for (IntOffset, IntSize) {
+    fn int_rect(self) -> IntRect {
+        IntRect::from_offset_size(self.0, self.1)
+    }
+}
+/// Kotlin: `IntRect(topLeft: IntOffset, bottomRight: IntOffset)`
+impl IntRectArgs for (IntOffset, IntOffset) {
+    fn int_rect(self) -> IntRect {
+        IntRect { left: self.0.x, top: self.0.y, right: self.1.x, bottom: self.1.y }
+    }
+}
+/// Kotlin: `IntRect(center: IntOffset, radius: Int)`
+impl IntRectArgs for (IntOffset, i32) {
+    fn int_rect(self) -> IntRect {
+        let (c, r) = self;
+        IntRect { left: c.x - r, top: c.y - r, right: c.x + r, bottom: c.y + r }
+    }
 }
 
 impl IntRect {
