@@ -24,6 +24,7 @@ impl Modifier {
 
     /// `horizontal` at the start and the end, `vertical` at the top and the bottom (Compose's
     /// `padding(horizontal, vertical)`).
+    /// Kotlin: `padding(horizontal: Dp = 0.dp, vertical: Dp = 0.dp)`
     fn padding_hv(self, #[default(0.dp())] horizontal: Dp, #[default(0.dp())] vertical: Dp) -> Modifier {
         self.then_element(PaddingElement::new(horizontal, vertical, horizontal, vertical, true, "padding"))
     }
@@ -34,6 +35,7 @@ impl Modifier {
     }
 
     /// Each side its own (Compose's `padding(start, top, end, bottom)`).
+    /// Kotlin: `padding(start: Dp = 0.dp, top: Dp = 0.dp, end: Dp = 0.dp, bottom: Dp = 0.dp)`
     fn padding_sides(
         self,
         #[default(0.dp())] start: Dp,
@@ -50,6 +52,7 @@ impl Modifier {
     }
 
     /// What `padding_values` says (Compose's `padding(paddingValues)`).
+    /// Kotlin: `padding(paddingValues: PaddingValues)`
     fn padding_values(self, padding_values: PaddingValues) -> Modifier {
         self.then_element(PaddingValuesElement { padding_values })
     }

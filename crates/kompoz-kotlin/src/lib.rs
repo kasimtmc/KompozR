@@ -87,6 +87,10 @@ pub enum TextSource {
 pub struct Options {
     pub paths: Paths,
     pub text: TextSource,
+    /// The spans can't tell calls apart (a `.kt` file's tokens all have the span of `kompoz_file!`'s argument): each
+    /// call that keeps something in the composition (a composable, `remember…`) gets a group keyed by its Kotlin
+    /// line and column (`key(&(line, column), || …)`), the identity `#[track_caller]` gives it in `kompoz!`.
+    pub keyed_calls: bool,
 }
 
 /// What a translation gives: the Rust items, and the diagnostics (errors and warnings) in the order found. With
@@ -102,7 +106,7 @@ pub fn translate(text: &str, base: Pos, spans: &dyn SpanMap, opts: &Options) -> 
     let mut diags = Diagnostics::default();
     let tokens = lexer::lex(text, base, &mut diags);
     let file = parser::parse(&tokens, &mut diags);
-    let cx = codegen::Context { spans, paths: &opts.paths };
+    let cx = codegen::Context { spans, paths: &opts.paths, keyed_calls: opts.keyed_calls };
     let tokens = codegen::generate(&file, &cx, &mut diags);
     Translation { tokens, diagnostics: diags.list }
 }
@@ -110,6 +114,13 @@ pub fn translate(text: &str, base: Pos, spans: &dyn SpanMap, opts: &Options) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The lints a generated item allows.
+    fn allow() -> TokenStream {
+        quote! {
+            #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+        }
+    }
 
     #[test]
     fn a_kompozable_end_to_end() {
@@ -120,9 +131,10 @@ mod tests {
             &Options::default(),
         );
         assert!(t.diagnostics.is_empty(), "{:?}", t.diagnostics);
+        let allow = allow();
         let expected = quote! {
-            #[allow(non_snake_case)] #[::kompoz_runtime::kompozable] pub fn Empty() {}
-            #[allow(non_snake_case)] fn helper() {}
+            #allow #[::kompoz_runtime::kompozable] pub fn Empty() {}
+            #allow fn helper() {}
         };
         assert_eq!(t.tokens.to_string(), expected.to_string());
     }
@@ -135,7 +147,8 @@ mod tests {
         };
         let t = translate("@Composable internal fun `match`() {}", Pos::start(1, 1), &OneSpan::default(), &opts);
         assert!(t.diagnostics.is_empty(), "{:?}", t.diagnostics);
-        let expected = quote! { #[allow(non_snake_case)] #[::kz::runtime::kompozable] pub(crate) fn r#match() {} };
+        let allow = allow();
+        let expected = quote! { #allow #[::kz::runtime::kompozable] pub(crate) fn r#match() {} };
         assert_eq!(t.tokens.to_string(), expected.to_string());
     }
 
@@ -153,7 +166,8 @@ mod tests {
             found,
             [("expected a type, found `)`".to_string(), 11, 12), ("`a b` can't be a name in Rust".to_string(), 12, 5)]
         );
-        let expected = quote! { #[allow(non_snake_case)] #[::kompoz_runtime::kompozable] pub fn A() {} };
+        let allow = allow();
+        let expected = quote! { #allow #[::kompoz_runtime::kompozable] pub fn A() {} };
         assert_eq!(t.tokens.to_string(), expected.to_string());
     }
 }

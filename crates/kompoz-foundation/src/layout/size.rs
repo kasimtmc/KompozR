@@ -31,11 +31,13 @@ impl Modifier {
     }
 
     /// A preferred `width` by `height` (Compose's `size(width, height)`).
+    /// Kotlin: `size(width: Dp, height: Dp)`
     fn size_wh(self, width: Dp, height: Dp) -> Modifier {
         self.then_element(SizeElement::new(width, height, width, height, true, "size"))
     }
 
     /// A preferred size (Compose's `size(DpSize)`).
+    /// Kotlin: `size(size: DpSize)`
     fn size_dp(self, size: DpSize) -> Modifier {
         self.then_element(SizeElement::new(size.width, size.height, size.width, size.height, true, "size"))
     }
@@ -92,11 +94,13 @@ impl Modifier {
     }
 
     /// Exactly `width` by `height` (Compose's `requiredSize(width, height)`).
+    /// Kotlin: `requiredSize(width: Dp, height: Dp)`
     fn required_size_wh(self, width: Dp, height: Dp) -> Modifier {
         self.then_element(SizeElement::new(width, height, width, height, false, "requiredSize"))
     }
 
     /// Exactly `size` (Compose's `requiredSize(DpSize)`).
+    /// Kotlin: `requiredSize(size: DpSize)`
     fn required_size_dp(self, size: DpSize) -> Modifier {
         self.then_element(SizeElement::new(size.width, size.height, size.width, size.height, false, "requiredSize"))
     }

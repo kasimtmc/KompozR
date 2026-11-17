@@ -85,6 +85,7 @@ kompoz-ui/focus kompozable RestorableRow r crates/kompoz-ui/tests/focus.rs
 kompoz-runtime/macros fn RoundedCornerShape r crates/kompoz-runtime/tests/macros.rs
 * kompozable Row dddr crates/kompoz-foundation/src/layout/row_column.rs
 kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros.rs
+kompoz/kotlin kompozable RustBadge rd crates/kompoz/tests/kotlin.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/macros.rs

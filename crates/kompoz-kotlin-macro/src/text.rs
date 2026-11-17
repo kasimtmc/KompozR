@@ -11,9 +11,9 @@
 //! don't add up (tokens made by another macro), the text is rebuilt from the tokens themselves:
 //! [`TextSource::Rebuilt`]. Spacing follows the tokens (no space after a joint punctuation, around `.`, before an
 //! argument list …); newlines, which Kotlin needs between statements, go after a token that can end an expression
-//! (a name, a literal, a closing bracket, `!!`) before one that starts another: a name other than an infix
-//! function's or a continuing keyword (`else`, `catch`, `in`, …), a literal, an annotation. Doc comments are left
-//! out. It is best effort — what an editor sees — while the real build has the exact text.
+//! (a name, a literal, a closing bracket, `!!`, a postfix `++`/`--`) before one that starts another: a name other
+//! than an infix function's or a continuing keyword (`else`, `catch`, `in`, …) or a trailing lambda's label
+//! (`forEach lit@{`), a literal, an annotation. Doc comments are left out. It is best effort — what an editor sees — while the real build has the exact text.
 //!
 //! The span map: every leaf token (a group's delimiters too) with its offsets in the text; an offset maps to the
 //! token containing it (a Kotlin template split into several Rust literals maps to each piece's), else to the
@@ -200,6 +200,18 @@ struct Writer {
     text: String,
     entries: Vec<Entry>,
     prev: Prev,
+    /// Whether what came before the joint punctuation just written ended an expression (so `x++` is a postfix
+    /// increment, which ends one too, and `++x` a prefix one).
+    after_end: bool,
+    /// The last word written, while it is the last token (`return` of `return@lit`).
+    last_word: Option<String>,
+    /// The `@` just written follows `return`, `break`, `continue`, `this` or `super`: the name after it is a label
+    /// that ends the expression, not an annotation's.
+    label_ref: bool,
+    /// The `++`/`--` just written was a postfix one.
+    after_step: bool,
+    /// The first character of a `++`/`--` was just written.
+    step_open: Option<char>,
 }
 
 /// Keywords after which an expression goes on (or that start one): not an expression's end.
@@ -226,6 +238,11 @@ impl Writer {
     fn separate(&mut self, next: &Next) {
         let newline = self.ends_expression()
             && match next {
+                // (a trailing lambda's label: `forEach lit@{ … }` goes on)
+                Next::Label => false,
+                // (`++`/`--` after what ended an expression and was itself a postfix one: a prefix one, `++i`, on a
+                // statement of its own)
+                Next::Step if self.prev == Prev::Close && self.after_step => true,
                 Next::Word(w) => !listed(CONTINUES, w),
                 Next::Literal => true,
                 // an annotation (after a word: a label, `this@Outer`)
@@ -244,6 +261,8 @@ impl Writer {
             (_, Next::Punct('.' | ',' | ';' | '@' | '?')) => false,
             // `x!!`, `x: Int`, `A::class`
             (_, Next::Punct('!' | ':')) => !after_operand,
+            // (`i++`, its two characters together)
+            (_, Next::Step) => !after_operand && self.step_open.is_none(),
             (_, Next::Open(Delimiter::Parenthesis | Delimiter::Bracket)) => {
                 !matches!(self.prev, Prev::Word { .. } | Prev::Close)
             }
@@ -261,6 +280,7 @@ impl Writer {
         self.text += s;
         self.entries.push(Entry { start, end: self.text.len(), span: span.into() });
         self.prev = prev;
+        self.after_step = false;
     }
 
     fn tokens(&mut self, tokens: &[TokenTree]) {
@@ -290,20 +310,49 @@ impl Writer {
                 }
                 TokenTree::Ident(id) => {
                     let s = id.to_string();
-                    // (an annotation's name, `@Kompozable`, goes on to what it annotates)
-                    let ends = !listed(NOT_ENDS, &s) && !matches!(self.prev, Prev::Punct { ch: '@', .. });
-                    self.leaf(&s, id.span(), Next::Word(s.clone()), Prev::Word { ends });
+                    // (an annotation's name, `@Kompozable`, goes on to what it annotates; `return@lit`'s label ends
+                    // the expression)
+                    let after_at = matches!(self.prev, Prev::Punct { ch: '@', .. });
+                    let ends = !listed(NOT_ENDS, &s) && (!after_at || self.label_ref);
+                    let label = matches!(
+                        &tokens[i + 1..],
+                        [TokenTree::Punct(at), TokenTree::Group(g), ..] if at.as_char() == '@' && g.delimiter() == Delimiter::Brace
+                    );
+                    let next = if label { Next::Label } else { Next::Word(s.clone()) };
+                    self.leaf(&s, id.span(), next, Prev::Word { ends });
+                    self.last_word = Some(s);
                 }
                 TokenTree::Punct(p) => {
                     let ch = p.as_char();
                     let joint = p.spacing() == Spacing::Joint;
-                    // (the second `!` of `!!` ends an expression as a closing bracket does)
-                    let prev = if ch == '!' && !joint && self.prev == (Prev::Punct { ch: '!', joint: true }) {
+                    let closes_step = self.step_open == Some(ch);
+                    let closes_bang = ch == '!' && !joint && self.prev == (Prev::Punct { ch: '!', joint: true });
+                    // (the second `!` of `!!` ends an expression as a closing bracket does; so does a postfix
+                    // `++`/`--`'s)
+                    let prev = if closes_bang || (closes_step && self.after_end) {
                         Prev::Close
                     } else {
                         Prev::Punct { ch, joint }
                     };
-                    self.leaf(&ch.to_string(), p.span(), Next::Punct(ch), prev);
+                    // (the first of `++`/`--`: joint, or `+ +` where another macro's tokens lost their spacing —
+                    // `a + +b` isn't Kotlin anyone writes, `a - -b` is)
+                    let opens_step = !closes_step
+                        && matches!(ch, '+' | '-')
+                        && matches!(tokens.get(i + 1), Some(TokenTree::Punct(n)) if n.as_char() == ch)
+                        && (joint || ch == '+');
+                    if opens_step {
+                        // (after a postfix one it starts a statement: a prefix one)
+                        let starts_statement = self.prev == Prev::Close && self.after_step;
+                        self.after_end = self.ends_expression() && !starts_statement;
+                    }
+                    let postfix = closes_step && self.after_end;
+                    self.label_ref = ch == '@'
+                        && matches!(self.prev, Prev::Word { .. })
+                        && self.last_word.as_deref().is_some_and(|w| listed("return break continue this super", w));
+                    let next = if opens_step || closes_step { Next::Step } else { Next::Punct(ch) };
+                    self.leaf(&ch.to_string(), p.span(), next, prev);
+                    self.step_open = opens_step.then_some(ch);
+                    self.after_step = postfix;
                 }
                 TokenTree::Literal(l) => self.leaf(&l.to_string(), l.span(), Next::Literal, Prev::Literal),
             }
@@ -315,6 +364,10 @@ impl Writer {
 /// What comes next, for `Writer::separate`.
 enum Next {
     Word(String),
+    /// A name that labels a lambda (`lit` of `lit@{`).
+    Label,
+    /// The first character of `++` or `--`.
+    Step,
     Literal,
     Punct(char),
     Open(Delimiter),
@@ -333,7 +386,16 @@ fn is_doc(rest: &[TokenTree]) -> bool {
 }
 
 fn rebuilt(tokens: &[TokenTree]) -> Acquired {
-    let mut w = Writer { text: String::new(), entries: Vec::new(), prev: Prev::Start };
+    let mut w = Writer {
+        text: String::new(),
+        entries: Vec::new(),
+        prev: Prev::Start,
+        after_end: false,
+        last_word: None,
+        label_ref: false,
+        after_step: false,
+        step_open: None,
+    };
     w.tokens(tokens);
     Acquired { text: w.text, base: Pos::start(1, 1), source: TextSource::Rebuilt, spans: TokenSpans::new(w.entries) }
 }

@@ -15,7 +15,8 @@
 //! write `${'$'}`, `\u{8}`, `\u{41}`; raw strings with backslashes) — `kompoz_file!` has no such limits.
 //! `kompoz_file!` reads the file relative to the crate's directory (`CARGO_MANIFEST_DIR`), rebuilds when it changes
 //! (an `include_bytes!` of it: stable proc macros have no tracked paths), reports at the macro's call with the
-//! file's `file:line:column` in the message.
+//! file's `file:line:column` in the message. Its tokens all have that call's span, so the calls that keep something
+//! in the composition get their identity from a key of their Kotlin line and column instead (`Options::keyed_calls`).
 
 use kompoz_kotlin::{Diagnostic, OneSpan, Options, Pos, Severity, SpanMap, TextSource};
 use proc_macro::TokenStream;
@@ -29,7 +30,7 @@ mod text;
 #[proc_macro]
 pub fn kompoz(input: TokenStream) -> TokenStream {
     let acquired = text::acquire(input);
-    let opts = Options { paths: paths::resolve(), text: acquired.source };
+    let opts = Options { paths: paths::resolve(), text: acquired.source, keyed_calls: false };
     let t = kompoz_kotlin::translate(&acquired.text, acquired.base, &acquired.spans, &opts);
     let mut out = t.tokens;
     out.extend(report(&t.diagnostics, &acquired.spans, None));
@@ -61,7 +62,7 @@ pub fn kompoz_file(input: TokenStream) -> TokenStream {
     // (rustc's view of a source: no byte order mark, LF line ends)
     let text = content.strip_prefix('\u{feff}').unwrap_or(&content).replace("\r\n", "\n");
     let spans = OneSpan(span);
-    let opts = Options { paths: paths::resolve(), text: TextSource::Exact };
+    let opts = Options { paths: paths::resolve(), text: TextSource::Exact, keyed_calls: true };
     let t = kompoz_kotlin::translate(&text, Pos::start(1, 1), &spans, &opts);
     let tracked = path.to_string_lossy().into_owned();
     let mut out = quote_spanned!(span=> const _: &[u8] = ::core::include_bytes!(#tracked););

@@ -1,0 +1,120 @@
+//! The generator's own diagnostics: each at its Kotlin line:column (the text's base position counted in), one
+//! declaration's errors leaving the others translated.
+
+use kompoz_kotlin::{OneSpan, Options, Pos, translate};
+
+/// The diagnostics of `text` (starting at `line`:1), as `line:column: message`, and the Rust it gave.
+fn diagnose_at(text: &str, line: u32) -> (Vec<String>, String) {
+    let t = translate(text, Pos::start(line, 1), &OneSpan::default(), &Options::default());
+    let d = t.diagnostics.iter().map(|d| format!("{}: {}", d.loc.start, d.message)).collect();
+    (d, t.tokens.to_string())
+}
+
+fn diagnose(text: &str) -> Vec<String> {
+    diagnose_at(text, 1).0
+}
+
+const LATER: &str = "isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)";
+
+#[test]
+fn stage_14_constructs_at_their_positions() {
+    let text = "\
+class A
+fun f(x: Int): Int {
+    try { return 1 } catch (e: Exception) { return 2 }
+}
+fun g(x: String): Boolean = x is String
+fun h() = listOf(1).map(::println)
+";
+    assert_eq!(
+        diagnose(text),
+        [
+            format!("1:1: a class {LATER}"),
+            format!("3:5: `try` {LATER}"),
+            format!("5:29: an `is` check {LATER}"),
+            "6:5: write `h`'s return type: its expression's type isn't one KompozR can tell (`fun h(…): Type = …`)"
+                .to_string(),
+            format!("6:25: a callable reference (`::name`) {LATER}"),
+        ]
+    );
+}
+
+#[test]
+fn positions_count_from_the_base_and_in_characters() {
+    // (the text starts at line 40 of its file; `ğ` and `ü` are one column each)
+    let (d, _) = diagnose_at("fun ğü(x: Int) {\n    val y = 1\n    y = 2\n}", 40);
+    assert_eq!(d, ["42:5: `y` is a `val`: it can't be assigned"]);
+}
+
+#[test]
+fn errors_leave_the_other_declarations_translated() {
+    let (d, rust) = diagnose_at("fun bad() = undefinedThing(1)\nfun good(): Int = 2\n", 1);
+    assert_eq!(
+        d,
+        ["1:5: write `bad`'s return type: its expression's type isn't one KompozR can tell (`fun bad(…): Type = …`)"]
+    );
+    assert!(rust.contains("fn good"), "{rust}");
+    assert!(!rust.contains("fn bad"), "{rust}");
+}
+
+#[test]
+fn calls_named_wrongly_or_out_of_place() {
+    let text = "\
+@Kompozable
+fun Labeled(label: String, value: Int = 7) {}
+@Kompozable
+fun Uses() {
+    Labeled(label = \"a\", colour = 3)
+    Labeled()
+}
+fun later() {
+    delay(10)
+}
+";
+    assert_eq!(
+        diagnose(text),
+        [
+            "5:5: `Labeled`: no parameter `colour`",
+            "6:5: `Labeled` needs `label`",
+            "9:5: `delay` suspends: call it from a coroutine (`LaunchedEffect`, `launch`, a `suspend fun`)",
+        ]
+    );
+}
+
+#[test]
+fn jumps_and_receivers_where_there_are_none() {
+    let text = "\
+fun f(xs: List<Int>) {
+    xs.forEach { if (it > 1) return }
+    break
+    for (x in xs) { continue@outer }
+    println(this)
+}
+";
+    assert_eq!(
+        diagnose(text),
+        [
+            format!("2:30: a `return` from inside a lambda (Kotlin's non-local return) {LATER}"),
+            format!("3:5: `break`/`continue` outside a loop (or out of a lambda) {LATER}"),
+            "4:21: no loop labeled `outer` around it".to_string(),
+            "5:13: `this` here has nothing to be (no extension function or receiver lambda around it)".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn top_level_vals_need_their_types() {
+    assert_eq!(
+        diagnose("val answer = 42\nvar count: Int = 0\nval ok: Int = 1"),
+        [
+            "1:5: write `answer`'s type: a top-level `val` has it written (`val answer: Type = …`)".to_string(),
+            format!("2:1: a top-level `var` {LATER}"),
+        ]
+    );
+}
+
+#[test]
+fn names_rust_cant_have() {
+    let (d, _) = diagnose_at("fun `two words`() {}\nfun `self`() {}", 1);
+    assert_eq!(d, ["1:5: `two words` can't be a name in Rust", "2:5: `self` can't be a name in Rust"]);
+}

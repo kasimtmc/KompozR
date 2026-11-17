@@ -1189,7 +1189,8 @@ fn from_bounds(bs: &[TypeParamBound], generic: &BTreeMap<String, Vec<TypeParamBo
 }
 
 /// A lambda's receiver: its first parameter's type when that is a scope (`&mut DrawScope`, `PointerInputScope`,
-/// `&mut SemanticsPropertyReceiver`, a builder, `FocusProperties`), as Kotlin's `T.() -> R` is.
+/// `&mut SemanticsPropertyReceiver`, a builder, `FocusProperties`; `&mut SemanticsConfiguration`, which is
+/// Compose's SemanticsPropertyReceiver), as Kotlin's `T.() -> R` is.
 fn receiver_of(first: &Type) -> String {
     let inner = match first {
         Type::Reference(r) => &*r.elem,
@@ -1198,7 +1199,7 @@ fn receiver_of(first: &Type) -> String {
     let Type::Path(p) = inner else { return String::new() };
     let name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
     let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform"].iter().any(|s| name.ends_with(s))
-        || matches!(name.as_str(), "Path" | "Placeable");
+        || matches!(name.as_str(), "Path" | "Placeable" | "SemanticsConfiguration");
     if scope { name } else { String::new() }
 }
 

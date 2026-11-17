@@ -69,8 +69,9 @@ pub const DefaultCameraDistance: f32 = 8.0;
 
 /// What a graphics layer block sets (Compose's GraphicsLayerScope): how the layer is scaled, turned, moved, faded,
 /// shadowed and clipped, and through what it is composited. `size`, `density` and `layout_direction` are the
-/// layer's, to set the others by.
-#[derive(Clone)]
+/// layer's, to set the others by. Its properties are Kotlin's (`scaleX = 2f` in a `graphicsLayer { }` block).
+#[derive(Clone, kompoz_runtime::KotlinProperties)]
+#[kotlin(set)]
 pub struct GraphicsLayerScope {
     pub scale_x: f32,
     pub scale_y: f32,
@@ -100,8 +101,11 @@ pub struct GraphicsLayerScope {
     pub color_filter: Option<ColorFilter>,
     /// How far it reaches past its bounds when it is drawn offscreen.
     pub outsets: LayerOutsets,
+    #[kotlin(skip)]
     pub(crate) size: Size,
+    #[kotlin(skip)]
     pub(crate) density: Density,
+    #[kotlin(skip)]
     pub(crate) layout_direction: LayoutDirection,
 }
 

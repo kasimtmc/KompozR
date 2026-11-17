@@ -435,6 +435,7 @@ impl Modifier {
 
     /// Draws the content through a layer `block` sets up as the layer is worked out (Compose's graphicsLayer {}):
     /// what it reads changes the layer alone, without measuring, placing or drawing anything again.
+    /// Kotlin: `graphicsLayer(block: GraphicsLayerScope.() -> Unit)`
     pub fn graphics_layer_block(self, block: impl Fn(&mut GraphicsLayerScope) + 'static) -> Modifier {
         self.then_element(BlockGraphicsLayerElement { block: Rc::new(block), name: "graphicsLayer" })
     }
