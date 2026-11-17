@@ -1514,3 +1514,56 @@ fn cubic_roots_and_bounds_are_composes() {
     let (want_min, want_max) = brute.fold((f32::MAX, f32::MIN), |(a, b), y| (a.min(y), b.max(y)));
     assert!(near_by(min, want_min, 1e-4) && near_by(max, want_max, 1e-4) && min < 0.0 && max > 1.0);
 }
+
+/// Compose's Bezier.kt over a path's segment: its y at t, where along it x is a value, its bounds along x (what
+/// PathEasing solves with).
+#[test]
+fn segment_roots_and_bounds_are_composes() {
+    let segment =
+        |r#type, points: &[(f32, f32)]| PathSegment::new(r#type, points.iter().map(|&(x, y)| o(x, y)).collect(), 0.0);
+    let line = segment(PathSegmentType::Line, &[(0.0, 0.0), (2.0, 4.0)]);
+    assert!(near_by(find_first_root(&line, 1.0), 0.5, 1e-6) && near_by(evaluate_y(&line, 0.5), 2.0, 1e-6));
+    assert!(find_first_root(&line, 3.0).is_nan());
+    let quadratic = segment(PathSegmentType::Quadratic, &[(0.0, 0.0), (1.0, 2.0), (2.0, 0.0)]);
+    assert!(near_by(find_first_root(&quadratic, 1.0), 0.5, 1e-6) && near_by(evaluate_y(&quadratic, 0.5), 1.0, 1e-6));
+    let cubic_segment = segment(PathSegmentType::Cubic, &[(0.0, 0.0), (0.4, 0.0), (0.2, 1.0), (1.0, 1.0)]);
+    let t = find_first_root(&cubic_segment, 0.5);
+    assert!(near_by(cubic([0.0, 0.4, 0.2, 1.0], t as f64) as f32, 0.5, 1e-5));
+    assert!(near_by(evaluate_y(&cubic_segment, t), cubic([0.0, 0.0, 1.0, 1.0], t as f64) as f32, 1e-6));
+    // Bounds along x: past its ends where it bulges.
+    let mut roots = [0.0f32; 5];
+    let bulge = segment(PathSegmentType::Cubic, &[(0.0, 0.0), (-1.0, 0.0), (2.0, 0.0), (1.0, 0.0)]);
+    let (min, max) = compute_horizontal_bounds(&bulge, &mut roots);
+    let brute = (0..=10_000).map(|i| cubic([0.0, -1.0, 2.0, 1.0], i as f64 / 10_000.0) as f32);
+    let (want_min, want_max) = brute.fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(x), b.max(x)));
+    assert!(near_by(min, want_min, 1e-4) && near_by(max, want_max, 1e-4) && min < 0.0 && max > 1.0);
+    assert_eq!(compute_horizontal_bounds(&line, &mut roots), (0.0, 2.0));
+    // A move, a close: no root.
+    assert!(find_first_root(&segment(PathSegmentType::Move, &[(0.0, 0.0)]), 0.0).is_nan());
+}
+
+/// Compose's IntervalTree: intervals found by what they overlap, kept balanced, in order by their starts.
+#[test]
+fn interval_trees_find_overlaps() {
+    let mut tree = IntervalTree::new();
+    assert!(!tree.contains(0.5) && tree.find_first_overlap(0.0, 1.0).is_none());
+    for i in 0..100 {
+        let start = ((i * 37) % 100) as f32;
+        tree.add_interval(start, start + 1.5, Some(i));
+    }
+    // In order by their starts.
+    let starts: Vec<f32> = tree.iter().map(|i| i.start).collect();
+    assert!(starts.windows(2).all(|w| w[0] <= w[1]) && starts.len() == 100);
+    // What overlaps 10.2: the intervals from 9 and 10.
+    let mut found: Vec<f32> = tree.find_overlaps(10.2, 10.2).iter().map(|i| i.start).collect();
+    found.sort_by(f32::total_cmp);
+    assert_eq!(found, [9.0, 10.0]);
+    let first = tree.find_first_overlap(10.2, 10.2).unwrap();
+    assert!(first.contains(10.2) && first.data.is_some());
+    assert!(tree.contains(100.5) && !tree.contains(101.0) && tree.contains_range(-5.0, 0.0));
+    assert_eq!(tree.find_overlaps(20.0, 30.0).len(), 12);
+    tree.clear();
+    assert!(tree.iter().next().is_none() && !tree.contains(10.0));
+    let i = Interval::new(0.0, 1.0, Some("a"));
+    assert!(i.overlaps(&Interval::new(1.0, 2.0, None)) && !i.overlaps_range(1.5, 2.0));
+}

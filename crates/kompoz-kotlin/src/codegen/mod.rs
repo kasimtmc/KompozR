@@ -680,6 +680,21 @@ impl<'a, 'd> Gen<'a, 'd> {
 
     // ---- Top-level properties ----------------------------------------------------------------------------------
 
+    /// `v`, of type `value_ty`, as a value of the type `declared` is written as: an interface's shared object made of a
+    /// value of its own type (`val fade: AnimationSpec<Color> = tween(…)`: an `Arc<dyn AnimationSpec<Color>>`).
+    pub(crate) fn as_declared(&self, v: TokenStream, value_ty: &Ty, declared: &TokenStream, span: Span) -> TokenStream {
+        let d = declared.to_string().replace(' ', "");
+        let own = matches!(value_ty, Ty::Named(n, _) if !matches!(n.as_str(), "Arc" | "Rc")
+            && resolve::trait_object(n).is_none());
+        if own && d.starts_with("::std::sync::Arc<dyn") {
+            quote_spanned!(span=> ::std::sync::Arc::new(#v))
+        } else if own && d.starts_with("::std::rc::Rc<dyn") {
+            quote_spanned!(span=> ::std::rc::Rc::new(#v))
+        } else {
+            v
+        }
+    }
+
     fn top_property(&mut self, p: &Property) -> TokenStream {
         let span = self.span(p.loc);
         let Binding::Name(n) = &p.binding else {
@@ -730,7 +745,9 @@ impl<'a, 'd> Gen<'a, 'd> {
                 quote_spanned!(span=> #allow #vis const #name: &str = #v;)
             }
             ValForm::Static => {
+                let value_ty = self.peek_ty(init);
                 let v = self.value(init);
+                let v = self.as_declared(v, &value_ty, &rt, span);
                 let kt = self.kt(span);
                 quote_spanned! {span=>
                     #allow
@@ -742,7 +759,9 @@ impl<'a, 'd> Gen<'a, 'd> {
                 }
             }
             ValForm::ThreadLocal => {
+                let value_ty = self.peek_ty(init);
                 let v = self.value(init);
+                let v = self.as_declared(v, &value_ty, &rt, span);
                 let kt = self.kt(span);
                 let rtp = respan(self.rt().clone(), span);
                 quote_spanned! {span=>

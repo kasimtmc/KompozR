@@ -33,6 +33,8 @@ pub use background::BackgroundModifiers;
 pub use border::{BorderModifierNode, BorderModifiers};
 pub use canvas::Canvas;
 pub use image::{BitmapImage, Image, VectorImage};
+/// Compose's `androidx.compose.foundation.MutatorMutex` (kompoz-animation's, which Animatable uses too).
+pub use kompoz_animation::{MutatePriority, MutatorMutex};
 
 /// What an app using foundation imports: the layouts, the composables, the modifier extension traits, the gesture
 /// detectors, interactions and indications.
@@ -64,4 +66,5 @@ pub mod prelude {
         TextAutoSizeDefaults,
     };
     pub use crate::{BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, Image, VectorImage};
+    pub use crate::{MutatePriority, MutatorMutex};
 }

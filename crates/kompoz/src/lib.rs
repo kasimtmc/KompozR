@@ -22,6 +22,7 @@
 // (the macros name this crate `::kompoz` in it too)
 extern crate self as kompoz;
 
+pub use kompoz_animation as animation;
 pub use kompoz_coroutines as coroutines;
 pub use kompoz_foundation as foundation;
 pub use kompoz_gpu as gpu;
@@ -39,15 +40,16 @@ pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
 pub use kompoz_runtime::{kompozable, kompozable_block, kompozable_lambda, named, named_args};
 
 /// What an app writes with: the runtime (states, `remember`, effects, locals, the macros), coroutines (effects,
-/// flows), graphics (units — `16.dp()` —, colors, geometry, shapes, brushes, paths, images), text (styles, fonts,
-/// annotated strings), the UI core (`Modifier`, `Alignment`, `Layout`, the host's types, the composition locals,
-/// `Role`), foundation (Box, Row, Column, BasicText, the modifiers' traits, gestures, interactions), the app entry
-/// (`App`), and the Kotlin syntax's macros.
+/// flows), animation (Animatable, specs, easings, decays), graphics (units — `16.dp()` —, colors, geometry, shapes,
+/// brushes, paths, images), text (styles, fonts, annotated strings), the UI core (`Modifier`, `Alignment`, `Layout`,
+/// the host's types, the composition locals, `Role`), foundation (Box, Row, Column, BasicText, the modifiers' traits,
+/// gestures, interactions), the app entry (`App`), and the Kotlin syntax's macros.
 ///
 /// The crates' roots are taken whole (their modules with them); where two of them use a name, the one an app means
 /// is named here: the modules `draw` and `input` are the UI's (`DrawScope`, pointer input), `shape` and `unit`
 /// graphics' (shapes, `Dp`); text's are `kompoz::text::draw`, `kompoz::text::input`, `kompoz::text::shape`.
 pub mod prelude {
+    pub use kompoz_animation::*;
     pub use kompoz_coroutines::*;
     pub use kompoz_foundation::prelude::*;
     pub use kompoz_graphics::*;

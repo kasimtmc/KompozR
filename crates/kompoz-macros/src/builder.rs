@@ -294,10 +294,12 @@ pub(crate) enum Receiver {
     Ref(Type, bool),
 }
 
-/// The items of a builder (named with its prefix, next to the function), and the type its `new` makes.
+/// The items of a builder (named with its prefix, next to the function), the type its `new` makes, and the generic
+/// parameters (`<T>`, or nothing) an entry point making it declares: those the builder starts with free.
 pub(crate) struct Built {
     pub(crate) items: Ts,
     pub(crate) new_type: Ts,
+    pub(crate) new_generics: Ts,
 }
 
 /// What a builder is made for. `call` is what `__call` evaluates with the arguments bound to `__a0, __a1, …` (and
@@ -315,11 +317,15 @@ pub(crate) struct Spec<'a> {
     /// The parameters that keep the identity of a memoized closure given to them (by index). If any does, the
     /// builder carries the identities, which `__call` binds to `__kz_ids: [Option<u64>; n]` for `call` to use.
     pub(crate) wants_id: &'a [bool],
+    /// Whether the function's generic parameters no parameter without a default fixes may be the builder's from
+    /// its start (`new` and the entry point generic over them, inferred where the call's value goes: `tween(300)`'s
+    /// `T`); else they start as `Infer` (a composable's marker, whose builder type is an associated type).
+    pub(crate) free_ok: bool,
 }
 
 /// The builder of a function or method.
 pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
-    let Spec { rt, params, generics, where_clause, output, call, recv, prefix, vis, wants_id } = spec;
+    let Spec { rt, params, generics, where_clause, output, call, recv, prefix, vis, wants_id, free_ok } = spec;
     let pass_ids = wants_id.iter().any(|w| *w);
     let mut output = output.clone();
     let own_lifetimes: Vec<&Generic> = generics.iter().filter(|g| g.lifetime && g.inferred).collect();
@@ -376,7 +382,17 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             initial_outside.push(quote!(#m));
         }
     }
-    let initial_generics: HashMap<String, Ts> = generics.iter().map(|g| (g.key(), g.initial.clone())).collect();
+    // (the function's type generics are free from the builder's start: a setter naming one gives it its type in
+    // place, as Rust infers it from the argument, and one no argument names is inferred where the call's value goes
+    // — `tween(300)`'s `T`; a later parameter naming one, `animationSpec: Arc<dyn AnimationSpec<T>>` given a
+    // `tween(…)`, takes it as it is rather than making it anew. A composable's marker can't: they are fixed there.)
+    let free: Vec<&Generic> = if free_ok { types.iter().copied().filter(|g| g.inferred).collect() } else { Vec::new() };
+    let free_keys: std::collections::HashSet<String> = free.iter().map(|g| g.key()).collect();
+    let free_names: Vec<&Ts> = free.iter().map(|g| &g.name).collect();
+    let initial_generics: HashMap<String, Ts> = generics
+        .iter()
+        .map(|g| (g.key(), if free_keys.contains(&g.key()) { g.name.clone() } else { g.initial.clone() }))
+        .collect();
     let init_g = order(&initial_generics);
 
     let mut setters = Vec::new();
@@ -385,7 +401,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         let ty = &p.ty;
         // The generics it fixes: the function's that its type names; for an `impl Fn…`, those only its output names
         // (`impl FnOnce() -> R`: the closure says what R is; `impl Fn(&T)`'s T comes from elsewhere, so the closure's
-        // parameter types can be inferred).
+        // parameter types can be inferred) — but the free ones, which it takes as they are.
         let fixed: Vec<&Generic> = match fn_sugar(p) {
             Some(args) => {
                 let out_ty: Option<Type> = match &args.output {
@@ -405,6 +421,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             None if p.bounds().is_some() => Vec::new(),
             None => generics.iter().filter(|g| g.inferred && mentions(ty, &g.key())).collect(),
         };
+        let fixed: Vec<&Generic> = fixed.into_iter().filter(|g| !free_keys.contains(&g.key())).collect();
         let renames: HashMap<String, String> = fixed
             .iter()
             .map(|g| {
@@ -587,7 +604,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         }
         #[doc(hidden)]
         #[allow(non_snake_case, clippy::needless_lifetimes)]
-        #vis fn #new_name<#recv_lt #(#outer_g,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> {
+        #vis fn #new_name<#recv_lt #(#outer_g,)* #(#free_names,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> {
             #builder_name { _g: ::core::marker::PhantomData, #new_init #ids_init #(#fs: #initial),* }
         }
         #[allow(clippy::type_complexity, clippy::too_many_arguments, non_snake_case)]
@@ -607,5 +624,6 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         }
     };
     let outside_lt = matches!(recv, Some(Receiver::Ref(..))).then(|| quote!('_,));
-    Ok(Built { items, new_type: quote!(#builder_name<#outside_lt #(#init_g,)* #(#initial_outside),*>) })
+    let new_generics = if free_names.is_empty() { quote!() } else { quote!(<#(#free_names),*>) };
+    Ok(Built { items, new_type: quote!(#builder_name<#outside_lt #(#init_g,)* #(#initial_outside),*>), new_generics })
 }

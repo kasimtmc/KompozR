@@ -1491,6 +1491,106 @@ fn run_woken_by_from_inside_a_coroutine_keeps_its_own_wake() {
     scope.cancel();
 }
 
+/// An element of a coroutine's context (any `Clone + 'static` value, found by its type).
+#[derive(Clone, PartialEq, Debug)]
+struct Tag(&'static str);
+
+impl From<Tag> for CoroutineContext {
+    fn from(tag: Tag) -> CoroutineContext {
+        CoroutineContext::of(tag)
+    }
+}
+
+fn coroutine_contexts_reach_the_block_and_what_it_launches_in_its_scopes() {
+    let (rule, scope) = scope_rule();
+    let log = new_log();
+    let tag = || current_coroutine_context().get::<Tag>().map(|t| t.0).unwrap_or("none");
+    let (l, outer) = (log.clone(), scope.clone());
+    scope.launch(async move {
+        l.borrow_mut().push(format!("before: {}", tag()));
+        with_context(Tag("a"), async {
+            l.borrow_mut().push(format!("in: {}", tag()));
+            delay_ms(10).await;
+            l.borrow_mut().push(format!("after a delay: {}", tag()));
+            with_context(Tag("b"), async { l.borrow_mut().push(format!("inner: {}", tag())) }).await;
+            let l2 = l.clone();
+            coroutine_scope(|inner| async move {
+                // What a scope made inside launches sees it; what the outer scope launches doesn't.
+                let l3 = l2.clone();
+                inner.launch(async move { l3.borrow_mut().push(format!("child: {}", tag())) });
+                let l4 = l2.clone();
+                outer.launch(async move { l4.borrow_mut().push(format!("outer's: {}", tag())) });
+            })
+            .await;
+        })
+        .await;
+        l.borrow_mut().push(format!("out: {}", tag()));
+    });
+    rule.advance_time_by(20);
+    assert_eq!(
+        *log.borrow(),
+        ["before: none", "in: a", "after a delay: a", "inner: b", "child: a", "outer's: none", "out: none"]
+    );
+    // A scope's own context; elements by type, the newer one replacing the older.
+    let own = CoroutineScope::new_with_context(&rule.dispatcher, CoroutineContext::of(Tag("own")));
+    let seen = Rc::new(RefCell::new(None));
+    let s = seen.clone();
+    own.launch(async move { *s.borrow_mut() = current_coroutine_context().get::<Tag>() });
+    assert_eq!(*seen.borrow(), Some(Tag("own")));
+    let both = CoroutineContext::of(Tag("x")).plus_element(7i32) + CoroutineContext::of(Tag("y"));
+    assert_eq!((both.get::<Tag>(), both.get::<i32>()), (Some(Tag("y")), Some(7)));
+    assert_eq!(both.minus_key::<Tag>().get::<Tag>(), None);
+    assert!(CoroutineContext::new().is_empty() && current_coroutine_context().is_empty());
+}
+
+fn a_cancelled_coroutine_scope_cancels_who_awaits_it() {
+    let (rule, scope) = scope_rule();
+    let log = new_log();
+    // The block cancels its scope (Kotlin's `coroutineScope { cancel() }`): the CancellationException goes on out,
+    // what follows the scope doesn't run, the coroutine is cancelled.
+    let l = log.clone();
+    let job = scope.launch(async move {
+        coroutine_scope(|s| async move {
+            s.cancel();
+            delay_ms(10).await;
+        })
+        .await;
+        l.borrow_mut().push("after the scope".to_string());
+    });
+    rule.advance_time_by(50);
+    assert!(log.borrow().is_empty() && job.is_cancelled() && job.is_completed());
+    // cancel_current(): Kotlin's `throw CancellationException()` where nothing catches it.
+    let l = log.clone();
+    let job = scope.launch(async move {
+        l.borrow_mut().push("before".to_string());
+        cancel_current::<()>().await;
+        l.borrow_mut().push("after".to_string());
+    });
+    assert_eq!(*log.borrow(), ["before"]);
+    assert!(job.is_cancelled());
+    // Through nested scopes and a timeout, out to the launched coroutine.
+    let l = log.clone();
+    let job = scope.launch(async move {
+        let _ = with_timeout(Duration::from_secs(1), |_| async {
+            coroutine_scope(|_| async { cancel_current::<()>().await }).await;
+        })
+        .await;
+        l.borrow_mut().push("after the timeout".to_string());
+    });
+    rule.advance_time_by(50);
+    assert_eq!(*log.borrow(), ["before"]);
+    assert!(job.is_cancelled());
+    // An async's: awaiting it gives Err(Cancelled).
+    let got = Rc::new(RefCell::new(None));
+    let (g, s) = (got.clone(), scope.clone());
+    scope.launch(async move {
+        let d = s.r#async(async { coroutine_scope(|_| async { cancel_current::<i32>().await }).await });
+        *g.borrow_mut() = Some(d.await);
+    });
+    rule.advance_time_by(20);
+    assert_eq!(*got.borrow(), Some(Err(Cancelled)));
+}
+
 tests!(
     launched_effect_ticks_and_is_cancelled_on_leave,
     coroutines_give_back_values_and_work_in_the_background,
@@ -1524,4 +1624,6 @@ tests!(
     launched_effects_and_produce_state_take_several_keys,
     run_woken_by_resumes_what_it_wakes_before_returning,
     run_woken_by_from_inside_a_coroutine_keeps_its_own_wake,
+    coroutine_contexts_reach_the_block_and_what_it_launches_in_its_scopes,
+    a_cancelled_coroutine_scope_cancels_who_awaits_it,
 );

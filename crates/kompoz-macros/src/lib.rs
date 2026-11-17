@@ -456,8 +456,10 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
         prefix: &prefix,
         vis: &vis,
         wants_id: &wants_id,
+        // (a composable's marker names its builder's type in an associated type: no generics free there)
+        free_ok: !(composable.is_some() && is_pascal(&name.to_string())),
     })?;
-    let (items, new_type) = (built.items, built.new_type);
+    let (items, new_type, new_generics) = (built.items, built.new_type, built.new_generics);
 
     // A PascalCase composable is a constant of a marker type, which `Probe` turns into the builder; any other
     // function stays a function taking the parameters without a default, and a type of its name (a hidden struct,
@@ -508,7 +510,7 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
             quote! {
                 impl #name {
                     #[doc(hidden)]
-                    #vis fn __kz_builder() -> #new_type { #new_fn() }
+                    #vis fn __kz_builder #new_generics () -> #new_type { #new_fn() }
                 }
             }
         } else {
@@ -517,7 +519,7 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
                 #[doc(hidden)]
                 #vis struct #name {}
                 impl #name {
-                    pub fn __kz_builder() -> #new_type { #new_fn() }
+                    pub fn __kz_builder #new_generics () -> #new_type { #new_fn() }
                 }
             }
         };
@@ -642,9 +644,10 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             prefix: &prefix,
             vis: &vis,
             wants_id: &vec![false; params.len()],
+            free_ok: true,
         })?;
         gens.clear();
-        let (b, new_type) = (built.items, built.new_type);
+        let (b, new_type, new_generics) = (built.items, built.new_type, built.new_generics);
         modules.push(b);
         let receiver = &m.sig.inputs[0];
         let decl_sig = declaration(&m.sig);
@@ -652,15 +655,15 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
         if ext.is_some() {
             decls.push(quote! {
                 #[doc(hidden)]
-                fn #kz_name(#decl_receiver) -> #new_type;
+                fn #kz_name #new_generics (#decl_receiver) -> #new_type;
             });
             items.push(parse_quote! {
-                fn #kz_name(#receiver) -> #new_type { #new_fn(self) }
+                fn #kz_name #new_generics (#receiver) -> #new_type { #new_fn(self) }
             });
         } else {
             kz_fns.push(quote! {
                 #[doc(hidden)]
-                pub fn #kz_name(#receiver) -> #new_type { #new_fn(self) }
+                pub fn #kz_name #new_generics (#receiver) -> #new_type { #new_fn(self) }
             });
         }
 

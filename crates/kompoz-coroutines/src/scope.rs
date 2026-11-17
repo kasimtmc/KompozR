@@ -1,6 +1,7 @@
 //! Structured concurrency inside a coroutine: `coroutine_scope`, `supervisor_scope`, `with_timeout`.
 
-use crate::executor::{CoroutineScope, Failure, ScopeState, current};
+use crate::context::current_coroutine_context;
+use crate::executor::{CoroutineScope, Failure, ScopeState, cancel_current, current};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
@@ -22,6 +23,9 @@ enum Outcome<T> {
     Value(T),
     Failed(Failure),
     TimedOut,
+    /// The block was cancelled (its scope cancelled through the handle it was given, or the block's job): as Kotlin's
+    /// CancellationException leaving `coroutineScope`, the awaiting coroutine is cancelled too.
+    Cancelled,
 }
 
 /// Runs `block` as a child of a scope of its own, with what it launches there; done once all of them are.
@@ -31,7 +35,7 @@ async fn run_scope<T: 'static, Fut: Future<Output = T> + 'static>(
     timeout: Option<Duration>,
 ) -> Outcome<T> {
     let (d, job) = current();
-    let scope = ScopeState::new(&d, true, supervisor);
+    let scope = ScopeState::new(&d, true, supervisor, current_coroutine_context());
     let mut guard = CancelOnDrop(Some(scope.clone()));
     let timed_out = Rc::new(Cell::new(false));
     if let Some(t) = timeout {
@@ -76,7 +80,8 @@ async fn run_scope<T: 'static, Fut: Future<Output = T> + 'static>(
     }
     match value.borrow_mut().take() {
         Some(v) if !timed_out.get() => Outcome::Value(v),
-        _ => Outcome::TimedOut,
+        _ if timed_out.get() => Outcome::TimedOut,
+        _ => Outcome::Cancelled,
     }
 }
 
@@ -90,6 +95,7 @@ pub async fn coroutine_scope<T: 'static, Fut: Future<Output = T> + 'static>(
         Outcome::Value(v) => v,
         Outcome::Failed(f) => f.resume(),
         Outcome::TimedOut => unreachable!("cancelled without a timeout"),
+        Outcome::Cancelled => cancel_current().await,
     }
 }
 
@@ -102,6 +108,7 @@ pub async fn supervisor_scope<T: 'static, Fut: Future<Output = T> + 'static>(
         Outcome::Value(v) => v,
         Outcome::Failed(f) => f.resume(),
         Outcome::TimedOut => unreachable!("cancelled without a timeout"),
+        Outcome::Cancelled => cancel_current().await,
     }
 }
 
@@ -126,6 +133,7 @@ pub async fn with_timeout<T: 'static, Fut: Future<Output = T> + 'static>(
         Outcome::Value(v) => Ok(v),
         Outcome::Failed(f) => f.resume(),
         Outcome::TimedOut => Err(TimeoutCancellation),
+        Outcome::Cancelled => cancel_current().await,
     }
 }
 

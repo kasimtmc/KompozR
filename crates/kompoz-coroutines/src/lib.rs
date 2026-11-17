@@ -8,6 +8,7 @@
 mod background;
 mod channel;
 mod compose;
+mod context;
 mod executor;
 mod flow;
 mod hot;
@@ -17,7 +18,10 @@ mod time;
 pub use background::{Background, background_work_in_flight, run_in_background, with_background};
 pub use channel::{BufferOverflow, Channel, ReceiveFuture, SendFuture, produce};
 pub use compose::{LaunchedEffect, LocalDispatcher, produce_state, remember_coroutine_scope, snapshot_flow};
-pub use executor::{Cancelled, CoroutineScope, Deferred, Dispatcher, Failure, Job, current_job, run_catching};
+pub use context::{CoroutineContext, current_coroutine_context, with_context};
+pub use executor::{
+    Cancelled, CoroutineScope, Deferred, Dispatcher, Failure, Job, cancel_current, current_job, run_catching,
+};
 pub use flow::{Flow, FlowCollector, combine, empty_flow, flow, flow_of};
 pub use hot::{AsFlow, MutableSharedFlow, MutableStateFlow, SharedFlow, SharingStarted, StateFlow};
 pub use scope::{TimeoutCancellation, coroutine_scope, supervisor_scope, with_timeout, with_timeout_or_null};

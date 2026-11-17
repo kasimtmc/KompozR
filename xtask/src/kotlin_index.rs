@@ -44,6 +44,7 @@ const API_CRATES: &[&str] = &[
     "kompoz-graphics",
     "kompoz-text",
     "kompoz-ui",
+    "kompoz-animation",
     "kompoz-foundation",
     "kompoz-test",
 ];
@@ -1216,7 +1217,7 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     let mut out = Vec::new();
     // (Kotlin's overloads, as a tuple: `fn Color(args: impl ColorArgs)`)
     if let [only] = typed.as_slice()
-        && let Some(trait_name) = impl_trait_name(&only.ty)
+        && let Some(trait_name) = impl_trait_name(&only.ty).or_else(|| generic_trait_name(&only.ty, &bounds))
         && trait_name.ends_with("Args")
         && let Some(overloads) = scan.overloads.get(&trait_name)
     {
@@ -1247,6 +1248,19 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     }
     out.insert(0, it);
     out
+}
+
+/// A generic parameter's trait: `A` of `fn f<A: AnimatableArgs>(args: A)` → `AnimatableArgs` (what an overloaded
+/// function whose return type depends on its arguments takes).
+fn generic_trait_name(ty: &Type, bounds: &BTreeMap<String, Vec<TypeParamBound>>) -> Option<String> {
+    let Type::Path(p) = ty else { return None };
+    if p.path.segments.len() != 1 {
+        return None;
+    }
+    bounds.get(&p.path.segments[0].ident.to_string())?.iter().find_map(|b| match b {
+        TypeParamBound::Trait(t) => t.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    })
 }
 
 /// `impl Name` → `Name`.
@@ -1364,8 +1378,9 @@ fn from_bounds(bs: &[TypeParamBound], generic: &BTreeMap<String, Vec<TypeParamBo
 }
 
 /// A lambda's receiver: its first parameter's type when that is a scope (`&mut DrawScope`, `PointerInputScope`,
-/// `&mut SemanticsPropertyReceiver`, a builder, `FocusProperties`; `&mut SemanticsConfiguration`, which is
-/// Compose's SemanticsPropertyReceiver), as Kotlin's `T.() -> R` is.
+/// `&mut SemanticsPropertyReceiver`, a builder, `FocusProperties`, a DSL's config (`&mut KeyframesSpecConfig<T>`), an
+/// `&Animatable` (its `animateTo` block); `&mut SemanticsConfiguration`, which is Compose's
+/// SemanticsPropertyReceiver), as Kotlin's `T.() -> R` is.
 fn receiver_of(first: &Type) -> String {
     let inner = match first {
         Type::Reference(r) => &*r.elem,
@@ -1373,8 +1388,8 @@ fn receiver_of(first: &Type) -> String {
     };
     let Type::Path(p) = inner else { return String::new() };
     let name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
-    let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform"].iter().any(|s| name.ends_with(s))
-        || matches!(name.as_str(), "Path" | "Placeable" | "SemanticsConfiguration");
+    let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform", "Config"].iter().any(|s| name.ends_with(s))
+        || matches!(name.as_str(), "Path" | "Placeable" | "SemanticsConfiguration" | "Animatable");
     if scope { name } else { String::new() }
 }
 

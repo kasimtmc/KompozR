@@ -9,6 +9,7 @@
 //! structured scope (`coroutine_scope`), which cancels the rest and hands it to who awaits the scope; to who
 //! awaits an `async`'s `Deferred`; or, with nobody to take it, reported (not fatal).
 
+use crate::context::{CoroutineContext, push_context};
 use parking_lot::Mutex;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -372,6 +373,7 @@ impl Inner {
         job.running.set(true);
         let result = {
             let _pop = PopCurrent;
+            let _context = push_context(job.context.clone());
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.as_mut().poll(&mut cx)))
         };
         job.running.set(false);
@@ -442,11 +444,14 @@ pub(crate) struct JobState {
     body: bool,
     failure: RefCell<Option<Failure>>,
     joiners: RefCell<Vec<Waker>>,
+    /// Its scope's context (what it reads as `current_coroutine_context`).
+    context: CoroutineContext,
 }
 
 impl JobState {
     fn new(dispatcher: &Rc<Inner>, scope: &Rc<ScopeState>, deferred: bool, body: bool) -> Rc<JobState> {
         Rc::new(JobState {
+            context: scope.context.clone(),
             dispatcher: Rc::downgrade(dispatcher),
             task: Cell::new(None),
             scope: RefCell::new(Rc::downgrade(scope)),
@@ -515,11 +520,19 @@ pub(crate) struct ScopeState {
     /// Woken once its last child is done.
     when_empty: RefCell<Option<Waker>>,
     cancelling: Cell<bool>,
+    /// What its coroutines run with.
+    context: CoroutineContext,
 }
 
 impl ScopeState {
-    pub(crate) fn new(dispatcher: &Rc<Inner>, structured: bool, supervisor: bool) -> Rc<ScopeState> {
+    pub(crate) fn new(
+        dispatcher: &Rc<Inner>,
+        structured: bool,
+        supervisor: bool,
+        context: CoroutineContext,
+    ) -> Rc<ScopeState> {
         Rc::new(ScopeState {
+            context,
             dispatcher: Rc::downgrade(dispatcher),
             jobs: RefCell::new(Vec::new()),
             cancelled: Cell::new(false),
@@ -613,7 +626,17 @@ impl PartialEq for CoroutineScope {
 impl CoroutineScope {
     /// A scope of its own on `dispatcher` (a ViewModel's, a screen's): cancel it when it is done with.
     pub fn new(dispatcher: &Dispatcher) -> CoroutineScope {
-        CoroutineScope(ScopeState::new(&dispatcher.0, false, false))
+        CoroutineScope::new_with_context(dispatcher, CoroutineContext::new())
+    }
+
+    /// The same, its coroutines run with `context` (Kotlin's `CoroutineScope(context)`).
+    pub fn new_with_context(dispatcher: &Dispatcher, context: CoroutineContext) -> CoroutineScope {
+        CoroutineScope(ScopeState::new(&dispatcher.0, false, false, context))
+    }
+
+    /// What its coroutines run with.
+    pub fn coroutine_context(&self) -> CoroutineContext {
+        self.0.context.clone()
     }
 
     /// Starts `coroutine`; it runs at once until it first waits.
@@ -746,6 +769,14 @@ impl<T: 'static> std::future::IntoFuture for Deferred<T> {
 /// The coroutine running now (Kotlin's `coroutineContext[Job]`).
 pub fn current_job() -> Job {
     Job(current().1)
+}
+
+/// Cancels the coroutine running now and never gives a value: what Kotlin's `throw CancellationException()` does
+/// where nothing catches it (the coroutine ends there, its destructors run; awaited by `coroutine_scope`, the
+/// awaiting coroutine is cancelled too).
+pub async fn cancel_current<T>() -> T {
+    current_job().cancel();
+    std::future::pending().await
 }
 
 /// Runs `future`, giving what it failed with instead of failing (Kotlin's `runCatching`, a `try`/`catch` around

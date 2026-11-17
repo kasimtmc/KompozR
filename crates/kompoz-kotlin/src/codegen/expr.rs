@@ -773,6 +773,10 @@ impl Gen<'_, '_> {
                 Out::plain(ts, ty)
             }
             other => {
+                // A member of the left side's type or a member extension of an implicit receiver, as a call is.
+                if let Some(out) = self.infix_member(name, lhs, rhs, loc) {
+                    return out;
+                }
                 // An infix member of the index (`LocalX provides v`).
                 let item = lookup(other).iter().find(|i| i.kind == Kind::Method && i.params.len() == 1);
                 let Some(item) = item else {

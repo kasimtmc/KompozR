@@ -441,13 +441,16 @@ pub(crate) fn plain_type_text(t: &str) -> String {
 /// (`Arc`, `Rc`) the API's own parameters hold that trait's objects in (`Rc` if none says), none for what isn't a
 /// trait of the API (a trait is what the index has methods of through it, of no type).
 pub(crate) fn trait_object(name: &str) -> Option<&'static str> {
-    let is_trait = index::ITEMS.iter().any(|i| i.via == name && i.owner.is_empty() && i.kind == Kind::Method);
-    if !is_trait {
-        return None;
-    }
     let (arc, rc) = (format!("Arc<dyn {name}"), format!("Rc<dyn {name}"));
     let held = |p: &str| index::ITEMS.iter().flat_map(|i| i.params).filter(|x| x.ty.contains(p)).count();
-    Some(if held(&arc) > held(&rc) { "Arc" } else { "Rc" })
+    let (arcs, rcs) = (held(&arc), held(&rc));
+    // (a trait the index knows a method of, or one the API takes as a shared trait object: `AnimationSpec<T>`, whose
+    // methods are hidden but which `animationSpec: Arc<dyn AnimationSpec<T>>` takes)
+    let is_trait = index::ITEMS.iter().any(|i| i.via == name && i.owner.is_empty() && i.kind == Kind::Method);
+    if !is_trait && arcs + rcs == 0 {
+        return None;
+    }
+    Some(if arcs > rcs { "Arc" } else { "Rc" })
 }
 
 /// What a call calls: its Rust path or method name, its parameters, and how it is called.

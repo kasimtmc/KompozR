@@ -17,10 +17,12 @@ pub mod draw;
 pub mod focus;
 pub mod graphics_context;
 pub mod host;
+pub mod infinite_animation_policy;
 pub mod input;
 pub mod layout;
 pub mod media_query;
 pub mod modifier;
+pub mod motion_duration_scale;
 pub mod node;
 pub mod platform;
 pub mod semantics;
@@ -37,6 +39,7 @@ pub use alignment::{
 };
 pub use display_list::DisplayList;
 pub use host::{HostHandle, KompozHost};
+pub use infinite_animation_policy::InfiniteAnimationPolicy;
 pub use layout::{
     AlignmentLine, FirstBaseline, IntrinsicMeasurable, IntrinsicMeasureScope, LastBaseline, Layout, LayoutCoordinates,
     Measurable, MeasurePolicy, MeasureResult, MeasureScope, MultiMeasureLayout, Placeable, PlacementScope,
@@ -44,5 +47,6 @@ pub use layout::{
     measure_policy,
 };
 pub use modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, NodeKind};
+pub use motion_duration_scale::MotionDurationScale;
 pub use node::LayoutNode;
 pub use unit::Constraints;

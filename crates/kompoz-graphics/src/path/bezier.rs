@@ -1,6 +1,8 @@
-//! Roots and bounds of cubic Bézier curves along one axis (Compose's Bezier.kt: evaluateCubic,
-//! findFirstCubicRoot, computeCubicVerticalBounds), what Compose's CubicBezierEasing solves its curves with.
+//! Roots and bounds of Bézier curves along one axis (Compose's Bezier.kt: evaluateCubic, findFirstCubicRoot,
+//! computeCubicVerticalBounds, what Compose's CubicBezierEasing solves its curves with; and over a path's segment
+//! evaluateY, findFirstRoot, computeHorizontalBounds, what its PathEasing solves with).
 
+use super::iterator::{PathSegment, PathSegmentType};
 use std::f64::consts::PI;
 
 const Tau: f64 = PI * 2.0;
@@ -168,4 +170,116 @@ pub fn compute_cubic_vertical_bounds(p0y: f32, p1y: f32, p2y: f32, p3y: f32) -> 
         max_y = max_y.max(y);
     }
     (min_y, max_y)
+}
+
+// ---- A path segment along one axis (Compose's Bezier.kt over PathSegment: what PathEasing solves with) ----------
+
+/// The coordinate `axis` (0: x, 1: y) of a segment's point `i`.
+fn coord(segment: &PathSegment, i: usize, axis: usize) -> f32 {
+    let p = segment.points[i];
+    if axis == 0 { p.x } else { p.y }
+}
+
+/// The index of a segment's last point (Compose's endX/endY: 0 for a move, a close, a done).
+fn end_index(segment: &PathSegment) -> usize {
+    match segment.r#type {
+        PathSegmentType::Line => 1,
+        PathSegmentType::Quadratic | PathSegmentType::Conic => 2,
+        PathSegmentType::Cubic => 3,
+        _ => 0,
+    }
+}
+
+fn evaluate_line(p0: f32, p1: f32, t: f32) -> f32 {
+    (p1 - p0) * t + p0
+}
+
+fn evaluate_quadratic(p0: f32, p1: f32, p2: f32, t: f32) -> f32 {
+    let by = 2.0 * (p1 - p0);
+    let ay = p2 - 2.0 * p1 + p0;
+    (ay * t + by) * t + p0
+}
+
+/// A segment's coordinate `axis` at `t` (Compose's evaluateX, evaluateY): NaN for a conic, a close, a done.
+fn evaluate_axis(segment: &PathSegment, t: f32, axis: usize) -> f32 {
+    let c = |i| coord(segment, i, axis);
+    match segment.r#type {
+        PathSegmentType::Move => c(0),
+        PathSegmentType::Line => evaluate_line(c(0), c(1), t),
+        PathSegmentType::Quadratic => evaluate_quadratic(c(0), c(1), c(2), t),
+        PathSegmentType::Cubic => evaluate_cubic4(c(0), c(1), c(2), c(3), t),
+        _ => f32::NAN,
+    }
+}
+
+/// The y coordinate of `segment`'s curve at `t` (Compose's evaluateY): NaN for a conic, a close, a done.
+pub fn evaluate_y(segment: &PathSegment, t: f32) -> f32 {
+    evaluate_axis(segment, t, 1)
+}
+
+/// The first root within 0..1 of a quadratic Bézier (Compose's findFirstQuadraticRoot), NaN if none.
+fn find_first_quadratic_root(p0: f32, p1: f32, p2: f32) -> f32 {
+    let (a, b, c) = (p0 as f64, p1 as f64, p2 as f64);
+    let d = a - 2.0 * b + c;
+    if d != 0.0 {
+        let v1 = -(b * b - a * c).sqrt();
+        let v2 = -a + b;
+        let root = clamp_valid_root_in_unit_range((-(v1 + v2) / d) as f32);
+        if !root.is_nan() {
+            return root;
+        }
+        return clamp_valid_root_in_unit_range(((v1 - v2) / d) as f32);
+    } else if b != c {
+        return clamp_valid_root_in_unit_range(((2.0 * b - c) / (2.0 * b - 2.0 * c)) as f32);
+    }
+    f32::NAN
+}
+
+/// Where along `segment` (0..1) its x is `fraction`, the first such place; NaN if there is none (Compose's
+/// findFirstRoot: conics, closes and dones have none).
+pub fn find_first_root(segment: &PathSegment, fraction: f32) -> f32 {
+    let x = |i| coord(segment, i, 0) - fraction;
+    match segment.r#type {
+        PathSegmentType::Line => clamp_valid_root_in_unit_range(-x(0) / (x(1) - x(0))),
+        PathSegmentType::Quadratic => find_first_quadratic_root(x(0), x(1), x(2)),
+        PathSegmentType::Cubic => find_first_cubic_root(x(0), x(1), x(2), x(3)),
+        _ => f32::NAN,
+    }
+}
+
+/// The roots within 0..1 of a segment's derivative along `axis` (and, for a cubic, of its second derivative),
+/// written into `roots` from `index`; how many (Compose's findDerivativeRoots).
+fn find_derivative_roots(segment: &PathSegment, axis: usize, roots: &mut [f32], index: usize) -> usize {
+    let c = |i| coord(segment, i, axis);
+    match segment.r#type {
+        PathSegmentType::Quadratic => {
+            let d0 = 2.0 * (c(1) - c(0));
+            let d1 = 2.0 * (c(2) - c(1));
+            find_line_root(d0, d1, roots, index)
+        }
+        PathSegmentType::Cubic => {
+            let d0 = 3.0 * (c(1) - c(0));
+            let d1 = 3.0 * (c(2) - c(1));
+            let d2 = 3.0 * (c(3) - c(2));
+            let count = find_quadratic_roots(d0, d1, d2, roots, index);
+            let dd0 = 2.0 * (d1 - d0);
+            let dd1 = 2.0 * (d2 - d1);
+            count + find_line_root(dd0, dd1, roots, index + count)
+        }
+        _ => 0,
+    }
+}
+
+/// The least and greatest x of `segment` (Compose's computeHorizontalBounds; `roots`, at least 5 long, is scratch).
+pub fn compute_horizontal_bounds(segment: &PathSegment, roots: &mut [f32]) -> (f32, f32) {
+    let count = find_derivative_roots(segment, 0, roots, 0);
+    let (start, end) = (coord(segment, 0, 0), coord(segment, end_index(segment), 0));
+    let mut min_x = start.min(end);
+    let mut max_x = start.max(end);
+    for &t in &roots[..count] {
+        let x = evaluate_axis(segment, t, 0);
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+    }
+    (min_x, max_x)
 }

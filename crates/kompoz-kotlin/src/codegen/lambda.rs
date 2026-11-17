@@ -291,14 +291,83 @@ impl Gen<'_, '_> {
 /// (`Self::Item`, `T`) or `impl` type: the standard library's names by their paths (`Rc` → `::std::rc::Rc`), the
 /// API's as they are (the prelude has them).
 pub(crate) fn written_type(text: &str, span: Span) -> Option<TokenStream> {
-    let generic = text
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|w| w == "Self" || w == "impl" || (w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())));
-    if generic {
+    let words = || text.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+    if words().any(|w| w == "Self" || w == "impl") {
         return None;
     }
     let tokens = text.parse::<TokenStream>().ok()?;
-    Some(respan(std_paths(tokens), span))
+    // (the function's type parameters, `T`, left to inference: `Box<dyn FnMut(&Animatable<_, _>)>` still tells the
+    // closure what its parameter is)
+    Some(respan(std_paths(type_params_inferred(tokens)), span))
+}
+
+/// `tokens` with a type parameter (a single capital letter) written `_`, a named lifetime `'_` and a `for<…>`
+/// left out (a closure's elided lifetimes are higher-ranked): what a closure's type can be written as where the
+/// function's generics aren't known.
+fn type_params_inferred(tokens: TokenStream) -> TokenStream {
+    use proc_macro2::{Group, Ident, Punct, Spacing, TokenTree};
+    let all: Vec<TokenTree> = tokens.into_iter().collect();
+    let mut out: Vec<TokenTree> = Vec::new();
+    let mut k = 0;
+    while k < all.len() {
+        match &all[k] {
+            // `for<'a, …>`: left out
+            TokenTree::Ident(i)
+                if i == "for" && matches!(all.get(k + 1), Some(TokenTree::Punct(p)) if p.as_char() == '<') =>
+            {
+                let mut depth = 0;
+                k += 1;
+                while k < all.len() {
+                    if let TokenTree::Punct(p) = &all[k] {
+                        match p.as_char() {
+                            '<' => depth += 1,
+                            '>' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    k += 1;
+                }
+            }
+            // `'a` (not `'static`): `'_`
+            TokenTree::Punct(p)
+                if p.as_char() == '\'' && matches!(all.get(k + 1), Some(TokenTree::Ident(i)) if i != "static") =>
+            {
+                let mut quote = Punct::new('\'', Spacing::Joint);
+                quote.set_span(p.span());
+                out.push(TokenTree::Punct(quote));
+                out.push(TokenTree::Ident(Ident::new("_", p.span())));
+                k += 1;
+            }
+            TokenTree::Punct(p) if p.as_char() == '\'' => {
+                out.push(all[k].clone());
+                if let Some(next) = all.get(k + 1) {
+                    out.push(next.clone());
+                }
+                k += 1;
+            }
+            TokenTree::Ident(i)
+                if {
+                    let w = i.to_string();
+                    w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())
+                } =>
+            {
+                out.push(TokenTree::Ident(Ident::new("_", i.span())));
+            }
+            TokenTree::Group(g) => {
+                let mut ng = Group::new(g.delimiter(), type_params_inferred(g.stream()));
+                ng.set_span(g.span());
+                out.push(TokenTree::Group(ng));
+            }
+            other => out.push(other.clone()),
+        }
+        k += 1;
+    }
+    out.into_iter().collect()
 }
 
 /// `tokens` with the standard library's types they name unqualified written by their paths.

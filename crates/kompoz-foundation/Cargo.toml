@@ -10,6 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+kompoz-animation = { path = "../kompoz-animation" }
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-runtime = { path = "../kompoz-runtime" }

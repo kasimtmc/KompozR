@@ -236,12 +236,13 @@ impl Gen<'_, '_> {
                     Ty::List(_) | Ty::Set(_) | Ty::Map(_, _)
                 );
                 let m = if mutable || collection { quote_spanned!(span=> mut) } else { quote!() };
-                let annot = match &declared {
-                    Some((ty, t)) if !matches!(ty, Ty::Fun(_)) => {
-                        let rt = self.rust_type(t, super::types::TypePos::Value);
-                        quote_spanned!(span=> : #rt)
-                    }
-                    _ => quote!(),
+                let declared_rt = match &declared {
+                    Some((ty, t)) if !matches!(ty, Ty::Fun(_)) => Some(self.rust_type(t, super::types::TypePos::Value)),
+                    _ => None,
+                };
+                let annot = match &declared_rt {
+                    Some(rt) => quote_spanned!(span=> : #rt),
+                    None => quote!(),
                 };
                 let (value, ty) = match init {
                     PropertyInit::Value(e) => {
@@ -254,7 +255,12 @@ impl Gen<'_, '_> {
                             && o.kind != OutKind::Null
                             && !o.ty.is_nullable()
                             && o.ty != Ty::Unknown;
+                        let value_ty = o.ty.clone();
                         let v = self.finish(o, Want::default(), e.loc);
+                        let v = match &declared_rt {
+                            Some(rt) => self.as_declared(v, &value_ty, rt, span),
+                            None => v,
+                        };
                         let v = if wrap { quote_spanned!(span=> ::core::option::Option::Some(#v)) } else { v };
                         (quote_spanned!(span=> = #v), ty)
                     }

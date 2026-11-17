@@ -414,6 +414,24 @@ impl Gen<'_, '_> {
         self.method_on(recv, name, args, loc)
     }
 
+    /// `lhs name rhs` (an infix call) as a call of a member: the left side's type's own (`entity using easing`, one
+    /// of its overloads by the argument), or a member extension of an implicit receiver (`1.3f at 100` in a
+    /// `keyframes { }` block: the config's `at(value, timeStamp)`); `None` when neither has one of that name.
+    pub(crate) fn infix_member(&mut self, name: &Ident, lhs: &Expr, rhs: &Expr, loc: Loc) -> Option<Out> {
+        let lhs_ty = self.peek_ty(lhs);
+        let own = lhs_ty.owner().is_some_and(|o| members_of(o, &name.name).any(|i| i.kind == Kind::Method));
+        let extension = self
+            .receivers
+            .iter()
+            .any(|r| members_of(&r.ty, &name.name).any(|i| i.kind == Kind::Method && i.params.len() == 2));
+        if !own && !extension {
+            return None;
+        }
+        let recv = self.expr(lhs);
+        let arg = ArgRef { name: None, value: ArgValue::Expr(rhs), spread: false, loc: rhs.loc };
+        Some(self.method_on(recv, name, &[arg], loc))
+    }
+
     /// A method call on a value written as `recv`.
     fn method_on(&mut self, recv: Out, name: &Ident, args: &[ArgRef], loc: Loc) -> Out {
         let span = self.span(loc);
@@ -497,7 +515,8 @@ impl Gen<'_, '_> {
             self.elem_hint = None;
             return out;
         }
-        // A member extension of an implicit receiver (`placeable.place(x, y)` in a PlacementScope).
+        // A member extension of an implicit receiver (`placeable.place(x, y)` in a PlacementScope; a generic one,
+        // `1.3f at 100` in a `keyframes { }` block, the config's `at(value: T, …)`, extends any value).
         let scoped = self.receivers.iter().rev().find_map(|r| {
             let items: Vec<&'static crate::index::Item> =
                 members_of(&r.ty, &name.name).filter(|i| i.kind == Kind::Method && !i.params.is_empty()).collect();
@@ -506,6 +525,7 @@ impl Gen<'_, '_> {
                 recv.ty == Ty::Unknown
                     || first == recv.ty
                     || first.is_float() && recv.ty.is_number()
+                    || first == Ty::Unknown && is_type_parameter(i.params[0].ty)
                     || first.owner().is_some() && first.owner() == recv.ty.owner()
             });
             (fits && owner_has_no(&recv.ty, &name.name)).then(|| (r.clone(), items))
@@ -1233,4 +1253,10 @@ fn ambiguous_member(name: &str) -> bool {
 /// Whether a value of type `t` has no method `name` of its own (a member extension of a scope may be meant).
 fn owner_has_no(t: &Ty, name: &str) -> bool {
     t.owner().is_none_or(|o| members_of(o, name).next().is_none())
+}
+
+/// Whether a parameter's Rust type is a type parameter (`T`): what a generic member extension extends.
+fn is_type_parameter(ty: &str) -> bool {
+    let t = ty.trim();
+    t.len() == 1 && t.chars().all(|c| c.is_ascii_uppercase())
 }

@@ -15,6 +15,7 @@ workspace = true
 test = ["dep:kompoz-test"]
 
 [dependencies]
+kompoz-animation = { path = "../kompoz-animation" }
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
@@ -53,4 +54,9 @@ harness = false
 # SubcomposeLayout and BoxWithConstraints in Kotlin's syntax.
 [[test]]
 name = "kotlin_subcompose"
+harness = false
+
+# animation-core's value layer in Kotlin's syntax.
+[[test]]
+name = "kotlin_animation"
 harness = false

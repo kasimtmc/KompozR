@@ -207,12 +207,13 @@ impl Gen<'_, '_> {
             }
             "IntRange" => quote_spanned!(span=> #kt::KtProgression<i32>),
             // (an interface the API has as a trait: its object shared, as Kotlin's references are — `shape: Shape` is
-            // an `Arc<dyn Shape>`, as the API's own shapes are)
-            _ if args.is_empty() && super::resolve::trait_object(name).is_some() => {
+            // an `Arc<dyn Shape>`, as the API's own shapes are; `AnimationSpec<Float>` an `Arc<dyn AnimationSpec<f32>>`)
+            _ if super::resolve::trait_object(name).is_some() => {
                 let i = self.name_ident(name, last.name.loc);
+                let g = if args.is_empty() { quote!() } else { quote_spanned!(span=> <#(#args),*>) };
                 match super::resolve::trait_object(name) {
-                    Some("Arc") => quote_spanned!(span=> ::std::sync::Arc<dyn #i>),
-                    _ => quote_spanned!(span=> ::std::rc::Rc<dyn #i>),
+                    Some("Arc") => quote_spanned!(span=> ::std::sync::Arc<dyn #i #g>),
+                    _ => quote_spanned!(span=> ::std::rc::Rc<dyn #i #g>),
                 }
             }
             _ => {
