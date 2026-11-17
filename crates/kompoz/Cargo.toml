@@ -68,6 +68,10 @@ name = "kotlin_scroll"
 harness = false
 
 [[test]]
+name = "kotlin_lazy"
+harness = false
+
+[[test]]
 name = "kotlin_text_input"
 harness = false
 

@@ -26,6 +26,7 @@ mod indirect_drag;
 mod mouse_wheel;
 pub(crate) mod scrollable;
 pub(crate) mod scrollable_state;
+pub mod snapping;
 mod tap;
 mod transform;
 
@@ -39,7 +40,9 @@ pub use draggable::{
     DefaultDraggableState, DragBlock, DragScope, DraggableModifiers, DraggableNode, DraggableState, DraggableStateEq,
     DraggableStateExtensions, OnDragStarted, OnDragStopped, remember_draggable_state,
 };
-pub use fling::{DefaultFlingBehavior, FlingBehavior, FlingBehaviorEq, ScrollableDefaultFlingBehavior};
+pub use fling::{
+    DefaultFlingBehavior, FlingBehavior, FlingBehaviorEq, ScrollableDefaultFlingBehavior, TargetedFlingBehavior,
+};
 pub use mouse_wheel::{DefaultScrollConfig, LocalScrollConfig, ScrollConfig};
 pub use scrollable::{NestedScrollScope, ScrollableDefaults, ScrollableModifiers, ScrollableNode};
 pub use scrollable_state::{

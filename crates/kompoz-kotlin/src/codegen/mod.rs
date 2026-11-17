@@ -110,6 +110,8 @@ pub(crate) struct LambdaCx {
     pub labels: Vec<String>,
     /// How many loops were open outside it (a `break` can't leave a lambda).
     pub loops: usize,
+    /// What its result goes to (a `return@label` value too): Kotlin's `Any` made a key.
+    pub result: expr::Want,
 }
 
 pub(crate) struct Gen<'a, 'd> {
@@ -129,6 +131,10 @@ pub(crate) struct Gen<'a, 'd> {
     pub call_labels: Vec<String>,
     /// A kt shim's call being written: its receiver's element type and its own (its lambdas' `it`).
     pub elem_hint: Option<(Ty, Ty)>,
+    /// A generic call's element type `T`, known from the collection it is given (`items(rows, key = { it.id })`:
+    /// `items_list(items: impl LazyListItems<T>, key: Rc<dyn Fn(&T) -> LazyKey>)`): what its lambdas' `T` is, written
+    /// out where a closure made a trait object can't take it from where it goes.
+    pub type_arg: Option<Ty>,
     counter: usize,
 }
 
@@ -147,6 +153,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             lambdas: Vec::new(),
             call_labels: Vec::new(),
             elem_hint: None,
+            type_arg: None,
             counter: 0,
         }
     }

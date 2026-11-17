@@ -1,6 +1,6 @@
 //! The C++ Kompoz's Kotlin-syntax tests (tests/kompozable_tests.cpp) that stage 9's Kotlin takes, ported: the same
 //! Kotlin (as Compose writes it where the C++ Kompoz's was looser) through `kompoz!` and `kompoz_file!`, the same
-//! behaviour asserted. What they use of later stages (data classes and enums, Material, lazy lists, SubcomposeLayout,
+//! behaviour asserted. What they use of later stages (data classes and enums, Material, SubcomposeLayout,
 //! anchored dragging, object expressions) is left out or written as Rust types Kotlin calls, as
 //! tools/stage9-followups.md lists.
 
@@ -96,7 +96,7 @@ fn rust_calls_the_modules_kotlin() {
     rule.on_node_with_text("> çıkartma:3").assert_exists();
 }
 
-// ---- lazy_items_effects_and_locals (the effects and locals; the lazy list is stage 10's, Material's theme 12's) ----
+// ---- lazy_items_effects_and_locals (Material's theme is stage 12's) -----------------------------------------------
 
 /// A mail of the inbox: no `==`, so a list of it is never compared and its composable isn't skipped.
 #[derive(Clone, KotlinProperties)]
@@ -114,9 +114,9 @@ kompoz! {
             onDispose { log("kapandı") }
         }
         CompositionLocalProvider(LocalInk provides Color.Red) {
-            Column {
-                Text("Gelen kutusu")
-                mails.forEachIndexed { index, mail ->
+            LazyColumn(modifier = Modifier.height(300.dp)) {
+                item { Text("Gelen kutusu") }
+                itemsIndexed(mails) { index, mail ->
                     Text("$index: ${mail.from}", modifier = Modifier.testTag("mürekkep $index ${LocalInk.current == Color.Red}"))
                 }
             }
@@ -144,7 +144,7 @@ fn effects_and_locals() {
     assert_eq!(*log.borrow(), ["açıldı 2", "kapandı"]);
 }
 
-// ---- state_forms_as_compose_writes_them (rememberLazyListState is stage 10's) ------------------------------------
+// ---- state_forms_as_compose_writes_them -------------------------------------------------------------------------
 
 /// A town: saved by its name.
 #[derive(Clone, Debug, PartialEq, KotlinProperties)]
@@ -168,11 +168,13 @@ thread_local! {
 kompoz! {
     @Kompozable
     fun StateForms() {
+        val list = rememberLazyListState()
         val todos = remember { mutableStateOf(mutableListOf("bir")) }
         val tags = remember { mutableStateListOf("a", "b") }
         var runs by remember { mutableStateOf(0, neverEqualPolicy()) }
         val town by rememberSaveable(stateSaver = townSaver) { mutableStateOf(Town("İzmir")) }
         Column {
+            Text("ilk görünen ${list.firstVisibleItemIndex}")
             Text("yapılacak ${todos.value.size}")
             Text("etiket ${tags.size}")
             Text("${town.name} $runs")
@@ -194,6 +196,7 @@ kompoz! {
 
 fn state_forms_as_compose_writes_them() {
     let rule = KompozTestRule::new(StateForms);
+    rule.on_node_with_text("ilk görünen 0").assert_exists();
     rule.on_node_with_text("yapılacak 1").assert_exists();
     rule.on_node_with_text("etiket 2").assert_exists();
     rule.on_node_with_text("İzmir 0").assert_exists();

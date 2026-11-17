@@ -239,7 +239,24 @@ impl NodeCoordinator {
         match self.layer_properties() {
             Some(layer) => {
                 let size = self.measured_size.get().to_size();
-                draw_through_layer(canvas, &layer, size, &mut |c| self.draw_contained_draw_modifiers(c));
+                match &layer.record_into {
+                    // Placed with a graphics layer (Compose's `placeWithLayer(offset, layer)`): what it draws is
+                    // that layer's recording, drawn through it (and drawable again by whoever holds the layer).
+                    Some(recorded) => {
+                        let mut picture = Picture::new();
+                        let outer = KEPT_PASS.replace(false);
+                        self.draw_contained_draw_modifiers(&mut picture);
+                        KEPT_PASS.set(outer);
+                        recorded.keep_recording(picture, self.measured_size.get());
+                        let picture = recorded.picture();
+                        draw_through_layer(canvas, &layer, size, &mut |c| {
+                            if let Some(p) = &picture {
+                                p.replay(c);
+                            }
+                        });
+                    }
+                    None => draw_through_layer(canvas, &layer, size, &mut |c| self.draw_contained_draw_modifiers(c)),
+                }
             }
             None => self.draw_contained_draw_modifiers(canvas),
         }

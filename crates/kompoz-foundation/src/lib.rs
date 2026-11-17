@@ -5,8 +5,9 @@
 //! interactions and their sources, indications, `magnifier`, `background` and `border`, `Canvas` and `Image`,
 //! focus groups, progress and selectable group semantics, bring-into-view requesters and responders, scrolling
 //! ([`gestures`]: `draggable`, `scrollable` with its flings, wheel, nested scroll and bringing into view;
-//! [`scroll`]: `ScrollState`, `vertical_scroll`, `horizontal_scroll`; [`scrollable_area`]), overscroll (Android's
-//! stretch: [`overscroll`]), and text ([`text`]:
+//! [`scroll`]: `ScrollState`, `vertical_scroll`, `horizontal_scroll`; [`scrollable_area`]; snapping:
+//! [`gestures::snapping`]), overscroll (Android's stretch: [`overscroll`]), lazy lists ([`lazy`]: `LazyColumn`,
+//! `LazyRow`, `LazyListState`; the `LazyLayout` core: [`lazy::layout`]), and text ([`text`]:
 //! `BasicText` with its links, inline content and auto size; `text::selection`: `SelectionContainer`,
 //! `DisableSelection`; `text::input`: the state-based text field's model — `TextFieldState`, its buffer, undo and
 //! transformations —, keyboard options and actions, key mappings). Its modifiers extend `Modifier` through traits:
@@ -32,6 +33,7 @@ mod image;
 pub mod indication;
 pub mod interaction;
 pub mod layout;
+pub mod lazy;
 pub mod magnifier;
 pub mod overscroll;
 pub mod overscroll_android;
@@ -61,6 +63,10 @@ pub mod prelude {
     pub use crate::draganddrop::DragAndDropModifiers;
     pub use crate::focusable::FocusableModifiers;
     pub use crate::focused_bounds::FocusedBoundsModifiers;
+    pub use crate::gestures::snapping::{
+        SnapLayoutInfoProvider, SnapPosition, lazy_list_snap_layout_info_provider, remember_snap_fling_behavior,
+        remember_snap_fling_behavior_for_list, snap_fling_behavior,
+    };
     pub use crate::gestures::*;
     pub use crate::hoverable::HoverableModifiers;
     pub use crate::indication::{
@@ -71,6 +77,12 @@ pub mod prelude {
         PressInteraction,
     };
     pub use crate::layout::*;
+    pub use crate::lazy::layout::LazyKey;
+    // (a lazy item's content type: Kotlin's `Any`, a subcomposition's slot id)
+    pub use crate::lazy::{
+        LazyColumn, LazyItemScopeModifiers, LazyListItemInfo, LazyListLayoutInfo, LazyListScope, LazyListState,
+        LazyRow, remember_lazy_list_state,
+    };
     pub use crate::magnifier::MagnifierModifiers;
     pub use crate::overscroll::{
         LocalOverscrollFactory, OverscrollEffect, OverscrollFactory, OverscrollModifiers, PerformFling,
@@ -101,4 +113,5 @@ pub mod prelude {
     };
     pub use crate::{BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, Image, VectorImage};
     pub use crate::{MutatePriority, MutatorMutex};
+    pub use kompoz_ui::layout::SlotKey;
 }

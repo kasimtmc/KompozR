@@ -376,6 +376,11 @@ impl Owner {
         root_resized
     }
 
+    /// Whether a measure and layout pass runs now.
+    pub(crate) fn is_measuring(&self) -> bool {
+        self.during_measure_layout.get()
+    }
+
     /// Measures `node` within `constraints` and lays it out now, apart from its parent's measure (Compose's
     /// `measureAndLayout(layoutNode, constraints)`: a precomposed slot premeasured).
     pub(crate) fn measure_and_layout_node(&self, node: &Rc<LayoutNode>, constraints: Constraints) {

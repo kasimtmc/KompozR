@@ -424,6 +424,10 @@ impl Gen<'_, '_> {
                 let v = combined(self, read, &read_ty);
                 match ty {
                     Ty::Map(_, _) => quote_spanned!(span=> #r.set(#(#idx,)* #v);),
+                    // (a state list: its own `set`, taking `&self` and a `usize`)
+                    Ty::Named(n, _) if n == "SnapshotStateList" => {
+                        quote_spanned!(span=> #r.set(#((#idx) as usize,)* #v);)
+                    }
                     _ => quote_spanned!(span=> #kt::KtMutableList::set(&mut #r, #(#idx,)* #v);),
                 }
             }
@@ -547,7 +551,8 @@ impl Gen<'_, '_> {
                 }
                 match value {
                     Some(v) => {
-                        let v = self.value(v);
+                        let want = self.lambdas.last().map(|l| l.result).unwrap_or_default();
+                        let v = self.value_want(v, want);
                         quote_spanned!(span=> return #v)
                     }
                     None => quote_spanned!(span=> return),
@@ -723,7 +728,7 @@ impl Gen<'_, '_> {
                         {
                             self.number(n, e.loc, true).ts
                         } else {
-                            self.value_want(e, Want { str_ok: true })
+                            self.value_want(e, Want { str_ok: true, any: None })
                         };
                         quote_spanned!(span=> #s == #v)
                     }

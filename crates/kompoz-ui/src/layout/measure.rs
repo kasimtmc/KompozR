@@ -435,6 +435,30 @@ impl PlacementScope {
         placeable.place_apparent_to_real_offset(position, z_index, Some(layer_block));
     }
 
+    /// Places it through `layer` (Compose's `placeWithLayer(x, y, layer)`): drawn with the layer's properties (as
+    /// they change), what it draws recorded into the layer, which can draw it again elsewhere.
+    pub fn place_with_graphics_layer(
+        &self,
+        placeable: &Placeable,
+        position: IntOffset,
+        layer: &crate::draw::GraphicsLayer,
+        z_index: f32,
+    ) {
+        placeable.place_apparent_to_real_offset(position, z_index, Some(layer.placement_block()));
+    }
+
+    /// `place_relative` through `layer` (Compose's `placeRelativeWithLayer(position, layer)`).
+    pub fn place_relative_with_graphics_layer(
+        &self,
+        placeable: &Placeable,
+        position: IntOffset,
+        layer: &crate::draw::GraphicsLayer,
+        z_index: f32,
+    ) {
+        let at = self.mirrored(placeable, position);
+        placeable.place_apparent_to_real_offset(at, z_index, Some(layer.placement_block()));
+    }
+
     /// `place_relative` through a layer (Compose's `placeRelativeWithLayer`).
     pub fn place_relative_with_layer(
         &self,

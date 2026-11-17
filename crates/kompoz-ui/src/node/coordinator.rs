@@ -530,6 +530,15 @@ impl NodeCoordinator {
             }
             None => block(&mut scope),
         }
+        if let Some(recorded) = &scope.record_into {
+            // (placed with a graphics layer: its properties changing are this layer's)
+            let weak = self.this.clone();
+            recorded.set_on_property_changed(Some(Rc::new(move || {
+                if let Some(c) = weak.upgrade() {
+                    c.update_layer_parameters(true);
+                }
+            })));
+        }
         let matrix = scope.matrix();
         let mut inverse = matrix;
         inverse.invert();

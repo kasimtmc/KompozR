@@ -14,7 +14,9 @@
 use super::layer_draw::{LayerDraw, draw_layer};
 use super::{ContentDrawScope, DrawScope, KEPT_PASS, Picture};
 use crate::graphics_context::DefaultShadowColor;
-use crate::layout::{CompositingStrategy, DefaultCameraDistance, LayerGeometry};
+use crate::layout::{
+    CompositingStrategy, DefaultCameraDistance, GraphicsLayerScope, LayerBlock, LayerGeometry, TransformOrigin,
+};
 use crate::platform::{LocalPlatform, PlatformHandle};
 use kompoz_graphics::{
     BlendMode, Color, ColorFilter, CornerRadius, Density, ImageBitmap, IntOffset, IntSize, LayoutDirection, Offset,
@@ -24,6 +26,17 @@ use kompoz_runtime::{kompozable, named, remember};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::Arc;
+
+/// A layer's outline as the shape of the layout placed with it.
+#[derive(Debug, PartialEq)]
+struct OutlineShape(Outline);
+
+impl kompoz_graphics::Shape for OutlineShape {
+    fn create_outline(&self, _: Size, _: LayoutDirection, _: &Density) -> Outline {
+        self.0.clone()
+    }
+}
 
 /// What a layer is drawn with (Compose's GraphicsLayer properties), as a graphics layer draws its content: where
 /// it goes in the scope it is drawn in, how faded, scaled, turned (about its pivot: its middle unless given) and
@@ -93,6 +106,11 @@ struct LayerData {
     properties: GraphicsLayerProperties,
     platform: Option<PlatformHandle>,
     released: bool,
+    /// What placing a layout with it does: copies its properties into the layout's layer (made once, kept so
+    /// placing again with it isn't taken as a new layer).
+    placement_block: Option<LayerBlock>,
+    /// Told when a property changes, by the layout placed with it (its layer's properties taken again).
+    on_property_changed: Option<Rc<dyn Fn()>>,
 }
 
 /// A recording and what it is drawn with (Compose's GraphicsLayer). Clones are the same layer; two are equal when
@@ -123,7 +141,15 @@ macro_rules! properties {
                 self.data.borrow().properties.$get.clone()
             }
             pub fn $set(&self, value: $ty) {
-                self.data.borrow_mut().properties.$get = value;
+                let changed = {
+                    let mut d = self.data.borrow_mut();
+                    let changed = d.properties.$get != value;
+                    d.properties.$get = value;
+                    changed
+                };
+                if changed {
+                    self.property_changed();
+                }
             }
         )*
     };
@@ -139,6 +165,8 @@ impl GraphicsLayer {
                 properties: GraphicsLayerProperties::default(),
                 platform,
                 released: false,
+                placement_block: None,
+                on_property_changed: None,
             })),
         }
     }
@@ -175,6 +203,72 @@ impl GraphicsLayer {
 
     pub fn set_properties(&self, properties: GraphicsLayerProperties) {
         self.data.borrow_mut().properties = properties;
+        self.property_changed();
+    }
+
+    /// Tells the layout placed with it that a property changed.
+    fn property_changed(&self) {
+        let listener = self.data.borrow().on_property_changed.clone();
+        if let Some(listener) = listener {
+            listener();
+        }
+    }
+
+    /// The layer block that places a layout through this layer (what `PlacementScope::place_with_graphics_layer`
+    /// gives): its properties are the layout layer's, kept up to date as they change, and what the layout draws is
+    /// recorded into it.
+    pub(crate) fn placement_block(&self) -> LayerBlock {
+        if let Some(block) = self.data.borrow().placement_block.clone() {
+            return block;
+        }
+        let weak = Rc::downgrade(&self.data);
+        let block: LayerBlock = Rc::new(move |scope: &mut GraphicsLayerScope| {
+            if let Some(data) = weak.upgrade() {
+                GraphicsLayer { data }.apply_to(scope);
+            }
+        });
+        self.data.borrow_mut().placement_block = Some(block.clone());
+        block
+    }
+
+    /// Its properties as a layout's layer has them, and itself as what that layer records into.
+    fn apply_to(&self, scope: &mut GraphicsLayerScope) {
+        let p = self.properties();
+        scope.alpha = p.alpha;
+        scope.scale_x = p.scale_x;
+        scope.scale_y = p.scale_y;
+        scope.translation_x = p.translation_x;
+        scope.translation_y = p.translation_y;
+        scope.rotation_x = p.rotation_x;
+        scope.rotation_y = p.rotation_y;
+        scope.rotation_z = p.rotation_z;
+        scope.camera_distance = p.camera_distance;
+        if p.pivot_offset.is_specified() && scope.size.width > 0.0 && scope.size.height > 0.0 {
+            scope.transform_origin =
+                TransformOrigin::new(p.pivot_offset.x / scope.size.width, p.pivot_offset.y / scope.size.height);
+        }
+        scope.shadow_elevation = p.shadow_elevation;
+        scope.ambient_shadow_color = p.ambient_shadow_color;
+        scope.spot_shadow_color = p.spot_shadow_color;
+        scope.clip = p.clip;
+        if let Some(outline) = p.outline {
+            scope.shape = Arc::new(OutlineShape(outline));
+        }
+        scope.render_effect = p.render_effect;
+        scope.blend_mode = p.blend_mode;
+        scope.color_filter = p.color_filter;
+        scope.compositing_strategy = p.compositing_strategy;
+        scope.record_into = Some(self.clone());
+    }
+
+    /// Who hears its properties change: the layout placed with it.
+    pub(crate) fn set_on_property_changed(&self, listener: Option<Rc<dyn Fn()>>) {
+        self.data.borrow_mut().on_property_changed = listener;
+    }
+
+    /// Keeps `picture` as its recording, of `size` (a layout placed with it drew).
+    pub(crate) fn keep_recording(&self, picture: Picture, size: IntSize) {
+        self.keep(picture, size);
     }
 
     /// Its stretch (none unless [`stretch`](GraphicsLayer::stretch) set one).

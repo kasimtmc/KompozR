@@ -91,3 +91,7 @@ harness = false
 [[test]]
 name = "tooltip"
 harness = false
+
+[[test]]
+name = "lazy"
+harness = false

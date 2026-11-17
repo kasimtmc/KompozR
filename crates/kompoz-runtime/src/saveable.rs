@@ -532,6 +532,57 @@ impl SaveableStateHolder {
         c.end_group();
     }
 
+    /// [`SaveableStateProvider`](Self::SaveableStateProvider) as Compose's is made: in `ReusableContent(key)`, so
+    /// content shown under one key and then another at the same place (a lazy layout's item slot reused for
+    /// another item) keeps its nodes, its state going with its key and coming back with it.
+    #[allow(non_snake_case)]
+    #[track_caller]
+    pub fn ReusableSaveableStateProvider(&self, key: &str, content: impl FnOnce()) {
+        let removed = self.removed.borrow().iter().any(|k| k == key);
+        let registry = if removed {
+            Rc::new(RefCell::new(Registry::default()))
+        } else {
+            self.registries.borrow_mut().entry(key.to_string()).or_default().clone()
+        };
+        let c = Composer::require();
+        c.start_group(key_of(Location::caller()));
+        // (ReusableContent(key): the key kept in a slot; another one composes what follows as new, nodes reused)
+        let changed = match c.take_slot() {
+            Some(mut slot) => {
+                let changed = match slot.value.downcast_mut::<String>() {
+                    Some(old) if old == key => false,
+                    Some(old) => {
+                        *old = key.to_string();
+                        true
+                    }
+                    None => true,
+                };
+                c.put_slot(slot);
+                changed
+            }
+            None => {
+                c.set_remembered(Box::new(key.to_string()), None);
+                false
+            }
+        };
+        if changed {
+            c.begin_reuse();
+        }
+        {
+            let mut r = registry.borrow_mut();
+            r.boundary = Some(c.boundary_here()); // positions are counted from here down
+            r.present = true;
+        }
+        let presence = remember(|| Rc::new(Presence(RefCell::new(Weak::new()))));
+        *presence.0.borrow_mut() = Rc::downgrade(&registry);
+        let registry = SaveableStateRegistry { inner: registry };
+        provide_here(vec![LocalSaveableStateRegistry.provides(Some(registry)).0], content);
+        if changed {
+            c.end_reuse();
+        }
+        c.end_group();
+    }
+
     pub fn remove_state(&self, key: &str) {
         self.registries.borrow_mut().remove(key);
         self.removed.borrow_mut().push(key.to_string());

@@ -305,6 +305,14 @@ impl NodeCx {
         }
     }
 
+    /// Its layout measured and placed again now (Compose's `remeasureSync`, a `Remeasurement`'s
+    /// `forceRemeasure`).
+    pub fn remeasure_sync(&self) {
+        if let Some(n) = self.cell.layout_node() {
+            n.force_remeasure();
+        }
+    }
+
     /// Its layout placed again, its placement blocks run again without measuring (Compose's
     /// `invalidatePlacement`).
     pub fn invalidate_placement(&self) {
@@ -801,6 +809,11 @@ impl NodeHandle {
     }
     pub fn layout_node(&self) -> Option<Rc<LayoutNode>> {
         self.cx().and_then(|c| c.layout_node())
+    }
+    pub fn remeasure_sync(&self) {
+        if let Some(c) = self.cx() {
+            c.remeasure_sync();
+        }
     }
     pub fn density(&self) -> Density {
         self.cx().map_or_else(Density::default, |c| c.density())

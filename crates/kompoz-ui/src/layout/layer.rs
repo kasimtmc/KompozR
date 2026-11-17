@@ -107,6 +107,10 @@ pub struct GraphicsLayerScope {
     pub(crate) density: Density,
     #[kotlin(skip)]
     pub(crate) layout_direction: LayoutDirection,
+    /// The graphics layer it was placed with (Compose's `placeWithLayer(offset, layer)`): what is drawn through it
+    /// is recorded into that layer too, which can draw it again (a lazy list's item fading out after it left).
+    #[kotlin(skip)]
+    pub(crate) record_into: Option<crate::draw::GraphicsLayer>,
 }
 
 impl Default for GraphicsLayerScope {
@@ -135,6 +139,7 @@ impl Default for GraphicsLayerScope {
             size: Size::Zero,
             density: Density::default(),
             layout_direction: LayoutDirection::Ltr,
+            record_into: None,
         }
     }
 }
@@ -233,6 +238,7 @@ impl GraphicsLayerScope {
             && self.color_filter == other.color_filter
             && self.outsets == other.outsets
             && self.size == other.size
+            && self.record_into == other.record_into
     }
 }
 

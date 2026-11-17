@@ -7,6 +7,7 @@ use crate::display_list::DisplayList;
 use crate::draganddrop::{self, DragAndDropEvent, DragAndDropSession, DragAndDropTransferData, RootDragAndDropElement};
 use crate::focus::{FocusDirection, FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
+use crate::idle::{IdleEntry, IdleScope, IdleWork, IdleWorkQueue, LocalIdleWorkQueue};
 use crate::input::PointerEventType;
 use crate::input::{
     IndirectPointerEvent, IndirectPointerEventPrimaryDirectionalMotionAxis, IndirectPointerEventType, InputState, Key,
@@ -47,14 +48,6 @@ struct Environment {
     strings: Strings,
     dynamic_palette: Option<DynamicTonalPalette>,
     wallpaper_palette: Option<DynamicTonalPalette>,
-}
-
-/// Work for the time between frames (C++'s IdleWork): one for each owner.
-struct IdleWork {
-    owner: usize,
-    estimate_nanos: i64,
-    start: Box<dyn FnOnce() -> bool>,
-    took: Box<dyn FnOnce(i64)>,
 }
 
 /// The root's measure policy (Compose's RootMeasurePolicy): the children measured in the window's constraints, as
@@ -174,7 +167,7 @@ pub struct KompozHost {
     /// The links the app is opened with.
     deep_links: DeepLinks,
     /// Work waiting for the time between frames, in the order asked.
-    idle_work: RefCell<Vec<IdleWork>>,
+    idle_work: IdleWorkQueue,
     /// A trackpad's pinch under way (ScaleStart sent, ScaleEnd not yet).
     scaling: Cell<bool>,
 }
@@ -244,7 +237,7 @@ impl KompozHost {
             drag_and_drop_root,
             drag_session: RefCell::new(None),
             deep_links: DeepLinks::new(),
-            idle_work: RefCell::new(Vec::new()),
+            idle_work: IdleWorkQueue::new(),
             scaling: Cell::new(false),
         };
         let composition = Composition::new(Some(root as Rc<dyn kompoz_runtime::Node>));
@@ -272,6 +265,7 @@ impl KompozHost {
         let text_input = self.text_input.clone();
         let media = self.media.clone();
         let deep_links = self.deep_links.clone();
+        let idle_work = self.idle_work.clone();
         move || {
             let env = environment.get();
             let content = content.clone();
@@ -300,6 +294,7 @@ impl KompozHost {
                 LocalFocusManager.provides(focus_manager.clone()),
                 LocalBackDispatcher.provides(Some(back.clone())),
                 LocalDispatcher.provides(Some(dispatcher.clone())),
+                LocalIdleWorkQueue.provides(Some(idle_work.clone())),
                 LocalFontFamilyResolver.provides_unequal(resolver),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
@@ -1047,44 +1042,64 @@ impl KompozHost {
         start: impl FnOnce() -> bool + 'static,
         took: impl FnOnce(i64) + 'static,
     ) {
-        let work = IdleWork { owner, estimate_nanos, start: Box::new(start), took: Box::new(took) };
-        let mut queue = self.idle_work.borrow_mut();
-        match queue.iter_mut().find(|w| w.owner == owner) {
-            Some(w) => *w = work,
-            None => queue.push(work),
-        }
+        let work = IdleWork::Once { estimate_nanos, start: Box::new(start), took: Box::new(took) };
+        self.idle_work.put(IdleEntry { owner, work });
+    }
+
+    /// The work waiting for the time between frames (LocalIdleWorkQueue): tasks run while there is time, as
+    /// Compose's prefetch requests are.
+    pub fn idle_work_queue(&self) -> IdleWorkQueue {
+        self.idle_work.clone()
     }
 
     pub fn has_idle_work(&self) -> bool {
-        !self.idle_work.borrow().is_empty()
+        self.idle_work.has_work()
     }
 
     /// Does the idle work that fits in `budget_nanos` (the platform's, until the next frame is due), in order: one
-    /// whose estimate is more than the time left waits for the next pause (C++'s `idle`).
+    /// whose estimate is more than the time left waits for the next pause (C++'s `idle`); a task runs while there
+    /// is time, and one with more to do runs first in the next pause (Compose's prefetch scheduler). What each
+    /// changed is composed then (laid out and drawn by the next frame).
     pub fn idle(&self, budget_nanos: i64) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_nanos(budget_nanos.max(0) as u64);
+        let scope = IdleScope::new(deadline);
         loop {
-            let left = deadline.saturating_duration_since(std::time::Instant::now()).as_nanos() as i64;
-            let work = {
-                let mut queue = self.idle_work.borrow_mut();
-                match queue.first() {
-                    Some(w) if left > 0 && w.estimate_nanos <= left => queue.remove(0),
-                    _ => return,
+            let left = scope.available_time_nanos();
+            let entry = self.idle_work.take_first(|w| match w {
+                IdleWork::Once { estimate_nanos, .. } => left > 0 && *estimate_nanos <= left,
+                IdleWork::Task(_) => left > 0,
+            });
+            let Some(entry) = entry else { return };
+            let owner = entry.owner;
+            match entry.work {
+                IdleWork::Once { start, took, .. } => {
+                    let started = std::time::Instant::now();
+                    if !start() {
+                        continue;
+                    }
+                    self.compose_idle_changes();
+                    took(started.elapsed().as_nanos() as i64);
                 }
-            };
-            let started = std::time::Instant::now();
-            if !(work.start)() {
-                continue;
+                IdleWork::Task(mut task) => {
+                    let more = task(&scope);
+                    self.compose_idle_changes();
+                    if more {
+                        self.idle_work.put_back_first(IdleEntry { owner, work: IdleWork::Task(task) });
+                        return;
+                    }
+                }
             }
-            // What it changed composed now, as a frame would (laid out by the next frame).
-            Snapshot::send_apply_notifications();
+        }
+    }
+
+    /// What idle work changed composed now, as a frame would (laid out by the next frame).
+    fn compose_idle_changes(&self) {
+        Snapshot::send_apply_notifications();
+        self.owner.snapshot_observer().process_changes();
+        let recomposed = self.composition.borrow().as_ref().is_some_and(|c| c.recompose(self.frame_time.get()));
+        if recomposed {
+            self.owner.run_end_apply_listeners();
             self.owner.snapshot_observer().process_changes();
-            let recomposed = self.composition.borrow().as_ref().is_some_and(|c| c.recompose(self.frame_time.get()));
-            if recomposed {
-                self.owner.run_end_apply_listeners();
-                self.owner.snapshot_observer().process_changes();
-            }
-            (work.took)(started.elapsed().as_nanos() as i64);
         }
     }
 

@@ -17,6 +17,7 @@ pub mod draw;
 pub mod focus;
 pub mod graphics_context;
 pub mod host;
+pub mod idle;
 pub mod infinite_animation_policy;
 pub mod input;
 pub mod layout;
@@ -40,6 +41,7 @@ pub use alignment::{
 };
 pub use display_list::DisplayList;
 pub use host::{HostHandle, KompozHost};
+pub use idle::{IdleScope, IdleWorkQueue, LocalIdleWorkQueue};
 pub use infinite_animation_policy::InfiniteAnimationPolicy;
 pub use layout::{
     AlignmentLine, FirstBaseline, IntrinsicMeasurable, IntrinsicMeasureScope, LastBaseline, Layout, LayoutCoordinates,

@@ -622,6 +622,24 @@ impl LayoutNode {
         }
     }
 
+    /// Measured and placed again now, not at the next frame (Compose's `forceRemeasure`: what a `Remeasurement` and
+    /// a node's `remeasureSync` do — a lazy list scrolled by a delta lays out its items before the scroll returns
+    /// what it took): within its last constraints, its parent told (for the next layout) if its size changed.
+    pub fn force_remeasure(&self) {
+        let Some(owner) = self.owner() else { return };
+        self.request_remeasure(false);
+        let me = self.rc();
+        let is_root = owner.root().is_some_and(|r| Rc::ptr_eq(&r, &me));
+        match self.last_constraints.get() {
+            Some(constraints) if !is_root => owner.measure_and_layout_node(&me, constraints),
+            _ => {
+                if !owner.is_measuring() {
+                    owner.measure_and_layout();
+                }
+            }
+        }
+    }
+
     /// Measured again (Compose's `invalidateMeasurements`).
     pub fn invalidate_measurements(&self) {
         self.request_remeasure(false);

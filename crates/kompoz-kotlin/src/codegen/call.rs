@@ -8,7 +8,7 @@
 //! `named_args!`) makes: the generator writes `f(a, name = b)` and the macro rewrites it. A PascalCase call in a
 //! composable body always goes through `Probe` (the macro's), whatever its arguments.
 
-use super::expr::{Out, OutKind, Want};
+use super::expr::{AnyWrap, Out, OutKind, Want};
 use super::names::{ident, is_pascal, snake};
 use super::resolve::*;
 use super::{Gen, respan};
@@ -172,7 +172,7 @@ impl Gen<'_, '_> {
             for (k, a) in args.iter().enumerate() {
                 vals.push(match (a.value, params.get(k)) {
                     (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() => {
-                        self.value_want(e, Want { str_ok: false })
+                        self.value_want(e, Want { str_ok: false, any: None })
                     }
                     (ArgValue::Expr(e), Some(to)) if to.is_number() && !a.value.is_lambda() => {
                         let from = self.peek_ty(e);
@@ -266,7 +266,9 @@ impl Gen<'_, '_> {
         let mut vals = Vec::new();
         for a in args {
             let v = match a.value {
-                ArgValue::Expr(e) if pascal && !a.value.is_lambda() => self.value_want(e, Want { str_ok: false }),
+                ArgValue::Expr(e) if pascal && !a.value.is_lambda() => {
+                    self.value_want(e, Want { str_ok: false, any: None })
+                }
                 _ => self.loose_arg(a),
             };
             vals.push(match a.name {
@@ -718,8 +720,34 @@ impl Gen<'_, '_> {
 
     // ---- Writing the call --------------------------------------------------------------------------------------
 
-    /// The call of `c` through `target` with `args`.
+    /// The call of `c` through `target` with `args` (a generic one's element type `T` bound from the collection it is
+    /// given, for its lambdas: [`Gen::type_arg`]).
     fn emit(&mut self, c: &Callee, target: Target, args: &[ArgRef], loc: Loc, kotlin: &str) -> Out {
+        let bound = self.map_args(c, args).ok().and_then(|m| self.collection_type_arg(c, &m));
+        let saved = std::mem::replace(&mut self.type_arg, bound);
+        let out = self.emit_bound(c, target, args, loc, kotlin);
+        self.type_arg = saved;
+        out
+    }
+
+    /// The element type of the collection a generic callee's `T` comes from (`items: impl LazyListItems<T>`, `Vec<T>`,
+    /// `&[T]`, `impl IntoIterator<Item = T>`), as the argument given to it is known.
+    fn collection_type_arg(&self, c: &Callee, m: &Mapping) -> Option<Ty> {
+        c.params.iter().enumerate().find_map(|(k, p)| {
+            let t = plain_type_text(&p.ty);
+            let collection_of_t =
+                t.contains("<T>") || t.contains("=T>") || t.starts_with("&[T]") || t.starts_with("[T]");
+            if !collection_of_t || m.given[k].len() != 1 {
+                return None;
+            }
+            match m.given[k][0].value {
+                ArgValue::Expr(e) => Some(self.peek_ty(e).element()).filter(|t| *t != Ty::Unknown),
+                ArgValue::Lambda(_) => None,
+            }
+        })
+    }
+
+    fn emit_bound(&mut self, c: &Callee, target: Target, args: &[ArgRef], loc: Loc, kotlin: &str) -> Out {
         let span = self.span(loc);
         if let Some((own, links)) = split_chain(c, args)
             && !links.is_empty()
@@ -932,6 +960,16 @@ impl Gen<'_, '_> {
     fn arg_value(&mut self, a: &ArgRef, p: Option<&PInfo>, transform_wraps: bool) -> TokenStream {
         let span = self.span(a.loc);
         let Some(p) = p else { return self.loose_arg(a) };
+        // (a nullable parameter whose default isn't null — `overscrollEffect: OverscrollEffect? =
+        // rememberOverscrollEffect()` — is Rust's `Option<Option<T>>`, the outer `None` its default: what is given,
+        // `null` too, in `Some`)
+        if let Some(inner) = p.ty.trim().strip_prefix("Option<").and_then(|r| r.strip_suffix('>'))
+            && inner.trim_start().starts_with("Option<")
+        {
+            let ip = PInfo { ty: inner.trim().to_string(), option: OptionForm::Option, ..p.clone() };
+            let v = self.arg_value(a, Some(&ip), transform_wraps);
+            return quote_spanned!(span=> ::core::option::Option::Some(#v));
+        }
         // (one value to a slice: an array of it, unless it is a list already — `floatArrayOf(8f, 6f)`)
         let a_list = matches!(a.value, ArgValue::Expr(e) if matches!(self.peek_ty(e), Ty::List(_)));
         if p.vararg || (p.ty.trim_start().starts_with("&[") && !a.value.is_lambda() && !a_list) {
@@ -962,7 +1000,7 @@ impl Gen<'_, '_> {
                 // (made the trait object its parameter takes, which a builder's generic setter wouldn't coerce it to)
                 let ty = p.ty.trim();
                 let ty = ty.strip_prefix("Option<").and_then(|t| t.strip_suffix('>')).unwrap_or(ty);
-                let made = match super::lambda::written_type(ty, span) {
+                let made = match super::lambda::written_type(&self.bind_type_arg(ty, span), span) {
                     Some(t) => {
                         let f = self.fresh("f", span);
                         quote_spanned!(span=> { let #f: #t = #made; #f })
@@ -997,10 +1035,15 @@ impl Gen<'_, '_> {
             let v = self.number(n, e.loc, true).ts;
             return if neg { quote_spanned!(span=> -#v) } else { v };
         }
+        // (Kotlin's `Any` — a key, a content type —: the value made the Rust type holding it, in `Some` for an optional
+        // one; each branch of an `if`/`when`)
+        if let Some(w) = AnyWrap::of_rust(&p.ty) {
+            return self.value_want(e, Want { str_ok: false, any: Some(w) });
+        }
         let o = self.expr(e);
         let nullable_arg = o.kind == OutKind::Null || o.ty.is_nullable();
         let arg_ty = o.ty.clone();
-        let v = self.finish(o, Want { str_ok: p.takes_str() }, e.loc);
+        let v = self.finish(o, Want { str_ok: p.takes_str(), any: None }, e.loc);
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
@@ -1019,6 +1062,52 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> ::core::convert::Into::<#ty>::into(#v))
             }
             (a, b) if converts(a, &b) => quote_spanned!(span=> ::core::convert::Into::into(#v)),
+            _ => v,
+        };
+        // (a shared trait object of another trait, `Rc<dyn TargetedFlingBehavior>` given as an `Rc<dyn FlingBehavior>`:
+        // Kotlin's subinterface value, upcast where its type is written, which a builder's generic setter wouldn't do)
+        let v = match (&arg_ty, Ty::from_rust(target)) {
+            (Ty::Named(ptr, a), Ty::Named(want, b))
+                if matches!(ptr.as_str(), "Rc" | "Arc") && *ptr == want && !a.is_empty() && *a != b =>
+            {
+                let raw = p.ty.trim();
+                let raw = raw.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')).unwrap_or(raw);
+                match super::lambda::written_type(raw, span) {
+                    Some(ty) => {
+                        let f = self.fresh("f", span);
+                        quote_spanned!(span=> { let #f: #ty = #v; #f })
+                    }
+                    None => v,
+                }
+            }
+            _ => v,
+        };
+        // (a shared trait object in an `Option`, `placementSpec: Option<Arc<dyn FiniteAnimationSpec<IntOffset>>>`,
+        // given a value of its own type, `tween(200)`: `Arc::new` of it, made the trait object where its type is
+        // written, which a builder's generic setter wouldn't do)
+        let v = match &arg_ty {
+            Ty::Named(name, _)
+                if inner.is_some()
+                    && !nullable_arg
+                    && !matches!(name.as_str(), "Arc" | "Rc")
+                    && trait_object(name).is_none()
+                    && (target.starts_with("Arc<dyn") || target.starts_with("Rc<dyn")) =>
+            {
+                let raw = p.ty.trim();
+                let raw = raw.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')).unwrap_or(raw);
+                let made = if target.starts_with("Arc<dyn") {
+                    quote_spanned!(span=> ::std::sync::Arc::new(#v))
+                } else {
+                    quote_spanned!(span=> ::std::rc::Rc::new(#v))
+                };
+                match super::lambda::written_type(raw, span) {
+                    Some(ty) => {
+                        let f = self.fresh("f", span);
+                        quote_spanned!(span=> { let #f: #ty = #made; #f })
+                    }
+                    None => made,
+                }
+            }
             _ => v,
         };
         if p.option == OptionForm::Option && !nullable_arg {
@@ -1071,7 +1160,7 @@ impl Gen<'_, '_> {
             }
             ArgValue::Expr(e) => match &e.kind {
                 ExprKind::Lambda(l) => self.lambda_for(l, None, None, false),
-                _ => self.value_want(e, Want { str_ok: true }),
+                _ => self.value_want(e, Want { str_ok: true, any: None }),
             },
         }
     }

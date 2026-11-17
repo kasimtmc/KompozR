@@ -102,14 +102,21 @@ impl Gen<'_, '_> {
         self.push_scope();
         let boundary = self.scopes.len() - 1;
         self.frames.push(CaptureFrame { boundary, used: Vec::new() });
-        self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len() });
+        // (a result of Kotlin's `Any` — a key lambda's —: made the Rust type holding it)
+        let result = Want { str_ok: false, any: known.and_then(|k| super::expr::AnyWrap::of_rust(&k.output)) };
+        self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len(), result });
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();
         let mut unpack = TokenStream::new();
         let mut receiver_ident: Option<proc_macro2::Ident> = None;
         // (a closure made a trait object writes its parameters' types: none comes from where it goes)
+        let written_inputs: Vec<Option<TokenStream>> = info
+            .inputs
+            .iter()
+            .map(|t| if info.typed { written_type(&self.bind_type_arg(t, span), span) } else { None })
+            .collect();
         let typed = |k: usize| -> TokenStream {
-            match info.inputs.get(k).filter(|_| info.typed).and_then(|t| written_type(t, span)) {
+            match written_inputs.get(k).cloned().flatten() {
                 Some(t) => quote_spanned!(span=> : #t),
                 None => quote!(),
             }
@@ -137,6 +144,12 @@ impl Gen<'_, '_> {
         let input_tys: Vec<Ty> = info.inputs.iter().skip(first_input).map(|t| self.input_ty(t)).collect();
         let mut_refs: Vec<bool> =
             info.inputs.iter().skip(first_input).map(|t| t.trim_start().starts_with("&mut")).collect();
+        // (its body's calls are its own: the call it is given to binds no `T` of theirs)
+        let outer_type_arg = self.type_arg.take();
+        // (an element the generic callee lends, `&T` — `items(todos) { t -> … }` —: Kotlin's value of it, a clone, which
+        // what the lambda keeps can capture)
+        let lent: Vec<bool> =
+            info.inputs.iter().skip(first_input).map(|t| outer_type_arg.is_some() && is_lent_type_param(t)).collect();
         match &l.params {
             Some(ps) => {
                 for (k, p) in ps.iter().enumerate() {
@@ -160,6 +173,9 @@ impl Gen<'_, '_> {
                             self.declare(&n.name, rust, LocalKind::LambdaParam, ty);
                             if mut_refs.get(k) == Some(&true) {
                                 self.mark_mut_ref(&n.name);
+                            }
+                            if lent.get(k) == Some(&true) {
+                                unpack.extend(quote_spanned!(span=> let #i = ::core::clone::Clone::clone(#i);));
                             }
                             params.push(quote_spanned!(span=> #i #annot));
                         }
@@ -193,6 +209,9 @@ impl Gen<'_, '_> {
                     if mut_refs.first() == Some(&true) {
                         self.mark_mut_ref("it");
                     }
+                    if lent.first() == Some(&true) {
+                        unpack.extend(quote_spanned!(span=> let it = ::core::clone::Clone::clone(it);));
+                    }
                     let t = typed(first_input);
                     params.push(quote_spanned!(span=> it #t));
                 } else if takes_it {
@@ -219,7 +238,7 @@ impl Gen<'_, '_> {
         let tail = if known.is_some_and(|k| k.unit_output()) || (known.is_some() && info.kind == LambdaKind::Future) {
             Tail::Unit
         } else {
-            Tail::Value(Want::default())
+            Tail::Value(result)
         };
         let body = self.stmts(&l.body.stmts, tail);
         // (Kotlin's `this` needn't be used: a receiver the body leaves alone is no unused variable)
@@ -231,6 +250,7 @@ impl Gen<'_, '_> {
         }
         self.in_async = was_async;
         self.receivers.truncate(receivers_before);
+        self.type_arg = outer_type_arg;
         self.lambdas.pop();
         let frame = self.frames.pop().expect("its frame");
         self.pop_scope();
@@ -294,16 +314,53 @@ impl Gen<'_, '_> {
 
     /// A lambda input's type, as the index writes it.
     fn input_ty(&self, text: &str) -> Ty {
+        let bare = text.trim();
+        let bare = bare.strip_prefix("&mut ").or_else(|| bare.strip_prefix('&')).unwrap_or(bare).trim();
+        // (a reference's named lifetime: `&'a T`)
+        let bare = match bare.strip_prefix('\'') {
+            Some(rest) => rest.split_once(' ').map_or(bare, |(_, t)| t.trim()),
+            None => bare,
+        };
         if let Some((elem, recv)) = &self.elem_hint {
-            let text = text.trim();
-            let text = text.strip_prefix("&mut ").or_else(|| text.strip_prefix('&')).unwrap_or(text);
-            match text.trim() {
+            match bare {
                 "Self::Item" | "T" => return elem.clone(),
                 "(Self::K, Self::V)" => return recv.element(),
                 _ => {}
             }
         }
+        if bare == "T"
+            && let Some(t) = &self.type_arg
+        {
+            return t.clone();
+        }
         Ty::from_rust(text)
+    }
+
+    /// A Rust type's text (an index's) with the generic call's element type for its `T`, when it is known
+    /// ([`Gen::type_arg`]): `&'a T` → `&'a Row2`.
+    pub(crate) fn bind_type_arg(&self, text: &str, span: Span) -> String {
+        let Some(t) = self.type_arg.as_ref().filter(|t| **t != Ty::Unknown) else { return text.to_string() };
+        let rust = self.rust_of_ty(t, span).to_string();
+        let mut out = String::new();
+        let mut word = String::new();
+        let flush = |word: &mut String, out: &mut String| {
+            if word == "T" {
+                out.push_str(&rust);
+            } else {
+                out.push_str(word);
+            }
+            word.clear();
+        };
+        for c in text.chars() {
+            if c.is_alphanumeric() || c == '_' || (c == '\'' && word.is_empty()) {
+                word.push(c);
+            } else {
+                flush(&mut word, &mut out);
+                out.push(c);
+            }
+        }
+        flush(&mut word, &mut out);
+        out
     }
 }
 
@@ -433,6 +490,21 @@ fn std_paths(tokens: TokenStream) -> TokenStream {
         }
     }
     out.into_iter().collect()
+}
+
+/// Whether a lambda input's type (an index's text) is a shared reference to the callee's type parameter: `&T`,
+/// `&'a T`.
+fn is_lent_type_param(text: &str) -> bool {
+    let Some(rest) = text.trim().strip_prefix('&') else { return false };
+    let rest = rest.trim_start();
+    if rest.starts_with("mut ") {
+        return false;
+    }
+    let rest = match rest.strip_prefix('\'') {
+        Some(r) => r.split_once(' ').map_or("", |(_, t)| t.trim()),
+        None => rest,
+    };
+    rest == "T"
 }
 
 /// Whether a lambda's body uses `it` (outside lambdas of its own that name their parameters… or take theirs).

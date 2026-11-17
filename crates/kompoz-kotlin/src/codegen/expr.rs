@@ -46,6 +46,50 @@ impl Out {
 pub(crate) struct Want {
     /// A `&'static str` is taken as it is (`impl Into<String>`, `&str`).
     pub str_ok: bool,
+    /// Kotlin's `Any` as the Rust API holds it (a lazy list's key, a slot's id): the value made one.
+    pub any: Option<AnyWrap>,
+}
+
+/// A Rust type holding a value of any type, Kotlin's `Any` (a key compared by its value): `LazyKey::new(v)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AnyKind {
+    /// A lazy layout's item key (`key = { it.id }`): kompoz-foundation's `LazyKey`.
+    LazyKey,
+    /// A subcomposition's slot id or a lazy item's content type: kompoz-ui's `SlotKey`.
+    SlotKey,
+}
+
+/// How a value goes to a place of Kotlin's `Any`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AnyWrap {
+    pub kind: AnyKind,
+    /// The place is an `Option` (Kotlin's `Any?`, a lambda's result): a value is given in `Some`, a nullable one
+    /// mapped, `null` as `None`.
+    pub optional: bool,
+}
+
+impl AnyWrap {
+    /// The wrap a Rust type (an index's text) of Kotlin's `Any` takes: `LazyKey`, `Option<SlotKey>`; none for others.
+    pub(crate) fn of_rust(text: &str) -> Option<AnyWrap> {
+        let t = super::resolve::plain_type_text(text);
+        let (optional, inner) = match t.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')) {
+            Some(inner) => (true, inner.to_string()),
+            None => (false, t),
+        };
+        let kind = match inner.rsplit("::").next().unwrap_or("") {
+            "LazyKey" => AnyKind::LazyKey,
+            "SlotKey" => AnyKind::SlotKey,
+            _ => return None,
+        };
+        Some(AnyWrap { kind, optional })
+    }
+
+    fn type_name(self) -> &'static str {
+        match self.kind {
+            AnyKind::LazyKey => "LazyKey",
+            AnyKind::SlotKey => "SlotKey",
+        }
+    }
 }
 
 impl Gen<'_, '_> {
@@ -56,6 +100,20 @@ impl Gen<'_, '_> {
     }
 
     pub(crate) fn value_want(&mut self, e: &Expr, want: Want) -> TokenStream {
+        // (Kotlin's `Any` from an `if`/`when` with branches of their own types — `if (it == 0) null else "satır"` —:
+        // each branch made it)
+        if want.any.is_some() {
+            match &e.kind {
+                ExprKind::If { condition, then, otherwise: Some(o) } => {
+                    return self.if_expr(condition, then, Some(o), Tail::Value(want), e.loc).ts;
+                }
+                ExprKind::When(w) if w.branches.iter().any(|b| b.is_else()) => {
+                    return self.when(w, Tail::Value(want), e.loc).ts;
+                }
+                ExprKind::Paren(inner) => return self.value_want(inner, want),
+                _ => {}
+            }
+        }
         let out = self.expr(e);
         self.finish(out, want, e.loc)
     }
@@ -63,11 +121,53 @@ impl Gen<'_, '_> {
     pub(crate) fn finish(&self, out: Out, want: Want, loc: Loc) -> TokenStream {
         let span = self.span(loc);
         let ts = out.ts;
-        match out.kind {
+        let kind = out.kind;
+        let ts = match kind {
             OutKind::Local => quote_spanned!(span=> #ts.clone()),
             OutKind::RefMut => quote_spanned!(span=> (*#ts).clone()),
-            OutKind::StrLit if !want.str_ok => quote_spanned!(span=> ::std::string::String::from(#ts)),
+            OutKind::StrLit if !want.str_ok || want.any.is_some() => {
+                quote_spanned!(span=> ::std::string::String::from(#ts))
+            }
             _ => ts,
+        };
+        match want.any {
+            Some(w) => self.any_value(ts, &out.ty, kind, w, span),
+            None => ts,
+        }
+    }
+
+    /// A value made Kotlin's `Any` as the Rust API holds it (see [`AnyWrap`]): `LazyKey::new(v)`, in `Some` for an
+    /// optional place; a nullable value mapped, `null` left `None`; a value of the type already as it is.
+    fn any_value(&self, ts: TokenStream, ty: &Ty, kind: OutKind, w: AnyWrap, span: Span) -> TokenStream {
+        if kind == OutKind::Null {
+            return ts;
+        }
+        let name = w.type_name();
+        let already = |t: &Ty| matches!(t, Ty::Named(n, _) if n == name);
+        let path = match w.kind {
+            AnyKind::LazyKey => {
+                let f = respan(self.cx.paths.foundation.clone(), span);
+                quote_spanned!(span=> #f::lazy::layout::LazyKey)
+            }
+            AnyKind::SlotKey => {
+                let ui = respan(self.cx.paths.ui.clone(), span);
+                quote_spanned!(span=> #ui::layout::SlotKey)
+            }
+        };
+        match ty {
+            Ty::Nullable(inner) if already(inner) => ts,
+            Ty::Nullable(_) => quote_spanned!(span=> ::core::option::Option::map(#ts, #path::new)),
+            t if already(t) => {
+                if w.optional {
+                    quote_spanned!(span=> ::core::option::Option::Some(#ts))
+                } else {
+                    ts
+                }
+            }
+            _ => {
+                let v = quote_spanned!(span=> #path::new(#ts));
+                if w.optional { quote_spanned!(span=> ::core::option::Option::Some(#v)) } else { v }
+            }
         }
     }
 
@@ -698,7 +798,7 @@ impl Gen<'_, '_> {
         let ts = match kind {
             OutKind::StrLit | OutKind::IntLit => return o,
             OutKind::Local if !value => o.ts,
-            _ => self.finish(o, Want { str_ok: true }, e.loc),
+            _ => self.finish(o, Want { str_ok: true, any: None }, e.loc),
         };
         match wider {
             Some(w) if w != ty && ty.is_number() => {
@@ -1041,6 +1141,11 @@ impl Gen<'_, '_> {
                 let gives = |p: &crate::index::Param| {
                     let ty = p.ty.trim();
                     ty == g
+                        // (a vararg of it: `mutableStateListOf(Todo(…), …)`'s `impl IntoIterator<Item = T>`)
+                        || p.vararg && {
+                            let t = ty.replace(' ', "");
+                            t.ends_with(&format!("={g}>")) || t == format!("&[{g}]") || t == format!("[{g}]")
+                        }
                         || p.lambda.is_some_and(|l| l.output.trim() == g)
                         || ty
                             .strip_prefix("fn()")
@@ -1053,7 +1158,7 @@ impl Gen<'_, '_> {
                 let value = match (by_name.or(by_place), trailing) {
                     (Some(a), _) => match &a.value.kind {
                         ExprKind::Lambda(l) => self.peek_block(&l.body),
-                        _ if item.params[k].ty.trim() == g => self.peek_ty(&a.value),
+                        _ if item.params[k].ty.trim() == g || item.params[k].vararg => self.peek_ty(&a.value),
                         _ => Ty::Unknown,
                     },
                     (None, Some(l)) if last => self.peek_block(&l.body),

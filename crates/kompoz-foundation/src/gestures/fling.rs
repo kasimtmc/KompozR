@@ -34,6 +34,27 @@ pub trait FlingBehavior: Any + FlingBehaviorEq {
     }
 }
 
+/// A fling that knows where it settles (Compose's TargetedFlingBehavior: a snapping one): it tells the distance
+/// left to its settling offset as it goes.
+pub trait TargetedFlingBehavior: FlingBehavior {
+    /// Flings from `initial_velocity` px/s, telling `on_remaining_distance_updated` the distance left to where it
+    /// settles each step (it may change as it goes); the velocity left (Compose's `performFling(initialVelocity,
+    /// onRemainingDistanceUpdated)`).
+    /// Kotlin: `performFling(initialVelocity: Float, onRemainingDistanceUpdated: (Float) -> Unit)`
+    fn perform_fling_with_remaining(
+        &self,
+        scope: Rc<dyn ScrollScope>,
+        initial_velocity: f32,
+        on_remaining_distance_updated: Rc<dyn Fn(f32)>,
+    ) -> LocalFuture<'_, f32>;
+}
+
+impl fmt::Debug for dyn TargetedFlingBehavior {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "TargetedFlingBehavior")
+    }
+}
+
 /// How fling behaviors compare (a blanket impl for every `PartialEq` one).
 #[doc(hidden)]
 pub trait FlingBehaviorEq {
@@ -119,7 +140,7 @@ impl DefaultFlingBehavior {
 }
 
 /// Compose's DefaultScrollMotionDurationScale: 1.
-fn default_scroll_motion_duration_scale() -> MotionDurationScale {
+pub(crate) fn default_scroll_motion_duration_scale() -> MotionDurationScale {
     MotionDurationScale::new(1.0)
 }
 
