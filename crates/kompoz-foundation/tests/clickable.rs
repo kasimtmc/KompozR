@@ -1112,8 +1112,8 @@ fn the_default_indication_shows_presses_hovers_and_focus() {
 }
 
 fn a_clickable_can_leave_out_the_indication() {
-    // The clickable part of C++'s draggable_tells_its_drags_and_clickable_can_leave_out_the_indication (draggable
-    // is stage 10's): no indication, nothing drawn over it while pressed.
+    // The clickable part of C++ 23625 (draggable_tells_its_drags_and_clickable_can_leave_out_the_indication; its
+    // draggable part is gestures.rs' draggable_tells_its_drags): no indication, nothing drawn over it while pressed.
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Column(|| {
             Box(modifier = Modifier.size(60.dp()).clickable_indication(None, None, on_click = || {}).test_tag("sade"));

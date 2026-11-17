@@ -139,6 +139,9 @@ pub struct Lambda {
     pub receiver: &'static str,
     /// It suspends: it gives a future (`async move { … }`), or it is one ([`LambdaKind::Future`]).
     pub suspend: bool,
+    /// Its future is boxed (`Pin<Box<dyn Future<…>>>`, an alias of one: foundation's `LocalFuture`): it gives
+    /// `Box::pin(async move { … })`, Kotlin's suspending function type kept as a trait object.
+    pub boxed: bool,
 }
 
 /// What kind of closure a lambda is.

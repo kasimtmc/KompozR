@@ -390,6 +390,11 @@ impl LayoutNode {
         if self.layout_direction.get() != direction {
             self.layout_direction.set(direction);
             self.on_density_or_layout_direction_changed();
+            // (Compose's `nodes.headToTail { it.onLayoutDirectionChange() }`: the chain's nodes, not their delegates)
+            for cell in self.chain_nodes() {
+                let cx = crate::modifier::NodeCx::new(&cell);
+                crate::input::call_node(|| cell.node.borrow_mut().on_layout_direction_change(&cx));
+            }
         }
     }
 

@@ -6,7 +6,10 @@ pub(crate) mod chain;
 pub(crate) mod diff;
 mod node;
 
-pub use node::{DelegatedNode, NodeCx, NodeHandle, NodeKind, ObserverModifierNode, TraversableNode, TraversalDecision};
+pub use node::{
+    DelegatableNode, DelegatedNode, NodeCx, NodeHandle, NodeKind, ObserverModifierNode, TraversableNode,
+    TraversalDecision,
+};
 pub(crate) use node::{NodeCell, NodeRc, dispatch_for_kind, traverse_descendants_of};
 
 use std::any::{Any, TypeId};
@@ -172,6 +175,13 @@ pub trait ModifierNode: Any {
         let _ = cx;
     }
     fn on_reset(&mut self) {}
+
+    /// Its layout's layout direction changed (Compose's `onLayoutDirectionChange`): what it measures, places and
+    /// draws is invalidated already; this is for what else depends on it (a scrollable's direction). Called on
+    /// the nodes of a chain, not on their delegates, as Compose's `headToTail`.
+    fn on_layout_direction_change(&mut self, cx: &NodeCx) {
+        let _ = cx;
+    }
 
     /// Whether an update of its element invalidates what its capabilities depend on (measurement for a layout
     /// node, drawing for a draw node, …), as Compose's `shouldAutoInvalidate`; a node that invalidates itself as

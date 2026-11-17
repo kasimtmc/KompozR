@@ -20,6 +20,26 @@ pub enum GestureState {
 /// (in the Initial or Main pass) and reset as it ends (in the Final pass).
 pub trait GestureConnection {
     fn gesture_state(&self) -> GestureState;
+
+    /// It as a drag's connection, if it is one (Compose's `is DraggableGestureConnection`).
+    fn as_draggable(&self) -> Option<&dyn DraggableGestureConnection> {
+        None
+    }
+}
+
+/// A drag's gesture connection (Compose's DraggableGestureConnection): the axis it drags along (none: any way), so
+/// a drag below it can tell whether the gesture is the parent's.
+pub trait DraggableGestureConnection: GestureConnection {
+    fn orientation(&self) -> Option<crate::gestures::Orientation>;
+}
+
+/// Calls `block` with the drag connections above `cx`'s node, nearest first, until it says false (Compose's
+/// `traverseParentDraggableGestures`).
+pub fn traverse_parent_draggable_gestures(cx: &NodeCx, block: &mut dyn FnMut(&dyn DraggableGestureConnection) -> bool) {
+    traverse_ancestor_gestures(cx, &mut |c| match c.as_draggable() {
+        Some(d) => block(d),
+        None => true,
+    });
 }
 
 /// What gesture nodes are found by (Compose's GestureNode.TraverseKey).

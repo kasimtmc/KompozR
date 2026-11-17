@@ -30,6 +30,8 @@ use std::rc::Rc;
 /// ```
 pub struct KompozitionLocal<T> {
     default: fn() -> T,
+    /// A default worked out from other locals where it is read (Compose's `compositionLocalWithComputedDefaultOf`).
+    computed: Option<fn(&KompozitionLocalAccessorScope) -> T>,
     dynamic: bool,
     /// A dynamic local's mutation policy (none: `==`, or never the same for a value given unequal).
     policy: Option<SnapshotMutationPolicy<T>>,
@@ -40,22 +42,61 @@ thread_local! {
     static DEFAULTS: RefCell<HashMap<usize, Rc<dyn Any>>> = RefCell::new(HashMap::new());
 }
 
+/// A computed local's default is never made from a plain default.
+fn no_plain_default<T>() -> T {
+    unreachable!("kompoz: a computed local's default is computed")
+}
+
+/// Where a computed local's default reads the other locals (Compose's CompositionLocalAccessorScope): the
+/// composition reading it, the context of a node reading it, or (outside of both) their defaults.
+pub struct KompozitionLocalAccessorScope<'a> {
+    source: AccessorSource<'a>,
+}
+
+enum AccessorSource<'a> {
+    /// The composition running: what is provided where the local is read, the read subscribing the running scope.
+    Composer,
+    /// A context's (a layout node's locals): read, or peeked at.
+    Context(&'a KompozitionLocalContext, bool),
+    /// No providers: the defaults.
+    Defaults,
+}
+
+impl KompozitionLocalAccessorScope<'_> {
+    /// `local`'s value where the computed local is read (Compose's `CompositionLocal.currentValue`).
+    pub fn current_value<U: Clone + 'static>(&self, local: &KompozitionLocal<U>) -> U {
+        match &self.source {
+            AccessorSource::Composer => local.current(),
+            AccessorSource::Context(context, true) => context.get(local),
+            AccessorSource::Context(context, false) => context.peek(local),
+            AccessorSource::Defaults => local.default_value(),
+        }
+    }
+}
+
 impl<T: Clone + 'static> KompozitionLocal<T> {
     /// A dynamic local (Compose's `compositionLocalOf`) whose default is `default()`, made when first read without
     /// a provider (it may panic for a local that must be provided).
     pub const fn new(default: fn() -> T) -> Self {
-        KompozitionLocal { default, dynamic: true, policy: None }
+        KompozitionLocal { default, computed: None, dynamic: true, policy: None }
     }
 
     /// A dynamic local whose provider's values are the same when `policy` says so (Compose's
     /// `compositionLocalOf(policy)`): one the same as the value held sets nothing and tells no one.
     pub const fn with_policy(policy: SnapshotMutationPolicy<T>, default: fn() -> T) -> Self {
-        KompozitionLocal { default, dynamic: true, policy: Some(policy) }
+        KompozitionLocal { default, computed: None, dynamic: true, policy: Some(policy) }
     }
 
     /// A static local (Compose's `staticCompositionLocalOf`).
     pub const fn new_static(default: fn() -> T) -> Self {
-        KompozitionLocal { default, dynamic: false, policy: None }
+        KompozitionLocal { default, computed: None, dynamic: false, policy: None }
+    }
+
+    /// A dynamic local whose default `compute` works out from other locals where it is read (Compose's
+    /// `compositionLocalWithComputedDefaultOf`): read without a provider, it is computed again each time, reading
+    /// them there (`scope.current_value(&LocalDensity)`), and those reads subscribe as reading them would.
+    pub const fn new_computed(compute: fn(&KompozitionLocalAccessorScope) -> T) -> Self {
+        KompozitionLocal { default: no_plain_default::<T>, computed: Some(compute), dynamic: true, policy: None }
     }
 
     pub(crate) fn id(&self) -> usize {
@@ -70,16 +111,23 @@ impl<T: Clone + 'static> KompozitionLocal<T> {
     /// The value: the nearest provider's, else the default. Reading it subscribes the running scope: it
     /// recomposes when the provider above it gives a different value.
     pub fn current(&self) -> T {
-        if let Some(c) = Composer::current()
-            && let Some(v) = c.read_local(self.id())
-        {
-            return v.downcast_ref::<T>().expect("a local's value of another type").clone();
+        if let Some(c) = Composer::current() {
+            if let Some(v) = c.read_local(self.id()) {
+                return v.downcast_ref::<T>().expect("a local's value of another type").clone();
+            }
+            if let Some(compute) = self.computed {
+                return compute(&KompozitionLocalAccessorScope { source: AccessorSource::Composer });
+            }
         }
         self.default_value()
     }
 
-    /// Its default (what is read where nothing provides it), without reading anything.
+    /// Its default (what is read where nothing provides it), without reading anything: a computed one's from
+    /// the other locals' defaults.
     pub fn default_value(&self) -> T {
+        if let Some(compute) = self.computed {
+            return compute(&KompozitionLocalAccessorScope { source: AccessorSource::Defaults });
+        }
         let id = self.id();
         if let Some(v) = DEFAULTS.with(|d| d.borrow().get(&id).cloned()) {
             return v.downcast_ref::<T>().unwrap().clone();
@@ -87,6 +135,14 @@ impl<T: Clone + 'static> KompozitionLocal<T> {
         let v = (self.default)();
         DEFAULTS.with(|d| d.borrow_mut().insert(id, Rc::new(v.clone())));
         v
+    }
+
+    /// Its default where `context` is (a computed one from the context's other locals, read or peeked at).
+    fn default_in(&self, context: &KompozitionLocalContext, read: bool) -> T {
+        match self.computed {
+            Some(compute) => compute(&KompozitionLocalAccessorScope { source: AccessorSource::Context(context, read) }),
+            None => self.default_value(),
+        }
     }
 
     /// The comparison its provider's values go by: its policy's, else `fallback`.
@@ -153,6 +209,14 @@ pub const fn kompozition_local_of_with_policy<T: Clone + 'static>(
     KompozitionLocal::with_policy(policy, default)
 }
 
+/// Compose's `compositionLocalWithComputedDefaultOf { compute }`: a dynamic local whose default is worked out
+/// from other locals where it is read.
+pub const fn kompozition_local_with_computed_default_of<T: Clone + 'static>(
+    compute: fn(&KompozitionLocalAccessorScope) -> T,
+) -> KompozitionLocal<T> {
+    KompozitionLocal::new_computed(compute)
+}
+
 /// Compose's `staticCompositionLocalOf { default }`: a static local.
 pub const fn static_kompozition_local_of<T: Clone + 'static>(default: fn() -> T) -> KompozitionLocal<T> {
     KompozitionLocal::new_static(default)
@@ -217,7 +281,7 @@ impl KompozitionLocalContext {
                 let value = if p.dynamic { p.holder.read() } else { p.holder.peek() };
                 value.downcast_ref::<T>().expect("a local's value of another type").clone()
             }
-            None => local.default_value(),
+            None => local.default_in(self, true),
         }
     }
 
@@ -225,7 +289,7 @@ impl KompozitionLocalContext {
     pub fn peek<T: Clone + 'static>(&self, local: &KompozitionLocal<T>) -> T {
         match self.values.iter().rev().find(|p| p.local == local.id()) {
             Some(p) => p.holder.peek().downcast_ref::<T>().expect("a local's value of another type").clone(),
-            None => local.default_value(),
+            None => local.default_in(self, false),
         }
     }
 

@@ -59,3 +59,11 @@ harness = false
 [[test]]
 name = "subcompose"
 harness = false
+
+[[test]]
+name = "scroll"
+harness = false
+
+[[test]]
+name = "overscroll"
+harness = false

@@ -10,8 +10,9 @@
 //!   memoizes by its captures, Compose's strong skipping) the plain closure it is given itself;
 //! - a receiver lambda (`DrawScope.() -> Unit`): its first parameter is the scope (`this`, `this1`, … for nested
 //!   ones), whose members free names in it resolve to (`drawCircle(…)` → `this.draw_circle(…)`);
-//! - a suspending one: an `async` block (`LaunchedEffect(k) { … }`), or a closure giving one (`pointerInput(k) { … }`),
-//!   whose suspending calls are awaited;
+//! - a suspending one: an `async` block (`LaunchedEffect(k) { … }`), or a closure giving one (`pointerInput(k) { … }`;
+//!   boxed, `Box::pin(async move { … })`, where the closure is a trait object giving `Pin<Box<dyn Future>>`:
+//!   `draggable`'s `onDragStopped`), whose suspending calls are awaited;
 //! - `Layout`'s measure policy: through `measure_policy(…)`, which gives Rust its parameters' types.
 //!
 //! Its parameters: as written, or `it` when it takes one and names none. Its body's last expression is its value,
@@ -36,6 +37,7 @@ impl Gen<'_, '_> {
             output: String::new(),
             receiver: None,
             suspend: false,
+            boxed: false,
             stored: true,
             measure_policy: false,
             typed: false,
@@ -64,6 +66,7 @@ impl Gen<'_, '_> {
                     output: String::new(),
                     receiver: None,
                     suspend: false,
+                    boxed: false,
                     stored: false,
                     measure_policy: false,
                     typed: false,
@@ -103,6 +106,7 @@ impl Gen<'_, '_> {
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();
         let mut unpack = TokenStream::new();
+        let mut receiver_ident: Option<proc_macro2::Ident> = None;
         // (a closure made a trait object writes its parameters' types: none comes from where it goes)
         let typed = |k: usize| -> TokenStream {
             match info.inputs.get(k).filter(|_| info.typed).and_then(|t| written_type(t, span)) {
@@ -116,6 +120,7 @@ impl Gen<'_, '_> {
             let i = proc_macro2::Ident::new(&name, span);
             let t = typed(0);
             params.push(quote!(#i #t));
+            receiver_ident = Some(i.clone());
             let by_ref = info.inputs.first().is_some_and(|t| {
                 let t = t.trim_start();
                 t.starts_with('&') && !t.starts_with("&mut")
@@ -217,6 +222,13 @@ impl Gen<'_, '_> {
             Tail::Value(Want::default())
         };
         let body = self.stmts(&l.body.stmts, tail);
+        // (Kotlin's `this` needn't be used: a receiver the body leaves alone is no unused variable)
+        if let Some(i) = &receiver_ident
+            && !mentions(&body, i)
+            && !mentions(&unpack, i)
+        {
+            unpack.extend(quote_spanned!(span=> let _ = &#i;));
+        }
         self.in_async = was_async;
         self.receivers.truncate(receivers_before);
         self.lambdas.pop();
@@ -246,7 +258,15 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> async #block)
             };
         }
-        let closure = if suspend {
+        let closure = if suspend && info.boxed {
+            // (a trait object giving a boxed future: the closure says so, so the box is made one)
+            let inner = lets(span);
+            let output = written_type(&info.output, span).unwrap_or_else(|| quote_spanned!(span=> _));
+            let ret =
+                quote_spanned!(span=> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = #output>>>);
+            let mv = if explicit || transform_wraps { quote!(move) } else { quote!() };
+            quote_spanned!(span=> #mv |#(#params),*| -> #ret { #inner ::std::boxed::Box::pin(async move #block) })
+        } else if suspend {
             // (a closure giving a future: each call's future owns clones of what it uses)
             let inner = lets(span);
             if explicit || transform_wraps {
@@ -463,4 +483,13 @@ fn uses_it(b: &Block) -> bool {
         })
     }
     block(b)
+}
+
+/// Whether `tokens` name `ident` anywhere (in groups too).
+fn mentions(tokens: &TokenStream, ident: &proc_macro2::Ident) -> bool {
+    tokens.clone().into_iter().any(|t| match t {
+        proc_macro2::TokenTree::Ident(i) => i == *ident,
+        proc_macro2::TokenTree::Group(g) => mentions(&g.stream(), ident),
+        _ => false,
+    })
 }

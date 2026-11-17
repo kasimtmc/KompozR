@@ -362,6 +362,8 @@ pub(crate) struct LInfo {
     /// The Rust type of its receiver (its first input), Kotlin's `T.() -> R`.
     pub receiver: Option<String>,
     pub suspend: bool,
+    /// Its future is boxed (`Pin<Box<dyn Future>>`): it gives `Box::pin(async move { … })`.
+    pub boxed: bool,
     /// It is kept by the callee (`+ 'static`): it captures clones and moves them in, as Kotlin's lambdas share
     /// what they capture; otherwise it runs before the call returns (Kotlin's inline functions) and borrows.
     pub stored: bool,
@@ -494,6 +496,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             output: "MeasureResult".into(),
             receiver: Some("MeasureScope".into()),
             suspend: false,
+            boxed: false,
             stored: true,
             measure_policy: true,
             typed: false,
@@ -505,6 +508,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             output: l.output.to_string(),
             receiver: (!l.receiver.is_empty()).then(|| l.receiver.to_string()),
             suspend: l.suspend,
+            boxed: l.boxed,
             // (a generic parameter's bounds are elsewhere: what a callee takes that way it keeps; so does a
             // coroutine, and a shared or boxed one: an owned trait object is `'static`)
             stored: ty.contains("'static")

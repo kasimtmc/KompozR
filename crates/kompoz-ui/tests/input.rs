@@ -728,14 +728,14 @@ fn a_node_leaving_while_a_pointer_is_down_on_it_is_cancelled() {
 // Hover, on_pointer_event, the cursor
 
 fn pointer_events_enter_move_exit_press_release_and_scroll() {
-    // C++'s pointer_events_enter_move_exit_press_release_and_scroll with Compose's events: the first move over a
-    // node is its Enter (no Move after it); the wheel's scroll is told the handler (no list here: scrolling is
-    // stage 10's), and taken when it consumes it.
+    // C++ 29012 with Compose's events: the first move over a node is its Enter (no Move after it); the wheel's
+    // scroll is told the handler, and the list it is in scrolls unless the handler consumes it.
     let log = new_log();
     let take_wheel = mutable_state_of(false);
-    let (l, tw) = (log.clone(), take_wheel.clone());
+    let scroll = kompoz_foundation::prelude::ScrollState::new(0);
+    let (l, tw, sc) = (log.clone(), take_wheel.clone(), scroll.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (l, tw) = (l.clone(), tw.clone());
+        let (l, tw, sc) = (l.clone(), tw.clone(), sc.clone());
         let lr = l.clone();
         let record = move |label: &'static str| {
             let l = lr.clone();
@@ -762,15 +762,21 @@ fn pointer_events_enter_move_exit_press_release_and_scroll() {
                 .on_pointer_event(PointerEventType::Press, on_event = record("press"))
                 .on_pointer_event(PointerEventType::Release, on_event = record("release")));
             let (l2, tw) = (l2.clone(), tw.clone());
-            Box(modifier = Modifier.size_wh(100.dp(), 400.dp()).on_pointer_event(
-                PointerEventType::Scroll,
-                on_event = move |_: &AwaitPointerEventScope, e: &PointerEvent| {
-                    push(&l2, format!("scroll d{}", e.changes[0].scroll_delta.y));
-                    if tw.peek() {
-                        e.changes[0].consume();
-                    }
+            Column(
+                modifier = Modifier.height(100.dp()).vertical_scroll(&sc),
+                content = move || {
+                    let (l2, tw) = (l2.clone(), tw.clone());
+                    Box(modifier = Modifier.size_wh(100.dp(), 400.dp()).on_pointer_event(
+                        PointerEventType::Scroll,
+                        on_event = move |_: &AwaitPointerEventScope, e: &PointerEvent| {
+                            push(&l2, format!("scroll d{}", e.changes[0].scroll_delta.y));
+                            if tw.peek() {
+                                e.changes[0].consume();
+                            }
+                        },
+                    ));
                 },
-            ));
+            );
         });
     }));
     let h = rule.host();
@@ -799,12 +805,16 @@ fn pointer_events_enter_move_exit_press_release_and_scroll() {
     h.pointer_move(at(20.0, 20.0), -1, 0);
     h.pointer_exit(); // the mouse left the window
     assert_eq!(taken(&log), ["enter 10,10", "exit 10,10"]);
-    // The wheel: the handler hears it (down: positive), and it is taken only when consumed.
-    assert!(!h.scroll(at(50.0, 120.0), at(0.0, 1.0)));
+    // The wheel: the handler hears it (down: positive) and the list scrolls, unless it consumes it.
+    h.scroll(at(50.0, 120.0), at(0.0, 1.0));
+    rule.wait_for_idle();
+    let scrolled = scroll.value();
+    assert!(taken(&log) == ["scroll d1"] && scrolled > 0, "{scrolled}");
     take_wheel.set(true);
     rule.wait_for_idle();
-    assert!(h.scroll(at(50.0, 120.0), at(0.0, 1.0)));
-    assert_eq!(taken(&log), ["scroll d1", "scroll d1"]);
+    h.scroll(at(50.0, 120.0), at(0.0, 1.0));
+    rule.wait_for_idle();
+    assert!(scroll.value() == scrolled && taken(&log) == ["scroll d1"]);
 }
 
 fn mouse_input_injected_on_a_node_hovers_presses_and_scrolls_it() {
@@ -1087,8 +1097,8 @@ impl NestedScrollConnection for RecordingConnection {
 }
 
 fn nested_scroll_connections_pre_outer_first_post_inner_first_and_flings_suspend() {
-    // C++'s nested_scroll_connections_pre_outer_first_post_inner_first, the scrolls sent by a dispatcher (the
-    // scrollables are stage 10's), and its fling callbacks suspending (the C++ debt fixed).
+    // The connections' order with the scrolls sent by a dispatcher (C++ 14543 with a scroll container:
+    // nested_scroll_connections_around_a_scroll_container), and its fling callbacks suspending (the C++ debt fixed).
     let log = new_log();
     let outer: Rc<dyn NestedScrollConnection> =
         Rc::new(RecordingConnection { log: log.clone(), name: "A", take_half: true });
@@ -1247,6 +1257,129 @@ fn indirect_pointer_events_go_along_the_focused_path() {
     assert!(taken(&log).contains(&"iç cancel".to_string()));
 }
 
+/// A connection adding up what reaches it: what it took before the scroll (half of each, if it takes half), the
+/// pre-fling velocity, the post-fling's consumed and available; its calls logged by name.
+struct Tally {
+    log: Log,
+    name: &'static str,
+    take_half: bool,
+    pre_used: Cell<f32>,
+    pre_fling: Cell<f32>,
+    post_fling: Cell<(f32, f32)>,
+}
+
+impl Tally {
+    fn new(log: &Log, name: &'static str, take_half: bool) -> Rc<Tally> {
+        Rc::new(Tally {
+            log: log.clone(),
+            name,
+            take_half,
+            pre_used: Cell::new(0.0),
+            pre_fling: Cell::new(f32::NAN),
+            post_fling: Cell::new((f32::NAN, f32::NAN)),
+        })
+    }
+}
+
+impl NestedScrollConnection for Tally {
+    fn on_pre_scroll(&self, available: Offset, _: NestedScrollSource) -> Offset {
+        push(&self.log, format!("{}.pre", self.name));
+        if !self.take_half {
+            return Offset::Zero;
+        }
+        let used = Offset::new(0.0, available.y / 2.0);
+        self.pre_used.set(self.pre_used.get() + used.y);
+        used
+    }
+    fn on_post_scroll(&self, _: Offset, _: Offset, _: NestedScrollSource) -> Offset {
+        push(&self.log, format!("{}.post", self.name));
+        Offset::Zero
+    }
+    fn on_pre_fling(&self, available: Velocity) -> FlingFuture<'_> {
+        push(&self.log, format!("{}.preFling", self.name));
+        self.pre_fling.set(available.y);
+        Box::pin(async { Velocity::Zero })
+    }
+    fn on_post_fling(&self, consumed: Velocity, available: Velocity) -> FlingFuture<'_> {
+        push(&self.log, format!("{}.postFling", self.name));
+        self.post_fling.set((consumed.y, available.y));
+        Box::pin(async { Velocity::Zero })
+    }
+}
+
+fn nested_scroll_connections_around_a_scroll_container() {
+    // C++ 14543: a scroll container's drags go through the connections around it, the outer one's pre-scroll
+    // first, the inner one's post-scroll first; held still before lifting, no fling, but both get the (zero) fling
+    // callbacks; a flick's velocity follows the finger (up: negative), and what is left when the fling stops
+    // comes after it. (Compose's drag starts with what is past the touch slop: 200 less 8, half of it the outer
+    // connection's; C++ dropped the first move: 95.)
+    let log = new_log();
+    let (outer, inner) = (Tally::new(&log, "A", true), Tally::new(&log, "B", false));
+    let list = kompoz_foundation::prelude::ScrollState::new(0);
+    let (o, i, l) = (outer.clone(), inner.clone(), list.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (i, l) = (i.clone(), l.clone());
+        Box(
+            modifier = Modifier.fill_max_size().nested_scroll(o.clone()),
+            content = move || {
+                let l = l.clone();
+                Box(
+                    modifier = Modifier.fill_max_size().nested_scroll(i.clone()),
+                    content = move || {
+                        Column(
+                            modifier = Modifier.fill_max_size().vertical_scroll(&l),
+                            content = || {
+                                Box(modifier = Modifier.height(5000.dp()));
+                            },
+                        );
+                    },
+                );
+            },
+        );
+    }));
+    let h = rule.host();
+    // 10 px a move; held 200 ms before lifting.
+    h.pointer_down(at(200.0, 600.0), -1, 0, PointerType::Touch);
+    for i in 1..=20 {
+        rule.advance_frame();
+        h.pointer_move(at(200.0, 600.0 - 10.0 * i as f32), -1, 0);
+    }
+    rule.main_clock().advance_time_by(200);
+    h.pointer_up(at(200.0, 400.0), -1, 0);
+    rule.wait_for_idle();
+    let slop = kompoz_ui::platform::ViewConfiguration::default().touch_slop;
+    let dragged = 200.0 - slop;
+    assert!(
+        outer.pre_used.get() == -dragged / 2.0 && list.value() as f32 == dragged / 2.0,
+        "{} {}",
+        outer.pre_used.get(),
+        list.value()
+    );
+    {
+        let log = log.borrow();
+        assert!(log.len() >= 4 && log[..4] == ["A.pre", "B.pre", "B.post", "A.post"], "{log:?}");
+        assert!(log.last().map(String::as_str) == Some("A.postFling") && outer.pre_fling.get() == 0.0, "{log:?}");
+    }
+    // A flick: the velocity follows the finger; what is left when the fling stops (none: it slowed down) comes
+    // after it.
+    taken(&log);
+    h.pointer_down(at(200.0, 600.0), -1, 0, PointerType::Touch);
+    for i in 1..=4 {
+        rule.advance_frame();
+        h.pointer_move(at(200.0, 600.0 - 50.0 * i as f32), -1, 0);
+    }
+    h.pointer_up(at(200.0, 400.0), -1, 0);
+    rule.advance_frame();
+    assert!(outer.pre_fling.get() < -1000.0, "{}", outer.pre_fling.get());
+    assert!(!log.borrow().iter().any(|l| l == "A.postFling")); // still flinging
+    rule.wait_for_idle();
+    assert_eq!(log.borrow().last().map(String::as_str), Some("A.postFling"));
+    let (consumed, available) = outer.post_fling.get();
+    // All of it used, none left: the list never ran out.
+    assert!(available.abs() < 1.0 && (consumed - outer.pre_fling.get()).abs() < 1.0, "{consumed} {available}");
+    assert_eq!(inner.pre_used.get(), 0.0);
+}
+
 tests!(
     indirect_pointer_events_go_along_the_focused_path,
     pointer_event_passes_reach_parents_before_and_after_their_children,
@@ -1267,4 +1400,5 @@ tests!(
     velocity_tracker_measures_the_last_stretch,
     velocity_trackers_follow_changes_and_one_dimension_by_impulse,
     nested_scroll_connections_pre_outer_first_post_inner_first_and_flings_suspend,
+    nested_scroll_connections_around_a_scroll_container,
 );

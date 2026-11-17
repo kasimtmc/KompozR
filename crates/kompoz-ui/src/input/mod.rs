@@ -369,6 +369,7 @@ fn data(
         scroll_delta: Offset::Zero,
         scale_factor: 1.0,
         rotation: 0.0,
+        pan_offset: Offset::Zero,
     }
 }
 
@@ -714,7 +715,7 @@ pub(crate) fn stylus_exit(host: &KompozHost, pointer_id: i64) {
     host.input.borrow().stylus.borrow_mut().take();
 }
 
-/// A wheel or touchpad scrolled by `delta` px (down and right positive: the change's `scroll_delta`) with the
+/// A wheel or touchpad scrolled by `delta` notches (down and right positive: the change's `scroll_delta`) with the
 /// mouse at `position`.
 pub(crate) fn scroll(host: &KompozHost, position: Offset, delta: Offset) -> bool {
     let event = {
@@ -740,6 +741,23 @@ pub(crate) fn scale(host: &KompozHost, position: Offset, r#type: PointerEventTyp
         let mut pointer = state.mouse_pointer(time).expect("the mouse is over the window");
         pointer.scale_factor = factor;
         pointer.rotation = rotation;
+        let mut e = state.event(r#type, vec![pointer]);
+        e.buttons = state.mouse_buttons();
+        e
+    };
+    process(host, event, true).any_change_consumed
+}
+
+/// A trackpad's two-finger pan with the mouse at `position` (Compose's PanStart, PanMove and PanEnd events, which
+/// Android makes of a touchpad's swipe): the change's `pan_offset` (px since the last, Compose's: the scroll the
+/// fingers make, the opposite of their movement); whether a node consumed it.
+pub(crate) fn pan(host: &KompozHost, position: Offset, r#type: PointerEventType, offset: Offset) -> bool {
+    let event = {
+        let state = host.input.borrow();
+        state.mouse_at(None, position);
+        let time = host.dispatcher().now();
+        let mut pointer = state.mouse_pointer(time).expect("the mouse is over the window");
+        pointer.pan_offset = offset;
         let mut e = state.event(r#type, vec![pointer]);
         e.buttons = state.mouse_buttons();
         e

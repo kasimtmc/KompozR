@@ -17,7 +17,7 @@ pub mod regions;
 mod script;
 mod title_bar;
 
-pub use app_core::{AppCore, DeviceFactory, Next, WHEEL_NOTCH_DP};
+pub use app_core::{AppCore, DeviceFactory, Next};
 pub use event::{Event, MouseButton};
 pub use platform::{Metrics, Platform, TitleBar, WindowAction, WindowButton};
 pub use title_bar::{

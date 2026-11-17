@@ -236,13 +236,15 @@ pub struct PointerInputChange {
     pub previous_position: Offset,
     pub previous_pressed: bool,
     pub r#type: PointerType,
-    /// A scroll event's wheel or touchpad delta, px (down and right positive).
+    /// A scroll event's wheel or touchpad delta, in notches (Compose's units: down and right positive; a touchpad's
+    /// or a free-spinning wheel's parts of notches; foundation's scrollables make a notch 64 dp).
     pub scroll_delta: Offset,
     /// A trackpad pinch's scale (Compose's `scaleFactor`).
     pub scale_factor: f32,
     /// A trackpad pinch's twist, degrees clockwise (KompozR's, as C++'s `zoom` rotation: Compose has none).
     pub rotation: f32,
-    /// A trackpad pan's offset (Compose's `panOffset`).
+    /// A trackpad pan's offset (Compose's `panOffset`, Android's gesture scroll distance: the opposite of the
+    /// fingers' movement).
     pub pan_offset: Offset,
     historical: Rc<Vec<HistoricalChange>>,
     /// Where it is in the window.
@@ -422,6 +424,7 @@ pub(crate) struct PointerInputEventData {
     pub(crate) scroll_delta: Offset,
     pub(crate) scale_factor: f32,
     pub(crate) rotation: f32,
+    pub(crate) pan_offset: Offset,
 }
 
 /// What the platform sent (Compose's PointerInputEvent): its time, its pointers, and the rest of what a

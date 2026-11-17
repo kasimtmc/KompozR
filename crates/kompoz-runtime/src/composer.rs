@@ -13,7 +13,7 @@ use crate::snapshot::{ObserverHandle, Snapshot, SnapshotApplyResult, StateKey};
 use parking_lot::Mutex;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::Location;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -333,6 +333,9 @@ pub(crate) struct ComposerState {
     /// The holders of dynamic locals its providers set: their readers here were invalidated as they were set, so
     /// their applied changes aren't taken again.
     set_holders: Vec<StateKey>,
+    /// The derived states made here: they invalidate their readers here as they change, so the change they tell
+    /// the apply observers (for their readers elsewhere) isn't taken again.
+    derived_keys: HashSet<StateKey>,
     pass: u64,
     frame_time: i64,
     stats: RecompositionStats,
@@ -434,6 +437,7 @@ impl Composer {
                     timed_scopes: Vec::new(),
                     parked: Vec::new(),
                     set_holders: Vec::new(),
+                    derived_keys: HashSet::new(),
                     pass: 0,
                     frame_time: 0,
                     stats: RecompositionStats::default(),
@@ -535,9 +539,20 @@ impl Composer {
         let keys = std::mem::take(&mut *self.pending.lock());
         let set_holders = std::mem::take(&mut self.state.borrow_mut().set_holders);
         for key in keys {
-            if !set_holders.contains(&key) {
+            let derived = self.state.borrow().derived_keys.contains(&key);
+            if !set_holders.contains(&key) && !derived {
                 self.invalidate_readers(key);
             }
+        }
+    }
+
+    /// A derived state made here (its key), or gone.
+    pub(crate) fn set_derived_key(&self, key: StateKey, made: bool) {
+        let mut st = self.state.borrow_mut();
+        if made {
+            st.derived_keys.insert(key);
+        } else {
+            st.derived_keys.remove(&key);
         }
     }
 

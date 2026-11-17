@@ -8,11 +8,12 @@ use super::selection::Selection;
 use super::state::{SelectionState, remember_selection_state};
 use crate::magnifier::MagnifierModifiers;
 use crate::text::long_press_text_drag_observer::detect_down_and_drag_gestures_with_observer;
-use kompoz_coroutines::remember_coroutine_scope;
+use kompoz_animation::{Animatable, AnimationSpec, AnimationVector2D, Spring, TwoWayConverter, spring};
+use kompoz_coroutines::{LaunchedEffect, coroutine_scope, remember_coroutine_scope, snapshot_flow};
 use kompoz_graphics::{Density, Dp, DpSize, IntSize, Offset};
 use kompoz_runtime::{
-    DisposableEffect, KompozitionLocalProvider, MutableState, key, kompozable, mutable_state_of, on_dispose, remember,
-    remember_keyed, remember_saveable_with,
+    DisposableEffect, KompozitionLocalProvider, MutableState, State, derived_state_of, key, kompozable,
+    mutable_state_of, on_dispose, remember, remember_keyed, remember_saveable_with,
 };
 use kompoz_text::AnnotatedString;
 use kompoz_ui::input::PointerInputScope;
@@ -20,6 +21,7 @@ use kompoz_ui::layout::layout_into;
 use kompoz_ui::platform::{LocalClipboard, LocalDensity, LocalHapticFeedback, LocalTextToolbar};
 use kompoz_ui::{Constraints, Measurable, MeasurePolicy, MeasureResult, MeasureScope, Modifier};
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Makes the text in `content` selectable, one selection across all of it (Compose's `SelectionContainer`): a
 /// finger's long press selects a word, with handles to drag (from text to text) and the text toolbar (copy,
@@ -185,23 +187,24 @@ fn selection_handle(manager: &Rc<SelectionManager>, selection: &Selection, is_st
     })
 }
 
-/// The magnifier of a dragged handle (Compose's `selectionMagnifier`, Android's): over the container while a
-/// finger drags a handle, its source where [`calculate_selection_magnifier_center`] says, hidden when dragged too
-/// far from the line (by half its size, told once shown). Compose eases it between lines with a spring; it moves
-/// there at once here (animations are a later stage).
+/// The magnifier of a dragged handle (Compose's `selectionMagnifier`, Android's, through its
+/// `animatedSelectionMagnifier`): over the container while a finger drags a handle, its source where
+/// [`calculate_selection_magnifier_center`] says — along the line at once, eased between lines by a spring —
+/// hidden when dragged too far from the line (by half its size, told once shown).
 #[track_caller]
 fn selection_magnifier(manager: &Rc<SelectionManager>) -> Modifier {
     kompoz_runtime::kompozable_block!({
         let density = LocalDensity.current();
         let magnifier_size: MutableState<IntSize> = remember(|| mutable_state_of(IntSize::Zero));
+        let (center_manager, size) = (Rc::downgrade(manager), magnifier_size.clone());
+        let animated_center = remember_animated_magnifier_position(move || match center_manager.upgrade() {
+            Some(m) => calculate_selection_magnifier_center(&m, size.get()),
+            None => Offset::Unspecified,
+        });
         if !manager.should_show_magnifier() {
             return Modifier;
         }
-        let (center_manager, size) = (Rc::downgrade(manager), magnifier_size.clone());
-        let source_center = move |_: &Density| match center_manager.upgrade() {
-            Some(m) => calculate_selection_magnifier_center(&m, size.get()),
-            None => Offset::Unspecified,
-        };
+        let source_center = move |_: &Density| animated_center.get();
         let on_size_changed: Rc<dyn Fn(DpSize)> = Rc::new(move |s: DpSize| {
             magnifier_size.set(IntSize::new(density.round_to_px(s.width), density.round_to_px(s.height)));
         });
@@ -216,6 +219,70 @@ fn selection_magnifier(manager: &Rc<SelectionManager>) -> Modifier {
             true,
         )
     })
+}
+
+/// `Offset.VectorConverter` passing `Offset::Unspecified` on (Compose's UnspecifiedSafeOffsetVectorConverter).
+fn unspecified_safe_offset_vector_converter() -> TwoWayConverter<Offset, AnimationVector2D> {
+    TwoWayConverter(
+        |offset: Offset| {
+            if offset.is_specified() {
+                AnimationVector2D { v1: offset.x, v2: offset.y }
+            } else {
+                AnimationVector2D { v1: f32::NAN, v2: f32::NAN }
+            }
+        },
+        |v: AnimationVector2D| Offset::new(v.v1, v.v2),
+    )
+}
+
+/// How close to its target the magnifier's spring ends (Compose's OffsetDisplacementThreshold).
+const OffsetDisplacementThreshold: Offset =
+    Offset::new(Spring::DefaultDisplacementThreshold, Spring::DefaultDisplacementThreshold);
+
+/// The magnifier's position, following what `target_calculation` makes of the states it reads: at once along a
+/// line (an animation would only lag behind the finger), by a spring to another line (a new one launched from the
+/// running one's velocity, keeping its inertia), at once to or from none (Compose's
+/// `rememberAnimatedMagnifierPosition`).
+#[kompozable]
+fn remember_animated_magnifier_position(target_calculation: impl Fn() -> Offset + 'static) -> State<Offset> {
+    let target_value = remember(|| derived_state_of(target_calculation));
+    let animatable = {
+        let target_value = target_value.clone();
+        remember(move || {
+            Animatable::new(
+                target_value.get(),
+                unspecified_safe_offset_vector_converter(),
+                Some(OffsetDisplacementThreshold),
+                "Animatable",
+            )
+        })
+    };
+    let (target, a) = (target_value.clone(), animatable.clone());
+    LaunchedEffect((), async move {
+        coroutine_scope(move |animation_scope| async move {
+            snapshot_flow(move || target.get())
+                .collect(move |target_value: Offset| {
+                    let a = a.clone();
+                    let current = a.peek();
+                    if current.is_specified() && target_value.is_specified() && current.y != target_value.y {
+                        let spec: Arc<dyn AnimationSpec<Offset>> = Arc::new(spring(
+                            Spring::DampingRatioNoBouncy,
+                            Spring::StiffnessMedium,
+                            Some(OffsetDisplacementThreshold),
+                        ));
+                        animation_scope.launch(async move {
+                            kompoz_runtime::named_args!(a.animate_to(target_value, spec)).await;
+                        });
+                    } else {
+                        // (no suspension: done as it is launched, in the collector's order)
+                        animation_scope.launch(async move { a.snap_to(target_value).await });
+                    }
+                })
+                .await;
+        })
+        .await;
+    });
+    animatable.as_state()
 }
 
 /// A layout passing its constraints to each child, at its top left, as big as the biggest (Compose's

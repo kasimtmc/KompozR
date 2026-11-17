@@ -72,6 +72,16 @@ impl TouchSlopDetector {
         self.total_position_change = Offset::Zero;
     }
 
+    /// Starts again from `initial_position_accumulator` (Compose's `reset(initialPositionAccumulator)`).
+    pub(crate) fn reset_to(&mut self, initial_position_accumulator: Offset) {
+        self.total_position_change = initial_position_accumulator;
+    }
+
+    /// The axis it measures along from now on (Compose's `orientation` setter).
+    pub(crate) fn set_orientation(&mut self, orientation: Option<Orientation>) {
+        self.orientation = orientation;
+    }
+
     fn calculate_post_slop_offset(&self, touch_slop: f32) -> Offset {
         let total = self.total_position_change;
         match self.orientation {

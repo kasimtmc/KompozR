@@ -927,8 +927,8 @@ impl kompoz_ui::platform::PlatformCallbacks for Exclusions {
 }
 
 fn system_gesture_exclusion_tells_the_platform_where_swipes_are_the_apps() {
-    // C++'s system_gesture_exclusion_keeps_the_rects_in_view without its scrolled part (scroll containers are a
-    // later stage's), with Compose's rects: each in the root, all of it or the part given, as nodes come and go.
+    // Compose's rects: each in the root, all of it or the part given, as nodes come and go (C++ 24607 with a
+    // scroll container: system_gesture_exclusion_keeps_the_rects_in_view).
     let shown = mutable_state_of(true);
     let s = shown.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
@@ -966,6 +966,53 @@ fn system_gesture_exclusion_tells_the_platform_where_swipes_are_the_apps() {
     assert_eq!(exclusions.0.borrow().len(), told);
 }
 
+fn system_gesture_exclusion_keeps_the_rects_in_view() {
+    // C++ 24607: in a scroll container, what is scrolled out of it isn't kept (Compose's boundsInRoot, cut by the
+    // container's clip; one never in view is empty, left out as Compose's RectListNode leaves it); scrolled, the
+    // rects follow; gone, the others move up.
+    use kompoz_foundation::prelude::*;
+    let shown = mutable_state_of(true);
+    let scroll = ScrollState::new(0);
+    let (s, sc) = (shown.clone(), scroll.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (s, sc) = (s.clone(), sc.clone());
+        Column(move || {
+            if s.get() {
+                Box(modifier = Modifier.size_wh(100.dp(), 50.dp()).system_gesture_exclusion()); // 0..50, all of it
+            }
+            // Only its first 30 across (a slider's edge, say).
+            Box(modifier = Modifier
+                .size_wh(200.dp(), 60.dp())
+                .system_gesture_exclusion_with(|c| Rect::new(0.0, 0.0, 30.0, c.size().height as f32)));
+            Column(
+                modifier = Modifier.fill_max_width().height(100.dp()).vertical_scroll(&sc),
+                content = || {
+                    Box(modifier = Modifier.fill_max_width().height(80.dp()));
+                    Box(modifier = Modifier.size_wh(50.dp(), 80.dp()).system_gesture_exclusion());
+                    Box(modifier = Modifier.size_wh(50.dp(), 80.dp()).system_gesture_exclusion()); // 160..240: never in view
+                },
+            );
+            Box(modifier = Modifier.size(40.dp()));
+        });
+    }));
+    let rects = || rule.host().system_gesture_exclusion();
+    assert_eq!(
+        rects(),
+        [IntRect::new(0, 0, 100, 50), IntRect::new(0, 50, 30, 110), IntRect::new(0, 110 + 80, 50, 210)]
+    );
+    // More of the last one in view.
+    let sc = scroll.clone();
+    kompoz_coroutines::CoroutineScope::new(rule.host().dispatcher()).launch(async move {
+        sc.scroll_to(60).await;
+    });
+    rule.wait_for_idle();
+    assert_eq!(rects()[2], IntRect::new(0, 110 + 20, 50, 210));
+    // Gone, and the others up 50.
+    shown.set(false);
+    rule.wait_for_idle();
+    assert_eq!(rects(), [IntRect::new(0, 0, 30, 60), IntRect::new(0, 60 + 20, 50, 160)]);
+}
+
 tests!(
     coordinates_tell_where_layouts_are_and_map_between_them,
     a_layer_moves_and_clips_what_coordinates_tell,
@@ -987,4 +1034,5 @@ tests!(
     a_dynamic_local_read_while_measuring_measures_again_without_composing,
     the_host_saves_and_restores_its_saveable_state,
     system_gesture_exclusion_tells_the_platform_where_swipes_are_the_apps,
+    system_gesture_exclusion_keeps_the_rects_in_view,
 );

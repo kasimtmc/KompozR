@@ -491,48 +491,53 @@ impl KompozHost {
         }
         self.frame_time.set(time_nanos);
         self.dispatcher.run(time_nanos);
-        let composition = self.composition.borrow();
-        let Some(composition) = composition.as_ref() else { return false };
-        for pass in 0..4 {
-            Snapshot::send_apply_notifications();
-            self.owner.snapshot_observer().process_changes();
-            // (focus targets whose properties read what changed, worked out)
-            self.focus.process_invalidations();
-            if self.handle.invalid.swap(false, Ordering::AcqRel) {
-                self.generation.set(self.generation.get() + 1);
-                composition.invalidate_all();
-                self.root.invalidate_measurement_for_subtree();
-            }
-            if pass == 0 {
-                composition.invalidate_frame_scopes(time_nanos);
-            }
-            let recomposed = composition.recompose(time_nanos);
-            if recomposed {
-                self.owner.run_end_apply_listeners();
-                // (the focus nodes the composition changed, worked out: Compose's FocusInvalidationManager)
-                self.focus.process_invalidations();
-                // (what the composition's own snapshot changed reaches the layout's readers too)
+        {
+            let composition = self.composition.borrow();
+            let Some(composition) = composition.as_ref() else { return false };
+            for pass in 0..4 {
+                Snapshot::send_apply_notifications();
                 self.owner.snapshot_observer().process_changes();
-            }
-            if !self.owner.has_pending_measure_or_layout() && !self.owner.has_pending_on_positioned_callbacks() {
+                // (focus targets whose properties read what changed, worked out)
+                self.focus.process_invalidations();
+                if self.handle.invalid.swap(false, Ordering::AcqRel) {
+                    self.generation.set(self.generation.get() + 1);
+                    composition.invalidate_all();
+                    self.root.invalidate_measurement_for_subtree();
+                }
+                if pass == 0 {
+                    composition.invalidate_frame_scopes(time_nanos);
+                }
+                let recomposed = composition.recompose(time_nanos);
+                if recomposed {
+                    self.owner.run_end_apply_listeners();
+                    // (the focus nodes the composition changed, worked out: Compose's FocusInvalidationManager)
+                    self.focus.process_invalidations();
+                    // (what the composition's own snapshot changed reaches the layout's readers too)
+                    self.owner.snapshot_observer().process_changes();
+                }
+                if !self.owner.has_pending_measure_or_layout() && !self.owner.has_pending_on_positioned_callbacks() {
+                    if global_snapshot_changed() || self.owner.snapshot_observer().has_pending() {
+                        continue;
+                    }
+                    break;
+                }
+                self.owner.measure_and_layout();
+                self.owner.dispatch_on_positioned_callbacks();
+                self.focus.process_invalidations();
+                self.focus.prune();
                 if global_snapshot_changed() || self.owner.snapshot_observer().has_pending() {
                     continue;
                 }
+                if self.layout_check.get() && !composition.has_invalidations() {
+                    let mismatches = self.owner.check_layout();
+                    self.layout_check_mismatches.borrow_mut().extend(mismatches);
+                }
                 break;
             }
-            self.owner.measure_and_layout();
-            self.owner.dispatch_on_positioned_callbacks();
-            self.focus.process_invalidations();
-            self.focus.prune();
-            if global_snapshot_changed() || self.owner.snapshot_observer().has_pending() {
-                continue;
-            }
-            if self.layout_check.get() && !composition.has_invalidations() {
-                let mismatches = self.owner.check_layout();
-                self.layout_check_mismatches.borrow_mut().extend(mismatches);
-            }
-            break;
         }
+        // (the coroutines continuing after the frame — Compose's frame continuations, dispatched after its
+        // composition and layout — see where it laid things out; what they write is the next frame's)
+        self.dispatcher.run_frame_end();
         self.owner.dispatch_semantics_changes();
         if self.owner.take_gesture_exclusion_changed() {
             let rects = self.owner.gesture_exclusion();
@@ -692,8 +697,10 @@ impl KompozHost {
         crate::input::stylus_exit(self, pointer_id);
     }
 
-    /// A wheel or touchpad scrolled by `delta` px (down and right positive) with the mouse at `position`; whether
-    /// a node took it.
+    /// A wheel or touchpad scrolled by `delta` notches (down and right positive; a touchpad's or a free-spinning
+    /// wheel's parts of notches as they come) with the mouse at `position`: the change's `scroll_delta`, in
+    /// Compose's units (foundation's scrollables make a notch 64 dp, Android's scroll factor); whether a node took
+    /// it.
     pub fn scroll(&self, position: Offset, delta: Offset) -> bool {
         crate::input::scroll(self, position, delta)
     }
@@ -1141,6 +1148,15 @@ impl KompozHost {
             _ => {}
         }
         crate::input::scale(self, position, r#type, factor, rotation)
+    }
+
+    /// A trackpad's two-finger pan with the mouse at `position` (px): its start (`PanStart`), each move
+    /// (`PanMove`) and end (`PanEnd`), as Compose's trackpad pan events (Android makes them of a touchpad's
+    /// swipe; foundation's scrollables scroll with them); `offset` is the pan offset since the last (px), as
+    /// Compose's `panOffset` (Android's AXIS_GESTURE_SCROLL_X/Y_DISTANCE): the scroll the fingers make, the opposite
+    /// of their movement (fingers up: positive y). Whether a node consumed it.
+    pub fn pan(&self, position: Offset, r#type: PointerEventType, offset: Offset) -> bool {
+        crate::input::pan(self, position, r#type, offset)
     }
 
     /// Zooms what is under `position` (px) by `factor` and turns it by `rotation` degrees clockwise (C++'s `zoom`:

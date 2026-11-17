@@ -45,6 +45,7 @@ impl<T> Drop for Inner<T> {
             && let Some(c) = self.composer.upgrade()
         {
             c.remove_observer(s);
+            c.set_derived_key(self.key, false);
         }
     }
 }
@@ -96,9 +97,13 @@ impl<T: Clone + 'static> DerivedState<T> {
                     && inner.recompute()
                 {
                     c.invalidate_readers(inner.key);
+                    // Its readers outside the composition (a layout's, a drawing's, a snapshot flow's) are told
+                    // as a state's are: Compose's reads of a derived state report its dependencies to them.
+                    crate::snapshot::state_changed(inner.key);
                 }
             }));
             inner.observer.set(Some(s));
+            c.set_derived_key(inner.key, true);
         }
         DerivedState { inner }
     }

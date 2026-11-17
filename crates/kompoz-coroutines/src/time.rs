@@ -104,6 +104,38 @@ impl Future for AwaitFrame {
     }
 }
 
+/// `await_frame_end().await`: waits until the frame under way (or the next one) is done composing and laying out,
+/// and gives its time — where Compose's coroutines continue after a frame, their frame continuations being
+/// dispatched after the frame's composition and layout passes (what reads the layout a frame's animation step
+/// changed: ContentInViewNode's `afterFrame`). A coroutine resumed by a frame (`await_frame`) continues in it,
+/// before its composition, so what it sets shows in that frame.
+pub fn await_frame_end() -> AwaitFrameEnd {
+    AwaitFrameEnd { time: None }
+}
+
+pub struct AwaitFrameEnd {
+    time: Option<Rc<Cell<Option<i64>>>>,
+}
+
+impl Future for AwaitFrameEnd {
+    type Output = i64;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<i64> {
+        match &self.time {
+            Some(t) => match t.get() {
+                Some(time) => Poll::Ready(time),
+                None => Poll::Pending,
+            },
+            None => {
+                let (d, job) = current();
+                let time = Rc::new(Cell::new(None));
+                d.at_frame_end(time.clone(), cx.waker().clone(), &job);
+                self.time = Some(time);
+                Poll::Pending
+            }
+        }
+    }
+}
+
 /// Compose's `withFrameNanos { time -> … }`: waits for the next frame and gives what `on_frame` makes of its time.
 pub async fn with_frame_nanos<R>(on_frame: impl FnOnce(i64) -> R) -> R {
     on_frame(await_frame().await)

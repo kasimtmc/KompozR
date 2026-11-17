@@ -112,6 +112,8 @@ pub(crate) struct Inner {
     queue: Arc<Queue>,
     timers: RefCell<Vec<Timer>>,
     frames: RefCell<Vec<FrameWaiter>>,
+    /// Who waits for the end of the next frame (after its composition and layout).
+    frame_ends: RefCell<Vec<FrameWaiter>>,
     now: Cell<i64>,
     seq: Cell<u64>,
 }
@@ -158,6 +160,7 @@ impl Dispatcher {
             queue: Arc::new(Queue { ready: Mutex::new(Vec::new()), notify: Mutex::new(None) }),
             timers: RefCell::new(Vec::new()),
             frames: RefCell::new(Vec::new()),
+            frame_ends: RefCell::new(Vec::new()),
             now: Cell::new(0),
             seq: Cell::new(0),
         }))
@@ -231,6 +234,20 @@ impl Dispatcher {
         self.run_ready();
     }
 
+    /// The end of a frame (the host calls it once the frame's composition and layout are done): the coroutines
+    /// awaiting it ([`await_frame_end`](crate::await_frame_end)) get it, and everything woken runs.
+    pub fn run_frame_end(&self) {
+        let now = self.0.now.get();
+        let waiters = std::mem::take(&mut *self.0.frame_ends.borrow_mut());
+        for w in waiters {
+            if job_alive(&w.job) {
+                w.time.set(Some(now));
+                w.waker.wake();
+            }
+        }
+        self.run_ready();
+    }
+
     /// Polls what was woken (from this thread or another) until nothing is left.
     pub fn run_ready(&self) {
         loop {
@@ -290,7 +307,7 @@ impl Dispatcher {
     }
 
     pub fn has_frame_waiters(&self) -> bool {
-        self.0.frames.borrow().iter().any(|w| job_alive(&w.job))
+        self.0.frames.borrow().iter().chain(self.0.frame_ends.borrow().iter()).any(|w| job_alive(&w.job))
     }
 
     pub fn has_timers(&self) -> bool {
@@ -420,6 +437,10 @@ impl Inner {
 
     pub(crate) fn at_next_frame(&self, time: Rc<Cell<Option<i64>>>, waker: Waker, job: &Rc<JobState>) {
         self.frames.borrow_mut().push(FrameWaiter { time, waker, job: Rc::downgrade(job) });
+    }
+
+    pub(crate) fn at_frame_end(&self, time: Rc<Cell<Option<i64>>>, waker: Waker, job: &Rc<JobState>) {
+        self.frame_ends.borrow_mut().push(FrameWaiter { time, waker, job: Rc::downgrade(job) });
     }
 
     pub(crate) fn now(&self) -> i64 {

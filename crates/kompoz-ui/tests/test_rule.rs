@@ -1,7 +1,7 @@
 //! The test rule's tests: finders and matchers over the semantics trees, selections (children, parent, siblings,
 //! ancestors, index), assertions and their Compose messages, actions (clicks, semantics actions, scrolling to a
-//! node through the bring-into-view chain), printing. The C++ Kompoz's test_rule_assertions without Material (its
-//! buttons, checkbox and icon as semantics boxes, its scrolling column as a scroll-like bring-into-view node).
+//! node by its scrollable's ScrollBy), printing. The C++ Kompoz's test_rule_assertions without Material (its
+//! buttons, checkbox and icon as semantics boxes).
 
 #![allow(non_snake_case)]
 
@@ -12,8 +12,6 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
-use kompoz_ui::focus::{BoundsProvider, BringIntoViewFuture, BringIntoViewModifierNode};
-use kompoz_ui::layout::LayoutCoordinates;
 use kompoz_ui::semantics::*;
 use kompoz_ui::*;
 use std::cell::Cell;
@@ -44,79 +42,20 @@ fn fails(f: impl FnOnce(), message: &str) {
     }
 }
 
-/// A box scrolling what it wraps up by its state (a stand-in for a scroll container: stage 10's): it brings a
-/// rect of what is below it into view by scrolling just far enough (Compose's BringIntoViewModifierNode).
-fn scroller(scroll: MutableState<i32>) -> Modifier {
-    let s = scroll.clone();
-    Modifier.then_element(Scroller { scroll }).layout(move |scope, m, c| {
-        let p = m.measure(Constraints::new(c.min_width, c.max_width, 0, Constraints::Infinity));
-        let s = s.clone();
-        scope.layout(c.max_width, c.max_height, move |pl| pl.place(&p, 0, -s.get()))
-    })
-}
-
-#[derive(PartialEq)]
-struct Scroller {
-    scroll: MutableState<i32>,
-}
-
-impl ModifierNodeElement for Scroller {
-    type Node = ScrollerNode;
-    fn create(&self) -> ScrollerNode {
-        ScrollerNode { scroll: self.scroll.clone(), handle: None }
-    }
-    fn update(&self, node: &mut ScrollerNode) {
-        node.scroll = self.scroll.clone();
-    }
-}
-
-struct ScrollerNode {
-    scroll: MutableState<i32>,
-    handle: Option<NodeHandle>,
-}
-
-impl ModifierNode for ScrollerNode {
-    node_capabilities!(bring_into_view);
-    fn on_attach(&mut self, cx: &NodeCx) {
-        self.handle = Some(cx.handle());
-    }
-}
-
-impl BringIntoViewModifierNode for ScrollerNode {
-    fn bring_into_view(&mut self, child: LayoutCoordinates, bounds: BoundsProvider) -> BringIntoViewFuture {
-        let (scroll, handle) = (self.scroll.clone(), self.handle.clone());
-        Box::pin(async move {
-            let Some(me) = handle.and_then(|h| h.coordinates()) else { return };
-            let Some(rect) = bounds() else { return };
-            let at = me.local_bounding_box_of(&child, false).top_left();
-            let rect = rect.translate(at);
-            let height = me.size().height as f32;
-            let delta = if rect.bottom > height {
-                rect.bottom - height
-            } else if rect.top < 0.0 {
-                rect.top
-            } else {
-                0.0
-            };
-            scroll.set(scroll.peek() + delta.round() as i32);
-        })
-    }
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // Ported from C++
 
 fn test_rule_assertions() {
-    // C++'s test_rule_assertions: semantics boxes for its buttons, checkbox and icon; a scroll-like box for its
-    // scrolling column. Compose's messages.
+    // C++'s test_rule_assertions: semantics boxes for its buttons, checkbox and icon (Material is stage 12's); its
+    // scrolling column a vertical_scroll. Compose's messages.
     let ticked = mutable_state_of(false);
-    let scroll = mutable_state_of(0);
+    let scroll = ScrollState::new(0);
     let (t, sc) = (ticked.clone(), scroll.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
             let (t, sc) = (t.clone(), sc.clone());
             Column(
-                Modifier.fill_max_size().then(scroller(sc.clone())),
+                Modifier.fill_max_size().vertical_scroll(&sc),
                 content = move || {
                     Box(Modifier.semantics_with(true, |c| c.on_click(|| true)), content = || Text("Tamam"));
                     Box(
@@ -211,7 +150,7 @@ fn test_rule_assertions() {
     );
     rule.on_node_with_text("Aşağıda").perform_scroll_to();
     rule.on_node_with_text("Aşağıda").assert_is_displayed();
-    assert!(scroll.peek() > 700, "{}", scroll.peek());
+    assert!(scroll.value() > 700, "{}", scroll.value());
     // Nothing above it scrolls: Compose's message.
     let other = KompozTestRule::new(kompozable_lambda!(|| Text("yalnız")));
     fails(
@@ -363,9 +302,51 @@ fn semantics_actions_run_through_the_rule() {
     rule.on_node_with_tag("x").perform_click();
 }
 
+fn scrolling_to_a_node_index_or_key_as_compose() {
+    // Compose's performScrollToNode on a scroll container: the matching node below it scrolled into view (all of it
+    // is composed: no viewport-by-viewport search); none matching, Compose's message. performScrollToIndex and
+    // performScrollToKey need a lazy layout's actions: Compose's messages without them.
+    let scroll = kompoz_foundation::prelude::ScrollState::new(0);
+    let s = scroll.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        Column(
+            Modifier.fill_max_size().vertical_scroll(&s).test_tag("liste"),
+            content = || {
+                for i in 0..40 {
+                    Text(format!("satır {i}"), modifier = Modifier.height(50.dp()));
+                }
+            },
+        );
+    }));
+    rule.on_node_with_text("satır 30").assert_is_not_displayed();
+    rule.on_node_with_tag("liste").perform_scroll_to_node(has_text("satır 30", false, false));
+    rule.on_node_with_text("satır 30").assert_is_displayed();
+    assert!(scroll.value() > 0, "{}", scroll.value());
+    fails(
+        || {
+            rule.on_node_with_tag("liste").perform_scroll_to_node(has_text("yok", false, false));
+        },
+        "No node found that matches Text + InputText + EditableText contains 'yok' (ignoreCase: false) in scrollable \
+         container",
+    );
+    fails(
+        || {
+            rule.on_node_with_tag("liste").perform_scroll_to_index(3);
+        },
+        "Failed to scroll to index 3, the node is missing [ScrollToIndex]",
+    );
+    fails(
+        || {
+            rule.on_node_with_tag("liste").perform_scroll_to_key(&3);
+        },
+        "Failed to scroll to the item identified by the key, the node is missing [IndexForKey, ScrollToIndex]",
+    );
+}
+
 tests!(
     test_rule_assertions,
     selections_follow_the_tree,
     printing_shows_the_tree_as_compose_does,
     semantics_actions_run_through_the_rule,
+    scrolling_to_a_node_index_or_key_as_compose,
 );

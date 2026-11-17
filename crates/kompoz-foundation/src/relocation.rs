@@ -3,7 +3,7 @@
 
 use kompoz_graphics::Rect;
 use kompoz_runtime::named;
-use kompoz_ui::focus::{BoundsProvider, bring_into_view};
+use kompoz_ui::focus::{BoundsProvider, BringIntoViewFuture, BringIntoViewModifierNode, bring_into_view};
 use kompoz_ui::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle};
 use std::cell::RefCell;
 use std::future::Future;
@@ -106,5 +106,137 @@ impl ModifierNode for BringIntoViewRequesterNode {
     fn on_detach(&mut self, cx: &NodeCx) {
         self.requester.remove(cx);
         self.handle = None;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Responders
+
+/// What brings a rect of its content into view (Compose's deprecated BringIntoViewResponder, what a scrollable's
+/// ContentInViewNode is): where a rect of it will be once it has brought it in, for the containers above it, and
+/// bringing it in (a future done once it is, or once the request was let go).
+pub trait BringIntoViewResponder {
+    /// Where `local_rect` (in its coordinates) will be once it has brought it into view (Compose's
+    /// `calculateRectForParent`).
+    fn calculate_rect_for_parent(&self, local_rect: Rect) -> Rect;
+
+    /// Brings `local_rect()` (in its coordinates, asked again as things move; none: gone) into view (Compose's
+    /// `bringChildIntoView`).
+    fn bring_child_into_view(self: Rc<Self>, local_rect: Rc<dyn Fn() -> Option<Rect>>) -> BringIntoViewFuture;
+}
+
+/// The responder modifier.
+#[named(trait BringIntoViewResponderModifiers)]
+impl Modifier {
+    /// Makes this layout bring what asks under it into view through `responder` (Compose's deprecated
+    /// `Modifier.bringIntoViewResponder`), and the containers above it as `responder` says it will be.
+    fn bring_into_view_responder(self, responder: Rc<dyn BringIntoViewResponder>) -> Modifier {
+        self.then_element(BringIntoViewResponderElement { responder })
+    }
+}
+
+struct BringIntoViewResponderElement {
+    responder: Rc<dyn BringIntoViewResponder>,
+}
+
+impl PartialEq for BringIntoViewResponderElement {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::addr_eq(Rc::as_ptr(&self.responder), Rc::as_ptr(&other.responder))
+    }
+}
+
+impl ModifierNodeElement for BringIntoViewResponderElement {
+    type Node = BringIntoViewResponderNode;
+    fn create(&self) -> BringIntoViewResponderNode {
+        BringIntoViewResponderNode::new(self.responder.clone())
+    }
+    fn update(&self, node: &mut BringIntoViewResponderNode) {
+        node.responder = self.responder.clone();
+    }
+    fn name(&self) -> &'static str {
+        "bringIntoViewResponder"
+    }
+}
+
+/// The node bringing a child's rect into view through its responder, and through the containers above it
+/// (Compose's BringIntoViewResponderNode): both at once.
+pub struct BringIntoViewResponderNode {
+    pub(crate) responder: Rc<dyn BringIntoViewResponder>,
+    shared: Rc<ResponderShared>,
+}
+
+#[derive(Default)]
+struct ResponderShared {
+    handle: RefCell<Option<NodeHandle>>,
+    /// Placed once (Compose's `hasBeenPlaced`: nothing is worked out before).
+    has_been_placed: std::cell::Cell<bool>,
+}
+
+impl BringIntoViewResponderNode {
+    /// A node of `responder` (what a scrollable delegates to with its ContentInViewNode).
+    pub fn new(responder: Rc<dyn BringIntoViewResponder>) -> BringIntoViewResponderNode {
+        BringIntoViewResponderNode { responder, shared: Rc::new(ResponderShared::default()) }
+    }
+}
+
+impl ModifierNode for BringIntoViewResponderNode {
+    kompoz_ui::node_capabilities!(bring_into_view, layout_aware);
+
+    fn should_auto_invalidate(&self) -> bool {
+        false
+    }
+
+    fn on_attach(&mut self, cx: &NodeCx) {
+        *self.shared.handle.borrow_mut() = Some(cx.handle());
+    }
+}
+
+impl kompoz_ui::layout::LayoutAwareModifierNode for BringIntoViewResponderNode {
+    fn on_placed(&mut self, _coordinates: &kompoz_ui::LayoutCoordinates) {
+        self.shared.has_been_placed.set(true);
+    }
+
+    fn observes_remeasure(&self) -> bool {
+        false
+    }
+}
+
+impl BringIntoViewModifierNode for BringIntoViewResponderNode {
+    fn bring_into_view(
+        &mut self,
+        child_coordinates: kompoz_ui::LayoutCoordinates,
+        bounds_provider: BoundsProvider,
+    ) -> BringIntoViewFuture {
+        let shared = self.shared.clone();
+        let responder = self.responder.clone();
+        // The rect in this node's coordinates, while both are attached and it was placed (Compose's `localRect`).
+        let local_rect: Rc<dyn Fn() -> Option<Rect>> = Rc::new(move || {
+            let cx = shared.handle.borrow().as_ref().and_then(|h| h.cx())?;
+            if !cx.is_attached() || !shared.has_been_placed.get() {
+                return None;
+            }
+            let layout_coordinates = cx.coordinates()?;
+            if !child_coordinates.is_attached() {
+                return None;
+            }
+            let rect = bounds_provider()?;
+            let local = layout_coordinates.local_bounding_box_of(&child_coordinates, false);
+            Some(rect.translate(local.top_left()))
+        });
+        let parent_rect: BoundsProvider = {
+            let (local_rect, responder) = (local_rect.clone(), responder.clone());
+            Rc::new(move || local_rect().map(|r| responder.calculate_rect_for_parent(r)))
+        };
+        let parent = self.shared.handle.borrow().as_ref().and_then(|h| h.cx());
+        Box::pin(async move {
+            // Both at once: the child into this one's view, this one's rect into its parents'.
+            kompoz_coroutines::coroutine_scope(move |scope| async move {
+                scope.launch(responder.bring_child_into_view(local_rect));
+                if let Some(cx) = parent {
+                    scope.launch(bring_into_view(&cx, Some(parent_rect)));
+                }
+            })
+            .await
+        })
     }
 }

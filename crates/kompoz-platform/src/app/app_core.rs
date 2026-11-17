@@ -54,9 +54,6 @@ pub struct Next {
     pub quit: bool,
 }
 
-/// The wheel's notch: 64 dp (C++'s docs; Compose desktop's wheel step on Linux).
-pub const WHEEL_NOTCH_DP: f32 = 64.0;
-
 /// Frames of a script in virtual time: 60 a second.
 const SCRIPT_FRAME_NS: i64 = 16_666_667;
 
@@ -529,7 +526,6 @@ impl<P: Platform> AppCore<P> {
         if let Some(modifiers) = e.modifiers() {
             host.set_keyboard_modifiers(modifiers); // (pointer events carry the keys held down)
         }
-        let px = self.scale;
         match e {
             Event::Quit => self.quit = true,
             Event::FocusGained | Event::FocusLost => {
@@ -619,7 +615,7 @@ impl<P: Platform> AppCore<P> {
                 if ctrl && host.zoom(at, 1.1f32.powf(dy), 0.0) {
                     return;
                 }
-                host.scroll(at, Offset::new(dx * WHEEL_NOTCH_DP * px, -dy * WHEEL_NOTCH_DP * px));
+                host.scroll(at, Offset::new(dx, -dy));
             }
             &Event::PinchBegin { x, y } => {
                 host.scale(self.to_px(x, y), PointerEventType::ScaleStart, 1.0, 0.0);
@@ -1118,7 +1114,7 @@ impl<P: Platform> AppCore<P> {
                     return None;
                 }
                 Command::Wheel(p, notches) => {
-                    host.scroll(dp(p), Offset::new(0.0, -notches * WHEEL_NOTCH_DP * px));
+                    host.scroll(dp(p), Offset::new(0.0, -notches));
                 }
                 Command::Zoom(p, factor) => {
                     host.zoom(dp(p), factor, 0.0);

@@ -16,13 +16,36 @@
 //! });
 //! ```
 
+pub(crate) mod bring_into_view_spec;
+mod content_in_view;
 mod drag;
+pub(crate) mod draggable;
+pub(crate) mod fling;
 mod for_each;
+mod indirect_drag;
+mod mouse_wheel;
+pub(crate) mod scrollable;
+pub(crate) mod scrollable_state;
 mod tap;
 mod transform;
 
+pub use bring_into_view_spec::{
+    BringIntoViewSpec, BringIntoViewSpecEq, DefaultBringIntoViewSpec, LocalBringIntoViewSpec,
+    default_calculate_scroll_distance,
+};
 pub use drag::{DetectAxisDragGestures, DetectDragGestures, DetectDragGesturesAfterLongPress};
 pub(crate) use drag::{await_all_pointers_up_with_slop_detection, pointer_slop};
+pub use draggable::{
+    DefaultDraggableState, DragBlock, DragScope, DraggableModifiers, DraggableNode, DraggableState, DraggableStateEq,
+    DraggableStateExtensions, OnDragStarted, OnDragStopped, remember_draggable_state,
+};
+pub use fling::{DefaultFlingBehavior, FlingBehavior, FlingBehaviorEq, ScrollableDefaultFlingBehavior};
+pub use mouse_wheel::{DefaultScrollConfig, LocalScrollConfig, ScrollConfig};
+pub use scrollable::{NestedScrollScope, ScrollableDefaults, ScrollableModifiers, ScrollableNode};
+pub use scrollable_state::{
+    DefaultScrollableState, LocalFuture, ScrollBlock, ScrollIndicatorState, ScrollScope, ScrollableState,
+    ScrollableStateEq, ScrollableStateExtensions, remember_scrollable_state,
+};
 pub use tap::{DetectTapGestures, GestureCancellation, PressGestureScope};
 pub(crate) use tap::{FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY, is_changed_to_down};
 pub use transform::DetectTransformGestures;

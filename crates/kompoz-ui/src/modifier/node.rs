@@ -360,6 +360,12 @@ impl NodeCx {
         }
     }
 
+    /// The dispatcher of the host it is in, while it is in one: its clock (`now()`, the frame's time or a newer
+    /// event's) is what Android's `AnimationUtils.currentAnimationTimeMillis` is to a view.
+    pub fn dispatcher(&self) -> Option<kompoz_coroutines::Dispatcher> {
+        self.cell.layout_node().and_then(|n| n.owner()).map(|o| o.dispatcher())
+    }
+
     /// A scope for its coroutines: made when first asked for, cancelled when the node is detached (Compose's
     /// `Modifier.Node.coroutineScope`). Panics on a node that isn't attached.
     #[track_caller]
@@ -400,6 +406,14 @@ impl NodeCx {
         owner.snapshot_observer().observe(&scope, f)
     }
 
+    /// Tells the platform its layout scrolled by `delta`, what a scrollable consumed (Compose's
+    /// `DelegatableNode.dispatchOnScrollChanged`, which calls the owner's): Android's owner tells its view tree's
+    /// scroll observers (stage 15's); a desktop owner, as Compose's default `Owner.dispatchOnScrollChanged`, has none
+    /// to tell.
+    pub fn dispatch_on_scroll_changed(&self, delta: kompoz_graphics::Offset) {
+        let _ = delta;
+    }
+
     /// Runs `effect` once the composition's changes are applied (Compose's `Modifier.Node.sideEffect`).
     pub fn side_effect(&self, effect: impl FnOnce() + 'static) {
         match self.cell.layout_node().and_then(|n| n.owner()) {
@@ -413,6 +427,27 @@ impl NodeCx {
     pub fn delegate<T: ModifierNode>(&self, node: T) -> DelegatedNode<T> {
         let typed = NodeCell::new_typed(node);
         let cell: NodeRc = typed.clone();
+        self.delegate_cell(cell);
+        DelegatedNode { cell: typed }
+    }
+
+    /// Makes a node made apart from any chain a delegate of this one (Compose's `delegate` of a node another
+    /// object hands out, as an OverscrollEffect's `node`): nothing if it is this node's delegate already. Panics
+    /// if it is another node's delegate, or attached.
+    #[track_caller]
+    pub fn delegate_node(&self, node: &DelegatableNode) {
+        let delegator = node.cell.meta.delegator.borrow().as_ref().and_then(Weak::upgrade);
+        if let Some(d) = delegator {
+            if Rc::ptr_eq(&d, &self.cell) {
+                return;
+            }
+            panic!("Cannot delegate to an already delegated node");
+        }
+        assert!(!node.cell.meta.attached.get(), "Cannot delegate to an already attached node");
+        self.delegate_cell(node.cell.clone());
+    }
+
+    fn delegate_cell(&self, cell: NodeRc) {
         *cell.meta.delegator.borrow_mut() = Some(Rc::downgrade(&self.cell));
         let before = self.cell.meta.kind_set.get();
         let delegated = cell.meta.kind_set.get();
@@ -436,16 +471,25 @@ impl NodeCx {
             cell.run_attach_lifecycle();
             crate::modifier::chain::auto_invalidate(&cell, crate::modifier::chain::Phase::Inserted);
         }
-        DelegatedNode { cell: typed }
     }
 
     /// Takes a delegate back (Compose's `undelegate`): detached if it was attached, its kinds no longer this
     /// node's.
     pub fn undelegate<T: ModifierNode>(&self, delegate: &DelegatedNode<T>) {
         let target: NodeRc = delegate.cell.clone();
+        self.undelegate_cell(&target);
+    }
+
+    /// Takes back a node [`delegate_node`](NodeCx::delegate_node) delegated to: it can be delegated to again (by
+    /// this node or another).
+    pub fn undelegate_node(&self, node: &DelegatableNode) {
+        self.undelegate_cell(&node.cell);
+    }
+
+    fn undelegate_cell(&self, target: &NodeRc) {
         let found = {
             let mut delegates = self.cell.meta.delegates.borrow_mut();
-            let at = delegates.iter().position(|d| Rc::ptr_eq(d, &target));
+            let at = delegates.iter().position(|d| Rc::ptr_eq(d, target));
             at.map(|i| delegates.remove(i))
         };
         let Some(cell) = found else { panic!("kompoz: undelegate of a node that isn't a delegate of this one") };
@@ -773,6 +817,10 @@ impl NodeHandle {
             None => local.default_value(),
         }
     }
+    /// Its host's dispatcher (see [`NodeCx::dispatcher`]).
+    pub fn dispatcher(&self) -> Option<kompoz_coroutines::Dispatcher> {
+        self.cx().and_then(|c| c.dispatcher())
+    }
     /// The node's coroutine scope (see [`NodeCx::coroutine_scope`]); none once it is gone or detached.
     pub fn coroutine_scope(&self) -> Option<CoroutineScope> {
         self.cx().filter(|c| c.is_attached()).map(|c| c.coroutine_scope())
@@ -782,6 +830,48 @@ impl NodeHandle {
             Some(c) => c.observe_reads(f),
             None => f(),
         }
+    }
+}
+
+/// A node made apart from any chain, handed out by what owns it to be delegated to by whichever node takes it
+/// (Compose's DelegatableNode an object hands out: an OverscrollEffect's `node`, which `Modifier.overscroll` or a
+/// scrollable area delegates to): [`NodeCx::delegate_node`] attaches it where that node is,
+/// [`NodeCx::undelegate_node`] gives it back. Clones are the same node.
+#[derive(Clone)]
+pub struct DelegatableNode {
+    pub(crate) cell: NodeRc,
+}
+
+impl DelegatableNode {
+    /// `node`, in no chain yet.
+    pub fn new<T: ModifierNode>(node: T) -> DelegatableNode {
+        DelegatableNode { cell: NodeCell::new_rc(node) }
+    }
+
+    /// Whether it is attached (delegated to by an attached node: Compose's `node.isAttached`).
+    pub fn is_attached(&self) -> bool {
+        self.cell.meta.attached.get()
+    }
+
+    /// Its context (what it invalidates and reads is where it is delegated to).
+    pub fn cx(&self) -> NodeCx {
+        NodeCx { cell: self.cell.clone() }
+    }
+
+    /// Whether `other` is the same node.
+    pub fn ptr_eq(&self, other: &DelegatableNode) -> bool {
+        Rc::ptr_eq(&self.cell, &other.cell)
+    }
+
+    /// Whether `cx`'s node delegates to it.
+    pub fn is_delegate_of(&self, cx: &NodeCx) -> bool {
+        self.cell.meta.delegator.borrow().as_ref().and_then(Weak::upgrade).is_some_and(|d| Rc::ptr_eq(&d, &cx.cell))
+    }
+}
+
+impl std::fmt::Debug for DelegatableNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "DelegatableNode({:p})", Rc::as_ptr(&self.cell))
     }
 }
 

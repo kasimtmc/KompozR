@@ -42,9 +42,10 @@ pub use context::{
 pub use derived::{DerivedState, derived_state_of, derived_state_of_with_policy};
 pub use kompoz_macros::{KotlinProperties, kompozable, kompozable_block, kompozable_lambda, named, named_args};
 pub use local::{
-    KompozitionLocal, KompozitionLocalContext, KompozitionLocalProvider, KompozitionLocalProviderContext,
-    ProvidedValue, current_kompozition_local_context, current_kompozition_local_context_unobserved,
-    current_kompozition_local_map, kompozition_local_of, kompozition_local_of_with_policy, static_kompozition_local_of,
+    KompozitionLocal, KompozitionLocalAccessorScope, KompozitionLocalContext, KompozitionLocalProvider,
+    KompozitionLocalProviderContext, ProvidedValue, current_kompozition_local_context,
+    current_kompozition_local_context_unobserved, current_kompozition_local_map, kompozition_local_of,
+    kompozition_local_of_with_policy, kompozition_local_with_computed_default_of, static_kompozition_local_of,
 };
 pub use movable::{MovableContent, MovableContentOf, movable_content_of, movable_content_with_param_of};
 pub use read::{observe_reads, record_read, without_read_observation};

@@ -14,6 +14,12 @@ use kompoz_ui::platform::{LocalViewConfiguration, ViewConfiguration};
 /// The time between two events of a gesture, ms (Compose's `InputDispatcher.eventPeriodMillis`).
 pub const EVENT_PERIOD_MILLIS: i64 = 16;
 
+// (Compose's swipeWithVelocity checks it as it swipes: a constant here, checked once)
+const _: () = assert!(
+    EVENT_PERIOD_MILLIS < 40,
+    "InputDispatcher.eventPeriod must be smaller than 40ms in order to generate velocities"
+);
+
 /// The host pointer id the mouse is injected with.
 const MOUSE_POINTER_ID: i64 = -1;
 
@@ -454,6 +460,20 @@ impl TouchInjectionScope {
         }
     }
 
+    /// From `start` to `end` in `duration_millis`, along a path whose velocity at the end (as a velocity tracker
+    /// measures it) is `end_velocity` px/s (Compose's `swipeWithVelocity`, its Android path: a quadratic over the
+    /// last stretch, Lsq2's).
+    pub fn swipe_with_velocity_with(&mut self, start: Offset, end: Offset, end_velocity: f32, duration_millis: i64) {
+        assert!(end_velocity >= 0.0, "Velocity cannot be {end_velocity}, it must be positive");
+        let minimum_duration = (2.5 * EVENT_PERIOD_MILLIS as f32).ceil() as i64;
+        assert!(
+            duration_millis >= minimum_duration,
+            "Duration must be at least {minimum_duration}ms because velocity requires at least 3 input events"
+        );
+        let path_finder = LsqVelocityPathFinder::new(start, end, end_velocity, duration_millis);
+        self.swipe_along(move |t| path_finder.calculate_offset_for_time(t), duration_millis, &[]);
+    }
+
     /// Two pointers from `start0` and `start1` to `end0` and `end1` (Compose's `pinch`).
     pub fn pinch_with(&mut self, start0: Offset, end0: Offset, start1: Offset, end1: Offset, duration_millis: i64) {
         let d = duration_millis as f32;
@@ -530,6 +550,20 @@ impl TouchInjectionScope {
         self.swipe_with(start, end, duration_millis);
     }
 
+    /// A swipe ending at `end_velocity` px/s, in the time it takes to reach it from rest by default (Compose's
+    /// `swipeWithVelocity`: 2 × the distance ÷ the velocity, 200 ms past 100 ms; Kotlin's default of the other
+    /// parameters, here none).
+    pub fn swipe_with_velocity(
+        &mut self,
+        start: Offset,
+        end: Offset,
+        end_velocity: f32,
+        #[default(None)] duration_millis: Option<i64>,
+    ) {
+        let duration_millis = duration_millis.unwrap_or_else(|| calculate_default_duration(start, end, end_velocity));
+        self.swipe_with_velocity_with(start, end, end_velocity, duration_millis);
+    }
+
     /// A pinch, 400 ms by default.
     pub fn pinch(
         &mut self,
@@ -580,6 +614,99 @@ impl TouchInjectionScope {
         #[default(200)] duration_millis: i64,
     ) {
         self.swipe_right_with(start_x, end_x, duration_millis);
+    }
+}
+
+/// Within this of its end a swipe's velocity is measured (Compose's VelocityPathFinder HorizonMilliseconds).
+const HORIZON_MILLISECONDS: i64 = 100;
+/// A velocity swipe's length when its velocity can't set it (Compose's DefaultDurationMilliseconds).
+const DEFAULT_DURATION_MILLISECONDS: i64 = 200;
+
+/// The time a swipe from `start` to `end` takes to reach `end_velocity` from rest (Compose's
+/// `VelocityPathFinder.calculateDefaultDuration`).
+#[track_caller]
+pub(crate) fn calculate_default_duration(start: Offset, end: Offset, end_velocity: f32) -> i64 {
+    assert!(end_velocity >= 0.0, "Velocity cannot be {end_velocity}, it must be positive");
+    assert!(start != end || end_velocity == 0.0, "When start == end; velocity cannot be {end_velocity}, it must be 0f");
+    let distance = (end - start).get_distance();
+    // A swipe as a constant deceleration to the end: its average speed, half its end speed.
+    let default_duration = 2.0 / end_velocity * distance * 1000.0;
+    // (an end velocity measured over the last 100 ms: a longer swipe is the default one)
+    if default_duration.is_nan() || default_duration > HORIZON_MILLISECONDS as f32 {
+        return DEFAULT_DURATION_MILLISECONDS;
+    }
+    let minimum_duration = (2.5 * EVENT_PERIOD_MILLIS as f32).ceil() as i64;
+    assert!(
+        default_duration.floor() as i64 >= minimum_duration,
+        "Unable to generate a swipe gesture between {start:?} and {end:?} that ends with velocity of {end_velocity} \
+         px/s, without going outside of the range [start..end]. Suggested fixes: 1. set velocity to {} px/s or \
+         lower; or 2. increase the distance between the start and end to {} or higher",
+        (2.0 / minimum_duration as f32) * distance * 1000.0,
+        0.5 * minimum_duration as f32 * end_velocity / 1000.0
+    );
+    default_duration.floor() as i64
+}
+
+/// A swipe's path ending at a velocity, for a least squares velocity tracker (Compose's LsqVelocityPathFinder,
+/// its Android actual): still until the last stretch, then a parabola reaching the end at the velocity.
+struct LsqVelocityPathFinder {
+    start_position: Offset,
+    end_position: Offset,
+    end_velocity: f32,
+    duration_millis: i64,
+    vx: f64,
+    vy: f64,
+}
+
+impl LsqVelocityPathFinder {
+    fn new(start_position: Offset, end_position: Offset, end_velocity: f32, duration_millis: i64) -> Self {
+        let delta = end_position - start_position;
+        let theta = (delta.y as f64).atan2(delta.x as f64);
+        LsqVelocityPathFinder {
+            start_position,
+            end_position,
+            end_velocity,
+            duration_millis,
+            vx: theta.cos() * end_velocity as f64 / 1000.0,
+            vy: theta.sin() * end_velocity as f64 / 1000.0,
+        }
+    }
+
+    fn calculate_offset_for_time(&self, time: i64) -> Offset {
+        let x = self.calculate_axis(self.vx, self.start_position.x, self.end_position.x, time);
+        let y = self.calculate_axis(self.vy, self.start_position.y, self.end_position.y, time);
+        Offset::new(x, y)
+    }
+
+    #[track_caller]
+    fn calculate_axis(&self, velocity: f64, start: f32, end: f32, time: i64) -> f32 {
+        let t_total = self.duration_millis;
+        let d = if start == end { t_total as f64 } else { (t_total as f64).min(2.0 / velocity * (end - start) as f64) };
+        let a = (start as f64 + velocity * d - end as f64) / (d * d);
+        let horizon = t_total.min(HORIZON_MILLISECONDS);
+        if d < horizon as f64 {
+            let requested_distance = (self.end_position - self.start_position).get_distance();
+            panic!(
+                "Unable to generate a swipe gesture between {:?} and {:?} with duration {} that ends with velocity \
+                 of {} px/s, without going outside of the range [start..end]. Suggested fixes: 1. set duration to {} \
+                 or lower; 2. set velocity to {} px/s or lower; or 3. increase the distance between the start and \
+                 end to {} or higher",
+                self.start_position,
+                self.end_position,
+                self.duration_millis,
+                self.end_velocity,
+                d,
+                (2.0 / horizon as f32) * requested_distance * 1000.0,
+                (horizon as f32 / 2.0) * self.end_velocity / 1000.0
+            );
+        }
+        let threshold = t_total as f64 - d;
+        if (time as f64) < threshold {
+            start
+        } else {
+            let dt = (time - t_total) as f64;
+            (a * dt * dt + velocity * dt + end as f64) as f32
+        }
     }
 }
 
@@ -726,7 +853,8 @@ impl MouseInjectionScope {
         self.base.events.push(InjectedEvent::MouseExit { time: self.base.current_time, position: self.cursor });
     }
 
-    /// The wheel turned by `delta` px (down or right positive: Compose's `scroll(delta, scrollWheel)`).
+    /// The wheel turned by `delta` notches (down or right positive: Compose's `scroll(delta, scrollWheel)`; a notch
+    /// scrolls 64 dp, as on Android).
     pub fn scroll_with(&mut self, delta: f32, scroll_wheel: ScrollWheel) {
         let d = match scroll_wheel {
             ScrollWheel::Vertical => Offset::new(0.0, delta),

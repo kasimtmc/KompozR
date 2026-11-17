@@ -3,7 +3,10 @@
 //! intrinsic sizes, alignment line padding), window insets, the gesture detectors, the clickables (`clickable`,
 //! `combined_clickable`, `selectable`, `toggleable`, `tri_state_toggleable`), `focusable`, `hoverable`,
 //! interactions and their sources, indications, `magnifier`, `background` and `border`, `Canvas` and `Image`,
-//! focus groups, progress and selectable group semantics, bring-into-view requesters, and text ([`text`]:
+//! focus groups, progress and selectable group semantics, bring-into-view requesters and responders, scrolling
+//! ([`gestures`]: `draggable`, `scrollable` with its flings, wheel, nested scroll and bringing into view;
+//! [`scroll`]: `ScrollState`, `vertical_scroll`, `horizontal_scroll`; [`scrollable_area`]), overscroll (Android's
+//! stretch: [`overscroll`]), and text ([`text`]:
 //! `BasicText` with its links, inline content and auto size; `text::selection`: `SelectionContainer`,
 //! `DisableSelection`). Its modifiers extend `Modifier` through traits: `use kompoz_foundation::prelude::*`.
 
@@ -13,7 +16,9 @@ mod background;
 mod border;
 mod canvas;
 pub mod clickable;
+pub mod clip_scrollable_container;
 pub mod draganddrop;
+mod edge_effect;
 pub mod focusable;
 pub mod focused_bounds;
 pub mod gesture_node;
@@ -24,8 +29,12 @@ pub mod indication;
 pub mod interaction;
 pub mod layout;
 pub mod magnifier;
+pub mod overscroll;
+pub mod overscroll_android;
 pub mod progress_semantics;
 pub mod relocation;
+pub mod scroll;
+pub mod scrollable_area;
 pub mod selection;
 pub mod text;
 
@@ -40,6 +49,7 @@ pub use kompoz_animation::{MutatePriority, MutatorMutex};
 /// detectors, interactions and indications.
 pub mod prelude {
     pub use crate::clickable::{Callback, ClickableModifiers};
+    pub use crate::clip_scrollable_container::{ClipScrollableContainerModifiers, MaxSupportedElevation};
     pub use crate::draganddrop::DragAndDropModifiers;
     pub use crate::focusable::FocusableModifiers;
     pub use crate::focused_bounds::FocusedBoundsModifiers;
@@ -54,8 +64,19 @@ pub mod prelude {
     };
     pub use crate::layout::*;
     pub use crate::magnifier::MagnifierModifiers;
+    pub use crate::overscroll::{
+        LocalOverscrollFactory, OverscrollEffect, OverscrollFactory, OverscrollModifiers, PerformFling,
+        remember_overscroll_effect, without_event_handling, without_visual_effect,
+    };
+    pub use crate::overscroll_android::{
+        LocalOverscrollConfiguration, OverscrollConfiguration, remember_platform_overscroll_factory,
+    };
     pub use crate::progress_semantics::ProgressSemanticsModifiers;
-    pub use crate::relocation::{BringIntoViewRequester, RelocationModifiers};
+    pub use crate::relocation::{
+        BringIntoViewRequester, BringIntoViewResponder, BringIntoViewResponderModifiers, RelocationModifiers,
+    };
+    pub use crate::scroll::{ScrollModifiers, ScrollState, remember_scroll_state};
+    pub use crate::scrollable_area::ScrollableAreaModifiers;
     pub use crate::selection::{SelectableModifiers, SelectionModifiers, ToggleableModifiers};
     pub use crate::text::selection::{
         DisableSelection, LocalTextSelectionColors, SelectionContainer, SelectionContainerWithSelection,

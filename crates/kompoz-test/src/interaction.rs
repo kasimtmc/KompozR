@@ -690,26 +690,132 @@ impl<'a> SemanticsNodeInteraction<'a> {
         self
     }
 
-    /// Brings it into view through the bring-into-view nodes above it (Compose's `performScrollTo`; here by the
-    /// scroll containers' bring-into-view chain), the rule run until idle. Panics if nothing above it scrolls.
+    /// Scrolls it into view through the closest scrollable above it, by its `ScrollBy` action: just far enough to
+    /// show its far side, again until it shows (Compose's `performScrollTo`), the rule run until idle each time.
+    /// Panics if nothing above it scrolls.
     #[track_caller]
     pub fn perform_scroll_to(&self) -> &Self {
-        let node = self.fetch_with("Failed to perform performScrollTo.");
-        let Some(future) = kompoz_ui::focus::bring_layout_into_view(node.layout_node(), None) else {
-            panic!(
-                "{}",
-                general_error(
-                    "Semantic Node has no parent layout with a Scroll SemanticsAction",
-                    &self.selector,
-                    &node
-                )
-            );
-        };
-        kompoz_coroutines::CoroutineScope::new(self.rule.host().dispatcher()).launch(future);
+        loop {
+            self.rule.wait_for_idle();
+            let node = self.fetch_with("Action performScrollTo() failed.");
+            if !scroll_to_node(&node, &self.selector) {
+                break;
+            }
+        }
         self.rule.wait_for_idle();
         self
     }
 
+    /// Scrolls this lazy layout to its item `index` by its `ScrollToIndex` action (Compose's
+    /// `performScrollToIndex`).
+    #[track_caller]
+    pub fn perform_scroll_to_index(&self, index: i32) -> &Self {
+        self.rule.wait_for_idle();
+        let node = self.fetch_with(&format!("Failed: performScrollToIndex({index})"));
+        self.scroll_to_index(&node, index);
+        self.rule.wait_for_idle();
+        self
+    }
+
+    #[track_caller]
+    fn scroll_to_index(&self, node: &SemanticsNode, index: i32) {
+        let config = node.config();
+        let Some(action) = config.get(SemanticsActions::ScrollToIndex) else {
+            let message = format!(
+                "Failed to scroll to index {index}, the node is missing [{}]",
+                SemanticsActions::ScrollToIndex.name()
+            );
+            panic!("{}", general_error(&message, &self.selector, node));
+        };
+        if let Some(f) = action.action {
+            f(index);
+        }
+    }
+
+    /// Scrolls this lazy layout to the item of `key` by its `IndexForKey` and `ScrollToIndex` (Compose's
+    /// `performScrollToKey`).
+    #[track_caller]
+    pub fn perform_scroll_to_key(&self, key: &dyn std::any::Any) -> &Self {
+        self.rule.wait_for_idle();
+        let node = self.fetch_with("Failed: performScrollToKey");
+        let config = node.config();
+        let (Some(index_for_key), true) =
+            (config.get(SemanticsProperties::IndexForKey), config.contains(SemanticsActions::ScrollToIndex))
+        else {
+            let message = format!(
+                "Failed to scroll to the item identified by the key, the node is missing [{}, {}]",
+                SemanticsProperties::IndexForKey.name(),
+                SemanticsActions::ScrollToIndex.name()
+            );
+            panic!("{}", general_error(&message, &self.selector, &node));
+        };
+        let index = (index_for_key.0)(key);
+        assert!(index >= 0, "Failed to scroll to the item identified by the key, couldn't find the key.");
+        if let Some(f) = config.get(SemanticsActions::ScrollToIndex).and_then(|a| a.action) {
+            f(index);
+        }
+        self.rule.wait_for_idle();
+        self
+    }
+
+    /// Scrolls this scrollable until a node below it matching `matcher` shows (Compose's `performScrollToNode`): to
+    /// that node if it is there (composed), else, a lazy layout, from its start a viewport at a time until it is.
+    /// Panics if there is none.
+    #[track_caller]
+    pub fn perform_scroll_to_node(&self, matcher: SemanticsMatcher) -> &Self {
+        let Some(node) = self.scroll_to_matching_descendant_or_return_scrollable(&matcher) else { return self };
+        // Not a lazy layout, and the node isn't there.
+        if !is_lazy_list(&node) {
+            let message = format!("No node found that matches {} in scrollable container", matcher.description);
+            panic!("{}", general_error(&message, &self.selector, &node));
+        }
+        // To the start of the list.
+        let config = node.config();
+        let (h, v) = (
+            config.get(SemanticsProperties::HorizontalScrollAxisRange),
+            config.get(SemanticsProperties::VerticalScrollAxisRange),
+        );
+        if !is_at_start(&h) || !is_at_start(&v) {
+            self.scroll_to_index(&node, 0);
+        }
+        loop {
+            let Some(new_node) = self.scroll_to_matching_descendant_or_return_scrollable(&matcher) else { return self };
+            let config = new_node.config();
+            let (h, v) = (
+                config.get(SemanticsProperties::HorizontalScrollAxisRange),
+                config.get(SemanticsProperties::VerticalScrollAxisRange),
+            );
+            if is_at_end(&h) && is_at_end(&v) {
+                let message = format!("No node found that matches {} in scrollable container", matcher.description);
+                panic!("{}", general_error(&message, &self.selector, &new_node));
+            }
+            let view_port_size = new_node.layout_node().coordinates().bounds_in_parent().size();
+            let dx = if h.is_some() { view_port_size.width } else { 0.0 };
+            let dy = if v.is_some() { view_port_size.height } else { 0.0 };
+            // A viewport on.
+            if let Some(f) = config.get(SemanticsActions::ScrollBy).and_then(|a| a.action) {
+                f(dx, dy);
+            }
+        }
+    }
+
+    /// Compose's `scrollToMatchingDescendantOrReturnScrollable`: the matching node scrolled to, none then; else this
+    /// scrollable.
+    #[track_caller]
+    fn scroll_to_matching_descendant_or_return_scrollable(&self, matcher: &SemanticsMatcher) -> Option<SemanticsNode> {
+        self.rule.wait_for_idle();
+        let mut node = self.fetch_with(&format!("Failed: performScrollToNode({})", matcher.description));
+        let mut matched_node = match_descendant(matcher, &node);
+        while let Some(m) = matched_node {
+            if !scroll_to_node(&m, &self.selector) {
+                return None;
+            }
+            self.rule.wait_for_idle();
+            node = self.fetch_with(&format!("Failed: performScrollToNode({})", matcher.description));
+            matched_node = match_descendant(matcher, &node);
+        }
+        Some(node)
+    }
     /// Performs its action `key` (one taking nothing) (Compose's `performSemanticsAction(key)`), the rule run until
     /// idle. Panics if it has none.
     #[track_caller]
@@ -972,4 +1078,102 @@ impl<'a> SemanticsNodeInteractionCollection<'a> {
     pub fn print_to_log(&self, tag: &str, max_depth: usize) {
         eprintln!("{tag}: printToLog:\n{}", self.print_to_string(max_depth));
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Scrolling to a node (Compose's Actions.kt helpers)
+
+/// Scrolls `node` into the viewport of the closest scrollable above it by its `ScrollBy` action: whether it had
+/// something to scroll (Compose's `scrollToNode`).
+#[track_caller]
+fn scroll_to_node(node: &SemanticsNode, selector: &SemanticsSelector) -> bool {
+    let has_scroll_action = matcher::has_scroll_action();
+    let mut parent = node.parent();
+    let scrollable_node = loop {
+        match parent {
+            Some(p) if has_scroll_action.matches(&p) => break p,
+            Some(p) => parent = p.parent(),
+            None => panic!(
+                "{}",
+                general_error("Semantic Node has no parent layout with a Scroll SemanticsAction", selector, node)
+            ),
+        }
+    };
+    // The (clipped) viewport in its direct parent's content area, in the root: the parent's clip only.
+    let coordinates = scrollable_node.layout_node().coordinates();
+    let viewport_in_parent = coordinates.bounds_in_parent();
+    let parent_in_root = coordinates.parent_layout_coordinates().map_or(Offset::Zero, |p| p.position_in_root());
+    let viewport = viewport_in_parent.translate(parent_in_root);
+    let size = node.size();
+    let target = Rect::from_offset_size(
+        node.position_in_root(),
+        kompoz_graphics::Size::new(size.width as f32, size.height as f32),
+    );
+    // The delta lining up the side that scrolls least; none if the two sides want opposite ways.
+    let scroll_delta = |a: f32, b: f32| -> f32 {
+        if java_sign(a) == java_sign(b) { if a.abs() < b.abs() { a } else { b } } else { 0.0 }
+    };
+    let config = scrollable_node.config();
+    let horizontal = config.get(SemanticsProperties::HorizontalScrollAxisRange);
+    let vertical = config.get(SemanticsProperties::VerticalScrollAxisRange);
+    let mut dx = scroll_delta(target.left - viewport.left, target.right - viewport.right);
+    if horizontal.as_ref().is_some_and(|r| r.reverse_scrolling) {
+        dx = -dx;
+    }
+    if scrollable_node.layout_node().layout_direction() == kompoz_graphics::LayoutDirection::Rtl {
+        dx = -dx;
+    }
+    let mut dy = scroll_delta(target.top - viewport.top, target.bottom - viewport.bottom);
+    if vertical.as_ref().is_some_and(|r| r.reverse_scrolling) {
+        dy = -dy;
+    }
+    if dx != 0.0 && horizontal.is_some() || dy != 0.0 && vertical.is_some() {
+        if let Some(f) = config.get(SemanticsActions::ScrollBy).and_then(|a| a.action) {
+            f(dx, dy);
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// Kotlin's `sign` of a float: -1, 0 or 1.
+fn java_sign(v: f32) -> f32 {
+    if v > 0.0 {
+        1.0
+    } else if v < 0.0 {
+        -1.0
+    } else {
+        0.0
+    }
+}
+
+/// A lazy layout: it scrolls, and to an index (Compose's `isLazyList`).
+fn is_lazy_list(node: &SemanticsNode) -> bool {
+    let config = node.config();
+    config.contains(SemanticsActions::ScrollBy) && config.contains(SemanticsActions::ScrollToIndex)
+}
+
+fn is_at_start(range: &Option<kompoz_ui::semantics::ScrollAxisRange>) -> bool {
+    range.as_ref().is_none_or(|r| (r.value)() == 0.0)
+}
+
+fn is_at_end(range: &Option<kompoz_ui::semantics::ScrollAxisRange>) -> bool {
+    range.as_ref().is_none_or(|r| (r.value)() == (r.max_value)())
+}
+
+/// The first node below `root` (not itself) that `matcher` matches and is placed, depth first (Compose's
+/// `matchDescendant`).
+fn match_descendant(matcher: &SemanticsMatcher, root: &SemanticsNode) -> Option<SemanticsNode> {
+    root.children().into_iter().find_map(|child| match_node_or_descendant(matcher, child))
+}
+
+fn match_node_or_descendant(matcher: &SemanticsMatcher, root: SemanticsNode) -> Option<SemanticsNode> {
+    if !root.is_placed() {
+        return None;
+    }
+    if matcher.matches(&root) {
+        return Some(root);
+    }
+    root.children().into_iter().find_map(|child| match_node_or_descendant(matcher, child))
 }

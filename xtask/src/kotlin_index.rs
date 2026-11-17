@@ -605,6 +605,8 @@ struct KLambda {
     output: String,
     receiver: String,
     suspend: bool,
+    /// Its future is boxed: `Pin<Box<dyn Future<…>>>`, or an alias of one.
+    boxed: bool,
 }
 
 /// A Kotlin signature from a doc line: `name(p: T = d, vararg q: U): R`.
@@ -724,6 +726,9 @@ struct Scan {
     /// The type aliases of closures (`type Callback = Rc<dyn Fn()>`), by name: a parameter of one takes a lambda
     /// (one name aliasing two types isn't).
     aliases: BTreeMap<String, Option<Type>>,
+    /// The aliases of boxed futures (`type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>`), by name:
+    /// their type parameters and their future's output.
+    boxed_futures: BTreeMap<String, (Vec<String>, Type)>,
     /// Kotlin's names of types that Rust names otherwise (a doc line ``Kotlin: `Arrangement.Absolute` `` on
     /// `AbsoluteArrangement`): (Kotlin, Rust).
     types: BTreeSet<(String, String)>,
@@ -869,6 +874,19 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                             .push(((*imp.self_ty).clone(), kotlin_doc(&imp.attrs)));
                     }
                 }
+            }
+            Item::Type(t) if is_pub(&t.vis) && boxed_future_output(&t.ty).is_some() => {
+                let params = t
+                    .generics
+                    .params
+                    .iter()
+                    .filter_map(|p| match p {
+                        syn::GenericParam::Type(tp) => Some(tp.ident.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                let output = boxed_future_output(&t.ty).expect("a boxed future");
+                scan.boxed_futures.insert(t.ident.to_string(), (params, output));
             }
             Item::Type(t) if t.generics.params.is_empty() && is_pub(&t.vis) => {
                 let mut f = FindFn(false);
@@ -1174,7 +1192,7 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
         if let Some(d) = param_default(&pt.attrs) {
             p.default = Some((false, d));
         }
-        p.lambda = lambda(&ty, &bounds);
+        p.lambda = lambda(&ty, &bounds, &scan.boxed_futures);
         if let Some(doc) = &doc {
             // (by name where the doc names it, else by place)
             let found = doc
@@ -1240,7 +1258,7 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
                     p.default = d.clone().map(|d| (true, d));
                     p.vararg = *vararg;
                 }
-                p.lambda = lambda(t, &BTreeMap::new());
+                p.lambda = lambda(t, &BTreeMap::new(), &scan.boxed_futures);
                 o.params.push(p);
             }
             out.push(o);
@@ -1313,25 +1331,25 @@ fn future_output(bounds: &[TypeParamBound]) -> Option<String> {
 
 /// What a parameter's type says of a lambda: `impl Fn(A) -> R`, a generic `F: FnMut(…)`, `&dyn Fn…`,
 /// `Box`/`Rc`/`Arc<dyn Fn…>`, `Option<…>` of one; a future (`impl Future<Output = ()>`: a suspending block).
-fn lambda(ty: &Type, bounds: &BTreeMap<String, Vec<TypeParamBound>>) -> Option<KLambda> {
+fn lambda(ty: &Type, bounds: &BTreeMap<String, Vec<TypeParamBound>>, boxed: &BoxedFutures) -> Option<KLambda> {
     match ty {
-        Type::ImplTrait(it) => from_bounds(&it.bounds.iter().cloned().collect::<Vec<_>>(), bounds),
-        Type::TraitObject(o) => from_bounds(&o.bounds.iter().cloned().collect::<Vec<_>>(), bounds),
-        Type::Reference(r) => lambda(&r.elem, bounds),
-        Type::Paren(p) => lambda(&p.elem, bounds),
+        Type::ImplTrait(it) => from_bounds(&it.bounds.iter().cloned().collect::<Vec<_>>(), bounds, boxed),
+        Type::TraitObject(o) => from_bounds(&o.bounds.iter().cloned().collect::<Vec<_>>(), bounds, boxed),
+        Type::Reference(r) => lambda(&r.elem, bounds, boxed),
+        Type::Paren(p) => lambda(&p.elem, bounds, boxed),
         Type::Path(p) => {
             let seg = p.path.segments.last()?;
             let name = seg.ident.to_string();
             if p.path.segments.len() == 1
                 && let Some(b) = bounds.get(&name)
             {
-                return from_bounds(b, bounds);
+                return from_bounds(b, bounds, boxed);
             }
             if ["Option", "Box", "Rc", "Arc"].contains(&name.as_str())
                 && let syn::PathArguments::AngleBracketed(a) = &seg.arguments
                 && let Some(syn::GenericArgument::Type(inner)) = a.args.first()
             {
-                return lambda(inner, bounds);
+                return lambda(inner, bounds, boxed);
             }
             None
         }
@@ -1339,9 +1357,70 @@ fn lambda(ty: &Type, bounds: &BTreeMap<String, Vec<TypeParamBound>>) -> Option<K
     }
 }
 
-fn from_bounds(bs: &[TypeParamBound], generic: &BTreeMap<String, Vec<TypeParamBound>>) -> Option<KLambda> {
+/// The aliases of boxed futures, by name: their type parameters and their future's output.
+type BoxedFutures = BTreeMap<String, (Vec<String>, Type)>;
+
+/// The output of a boxed future's type: `Pin<Box<dyn Future<Output = T> + 'a>>`'s `T`.
+fn boxed_future_output(ty: &Type) -> Option<Type> {
+    let Type::Path(p) = ty else { return None };
+    let seg = p.path.segments.last()?;
+    if seg.ident != "Pin" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(a) = &seg.arguments else { return None };
+    let Some(syn::GenericArgument::Type(Type::Path(b))) = a.args.first() else { return None };
+    let bseg = b.path.segments.last()?;
+    if bseg.ident != "Box" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(ba) = &bseg.arguments else { return None };
+    let Some(syn::GenericArgument::Type(Type::TraitObject(o))) = ba.args.first() else { return None };
+    let output = future_output(&o.bounds.iter().cloned().collect::<Vec<_>>())?;
+    syn::parse_str::<Type>(&output).ok()
+}
+
+/// The output of a boxed future a lambda gives (`Pin<Box<dyn Future<Output = T>>>`, or an alias of one with its
+/// type arguments put in), as text.
+fn boxed_output(ty: &Type, boxed: &BoxedFutures) -> Option<String> {
+    if let Some(o) = boxed_future_output(ty) {
+        return Some(text(o.to_token_stream()));
+    }
+    let Type::Path(p) = ty else { return None };
+    let seg = p.path.segments.last()?;
+    let (params, output) = boxed.get(&seg.ident.to_string())?;
+    let args: Vec<&Type> = match &seg.arguments {
+        syn::PathArguments::AngleBracketed(a) => a
+            .args
+            .iter()
+            .filter_map(|g| match g {
+                syn::GenericArgument::Type(t) => Some(t),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    // (the output a type parameter: the argument in its place)
+    let out = text(output.to_token_stream());
+    Some(match params.iter().position(|p| *p == out) {
+        Some(i) => args.get(i).map_or(out, |a| text(a.to_token_stream())),
+        None => out,
+    })
+}
+
+fn from_bounds(
+    bs: &[TypeParamBound],
+    generic: &BTreeMap<String, Vec<TypeParamBound>>,
+    boxed_futures: &BoxedFutures,
+) -> Option<KLambda> {
     if let Some(output) = future_output(bs) {
-        return Some(KLambda { kind: "Future", inputs: Vec::new(), output, receiver: String::new(), suspend: true });
+        return Some(KLambda {
+            kind: "Future",
+            inputs: Vec::new(),
+            output,
+            receiver: String::new(),
+            suspend: true,
+            boxed: false,
+        });
     }
     bs.iter().find_map(|b| {
         let TypeParamBound::Trait(t) = b else { return None };
@@ -1354,9 +1433,9 @@ fn from_bounds(bs: &[TypeParamBound], generic: &BTreeMap<String, Vec<TypeParamBo
         };
         let syn::PathArguments::Parenthesized(args) = &seg.arguments else { return None };
         let inputs: Vec<String> = args.inputs.iter().map(|a| text(a.ty.to_token_stream())).collect();
-        let (mut output, mut suspend) = match &args.output {
-            ReturnType::Default => ("()".to_string(), false),
-            ReturnType::Type(_, t) => (text(t.to_token_stream()), false),
+        let (mut output, mut suspend, mut boxed) = match &args.output {
+            ReturnType::Default => ("()".to_string(), false, false),
+            ReturnType::Type(_, t) => (text(t.to_token_stream()), false, false),
         };
         // (a lambda giving a future suspends: `impl Fn(PointerInputScope) -> impl Future<Output = ()>`, `Fut`)
         if let ReturnType::Type(_, t) = &args.output {
@@ -1370,10 +1449,15 @@ fn from_bounds(bs: &[TypeParamBound], generic: &BTreeMap<String, Vec<TypeParamBo
             if let Some(o) = fut {
                 output = o;
                 suspend = true;
+            } else if let Some(o) = boxed_output(t, boxed_futures) {
+                // (a boxed one: `-> Pin<Box<dyn Future<Output = ()>>>`, `-> LocalFuture<'static, ()>`)
+                output = o;
+                suspend = true;
+                boxed = true;
             }
         }
         let receiver = args.inputs.first().map(|a| receiver_of(&a.ty)).unwrap_or_default();
-        Some(KLambda { kind, inputs, output, receiver, suspend })
+        Some(KLambda { kind, inputs, output, receiver, suspend, boxed })
     })
 }
 
@@ -1454,12 +1538,13 @@ fn render_param(p: &KParam) -> String {
     let lambda = match &p.lambda {
         None => "None".to_string(),
         Some(l) => format!(
-            "Some(Lambda {{ kind: LambdaKind::{}, inputs: &[{}], output: {:?}, receiver: {:?}, suspend: {} }})",
+            "Some(Lambda {{ kind: LambdaKind::{}, inputs: &[{}], output: {:?}, receiver: {:?}, suspend: {}, boxed: {} }})",
             l.kind,
             l.inputs.iter().map(|i| format!("{i:?}")).collect::<Vec<_>>().join(", "),
             l.output,
             l.receiver,
-            l.suspend
+            l.suspend,
+            l.boxed
         ),
     };
     format!(

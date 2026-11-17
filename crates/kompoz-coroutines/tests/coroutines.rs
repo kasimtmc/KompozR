@@ -1591,6 +1591,74 @@ fn a_cancelled_coroutine_scope_cancels_who_awaits_it() {
     assert_eq!(*got.borrow(), Some(Err(Cancelled)));
 }
 
+fn snapshot_flow_follows_a_derived_state_made_in_the_composition() {
+    // A derived state made in the composition (its inputs observed there) tells a snapshot flow reading it when
+    // its value changes, as Compose's derived states report their dependencies to the readers outside.
+    let count = mutable_state_of(0);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let (c, s) = (count.clone(), seen.clone());
+    let rule = CoRule::new(kompozable_lambda!(move || {
+        let c = c.clone();
+        let big = remember(|| derived_state_of(move || c.get() > 3));
+        let s = s.clone();
+        LaunchedEffect(0, async move {
+            snapshot_flow(move || big.get()).collect(move |v| s.borrow_mut().push(v)).await;
+        });
+    }));
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), [false]);
+    count.set(2); // still not big: nothing new
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), [false]);
+    count.set(5);
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), [false, true]);
+    count.set(1);
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), [false, true, false]);
+}
+
+fn catch_cancellation_gives_the_cancellation_to_the_block_that_catches_it() {
+    // Kotlin's `try { … } catch (e: CancellationException) { … }` around a block whose own scope is cancelled:
+    // the catcher goes on; its value when it isn't.
+    let (rule, scope) = scope_rule();
+    let log = new_log();
+    let l = log.clone();
+    scope.launch(async move {
+        let caught = catch_cancellation(|inner: CoroutineScope| async move {
+            inner.cancel();
+            delay_ms(100).await; // a suspension: where the cancellation is thrown
+            1
+        })
+        .await;
+        push(&l, format!("caught {}", caught.is_err()));
+        let done = catch_cancellation(|_| async { 2 }).await;
+        push(&l, format!("done {:?}", done.ok()));
+    });
+    rule.wait_for_idle();
+    assert_eq!(*log.borrow(), ["caught true", "done Some(2)"]);
+}
+
+fn await_frame_end_resumes_after_the_frames_work() {
+    // A coroutine resumed by a frame runs before the frame's composition and layout; awaiting the frame's end, it
+    // goes on after them (where Compose's frame continuations run), at the frame's time.
+    let dispatcher = Dispatcher::new();
+    let log = new_log();
+    let l = log.clone();
+    CoroutineScope::new(&dispatcher).launch(async move {
+        let at = await_frame().await;
+        push(&l, format!("frame {at}"));
+        let end = await_frame_end().await;
+        push(&l, format!("end {end}"));
+    });
+    dispatcher.run(16 * MS);
+    push(&log, "laid out");
+    assert!(dispatcher.has_frame_waiters());
+    dispatcher.run_frame_end();
+    assert_eq!(*log.borrow(), [format!("frame {}", 16 * MS), "laid out".to_string(), format!("end {}", 16 * MS)]);
+    assert!(!dispatcher.has_frame_waiters());
+}
+
 tests!(
     launched_effect_ticks_and_is_cancelled_on_leave,
     coroutines_give_back_values_and_work_in_the_background,
@@ -1626,4 +1694,7 @@ tests!(
     run_woken_by_from_inside_a_coroutine_keeps_its_own_wake,
     coroutine_contexts_reach_the_block_and_what_it_launches_in_its_scopes,
     a_cancelled_coroutine_scope_cancels_who_awaits_it,
+    snapshot_flow_follows_a_derived_state_made_in_the_composition,
+    catch_cancellation_gives_the_cancellation_to_the_block_that_catches_it,
+    await_frame_end_resumes_after_the_frames_work,
 );

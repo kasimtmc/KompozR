@@ -281,6 +281,7 @@ impl Gen<'_, '_> {
             output,
             receiver,
             suspend: f.suspend,
+            boxed: false,
             stored,
             measure_policy: false,
             typed: false,

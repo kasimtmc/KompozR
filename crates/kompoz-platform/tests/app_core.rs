@@ -394,10 +394,11 @@ fn the_platforms_events_are_the_hosts_input() {
         taken(&log),
         ["press 15,30 Mouse b0", "release 15,30 Mouse b0", "press 15,30 Mouse b1", "release 15,30 Mouse b1"]
     );
-    // A notch is 64 dp (128 px at 2 px a dp), the wheel's up a scroll up; parts of notches as they come.
+    // The wheel's notches as they come (Compose's scroll deltas: the scrollables make a notch 64 dp), its up a
+    // scroll up; parts of notches as they come.
     core.handle(&Event::Wheel { x: 10.0, y: 20.0, dx: 0.0, dy: 1.0, modifiers: none, time: -1 });
     core.handle(&Event::Wheel { x: 10.0, y: 20.0, dx: 0.5, dy: -0.25, modifiers: none, time: -1 });
-    assert_eq!(taken(&log), ["scroll 15,30 d0,-128", "scroll 15,30 d64,32"]);
+    assert_eq!(taken(&log), ["scroll 15,30 d0,-1", "scroll 15,30 d0.5,0.25"]);
     // Ctrl+wheel zooms (1.1 a notch), Ctrl+Shift+wheel turns (15° a notch); a touchpad pinches.
     core.handle(&Event::Wheel { x: 10.0, y: 20.0, dx: 0.0, dy: 2.0, modifiers: ctrl, time: -1 });
     core.handle(&Event::Wheel { x: 10.0, y: 20.0, dx: 0.0, dy: 1.0, modifiers: ctrl | KeyModifiers::Shift, time: -1 });

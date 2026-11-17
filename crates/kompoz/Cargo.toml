@@ -60,3 +60,8 @@ harness = false
 [[test]]
 name = "kotlin_animation"
 harness = false
+
+# Scrolling, dragging and overscroll in Kotlin's syntax.
+[[test]]
+name = "kotlin_scroll"
+harness = false

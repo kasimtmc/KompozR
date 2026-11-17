@@ -118,19 +118,13 @@ fn replayed(rule: &KompozTestRule, viewport: Size) -> RecordingCanvas {
     canvas
 }
 
-/// A vertical scroll of the tests' own (verticalScroll's): what it wraps measured as tall as it is, cut to the
-/// scroller, moved up by `scroll` px (as far as it can go), placed again as it changes.
-fn scrolled(m: Modifier, scroll: &MutableState<i32>) -> Modifier {
-    let scroll = scroll.clone();
-    m.clip_to_bounds().layout(move |scope, measurable, c| {
-        let p = measurable.measure(Constraints::new(c.min_width, c.max_width, 0, Constraints::Infinity));
-        let (width, height) = (c.constrain_width(p.width()), c.constrain_height(p.height()));
-        let scroll = scroll.clone();
-        scope.layout(width, height, move |pl| {
-            let by = scroll.get().clamp(0, (p.height() - height).max(0));
-            pl.place(&p, 0, -by)
-        })
-    })
+/// Scrolls `state` to `value` px (as far as it goes) from code, run until idle.
+fn scroll_to(rule: &KompozTestRule, state: &ScrollState, value: i32) {
+    let s = state.clone();
+    kompoz_coroutines::CoroutineScope::new(rule.host().dispatcher()).launch(async move {
+        s.scroll_to(value).await;
+    });
+    rule.wait_for_idle();
 }
 
 /// What it wraps, moved by (`x`, `y`) px.
@@ -149,7 +143,7 @@ fn display_list_damage_is_what_changed_on_the_screen() {
     let blink = mutable_state_of(false);
     let spin = mutable_state_of(0.0f32);
     let more = mutable_state_of(false);
-    let scroll = mutable_state_of(0);
+    let scroll = ScrollState::new(0);
     let (b, sp, mo, sc) = (blink.clone(), spin.clone(), more.clone(), scroll.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
@@ -160,7 +154,7 @@ fn display_list_damage_is_what_changed_on_the_screen() {
                     .background_with(if b.get() { RED } else { BLUE }, RectangleShape));
                 let degrees = sp.get();
                 // (clips what scrolled out)
-                Column(scrolled(Modifier.height(200.dp()), &sc), move || {
+                Column(Modifier.height(200.dp()).vertical_scroll(&sc), move || {
                     Box(Modifier.size_wh(100.dp(), 300.dp()));
                     // At 300: out of view.
                     Box(Modifier.size(40.dp()).rotate(degrees).background_with(GREEN, RectangleShape));
@@ -202,8 +196,7 @@ fn display_list_damage_is_what_changed_on_the_screen() {
     rule.wait_for_idle();
     let d = frame().unwrap();
     assert!(d.top == added.top && d.bottom == added.bottom); // where it was
-    scroll.set(300); // (as far as it goes: 280)
-    rule.wait_for_idle();
+    scroll_to(&rule, &scroll, 300); // (as far as it goes: 280)
     let d = frame().unwrap();
     // Only the box that came into view.
     assert!(d.left == 0.0 && d.top >= 398.0 && d.bottom <= 502.0 && d.right < 104.0, "{d:?}");
@@ -307,7 +300,7 @@ fn display_list_moves_what_scrolled_by_whole_pixels() {
     // view, what doesn't move with it where it is and where moving took it). What would make moved pixels wrong
     // (something under them that isn't one color, a clip of another shape, a part of a pixel) draws what changed
     // again instead.
-    let scroll = mutable_state_of(0);
+    let scroll = ScrollState::new(0);
     let (fab, gradient, rounded, raised) =
         (mutable_state_of(false), mutable_state_of(false), mutable_state_of(false), mutable_state_of(false));
     let (sc, f, g, ro, ra) = (scroll.clone(), fab.clone(), gradient.clone(), rounded.clone(), raised.clone());
@@ -325,7 +318,7 @@ fn display_list_moves_what_scrolled_by_whole_pixels() {
                         list = list.background_brush_with(vgrad(&[RED, BLUE]), RectangleShape, 1.0);
                     }
                     let raised = ra.get();
-                    Column(scrolled(list, &sc), move || {
+                    Column(list.vertical_scroll(&sc), move || {
                         for i in 0..30 {
                             let mut item = Modifier.fill_max_width().height(50.dp()).padding(4.dp());
                             if raised {
@@ -354,8 +347,7 @@ fn display_list_moves_what_scrolled_by_whole_pixels() {
         list.end()
     };
     let scroll_by = |px: i32| {
-        scroll.set(scroll.peek() + px);
-        rule.wait_for_idle();
+        scroll_to(&rule, &scroll, scroll.value() + px);
         frame()
     };
     let moves = || list.borrow().moves().to_vec();
@@ -905,14 +897,14 @@ fn display_list_keeps_unchanged_nodes_of_a_host() {
     // Over a host, a list keeping nodes records what drawing every node records (the host's keep check says so each
     // frame too): a changed node is drawn, the others kept; a scrolled list's items are kept, moved with it.
     let tint = mutable_state_of(RED);
-    let scroll = mutable_state_of(0);
+    let scroll = ScrollState::new(0);
     let (t, sc) = (tint.clone(), scroll.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
             let (t, sc) = (t.clone(), sc.clone());
             Column(Modifier.fill_max_size(), move || {
                 Box(Modifier.size(30.dp()).background_with(t.get(), RectangleShape));
-                Column(scrolled(Modifier.height(200.dp()), &sc), || {
+                Column(Modifier.height(200.dp()).vertical_scroll(&sc), || {
                     for i in 0..20 {
                         let color = Color::new(0.0, i as f32 / 20.0, 0.0, 1.0);
                         Box(Modifier.fill_max_width().height(30.dp()).background_with(color, RectangleShape));
@@ -945,8 +937,7 @@ fn display_list_keeps_unchanged_nodes_of_a_host() {
     rule.wait_for_idle();
     let (k, n, d) = frame();
     assert!(k > 0 && n >= 1 && same_rect(d.unwrap(), rect(0.0, 0.0, 32.0, 32.0)), "{k} {n} {d:?}");
-    scroll.set(45);
-    rule.wait_for_idle();
+    scroll_to(&rule, &scroll, 45);
     let (k, n, _) = frame();
     assert!(k >= 6 && n >= 1, "{k} {n}"); // the items that showed are kept, moved with what they are in
     frame();

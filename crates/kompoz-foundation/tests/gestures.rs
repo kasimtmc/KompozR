@@ -1,13 +1,14 @@
 //! foundation.gestures: the tap, drag and transform detectors and the blocks they are made of, the multi-touch
-//! calculations, a custom drag through nested scrolling, and gestures injected with `perform_touch_input` (the C++
-//! Kompoz's gesture tests that need no clickable, scrollable or Material; Compose's behaviour where they differ).
-//! Numbers in px.
+//! calculations, a custom drag through nested scrolling, gestures injected with `perform_touch_input`, and
+//! `Modifier.draggable` (the C++ Kompoz's gesture tests that need no clickable or Material; Compose's behaviour where
+//! they differ). Numbers in px.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
 mod common;
 
 use common::*;
+use kompoz_animation::{FlingCalculator, PlatformFlingScrollFriction};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
@@ -274,17 +275,17 @@ fn small_tap_targets_take_touches_near_them_only_for_a_finger() {
 }
 
 fn view_configuration_sets_the_gesture_thresholds() {
-    // The pointer input part of C++'s view_configuration_sets_the_gesture_thresholds (its scrollables and tooltips
-    // are stage 10's and stage 12's, its long click the clickable tests'): the host's long press and double tap
-    // timeouts, and a
-    // touch slop a part of the screen provides for its own.
+    // C++ 8642 (its scrollable2D is the 2D scrolling's, its tooltip stage 12's, its long click the clickable
+    // tests'): the host's long press and double tap timeouts, a touch slop a part of the screen provides for its
+    // own, and the host's slop and fastest fling in a scroll container.
     let log = new_log();
     let seen = Rc::new(RefCell::new(None::<ViewConfiguration>));
     let inner = Rc::new(RefCell::new(None::<ViewConfiguration>));
-    let (l, se, inn) = (log.clone(), seen.clone(), inner.clone());
+    let scroll = ScrollState::new(0);
+    let (l, se, inn, sc) = (log.clone(), seen.clone(), inner.clone(), scroll.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         *se.borrow_mut() = Some(LocalViewConfiguration.current());
-        let (l, inn) = (l.clone(), inn.clone());
+        let (l, inn, sc) = (l.clone(), inn.clone(), sc.clone());
         Column(move || {
             let l2 = l.clone();
             Box(modifier = Modifier.size(100.dp()).pointer_input(0, move |s: PointerInputScope| {
@@ -307,6 +308,15 @@ fn view_configuration_sets_the_gesture_thresholds() {
                     async move { s.detect_drag_gestures(|_, _| {}).on_drag_start(move |_| push(&l, "drag")).await }
                 }));
             });
+            // 200..400
+            Column(
+                modifier = Modifier.fill_max_width().height(200.dp()).vertical_scroll(&sc),
+                content = || {
+                    for _ in 0..100 {
+                        Box(modifier = Modifier.fill_max_width().height(50.dp()));
+                    }
+                },
+            );
         });
     }));
     let h = rule.host();
@@ -354,6 +364,38 @@ fn view_configuration_sets_the_gesture_thresholds() {
     assert_eq!(taken(&log), ["drag"]);
     up_id(&rule, at(60.0, 150.0), 0);
     rule.wait_for_idle();
+    // The host's scrolling starts past its 20 px of slop: 5 px at a time, 60 in all, the slop left out (Compose's
+    // drag starts with what is past it: C++ counted from the move past it on, 35).
+    down_id(&rule, at(200.0, 390.0), 0);
+    for i in 1..=12 {
+        rule.advance_frame();
+        move_id(&rule, at(200.0, 390.0 - 5.0 * i as f32), 0);
+    }
+    rule.advance_frame(); // (the last delta reaches the scroll in its coroutine)
+    assert_eq!(scroll.value(), 60 - 20);
+    up_id(&rule, at(200.0, 330.0), 0);
+    rule.wait_for_idle();
+    let s = scroll.clone();
+    kompoz_coroutines::CoroutineScope::new(h.dispatcher()).launch(async move {
+        s.scroll_to(0).await;
+    });
+    rule.wait_for_idle();
+    // The host's flings go no faster than 1000 px/s.
+    down_id(&rule, at(200.0, 390.0), 0);
+    for i in 1..=4 {
+        rule.advance_frame();
+        move_id(&rule, at(200.0, 390.0 - 40.0 * i as f32), 0);
+    }
+    up_id(&rule, at(200.0, 230.0), 0);
+    h.dispatcher().run_ready(); // (the last delta in: the fling not yet on its way)
+    let dragged = scroll.value();
+    rule.wait_for_idle();
+    let spline = FlingCalculator::new(PlatformFlingScrollFriction, Density::new(1.0, 1.0)).fling_distance(1000.0);
+    assert!(
+        dragged == 160 - 20 && near((scroll.value() - dragged) as f32, spline, 1.0),
+        "{dragged} {} {spline}",
+        scroll.value()
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -581,24 +623,32 @@ fn a_drag_follows_its_own_finger_and_ends_cancelled_when_taken() {
 }
 
 fn drags_after_a_long_press_pick_up_and_follow() {
-    // C++'s drags_after_a_long_press_pick_up_and_follow without its scrolling page (stage 10).
+    // C++ 8880: in a scrolling page.
     let log = new_log();
     let dragged = Rc::new(Cell::new(Offset::Zero));
-    let (l, dr) = (log.clone(), dragged.clone());
+    let scroll = ScrollState::new(0);
+    let (l, dr, sc) = (log.clone(), dragged.clone(), scroll.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         let (l, dr) = (l.clone(), dr.clone());
-        Box(modifier = Modifier.size(100.dp()).pointer_input(0, move |s: PointerInputScope| {
-            let (a, b, c, dr) = (l.clone(), l.clone(), l.clone(), dr.clone());
-            async move {
-                s.detect_drag_gestures_after_long_press(move |_, d| dr.set(dr.get() + d))
-                    .on_drag_start(move |p| push(&a, format!("start {},{}", p.x, p.y)))
-                    .on_drag_end(move || push(&b, "end"))
-                    .on_drag_cancel(move || push(&c, "cancel"))
-                    .await
-            }
-        }));
+        Column(
+            modifier = Modifier.fill_max_size().vertical_scroll(&sc),
+            content = move || {
+                let (l, dr) = (l.clone(), dr.clone());
+                Box(modifier = Modifier.size(100.dp()).pointer_input(0, move |s: PointerInputScope| {
+                    let (a, b, c, dr) = (l.clone(), l.clone(), l.clone(), dr.clone());
+                    async move {
+                        s.detect_drag_gestures_after_long_press(move |_, d| dr.set(dr.get() + d))
+                            .on_drag_start(move |p| push(&a, format!("start {},{}", p.x, p.y)))
+                            .on_drag_end(move || push(&b, "end"))
+                            .on_drag_cancel(move || push(&c, "cancel"))
+                            .await
+                    }
+                }));
+                Box(modifier = Modifier.fill_max_width().height(2000.dp()));
+            },
+        );
     }));
-    // Held still, then moved: the whole way (no slop taken off).
+    // Held still, then moved: the whole way (no slop taken off), the page left alone.
     down_id(&rule, at(50.0, 50.0), 0);
     rule.main_clock().advance_time_by(450);
     for i in 1..=5 {
@@ -608,7 +658,21 @@ fn drags_after_a_long_press_pick_up_and_follow() {
     up_id(&rule, at(50.0, 100.0), 0);
     rule.wait_for_idle();
     assert_eq!(taken(&log), ["start 50,50", "end"]);
-    assert!(near(dragged.get().y, 50.0, 0.01));
+    assert!(near(dragged.get().y, 50.0, 0.01) && scroll.value() == 0);
+    // Moved before the long press: no drag; the page scrolls.
+    down_id(&rule, at(50.0, 80.0), 0);
+    for i in 1..=5 {
+        rule.advance_frame();
+        move_id(&rule, at(50.0, 80.0 - 12.0 * i as f32), 0);
+    }
+    up_id(&rule, at(50.0, 20.0), 0);
+    rule.wait_for_idle();
+    assert!(taken(&log).is_empty() && near(dragged.get().y, 50.0, 0.01) && scroll.value() > 30, "{}", scroll.value());
+    let s = scroll.clone();
+    kompoz_coroutines::CoroutineScope::new(rule.host().dispatcher()).launch(async move {
+        s.scroll_to(0).await;
+    });
+    rule.wait_for_idle(); // the item back under the finger
     // Let go before the long press: nothing.
     down_id(&rule, at(50.0, 50.0), 0);
     rule.main_clock().advance_time_by(200);
@@ -928,6 +992,191 @@ fn touch_input_injected_on_a_node_clicks_double_clicks_long_clicks_and_swipes() 
     assert_eq!(taken(&log).len(), 1); // the start only
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Draggable
+
+/// C++'s `rule.swipe`: a finger from `from` to `to`, one move a frame, let go, a frame.
+fn swipe(rule: &KompozTestRule, from: Offset, to: Offset, frames: i32) {
+    down_id(rule, from, 0);
+    for i in 1..=frames {
+        rule.advance_frame();
+        move_id(rule, from + (to - from) * (i as f32 / frames as f32), 0);
+    }
+    up_id(rule, to, 0);
+    rule.advance_frame();
+}
+
+/// What `on_drag_stopped` is given: the velocity, set into `velocity`.
+fn stopped_into(velocity: Rc<Cell<f32>>) -> OnDragStopped {
+    Rc::new(move |_, v| {
+        velocity.set(v);
+        Box::pin(async {})
+    })
+}
+
+fn draggable_reports_deltas_with_the_latest_callback() {
+    // C++ 14215: a horizontal swipe of 100 px reports 100 less the touch slop (Compose's drag starts past it),
+    // stopped once; recomposed with another callback, the next drag goes to that one.
+    let total = Rc::new(Cell::new(0.0f32));
+    let stops = Rc::new(Cell::new(0));
+    let factor = mutable_state_of(1.0f32);
+    let (t, st, f) = (total.clone(), stops.clone(), factor.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (t, st) = (t.clone(), st.clone());
+        let by = f.get();
+        let drag = remember_draggable_state(move |d| t.set(t.get() + d * by));
+        let stopped: OnDragStopped = Rc::new(move |_, _| {
+            st.set(st.get() + 1);
+            Box::pin(async {})
+        });
+        Box(modifier = named_args!(Modifier.size_wh(200.dp(), 100.dp()).draggable(
+            drag,
+            Orientation::Horizontal,
+            on_drag_stopped = Some(stopped.clone())
+        )));
+    }));
+    let slop = ViewConfiguration::default().touch_slop;
+    swipe(&rule, at(20.0, 50.0), at(120.0, 50.0), 10);
+    rule.wait_for_idle();
+    assert!(near(total.get(), 100.0 - slop, 0.01) && stops.get() == 1, "{} {}", total.get(), stops.get());
+    factor.set(2.0);
+    rule.wait_for_idle();
+    swipe(&rule, at(120.0, 50.0), at(20.0, 50.0), 10);
+    rule.wait_for_idle();
+    assert!(near(total.get(), (100.0 - slop) - 2.0 * (100.0 - slop), 0.01) && stops.get() == 2, "{}", total.get());
+}
+
+fn draggable_flings_a_node_that_moves_with_the_finger() {
+    // C++ 14227: the node follows the finger (a frame late), so the pointer hardly moves over it: the drag's
+    // travel counts, and the velocity it is let go with. A move that leaves the pointer where the last one left it
+    // over the node isn't dispatched to it (Compose's HitPathTracker with its default flags:
+    // isTriggerMoveEventsWhenLocationHasNotChangedEnabled off), so of three moves of 20 px the third, the node
+    // having caught up, is missed: 20 less the slop, then 20 (C++ counted all 60 less the slop).
+    let x = mutable_state_of(0.0f32);
+    let velocity = Rc::new(Cell::new(0.0f32));
+    let (xs, v) = (x.clone(), velocity.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let xd = xs.clone();
+            let drag = remember_draggable_state(move |d| xd.set(xd.peek() + d));
+            let xo = xs.clone();
+            Box(modifier = named_args!(
+                Modifier.offset_px(move |_| IntOffset::new(xo.get().round() as i32, 0)).size(40.dp()).draggable(
+                    drag,
+                    Orientation::Horizontal,
+                    on_drag_stopped = Some(stopped_into(v.clone()))
+                )
+            ));
+        }),
+        IntSize::new(400, 400),
+    );
+    let slop = ViewConfiguration::default().touch_slop;
+    swipe(&rule, at(20.0, 20.0), at(80.0, 20.0), 3);
+    rule.wait_for_idle();
+    assert!(near(x.peek(), 20.0 - slop + 20.0, 0.01) && velocity.get() > 600.0, "{} {}", x.peek(), velocity.get());
+    let from = x.peek() + 20.0;
+    swipe(&rule, at(from, 20.0), at(from - 60.0, 20.0), 3);
+    rule.wait_for_idle();
+    assert!(velocity.get() < -600.0, "{}", velocity.get());
+}
+
+fn draggable_tells_the_velocity_it_was_let_go_with() {
+    // C++ 24105: 200 px in 80 ms is let go fast; held still before letting go, with none; a draggable without a
+    // stop callback of its own is stopped too (its drag ends).
+    let velocity = Rc::new(Cell::new(-1.0f32));
+    let ended = Rc::new(Cell::new(0));
+    let (v, e) = (velocity.clone(), ended.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (v, e) = (v.clone(), e.clone());
+        Column(move || {
+            let fast = remember_draggable_state(|_| {});
+            Box(modifier = named_args!(Modifier.size_wh(300.dp(), 60.dp()).draggable(
+                fast,
+                Orientation::Horizontal,
+                on_drag_stopped = Some(stopped_into(v.clone()))
+            ))
+            .test_tag("hızlı"));
+            let plain = remember_draggable_state(|_| {});
+            let e = e.clone();
+            let stopped: OnDragStopped = Rc::new(move |_, _| {
+                e.set(e.get() + 1);
+                Box::pin(async {})
+            });
+            Box(modifier = named_args!(Modifier.size_wh(300.dp(), 60.dp()).draggable(
+                plain,
+                Orientation::Vertical,
+                on_drag_stopped = Some(stopped.clone())
+            ))
+            .test_tag("düz"));
+        });
+    }));
+    let b = rule.on_node_with_tag("hızlı").fetch_semantics_node().unclipped_bounds_in_root();
+    swipe(&rule, at(b.left + 20.0, b.top + 30.0), at(b.left + 220.0, b.top + 30.0), 5); // 200 px in 80 ms
+    rule.wait_for_idle();
+    assert!(velocity.get() > 1500.0 && velocity.get() < 4000.0, "{}", velocity.get());
+    velocity.set(-1.0);
+    down_id(&rule, at(b.left + 200.0, b.top + 30.0), 0); // then held still: none
+    for d in [-20.0, -40.0, -60.0] {
+        move_id(&rule, at(b.left + 200.0 + d, b.top + 30.0), 0);
+    }
+    rule.main_clock().advance_time_by(200);
+    up_id(&rule, at(b.left + 140.0, b.top + 30.0), 0);
+    rule.wait_for_idle();
+    assert_eq!(velocity.get(), 0.0);
+    let p = rule.on_node_with_tag("düz").fetch_semantics_node().unclipped_bounds_in_root();
+    swipe(&rule, at(p.left + 20.0, p.top + 5.0), at(p.left + 20.0, p.top + 55.0), 5);
+    rule.wait_for_idle();
+    assert_eq!(ended.get(), 1);
+}
+
+fn draggable_tells_its_drags() {
+    // The draggable part of C++ 23625 (its clickable part is the clickable tests'): a drag is told to the
+    // interaction source as it starts and as it stops, and shows as dragged meanwhile.
+    let source = MutableInteractionSource::new();
+    let log = new_log();
+    let dragged = Rc::new(Cell::new(false));
+    let moved = Rc::new(Cell::new(0.0f32));
+    let (s, l, dr, m) = (source.clone(), log.clone(), dragged.clone(), moved.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let flow = s.interactions();
+        let l = l.clone();
+        kompoz_coroutines::LaunchedEffect(s.clone(), async move {
+            flow.collect(move |i| {
+                let name = if i.is::<DragInteraction::Start>() {
+                    "DragStart"
+                } else if i.is::<DragInteraction::Stop>() {
+                    "DragStop"
+                } else if i.is::<DragInteraction::Cancel>() {
+                    "DragCancel"
+                } else {
+                    "other"
+                };
+                push(&l, name);
+            })
+            .await;
+        });
+        dr.set(s.collect_is_dragged_as_state().get());
+        let m = m.clone();
+        let drag = remember_draggable_state(move |d| m.set(m.get() + d));
+        Box(modifier = named_args!(Modifier.size(100.dp()).draggable(
+            drag,
+            Orientation::Horizontal,
+            interaction_source = Some(s.clone())
+        ))
+        .test_tag("sürgü"));
+    }));
+    let c = at(50.0, 50.0);
+    down_id(&rule, c, 0);
+    for i in 1..=5 {
+        move_id(&rule, at(c.x + 10.0 * i as f32, c.y), 0);
+    }
+    rule.wait_for_idle_within(0);
+    assert!(dragged.get() && *log.borrow() == ["DragStart"] && moved.get() > 0.0, "{:?}", log.borrow());
+    up_id(&rule, at(c.x + 50.0, c.y), 0);
+    rule.wait_for_idle();
+    assert!(!dragged.get() && *log.borrow() == ["DragStart", "DragStop"], "{:?}", log.borrow());
+}
+
 tests!(
     tap_gestures_tap_double_tap_and_long_press,
     a_tap_after_idling_is_not_a_long_press,
@@ -944,4 +1193,8 @@ tests!(
     pan_zoom_lock_keeps_a_pinch_from_turning,
     nested_scroll_dispatcher_offers_a_custom_drag_to_the_parents,
     touch_input_injected_on_a_node_clicks_double_clicks_long_clicks_and_swipes,
+    draggable_reports_deltas_with_the_latest_callback,
+    draggable_flings_a_node_that_moves_with_the_finger,
+    draggable_tells_the_velocity_it_was_let_go_with,
+    draggable_tells_its_drags,
 );

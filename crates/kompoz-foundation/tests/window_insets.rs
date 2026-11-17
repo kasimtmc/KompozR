@@ -781,7 +781,15 @@ fn fit_inside_and_fit_outside_follow_the_rulers() {
 
 struct Keyboard {
     moved: std::cell::Cell<f32>,
+    /// The highest it went.
+    peak: std::cell::Cell<f32>,
     ends: RefCell<Vec<f32>>,
+}
+
+impl Keyboard {
+    fn new() -> Rc<Keyboard> {
+        Rc::new(Keyboard { moved: Default::default(), peak: Default::default(), ends: RefCell::new(Vec::new()) })
+    }
 }
 
 impl kompoz_ui::platform::PlatformCallbacks for Keyboard {
@@ -790,6 +798,7 @@ impl kompoz_ui::platform::PlatformCallbacks for Keyboard {
     }
     fn ime_control_by(&self, px: f32) {
         self.moved.set(self.moved.get() + px);
+        self.peak.set(self.peak.get().max(self.moved.get()));
     }
     fn ime_control_end(&self, velocity: f32) {
         self.ends.borrow_mut().push(velocity);
@@ -799,9 +808,9 @@ impl kompoz_ui::platform::PlatformCallbacks for Keyboard {
 struct Nothing;
 impl kompoz_ui::input::NestedScrollConnection for Nothing {}
 
-fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
-    // C++'s ime_nested_scroll_moves_the_keyboard_past_the_end, its list's scrolling dispatched by hand (scroll
-    // containers are a later stage's) and a node that says it can be edited in place of its text field.
+fn ime_nested_scroll_takes_what_is_dispatched_past_the_end() {
+    // The connection by hand: a list's scrolling dispatched to it, a node that says it can be edited in place of
+    // a text field (the text field is its own work's).
     use kompoz_ui::input::{NestedScrollDispatcher, NestedScrollSource::*};
     use kompoz_ui::unit::Velocity;
     let dispatcher = NestedScrollDispatcher::default();
@@ -823,7 +832,7 @@ fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
             },
         );
     }));
-    let keyboard = Rc::new(Keyboard { moved: std::cell::Cell::new(0.0), ends: RefCell::new(Vec::new()) });
+    let keyboard = Keyboard::new();
     rule.host().set_callbacks(keyboard.clone());
     let up = |px: f32| dispatcher.dispatch_post_scroll(Offset::Zero, Offset::new(0.0, -px), UserInput);
     let down = |px: f32| dispatcher.dispatch_pre_scroll(Offset::new(0.0, px), UserInput);
@@ -857,6 +866,87 @@ fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
     assert_eq!(fling(300.0), Velocity::Zero);
 }
 
+fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
+    // C++ 832 (a node that says it can be edited in place of its text field: the text field is its own work's):
+    // a list scrolled past its end, a field focused, brings the keyboard up with the finger; up and back down in
+    // one drag, it goes down first, never under its bottom, the list taking the rest; pushed down mid-list or at
+    // its start, the keyboard isn't taken hold of.
+    let scroll = ScrollState::new(0);
+    let field = kompoz_ui::focus::FocusRequester::new();
+    let (s, f) = (scroll.clone(), field.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (s, f) = (s.clone(), f.clone());
+        Column(
+            Modifier.fill_max_size(),
+            content = move || {
+                Column(
+                    Modifier.weight(1.0).fill_max_width().ime_nested_scroll().vertical_scroll(&s).test_tag("liste"),
+                    content = || {
+                        for _ in 0..20 {
+                            Box(Modifier.fill_max_width().height(50.dp()));
+                        }
+                    },
+                );
+                Box(Modifier.size(10.dp()).semantics(|c| c.set_is_editable(true)).focus_requester(&f).focus_target());
+            },
+        );
+    }));
+    let keyboard = Keyboard::new();
+    rule.host().set_callbacks(keyboard.clone());
+    // A finger at x 200 through these heights, then up.
+    let drag = |ys: &[f32]| {
+        let h = rule.host();
+        h.pointer_down(Offset::new(200.0, ys[0]), -1, 0, kompoz_ui::input::PointerType::Touch);
+        for y in &ys[1..] {
+            rule.advance_frame();
+            h.pointer_move(Offset::new(200.0, *y), -1, 0);
+        }
+        rule.advance_frame();
+        h.pointer_up(Offset::new(200.0, *ys.last().unwrap()), -1, 0);
+        rule.wait_for_idle();
+    };
+    let scroll_to = |value: i32| {
+        let s = scroll.clone();
+        kompoz_coroutines::CoroutineScope::new(rule.host().dispatcher()).launch(async move {
+            s.scroll_to(value).await;
+        });
+        rule.wait_for_idle();
+    };
+    let near = |a: f32, b: f32, tolerance: f32| (a - b).abs() <= tolerance;
+    // No field focused: past the end nothing more happens.
+    drag(&[600.0, 500.0, 400.0, 300.0, 200.0, 100.0]);
+    assert!(scroll.value() > 0 && keyboard.moved.get() == 0.0 && keyboard.ends.borrow().is_empty());
+    // Focused: the list scrolls to its end first, then the keyboard comes up with the finger; let go, it is
+    // finished.
+    scroll_to(0);
+    field.request_focus();
+    rule.wait_for_idle();
+    let at_end = scroll.max_value();
+    drag(&[650.0, 550.0, 450.0, 350.0, 250.0, 150.0, 100.0]);
+    assert!(scroll.value() == at_end && keyboard.moved.get() > 100.0, "{} {}", scroll.value(), keyboard.moved.get());
+    assert!(keyboard.ends.borrow().len() == 1 && !rule.host().ime_controlling());
+    // Up and back down in one drag: it goes down first, never under its bottom; pushed on down past it, the list
+    // took the rest.
+    keyboard.moved.set(0.0);
+    keyboard.peak.set(0.0);
+    drag(&[600.0, 500.0, 400.0, 500.0, 600.0, 700.0]);
+    let peak = keyboard.peak.get();
+    assert!(near(keyboard.moved.get(), 0.0, 0.5) && keyboard.ends.borrow().len() == 2, "{}", keyboard.moved.get());
+    assert!(
+        peak > 50.0 && near(scroll.value() as f32, at_end as f32 - (300.0 - peak), 2.0),
+        "{peak} {}",
+        scroll.value()
+    );
+    // Pushed down mid-list or at its start: the keyboard isn't taken hold of.
+    scroll_to(at_end / 2);
+    drag(&[300.0, 400.0, 500.0]);
+    scroll_to(0);
+    drag(&[300.0, 400.0, 500.0, 600.0]);
+    assert!(
+        keyboard.ends.borrow().len() == 2 && !rule.host().ime_controlling() && near(keyboard.moved.get(), 0.0, 0.5)
+    );
+}
+
 tests!(
     window_insets_paddings_consume_what_the_outer_ones_took,
     consumed_window_insets_are_told,
@@ -871,5 +961,6 @@ tests!(
     the_keyboard_sliding_measures_again_without_composing,
     visibility_and_insets_ignoring_visibility_as_compose,
     fit_inside_and_fit_outside_follow_the_rulers,
+    ime_nested_scroll_takes_what_is_dispatched_past_the_end,
     ime_nested_scroll_moves_the_keyboard_past_the_end,
 );

@@ -598,8 +598,9 @@ fn two_texts_under_a_box(toolbar: Rc<RecordingToolbar>) -> KompozTestRule {
 fn dragging_a_handle_shows_the_text_magnifier() {
     // C++ 6685's SelectionContainer part (its text field part is stage 10's): while a finger drags a handle the
     // magnifier shows where the drag is — its x within the line, at the line's middle — and the toolbar is out of
-    // the way; both go with the finger. (A handle's drag starts past the 8 px touch slop, which it doesn't move by:
-    // 40 of the 48 px. The magnifier jumps between lines, without Compose's spring: animations are a later stage.)
+    // the way; both go with the finger, the magnifier eased to another line by a spring (Compose's
+    // animatedSelectionMagnifier). (A handle's drag starts past the 8 px touch slop, which it doesn't move by: 40
+    // of the 48 px.)
     let toolbar = Rc::new(RecordingToolbar::default());
     let rule = two_texts_under_a_box(toolbar.clone());
     long_press(&rule, at(24.0, 110.0));
@@ -618,7 +619,17 @@ fn dragging_a_handle_shows_the_text_magnifier() {
     // Zoomed in a layer above the source.
     let canvas = rule.draw();
     assert!(canvas.layer_transforms.iter().any(|t| near(t.scale_x, 1.25, 0.01) && near(t.translation_y, -42.0, 0.01)));
-    rule.host().pointer_up(at(end.x + 48.0, end.y), -1, 0);
+    // Down to the next line: the magnifier springs there, a frame at a time.
+    rule.host().pointer_move(at(end.x + 48.0, end.y + 20.0), -1, 0);
+    rule.advance_frame();
+    rule.advance_frame();
+    rule.advance_frame();
+    let moving = magnifier_at(&rule).expect("the magnifier");
+    assert!(moving.y > 110.0 && moving.y < 130.0, "{moving:?}");
+    rule.wait_for_idle();
+    let there = magnifier_at(&rule).expect("the magnifier");
+    assert!(near(there.y, 130.0, 0.01), "{there:?}");
+    rule.host().pointer_up(at(end.x + 48.0, end.y + 20.0), -1, 0);
     rule.wait_for_idle();
     assert!(magnifier_at(&rule).is_none() && toolbar.shown()); // gone with the finger, the toolbar back
     // Dragged far from the line's text (more than half the magnifier's width past its end): hidden.

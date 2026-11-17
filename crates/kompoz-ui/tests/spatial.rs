@@ -1,12 +1,13 @@
 //! ui's spatial callbacks: `on_layout_rect_changed` with its throttle and debounce, `on_visibility_changed`,
-//! `on_first_visible`, `layout_bounds`, a node's registration, occlusions. Scrolling is a placement-time offset
-//! here (`offset_px` reading a state), which moves what it wraps as a scroll does.
+//! `on_first_visible`, `layout_bounds`, a node's registration, occlusions; scrolled by foundation's
+//! `vertical_scroll`.
 
 #![allow(non_snake_case)]
 
 mod common;
 
 use common::*;
+use kompoz_foundation::gestures::ScrollableState;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
@@ -17,13 +18,10 @@ use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// What a column scrolled by `scroll` px wraps: as long as its content, moved up by it.
-fn scrolled(scroll: &MutableState<i32>) -> Modifier {
-    let s = scroll.clone();
-    Modifier
-        .offset_px(move |_| IntOffset::new(0, -s.get()))
-        .fill_max_width()
-        .wrap_content_height_with(Alignment::Top, true)
+/// Scrolls `state` to `value` px at once, as a frame's drag does (`dispatch_raw_delta`): laid out at the next
+/// frame.
+fn set_scroll(state: &ScrollState, value: i32) {
+    state.dispatch_raw_delta((value - state.value()) as f32);
 }
 
 /// What a callback was told: who, where in the window (y), how much of it is in the window.
@@ -42,7 +40,7 @@ fn on_layout_rect_changed_debounces_and_throttles() {
     // C++'s on_layout_rect_changed_debounces_and_throttles.
     let told: Rc<RefCell<Vec<Told>>> = Rc::new(RefCell::new(Vec::new()));
     let shown = mutable_state_of(true);
-    let scroll = mutable_state_of(0);
+    let scroll = ScrollState::new(0);
     let (t, sh, sc) = (told.clone(), shown.clone(), scroll.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
@@ -57,7 +55,7 @@ fn on_layout_rect_changed_debounces_and_throttles() {
                 }
             };
             let (a, b, c) = (report('a'), report('b'), report('c'));
-            Column(scrolled(&sc), || {
+            Column(Modifier.fill_max_size().vertical_scroll(&sc), || {
                 Box(Modifier.fill_max_width().height(200.dp()));
                 // At 200: debounced 64 ms.
                 if sh.get() {
@@ -83,7 +81,7 @@ fn on_layout_rect_changed_debounces_and_throttles() {
     rule.advance_time_by(200);
     told.borrow_mut().clear();
     for i in 1..=12 {
-        scroll.set(10 * i);
+        set_scroll(&scroll, 10 * i);
         rule.advance_frame();
     }
     let c = of('c');
@@ -100,7 +98,7 @@ fn on_layout_rect_changed_debounces_and_throttles() {
     // Leaving the layout, even while its new place waits to be told: nothing told (b and c move up, and are
     // told).
     told.borrow_mut().clear();
-    scroll.set(130);
+    set_scroll(&scroll, 130);
     rule.advance_frame();
     shown.set(false);
     rule.wait_for_idle();
@@ -115,7 +113,7 @@ fn visibility_is_told_as_nodes_come_and_go() {
     // C++'s visibility_is_told_as_nodes_come_and_go.
     let log: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
     let (shown, placed) = (mutable_state_of(true), mutable_state_of(true));
-    let (scroll, inner) = (mutable_state_of(0), mutable_state_of(0));
+    let (scroll, inner) = (ScrollState::new(0), ScrollState::new(0));
     let holder = LayoutBoundsHolder::new();
     let (l, sh, pl, sc, inn, h) =
         (log.clone(), shown.clone(), placed.clone(), scroll.clone(), inner.clone(), holder.clone());
@@ -132,7 +130,7 @@ fn visibility_is_told_as_nodes_come_and_go() {
             let (top, going, settled, bottom, timed, boxed) =
                 (note("üst"), note("gidecek"), note("yerleşik"), note("alt"), note("süreli"), note("kutuda"));
             let (pl, h, inn) = (pl.clone(), h.clone(), inn.clone());
-            Column(scrolled(&sc), || {
+            Column(Modifier.fill_max_size().vertical_scroll(&sc), || {
                 // (taking the second one away moves nothing)
                 Row(|| {
                     Box(Modifier.size(100.dp()).on_visibility_changed(callback = top));
@@ -163,13 +161,16 @@ fn visibility_is_told_as_nodes_come_and_go() {
                 // At 1200.
                 Box(Modifier.size(100.dp()).on_visibility_changed(min_duration_ms = 300, callback = timed));
                 // At 1300, a box of its own.
-                Column(Modifier.height(200.dp()).layout_bounds(h.clone()).then(scrolled(&inn)), || {
-                    Box(Modifier.height(250.dp()));
-                    Box(Modifier
-                        .size(50.dp())
-                        .on_visibility_changed(viewport_bounds = Some(h.clone()), callback = boxed));
-                    Box(Modifier.height(300.dp()));
-                });
+                Column(
+                    Modifier.fill_max_width().height(200.dp()).layout_bounds(h.clone()).vertical_scroll(&inn),
+                    || {
+                        Box(Modifier.height(250.dp()));
+                        Box(Modifier
+                            .size(50.dp())
+                            .on_visibility_changed(viewport_bounds = Some(h.clone()), callback = boxed));
+                        Box(Modifier.height(300.dp()));
+                    },
+                );
                 Box(Modifier.height(2000.dp()));
             });
         }),
@@ -190,44 +191,44 @@ fn visibility_is_told_as_nodes_come_and_go() {
     assert_eq!(logged().last().map(String::as_str), Some("yerleşik -"));
     log.borrow_mut().clear();
     // "alt" 750..850: half of it in, not more; "üst" out.
-    scroll.set(250);
+    set_scroll(&scroll, 250);
     rule.wait_for_idle();
     assert_eq!(logged(), ["üst -"]);
     // 60% of it in.
-    scroll.set(260);
+    set_scroll(&scroll, 260);
     rule.wait_for_idle();
     assert_eq!(logged(), ["üst -", "alt +"]);
     log.borrow_mut().clear();
     // The first-visible one all in (650..750): told after 500 ms of it (waiting for idle would run them out).
-    scroll.set(450);
+    set_scroll(&scroll, 450);
     rule.advance_time_by(300);
     assert!(logged().is_empty());
     rule.advance_time_by(300);
     assert_eq!(logged(), ["ilk"]);
-    scroll.set(0);
+    set_scroll(&scroll, 0);
     rule.wait_for_idle();
-    scroll.set(450);
+    set_scroll(&scroll, 450);
     rule.wait_for_idle();
     rule.advance_time_by(1000);
     // Only the first time.
     assert_eq!(count("ilk"), 1);
-    scroll.set(0);
+    set_scroll(&scroll, 0);
     rule.wait_for_idle();
     log.borrow_mut().clear();
-    scroll.set(450);
+    set_scroll(&scroll, 450);
     rule.wait_for_idle();
     assert_eq!(logged(), ["üst -", "alt +"]);
     // "süreli" all in: waiting for the app to settle runs its 300 ms out.
-    scroll.set(550);
+    set_scroll(&scroll, 550);
     rule.wait_for_idle();
     assert_eq!(logged().last().map(String::as_str), Some("süreli +"));
     // In its box's viewport: the box at 500..700 on screen, its item at 750..800: in the window, off the box.
     log.borrow_mut().clear();
-    scroll.set(800);
+    set_scroll(&scroll, 800);
     rule.wait_for_idle();
     assert_eq!(count("kutuda +"), 0);
     // The item at 550..600, in the box.
-    inner.set(200);
+    set_scroll(&inner, 200);
     rule.wait_for_idle();
     assert_eq!(count("kutuda +"), 1);
 }

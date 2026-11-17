@@ -112,6 +112,22 @@ pub async fn supervisor_scope<T: 'static, Fut: Future<Output = T> + 'static>(
     }
 }
 
+/// Runs `block` as `coroutine_scope` does, catching its own cancellation (Kotlin's `try { … } catch (e:
+/// CancellationException)` around suspending code): `Err(Cancelled)` when the block was cancelled from inside —
+/// a non-suspending call under it "threw" by cancelling [`current_job`](crate::current_job), as a fling's
+/// `scrollBy` throws when its node left — while the coroutine awaiting this goes on. Cancelled from outside, the
+/// awaiting coroutine is dropped with it, as a Kotlin catch would rethrow at its next suspension.
+pub async fn catch_cancellation<T: 'static, Fut: Future<Output = T> + 'static>(
+    block: impl FnOnce(CoroutineScope) -> Fut,
+) -> Result<T, crate::Cancelled> {
+    match run_scope(block, false, None).await {
+        Outcome::Value(v) => Ok(v),
+        Outcome::Failed(f) => f.resume(),
+        Outcome::TimedOut => unreachable!("cancelled without a timeout"),
+        Outcome::Cancelled => Err(crate::Cancelled),
+    }
+}
+
 /// The time given to [`with_timeout`] ran out (Kotlin's TimeoutCancellationException).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeoutCancellation;
