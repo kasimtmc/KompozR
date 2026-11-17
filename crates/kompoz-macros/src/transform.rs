@@ -854,13 +854,18 @@ impl VisitMut for Transformer {
                 let path = &p.path;
                 *e = match route {
                     Route::Probe { named } => {
-                        let entry = Ident::new(if named { "__kz_named" } else { "__kz_builder" }, span);
-                        // (the probe at the call, so what rustc says of it is said there)
+                        // (the probe and `named` at the call, so what rustc says of them is said there)
                         let probe = respanned(quote!(#rt::__private::Probe), span);
+                        let builder = if named {
+                            let open = respanned(quote!(#rt::__private::named), span);
+                            quote_spanned!(span=> #open((&&#probe(#path)).__kz_named()))
+                        } else {
+                            quote_spanned!(span=> (&&#probe(#path)).__kz_builder())
+                        };
                         parse_quote_spanned!(span=> {
                             #[allow(unused_imports)]
                             use #rt::__private::{ViaBuilder as _, ViaFn as _};
-                            (&&#probe(#path)).#entry()
+                            #builder
                         } #(#links)* .__call())
                     }
                     _ => parse_quote_spanned!(span=> #path::__kz_builder() #(#links)* .__call()),

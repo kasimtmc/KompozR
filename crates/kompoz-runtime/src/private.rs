@@ -75,9 +75,9 @@ pub struct Probe<T>(pub T);
 pub trait ViaBuilder {
     type Builder;
     fn __kz_builder(&self) -> Self::Builder;
-    /// The builder for a call with named arguments.
-    fn __kz_named(&self) -> Self::Builder {
-        self.__kz_builder()
+    /// The builder for a call with named arguments (opened by [`named`]).
+    fn __kz_named(&self) -> Named<Self::Builder> {
+        Named(self.__kz_builder())
     }
 }
 impl<M: Kompozable> ViaBuilder for &Probe<M> {
@@ -90,32 +90,47 @@ impl<M: Kompozable> ViaBuilder for &Probe<M> {
 pub trait ViaFn {
     type F;
     fn __kz_builder(&self) -> Positional<Self::F, ()>;
-    /// A call with named arguments of what isn't a composable: an error, as nothing is known of its parameters.
-    fn __kz_named(&self) -> Positional<Self::F, ()>
-    where
-        Self::F: NamedArgumentsUnknown;
+    /// A call with named arguments of what isn't a composable: an error from [`named`], as nothing is known of its
+    /// parameters.
+    fn __kz_named(&self) -> Self::F;
 }
 impl<F: Copy> ViaFn for Probe<F> {
     type F = F;
     fn __kz_builder(&self) -> Positional<F, ()> {
         Positional(self.0, ())
     }
-    fn __kz_named(&self) -> Positional<F, ()>
-    where
-        F: NamedArgumentsUnknown,
-    {
-        Positional(self.0, ())
+    fn __kz_named(&self) -> F {
+        self.0
     }
 }
 
-/// Implemented by nothing: what a named call of a PascalCase function that isn't known to be `#[named]` reports.
+/// A composable's builder, for a call with named arguments.
+pub struct Named<B>(B);
+
+/// What a call with named arguments opens: a composable's builder. Anything else called with named arguments (what
+/// [`ViaFn`] hands on) isn't one, and [`named`] reports it.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` isn't known to take named arguments",
     label = "called with named arguments here",
     note = "a #[named] PascalCase function's named calls go through its type (`Name::__kz_builder()`): the macros know it from the API index (`cargo xtask kotlin-index`) or when it is defined in the same body",
     note = "outside those, call its builder yourself: `Name::__kz_builder().param(value).__call()`"
 )]
-pub trait NamedArgumentsUnknown {}
+pub trait NamedCall {
+    type Builder;
+    fn __kz_open(self) -> Self::Builder;
+}
+impl<B> NamedCall for Named<B> {
+    type Builder = B;
+    fn __kz_open(self) -> B {
+        self.0
+    }
+}
+
+/// `named((&&Probe(f)).__kz_named())`: the builder of a call with named arguments. (A free function's bound, so what
+/// rustc says when it isn't met reads the same in every rustc.)
+pub fn named<C: NamedCall>(call: C) -> C::Builder {
+    call.__kz_open()
+}
 
 /// A call of a plain function, tuple struct or enum variant: the arguments in order.
 pub struct Positional<F, A>(F, A);
