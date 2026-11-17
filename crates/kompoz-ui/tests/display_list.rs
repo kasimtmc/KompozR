@@ -1821,6 +1821,28 @@ fn kept_nodes_draw_what_their_images_hold_now() {
     assert!(kept == 1 && d.is_some_and(|d| covers(d, rect(0.0, 0.0, 40.0, 40.0))), "{d:?}");
 }
 
+fn a_node_moved_from_its_parents_origin_keeps_its_own_translation() {
+    // A node drawn at its parent's origin has no translation of its own: what encloses all it draws is one of its
+    // modifiers' (a padding's). Moved down by a sibling shown before it, it is kept with its position's translation
+    // added around that one, as drawing it again records (the host's keep check says so).
+    let shown = mutable_state_of(false);
+    let s = shown.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let s = s.clone();
+        Column(move || {
+            if s.get() {
+                Box(Modifier.size_wh(100.dp(), 20.dp()).background(BLUE));
+            }
+            Box(Modifier.padding_hv(0.dp(), 20.dp()).size_wh(50.dp(), 20.dp()).background(RED));
+        });
+    }));
+    shown.set(true);
+    rule.advance_frame(); // (the keep check: the same)
+    let drawn = rule.draw();
+    let red = drawn.rects.iter().zip(&drawn.rect_colors).find(|(_, c)| **c == RED).map(|(r, _)| *r);
+    assert_eq!(red, Some(rect(0.0, 40.0, 50.0, 20.0)));
+}
+
 fn keep_check_catches_a_stale_node() {
     // The host's keep check (on in the rule) draws each frame keeping the nodes that didn't change and drawing them
     // all: a node that changed without saying so (drawing from what isn't observed) is kept stale, and the check
@@ -1895,5 +1917,6 @@ tests!(
     display_list_keeps_brushed_shadows_whole,
     display_list_elevation_shadows_reach_from_the_light,
     kept_nodes_draw_what_their_images_hold_now,
+    a_node_moved_from_its_parents_origin_keeps_its_own_translation,
     keep_check_catches_a_stale_node,
 );

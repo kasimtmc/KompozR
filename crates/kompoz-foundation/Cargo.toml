@@ -71,3 +71,23 @@ harness = false
 [[test]]
 name = "text_input"
 harness = false
+
+[[test]]
+name = "flow_layout"
+harness = false
+
+[[test]]
+name = "grid"
+harness = false
+
+[[test]]
+name = "flex_box"
+harness = false
+
+[[test]]
+name = "marquee"
+harness = false
+
+[[test]]
+name = "tooltip"
+harness = false

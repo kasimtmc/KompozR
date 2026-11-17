@@ -21,6 +21,7 @@ kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-kotlin-macro = { path = "../kompoz-kotlin-macro" }
+kompoz-material-ripple = { path = "../kompoz-material-ripple" }
 kompoz-platform = { path = "../kompoz-platform" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-test = { path = "../kompoz-test", optional = true }
@@ -68,4 +69,9 @@ harness = false
 
 [[test]]
 name = "kotlin_text_input"
+harness = false
+
+# Non-lazy layouts, the marquee, the tooltip box and the ripple in Kotlin's syntax.
+[[test]]
+name = "kotlin_layouts"
 harness = false

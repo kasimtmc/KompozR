@@ -50,6 +50,9 @@ pub struct Strings {
     pub pm: String,
     pub hour: String,
     pub minute: String,
+    /// A tooltip anchor's long-click action, and a tooltip's pane title (Compose's BasicTooltipStrings).
+    pub tooltip_label: String,
+    pub tooltip_description: String,
 }
 
 impl Strings {
@@ -82,6 +85,8 @@ impl Strings {
             pm: s("PM"),
             hour: s("Hour"),
             minute: s("Minute"),
+            tooltip_label: s("show tooltip"),
+            tooltip_description: s("tooltip"),
         }
     }
 
@@ -114,6 +119,8 @@ impl Strings {
             pm: s("ÖS"),
             hour: s("Saat"),
             minute: s("Dakika"),
+            tooltip_label: s("ipucunu göster"),
+            tooltip_description: s("ipucu"),
         }
     }
 

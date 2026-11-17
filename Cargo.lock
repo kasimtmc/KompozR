@@ -356,6 +356,7 @@ dependencies = [
  "kompoz-gpu",
  "kompoz-graphics",
  "kompoz-kotlin-macro",
+ "kompoz-material-ripple",
  "kompoz-platform",
  "kompoz-runtime",
  "kompoz-test",
@@ -444,6 +445,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "kompoz-material-ripple"
+version = "0.1.0"
+dependencies = [
+ "kompoz-animation",
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-ui",
 ]
 
 [[package]]

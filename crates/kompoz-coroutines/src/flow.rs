@@ -413,6 +413,27 @@ impl<T: 'static> Flow<T> {
         })
     }
 
+    /// Calls `on_value` with each value, the call for the value before cancelled where it waits when the next comes
+    /// (Kotlin's collectLatest); done once the flow ends and the last call is done.
+    pub fn collect_latest<Fut: Future<Output = ()> + 'static>(
+        &self,
+        on_value: impl Fn(T) -> Fut + 'static,
+    ) -> BoxFuture {
+        let on_value = Rc::new(on_value);
+        self.flat_map_latest(move |v| {
+            let (on_value, value) = (on_value.clone(), RefCell::new(Some(v)));
+            flow(move |_: FlowCollector<()>| {
+                let call = value.borrow_mut().take().map(|v| on_value(v));
+                async move {
+                    if let Some(call) = call {
+                        call.await;
+                    }
+                }
+            })
+        })
+        .collect(|_| {})
+    }
+
     /// Collects it in `scope`, doing nothing with the values (Kotlin's launchIn: what `on_each` does is the point).
     pub fn launch_in(&self, scope: &CoroutineScope) -> Job {
         scope.launch(self.collect(|_| {}))

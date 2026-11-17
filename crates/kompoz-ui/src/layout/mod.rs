@@ -17,7 +17,10 @@ mod visibility;
 mod window_insets_rulers;
 
 pub use alignment_line::{AlignmentLine, FirstBaseline, HorizontalAlignmentLine, LastBaseline, VerticalAlignmentLine};
-pub use composables::{Layout, MultiMeasureLayout, layout_into, measure_policy};
+pub(crate) use composables::VirtualLayoutNode;
+pub use composables::{
+    Layout, MultiContentLayout, MultiContentMeasurePolicy, MultiMeasureLayout, layout_into, measure_policy,
+};
 pub use coordinates::LayoutCoordinates;
 #[doc(hidden)]
 pub use layer::LayerGeometry;

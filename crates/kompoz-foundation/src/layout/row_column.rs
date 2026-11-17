@@ -12,6 +12,7 @@ use kompoz_ui::{
     MeasureResult, MeasureScope, Modifier, Placeable, VerticalAlignment,
 };
 use std::any::Any;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A layout of its children side by side (Compose's `Row`): `horizontal_arrangement` puts them along (mirrored
@@ -70,11 +71,19 @@ pub(crate) struct RowColumnParentData {
     pub(crate) weight: f32,
     pub(crate) fill: bool,
     pub(crate) cross_axis_alignment: Option<CrossAxisAlignment>,
+    /// A flow layout's child's `fill_max_row_height`/`fill_max_column_width` (Compose's `flowLayoutData`).
+    pub(crate) flow_layout_data: Option<FlowLayoutData>,
+}
+
+/// How much of its line's cross axis a flow layout's child fills (Compose's FlowLayoutData).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FlowLayoutData {
+    pub(crate) fill_cross_axis_fraction: f32,
 }
 
 impl Default for RowColumnParentData {
     fn default() -> Self {
-        RowColumnParentData { weight: 0.0, fill: true, cross_axis_alignment: None }
+        RowColumnParentData { weight: 0.0, fill: true, cross_axis_alignment: None, flow_layout_data: None }
     }
 }
 
@@ -86,11 +95,16 @@ impl RowColumnParentData {
     }
 }
 
-fn parent_data_of(measurable: &dyn IntrinsicMeasurable) -> Option<RowColumnParentData> {
+pub(crate) fn parent_data_of(measurable: &dyn IntrinsicMeasurable) -> Option<RowColumnParentData> {
     measurable.parent_data()?.downcast_ref::<RowColumnParentData>().cloned()
 }
 
-fn weight_of(measurable: &dyn IntrinsicMeasurable) -> f32 {
+/// What a measured child told its Row, Column or flow layout (Compose's `Placeable.rowColumnParentData`).
+pub(crate) fn placeable_parent_data(placeable: &Placeable) -> Option<RowColumnParentData> {
+    placeable.parent_data()?.downcast_ref::<RowColumnParentData>().cloned()
+}
+
+pub(crate) fn weight_of(measurable: &dyn IntrinsicMeasurable) -> f32 {
     parent_data_of(measurable).map_or(0.0, |d| d.weight)
 }
 
@@ -134,7 +148,7 @@ impl AlignmentLineProvider {
 }
 
 impl CrossAxisAlignment {
-    fn is_relative(&self) -> bool {
+    pub(crate) fn is_relative(&self) -> bool {
         matches!(self, CrossAxisAlignment::AlignmentLine(_))
     }
 
@@ -146,7 +160,7 @@ impl CrossAxisAlignment {
     }
 
     /// Where the child goes across, in `size` (Compose's `CrossAxisAlignment.align`).
-    fn align(
+    pub(crate) fn align(
         &self,
         size: i32,
         item_cross_axis_size: i32,
@@ -173,8 +187,30 @@ impl CrossAxisAlignment {
 // ---------------------------------------------------------------------------------------------------------------
 // Measuring (Compose's RowColumnMeasurePolicy.measure)
 
-/// What a Row and a Column do their own way (Compose's RowColumnMeasurePolicy).
-trait RowColumnMeasurePolicy {
+/// A child as a Row, a Column or a flow layout measures it: a `&dyn Measurable` it was given, or one it holds (a
+/// subcomposed one: a contextual flow layout's).
+pub(crate) trait MeasurableRef: Clone {
+    fn get(&self) -> &dyn Measurable;
+}
+
+impl MeasurableRef for &dyn Measurable {
+    fn get(&self) -> &dyn Measurable {
+        *self
+    }
+}
+
+impl MeasurableRef for Rc<dyn Measurable> {
+    fn get(&self) -> &dyn Measurable {
+        &**self
+    }
+}
+
+/// Where each line of a flow layout is across, worked out once all are measured and read as they are placed
+/// (Compose's `crossAxisOffset` array).
+pub(crate) type CrossAxisOffsets = Rc<RefCell<Vec<i32>>>;
+
+/// What a Row, a Column and a flow layout's lines do their own way (Compose's RowColumnMeasurePolicy).
+pub(crate) trait RowColumnMeasurePolicy {
     fn main_axis_size(&self, placeable: &Placeable) -> i32;
     fn cross_axis_size(&self, placeable: &Placeable) -> i32;
     fn populate_main_axis_positions(
@@ -184,16 +220,21 @@ trait RowColumnMeasurePolicy {
         main_axis_positions: &mut [i32],
         scope: &MeasureScope,
     );
+    /// The result placing `placeables[start_index..end_index]` at `main_axis_positions` (a line's when
+    /// `cross_axis_offset` says where the lines are).
     #[allow(clippy::too_many_arguments)]
     fn place_helper(
         &self,
-        placeables: Vec<Placeable>,
-        datas: Vec<Option<RowColumnParentData>>,
+        placeables: &[Option<Placeable>],
         scope: &MeasureScope,
         before_cross_axis_alignment_line: i32,
         main_axis_positions: Vec<i32>,
         main_axis_layout_size: i32,
         cross_axis_layout_size: i32,
+        cross_axis_offset: Option<CrossAxisOffsets>,
+        current_line_index: usize,
+        start_index: usize,
+        end_index: usize,
     ) -> MeasureResult;
     fn create_constraints(
         &self,
@@ -205,8 +246,12 @@ trait RowColumnMeasurePolicy {
     ) -> Constraints;
 }
 
+/// Measures `measurables[start_index..end_index]` (those in `placeables` already measured are taken as they
+/// are): the ones without a weight at their preferred size, then the weighted ones sharing what is left, each
+/// as tall (or wide) as a flow layout's `fill_max_row_height` says; then places them (Compose's
+/// `RowColumnMeasurePolicy.measure`).
 #[allow(clippy::too_many_arguments)]
-fn measure_row_column<P: RowColumnMeasurePolicy>(
+pub(crate) fn measure_row_column<P: RowColumnMeasurePolicy + ?Sized, M: MeasurableRef>(
     policy: &P,
     main_axis_min: i32,
     cross_axis_min: i32,
@@ -214,44 +259,64 @@ fn measure_row_column<P: RowColumnMeasurePolicy>(
     cross_axis_max: i32,
     arrangement_spacing_int: i32,
     scope: &MeasureScope,
-    measurables: &[&dyn Measurable],
+    measurables: &[M],
+    placeables: &mut [Option<Placeable>],
+    start_index: usize,
+    end_index: usize,
+    cross_axis_offset: Option<CrossAxisOffsets>,
+    current_line_index: usize,
 ) -> MeasureResult {
     let arrangement_spacing_px = arrangement_spacing_int as i64;
-    let n = measurables.len();
-    let datas: Vec<Option<RowColumnParentData>> = measurables.iter().map(|m| parent_data_of(*m)).collect();
-    let weight = |i: usize| datas[i].as_ref().map_or(0.0, |d| d.weight);
+    let datas: Vec<Option<RowColumnParentData>> =
+        (start_index..end_index).map(|i| parent_data_of(measurables[i].get())).collect();
+    let data = |i: usize| datas[i - start_index].as_ref();
+    let weight = |i: usize| data(i).map_or(0.0, |d| d.weight);
+    // What a flow layout's child asks of the cross axis (`fill_max_row_height`), if it is bounded.
+    let cross_axis_desired_size = |i: usize| {
+        if cross_axis_max == Constraints::Infinity {
+            None
+        } else {
+            data(i)
+                .and_then(|d| d.flow_layout_data.as_ref())
+                .map(|f| round(f.fill_cross_axis_fraction * cross_axis_max as f32))
+        }
+    };
 
     let mut total_weight = 0f32;
     let mut fixed_space = 0i32;
     let mut cross_axis_space = 0i32;
     let mut weight_children_count = 0i64;
     let mut any_align_by = false;
-    let mut children_main_axis_size = vec![0i32; n];
-    let mut placeables: Vec<Option<Placeable>> = vec![None; n];
+    let sub_size = end_index - start_index;
+    let mut children_main_axis_size = vec![0i32; sub_size];
     let mut before_cross_axis_alignment_line = 0;
     let mut after_cross_axis_alignment_line = 0;
     // The children without a weight first.
     let mut space_after_last_no_weight = 0;
-    for i in 0..n {
+    for i in start_index..end_index {
         let w = weight(i);
-        any_align_by = any_align_by
-            || datas[i].as_ref().and_then(|d| d.cross_axis_alignment.as_ref()).is_some_and(|a| a.is_relative());
+        any_align_by =
+            any_align_by || data(i).and_then(|d| d.cross_axis_alignment.as_ref()).is_some_and(|a| a.is_relative());
         if w > 0.0 {
             total_weight += w;
             weight_children_count += 1;
         } else {
+            let desired = cross_axis_desired_size(i);
             let remaining = main_axis_max - fixed_space;
             // Their preferred size along.
-            let placeable = measurables[i].measure(policy.create_constraints(
-                0,
-                0,
-                if main_axis_max == Constraints::Infinity { Constraints::Infinity } else { remaining.max(0) },
-                cross_axis_max,
-                false,
-            ));
+            let placeable = match placeables[i].clone() {
+                Some(p) => p,
+                None => measurables[i].get().measure(policy.create_constraints(
+                    0,
+                    desired.unwrap_or(0),
+                    if main_axis_max == Constraints::Infinity { Constraints::Infinity } else { remaining.max(0) },
+                    desired.unwrap_or(cross_axis_max),
+                    false,
+                )),
+            };
             let main = policy.main_axis_size(&placeable);
             let cross = policy.cross_axis_size(&placeable);
-            children_main_axis_size[i] = main;
+            children_main_axis_size[i - start_index] = main;
             space_after_last_no_weight = arrangement_spacing_int.min((remaining - main).max(0));
             fixed_space += main + space_after_last_no_weight;
             cross_axis_space = cross_axis_space.max(cross);
@@ -270,42 +335,43 @@ fn measure_row_column<P: RowColumnMeasurePolicy>(
         let remaining_to_target = (target_space as i64 - fixed_space as i64 - arrangement_spacing_total).max(0);
         let weight_unit_space = remaining_to_target as f32 / total_weight;
         let mut remainder = remaining_to_target;
-        for i in 0..n {
+        for i in start_index..end_index {
             remainder -= round(weight_unit_space * weight(i)) as i64;
         }
         let mut weighted = 0i64;
-        for i in 0..n {
+        for i in start_index..end_index {
             if placeables[i].is_some() {
                 continue;
             }
             let w = weight(i);
-            let fill = datas[i].as_ref().is_none_or(|d| d.fill);
+            let fill = data(i).is_none_or(|d| d.fill);
+            let desired = cross_axis_desired_size(i);
             // What rounding took or gave, spread one by one over the first children.
             let remainder_unit = remainder.signum();
             remainder -= remainder_unit;
             let child_main_axis_size = 0.max(round(weight_unit_space * w) + remainder_unit as i32);
             let child_constraints = policy.create_constraints(
                 if fill && child_main_axis_size != Constraints::Infinity { child_main_axis_size } else { 0 },
-                0,
+                desired.unwrap_or(0),
                 child_main_axis_size,
-                cross_axis_max,
+                desired.unwrap_or(cross_axis_max),
                 true,
             );
-            let placeable = measurables[i].measure(child_constraints);
+            let placeable = measurables[i].get().measure(child_constraints);
             let main = policy.main_axis_size(&placeable);
             let cross = policy.cross_axis_size(&placeable);
-            children_main_axis_size[i] = main;
+            children_main_axis_size[i - start_index] = main;
             weighted += main as i64;
             cross_axis_space = cross_axis_space.max(cross);
             placeables[i] = Some(placeable);
         }
         weighted_space = coerce_in((weighted + arrangement_spacing_total) as i32, 0, main_axis_max - fixed_space);
     }
-    let placeables: Vec<Placeable> = placeables.into_iter().map(|p| p.expect("measured")).collect();
 
     if any_align_by {
-        for (placeable, data) in placeables.iter().zip(&datas) {
-            let Some(alignment) = data.as_ref().and_then(|d| d.cross_axis_alignment.as_ref()) else { continue };
+        for (k, placeable) in placeables[start_index..end_index].iter().enumerate() {
+            let placeable = placeable.as_ref().expect("measured");
+            let Some(alignment) = data(start_index + k).and_then(|d| d.cross_axis_alignment.as_ref()) else { continue };
             let Some(position) = alignment.calculate_alignment_line_position(placeable) else { continue };
             let cross = policy.cross_axis_size(placeable);
             let specified = position != AlignmentLine::Unspecified;
@@ -320,7 +386,7 @@ fn measure_row_column<P: RowColumnMeasurePolicy>(
     let main_axis_layout_size = (fixed_space + weighted_space).max(0).max(main_axis_min);
     let cross_axis_layout_size =
         cross_axis_space.max(cross_axis_min).max(before_cross_axis_alignment_line + after_cross_axis_alignment_line);
-    let mut main_axis_positions = vec![0i32; n];
+    let mut main_axis_positions = vec![0i32; sub_size];
     policy.populate_main_axis_positions(
         main_axis_layout_size,
         &children_main_axis_size,
@@ -329,12 +395,45 @@ fn measure_row_column<P: RowColumnMeasurePolicy>(
     );
     policy.place_helper(
         placeables,
-        datas,
         scope,
         before_cross_axis_alignment_line,
         main_axis_positions,
         main_axis_layout_size,
         cross_axis_layout_size,
+        cross_axis_offset,
+        current_line_index,
+        start_index,
+        end_index,
+    )
+}
+
+/// Measures a Row's or a Column's children, all of them (Compose's `measure` called with `0, measurables.size`).
+#[allow(clippy::too_many_arguments)]
+fn measure_all<P: RowColumnMeasurePolicy>(
+    policy: &P,
+    main_axis_min: i32,
+    cross_axis_min: i32,
+    main_axis_max: i32,
+    cross_axis_max: i32,
+    arrangement_spacing_int: i32,
+    scope: &MeasureScope,
+    measurables: &[&dyn Measurable],
+) -> MeasureResult {
+    let mut placeables = vec![None; measurables.len()];
+    measure_row_column(
+        policy,
+        main_axis_min,
+        cross_axis_min,
+        main_axis_max,
+        cross_axis_max,
+        arrangement_spacing_int,
+        scope,
+        measurables,
+        &mut placeables,
+        0,
+        measurables.len(),
+        None,
+        0,
     )
 }
 
@@ -373,18 +472,24 @@ impl RowColumnMeasurePolicy for RowMeasurePolicy {
 
     fn place_helper(
         &self,
-        placeables: Vec<Placeable>,
-        datas: Vec<Option<RowColumnParentData>>,
+        placeables: &[Option<Placeable>],
         scope: &MeasureScope,
         before_cross_axis_alignment_line: i32,
         main_axis_positions: Vec<i32>,
         main_axis_layout_size: i32,
         cross_axis_layout_size: i32,
+        _: Option<CrossAxisOffsets>,
+        _: usize,
+        start_index: usize,
+        end_index: usize,
     ) -> MeasureResult {
         let vertical_alignment = self.vertical_alignment.clone();
+        let placeables: Vec<Placeable> =
+            placeables[start_index..end_index].iter().map(|p| p.clone().expect("measured")).collect();
         scope.layout(main_axis_layout_size, cross_axis_layout_size, move |p| {
             for (i, placeable) in placeables.iter().enumerate() {
-                let cross_axis_position = match datas[i].as_ref().and_then(|d| d.cross_axis_alignment.as_ref()) {
+                let data = placeable_parent_data(placeable);
+                let cross_axis_position = match data.as_ref().and_then(|d| d.cross_axis_alignment.as_ref()) {
                     Some(alignment) => alignment.align(
                         cross_axis_layout_size,
                         placeable.height(),
@@ -422,7 +527,7 @@ impl MeasurePolicy for RowMeasurePolicy {
         measurables: &[&dyn Measurable],
         constraints: Constraints,
     ) -> MeasureResult {
-        measure_row_column(
+        measure_all(
             self,
             constraints.min_width,
             constraints.min_height,
@@ -513,19 +618,25 @@ impl RowColumnMeasurePolicy for ColumnMeasurePolicy {
 
     fn place_helper(
         &self,
-        placeables: Vec<Placeable>,
-        datas: Vec<Option<RowColumnParentData>>,
+        placeables: &[Option<Placeable>],
         scope: &MeasureScope,
         before_cross_axis_alignment_line: i32,
         main_axis_positions: Vec<i32>,
         main_axis_layout_size: i32,
         cross_axis_layout_size: i32,
+        _: Option<CrossAxisOffsets>,
+        _: usize,
+        start_index: usize,
+        end_index: usize,
     ) -> MeasureResult {
         let horizontal_alignment = self.horizontal_alignment.clone();
         let layout_direction = scope.layout_direction();
+        let placeables: Vec<Placeable> =
+            placeables[start_index..end_index].iter().map(|p| p.clone().expect("measured")).collect();
         scope.layout(cross_axis_layout_size, main_axis_layout_size, move |p| {
             for (i, placeable) in placeables.iter().enumerate() {
-                let cross_axis_position = match datas[i].as_ref().and_then(|d| d.cross_axis_alignment.as_ref()) {
+                let data = placeable_parent_data(placeable);
+                let cross_axis_position = match data.as_ref().and_then(|d| d.cross_axis_alignment.as_ref()) {
                     Some(alignment) => alignment.align(
                         cross_axis_layout_size,
                         placeable.width(),
@@ -563,7 +674,7 @@ impl MeasurePolicy for ColumnMeasurePolicy {
         measurables: &[&dyn Measurable],
         constraints: Constraints,
     ) -> MeasureResult {
-        measure_row_column(
+        measure_all(
             self,
             constraints.min_height,
             constraints.min_width,

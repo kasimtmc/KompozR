@@ -516,7 +516,10 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
                 || l.suspend
                 || ["Rc<dyn", "Arc<dyn", "Box<dyn"].iter().any(|o| ty.contains(o)),
             measure_policy: false,
-            typed: ["Rc<dyn", "Arc<dyn", "Box<dyn"].iter().any(|o| ty.contains(o)),
+            // (a trait object's, and a fun interface's — `impl FlexBoxConfig`, its closures' parameters typed for
+            // Rust to find the trait's blanket impl)
+            typed: ["Rc<dyn", "Arc<dyn", "Box<dyn"].iter().any(|o| ty.contains(o))
+                || (ty.starts_with("impl ") && !["Fn(", "FnMut(", "FnOnce(", "Future"].iter().any(|f| ty.contains(f))),
         })
     };
     PInfo {

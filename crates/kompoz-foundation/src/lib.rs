@@ -15,6 +15,8 @@
 #![allow(non_upper_case_globals, non_snake_case)]
 
 mod background;
+pub mod basic_marquee;
+pub mod basic_tooltip;
 mod border;
 mod canvas;
 pub mod clickable;
@@ -50,6 +52,10 @@ pub use kompoz_animation::{MutatePriority, MutatorMutex};
 /// What an app using foundation imports: the layouts, the composables, the modifier extension traits, the gesture
 /// detectors, interactions and indications.
 pub mod prelude {
+    pub use crate::basic_marquee::{MarqueeAnimationMode, MarqueeDefaults, MarqueeModifiers, MarqueeSpacing};
+    pub use crate::basic_tooltip::{
+        BasicTooltipBox, BasicTooltipDefaults, BasicTooltipState, remember_basic_tooltip_state,
+    };
     pub use crate::clickable::{Callback, ClickableModifiers};
     pub use crate::clip_scrollable_container::{ClipScrollableContainerModifiers, MaxSupportedElevation};
     pub use crate::draganddrop::DragAndDropModifiers;

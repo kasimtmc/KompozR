@@ -192,8 +192,7 @@ impl NodeCoordinator {
     }
 
     pub(crate) fn measure_scope(&self) -> MeasureScope {
-        let n = self.node();
-        MeasureScope::new(n.density(), n.layout_direction())
+        MeasureScope::for_node(&self.node())
     }
 
     /// The scope its measure result's placement block places in (Compose's `placementScope`).

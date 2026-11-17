@@ -3,7 +3,7 @@
 
 use super::alignment_lines::{AlignmentLines, NOT_PLACED};
 use super::{NodeCoordinator, Owner, ReaderScope};
-use crate::layout::{LayerBlock, MeasurePolicy};
+use crate::layout::{LayerBlock, MeasurePolicy, VirtualLayoutNode};
 use crate::modifier::chain::NodeChain;
 use crate::modifier::{Modifier, NodeKind, NodeRc, dispatch_for_kind};
 use crate::semantics::SemanticsConfiguration;
@@ -122,6 +122,10 @@ pub struct LayoutNode {
     /// Deactivated by its composition (Compose's `isDeactivated`): kept for reuse, its modifier's nodes detached,
     /// left out of the semantics.
     pub(crate) is_deactivated: Cell<bool>,
+    /// What its contents emitted when that includes virtual nodes (a multi-content layout's), else None.
+    pub(crate) virtual_children: RefCell<Option<Vec<Emitted>>>,
+    /// How many layouts each of those holds, as of the last sync.
+    pub(crate) virtual_group_sizes: RefCell<Vec<usize>>,
 }
 
 /// A measure policy measuring nothing, 0 by 0 (a node's until one is set: Compose's ErrorMeasurePolicy stands in
@@ -207,6 +211,8 @@ impl LayoutNode {
                 anchor: RefCell::new(Weak::new()),
                 subcompositions: RefCell::new(None),
                 is_deactivated: Cell::new(false),
+                virtual_children: RefCell::new(None),
+                virtual_group_sizes: RefCell::new(Vec::new()),
             }
         })
     }
@@ -788,11 +794,32 @@ impl LayoutNode {
 impl Node for LayoutNode {
     /// Compose's applier: the children become `children` (moved, inserted, removed), attached and detached.
     fn set_children(&self, children: &[Rc<dyn Node>]) {
-        let emitted: Vec<Rc<LayoutNode>> = children
-            .iter()
-            .map(|c| (c.clone() as Rc<dyn Any>).downcast::<LayoutNode>().expect("kompoz: a node of another kind"))
-            .collect();
-        self.rc().set_layout_children(emitted);
+        let mut emitted: Vec<Emitted> = Vec::with_capacity(children.len());
+        for c in children {
+            let any = c.clone() as Rc<dyn Any>;
+            match any.downcast::<LayoutNode>() {
+                Ok(node) => emitted.push(Emitted::Layout(node)),
+                Err(any) => {
+                    let virtual_node = any.downcast::<VirtualLayoutNode>().expect("kompoz: a node of another kind");
+                    virtual_node.set_parent(self.this.clone());
+                    emitted.push(Emitted::Virtual(virtual_node));
+                }
+            }
+        }
+        if emitted.iter().any(|e| matches!(e, Emitted::Virtual(_))) {
+            *self.virtual_children.borrow_mut() = Some(emitted);
+            self.rc().sync_virtual_children();
+        } else {
+            *self.virtual_children.borrow_mut() = None;
+            let nodes = emitted
+                .into_iter()
+                .map(|e| match e {
+                    Emitted::Layout(n) => n,
+                    Emitted::Virtual(_) => unreachable!(),
+                })
+                .collect();
+            self.rc().set_layout_children(nodes);
+        }
     }
 
     /// Composed again for other content (Compose's `onReuse`): its modifier's nodes reset (unless it was
@@ -816,7 +843,61 @@ impl Node for LayoutNode {
     }
 }
 
+/// What a layout's content emitted: a layout, or a virtual node holding layouts (a multi-content layout's).
+pub(crate) enum Emitted {
+    Layout(Rc<LayoutNode>),
+    Virtual(Rc<VirtualLayoutNode>),
+}
+
 impl LayoutNode {
+    /// Its children made again from what its contents emitted, its virtual nodes' layouts in their places
+    /// (Compose's folded children: a virtual node's children are its parent's); measured again when only the
+    /// groups changed.
+    pub(crate) fn sync_virtual_children(self: &Rc<Self>) {
+        let (flat, groups) = {
+            let emitted = self.virtual_children.borrow();
+            let Some(emitted) = emitted.as_ref() else { return };
+            let mut flat = Vec::new();
+            let mut groups = Vec::new();
+            for e in emitted {
+                match e {
+                    Emitted::Layout(n) => {
+                        flat.push(n.clone());
+                        groups.push(1);
+                    }
+                    Emitted::Virtual(v) => {
+                        let nodes = v.nodes();
+                        groups.push(nodes.len());
+                        flat.extend(nodes);
+                    }
+                }
+            }
+            (flat, groups)
+        };
+        let same_groups = *self.virtual_group_sizes.borrow() == groups;
+        *self.virtual_group_sizes.borrow_mut() = groups;
+        self.set_layout_children(flat);
+        if !same_groups {
+            self.invalidate_measurements();
+        }
+    }
+
+    /// Its children by the virtual nodes they were emitted in (Compose's `getChildrenOfVirtualChildren`): one list
+    /// per virtual node (a layout emitted outside one is a list of its own); popup roots aren't children. Without
+    /// virtual nodes, its children as one list.
+    pub(crate) fn virtual_children_groups(&self) -> Vec<Vec<Rc<LayoutNode>>> {
+        let emitted = self.virtual_children.borrow();
+        let Some(emitted) = emitted.as_ref() else { return vec![self.children()] };
+        emitted
+            .iter()
+            .map(|e| match e {
+                Emitted::Layout(n) => vec![n.clone()],
+                Emitted::Virtual(v) => v.nodes(),
+            })
+            .map(|g| g.into_iter().filter(|n| !n.is_popup_root()).collect())
+            .collect()
+    }
+
     /// Its children become `emitted` (moved, inserted, removed; popup roots to its overlays), as the applier makes
     /// them.
     pub(crate) fn set_layout_children(self: &Rc<Self>, emitted: Vec<Rc<LayoutNode>>) {

@@ -1,6 +1,7 @@
 //! foundation.layout, as Compose's `androidx.compose.foundation.layout`: the layouts (`Box`, `Row`, `Column`,
-//! `Spacer`, `BoxWithConstraints`), arrangements, the padding, size, offset, aspect ratio, intrinsic size,
-//! alignment line padding and scope modifiers, window insets, and fitting inside or outside rulers.
+//! `Spacer`, `BoxWithConstraints`, `FlowRow`, `FlowColumn`, `ContextualFlowRow`, `ContextualFlowColumn`, `FlexBox`,
+//! `Grid`), arrangements, the padding, size, offset, aspect ratio, intrinsic size, alignment line padding and scope
+//! modifiers, window insets, and fitting inside or outside rulers.
 //!
 //! Compose's modifiers are extension functions of `Modifier`; here they are methods of extension traits
 //! implemented for it ([`PaddingModifiers`], [`SizeModifiers`], [`LayoutScopeModifiers`], …), with Compose's
@@ -13,15 +14,23 @@
 //! none, so the content is a plain closure and the scope modifiers (`align`, `weight`, `align_by`, …) are
 //! methods of one trait, [`LayoutScopeModifiers`], usable anywhere: one only means something to the parent it is
 //! meant for (`align(Alignment)` to a Box, `align(VerticalAlignment)` to a Row, …) and others ignore it, as
-//! Compose's parent data does.
+//! Compose's parent data does. So are the flow layouts' `fill_max_row_height`/`fill_max_column_width`
+//! ([`FlowLayoutScopeModifiers`]), `FlexBoxScope`'s `flex` ([`FlexBoxScopeModifiers`]) and `GridScope`'s
+//! `gridItem` overloads ([`GridScopeModifiers`]). A Grid's config block, a `GridConfigurationScope.() -> Unit`, is
+//! a closure given the scope: `|c: &mut GridConfigurationScope| { c.column(50.dp()); c.column(1.fr()); }`.
 
 mod alignment_line;
 mod arrangement;
 mod aspect_ratio;
 mod box_;
 mod box_with_constraints;
+mod contextual_flow_layout;
+mod flex_box;
+mod flow_layout;
+mod grid;
 mod intrinsic;
 mod offset;
+pub(crate) mod orientation;
 mod padding;
 mod row_column;
 mod ruler_alignment;
@@ -41,6 +50,23 @@ pub use arrangement::{
 pub use aspect_ratio::AspectRatioModifiers;
 pub use box_::Box;
 pub use box_with_constraints::{BoxWithConstraints, BoxWithConstraintsScope};
+pub use contextual_flow_layout::{
+    ContextualFlowColumn, ContextualFlowColumnScope, ContextualFlowRow, ContextualFlowRowScope,
+};
+pub use flex_box::{
+    DefaultFlexBoxConfig, DefaultFlexConfig, FlexAlignContent, FlexAlignItems, FlexAlignSelf, FlexBasis, FlexBox,
+    FlexBoxConfig, FlexBoxConfigArgs, FlexBoxConfigScope, FlexBoxScopeModifiers, FlexConfig, FlexConfigArgs,
+    FlexConfigScope, FlexDirection, FlexJustifyContent, FlexWrap,
+};
+pub use flow_layout::{
+    ContextualFlowColumnOverflow, ContextualFlowColumnOverflowScope, ContextualFlowRowOverflow,
+    ContextualFlowRowOverflowScope, FlowColumn, FlowColumnOverflow, FlowColumnOverflowScope, FlowLayoutOverflow,
+    FlowLayoutScopeModifiers, FlowRow, FlowRowOverflow, FlowRowOverflowScope,
+};
+pub use grid::{
+    Fr, FrExt, Grid, GridConfigurationScope, GridFlow, GridScope, GridScopeModifiers, GridTrackSize, GridTrackSizeArgs,
+    GridTrackSpec,
+};
 pub use intrinsic::{IntrinsicSize, IntrinsicSizeModifiers};
 pub use offset::{OffsetFn, OffsetModifiers};
 pub use padding::{CustomPaddingValues, PaddingModifiers, PaddingValues};

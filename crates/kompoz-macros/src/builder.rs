@@ -86,13 +86,22 @@ pub(crate) fn fn_sugar(p: &Param) -> Option<&ParenthesizedGenericArguments> {
     None
 }
 
+/// The type of an `impl Trait` parameter's default: a fn pointer for an `impl Fn…` (its default a closure or a
+/// function), else the unit struct its default names (`#[default(DefaultFlexBoxConfig)] config: impl FlexBoxConfig`:
+/// Compose's companion object standing for the default).
 fn fn_pointer(p: &Param) -> Result<Type> {
     match fn_sugar(p) {
         Some(args) => {
             let (inputs, output) = (&args.inputs, &args.output);
             Ok(parse_quote!(fn(#inputs) #output))
         }
-        None => Err(Error::new(p.ty.span(), "kompoz: a defaulted `impl Trait` parameter must be an `impl Fn…`")),
+        None => match &p.default {
+            Some(Expr::Path(ExprPath { qself: None, path, .. })) => Ok(parse_quote!(#path)),
+            _ => Err(Error::new(
+                p.ty.span(),
+                "kompoz: a defaulted `impl Trait` parameter must be an `impl Fn…`, or default to a unit struct (its path)",
+            )),
+        },
     }
 }
 

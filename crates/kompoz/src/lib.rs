@@ -27,6 +27,7 @@ pub use kompoz_coroutines as coroutines;
 pub use kompoz_foundation as foundation;
 pub use kompoz_gpu as gpu;
 pub use kompoz_graphics as graphics;
+pub use kompoz_material_ripple as material_ripple;
 pub use kompoz_platform as platform;
 pub use kompoz_runtime as runtime;
 /// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
@@ -43,7 +44,8 @@ pub use kompoz_runtime::{kompozable, kompozable_block, kompozable_lambda, named,
 /// flows), animation (Animatable, specs, easings, decays), graphics (units — `16.dp()` —, colors, geometry, shapes,
 /// brushes, paths, images), text (styles, fonts, annotated strings), the UI core (`Modifier`, `Alignment`, `Layout`,
 /// the host's types, the composition locals, `Role`), foundation (Box, Row, Column, BasicText, the modifiers' traits,
-/// gestures, interactions), the app entry (`App`), and the Kotlin syntax's macros.
+/// gestures, interactions), the ripple node (material-ripple's), the app entry (`App`), and the Kotlin syntax's
+/// macros.
 ///
 /// The crates' roots are taken whole (their modules with them); where two of them use a name, the one an app means
 /// is named here: the modules `draw` and `input` are the UI's (`DrawScope`, pointer input), `shape` and `unit`
@@ -53,6 +55,7 @@ pub mod prelude {
     pub use kompoz_coroutines::*;
     pub use kompoz_foundation::prelude::*;
     pub use kompoz_graphics::*;
+    pub use kompoz_material_ripple::prelude::*;
     pub use kompoz_runtime::*;
     pub use kompoz_text::*;
     pub use kompoz_ui::*;

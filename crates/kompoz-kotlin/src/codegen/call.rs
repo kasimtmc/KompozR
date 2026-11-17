@@ -642,9 +642,14 @@ impl Gen<'_, '_> {
                     || p.ty.contains("Fn<")
                     || p.ty.trim_start().starts_with("fn(");
                 if a.value.is_lambda() != lambda_param && !p.vararg {
-                    // (a lambda to a non-function parameter, or the reverse: a function value is one)
-                    let value_fits =
-                        matches!(a.value, ArgValue::Expr(e) if matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_)));
+                    // (a lambda to a non-function parameter, or the reverse: a function value is one, and any value
+                    // can be a fun interface's — `easing = LinearEasing` to an `impl Easing`)
+                    let fun_interface = p.lambda.is_some()
+                        && !p.ty.contains("Fn(")
+                        && !p.ty.contains("Fn<")
+                        && !p.ty.trim_start().starts_with("fn(");
+                    let value_fits = matches!(a.value, ArgValue::Expr(e)
+                        if fun_interface || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_)));
                     if a.value.is_lambda() || !value_fits {
                         return None;
                     }

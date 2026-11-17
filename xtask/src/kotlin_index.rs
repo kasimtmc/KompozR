@@ -46,6 +46,7 @@ const API_CRATES: &[&str] = &[
     "kompoz-ui",
     "kompoz-animation",
     "kompoz-foundation",
+    "kompoz-material-ripple",
     "kompoz-test",
 ];
 
@@ -850,6 +851,12 @@ fn substitute(body: TokenStream, param: &str, ty: &proc_macro2::Ident) -> TokenS
     out.into_iter().collect()
 }
 
+thread_local! {
+    /// The fun interfaces found (traits implemented for the closures of a signature): the closures' bounds.
+    static FUN_INTERFACES: std::cell::RefCell<BTreeMap<String, Vec<TypeParamBound>>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
 fn prescan(items: &[Item], scan: &mut Scan) {
     for item in items {
         match item {
@@ -869,9 +876,23 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                     }
                     if trait_name.ends_with("Args") {
                         scan.overloads
-                            .entry(trait_name)
+                            .entry(trait_name.clone())
                             .or_default()
                             .push(((*imp.self_ty).clone(), kotlin_doc(&imp.attrs)));
+                    }
+                    // A Kotlin fun interface (`fun interface FlexBoxConfig`): a trait implemented for the closures of
+                    // one signature (`impl<F: Fn(&mut FlexBoxConfigScope)> FlexBoxConfig for F`) takes a lambda.
+                    if let Type::Path(self_ty) = &*imp.self_ty
+                        && self_ty.path.segments.len() == 1
+                        && let Some(bounds) = imp.generics.params.iter().find_map(|p| match p {
+                            syn::GenericParam::Type(tp) if self_ty.path.segments[0].ident == tp.ident => {
+                                Some(tp.bounds.iter().cloned().collect::<Vec<_>>())
+                            }
+                            _ => None,
+                        })
+                        && bounds.iter().any(|b| matches!(b, TypeParamBound::Trait(t) if t.path.segments.last().is_some_and(|s| s.ident == "Fn")))
+                    {
+                        FUN_INTERFACES.with(|f| f.borrow_mut().insert(trait_name, bounds));
                     }
                 }
             }
@@ -1429,7 +1450,11 @@ fn from_bounds(
             "Fn" => "Fn",
             "FnMut" => "FnMut",
             "FnOnce" => "FnOnce",
-            _ => return None,
+            // (a fun interface: the lambda its closures are)
+            name => {
+                let fun = FUN_INTERFACES.with(|f| f.borrow().get(name).cloned())?;
+                return from_bounds(&fun, generic, boxed_futures);
+            }
         };
         let syn::PathArguments::Parenthesized(args) = &seg.arguments else { return None };
         let inputs: Vec<String> = args.inputs.iter().map(|a| text(a.ty.to_token_stream())).collect();

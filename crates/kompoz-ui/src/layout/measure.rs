@@ -12,7 +12,7 @@ use kompoz_graphics::{Density, IntOffset, IntSize, LayoutDirection};
 use kompoz_runtime::named;
 use std::any::Any;
 use std::fmt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 /// Something whose intrinsic sizes can be asked (Compose's IntrinsicMeasurable): a child of a layout, or what a
 /// layout modifier wraps.
@@ -158,6 +158,9 @@ pub struct MeasureScope {
     pub(crate) layout_direction: LayoutDirection,
     /// Measuring for an intrinsic size rather than for real (Compose's IntrinsicsMeasureScope).
     pub(crate) intrinsics: bool,
+    /// The layout node it measures (Compose's MeasureScopeWithLayoutNode): a multi-content layout's policy finds
+    /// its children's groups through it.
+    pub(crate) node: Option<Weak<crate::node::LayoutNode>>,
 }
 
 /// Compose's IntrinsicMeasureScope: the same as a measure scope here.
@@ -165,7 +168,17 @@ pub type IntrinsicMeasureScope = MeasureScope;
 
 impl MeasureScope {
     pub fn new(density: Density, layout_direction: LayoutDirection) -> MeasureScope {
-        MeasureScope { density, layout_direction, intrinsics: false }
+        MeasureScope { density, layout_direction, intrinsics: false, node: None }
+    }
+
+    /// The scope a layout node measures in.
+    pub(crate) fn for_node(node: &crate::node::LayoutNode) -> MeasureScope {
+        MeasureScope {
+            density: node.density(),
+            layout_direction: node.layout_direction(),
+            intrinsics: false,
+            node: Some(node.this.clone()),
+        }
     }
     pub fn density(&self) -> Density {
         self.density

@@ -1517,12 +1517,15 @@ impl DisplayList {
     /// as it was (through the state it is drawn in now), what it left out and asked asked again there.
     fn keep_moved(&mut self, frame: &[Command], events: &[Event], ranges: &[Range], index: u32, by: Offset) -> bool {
         let r = ranges[index as usize];
-        // Its translation: the first command, popped by the last, with nothing asked before or after it.
+        // Its translation: the first command, popped by the last, with nothing asked before or after it — to where it
+        // was (a node at its parent's origin has none: a translation enclosing all it drew is then one of its own
+        // modifiers', a padding's, kept as it was).
         let (first, end) = (r.first_command, r.end_command);
         let own = &events[r.first_event as usize + 1..(r.end_event as usize).saturating_sub(1)];
         let enclosing = first < end
             && frame[first as usize].kind == Kind::PushTranslation
             && frame[first as usize].end == end
+            && r.origin == Some(frame[first as usize].p1)
             && own.iter().all(|e| e.at > first && e.at < end);
         let was = if enclosing { frame[first as usize].p1 } else { Offset::Zero };
         let whole = |v: f32| if (v - v.round()).abs() < 1e-3 { v.round() } else { v }; // (layout's whole px)
