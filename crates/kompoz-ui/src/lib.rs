@@ -25,6 +25,7 @@ pub mod modifier;
 pub mod motion_duration_scale;
 pub mod node;
 pub mod platform;
+pub mod platform_text_input;
 pub mod semantics;
 pub mod spatial;
 pub mod state;

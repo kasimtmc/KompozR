@@ -41,8 +41,9 @@ impl TextEditState {
     }
 }
 
-/// The software keyboard a field wants (Compose's KeyboardType).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// The software keyboard a field wants (Compose's KeyboardType): what text-input-v3 is told as the field's content
+/// purpose and hints.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum KeyboardType {
     #[default]
     Unspecified,
@@ -55,10 +56,31 @@ pub enum KeyboardType {
     Password,
     NumberPassword,
     Decimal,
+    /// A password shown as it is typed.
+    PasswordVisible,
+    PostalAddress,
+    PersonName,
+    EmailSubject,
+    ShortMessage,
+    LongMessage,
+    /// Text filtering a list.
+    Filter,
+    /// Text spelled out phonetically.
+    Phonetic,
+    DateTime,
+    Date,
+    Time,
+    /// A number that may be negative.
+    NumberSigned,
+    /// A decimal that may be negative.
+    DecimalSigned,
+    DecimalPassword,
+    NumberPasswordSigned,
+    DecimalPasswordSigned,
 }
 
 /// The action key a field shows (Compose's ImeAction).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum ImeAction {
     #[default]
     Unspecified,
@@ -73,7 +95,7 @@ pub enum ImeAction {
 }
 
 /// How the keyboard capitalizes (Compose's KeyboardCapitalization).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum KeyboardCapitalization {
     #[default]
     Unspecified,
@@ -83,8 +105,15 @@ pub enum KeyboardCapitalization {
     Sentences,
 }
 
-/// What a focused field asks of the input method (C++'s ImeOptions: Compose's KeyboardOptions and a field's
-/// single-lineness).
+/// What the platform's input method is given beyond the common options (Compose's PlatformImeOptions): Android's
+/// private IME options (`EditorInfo.privateImeOptions`); the desktop's input methods take nothing more.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct PlatformImeOptions {
+    pub private_ime_options: Option<String>,
+}
+
+/// What a focused field asks of the input method (Compose's ImeOptions, as KeyboardOptions makes it with a field's
+/// single-lineness; C++'s ImeOptions).
 #[derive(Clone, PartialEq, Debug)]
 pub struct ImeOptions {
     pub keyboard_type: KeyboardType,
@@ -92,8 +121,12 @@ pub struct ImeOptions {
     pub capitalization: KeyboardCapitalization,
     pub auto_correct: bool,
     pub single_line: bool,
-    /// False: the typing goes to the field, the software keyboard stays as it is.
+    /// False: the typing goes to the field, the software keyboard stays as it is (C++'s; Compose's fields decide
+    /// it with KeyboardOptions' `showKeyboardOnFocus`).
     pub show_keyboard: bool,
+    pub platform_ime_options: Option<PlatformImeOptions>,
+    /// The languages the input method is hinted to type in (empty: none).
+    pub hint_locales: kompoz_text::LocaleList,
 }
 
 impl Default for ImeOptions {
@@ -105,6 +138,8 @@ impl Default for ImeOptions {
             auto_correct: true,
             single_line: true,
             show_keyboard: true,
+            platform_ime_options: None,
+            hint_locales: kompoz_text::LocaleList::empty(),
         }
     }
 }
@@ -633,13 +668,26 @@ impl PartialEq for DeepLinks {
     }
 }
 
-/// The software keyboard (Compose's SoftwareKeyboardController): hidden on request; shown by a focused field.
+/// The software keyboard (Compose's SoftwareKeyboardController, desktop's DelegatingSoftwareKeyboardController over
+/// the text input service): shown again for the field taking typing, hidden on request. On the desktop the
+/// platform's input method is the keyboard (text-input-v3 enabled, an XIM context focused).
 #[derive(Clone, PartialEq, Default)]
-pub struct SoftwareKeyboardController(pub(crate) PlatformHandle);
+pub struct SoftwareKeyboardController(pub(crate) crate::text_input::TextInputService);
 
 impl SoftwareKeyboardController {
+    /// One showing and hiding through `service`'s sessions.
+    pub fn new(service: crate::text_input::TextInputService) -> SoftwareKeyboardController {
+        SoftwareKeyboardController(service)
+    }
+
+    /// Shows the keyboard for the session open now, if one is (Compose's `show`).
+    pub fn show(&self) {
+        self.0.show_software_keyboard();
+    }
+
+    /// Hides the keyboard (Compose's `hide`).
     pub fn hide(&self) {
-        self.0.get().hide_software_keyboard();
+        self.0.hide_software_keyboard();
     }
 }
 

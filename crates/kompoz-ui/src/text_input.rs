@@ -1,139 +1,85 @@
-//! Text input from the platform's input method (Compose's `TextInputService` and `TextInputSession` of ui-text's
-//! `androidx.compose.ui.text.input`, and its `EditCommand`s): a focused editor starts a session with its text,
-//! selection and options, and gets what the input method does to them as edit commands — text committed (typed on
-//! a keyboard, or chosen in an input method), composing text (an input method's preedit), the composing region set
-//! or finished, text around the caret deleted, the selection moved — and the input method's action key. The platform
-//! is told the session's state through its callbacks ([`PlatformCallbacks::text_input`](crate::platform::PlatformCallbacks::text_input) and
-//! [`text_input_changed`](crate::platform::PlatformCallbacks::text_input_changed)); what it receives it hands to the host
-//! ([`KompozHost::text_input`](crate::KompozHost::text_input), `set_composing_text`, `send_edit_commands`,
+//! Text input from the platform's input method: the host's text input service (Compose's `TextInputService` and
+//! `TextInputSession` of `androidx.compose.ui.text.input`), what both Compose APIs go through here:
+//!
+//! - the legacy one (what the value-based text field uses): a focused editor starts a session with its text,
+//!   selection and options ([`TextInputService::start_input`]) and gets what the input method does as
+//!   [`EditCommand`]s and its action key;
+//! - the one of Compose 1.7+ ([`platform_text_input`](crate::platform_text_input):
+//!   `PlatformTextInputModifierNode`, `establish_text_input_session`, `start_input_method`): a session made of a
+//!   [`PlatformTextInputMethodRequest`](crate::platform_text_input::PlatformTextInputMethodRequest), whose editor
+//!   is read again after the commands it took and whenever what it holds changes (Compose desktop's
+//!   DesktopTextInputService2 reads its request's state).
+//!
+//! One session is open at a time, a new one closing the one before; the platform is told the session's state
+//! through its callbacks ([`PlatformCallbacks::text_input`](crate::platform::PlatformCallbacks::text_input) and
+//! [`text_input_changed`](crate::platform::PlatformCallbacks::text_input_changed)); what it receives it hands to the
+//! host ([`KompozHost::text_input`](crate::KompozHost::text_input), `set_composing_text`, `send_edit_commands`,
 //! `ime_action`), which hands it to the session open now.
 //!
-//! Offsets are UTF-8 byte offsets in the text, as [`TextEditState`]'s (Compose counts UTF-16 units): what a command
-//! gives is clamped to the text and to whole characters.
+//! Offsets are UTF-8 byte offsets in the text, as [`TextEditState`]'s and kompoz-text's (Compose counts UTF-16
+//! units): what a command gives is clamped to the text and to whole characters (kompoz-text's
+//! [`EditingBuffer`]). A platform speaking UTF-16 or code points converts at its boundary (text-input-v3 and XIM
+//! speak UTF-8 bytes already).
 
 use crate::platform::{ImeAction, ImeOptions, PlatformHandle, TextEditState};
 use kompoz_graphics::Rect;
 use kompoz_runtime::KompozitionLocal;
+use kompoz_text::TextRange;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// What an input method does to the text being edited (Compose's EditCommand implementations, those the platforms'
-/// input methods send). Applied with [`apply`](EditCommand::apply) as Compose's `EditingBuffer` applies them.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum EditCommand {
-    /// `text` in place of the composition (or, without one, the selection), the composition finished; the caret
-    /// then `new_cursor_position` from it as Compose has it: above 0, that many minus one after the text's end;
-    /// else that many before its start (Compose's CommitTextCommand).
-    CommitText { text: String, new_cursor_position: i32 },
-    /// `text` in place of the composition (or the selection), and composing (none if it is empty); the caret as
-    /// for [`CommitText`](EditCommand::CommitText) (Compose's SetComposingTextCommand).
-    SetComposingText { text: String, new_cursor_position: i32 },
-    /// The text from `start` to `end` composing (none if they are the same) (Compose's SetComposingRegionCommand).
-    SetComposingRegion { start: usize, end: usize },
-    /// The composition finished: its text stays (Compose's FinishComposingTextCommand).
-    FinishComposingText,
-    /// `before` bytes before the selection and `after` bytes after it deleted, whole characters (Compose's
-    /// DeleteSurroundingTextCommand).
-    DeleteSurroundingText { before: usize, after: usize },
-    /// The selection from `start` to `end` (Compose's SetSelectionCommand).
-    SetSelection { start: usize, end: usize },
-}
+pub use kompoz_text::input::{EditCommand, EditProcessor, EditingBuffer, TextFieldValue};
 
-/// The nearest character boundary of `text` at or before `at` (clamped to it).
-fn floor_boundary(text: &str, at: usize) -> usize {
-    let mut at = at.min(text.len());
-    while !text.is_char_boundary(at) {
-        at -= 1;
-    }
-    at
-}
-
-/// The nearest character boundary of `text` at or after `at` (clamped to it).
-fn ceil_boundary(text: &str, at: usize) -> usize {
-    let mut at = at.min(text.len());
-    while !text.is_char_boundary(at) {
-        at += 1;
-    }
-    at
-}
-
-/// `range` after `deleted` was taken out of the text (Compose's `updateRangeAfterDelete`).
-fn after_delete(range: (usize, usize), deleted: (usize, usize)) -> (usize, usize) {
-    let shift = |at: usize| {
-        if at <= deleted.0 {
-            at
-        } else if at >= deleted.1 {
-            at - (deleted.1 - deleted.0)
-        } else {
-            deleted.0
-        }
-    };
-    (shift(range.0), shift(range.1))
-}
-
-/// The selection of `state`, ordered and on whole characters.
-fn selection_of(state: &TextEditState) -> (usize, usize) {
-    let len = state.text.len();
-    let sel = (state.selection_start.min(state.selection_end), state.selection_start.max(state.selection_end));
-    (floor_boundary(&state.text, sel.0.min(len)), ceil_boundary(&state.text, sel.1.min(len)))
-}
-
-/// What a commit or a composing text replaces in `state`: the composition, else the selection.
-fn replaced_by_text(state: &TextEditState) -> (usize, usize) {
-    match state.composition {
-        Some((s, e)) => (floor_boundary(&state.text, s.min(e)), ceil_boundary(&state.text, s.max(e))),
-        None => selection_of(state),
-    }
-}
-
-impl EditCommand {
-    /// Applies it to `state`, as Compose's command applies to its EditingBuffer.
-    pub fn apply(&self, state: &mut TextEditState) {
-        let len = state.text.len();
-        let sel = selection_of(state);
-        match self {
-            EditCommand::CommitText { text, new_cursor_position }
-            | EditCommand::SetComposingText { text, new_cursor_position } => {
-                let (start, end) = replaced_by_text(state);
-                state.text.replace_range(start..end, text);
-                let composing = matches!(self, EditCommand::SetComposingText { .. }) && !text.is_empty();
-                state.composition = composing.then_some((start, start + text.len()));
-                let p = *new_cursor_position as i64;
-                let cursor = if p > 0 { (start + text.len()) as i64 + p - 1 } else { start as i64 + p };
-                let cursor = cursor.clamp(0, state.text.len() as i64) as usize;
-                let cursor = floor_boundary(&state.text, cursor);
-                state.selection_start = cursor;
-                state.selection_end = cursor;
-            }
-            EditCommand::SetComposingRegion { start, end } => {
-                let (s, e) = ((*start).min(*end).min(len), (*start).max(*end).min(len));
-                state.composition = (s != e).then(|| (floor_boundary(&state.text, s), ceil_boundary(&state.text, e)));
-            }
-            EditCommand::FinishComposingText => state.composition = None,
-            EditCommand::DeleteSurroundingText { before, after } => {
-                // (After the selection first, then before it: Compose's order.)
-                let end = ceil_boundary(&state.text, sel.1.saturating_add(*after));
-                let mut deleted = vec![(sel.1, end)];
-                let start = floor_boundary(&state.text, sel.0.saturating_sub(*before));
-                deleted.push((start, sel.0));
-                let mut selection = sel;
-                let mut composition = state.composition;
-                for &(a, b) in &deleted {
-                    if a < b {
-                        state.text.replace_range(a..b, "");
-                        selection = after_delete(selection, (a, b));
-                        composition = composition.map(|c| after_delete(c, (a, b))).filter(|c| c.0 != c.1);
-                    }
-                }
-                state.selection_start = selection.0;
-                state.selection_end = selection.1;
-                state.composition = composition;
-            }
-            EditCommand::SetSelection { start, end } => {
-                state.selection_start = floor_boundary(&state.text, *start);
-                state.selection_end = floor_boundary(&state.text, *end);
+impl TextEditState {
+    /// The editing buffer holding it (its selection in order).
+    pub fn to_editing_buffer(&self) -> EditingBuffer {
+        let len = self.text.len();
+        let selection = TextRange::new(self.selection_start.min(len), self.selection_end.min(len));
+        let mut buffer = EditingBuffer::from_text(&self.text, selection);
+        if let Some((s, e)) = self.composition {
+            let (s, e) = (s.min(e).min(len), s.max(e).min(len));
+            if s < e {
+                buffer.set_composition(s, e);
             }
         }
+        buffer
+    }
+
+    /// What `buffer` holds.
+    pub fn from_editing_buffer(buffer: &EditingBuffer) -> TextEditState {
+        TextEditState {
+            text: buffer.text().to_string(),
+            selection_start: buffer.selection_start(),
+            selection_end: buffer.selection_end(),
+            composition: buffer.composition().map(|c| (c.start, c.end)),
+        }
+    }
+
+    /// Applies `command` to it, as Compose's command applies to its EditingBuffer (the selection comes out in
+    /// order).
+    pub fn apply(&mut self, command: &EditCommand) {
+        let mut buffer = self.to_editing_buffer();
+        command.apply_to(&mut buffer);
+        *self = TextEditState::from_editing_buffer(&buffer);
+    }
+
+    /// An editor's value as the input method sees it.
+    pub fn from_value(value: &TextFieldValue) -> TextEditState {
+        TextEditState {
+            text: value.text().to_string(),
+            selection_start: value.selection().start,
+            selection_end: value.selection().end,
+            composition: value.composition().map(|c| (c.min(), c.max())),
+        }
+    }
+
+    /// It as an editor's value.
+    pub fn to_value(&self) -> TextFieldValue {
+        TextFieldValue::from_text(
+            &self.text,
+            TextRange::new(self.selection_start, self.selection_end),
+            self.composition.map(|(s, e)| TextRange::new(s, e)),
+        )
     }
 }
 
@@ -141,28 +87,43 @@ impl EditCommand {
 struct SessionState {
     on_edit_command: Rc<dyn Fn(&[EditCommand])>,
     on_ime_action: Rc<dyn Fn(ImeAction)>,
+    /// The text as the input method sees it.
     state: RefCell<TextEditState>,
     options: ImeOptions,
     /// Where the editor is in the window (px), as last told.
     area: Cell<Rect>,
     open: Cell<bool>,
+    /// What the editor holds now, read after it took commands (a [`start_input_method`](
+    /// TextInputService::start_input_method) session's request): where it differs from what the input method
+    /// sees (it refused or changed what came), the input method is told.
+    value: Option<Rc<dyn Fn() -> TextFieldValue>>,
+    /// Counted up as the input method's view moves with its commands (what follows the editor's value reads it,
+    /// so that the editor going back to a value it had is seen as a change from what the input method sees).
+    version: kompoz_runtime::MutableState<u64>,
 }
 
 struct ServiceState {
     platform: PlatformHandle,
     session: RefCell<Option<Rc<SessionState>>>,
+    /// The sessions of the 1.7+ API (Compose's owner `textInputSession` mutex).
+    text_input_sessions: crate::platform_text_input::SessionMutex,
 }
 
-/// What a focused editor starts its input sessions with (Compose's TextInputService): one session is open at a
-/// time, a new one closing the one before; the platform is told as they open and close. Provided at the root by
-/// the host ([`LocalTextInputService`]). Cheap to clone; equal when the same.
+/// What a focused editor starts its input sessions with (Compose's TextInputService and the owner's
+/// `textInputSession`): one session is open at a time, a new one closing the one before; the platform is told as
+/// they open and close. Provided at the root by the host ([`LocalTextInputService`]). Cheap to clone; equal when
+/// the same.
 #[derive(Clone)]
 pub struct TextInputService(Rc<ServiceState>);
 
 impl TextInputService {
     /// One telling `platform`'s callbacks.
     pub fn new(platform: PlatformHandle) -> TextInputService {
-        TextInputService(Rc::new(ServiceState { platform, session: RefCell::new(None) }))
+        TextInputService(Rc::new(ServiceState {
+            platform,
+            session: RefCell::new(None),
+            text_input_sessions: crate::platform_text_input::SessionMutex::new(),
+        }))
     }
 
     /// Opens a session for an editor holding `value` (Compose's `startInput`): what the input method does comes to
@@ -174,13 +135,39 @@ impl TextInputService {
         on_edit_command: impl Fn(&[EditCommand]) + 'static,
         on_ime_action: impl Fn(ImeAction) + 'static,
     ) -> TextInputSession {
+        self.open(value, options, Rc::new(on_edit_command), Rc::new(on_ime_action), None)
+    }
+
+    /// Opens a session whose editor's value `value` reads (the 1.7+ API's request): the input method is told what
+    /// it holds after each batch of commands, where that differs from what the commands would have left.
+    pub(crate) fn start_input_reading(
+        &self,
+        options: ImeOptions,
+        value: Rc<dyn Fn() -> TextFieldValue>,
+        on_edit_command: Rc<dyn Fn(&[EditCommand])>,
+        on_ime_action: Rc<dyn Fn(ImeAction)>,
+    ) -> TextInputSession {
+        let state = kompoz_runtime::without_read_observation(|| TextEditState::from_value(&value()));
+        self.open(state, options, on_edit_command, on_ime_action, Some(value))
+    }
+
+    fn open(
+        &self,
+        value: TextEditState,
+        options: ImeOptions,
+        on_edit_command: Rc<dyn Fn(&[EditCommand])>,
+        on_ime_action: Rc<dyn Fn(ImeAction)>,
+        reads: Option<Rc<dyn Fn() -> TextFieldValue>>,
+    ) -> TextInputSession {
         let session = Rc::new(SessionState {
-            on_edit_command: Rc::new(on_edit_command),
-            on_ime_action: Rc::new(on_ime_action),
+            on_edit_command,
+            on_ime_action,
             state: RefCell::new(value),
             options,
             area: Cell::new(Rect::Zero),
             open: Cell::new(true),
+            value: reads,
+            version: kompoz_runtime::mutable_state_of(0),
         });
         let before = self.0.session.replace(Some(session.clone()));
         if let Some(before) = before {
@@ -197,7 +184,7 @@ impl TextInputService {
         session.dispose();
     }
 
-    /// Shows the software keyboard for the open session again (Compose's `showSoftwareKeyboard`).
+    /// Shows the software keyboard for the open session again, if one is open (Compose's `showSoftwareKeyboard`).
     pub fn show_software_keyboard(&self) {
         if let Some(session) = self.current() {
             self.tell(&session, true);
@@ -209,9 +196,14 @@ impl TextInputService {
         self.0.platform.get().hide_software_keyboard();
     }
 
-    /// The open session's text, selection and composition as last told, if one is open.
+    /// The open session's text, selection and composition as the input method sees them, if one is open.
     pub fn session_state(&self) -> Option<TextEditState> {
         self.current().map(|s| s.state.borrow().clone())
+    }
+
+    /// The open session's options, if one is open.
+    pub fn session_options(&self) -> Option<ImeOptions> {
+        self.current().map(|s| s.options.clone())
     }
 
     /// Whether a session is open.
@@ -221,6 +213,29 @@ impl TextInputService {
 
     fn current(&self) -> Option<Rc<SessionState>> {
         self.0.session.borrow().clone()
+    }
+
+    /// The sessions of the 1.7+ API (the owner's session mutex).
+    pub(crate) fn text_input_sessions(&self) -> crate::platform_text_input::SessionMutex {
+        self.0.text_input_sessions.clone()
+    }
+
+    /// The open session's editor read again (a reading session's): what it holds told to the input method where it
+    /// differs from what the input method sees.
+    pub(crate) fn resync_open(&self) {
+        if let Some(session) = self.current() {
+            self.resync(&session);
+        }
+    }
+
+    /// The open session's editor is shown at `rect` (px) now.
+    pub(crate) fn notify_open_focused_rect(&self, rect: Rect) {
+        if let Some(session) = self.current()
+            && session.area.get() != rect
+        {
+            session.area.set(rect);
+            self.tell(&session, true);
+        }
     }
 
     fn tell(&self, session: &SessionState, active: bool) {
@@ -235,12 +250,31 @@ impl TextInputService {
         {
             let mut state = session.state.borrow_mut();
             for c in commands {
-                c.apply(&mut state);
+                state.apply(c);
             }
         }
         let on_edit_command = session.on_edit_command.clone();
         on_edit_command(commands);
+        self.resync(&session);
+        if session.value.is_some() {
+            session.version.set(session.version.peek().wrapping_add(1));
+        }
         true
+    }
+
+    /// A reading session's editor read again: what it holds told to the input method where it differs from what
+    /// the input method sees.
+    fn resync(&self, session: &Rc<SessionState>) {
+        let Some(value) = session.value.clone() else { return };
+        if !session.open.get() {
+            return;
+        }
+        let now = kompoz_runtime::without_read_observation(|| TextEditState::from_value(&value()));
+        let changed = *session.state.borrow() != now;
+        if changed {
+            *session.state.borrow_mut() = now.clone();
+            self.0.platform.get().text_input_changed(&now);
+        }
     }
 
     /// An input method's composing text with its caret at byte `start` of it, or bytes `start` to `end` of it
@@ -250,8 +284,22 @@ impl TextInputService {
     pub(crate) fn set_composing_text_with_selection(&self, text: &str, start: usize, end: usize) -> bool {
         let Some(session) = self.current() else { return false };
         // The composition will begin where what it replaces begins.
-        let at = replaced_by_text(&session.state.borrow()).0;
-        let (start, end) = (floor_boundary(text, start.min(end)), floor_boundary(text, start.max(end)));
+        let at = {
+            let state = session.state.borrow();
+            match state.composition {
+                Some((s, e)) => s.min(e),
+                None => state.selection_start.min(state.selection_end),
+            }
+            .min(state.text.len())
+        };
+        let floor = |at: usize| {
+            let mut at = at.min(text.len());
+            while !text.is_char_boundary(at) {
+                at -= 1;
+            }
+            at
+        };
+        let (start, end) = (floor(start.min(end)), floor(start.max(end)));
         self.send(&[
             EditCommand::SetComposingText { text: text.to_string(), new_cursor_position: 1 },
             EditCommand::SetSelection { start: at + start, end: at + end },
@@ -263,6 +311,7 @@ impl TextInputService {
         let Some(session) = self.current() else { return false };
         let on_ime_action = session.on_ime_action.clone();
         on_ime_action(action);
+        self.resync(&session);
         true
     }
 }
@@ -287,6 +336,11 @@ pub struct TextInputSession {
 }
 
 impl TextInputSession {
+    /// Its version: counted up as the input method's view moves with its commands (a reading session's).
+    pub(crate) fn version(&self) -> kompoz_runtime::MutableState<u64> {
+        self.session.version.clone()
+    }
+
     /// Whether it is still the open one.
     pub fn is_open(&self) -> bool {
         self.session.open.get()

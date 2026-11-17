@@ -8,7 +8,9 @@
 //! [`scroll`]: `ScrollState`, `vertical_scroll`, `horizontal_scroll`; [`scrollable_area`]), overscroll (Android's
 //! stretch: [`overscroll`]), and text ([`text`]:
 //! `BasicText` with its links, inline content and auto size; `text::selection`: `SelectionContainer`,
-//! `DisableSelection`). Its modifiers extend `Modifier` through traits: `use kompoz_foundation::prelude::*`.
+//! `DisableSelection`; `text::input`: the state-based text field's model — `TextFieldState`, its buffer, undo and
+//! transformations —, keyboard options and actions, key mappings). Its modifiers extend `Modifier` through traits:
+//! `use kompoz_foundation::prelude::*`.
 
 #![allow(non_upper_case_globals, non_snake_case)]
 
@@ -78,13 +80,18 @@ pub mod prelude {
     pub use crate::scroll::{ScrollModifiers, ScrollState, remember_scroll_state};
     pub use crate::scrollable_area::ScrollableAreaModifiers;
     pub use crate::selection::{SelectableModifiers, SelectionModifiers, ToggleableModifiers};
+    pub use crate::text::input::{
+        ChangeList, ExpandPolicy, InputTransformation, KeyboardActionHandler, OutputTransformation, TextFieldBuffer,
+        TextFieldLineLimits, TextFieldState, TextFieldTextStyles, TextObfuscationMode, TrackedRange, TransformInput,
+        UndoState, output_transformation, remember_text_field_state,
+    };
     pub use crate::text::selection::{
         DisableSelection, LocalTextSelectionColors, SelectionContainer, SelectionContainerWithSelection,
         SelectionContainerWithState, SelectionState, TextSelectionColors, remember_selection_state,
     };
     pub use crate::text::{
-        BasicText, BasicTextValue, InlineContentMap, InlineTextContent, OnTextLayout, StepBased, TextAutoSize,
-        TextAutoSizeDefaults,
+        BasicText, BasicTextValue, InlineContentMap, InlineTextContent, KeyboardActionScope, KeyboardActions,
+        KeyboardOptions, OnTextLayout, StepBased, TextAutoSize, TextAutoSizeDefaults,
     };
     pub use crate::{BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, Image, VectorImage};
     pub use crate::{MutatePriority, MutatorMutex};

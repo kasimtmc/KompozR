@@ -1,9 +1,14 @@
-//! A text field's value (Compose's `androidx.compose.ui.text.input.TextFieldValue`): its text, selection and
-//! composition. Text fields themselves are stage 10's.
+//! Text input (Compose's `androidx.compose.ui.text.input`): a text field's value ([`TextFieldValue`]: its text,
+//! selection and composition), the buffer an editor's commands change ([`EditingBuffer`]), the commands
+//! ([`EditCommand`]) and what applies them to a value ([`EditProcessor`]).
 
 use crate::annotated_string::AnnotatedString;
 use crate::range::TextRange;
 use kompoz_runtime::named;
+
+pub use crate::edit_command::EditCommand;
+pub use crate::edit_processor::EditProcessor;
+pub use crate::editing_buffer::{EditingBuffer, update_range_after_delete};
 
 /// The nearest character boundary of `text` at or before `offset` (within it).
 pub(crate) fn floor_boundary(text: &str, offset: usize) -> usize {

@@ -17,6 +17,7 @@ mod interaction;
 mod matcher;
 mod recording;
 mod text;
+mod text_actions;
 
 pub use input::{
     EVENT_PERIOD_MILLIS, InjectionScope, KeyInjectionScope, MouseInjectionScope, ScrollWheel, TouchInjectionScope,

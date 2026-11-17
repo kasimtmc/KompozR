@@ -1464,7 +1464,8 @@ fn from_bounds(
 /// A lambda's receiver: its first parameter's type when that is a scope (`&mut DrawScope`, `PointerInputScope`,
 /// `&mut SemanticsPropertyReceiver`, a builder, `FocusProperties`, a DSL's config (`&mut KeyframesSpecConfig<T>`), an
 /// `&Animatable` (its `animateTo` block); `&mut SemanticsConfiguration`, which is Compose's
-/// SemanticsPropertyReceiver), as Kotlin's `T.() -> R` is.
+/// SemanticsPropertyReceiver; `&mut TextFieldBuffer`, a text field state's `edit` and its transformations' block),
+/// as Kotlin's `T.() -> R` is.
 fn receiver_of(first: &Type) -> String {
     let inner = match first {
         Type::Reference(r) => &*r.elem,
@@ -1473,7 +1474,7 @@ fn receiver_of(first: &Type) -> String {
     let Type::Path(p) = inner else { return String::new() };
     let name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
     let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform", "Config"].iter().any(|s| name.ends_with(s))
-        || matches!(name.as_str(), "Path" | "Placeable" | "SemanticsConfiguration" | "Animatable");
+        || matches!(name.as_str(), "Path" | "Placeable" | "SemanticsConfiguration" | "Animatable" | "TextFieldBuffer");
     if scope { name } else { String::new() }
 }
 
@@ -1619,6 +1620,9 @@ mod tests {
                 /// Kotlin: `padStart(length: Int, padChar: Char = ' '): String`
                 fn pad_start(&self, length: i32, pad_char: char) -> String;
             }
+            impl TextFieldState {
+                pub fn edit(&self, block: impl FnOnce(&mut TextFieldBuffer)) {}
+            }
             "#,
         )
         .unwrap();
@@ -1637,6 +1641,9 @@ mod tests {
         let pi = find("pointerInput");
         let block = pi.params[1].lambda.as_ref().unwrap();
         assert!(block.suspend && block.receiver == "PointerInputScope");
+        // A text field state's edit block: `TextFieldBuffer.() -> Unit`.
+        let edit = find("edit").params[0].lambda.as_ref().unwrap();
+        assert_eq!(edit.receiver, "TextFieldBuffer");
         assert!(find("awaitFrame").flags.contains("SUSPEND"));
         assert!(find("delay").flags.contains("SUSPEND"));
         let effect = find("LaunchedEffect").params[1].lambda.as_ref().unwrap();

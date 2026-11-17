@@ -295,7 +295,7 @@ impl KompozHost {
                 LocalDynamicTonalPalette.provides(env.dynamic_palette),
                 LocalWallpaperTonalPalette.provides(env.wallpaper_palette),
                 LocalTextToolbar.provides_unequal(text_toolbar.clone()),
-                LocalSoftwareKeyboardController.provides(SoftwareKeyboardController(platform.clone())),
+                LocalSoftwareKeyboardController.provides(SoftwareKeyboardController::new(text_input.clone())),
                 LocalPlatform.provides(platform.clone()),
                 LocalFocusManager.provides(focus_manager.clone()),
                 LocalBackDispatcher.provides(Some(back.clone())),

@@ -47,6 +47,7 @@ kompoz-runtime/macros kompozable GradientCard r crates/kompoz-runtime/tests/macr
 * fn ImageBitmap rrddd crates/kompoz-graphics/src/image/bitmap.rs
 * kompozable InlineChildren rr crates/kompoz-foundation/src/text/inline_content.rs
 kompoz-runtime/macros fn Insets dd crates/kompoz-runtime/tests/macros.rs
+* kompozable InterceptPlatformTextInput rr crates/kompoz-ui/src/platform_text_input.rs
 kompoz-foundation/layout kompozable Intrinsics rrr crates/kompoz-foundation/tests/layout.rs
 kompoz-foundation/layout_modifiers kompozable Intrinsics rrr crates/kompoz-foundation/tests/layout_modifiers.rs
 kompoz-foundation/clickable kompozable Item r crates/kompoz-foundation/tests/clickable.rs
@@ -58,6 +59,8 @@ kompoz-runtime/runtime kompozable Items r crates/kompoz-runtime/tests/runtime.rs
 kompoz-ui/layouts kompozable Items r crates/kompoz-ui/tests/layouts.rs
 kompoz-runtime/runtime kompozable Keeper - crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable Keeping r crates/kompoz-runtime/tests/macros.rs
+* fn KeyboardActions dddddd crates/kompoz-foundation/src/text/keyboard_actions.rs
+* fn KeyboardOptions ddddddd crates/kompoz-foundation/src/text/keyboard_options.rs
 * kompozable KompozitionLocalProvider rr crates/kompoz-runtime/src/local.rs
 * kompozable KompozitionLocalProviderContext rr crates/kompoz-runtime/src/local.rs
 kompoz-runtime/macros kompozable Label rdd crates/kompoz-runtime/tests/macros.rs
@@ -75,6 +78,7 @@ kompoz-runtime/macros kompozable Local d crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/clickable kompozable LogInteractions rr crates/kompoz-foundation/tests/clickable.rs
 kompoz-foundation/scroll kompozable LogInteractions rr crates/kompoz-foundation/tests/scroll.rs
 kompoz-runtime/runtime kompozable Middle - crates/kompoz-runtime/tests/runtime.rs
+kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/tests/text_input.rs
 * kompozable MultiMeasureLayout drr crates/kompoz-ui/src/layout/composables.rs
 * fn OverscrollConfiguration dd crates/kompoz-foundation/src/overscroll_android.rs
 * fn PaddingValues dddd crates/kompoz-foundation/src/layout/padding.rs
@@ -139,6 +143,7 @@ kompoz-runtime/subcomposition kompozable Text r crates/kompoz-runtime/tests/comm
 kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
+kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/tests/text_input.rs
 * kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
 kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-foundation/tests/layout_modifiers.rs
 * kompozable WindowButtonView rrrr crates/kompoz-platform/src/app/title_bar.rs
@@ -189,6 +194,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method copy dddd crates/kompoz-graphics/src/constraints.rs Constraints
 * method copy dddd crates/kompoz-graphics/src/shape.rs CornerBasedShape
 * method copy ddddd crates/kompoz-animation/src/state.rs AnimationState
+* method copy ddddddd crates/kompoz-foundation/src/text/keyboard_options.rs KeyboardOptions
 * method copy ddddddddd crates/kompoz-text/src/paragraph_style.rs ParagraphStyle
 * method copy dddddddddddddddddd crates/kompoz-text/src/span_style.rs SpanStyle
 * method copy dddddddddddddddddddddddddd crates/kompoz-text/src/text_style.rs TextStyle
@@ -311,6 +317,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_selection_controller - crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable remember_selection_state - crates/kompoz-foundation/src/text/selection/state.rs
 * kompozable remember_spline_based_decay - crates/kompoz-animation/src/spline_decay.rs
+* kompozable remember_text_field_state dd crates/kompoz-foundation/src/text/input/text_field_state.rs
 * kompozable remember_text_measurer d crates/kompoz-ui/src/text.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs

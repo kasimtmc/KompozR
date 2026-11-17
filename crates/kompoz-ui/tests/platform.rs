@@ -65,7 +65,7 @@ fn state(text: &str, selection: (usize, usize), composition: Option<(usize, usiz
 }
 
 fn applied(mut s: TextEditState, command: EditCommand) -> TextEditState {
-    command.apply(&mut s);
+    s.apply(&command);
     s
 }
 

@@ -178,7 +178,7 @@ fn count_mismatch(
     sb
 }
 
-fn general_error(error_message: &str, selector: &SemanticsSelector, node: &SemanticsNode) -> String {
+pub(crate) fn general_error(error_message: &str, selector: &SemanticsSelector, node: &SemanticsNode) -> String {
     format!(
         "{error_message}\nSemantics of the node:\n{}\nSelector used: ({})\n",
         print_node(node, 0),
@@ -364,7 +364,7 @@ impl<'a> SemanticsNodeInteraction<'a> {
     }
 
     #[track_caller]
-    fn fetch_with(&self, error_message: &str) -> SemanticsNode {
+    pub(crate) fn fetch_with(&self, error_message: &str) -> SemanticsNode {
         let result = self.select(error_message);
         if result.selected_nodes.len() == 1 {
             return result.selected_nodes.into_iter().next().unwrap();

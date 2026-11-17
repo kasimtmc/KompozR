@@ -67,3 +67,7 @@ harness = false
 [[test]]
 name = "overscroll"
 harness = false
+
+[[test]]
+name = "text_input"
+harness = false

@@ -26,6 +26,9 @@
 pub mod annotated_string;
 pub mod bidi;
 pub mod draw;
+mod edit_command;
+mod edit_processor;
+mod editing_buffer;
 pub mod font;
 mod html;
 pub mod input;
@@ -34,6 +37,7 @@ mod kotlin;
 pub mod line_break;
 pub mod link;
 pub mod multi_paragraph;
+pub mod normalize;
 pub mod paragraph;
 pub mod paragraph_style;
 pub mod placeholder;
@@ -61,7 +65,7 @@ pub use font::{
     FontId, FontListFontFamily, FontLoadingStrategy, FontRegistry, FontSource, FontStyle, FontSynthesis, FontVariation,
     FontVariationSetting, FontVariationSettings, FontWeight, GenericFontFamily, Typeface, lerp_font_weight,
 };
-pub use input::TextFieldValue;
+pub use input::{EditCommand, EditProcessor, EditingBuffer, TextFieldValue};
 pub use intl::{Locale, LocaleList};
 pub use line_break::{
     BreakOpportunity, BrokenLine, LineBreakParams, LineMeasure, LineWidths, TabStops, break_lines, break_opportunities,

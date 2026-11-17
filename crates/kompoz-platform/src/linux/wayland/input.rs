@@ -11,7 +11,7 @@ use super::ffi::Object;
 use super::generated::*;
 use crate::app::{Event, MouseButton};
 use crate::linux::sys::{self, Mmap};
-use kompoz_ui::platform::{ImeOptions, KeyboardType, TextEditState};
+use kompoz_ui::platform::{ImeOptions, KeyboardCapitalization, KeyboardType, TextEditState};
 use std::os::fd::AsFd;
 
 /// A pointer button (linux/input-event-codes.h's `BTN_LEFT`…) as KompozR's.
@@ -96,22 +96,58 @@ impl Pinch {
     }
 }
 
-/// text-input-v3's content hint and purpose for a field's options (C++'s tellTextInput).
+/// text-input-v3's content hint and purpose for a field's options (C++'s tellTextInput, Compose 1.12's keyboard
+/// types and capitalization as Android's EditorInfo takes them: a hidden password's text hidden and sensitive, a
+/// shown one's sensitive; the capitalization as a case hint; ASCII as Latin).
 pub(super) fn content_type(options: &ImeOptions) -> (ZwpTextInputV3ContentHint, ZwpTextInputV3ContentPurpose) {
     type Hint = ZwpTextInputV3ContentHint;
     type Purpose = ZwpTextInputV3ContentPurpose;
     let mut hint = if options.auto_correct { Hint::COMPLETION | Hint::SPELLCHECK } else { Hint::NONE };
+    let hidden = Hint::HIDDEN_TEXT | Hint::SENSITIVE_DATA;
     let purpose = match options.keyboard_type {
-        KeyboardType::Unspecified | KeyboardType::Text | KeyboardType::Ascii => Purpose::NORMAL,
+        KeyboardType::Unspecified
+        | KeyboardType::Text
+        | KeyboardType::PostalAddress
+        | KeyboardType::EmailSubject
+        | KeyboardType::ShortMessage
+        | KeyboardType::LongMessage
+        | KeyboardType::Filter
+        | KeyboardType::Phonetic => Purpose::NORMAL,
+        KeyboardType::Ascii => {
+            hint |= Hint::LATIN;
+            Purpose::NORMAL
+        }
         KeyboardType::Number => Purpose::DIGITS,
-        KeyboardType::Decimal => Purpose::NUMBER,
+        KeyboardType::Decimal | KeyboardType::NumberSigned | KeyboardType::DecimalSigned => Purpose::NUMBER,
         KeyboardType::Phone => Purpose::PHONE,
         KeyboardType::Uri => Purpose::URL,
         KeyboardType::Email => Purpose::EMAIL,
-        KeyboardType::Password | KeyboardType::NumberPassword => {
-            hint = Hint::HIDDEN_TEXT | Hint::SENSITIVE_DATA;
-            if options.keyboard_type == KeyboardType::Password { Purpose::PASSWORD } else { Purpose::PIN }
+        KeyboardType::PersonName => Purpose::NAME,
+        KeyboardType::DateTime => Purpose::DATETIME,
+        KeyboardType::Date => Purpose::DATE,
+        KeyboardType::Time => Purpose::TIME,
+        KeyboardType::Password => {
+            hint = hidden;
+            Purpose::PASSWORD
         }
+        KeyboardType::PasswordVisible => {
+            hint = Hint::SENSITIVE_DATA;
+            Purpose::PASSWORD
+        }
+        KeyboardType::NumberPassword => {
+            hint = hidden;
+            Purpose::PIN
+        }
+        KeyboardType::DecimalPassword | KeyboardType::NumberPasswordSigned | KeyboardType::DecimalPasswordSigned => {
+            hint = hidden;
+            Purpose::NUMBER
+        }
+    };
+    hint |= match options.capitalization {
+        KeyboardCapitalization::Characters => Hint::UPPERCASE,
+        KeyboardCapitalization::Words => Hint::TITLECASE,
+        KeyboardCapitalization::Sentences => Hint::AUTO_CAPITALIZATION,
+        KeyboardCapitalization::None | KeyboardCapitalization::Unspecified => Hint::NONE,
     };
     if !options.single_line {
         hint |= Hint::MULTILINE;
@@ -715,6 +751,23 @@ mod tests {
         );
         assert_eq!(content_type(&options(KeyboardType::Decimal, true, false)).1, Purpose::NUMBER);
         assert_eq!(content_type(&options(KeyboardType::Number, true, false)).1, Purpose::DIGITS);
+        // Compose 1.12's kinds and the capitalization.
+        assert_eq!(
+            content_type(&options(KeyboardType::PasswordVisible, true, false)),
+            (Hint::SENSITIVE_DATA, Purpose::PASSWORD)
+        );
+        assert_eq!(content_type(&options(KeyboardType::PersonName, true, false)).1, Purpose::NAME);
+        assert_eq!(content_type(&options(KeyboardType::Date, true, false)).1, Purpose::DATE);
+        assert_eq!(content_type(&options(KeyboardType::Ascii, true, false)), (Hint::LATIN, Purpose::NORMAL));
+        assert_eq!(
+            content_type(&options(KeyboardType::DecimalPasswordSigned, true, true)),
+            (Hint::HIDDEN_TEXT | Hint::SENSITIVE_DATA, Purpose::NUMBER)
+        );
+        let caps = |capitalization| ImeOptions { capitalization, auto_correct: false, ..ImeOptions::default() };
+        assert_eq!(content_type(&caps(KeyboardCapitalization::Characters)).0, Hint::UPPERCASE);
+        assert_eq!(content_type(&caps(KeyboardCapitalization::Words)).0, Hint::TITLECASE);
+        assert_eq!(content_type(&caps(KeyboardCapitalization::Sentences)).0, Hint::AUTO_CAPITALIZATION);
+        assert_eq!(content_type(&caps(KeyboardCapitalization::None)).0, Hint::NONE);
     }
 
     fn field(text: &str, selection: (usize, usize), composition: Option<(usize, usize)>) -> TextEditState {
