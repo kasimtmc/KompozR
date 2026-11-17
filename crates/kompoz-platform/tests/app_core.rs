@@ -293,14 +293,19 @@ fn frames_are_paced_on_the_displays_beat() {
     let next = core.frame(Some(vsync));
     assert!(!next.quit);
     assert_eq!(core.frame_due(), Some(vsync + 16_666_667 * 3 / 5));
-    // On the platform's clock: on the beat of the last (a whole number of periods after it, never before it).
+    // On the platform's clock: on the beat of the last (a whole number of periods after it, never before it), the
+    // one nearest the frame's start (at most half a period from it), so due 1/10 to 11/10 of a period after it.
     std::thread::sleep(std::time::Duration::from_millis(40));
     let before = core.platform().now();
     core.frame(None);
+    let after = core.platform().now();
     let due = core.frame_due().unwrap();
     let beats = (due - 16_666_667 * 3 / 5 - vsync) as f64 / 16_666_667.0;
     assert!((beats - beats.round()).abs() < 1e-6 && beats >= 2.0, "{beats} beats after the vsync");
-    assert!(due > before && due < core.platform().now() + 16_666_667, "{due} after {before}");
+    assert!(
+        due >= before + 16_666_667 / 10 && due <= after + 16_666_667 * 11 / 10,
+        "{due} after {before} (the frame ended at {after})"
+    );
     // A script in virtual time has its frames at once.
     let mut scripted = started(TestPlatform::new(&[("KOMPOZ_SCRIPT", "wait 5;quit")]), 100.0, 100.0, counter(&seen));
     scripted.frame(None);
