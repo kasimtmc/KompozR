@@ -175,6 +175,15 @@ jobs:
             if cmp -s before.png shot.png; then echo "the click changed nothing"; exit 1; fi
             if grep -q "GPU validation" counter.log; then exit 1; fi
           done
+      # The Kotlin Counter (examples/counter-kotlin: its UI a .kt file) run headless by the same script: its shots,
+      # before the click and after, the Rust Counter's pixels.
+      - name: The Kotlin Counter, headless, drawing the Rust Counter's pixels
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+        run: |
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          cargo test -p counter-kotlin --test headless
       - name: The Counter's shots
         if: always()
         uses: actions/upload-artifact@v4

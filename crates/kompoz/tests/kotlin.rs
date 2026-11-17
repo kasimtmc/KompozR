@@ -369,18 +369,29 @@ fn a_file_composes() {
     r#in();
 }
 
-/// The text is the source's: a group's comments kept, the gaps between top-level tokens rebuilt from their lines
-/// and columns (a comment there is spacing), a doc comment once; it starts at its first token's line.
+/// The text is the source's: a group's comments kept, the gaps between top-level tokens as the call has them (a
+/// comment there too), a doc comment once; it starts at its first token's line. Tokens another macro passes on as
+/// they are (the call's text, the other macro's, doesn't hold them): the gaps rebuilt from their lines and columns.
 fn text_from_the_source() {
     let here = line!();
     let (text, line, rebuilt) = kompoz_kotlin_macro::__kompoz_text! {
         @Kompozable fun A() { /* kept */ "ğü" ; x }
-        /** doc */ /* gone */
-        val y = 1 // gone
+        /** doc */ /* kept too */
+        val y = 1 // after the last token: not the text's
     };
     assert!(!rebuilt);
     assert_eq!(line, here + 2);
-    assert_eq!(text, "        @Kompozable fun A() { /* kept */ \"ğü\" ; x }\n        /** doc */\n        val y = 1");
+    let expected =
+        "        @Kompozable fun A() { /* kept */ \"ğü\" ; x }\n        /** doc */ /* kept too */\n        val y = 1";
+    assert_eq!(text, expected);
+    macro_rules! through {
+        ($($t:tt)*) => { kompoz_kotlin_macro::__kompoz_text!($($t)*) };
+    }
+    let (text, _, rebuilt) = through! {
+        val a = 1 /* spacing */ val b = 2
+    };
+    assert!(!rebuilt);
+    assert_eq!(text, format!("        val a = 1{}val b = 2", " ".repeat(15)));
 }
 
 /// Tokens whose positions don't add up (here: repeated by a macro): the text rebuilt from the tokens, newlines
@@ -432,6 +443,23 @@ fn rebuilt_text_translates() {
     assert_eq!(counted(vec![1, 2, 1]), 3);
 }
 
+// Kotlin Rust's lexer takes as it is (none of the errors about what it rejects): templates whose pieces it splits
+// into literals with suffixes (`"${if (a) "x` …), apostrophes in comments (it's), quotes in characters, its own
+// escapes.
+kompoz! {
+    // (it's a comment between declarations: the source's)
+    fun lexed(a: Boolean): String {
+        val dollar = '$' // it's a character
+        val quote = '\''
+        return "${if (a) "x" else "y"}${"in" + "ner"}$dollar$quote\u{41}\t|"
+    }
+}
+
+fn rusts_lexer_takes_these() {
+    assert_eq!(lexed(true), "xinner$'A\t|");
+    assert_eq!(lexed(false), "yinner$'A\t|");
+}
+
 /// Runs the tests given one after the other on this thread, made the UI thread; the arguments name the ones to
 /// run (all if none).
 fn run(tests: &[(&str, fn())]) {
@@ -481,4 +509,5 @@ tests![
     a_kt_file_composes,
     named_arguments_evaluate_in_written_order,
     rebuilt_text_translates,
+    rusts_lexer_takes_these,
 ];

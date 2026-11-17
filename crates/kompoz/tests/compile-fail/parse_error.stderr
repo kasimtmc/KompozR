@@ -1,0 +1,5 @@
+error: kompoz: expected a type, found `)`
+ --> tests/compile-fail/parse_error.rs:8:24
+  |
+8 |     fun Greeting(name: ) {
+  |                        ^

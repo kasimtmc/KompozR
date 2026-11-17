@@ -1,0 +1,124 @@
+error: unknown start of token: `
+ --> tests/compile-fail/rust_lexer.rs:8:9
+  |
+8 |     fun `in`(x: Int): Int = x + 1
+  |         ^
+  |
+help: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not
+  |
+8 -     fun `in`(x: Int): Int = x + 1
+8 +     fun 'in`(x: Int): Int = x + 1
+  |
+
+error: unknown start of token: `
+ --> tests/compile-fail/rust_lexer.rs:8:12
+  |
+8 |     fun `in`(x: Int): Int = x + 1
+  |            ^
+  |
+help: Unicode character '`' (Grave Accent) looks like ''' (Single Quote), but it is not
+  |
+8 -     fun `in`(x: Int): Int = x + 1
+8 +     fun `in'(x: Int): Int = x + 1
+  |
+
+error: unknown character escape: `$`
+  --> tests/compile-fail/rust_lexer.rs:11:22
+   |
+11 |         val sign = "\$$price\b"
+   |                      ^ unknown character escape
+   |
+   = help: for more information, visit <https://doc.rust-lang.org/reference/tokens.html#literals>
+help: if you meant to write a literal backslash (perhaps escaping in a regular expression), consider a raw string literal
+   |
+11 |         val sign = r"\$$price\b"
+   |                    +
+
+error: unknown character escape: `b`
+  --> tests/compile-fail/rust_lexer.rs:11:30
+   |
+11 |         val sign = "\$$price\b"
+   |                              ^ unknown character escape
+   |
+   = help: for more information, visit <https://doc.rust-lang.org/reference/tokens.html#literals>
+help: if you meant to write a literal backslash (perhaps escaping in a regular expression), consider a raw string literal
+   |
+11 |         val sign = r"\$$price\b"
+   |                    +
+help: if you meant to write a backspace, use a hex escape
+   |
+11 -         val sign = "\$$price\b"
+11 +         val sign = "\$$price\x08"
+   |
+
+error: incorrect unicode escape sequence
+  --> tests/compile-fail/rust_lexer.rs:12:18
+   |
+12 |         val a = "\u0041"
+   |                  ^^^
+   |
+help: format of unicode escape sequences uses braces
+   |
+12 -         val a = "\u0041"
+12 +         val a = "\u{0041}"
+   |
+
+error: unknown character escape: `d`
+  --> tests/compile-fail/rust_lexer.rs:13:26
+   |
+13 |         val digits = """\d+"""
+   |                          ^ unknown character escape
+   |
+   = help: for more information, visit <https://doc.rust-lang.org/reference/tokens.html#literals>
+help: if you meant to write a literal backslash (perhaps escaping in a regular expression), consider a raw string literal
+   |
+13 |         val digits = ""r"\d+"""
+   |                        +
+
+error: prefix `else` is unknown
+  --> tests/compile-fail/rust_lexer.rs:14:36
+   |
+14 |         return if (price > 0) sign else"$a$digits"
+   |                                    ^^^^ unknown prefix
+   |
+   = note: prefixed identifiers and literals are reserved since Rust 2021
+help: consider inserting whitespace here
+   |
+14 |         return if (price > 0) sign else "$a$digits"
+   |                                        +
+
+error: kompoz: Rust's lexer, which reads `kompoz! { … }` before KompozR does, can't read the backticked name `` `in` ``: put this Kotlin in a `.kt` file read by `kompoz_file!("….kt")`, which Rust's lexer doesn't read
+ --> tests/compile-fail/rust_lexer.rs:8:10
+  |
+8 |     fun `in`(x: Int): Int = x + 1
+  |          ^^
+
+error: kompoz: Rust's lexer, which reads `kompoz! { … }` before KompozR does, has no escape `\$`: write `${'$'}` for a `$` in a string, `'$'` for the character, or put this Kotlin in a `.kt` file read by `kompoz_file!("….kt")`, which Rust's lexer doesn't read
+  --> tests/compile-fail/rust_lexer.rs:11:20
+   |
+11 |         val sign = "\$$price\b"
+   |                    ^^^^^^^^^^^^
+
+error: kompoz: Rust's lexer, which reads `kompoz! { … }` before KompozR does, has no escape `\b`: write `\u{8}`, or put this Kotlin in a `.kt` file read by `kompoz_file!("….kt")`, which Rust's lexer doesn't read
+  --> tests/compile-fail/rust_lexer.rs:11:20
+   |
+11 |         val sign = "\$$price\b"
+   |                    ^^^^^^^^^^^^
+
+error: kompoz: Rust's lexer, which reads `kompoz! { … }` before KompozR does, has no escape `\u0041`: write `\u{0041}`, or put this Kotlin in a `.kt` file read by `kompoz_file!("….kt")`, which Rust's lexer doesn't read
+  --> tests/compile-fail/rust_lexer.rs:12:17
+   |
+12 |         val a = "\u0041"
+   |                 ^^^^^^^^
+
+error: kompoz: Rust's lexer, which reads `kompoz! { … }` before KompozR does, has no escape `\d` (a backslash in a Kotlin raw string is one to it): put this Kotlin in a `.kt` file read by `kompoz_file!("….kt")`, which Rust's lexer doesn't read
+  --> tests/compile-fail/rust_lexer.rs:13:24
+   |
+13 |         val digits = """\d+"""
+   |                        ^^^^^
+
+error: kompoz: Rust's lexer, which reads `kompoz! { … }` before KompozR does, takes `else"` for a literal's prefix, which it reserves: put a space after `else`, or put this Kotlin in a `.kt` file read by `kompoz_file!("….kt")`, which Rust's lexer doesn't read
+  --> tests/compile-fail/rust_lexer.rs:14:36
+   |
+14 |         return if (price > 0) sign else"$a$digits"
+   |                                    ^^^^

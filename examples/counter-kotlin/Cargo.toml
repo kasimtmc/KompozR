@@ -1,0 +1,28 @@
+[package]
+name = "counter-kotlin"
+description = "KompozR's Counter with its UI in Kotlin's syntax (a .kt file through kompoz_file!), drawn as the Rust Counter is, run on the platform's window (KOMPOZ_HEADLESS=1: without one)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz = { path = "../../crates/kompoz" }
+
+[dev-dependencies]
+kompoz = { path = "../../crates/kompoz", features = ["test"] }
+# (the Rust Counter's own crates: its source, examples/counter/src/counter.rs, is drawn beside the Kotlin one)
+kompoz-foundation = { path = "../../crates/kompoz-foundation" }
+kompoz-graphics = { path = "../../crates/kompoz-graphics" }
+kompoz-runtime = { path = "../../crates/kompoz-runtime" }
+kompoz-text = { path = "../../crates/kompoz-text" }
+kompoz-ui = { path = "../../crates/kompoz-ui" }
+
+# The Kotlin Counter counts, and (with a GPU device) draws the Rust Counter's pixels: one thread, in sequence.
+[[test]]
+name = "headless"
+harness = false

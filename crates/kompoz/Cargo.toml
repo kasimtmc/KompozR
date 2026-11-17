@@ -29,8 +29,13 @@ kompoz-ui = { path = "../kompoz-ui" }
 [dev-dependencies]
 # (its own tests use `kompoz::test`)
 kompoz = { path = ".", features = ["test"] }
+trybuild = "1"
 
 # Kotlin's syntax end to end: kompoz! { … } compiled and composed, one thread, in sequence.
 [[test]]
 name = "kotlin"
 harness = false
+
+# What the compiler says when the Kotlin is wrong (trybuild: tests/compile-fail/*.rs and their .stderr).
+[[test]]
+name = "compile_fail"

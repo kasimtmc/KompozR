@@ -1,0 +1,26 @@
+error: kompoz: tests/compile-fail/parse_error.kt:6:20: expected a type, found `)`
+ --> tests/compile-fail/file_errors.rs:7:14
+  |
+7 | kompoz_file!("tests/compile-fail/parse_error.kt");
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: kompoz: tests/compile-fail/parse_error.kt:10:1: an object declaration isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
+ --> tests/compile-fail/file_errors.rs:7:14
+  |
+7 | kompoz_file!("tests/compile-fail/parse_error.kt");
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+ --> tests/compile-fail/file_errors.rs:9:14
+  |
+9 | kompoz_file!("tests/compile-fail/type_error.kt");
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |              |
+  |              expected `i32`, found `String`
+  |              arguments to this method are incorrect
+  |
+note: method defined here
+ --> tests/compile-fail/file_errors.rs:9:14
+  |
+9 | kompoz_file!("tests/compile-fail/type_error.kt");
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

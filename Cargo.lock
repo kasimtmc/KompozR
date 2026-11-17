@@ -77,6 +77,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "counter-kotlin"
+version = "0.1.0"
+dependencies = [
+ "kompoz",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-runtime",
+ "kompoz-text",
+ "kompoz-ui",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -348,6 +360,7 @@ dependencies = [
  "kompoz-test",
  "kompoz-text",
  "kompoz-ui",
+ "trybuild",
 ]
 
 [[package]]

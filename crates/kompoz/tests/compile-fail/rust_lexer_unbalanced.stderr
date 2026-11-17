@@ -1,0 +1,9 @@
+error: mismatched closing delimiter: `}`
+ --> tests/compile-fail/rust_lexer_unbalanced.rs:7:32
+  |
+6 | kompoz! {
+  |         - closing delimiter possibly meant for this
+7 |     fun paren(): String = "${ "(" }"
+  |                                ^ unclosed delimiter
+8 | }
+  | ^ mismatched closing delimiter

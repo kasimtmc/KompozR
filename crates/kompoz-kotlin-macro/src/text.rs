@@ -2,10 +2,11 @@
 //!
 //! Under rustc every token has its source text and its line and column (characters, 1-based). The text is each
 //! top-level token's source text (a group's holds its comments and spacing as written) with the gaps between them
-//! rebuilt — newlines, then spaces — so that a position in the text is the file's line:column; it starts at the
-//! first token's line, padded to its column (`base` = that line, column 1). Comments between top-level tokens
-//! become spaces; a doc comment, which Rust makes `#` + `[doc = "…"]` all carrying the comment's span, is taken
-//! once (as its source text).
+//! as the macro call's source text has them (comments, and what Rust's lexer couldn't read: a backticked name's
+//! backticks), so that a position in the text is the file's line:column; it starts at the first token's line,
+//! padded to its column (`base` = that line, column 1). Where the call's text doesn't hold the tokens (`kompoz!`
+//! written by another macro around the user's tokens) the gaps are rebuilt — newlines, then spaces. A doc comment,
+//! which Rust makes `#` + `[doc = "…"]` all carrying the comment's span, is taken once (as its source text).
 //!
 //! Without source text (rust-analyzer's proc-macro server: none, and every position 1:1), or when the positions
 //! don't add up (tokens made by another macro), the text is rebuilt from the tokens themselves:
@@ -17,9 +18,10 @@
 //!
 //! The span map: every leaf token (a group's delimiters too) with its offsets in the text; an offset maps to the
 //! token containing it (a Kotlin template split into several Rust literals maps to each piece's), else to the
-//! next token, else to the last.
+//! next token, else to the last. The leaves also tell what Rust's lexer rejected of the Kotlin (`rejected`).
 
-use kompoz_kotlin::{Pos, SpanMap, TextSource};
+use crate::rejected;
+use kompoz_kotlin::{Diagnostic, Pos, SpanMap, TextSource};
 use proc_macro::{Delimiter, Spacing, Span, TokenStream, TokenTree};
 
 pub(crate) struct Acquired {
@@ -27,20 +29,35 @@ pub(crate) struct Acquired {
     pub base: Pos,
     pub source: TextSource,
     pub spans: TokenSpans,
+    /// What Rust's lexer rejected of the Kotlin (rustc has reported it): why, and what to write instead.
+    pub rejected: Vec<Diagnostic>,
 }
 
 /// The macro's input as Kotlin text.
 pub(crate) fn acquire(input: TokenStream) -> Acquired {
     let tokens: Vec<TokenTree> = input.into_iter().collect();
-    exact(&tokens).unwrap_or_else(|| rebuilt(&tokens))
+    let mut a = exact(&tokens).unwrap_or_else(|| rebuilt(&tokens));
+    a.rejected = rejected::find(&a.text, a.base, &a.spans.entries, a.source);
+    a
 }
 
 // ---- The span map ----------------------------------------------------------------------------------------------
 
-struct Entry {
-    start: usize,
-    end: usize,
-    span: proc_macro2::Span,
+/// What a leaf token is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Leaf {
+    Ident,
+    Literal,
+    Punct(char),
+    /// A group's opening or closing delimiter.
+    Delimiter,
+}
+
+pub(crate) struct Entry {
+    pub start: usize,
+    pub end: usize,
+    pub span: proc_macro2::Span,
+    pub leaf: Leaf,
 }
 
 /// Where each leaf token is in the text.
@@ -95,44 +112,100 @@ fn exact(tokens: &[TokenTree]) -> Option<Acquired> {
             base: Pos::start(1, 1),
             source: TextSource::Exact,
             spans: TokenSpans::new(Vec::new()),
+            rejected: Vec::new(),
         });
     };
+    // The top-level tokens: where each is, and its text (a doc comment's `#` and `[doc = …]`: one comment, one
+    // text).
     let file = first.span().file();
-    let base = Pos::start(start_of(first.span()).0, 1);
-    let mut text = String::new();
-    let mut cursor = base;
-    let mut previous: Option<(LineColumn, LineColumn, String)> = None;
+    let mut pieces: Vec<(LineColumn, LineColumn, String)> = Vec::new();
     for t in tokens {
         let span = t.span();
         let (start, end) = (start_of(span), end_of(span));
         let source = span.source_text()?;
-        // (a doc comment's `#` and `[doc = …]`: one comment, one text)
-        if previous.as_ref().is_some_and(|p| (p.0, p.1) == (start, end) && p.2 == source) {
+        if pieces.last().is_some_and(|p| (p.0, p.1) == (start, end) && p.2 == source) {
             continue;
         }
-        if span.file() != file || start < (cursor.line, cursor.column) {
+        if span.file() != file {
             return None;
         }
-        let gap = if start.0 > cursor.line {
-            "\n".repeat((start.0 - cursor.line) as usize) + &" ".repeat(start.1 as usize - 1)
-        } else {
-            " ".repeat((start.1 - cursor.column) as usize)
+        pieces.push((start, end, source));
+    }
+    // (the call's text, where it holds every token as it is)
+    let call = CallText::of(Span::call_site())
+        .filter(|c| pieces.iter().all(|(start, end, source)| c.slice(*start, *end) == Some(source.as_str())));
+    let base = Pos::start(pieces[0].0.0, 1);
+    let mut text = String::new();
+    let mut cursor = base;
+    for (start, end, source) in pieces {
+        let at = (cursor.line, cursor.column);
+        if start < at {
+            return None;
+        }
+        // (before the first token: the padding to its column, not the call's `kompoz! {`)
+        let verbatim = call.as_ref().filter(|_| !text.is_empty()).and_then(|c| c.slice(at, start));
+        let gap = match verbatim {
+            Some(g) if line_column(cursor.advanced_by(g)) == start => g.to_string(),
+            _ if start.0 > cursor.line => {
+                "\n".repeat((start.0 - cursor.line) as usize) + &" ".repeat(start.1 as usize - 1)
+            }
+            _ => " ".repeat((start.1 - cursor.column) as usize),
         };
         cursor = cursor.advanced_by(&gap);
         text += &gap;
         cursor = cursor.advanced_by(&source);
         text += &source;
-        if (cursor.line, cursor.column) != end {
+        if line_column(cursor) != end {
             return None;
         }
-        previous = Some((start, end, source));
     }
     let lines = LineStarts::of(&text, base.line);
     let mut entries = Vec::new();
     for t in tokens {
         leaves_by_position(t, &lines, &text, &mut entries);
     }
-    Some(Acquired { text, base, source: TextSource::Exact, spans: TokenSpans::new(entries) })
+    Some(Acquired { text, base, source: TextSource::Exact, spans: TokenSpans::new(entries), rejected: Vec::new() })
+}
+
+fn line_column(p: Pos) -> LineColumn {
+    (p.line, p.column)
+}
+
+/// The macro call's source text (`kompoz! { … }` as written) and where it starts.
+struct CallText {
+    text: String,
+    start: LineColumn,
+    /// The offsets where its lines start.
+    lines: Vec<usize>,
+}
+
+impl CallText {
+    fn of(span: Span) -> Option<CallText> {
+        let text = span.source_text()?;
+        let mut lines = vec![0];
+        lines.extend(text.match_indices('\n').map(|(i, _)| i + 1));
+        Some(CallText { text, start: start_of(span), lines })
+    }
+
+    /// The offset of the file's `line`:`column` in the call's text, if it holds it (just past a line's end too).
+    fn offset(&self, (line, column): LineColumn) -> Option<usize> {
+        let i = line.checked_sub(self.start.0)? as usize;
+        let start = *self.lines.get(i)?;
+        let first_column = if i == 0 { self.start.1 } else { 1 };
+        let skip = column.checked_sub(first_column)? as usize;
+        let rest = &self.text[start..];
+        let line_text = &rest[..rest.find('\n').unwrap_or(rest.len())];
+        match line_text.char_indices().nth(skip) {
+            Some((at, _)) => Some(start + at),
+            None => (line_text.chars().count() == skip).then_some(start + line_text.len()),
+        }
+    }
+
+    /// The call's text from `from` to `to` (positions in the file), if it holds them.
+    fn slice(&self, from: LineColumn, to: LineColumn) -> Option<&str> {
+        let (a, b) = (self.offset(from)?, self.offset(to)?);
+        (a <= b).then(|| &self.text[a..b])
+    }
 }
 
 /// The offsets where the text's lines start.
@@ -160,20 +233,22 @@ impl LineStarts {
 }
 
 fn leaves_by_position(t: &TokenTree, lines: &LineStarts, text: &str, out: &mut Vec<Entry>) {
-    let add = |out: &mut Vec<Entry>, span: Span| {
+    let add = |out: &mut Vec<Entry>, span: Span, leaf: Leaf| {
         let start = lines.offset(text, start_of(span));
         let end = lines.offset(text, end_of(span)).max(start);
-        out.push(Entry { start, end, span: span.into() });
+        out.push(Entry { start, end, span: span.into(), leaf });
     };
     match t {
         TokenTree::Group(g) => {
-            add(out, g.span_open());
+            add(out, g.span_open(), Leaf::Delimiter);
             for c in g.stream() {
                 leaves_by_position(&c, lines, text, out);
             }
-            add(out, g.span_close());
+            add(out, g.span_close(), Leaf::Delimiter);
         }
-        other => add(out, other.span()),
+        TokenTree::Ident(i) => add(out, i.span(), Leaf::Ident),
+        TokenTree::Literal(l) => add(out, l.span(), Leaf::Literal),
+        TokenTree::Punct(p) => add(out, p.span(), Leaf::Punct(p.as_char())),
     }
 }
 
@@ -278,7 +353,14 @@ impl Writer {
         self.separate(&next);
         let start = self.text.len();
         self.text += s;
-        self.entries.push(Entry { start, end: self.text.len(), span: span.into() });
+        let leaf = match next {
+            Next::Word(_) | Next::Label => Leaf::Ident,
+            Next::Literal => Leaf::Literal,
+            Next::Open(_) | Next::Close => Leaf::Delimiter,
+            Next::Punct(c) => Leaf::Punct(c),
+            Next::Step => Leaf::Punct(s.chars().next().unwrap_or('+')),
+        };
+        self.entries.push(Entry { start, end: self.text.len(), span: span.into(), leaf });
         self.prev = prev;
         self.after_step = false;
     }
@@ -397,5 +479,11 @@ fn rebuilt(tokens: &[TokenTree]) -> Acquired {
         step_open: None,
     };
     w.tokens(tokens);
-    Acquired { text: w.text, base: Pos::start(1, 1), source: TextSource::Rebuilt, spans: TokenSpans::new(w.entries) }
+    Acquired {
+        text: w.text,
+        base: Pos::start(1, 1),
+        source: TextSource::Rebuilt,
+        spans: TokenSpans::new(w.entries),
+        rejected: Vec::new(),
+    }
 }

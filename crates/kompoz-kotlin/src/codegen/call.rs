@@ -894,11 +894,24 @@ impl Gen<'_, '_> {
         }
         let o = self.expr(e);
         let nullable_arg = o.kind == OutKind::Null || o.ty.is_nullable();
+        let arg_ty = o.ty.clone();
         let v = self.finish(o, Want { str_ok: p.takes_str() }, e.loc);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
         if p.option == OptionForm::Option && !nullable_arg {
             return quote_spanned!(span=> ::core::option::Option::Some(#v));
+        }
+        // (a shared trait object, `shape: Arc<dyn Shape>`, given a value of its own type, `RoundedCornerShape(16.dp)`:
+        // Kotlin's interface value is the Rust side's `Arc::new` of it)
+        if let Ty::Named(name, _) = &arg_ty
+            && !matches!(name.as_str(), "Arc" | "Rc")
+        {
+            if t.starts_with("Arc<dyn") {
+                return quote_spanned!(span=> ::std::sync::Arc::new(#v));
+            }
+            if t.starts_with("Rc<dyn") {
+                return quote_spanned!(span=> ::std::rc::Rc::new(#v));
+            }
         }
         if t.starts_with("&mut") {
             return quote_spanned!(span=> &mut #v);

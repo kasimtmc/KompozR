@@ -22,7 +22,8 @@ kompoz-runtime/runtime kompozable Column rr crates/kompoz-runtime/tests/common/m
 * fn Constraints dddd crates/kompoz-graphics/src/constraints.rs
 kompoz-runtime/runtime kompozable ContextUser - crates/kompoz-runtime/tests/runtime.rs
 kompoz-ui/tree kompozable Counted rr crates/kompoz-ui/tests/tree.rs
-counter/counter kompozable Counter - examples/counter/src/main.rs
+counter/counter kompozable Counter - examples/counter/src/counter.rs
+counter-kotlin/headless kompozable Counter - examples/counter/src/counter.rs
 kompoz-platform/app_core kompozable Counter r crates/kompoz-platform/tests/app_core.rs
 kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs

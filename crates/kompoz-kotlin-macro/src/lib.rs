@@ -12,11 +12,13 @@
 //! `kompoz!` takes its text from the tokens' source text (see `text`): positions are the Rust file's own lines and
 //! columns, every generated token carries the span of the Kotlin token it comes from. Rust's lexer reads the input
 //! first, so Kotlin it rejects can't be written here (backtick names, the escapes `\$`, `\b` and four-digit `\u`:
-//! write `${'$'}`, `\u{8}`, `\u{41}`; raw strings with backslashes) — `kompoz_file!` has no such limits.
+//! write `${'$'}`, `\u{8}`, `\u{41}`; raw strings with backslashes; a name right before a quote, `else"y"`) — rustc
+//! reports it, and so does the macro (`rejected`), saying what to write instead; `kompoz_file!` has no such limits.
 //! `kompoz_file!` reads the file relative to the crate's directory (`CARGO_MANIFEST_DIR`), rebuilds when it changes
 //! (an `include_bytes!` of it: stable proc macros have no tracked paths), reports at the macro's call with the
 //! file's `file:line:column` in the message. Its tokens all have that call's span, so the calls that keep something
-//! in the composition get their identity from a key of their Kotlin line and column instead (`Options::keyed_calls`).
+//! in the composition get their identity from a key of their Kotlin line and column instead (`Options::keyed_calls`),
+//! and rustc's errors in the Rust it becomes (a type mismatch) are at the call, without the file's line.
 
 use kompoz_kotlin::{Diagnostic, OneSpan, Options, Pos, Severity, SpanMap, TextSource};
 use proc_macro::TokenStream;
@@ -24,6 +26,7 @@ use proc_macro2::TokenStream as Ts;
 use quote::{format_ident, quote, quote_spanned};
 
 mod paths;
+mod rejected;
 mod text;
 
 /// Kotlin declarations, translated in place.
@@ -33,6 +36,7 @@ pub fn kompoz(input: TokenStream) -> TokenStream {
     let opts = Options { paths: paths::resolve(), text: acquired.source, keyed_calls: false };
     let t = kompoz_kotlin::translate(&acquired.text, acquired.base, &acquired.spans, &opts);
     let mut out = t.tokens;
+    out.extend(report(&acquired.rejected, &acquired.spans, None));
     out.extend(report(&t.diagnostics, &acquired.spans, None));
     out.into()
 }

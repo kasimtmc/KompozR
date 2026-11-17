@@ -480,8 +480,9 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             .enumerate()
             .map(|(j, f)| if j == i { quote!(#f: #rt::__private::Set(#convert)) } else { quote!(#f: self.#f) });
         let ret = quote!(#builder_name<#recv_lt #(#out_g,)* #(#out_p),*>);
-        let arg = format_ident!("__arg{i}");
-        let last = format_ident!("__last");
+        // (at the parameter: rustc's "method defined here" for a positional argument of the wrong type points at it)
+        let arg = format_ident!("__arg{i}", span = name.span());
+        let last = format_ident!("__last", span = name.span());
         // `setter`'s twin for a memoized closure.
         let memo = |setter: &Ident| {
             let twin = format_ident!("__kz_memo_{}", setter);
