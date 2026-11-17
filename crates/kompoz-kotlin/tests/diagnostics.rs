@@ -103,12 +103,14 @@ fun f(xs: List<Int>) {
 }
 
 #[test]
-fn top_level_vals_need_their_types() {
+fn top_level_vals_have_their_values_types_or_written_ones() {
     assert_eq!(
-        diagnose("val answer = 42\nvar count: Int = 0\nval ok: Int = 1"),
+        diagnose(
+            "val answer = 42\nvar count: Int = 0\nval ok: Int = 1\nval vague = unknownThing()\nval twice = answer * 2"
+        ),
         [
-            "1:5: write `answer`'s type: a top-level `val` has it written (`val answer: Type = …`)".to_string(),
             format!("2:1: a top-level `var` {LATER}"),
+            "4:5: write `vague`'s type: KompozR can't tell its value's type (`val vague: Type = …`)".to_string(),
         ]
     );
 }

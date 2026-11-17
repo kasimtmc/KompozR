@@ -19,8 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /** The button's color, and the text's. */
-val Accent: Color = Color(0xff3f51b5)
-val Ink: Color = Color(0xff1c1b1f)
+val Accent = Color(0xff3f51b5)
+val Ink = Color(0xff1c1b1f)
 
 /** A count and a button that adds to it; the count kept across runs with `KOMPOZ_STATE_FILE`. */
 @Composable

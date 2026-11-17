@@ -10,10 +10,12 @@
 //! | `@Kompozable fun Name(p: T = d)` (`@Composable` too) | `#[kompozable] pub fn Name(#[default(d)] p: T)`; `inline` → `#[kompozable(inline)]` |
 //! | `fun name(…): R = e` / `{ … }` | `#[named] fn name(…) -> R` (`#[named]` when a parameter has a default); its body in `named_args!` |
 //! | `fun Recv.name(…)` | a method of `#[named(trait RecvNameExt)] impl Recv` (see below) |
-//! | `val NAME: T = e` (top level) | `const` (numbers, booleans, characters, a string literal), else a `thread_local!` made at first read |
+//! | `val NAME: T = e`, `val NAME = e` (top level) | `const` (numbers, booleans, characters, a string literal), a `static` (what a `const fn` makes: `compositionLocalOf { … }`, known by its address), else a `thread_local!` made at first read; its type its value's when not written (a generic's told by a lambda's value or a type argument), a camelCase name in snake_case |
+//! | a name whose declaration isn't seen (another file's `val`, a Rust `thread_local!` or constant) | `kt::top_level!(name)`: a thread-local's value, or the value, cloned; a property of it `kt::top_level_with!(Name, |v| v.prop())`, lent in place; an infix on it in place (`Name.provides(v)`) |
 //! | `Int Long Float Double Boolean Char String Unit` | `i32 i64 f32 f64 bool char String ()` |
 //! | `T?`, `List<T>`, `Map<K, V>`, `Set<T>`, `Pair<A, B>` | `Option<T>`, `Vec<T>`, `kt::KtMap<K, V>`, `kt::KtSet<T>`, `(A, B)` |
 //! | parameter `String`, `T?`, `(A) -> R` | `impl Into<String>`, `impl Into<Option<T>>`, `impl Fn(A) -> R + 'static` |
+//! | parameter of an interface the API has as a trait (`shape: Shape`) | its object shared as the API holds it (`Arc<dyn Shape>`) |
 //! | `val x = e`, `var x = e` | `let x = e;`, `let mut x = e;` (a value read again is cloned: Kotlin shares values) |
 //! | `var x by remember { mutableStateOf(0) }` | `let x = remember(|| mutable_state_of(0));`, reads `KtDelegate::get_value(&x)`, writes `KtMutableDelegate::set_value(&x, v)`, `x++` → `post_inc(&x)` |
 //! | `"a $b ${c}"` | `kt::template!("a ", b, c)` (Kotlin's `toString()` of each) |
@@ -24,9 +26,10 @@
 //! | `when (x) { a, b -> …; in r -> …; else -> … }` | an `if` chain on the subject |
 //! | `for (x in xs)`, `while`, `do … while`, labels | `for x in KtIterable::kt_iter(&xs)` (a range as it is), `while`, `loop`, `'label:` |
 //! | `f(a, name = b) { … }` | `f(a, name = b, last = || …)`: named arguments and defaults through the callee's builder |
-//! | `a.b`, `a.b = v` | `a.b()`, `a.set_b(v)` (properties one form); `Type.X` → `Type::X`; `Modifier.Companion` → `Modifier` |
+//! | `a.b`, `a.b = v` | `a.b()`, `a.set_b(v)` (properties one form); `Type.X` → `Type::X`; `Modifier.Companion` → `Modifier`; a nested object Rust names otherwise (`Arrangement.Absolute.Left` → `AbsoluteArrangement::Left`) |
+//! | an argument of another type than its parameter's | what converts it: `Into::into` (a `Stroke` given as a `DrawStyle`), `Rc::new`/`Arc::new` (a value given as an interface), `as i32` (another integer type given as an `Int`), `&v` (a list given as a slice) |
 //! | Kotlin's standard members (`xs.map { }`, `s.length`) | the kt shims' traits, by the receiver's type when it is known (`KtList::map(&xs, |it| …)`) |
-//! | lambdas | closures: borrowing where the callee runs them before returning (Kotlin's inline functions), else capturing clones (`#[kompozable]` does that for the calls it rewrites) |
+//! | lambdas | closures: borrowing where the callee runs them before returning (Kotlin's inline functions), else capturing clones (`#[kompozable]` does that for the calls it rewrites); a shared one (`Callback`, `Rc<dyn Fn(&T)>`) made one, its parameters typed; a parameter given a `&mut` (`state.update { it.add(…) }`) reborrowed |
 //! | receiver lambdas (`Canvas { drawCircle(…) }`) | a closure taking the scope (`|this| this.draw_circle(…)`): free names that are its members resolve through it |
 //! | suspend lambdas (`LaunchedEffect(k) { delay(1) }`) | `async move { delay(1).await }`: known suspending calls are awaited |
 //!
@@ -56,7 +59,7 @@ use crate::Paths;
 use crate::ast::*;
 use crate::diag::Diagnostics;
 use crate::pos::{Loc, SpanMap};
-use names::{ident, is_pascal, pascal, snake, valid};
+use names::{ident, is_pascal, pascal, snake, valid, value_name};
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
 use resolve::*;
@@ -223,7 +226,7 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// Declares a local (in the innermost scope); its Rust name.
     pub fn declare(&mut self, kotlin: &str, rust: String, kind: LocalKind, ty: Ty) -> String {
         let depth = self.scopes.len() - 1;
-        let local = Local { rust: rust.clone(), kind, ty, depth, kept_closure: false };
+        let local = Local { rust: rust.clone(), kind, ty, depth, kept_closure: false, mut_ref: false };
         self.scopes.last_mut().expect("a scope").insert(kotlin.to_string(), local);
         rust
     }
@@ -237,6 +240,13 @@ impl<'a, 'd> Gen<'a, 'd> {
             }
         }
         Some(found)
+    }
+
+    /// Marks a local of the innermost scope as a `&mut` (see `Local::mut_ref`).
+    pub fn mark_mut_ref(&mut self, kotlin: &str) {
+        if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(kotlin)) {
+            l.mut_ref = true;
+        }
     }
 
     /// Whether a name is a local (without recording a capture).
@@ -271,6 +281,7 @@ impl<'a, 'd> Gen<'a, 'd> {
 
     /// The file's top-level functions and properties, for the calls and reads that come before them.
     fn collect(&mut self, file: &File) {
+        let mut untyped = Vec::new();
         for decl in &file.decls {
             match decl {
                 Decl::Function(f) => {
@@ -278,15 +289,42 @@ impl<'a, 'd> Gen<'a, 'd> {
                     self.file.functions.entry(f.name.name.clone()).or_default().push(info);
                 }
                 Decl::Property(p) => {
-                    if let (Binding::Name(n), Some(t)) = (&p.binding, &p.ty) {
-                        let ty = self.ty_of(t);
-                        let form = val_form(p, &ty);
-                        self.file.vals.insert(n.name.clone(), FileVal { rust: n.name.clone(), ty, form });
+                    if let Binding::Name(n) = &p.binding {
+                        match &p.ty {
+                            Some(t) => {
+                                let ty = self.ty_of(t);
+                                self.add_val(p, &n.name, ty);
+                            }
+                            None => untyped.push((p, n)),
+                        }
                     }
                 }
                 _ => {}
             }
         }
+        // A `val` without its type written has its value's, as far as the generator can tell: those its value reads
+        // first, wherever they stand in the file (Kotlin's top-level properties are the file's, in any order).
+        loop {
+            let before = untyped.len();
+            untyped.retain(|(p, n)| {
+                let PropertyInit::Value(init) = &p.init else { return false };
+                let ty = self.peek_ty(init);
+                if ty.is_vague() {
+                    return true;
+                }
+                self.add_val(p, &n.name, ty);
+                false
+            });
+            if untyped.len() == before {
+                break;
+            }
+        }
+    }
+
+    /// A top-level `val` of type `ty`, for its reads.
+    fn add_val(&mut self, p: &Property, kotlin: &str, ty: Ty) {
+        let form = val_form(p, &ty);
+        self.file.vals.insert(kotlin.to_string(), FileVal { rust: value_name(kotlin), ty, form });
     }
 
     /// What a call of a file's function needs to know of it.
@@ -649,13 +687,6 @@ impl<'a, 'd> Gen<'a, 'd> {
         if p.getter.is_some() || p.setter.is_some() {
             return self.later(p.loc, "a property's getter or setter");
         }
-        let Some(t) = &p.ty else {
-            self.error(
-                n.loc,
-                format!("write `{}`'s type: a top-level `val` has it written (`val {}: Type = …`)", n.name, n.name),
-            );
-            return quote!();
-        };
         let init = match &p.init {
             PropertyInit::Value(e) => e,
             PropertyInit::Delegate(e) => return self.later(e.loc, "a delegated top-level property"),
@@ -667,14 +698,23 @@ impl<'a, 'd> Gen<'a, 'd> {
         self.fun = FnState::default();
         self.scopes = vec![HashMap::new()];
         self.receivers.clear();
+        // (its type written, or its value's)
+        let Some(val) = self.file.vals.get(&n.name).cloned() else {
+            self.error(
+                n.loc,
+                format!("write `{}`'s type: KompozR can't tell its value's type (`val {}: Type = …`)", n.name, n.name),
+            );
+            return quote!();
+        };
         let vis = self.visibility(&p.modifiers, p.loc);
-        let name = self.name_ident(&n.name, n.loc);
-        let ty = self.ty_of(t);
-        let form = val_form(p, &ty);
+        let name = self.name_ident(&val.rust, n.loc);
+        let rt = match &p.ty {
+            Some(t) => self.rust_type(t, types::TypePos::Value),
+            None => self.rust_of_ty(&val.ty, self.span(n.loc)),
+        };
         let allow = allow_attr(span);
-        match form {
+        match val.form {
             ValForm::Const => {
-                let rt = self.rust_type(t, types::TypePos::Value);
                 let v = self.value(init);
                 quote_spanned!(span=> #allow #vis const #name: #rt = #v;)
             }
@@ -682,8 +722,19 @@ impl<'a, 'd> Gen<'a, 'd> {
                 let v = self.expr(init).ts;
                 quote_spanned!(span=> #allow #vis const #name: &str = #v;)
             }
+            ValForm::Static => {
+                let v = self.value(init);
+                let kt = self.kt(span);
+                quote_spanned! {span=>
+                    #allow
+                    #vis static #name: #rt = {
+                        #[allow(unused_imports)]
+                        use #kt::ext::*;
+                        #v
+                    };
+                }
+            }
             ValForm::ThreadLocal => {
-                let rt = self.rust_type(t, types::TypePos::Value);
                 let v = self.value(init);
                 let kt = self.kt(span);
                 let rtp = respan(self.rt().clone(), span);
@@ -721,11 +772,21 @@ fn val_form(p: &Property, ty: &Ty) -> ValForm {
         lit(e)
     };
     let PropertyInit::Value(init) = &p.init else { return ValForm::ThreadLocal };
+    // (made by a `const fn` of the API from literals and lambdas: `compositionLocalOf { … }`, a static, known by its
+    // address as a local is)
+    let made_const = match &init.kind {
+        ExprKind::Call { callee, type_args: _, args, trailing_lambda: _ } => {
+            matches!(&callee.kind, ExprKind::Name(n) if free_functions(&n.name).any(|i| i.has(crate::index::flags::CONST)))
+                && args.iter().all(|a| literal(&a.value) || matches!(a.value.kind, ExprKind::Lambda(_)))
+        }
+        _ => false,
+    };
     match ty {
         Ty::Int | Ty::Long | Ty::Float | Ty::Double | Ty::Bool | Ty::Char if literal(init) => ValForm::Const,
         Ty::String if matches!(&init.kind, ExprKind::String(s) if s.parts.iter().all(|p| matches!(p, StringPart::Text { .. }))) => {
             ValForm::StrConst
         }
+        _ if made_const => ValForm::Static,
         _ => ValForm::ThreadLocal,
     }
 }

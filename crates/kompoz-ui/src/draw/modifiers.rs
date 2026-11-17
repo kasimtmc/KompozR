@@ -542,6 +542,8 @@ impl Modifier {
 
     /// The same, set by `block` as it is drawn (from the defaults, the size given): what it reads (an animation)
     /// draws it again, never composes it.
+    ///
+    /// Kotlin: `blur(block: BlurScope.() -> Unit)`
     pub fn blur_block(self, block: impl Fn(&mut BlurScope) + 'static) -> Modifier {
         self.then_element(BlurElement { scope: None, block: Some(Rc::new(block)) })
     }
@@ -971,7 +973,8 @@ pub enum BlurType {
 
 /// What a blur block sets as it is drawn (Compose 1.13's BlurScope), each time from these: how much it blurs where,
 /// its edges, its alpha, what it blurs; the node's size (px) and density (it derefs to it) to read.
-#[derive(Clone)]
+#[derive(Clone, kompoz_runtime::KotlinProperties)]
+#[kotlin(set)]
 pub struct BlurScope {
     pub blur_radius_spec: BlurRadiusSpec,
     pub edge_treatment: BlurredEdgeTreatment,

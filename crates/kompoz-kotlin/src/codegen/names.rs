@@ -55,6 +55,12 @@ pub(crate) fn snake(name: &str) -> String {
     out
 }
 
+/// A value's Rust name (a top-level `val`, a name read whose declaration isn't seen): a PascalCase or upper-case one
+/// as it is (`Accent`, `MAX`), a camelCase one in snake_case (`townSaver` → `town_saver`), as functions are.
+pub(crate) fn value_name(name: &str) -> String {
+    if is_pascal(name) || name.chars().all(|c| !c.is_lowercase()) { name.to_string() } else { snake(name) }
+}
+
 /// A snake_case or camelCase name in PascalCase (`framed` → `Framed`, `fill_max` → `FillMax`).
 pub(crate) fn pascal(name: &str) -> String {
     let mut out = String::new();

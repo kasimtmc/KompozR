@@ -199,6 +199,93 @@ macro_rules! __kt_flatten {
     }};
 }
 
+/// A name the Kotlin syntax reads without seeing its declaration (a top-level `val` of another `kompoz!` or `.kt`
+/// file, a Rust `thread_local!`, constant or static): its value as Kotlin reads it — a thread-local's (a translated
+/// top-level `val` is one) cloned out of it, any other value cloned (Kotlin's values are shared).
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __kt_top_level {
+    ($name:expr $(,)?) => {{
+        #[allow(unused_imports)]
+        use $crate::kt::{KtTopLevelKey as _, KtTopLevelValue as _};
+        (&$crate::kt::KtTopLevelProbe(&$name)).kt_top_level()
+    }};
+}
+
+/// `f` of such a name's value where it is (`LocalSpacing.current` of another file's local: a static's in place, a
+/// thread-local's inside it): `top_level_with!(LocalSpacing, |v| v.current())`.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __kt_top_level_with {
+    ($name:expr, $f:expr $(,)?) => {{
+        #[allow(unused_imports)]
+        use $crate::kt::{KtTopLevelKeyWith as _, KtTopLevelValueWith as _};
+        (&$crate::kt::KtTopLevelProbe(&$name)).kt_top_level_with($f)
+    }};
+}
+
+/// What [`top_level!`] reads a value through (a thread-local's is found first, a plain value's one autoref later).
+#[doc(hidden)]
+pub struct KtTopLevelProbe<'a, T: ?Sized>(pub &'a T);
+
+/// A thread-local's value, cloned out of it.
+#[doc(hidden)]
+pub trait KtTopLevelKey {
+    type Value;
+    fn kt_top_level(&self) -> Self::Value;
+}
+
+impl<T: Clone + 'static> KtTopLevelKey for KtTopLevelProbe<'static, std::thread::LocalKey<T>> {
+    type Value = T;
+    fn kt_top_level(&self) -> T {
+        self.0.with(T::clone)
+    }
+}
+
+/// Any other value, cloned.
+#[doc(hidden)]
+pub trait KtTopLevelValue {
+    type Value;
+    fn kt_top_level(&self) -> Self::Value;
+}
+
+impl<T: Clone> KtTopLevelValue for &KtTopLevelProbe<'_, T> {
+    type Value = T;
+    fn kt_top_level(&self) -> T {
+        self.0.clone()
+    }
+}
+
+/// A thread-local's value, lent.
+#[doc(hidden)]
+pub trait KtTopLevelKeyWith {
+    type Value;
+    fn kt_top_level_with<R>(&self, f: impl FnOnce(&Self::Value) -> R) -> R;
+}
+
+impl<T: 'static> KtTopLevelKeyWith for KtTopLevelProbe<'static, std::thread::LocalKey<T>> {
+    type Value = T;
+    fn kt_top_level_with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        self.0.with(f)
+    }
+}
+
+/// Any other value, lent where it is.
+#[doc(hidden)]
+pub trait KtTopLevelValueWith {
+    type Value;
+    fn kt_top_level_with<R>(&self, f: impl FnOnce(&Self::Value) -> R) -> R;
+}
+
+impl<T> KtTopLevelValueWith for &KtTopLevelProbe<'_, T> {
+    type Value = T;
+    fn kt_top_level_with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        f(self.0)
+    }
+}
+
 pub use crate::__kt_flatten as flatten;
 pub use crate::__kt_safe as safe;
 pub use crate::__kt_template as template;
+pub use crate::__kt_top_level as top_level;
+pub use crate::__kt_top_level_with as top_level_with;

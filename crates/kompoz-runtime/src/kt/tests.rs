@@ -471,3 +471,24 @@ fn numbers_and_math() {
     assert!((2f32.pow(3.0) - 8.0).abs() < 1e-5); // (Miri adds its noise to powf)
     assert_eq!(to_char(65), 'A');
 }
+
+thread_local! {
+    static GREETING: String = String::from("selam");
+}
+
+const STEPS: i32 = 3;
+
+#[test]
+fn top_level_values_read_by_name() {
+    // (a thread-local's value cloned out of it, any other value cloned)
+    assert_eq!(top_level!(GREETING), "selam");
+    assert_eq!(top_level!(STEPS) * 2, 6);
+    let names = vec!["a".to_string()];
+    let copy: Vec<String> = top_level!(names);
+    assert_eq!((copy, names.len()), (vec!["a".to_string()], 1));
+    // (lent where it is: a thread-local's inside it, a value's in place, whether it clones or not)
+    assert_eq!(top_level_with!(GREETING, |g| g.len()), 5);
+    struct NotClone(i32);
+    static PLACE: NotClone = NotClone(7);
+    assert_eq!(top_level_with!(PLACE, |p| p.0), 7);
+}

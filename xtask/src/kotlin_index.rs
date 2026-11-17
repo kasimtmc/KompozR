@@ -12,8 +12,12 @@
 //!   with its Kotlin name (Rust's in camelCase, or what a doc line ``Kotlin: `name(…)` `` says), its parameters in
 //!   order (types as text, defaults: Rust's `#[default(…)]` or Kotlin's from the doc line), lambdas' arities,
 //!   receivers (`impl Fn(&mut DrawScope)`) and whether they suspend, and whether it suspends (`async fn`, a
-//!   future returned), is `#[kompozable]` or `#[named]`, or takes Kotlin's overloads as a tuple (`Color(args:
-//!   impl ColorArgs)`, each overload an `impl ColorArgs for (…)` with its own doc line).
+//!   future returned), is `#[kompozable]` or `#[named]` or a `const fn`, or takes Kotlin's overloads as a tuple
+//!   (`Color(args: impl ColorArgs)`, each overload an `impl ColorArgs for (…)` with its own doc line); what types
+//!   deref to (`DEREFS`), the types Kotlin names otherwise (`TYPES`: a struct's doc line ``Kotlin:
+//!   `Arrangement.Absolute` ``); closures' aliases written out in the parameters of their types (`Callback` →
+//!   `Rc<dyn Fn()>`); the items a file's own `macro_rules!` makes of a type's name (`transforms!(DrawScope)`),
+//!   expanded.
 //!
 //! `--check` builds both and fails if what is committed differs (CI).
 
@@ -707,20 +711,30 @@ fn camel(name: &str) -> String {
 }
 
 /// What the scan of the API crates collects.
+#[derive(Default)]
 struct Scan {
     items: Vec<KItem>,
     /// The types that are futures (`impl Future for Delay`): a function giving one suspends.
     futures: BTreeSet<String>,
     /// `impl XArgs for (…)`'s, by trait: the overloads of the function taking `impl XArgs`.
     overloads: BTreeMap<String, Vec<(Type, Option<String>)>>,
+    /// `impl Deref for X { type Target = Y; }`'s: (X, Y), what X's values have of Y's members.
+    derefs: BTreeSet<(String, String)>,
+    /// The type aliases of closures (`type Callback = Rc<dyn Fn()>`), by name: a parameter of one takes a lambda
+    /// (one name aliasing two types isn't).
+    aliases: BTreeMap<String, Option<Type>>,
+    /// Kotlin's names of types that Rust names otherwise (a doc line ``Kotlin: `Arrangement.Absolute` `` on
+    /// `AbsoluteArrangement`): (Kotlin, Rust).
+    types: BTreeSet<(String, String)>,
 }
 
 fn kotlin_index(packages: &[Package]) -> Result<String, String> {
-    let mut scan = Scan { items: Vec::new(), futures: BTreeSet::new(), overloads: BTreeMap::new() };
+    let mut scan = Scan::default();
     let mut files = Vec::new();
     for p in packages.iter().filter(|p| API_CRATES.contains(&p.name.as_str())) {
         if let Some(lib) = p.targets.iter().find(|t| t.lib) {
-            for s in sources(lib)? {
+            for mut s in sources(lib)? {
+                expand_local_macros(&mut s.file.items);
                 files.push((lib.krate.clone(), s));
             }
         }
@@ -737,7 +751,97 @@ fn kotlin_index(packages: &[Package]) -> Result<String, String> {
     let mut items = scan.items;
     items.sort();
     items.dedup();
-    Ok(render_kotlin(&items))
+    Ok(render_kotlin(&items, &scan.derefs, &scan.types))
+}
+
+/// Expands, in place, the invocations of a file's own `macro_rules!` that make items from a type's name: a macro of
+/// one arm taking `$name:ident` (`transforms!(DrawScope);`, the transforms of each drawing scope). What such a
+/// macro makes is the API as much as what is written out; other macros' items aren't read.
+fn expand_local_macros(items: &mut Vec<Item>) {
+    let mut macros: BTreeMap<String, (String, TokenStream)> = BTreeMap::new();
+    for item in items.iter() {
+        if let Item::Macro(m) = item
+            && m.mac.path.is_ident("macro_rules")
+            && let Some(name) = &m.ident
+            && let Some(arm) = ident_arm(m.mac.tokens.clone())
+        {
+            macros.insert(name.to_string(), arm);
+        }
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for item in items.drain(..) {
+        match item {
+            Item::Macro(m) if m.ident.is_none() => {
+                let name = m.mac.path.get_ident().map(|i| i.to_string()).unwrap_or_default();
+                let arg: Vec<TokenTree> = m.mac.tokens.clone().into_iter().collect();
+                let expanded = match (macros.get(&name), arg.as_slice()) {
+                    (Some((param, body)), [TokenTree::Ident(ty)]) => {
+                        syn::parse2::<syn::File>(substitute(body.clone(), param, ty)).ok()
+                    }
+                    _ => None,
+                };
+                match expanded {
+                    Some(file) => out.extend(file.items),
+                    None => out.push(Item::Macro(m)),
+                }
+            }
+            Item::Mod(mut m) => {
+                if let Some((_, inner)) = &mut m.content {
+                    expand_local_macros(inner);
+                }
+                out.push(Item::Mod(m));
+            }
+            other => out.push(other),
+        }
+    }
+    *items = out;
+}
+
+/// A `macro_rules!` body of one arm `($name:ident) => { … }`: the parameter's name and the arm's body.
+fn ident_arm(tokens: TokenStream) -> Option<(String, TokenStream)> {
+    let tts: Vec<TokenTree> = tokens.into_iter().collect();
+    let (matcher, body) = match tts.as_slice() {
+        [TokenTree::Group(m), TokenTree::Punct(eq), TokenTree::Punct(gt), TokenTree::Group(b), rest @ ..]
+            if eq.as_char() == '='
+                && gt.as_char() == '>'
+                && rest.iter().all(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ';')) =>
+        {
+            (m.stream(), b.stream())
+        }
+        _ => return None,
+    };
+    let m: Vec<TokenTree> = matcher.into_iter().collect();
+    match m.as_slice() {
+        [TokenTree::Punct(d), TokenTree::Ident(name), TokenTree::Punct(c), TokenTree::Ident(kind)]
+            if d.as_char() == '$' && c.as_char() == ':' && kind == "ident" =>
+        {
+            Some((name.to_string(), body))
+        }
+        _ => None,
+    }
+}
+
+/// `body` with `$param` made `ty`.
+fn substitute(body: TokenStream, param: &str, ty: &proc_macro2::Ident) -> TokenStream {
+    let mut out = Vec::new();
+    let mut tts = body.into_iter().peekable();
+    while let Some(t) = tts.next() {
+        match t {
+            TokenTree::Punct(p)
+                if p.as_char() == '$' && matches!(tts.peek(), Some(TokenTree::Ident(i)) if i == param) =>
+            {
+                tts.next();
+                out.push(TokenTree::Ident(ty.clone()));
+            }
+            TokenTree::Group(g) => {
+                let mut ng = proc_macro2::Group::new(g.delimiter(), substitute(g.stream(), param, ty));
+                ng.set_span(g.span());
+                out.push(TokenTree::Group(ng));
+            }
+            other => out.push(other),
+        }
+    }
+    out.into_iter().collect()
 }
 
 fn prescan(items: &[Item], scan: &mut Scan) {
@@ -749,11 +853,32 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                     if trait_name == "Future" {
                         scan.futures.insert(type_name(&imp.self_ty));
                     }
+                    if trait_name == "Deref"
+                        && let Some(target) = imp.items.iter().find_map(|i| match i {
+                            syn::ImplItem::Type(t) if t.ident == "Target" => Some(type_name(&t.ty)),
+                            _ => None,
+                        })
+                    {
+                        scan.derefs.insert((type_name(&imp.self_ty), target));
+                    }
                     if trait_name.ends_with("Args") {
                         scan.overloads
                             .entry(trait_name)
                             .or_default()
                             .push(((*imp.self_ty).clone(), kotlin_doc(&imp.attrs)));
+                    }
+                }
+            }
+            Item::Type(t) if t.generics.params.is_empty() && is_pub(&t.vis) => {
+                let mut f = FindFn(false);
+                f.visit_type(&t.ty);
+                if f.0 {
+                    let entry = scan.aliases.entry(t.ident.to_string()).or_insert_with(|| Some((*t.ty).clone()));
+                    if entry
+                        .as_ref()
+                        .is_some_and(|known| known.to_token_stream().to_string() != t.ty.to_token_stream().to_string())
+                    {
+                        *entry = None;
                     }
                 }
             }
@@ -765,6 +890,47 @@ fn prescan(items: &[Item], scan: &mut Scan) {
             _ => {}
         }
     }
+}
+
+/// Finds a closure trait (`Fn`, `FnMut`, `FnOnce`) in a type.
+struct FindFn(bool);
+
+impl<'ast> Visit<'ast> for FindFn {
+    fn visit_path_segment(&mut self, s: &'ast syn::PathSegment) {
+        if matches!(s.ident.to_string().as_str(), "Fn" | "FnMut" | "FnOnce")
+            && matches!(s.arguments, syn::PathArguments::Parenthesized(_))
+        {
+            self.0 = true;
+        }
+        syn::visit::visit_path_segment(self, s);
+    }
+}
+
+/// `ty` with the closures' aliases it names written out (`Option<Callback>` → `Option<Rc<dyn Fn()>>`): what the
+/// generator reads of a lambda parameter.
+fn expand_aliases(ty: &Type, aliases: &BTreeMap<String, Option<Type>>) -> Type {
+    struct Expand<'a>(&'a BTreeMap<String, Option<Type>>, u8);
+    impl syn::visit_mut::VisitMut for Expand<'_> {
+        fn visit_type_mut(&mut self, t: &mut Type) {
+            if let Type::Path(p) = t
+                && p.qself.is_none()
+                && let Some(last) = p.path.segments.last()
+                && last.arguments.is_empty()
+                && let Some(Some(target)) = self.0.get(&last.ident.to_string())
+                && self.1 < 4
+            {
+                *t = target.clone();
+                self.1 += 1;
+                self.visit_type_mut(t);
+                self.1 -= 1;
+                return;
+            }
+            syn::visit_mut::visit_type_mut(self, t);
+        }
+    }
+    let mut out = ty.clone();
+    syn::visit_mut::VisitMut::visit_type_mut(&mut Expand(aliases, 0), &mut out);
+    out
 }
 
 struct Cx<'a> {
@@ -810,7 +976,12 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                     scan.items.push(it);
                 }
             }
-            Item::Struct(s) if is_pub(&s.vis) && !hidden(&s.attrs) => properties(cx, s, scan),
+            Item::Struct(s) if is_pub(&s.vis) && !hidden(&s.attrs) => {
+                if let Some(kotlin) = kotlin_doc(&s.attrs).filter(|d| !d.contains('(')) {
+                    scan.types.insert((kotlin, s.ident.to_string()));
+                }
+                properties(cx, s, scan)
+            }
             Item::Trait(t) if is_pub(&t.vis) && !hidden(&t.attrs) => {
                 let via = t.ident.to_string();
                 for ti in &t.items {
@@ -997,11 +1168,12 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
             syn::Pat::Ident(pi) => unraw(&pi.ident),
             other => text(other.to_token_stream()),
         };
-        let mut p = plain_param(&name, &pt.ty);
+        let ty = expand_aliases(&pt.ty, &scan.aliases);
+        let mut p = plain_param(&name, &ty);
         if let Some(d) = param_default(&pt.attrs) {
             p.default = Some((false, d));
         }
-        p.lambda = lambda(&pt.ty, &bounds);
+        p.lambda = lambda(&ty, &bounds);
         if let Some(doc) = &doc {
             // (by name where the doc names it, else by place)
             let found = doc
@@ -1025,6 +1197,9 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     };
     if sig.asyncness.is_some() || returns_future(&sig.output, &bounds, &scan.futures) {
         it.flags.insert("SUSPEND");
+    }
+    if sig.constness.is_some() {
+        it.flags.insert("CONST");
     }
     if has_attr(attrs, "kompozable") {
         it.flags.insert("KOMPOZABLE");
@@ -1205,7 +1380,7 @@ fn receiver_of(first: &Type) -> String {
 
 // ---- generated.rs ----
 
-fn render_kotlin(items: &[KItem]) -> String {
+fn render_kotlin(items: &[KItem], derefs: &BTreeSet<(String, String)>, types: &BTreeSet<(String, String)>) -> String {
     let mut out = String::from(
         "// The API index the Kotlin syntax's generator reads: written by `cargo xtask kotlin-index` from the\n\
          // workspace's sources (don't edit by hand; `--check` in CI). Its types: `super` (index/mod.rs).\n\
@@ -1238,6 +1413,18 @@ fn render_kotlin(items: &[KItem]) -> String {
             it.ret,
             flags
         );
+    }
+    out.push_str(
+        "];\n\n/// What a type's values have of another's members (`impl Deref for X { type Target = Y; }`): (X, Y).\n",
+    );
+    out.push_str("pub static DEREFS: &[(&str, &str)] = &[\n");
+    for (from, to) in derefs {
+        let _ = writeln!(out, "    ({from:?}, {to:?}),");
+    }
+    out.push_str("];\n\n/// Kotlin's names of types Rust names otherwise (`Arrangement.Absolute` → `AbsoluteArrangement`): (Kotlin, Rust).\n");
+    out.push_str("pub static TYPES: &[(&str, &str)] = &[\n");
+    for (kotlin, rust) in types {
+        let _ = writeln!(out, "    ({kotlin:?}, {rust:?}),");
     }
     out.push_str("];\n");
     out
@@ -1335,7 +1522,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let mut scan = Scan { items: Vec::new(), futures: BTreeSet::new(), overloads: BTreeMap::new() };
+        let mut scan = Scan::default();
         prescan(&file.items, &mut scan);
         collect(&file.items, &Cx { krate: "k", module: "m", public: true }, &mut scan);
         let find = |k: &str| scan.items.iter().find(|i| i.kotlin == k).unwrap_or_else(|| panic!("no {k}"));
@@ -1363,5 +1550,46 @@ mod tests {
         assert_eq!(overloads[1].params[3].default, Some((true, "1f".to_string())));
         let pad = find("padStart");
         assert_eq!((pad.via.as_str(), pad.params[1].default.clone()), ("KtStr", Some((true, "' '".to_string()))));
+    }
+
+    #[test]
+    fn derefs_nested_objects_aliases_and_local_macros() {
+        let mut file: syn::File = syn::parse_str(
+            r#"
+            pub struct MeasureScope;
+            impl std::ops::Deref for MeasureScope { type Target = Density; fn deref(&self) -> &Density { todo!() } }
+            /// Kotlin: `Arrangement.Absolute`
+            pub struct AbsoluteArrangement;
+            pub type Callback = Rc<dyn Fn()>;
+            pub type Shared = Rc<Thing>;
+            pub fn clickable(on_long_click: Option<Callback>, shared: Shared) {}
+            pub const fn local_of(default: fn() -> i32) -> Local { todo!() }
+            macro_rules! transforms {
+                ($ty:ident) => {
+                    impl $ty { pub fn rotate(&mut self, degrees: f32, block: impl FnOnce(&mut $ty)) {} }
+                };
+            }
+            transforms!(DrawScope);
+            "#,
+        )
+        .unwrap();
+        expand_local_macros(&mut file.items);
+        let mut scan = Scan::default();
+        prescan(&file.items, &mut scan);
+        collect(&file.items, &Cx { krate: "k", module: "m", public: true }, &mut scan);
+        assert!(scan.derefs.contains(&("MeasureScope".to_string(), "Density".to_string())));
+        assert!(scan.types.contains(&("Arrangement.Absolute".to_string(), "AbsoluteArrangement".to_string())));
+        let find = |k: &str| scan.items.iter().find(|i| i.kotlin == k).unwrap_or_else(|| panic!("no {k}"));
+        let clickable = find("clickable");
+        // (a closure's alias written out, its lambda found; another alias kept)
+        assert_eq!(clickable.params[0].ty, "Option<Rc<dyn Fn()>>");
+        assert!(clickable.params[0].lambda.is_some());
+        assert_eq!(clickable.params[1].ty, "Shared");
+        assert!(find("localOf").flags.contains("CONST"));
+        let rotate = find("rotate");
+        assert_eq!(
+            (rotate.owner.as_str(), rotate.params[1].lambda.as_ref().unwrap().receiver.as_str()),
+            ("DrawScope", "DrawScope")
+        );
     }
 }

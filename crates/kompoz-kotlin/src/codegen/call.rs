@@ -52,6 +52,7 @@ impl ArgValue<'_> {
 }
 
 /// How the callee is reached.
+#[derive(Clone)]
 enum Target {
     /// A path call: `name(…)` (a PascalCase one goes through `Probe` in a composable body).
     Path(TokenStream, String),
@@ -154,9 +155,9 @@ impl Gen<'_, '_> {
             } else {
                 quote!(#i)
             };
-            let (receiver, ret) = match &l.ty {
-                Ty::Fun(ft) => (ft.receiver.clone(), ft.ret.clone()),
-                _ => (None, Ty::Unknown),
+            let (receiver, ret, params) = match &l.ty {
+                Ty::Fun(ft) => (ft.receiver.clone(), ft.ret.clone(), ft.params.clone()),
+                _ => (None, Ty::Unknown, Vec::new()),
             };
             let mut vals = Vec::new();
             if let Some(r) = receiver {
@@ -167,7 +168,20 @@ impl Gen<'_, '_> {
                     vals.push(quote!(#xi));
                 }
             }
-            vals.extend(args.iter().map(|a| self.loose_arg(a)));
+            // (a `String` parameter takes a `String`: a literal made one; a number parameter Kotlin's number)
+            for (k, a) in args.iter().enumerate() {
+                vals.push(match (a.value, params.get(k)) {
+                    (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() => {
+                        self.value_want(e, Want { str_ok: false })
+                    }
+                    (ArgValue::Expr(e), Some(to)) if to.is_number() && !a.value.is_lambda() => {
+                        let from = self.peek_ty(e);
+                        let v = self.value(e);
+                        self.kotlin_number(v, &from, to, span)
+                    }
+                    _ => self.loose_arg(a),
+                });
+            }
             return Out::plain(quote_spanned!(span=> #f(#(#vals),*)), ret);
         }
         // Special forms.
@@ -243,12 +257,18 @@ impl Gen<'_, '_> {
             }
             return Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown);
         }
-        // A type's constructor or a function the index doesn't know (Rust's own): as written, its arguments as given.
-        let rust = if is_pascal(&n.name) { n.name.clone() } else { snake(&n.name) };
+        // A type's constructor or a function the index doesn't know (Rust's own, another file's): as written, its
+        // arguments as given — a string literal to a PascalCase one (a composable of another file, a constructor) as
+        // Kotlin's `String`, which its parameters take (`impl Into<String>`, a defaulted one's `String`).
+        let pascal = is_pascal(&n.name);
+        let rust = if pascal { n.name.clone() } else { snake(&n.name) };
         let name = self.name_ident(&rust, n.loc);
         let mut vals = Vec::new();
         for a in args {
-            let v = self.loose_arg(a);
+            let v = match a.value {
+                ArgValue::Expr(e) if pascal && !a.value.is_lambda() => self.value_want(e, Want { str_ok: false }),
+                _ => self.loose_arg(a),
+            };
             vals.push(match a.name {
                 Some(an) => {
                     let ai = ident(&snake(&an.name), self.span(an.loc));
@@ -412,7 +432,7 @@ impl Gen<'_, '_> {
             let r = self.finish_recv(recv, Receiver::Value, loc);
             return self.emit(&f.callee(), Target::Method(r), args, loc, &name.name);
         }
-        // The type's own methods.
+        // The type's own methods (a generic one's lambdas take its type argument: `state.update { it… }`).
         if let Some(o) = &owner {
             let items: Vec<&'static crate::index::Item> =
                 members_of(o, &name.name).filter(|i| i.kind == Kind::Method).collect();
@@ -420,8 +440,15 @@ impl Gen<'_, '_> {
                 && let Some(c) = self.choose(&items, args, loc)
             {
                 let kind = c.item.map_or(Receiver::Ref, |i| i.receiver);
+                let hint = match &recv.ty {
+                    Ty::Named(_, a) if a.len() == 1 => Some((a[0].clone(), recv.ty.clone())),
+                    _ => None,
+                };
                 let r = self.finish_recv(recv, kind, loc);
-                return self.emit(&c, Target::Method(r), args, loc, &name.name);
+                let saved = std::mem::replace(&mut self.elem_hint, hint);
+                let out = self.emit(&c, Target::Method(r), args, loc, &name.name);
+                self.elem_hint = saved;
+                return out;
             }
         }
         // The kt shims: through their trait.
@@ -440,12 +467,21 @@ impl Gen<'_, '_> {
             let t = proc_macro2::Ident::new(item.via, nspan);
             let elem = recv.ty.element();
             let recv_ty = recv.ty.clone();
-            let r = match item.receiver {
-                Receiver::Value => {
+            let r = match (item.receiver, recv.kind) {
+                (Receiver::Value, _) => {
                     let v = self.finish(recv, Want::default(), loc);
                     quote!(#v)
                 }
-                Receiver::RefMut => {
+                // (a `&mut` held: reborrowed)
+                (Receiver::RefMut, OutKind::RefMut) => {
+                    let ts = recv.ts;
+                    quote_spanned!(span=> &mut *#ts)
+                }
+                (_, OutKind::RefMut) => {
+                    let ts = recv.ts;
+                    quote_spanned!(span=> &*#ts)
+                }
+                (Receiver::RefMut, _) => {
                     let ts = recv.ts;
                     quote_spanned!(span=> &mut #ts)
                 }
@@ -518,7 +554,7 @@ impl Gen<'_, '_> {
     /// A receiver for a method taking it as `kind`: a clone of a local taken by value.
     fn finish_recv(&self, recv: Out, kind: Receiver, loc: Loc) -> TokenStream {
         match (kind, recv.kind) {
-            (Receiver::Value, OutKind::Local) => self.finish(recv, Want::default(), loc),
+            (Receiver::Value, OutKind::Local | OutKind::RefMut) => self.finish(recv, Want::default(), loc),
             _ => recv.ts,
         }
     }
@@ -553,27 +589,29 @@ impl Gen<'_, '_> {
 
     /// How well arguments fit a callee (none: they don't).
     fn fit(&self, c: &Callee, args: &[ArgRef]) -> Option<i32> {
-        // (a builder of named arguments: `detectTapGestures(onTap = { … })`)
-        if c.params.is_empty()
-            && !args.is_empty()
-            && let Some(owner) = c.ret.owner()
-            && args.iter().all(|a| a.name.is_some_and(|n| members_of(owner, &n.name).any(|i| i.params.len() == 1)))
-        {
+        // (the named arguments of the builder it gives: `detectTapGestures(onTap = { … })`)
+        let (args, links) = split_chain(c, args)?;
+        if !links.is_empty() && c.params.is_empty() {
             return Some(0);
         }
+        let args = args.as_slice();
         let m = self.map_args(c, args).ok()?;
         let mut score = 0;
         for (k, p) in c.params.iter().enumerate() {
             let given = &m.given[k];
             if given.is_empty() {
-                if p.default == PDefault::None {
+                // (a vararg given nothing is an empty array)
+                if p.default == PDefault::None && !p.vararg {
                     return None;
                 }
                 score -= 1;
                 continue;
             }
             for a in given {
-                let lambda_param = p.lambda.is_some() || p.ty.contains("Fn(") || p.ty.contains("Fn<");
+                let lambda_param = p.lambda.is_some()
+                    || p.ty.contains("Fn(")
+                    || p.ty.contains("Fn<")
+                    || p.ty.trim_start().starts_with("fn(");
                 if a.value.is_lambda() != lambda_param && !p.vararg {
                     // (a lambda to a non-function parameter, or the reverse: a function value is one)
                     let value_fits =
@@ -649,11 +687,10 @@ impl Gen<'_, '_> {
     /// The call of `c` through `target` with `args`.
     fn emit(&mut self, c: &Callee, target: Target, args: &[ArgRef], loc: Loc, kotlin: &str) -> Out {
         let span = self.span(loc);
-        if c.params.is_empty()
-            && !args.is_empty()
-            && let Some(out) = self.chain_call(c, &target, args, loc)
+        if let Some((own, links)) = split_chain(c, args)
+            && !links.is_empty()
         {
-            return out;
+            return self.chain_call(c, target, &own, &links, loc, kotlin);
         }
         let m = match self.map_args(c, args) {
             Ok(m) => m,
@@ -678,7 +715,7 @@ impl Gen<'_, '_> {
         let mut vals: Vec<(Option<proc_macro2::Ident>, TokenStream, bool)> = Vec::new();
         if builder && c.builder {
             for (k, p) in c.params.iter().enumerate() {
-                if m.given[k].is_empty() && p.default == PDefault::None {
+                if m.given[k].is_empty() && p.default == PDefault::None && !p.vararg {
                     self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
                 }
             }
@@ -722,6 +759,7 @@ impl Gen<'_, '_> {
                     match &p.default {
                         PDefault::Kotlin(text) => vals.push((None, self.kotlin_default(text, p, loc), false)),
                         PDefault::Builder => {}
+                        PDefault::None if p.vararg => vals.push((None, self.many_value(&[], p, span), false)),
                         PDefault::None => {
                             self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
                         }
@@ -799,35 +837,39 @@ impl Gen<'_, '_> {
         Out::plain(ts, ret)
     }
 
-    /// A call of what takes nothing and gives a builder of its arguments by name (`detectTapGestures(onTap = { … })`
-    /// → `detect_tap_gestures().on_tap(…)`, awaited in a coroutine: Kotlin's suspending detectors).
-    fn chain_call(&mut self, c: &Callee, target: &Target, args: &[ArgRef], loc: Loc) -> Option<Out> {
+    /// A call of what gives a builder of the rest of its arguments by name (`detectTapGestures(onTap = { … })` →
+    /// `detect_tap_gestures().on_tap(…)`, `detectDragGestures(onDragStart = { … }, onDrag = { … })` →
+    /// `detect_drag_gestures(…).on_drag_start(…)`, awaited in a coroutine: Kotlin's suspending detectors): the call
+    /// with its own arguments (`own`), then the builder's methods with theirs (`links`).
+    fn chain_call(
+        &mut self,
+        c: &Callee,
+        target: Target,
+        own: &[ArgRef],
+        links: &[(ArgRef, &'static crate::index::Item)],
+        loc: Loc,
+        kotlin: &str,
+    ) -> Out {
         let span = self.span(loc);
-        let owner = c.ret.owner()?.to_string();
-        let mut links = Vec::new();
-        for a in args {
-            let name = a.name?;
-            let m = members_of(&owner, &name.name).find(|i| i.params.len() == 1)?;
-            links.push((a, m));
-        }
         let name = ident(&c.rust, span);
         let mut ts = match target {
+            _ if !c.params.is_empty() => self.emit(c, target, own, loc, kotlin).ts,
             Target::Path(p, _) => quote_spanned!(span=> #p()),
             Target::Method(r) => quote_spanned!(span=> #r.#name()),
             Target::Ufcs(t, r) => quote_spanned!(span=> #t::#name(#r)),
             Target::MethodFirst(r, first) => quote_spanned!(span=> #r.#name(#first)),
         };
-        for (a, m) in links {
+        for &(a, m) in links {
             let p = Callee::from_item(m).params.remove(0);
             let label = a.name.map(|n| n.name.clone()).unwrap_or_default();
-            let v = self.with_label(&label, |me| me.arg_value(a, Some(&p), false));
+            let v = self.with_label(&label, |me| me.arg_value(&a, Some(&p), false));
             let mi = ident(m.rust, self.span(a.loc));
             ts = quote_spanned!(span=> #ts.#mi(#v));
         }
         if self.in_async {
             ts = quote_spanned!(span=> #ts.await);
         }
-        Some(Out::plain(ts, Ty::Unit))
+        Out::plain(ts, Ty::Unit)
     }
 
     /// Writes `f` with the call's name as the label its lambdas have (`return@forEach`, `this@Canvas`).
@@ -856,7 +898,9 @@ impl Gen<'_, '_> {
     fn arg_value(&mut self, a: &ArgRef, p: Option<&PInfo>, transform_wraps: bool) -> TokenStream {
         let span = self.span(a.loc);
         let Some(p) = p else { return self.loose_arg(a) };
-        if p.vararg || (p.ty.trim_start().starts_with("&[") && !a.value.is_lambda()) {
+        // (one value to a slice: an array of it, unless it is a list already — `floatArrayOf(8f, 6f)`)
+        let a_list = matches!(a.value, ArgValue::Expr(e) if matches!(self.peek_ty(e), Ty::List(_)));
+        if p.vararg || (p.ty.trim_start().starts_with("&[") && !a.value.is_lambda() && !a_list) {
             return self.many_value(&[a], p, span);
         }
         if is_keys(p) {
@@ -866,6 +910,33 @@ impl Gen<'_, '_> {
             let label = self.call_labels.last().cloned();
             let closure = self.lambda_for(l, p.lambda.as_ref(), label.as_deref(), transform_wraps);
             let t = plain_type_text(&p.ty);
+            // (a shared or boxed closure, `Rc<dyn Fn()>` — `Callback` —, in an `Option` or not)
+            let (some, owned) = match t.strip_prefix("Option<") {
+                Some(inner) => (true, inner),
+                None => (false, t.as_str()),
+            };
+            let made = if owned.starts_with("Rc<dyn") {
+                Some(quote_spanned!(span=> ::std::rc::Rc::new(#closure)))
+            } else if owned.starts_with("Arc<dyn") {
+                Some(quote_spanned!(span=> ::std::sync::Arc::new(#closure)))
+            } else if owned.starts_with("Box<dyn") {
+                Some(quote_spanned!(span=> ::std::boxed::Box::new(#closure)))
+            } else {
+                None
+            };
+            if let Some(made) = made {
+                // (made the trait object its parameter takes, which a builder's generic setter wouldn't coerce it to)
+                let ty = p.ty.trim();
+                let ty = ty.strip_prefix("Option<").and_then(|t| t.strip_suffix('>')).unwrap_or(ty);
+                let made = match super::lambda::written_type(ty, span) {
+                    Some(t) => {
+                        let f = self.fresh("f", span);
+                        quote_spanned!(span=> { let #f: #t = #made; #f })
+                    }
+                    None => made,
+                };
+                return if some { quote_spanned!(span=> ::core::option::Option::Some(#made)) } else { made };
+            }
             return if t.starts_with("Option<&") {
                 quote_spanned!(span=> ::core::option::Option::Some(&#closure))
             } else if t.starts_with("Option<") {
@@ -896,15 +967,34 @@ impl Gen<'_, '_> {
         let nullable_arg = o.kind == OutKind::Null || o.ty.is_nullable();
         let arg_ty = o.ty.clone();
         let v = self.finish(o, Want { str_ok: p.takes_str() }, e.loc);
+        let v = self.kotlin_number(v, &arg_ty, &pty, span);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
+        // (a value of another type than the parameter's, which converts from it: Kotlin's subtype, a Rust `From` —
+        // a `Stroke` given as a `DrawStyle`; a type converts to itself, so a wrong guess of the argument's type costs
+        // nothing)
+        let inner = t.strip_prefix("Option<").and_then(|r| r.strip_suffix('>'));
+        let target = inner.unwrap_or(t);
+        // (of plain types both: a generic one's arguments aren't known here, `Arrangement<A>`)
+        let plain = |x: &Ty| matches!(x, Ty::Named(_, a) if a.is_empty());
+        let converts = |a: &Ty, b: &Ty| plain(a) && plain(b) && a != b && plain_path(target) && !takes_any(target);
+        let v = match (&arg_ty.non_null(), Ty::from_rust(target)) {
+            // (in an `Option`, named: a builder's setter takes anything `Into<Option<T>>`)
+            (a, b) if converts(a, &b) && inner.is_some() => {
+                let ty: TokenStream = respan(target.parse().expect("a type's path"), span);
+                quote_spanned!(span=> ::core::convert::Into::<#ty>::into(#v))
+            }
+            (a, b) if converts(a, &b) => quote_spanned!(span=> ::core::convert::Into::into(#v)),
+            _ => v,
+        };
         if p.option == OptionForm::Option && !nullable_arg {
             return quote_spanned!(span=> ::core::option::Option::Some(#v));
         }
         // (a shared trait object, `shape: Arc<dyn Shape>`, given a value of its own type, `RoundedCornerShape(16.dp)`:
-        // Kotlin's interface value is the Rust side's `Arc::new` of it)
+        // Kotlin's interface value is the Rust side's `Arc::new` of it; a value of the interface's type is one already)
         if let Ty::Named(name, _) = &arg_ty
             && !matches!(name.as_str(), "Arc" | "Rc")
+            && trait_object(name).is_none()
         {
             if t.starts_with("Arc<dyn") {
                 return quote_spanned!(span=> ::std::sync::Arc::new(#v));
@@ -920,6 +1010,16 @@ impl Gen<'_, '_> {
             return quote_spanned!(span=> &#v);
         }
         v
+    }
+
+    /// A value of another of Rust's integer types (`usize`: a layout's `lineCount`) as the Kotlin number `to` is.
+    fn kotlin_number(&self, v: TokenStream, from: &Ty, to: &Ty, span: Span) -> TokenStream {
+        if *from == Ty::OtherInt && to.is_number() && *to != Ty::OtherInt {
+            let t = self.rust_of_ty(to, span);
+            quote_spanned!(span=> (#v as #t))
+        } else {
+            v
+        }
     }
 
     /// An expression's value for a parameter `p` (a default's).
@@ -974,6 +1074,36 @@ impl Gen<'_, '_> {
         }
         respan(v, span)
     }
+}
+
+/// A call's arguments split: those its parameters take, and the named ones its result's builder takes as its methods
+/// of one parameter (`detectDragGestures(onDragStart = …)`: `DetectDragGestures::on_drag_start`); none when a named
+/// argument is neither's.
+fn split_chain<'e>(
+    c: &Callee,
+    args: &[ArgRef<'e>],
+) -> Option<(Vec<ArgRef<'e>>, Vec<(ArgRef<'e>, &'static crate::index::Item)>)> {
+    let mut own = Vec::new();
+    let mut links = Vec::new();
+    let owner = c.ret.owner();
+    for a in args {
+        match (a.name, owner) {
+            (Some(n), Some(owner)) if !c.params.iter().any(|p| p.kotlin == n.name) => {
+                let m = members_of(owner, &n.name).find(|i| i.params.len() == 1)?;
+                links.push((*a, m));
+            }
+            _ => own.push(*a),
+        }
+    }
+    Some((own, links))
+}
+
+/// Whether a type's text is a plain path (`DrawStyle`, `kt::KtSet`): no generics, references or bounds.
+fn plain_path(t: &str) -> bool {
+    !t.is_empty()
+        && t.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+        && t.starts_with(|c: char| c.is_alphabetic())
+        && !matches!(t, "Self" | "T" | "R" | "K" | "V")
 }
 
 /// Whether a token is, or holds, the identifier `name`.

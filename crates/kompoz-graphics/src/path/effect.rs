@@ -77,6 +77,8 @@ impl PathEffect {
     /// On, off, on… (in pairs, an odd last one left out as Android leaves it; none negative, not all 0), `phase` into
     /// the pattern (its length's remainder; negative: from its end), starting again on each contour; a closed one
     /// joins its last dash to its first. Strokes only: a fill is drawn as it is.
+    ///
+    /// Kotlin: `dashPathEffect(intervals: FloatArray, phase: Float = 0f)`
     pub fn dash_path_effect(intervals: &[f32], phase: f32) -> PathEffect {
         let intervals = &intervals[..intervals.len() & !1]; // (Android's: an even count, the odd one left out)
         // (SkDashPath::ValidDashPath)

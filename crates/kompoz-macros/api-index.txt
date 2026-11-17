@@ -98,13 +98,16 @@ kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/m
 kompoz-runtime/runtime kompozable Shown r crates/kompoz-runtime/tests/runtime.rs
 * kompozable SideEffect r crates/kompoz-runtime/src/remember.rs
 * kompozable SimpleLayout dr crates/kompoz-foundation/src/text/selection/container.rs
+kompoz/kotlin_ported fn Size2 dd crates/kompoz/tests/kotlin_ported.rs
 * kompozable Spacer r crates/kompoz-foundation/src/layout/spacer.rs
+kompoz/kotlin_ported fn Spacing dd crates/kompoz/tests/kotlin_ported.rs
 * fn SpanStyle dddddddddddddddddd crates/kompoz-text/src/span_style.rs
 kompoz-runtime/runtime kompozable SpeedReader - crates/kompoz-runtime/tests/runtime.rs
 kompoz-ui/tree kompozable Stack dr crates/kompoz-ui/tests/tree.rs
 kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
 kompoz-runtime/runtime kompozable StaticView - crates/kompoz-runtime/tests/runtime.rs
 * fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
+kompoz/kotlin_ported fn Sticker rd crates/kompoz/tests/kotlin_ported.rs
 * fn Stroke ddddd crates/kompoz-graphics/src/draw_style.rs
 * kompozable StyleAnnotation rrr crates/kompoz-foundation/src/text/link_scope.rs
 kompoz-runtime/macros kompozable Tagged rdd crates/kompoz-runtime/tests/macros.rs

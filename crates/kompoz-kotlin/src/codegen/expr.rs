@@ -4,12 +4,12 @@
 //! again is cloned (Kotlin's values are shared references; Rust's move), a string literal is made a `String`
 //! (Kotlin's one string type) unless what takes it takes a `&str` too, `null` is `None`.
 
-use super::names::{ident, is_pascal, snake};
+use super::names::{ident, is_pascal, snake, value_name};
 use super::resolve::*;
 use super::stmt::Tail;
 use super::{Gen, respan};
 use crate::ast::*;
-use crate::index::Kind;
+use crate::index::{self, Kind};
 use proc_macro2::{Literal, Span, TokenStream};
 use quote::{quote, quote_spanned};
 
@@ -25,6 +25,8 @@ pub(crate) enum OutKind {
     Null,
     /// An integer literal (which a float operand next to it makes a float one).
     IntLit,
+    /// A local holding a `&mut` (see `Local::mut_ref`).
+    RefMut,
 }
 
 pub(crate) struct Out {
@@ -63,6 +65,7 @@ impl Gen<'_, '_> {
         let ts = out.ts;
         match out.kind {
             OutKind::Local => quote_spanned!(span=> #ts.clone()),
+            OutKind::RefMut => quote_spanned!(span=> (*#ts).clone()),
             OutKind::StrLit if !want.str_ok => quote_spanned!(span=> ::std::string::String::from(#ts)),
             _ => ts,
         }
@@ -164,7 +167,13 @@ impl Gen<'_, '_> {
                 return Out::plain(quote_spanned!(span=> #kt::KtDelegate::get_value(&#i)), l.ty);
             }
             let copied = l.ty.is_copy() || (matches!(l.ty, Ty::Fun(_)) && !l.kept_closure);
-            let kind = if copied { OutKind::Plain } else { OutKind::Local };
+            let kind = if l.mut_ref {
+                OutKind::RefMut
+            } else if copied {
+                OutKind::Plain
+            } else {
+                OutKind::Local
+            };
             return Out { ts: quote!(#i), ty: l.ty, kind };
         }
         // A member of an implicit receiver (a property: its getter).
@@ -176,7 +185,7 @@ impl Gen<'_, '_> {
         if let Some(v) = self.file.vals.get(&n.name).cloned() {
             let i = ident(&v.rust, span);
             return match v.form {
-                ValForm::Const => Out::plain(quote!(#i), v.ty),
+                ValForm::Const | ValForm::Static => Out::plain(quote!(#i), v.ty),
                 ValForm::StrConst => Out { ts: quote!(#i), ty: Ty::String, kind: OutKind::StrLit },
                 ValForm::ThreadLocal => Out::plain(quote_spanned!(span=> #i.with(::core::clone::Clone::clone)), v.ty),
             };
@@ -192,18 +201,15 @@ impl Gen<'_, '_> {
             let i = ident(item.rust, span);
             return Out::plain(quote_spanned!(span=> #kt::#i), Ty::from_rust(item.ret));
         }
-        let ty = lookup(&n.name)
-            .iter()
-            .find(|i| i.kind == Kind::Value && i.owner.is_empty())
-            .map(|i| Ty::from_rust(i.ret))
-            .unwrap_or(Ty::Unknown);
-        let rust = if is_pascal(&n.name) || n.name.chars().all(|c| !c.is_lowercase()) {
-            n.name.clone()
-        } else {
-            snake(&n.name)
-        };
-        let i = self.name_ident(&rust, loc);
-        Out::plain(quote!(#i), ty)
+        let value = lookup(&n.name).iter().find(|i| i.kind == Kind::Value && i.owner.is_empty());
+        let i = self.name_ident(&value_name(&n.name), loc);
+        match value {
+            // (the API's value objects and constants: `Modifier`, `LocalDensity`, `RectangleShape`)
+            Some(item) => Out::plain(quote!(#i), Ty::from_rust(item.ret)),
+            // A value whose declaration isn't seen here: a top-level `val` of another `kompoz!` or `.kt` file (a
+            // thread-local), or Rust's own; read as Kotlin reads it.
+            None => Out::plain(quote_spanned!(span=> #kt::top_level!(#i)), Ty::Unknown),
+        }
     }
 
     /// The innermost implicit receiver with a member `kotlin` (that `accept` takes), and the member.
@@ -314,6 +320,11 @@ impl Gen<'_, '_> {
                 Some(n.name.clone())
             }
             ExprKind::Member { receiver, safe: false, name } if name.name == "Companion" => self.qualifier(receiver),
+            // (a nested object Rust names as a type of its own: `Arrangement.Absolute` → `AbsoluteArrangement`)
+            ExprKind::Member { receiver, safe: false, name } if is_pascal(&name.name) => {
+                let outer = self.qualifier(receiver)?;
+                crate::index::rust_type(&format!("{outer}.{}", name.name)).map(str::to_string)
+            }
             _ => None,
         }
     }
@@ -367,11 +378,25 @@ impl Gen<'_, '_> {
             let kt = self.kt(span);
             let t = proc_macro2::Ident::new(item.via, mspan);
             let m = ident(item.rust, mspan);
-            let r = recv.ts;
-            let arg = match item.receiver {
-                crate::index::Receiver::Value => quote!(#r),
-                crate::index::Receiver::RefMut => quote_spanned!(span=> &mut #r),
-                _ => quote_spanned!(span=> &#r),
+            let arg = match (item.receiver, recv.kind) {
+                (crate::index::Receiver::Value, _) => self.finish(recv, Want::default(), loc),
+                // (a `&mut` held: reborrowed)
+                (crate::index::Receiver::RefMut, OutKind::RefMut) => {
+                    let r = recv.ts;
+                    quote_spanned!(span=> &mut *#r)
+                }
+                (_, OutKind::RefMut) => {
+                    let r = recv.ts;
+                    quote_spanned!(span=> &*#r)
+                }
+                (crate::index::Receiver::RefMut, _) => {
+                    let r = recv.ts;
+                    quote_spanned!(span=> &mut #r)
+                }
+                _ => {
+                    let r = recv.ts;
+                    quote_spanned!(span=> &#r)
+                }
             };
             return Out::plain(quote_spanned!(span=> #kt::#t::#m(#arg)), Ty::from_rust(item.ret));
         }
@@ -430,10 +455,27 @@ impl Gen<'_, '_> {
         if is_pascal(&name.name) || name.name.chars().all(|c| !c.is_lowercase()) {
             let mi = self.name_ident(&name.name, name.loc);
             Out::plain(quote_spanned!(span=> #qi::#mi), Ty::named(q))
+        } else if !index::ITEMS.iter().any(|i| i.owner == q) {
+            // (a property of what the API has no type of: a top-level `val` of another file — `LocalSpacing.current` —
+            // or Rust's, read where it is, as `top_level!` reads it)
+            let mi = self.name_ident(&snake(&name.name), name.loc);
+            let kt = self.kt(span);
+            let v = proc_macro2::Ident::new("__kz_v", span);
+            Out::plain(quote_spanned!(span=> #kt::top_level_with!(#qi, |#v| #v.#mi())), Ty::Unknown)
         } else {
             let mi = self.name_ident(&snake(&name.name), name.loc);
             Out::plain(quote_spanned!(span=> #qi::#mi()), Ty::Unknown)
         }
+    }
+
+    /// Whether a name is none the generator sees declared: no local, receiver's member, top-level `val` of the file,
+    /// or the API's value (another file's `val`, Rust's own).
+    pub(crate) fn unseen(&self, name: &str) -> bool {
+        !self.is_local(name)
+            && !self.receivers.iter().any(|r| members_of(&r.ty, name).next().is_some())
+            && !self.file.vals.contains_key(name)
+            && name != "Unit"
+            && !lookup(name).iter().any(|i| i.kind == Kind::Value && i.owner.is_empty())
     }
 
     /// `a[i]`: Kotlin's `get` (a list's element, a map's value).
@@ -736,7 +778,14 @@ impl Gen<'_, '_> {
                 let Some(item) = item else {
                     return Out::plain(self.later(loc, &format!("the infix function `{other}`")), Ty::Unknown);
                 };
-                let a = self.expr(lhs).ts;
+                // (a name whose declaration isn't seen, in place: a static of another file, `LocalSpacing provides …`)
+                let a = match &lhs.kind {
+                    ExprKind::Name(n) if self.unseen(&n.name) => {
+                        let i = self.name_ident(&value_name(&n.name), n.loc);
+                        quote!(#i)
+                    }
+                    _ => self.expr(lhs).ts,
+                };
                 let b = self.value(rhs);
                 let m = ident(item.rust, self.span(name.loc));
                 Out::plain(quote_spanned!(span=> #a.#m(#b)), Ty::from_rust(item.ret))
@@ -859,8 +908,8 @@ impl Gen<'_, '_> {
                 let t = self.member_ty(&r.non_null(), &name.name, false);
                 if *safe { t.nullable() } else { t }
             }
-            ExprKind::Call { callee, args, trailing_lambda, .. } => {
-                self.peek_call(callee, args, trailing_lambda.is_some())
+            ExprKind::Call { callee, type_args, args, trailing_lambda } => {
+                self.peek_call(callee, type_args, args, trailing_lambda.as_deref())
             }
             ExprKind::Index { receiver, .. } => match self.peek_ty(receiver) {
                 Ty::Map(_, v) => v.nullable(),
@@ -902,7 +951,7 @@ impl Gen<'_, '_> {
         }
     }
 
-    fn peek_call(&self, callee: &Expr, args: &[Arg], trailing: bool) -> Ty {
+    fn peek_call(&self, callee: &Expr, type_args: &[TypeArg], args: &[Arg], trailing: Option<&Lambda>) -> Ty {
         match &callee.kind {
             ExprKind::Name(n) => {
                 if let Some(l) = self.scopes.iter().rev().find_map(|s| s.get(&n.name)) {
@@ -928,11 +977,15 @@ impl Gen<'_, '_> {
                     }
                     _ => {}
                 }
-                let n_args = args.len() + usize::from(trailing);
+                let n_args = args.len() + usize::from(trailing.is_some());
+                let named = |i: &&crate::index::Item| {
+                    args.iter().filter_map(|a| a.name.as_ref()).all(|a| i.params.iter().any(|p| p.kotlin == a.name))
+                };
                 free_functions(&n.name)
-                    .find(|i| i.params.len() >= n_args)
+                    .find(|i| i.params.len() >= n_args && named(i))
+                    .or_else(|| free_functions(&n.name).find(named))
                     .or_else(|| free_functions(&n.name).next())
-                    .map(|i| Ty::from_rust(i.ret))
+                    .map(|i| self.generic_ret(i, type_args, args, trailing))
                     .unwrap_or_else(|| if is_pascal(&n.name) { Ty::named(&n.name) } else { Ty::Unknown })
             }
             ExprKind::Member { receiver, safe, name } => {
@@ -955,6 +1008,73 @@ impl Gen<'_, '_> {
             }
             _ => Ty::Unknown,
         }
+    }
+}
+
+impl Gen<'_, '_> {
+    /// What a function of the index gives: its result's type parameter (one) told by the type argument written
+    /// (`compositionLocalOf<Account> { … }`), else by the argument that has that type (`mutableStateOf(1)`) or the
+    /// lambda that gives it (`remember { mutableStateListOf("a") }`, `staticCompositionLocalOf { Spacing() }`).
+    pub(crate) fn generic_ret(
+        &self,
+        item: &crate::index::Item,
+        type_args: &[TypeArg],
+        args: &[Arg],
+        trailing: Option<&Lambda>,
+    ) -> Ty {
+        let ret = Ty::from_rust(item.ret);
+        let generics: Vec<&str> = item
+            .ret
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|w| w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase()))
+            .collect();
+        let Some(g) = generics.first().copied().filter(|g| generics.iter().all(|x| x == g)) else { return ret };
+        let told = match type_args {
+            [TypeArg::Type { ty, .. }] => self.ty_of(ty),
+            _ => {
+                // (the parameter of type `g`, or of a lambda giving one; its argument by name, else by place, a trailing
+                // lambda the last)
+                let gives = |p: &crate::index::Param| {
+                    let ty = p.ty.trim();
+                    ty == g
+                        || p.lambda.is_some_and(|l| l.output.trim() == g)
+                        || ty
+                            .strip_prefix("fn()")
+                            .is_some_and(|r| r.trim().strip_prefix("->").map(str::trim) == Some(g))
+                };
+                let Some(k) = item.params.iter().position(gives) else { return ret };
+                let last = k + 1 == item.params.len();
+                let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| n.name == item.params[k].kotlin));
+                let by_place = args.iter().filter(|a| a.name.is_none()).nth(k);
+                let value = match (by_name.or(by_place), trailing) {
+                    (Some(a), _) => match &a.value.kind {
+                        ExprKind::Lambda(l) => self.peek_block(&l.body),
+                        _ if item.params[k].ty.trim() == g => self.peek_ty(&a.value),
+                        _ => Ty::Unknown,
+                    },
+                    (None, Some(l)) if last => self.peek_block(&l.body),
+                    _ => Ty::Unknown,
+                };
+                if value == Ty::Unit { Ty::Unknown } else { value }
+            }
+        };
+        if told == Ty::Unknown { ret } else { fill_unknown(ret, &told) }
+    }
+}
+
+/// `t` with what it leaves unknown made `with`.
+fn fill_unknown(t: Ty, with: &Ty) -> Ty {
+    let fill = |b: Box<Ty>| Box::new(fill_unknown(*b, with));
+    match t {
+        Ty::Unknown => with.clone(),
+        Ty::Nullable(x) => Ty::Nullable(fill(x)),
+        Ty::List(x) => Ty::List(fill(x)),
+        Ty::Set(x) => Ty::Set(fill(x)),
+        Ty::Range(x) => Ty::Range(fill(x)),
+        Ty::Map(k, v) => Ty::Map(fill(k), fill(v)),
+        Ty::Pair(a, b) => Ty::Pair(fill(a), fill(b)),
+        Ty::Named(n, args) => Ty::Named(n, args.into_iter().map(|a| fill_unknown(a, with)).collect()),
+        other => other,
     }
 }
 

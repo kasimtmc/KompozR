@@ -221,9 +221,23 @@ pub fn remember_saveable<T: Saveable + Clone + 'static>(init: impl FnOnce() -> T
 }
 
 /// The same, saved by `saver` (Compose's `rememberSaveable(saver = …)`).
+///
+/// Kotlin: `rememberSaveable(saver: Saver<T>, init: () -> T)`
 #[track_caller]
 pub fn remember_saveable_with<T: Clone + 'static>(saver: &Saver<T>, init: impl FnOnce() -> T) -> T {
     remember_saveable_at(key_of(Location::caller()), saver.clone(), init, false)
+}
+
+/// A state saved by `state_saver`, a saver of its value (Compose's `rememberSaveable(stateSaver = …) {
+/// mutableStateOf(…) }`): after the process ends, a state of the value saved comes back.
+///
+/// Kotlin: `rememberSaveable(stateSaver: Saver<T>, init: () -> MutableState<T>)`
+#[track_caller]
+pub fn remember_saveable_state<T: PartialEq + Clone + Send + Sync + 'static>(
+    state_saver: &Saver<T>,
+    init: impl FnOnce() -> MutableState<T>,
+) -> MutableState<T> {
+    remember_saveable_at(key_of(Location::caller()), state_saver.for_state(), init, false)
 }
 
 /// `rememberSaveable(inputs) { … }`: made again, the value it had and its saved one dropped, when `inputs`

@@ -80,6 +80,8 @@ impl<T> PartialEq for SnapshotStateList<T> {
 }
 
 /// `mutableStateListOf(…)`.
+///
+/// Kotlin: `mutableStateListOf(vararg elements: T)`
 pub fn mutable_state_list_of<T: Clone + Send + Sync + 'static>(
     items: impl IntoIterator<Item = T>,
 ) -> SnapshotStateList<T> {

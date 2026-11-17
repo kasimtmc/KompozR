@@ -143,6 +143,8 @@ pub fn mutable_state_of<T: PartialEq + Clone + Send + Sync + 'static>(value: T) 
 }
 
 /// `mutableStateOf(value, policy)`.
+///
+/// Kotlin: `mutableStateOf(value: T, policy: SnapshotMutationPolicy<T>)`
 pub fn mutable_state_of_with_policy<T: Clone + Send + Sync + 'static>(
     value: T,
     policy: SnapshotMutationPolicy<T>,

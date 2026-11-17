@@ -313,6 +313,8 @@ impl<A: ArrangementAxis> fmt::Debug for Arrangement<A> {
 }
 
 /// Arrangements that don't mirror right to left (Compose's `Arrangement.Absolute`).
+///
+/// Kotlin: `Arrangement.Absolute`
 pub struct AbsoluteArrangement;
 
 impl AbsoluteArrangement {

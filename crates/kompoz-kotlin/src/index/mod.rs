@@ -26,12 +26,19 @@
 //! - the methods of `kompoz_runtime::kt`'s extension traits (`KtStr`, `KtList`, …) are found through their trait
 //!   ([`Item::via`]), with the receivers they are implemented for unknown here: they are Kotlin's members of
 //!   `String`, `Iterable`, `Map`, … (a Rust method of the same name on the type comes first in a method call: such
-//!   a call goes through the trait, `KtStr::split(&s, …)`).
+//!   a call goes through the trait, `KtStr::split(&s, …)`);
+//! - what a type derefs to ([`DEREFS`]: a `MeasureScope`'s `Density`) is what Kotlin's supertype is: its members are
+//!   the type's too (`dp.roundToPx()` in a measure block);
+//! - a type Kotlin names otherwise, a nested object (`Arrangement.Absolute`), says so in a doc line ``Kotlin:
+//!   `Arrangement.Absolute` `` ([`TYPES`]);
+//! - a parameter of a closure's alias (`Callback`) is written out (`Rc<dyn Fn()>`); what a `macro_rules!` of the
+//!   same file makes of a type's name (`transforms!(DrawScope)`) is read as written out; a `const fn` is flagged
+//!   ([`flags::CONST`]: what it makes can be a `static`).
 
 #[rustfmt::skip]
 mod generated;
 
-pub use generated::ITEMS;
+pub use generated::{DEREFS, ITEMS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,6 +168,8 @@ pub mod flags {
     pub const SETTER: u16 = 1 << 5;
     /// Every module on the way to it is public (else it is reached through a re-export, as a prelude's).
     pub const REACHABLE: u16 = 1 << 6;
+    /// A `const fn`: what it makes can be a `static` (`compositionLocalOf { … }`).
+    pub const CONST: u16 = 1 << 7;
 }
 
 impl Item {
@@ -180,6 +189,24 @@ pub fn lookup(kotlin: &str) -> &'static [Item] {
     let start = ITEMS.partition_point(|i| i.kotlin < kotlin);
     let end = start + ITEMS[start..].partition_point(|i| i.kotlin == kotlin);
     &ITEMS[start..end]
+}
+
+/// The types whose members a value of Rust type `owner` has, in the order Rust's method calls try them: itself,
+/// then what it derefs to, and so on (`MeasureScope` → `Density`).
+pub fn deref_chain(owner: &str) -> Vec<&str> {
+    let mut chain = vec![owner];
+    while let Some((_, to)) = DEREFS.iter().find(|(from, _)| Some(from) == chain.last())
+        && !chain.contains(to)
+    {
+        chain.push(to);
+    }
+    chain
+}
+
+/// The Rust type a Kotlin (qualified) type name is when Rust names it otherwise (`Arrangement.Absolute` →
+/// `AbsoluteArrangement`).
+pub fn rust_type(kotlin: &str) -> Option<&'static str> {
+    TYPES.iter().find(|(k, _)| *k == kotlin).map(|(_, r)| *r)
 }
 
 /// The items of a Rust name, in the index's order (a scan).

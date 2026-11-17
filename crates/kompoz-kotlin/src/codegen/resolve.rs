@@ -113,6 +113,7 @@ impl Ty {
     pub fn element(&self) -> Ty {
         match self {
             Ty::List(t) | Ty::Set(t) | Ty::Range(t) => (**t).clone(),
+            Ty::Named(n, a) if n == "SnapshotStateList" => a.first().cloned().unwrap_or(Ty::Unknown),
             Ty::Map(k, v) => Ty::Pair(k.clone(), v.clone()),
             Ty::String => Ty::Char,
             _ => Ty::Unknown,
@@ -134,6 +135,8 @@ impl Ty {
             Ty::List(_) | Ty::Set(_) | Ty::Range(_) => {
                 &["KtList", "KtMutableList", "KtListOfLists", "KtListOfNullable", "KtScope"]
             }
+            // (a state list: Kotlin's MutableList functions are its own, taking `&self`; its reads are a list's)
+            Ty::Named(n, _) if n == "SnapshotStateList" => &["KtList", "KtListOfLists", "KtListOfNullable", "KtScope"],
             Ty::String => &["KtStr", "KtScope"],
             Ty::Nullable(t) if t.is_string() => &["KtNullableStr", "KtScope"],
             Ty::Map(_, _) => &["KtMapExt", "KtScope"],
@@ -307,7 +310,7 @@ impl TypeText<'_> {
             "String" | "str" => Ty::String,
             "Arc" | "Rc" | "Box" if matches!(args.first(), Some(Ty::String)) => Ty::String,
             "Option" => Ty::Nullable(Box::new(first())),
-            "Vec" | "VecDeque" | "List" | "MutableList" | "SnapshotStateList" => Ty::List(Box::new(first())),
+            "Vec" | "VecDeque" | "List" | "MutableList" => Ty::List(Box::new(first())),
             "KtSet" | "HashSet" | "BTreeSet" => Ty::Set(Box::new(first())),
             "KtMap" | "HashMap" | "BTreeMap" => {
                 Ty::Map(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown)))
@@ -364,6 +367,9 @@ pub(crate) struct LInfo {
     pub stored: bool,
     /// `impl MeasurePolicy`: given through `measure_policy(…)`, which tells Rust its parameters' types.
     pub measure_policy: bool,
+    /// Made a shared or boxed trait object (`Rc<dyn Fn(&TextLayoutResult)>`, `Callback`): its parameters are written
+    /// with their types, which a closure can't take from where it goes then.
+    pub typed: bool,
 }
 
 impl LInfo {
@@ -416,12 +422,32 @@ impl PInfo {
 /// → `implInto<…>`).
 pub(crate) fn plain_type_text(t: &str) -> String {
     let mut t = t.replace(' ', "");
-    for p in
-        ["::core::convert::", "::std::string::", "::core::option::", "::core::ops::", "::std::vec::", "::std::rc::"]
-    {
+    for p in [
+        "::core::convert::",
+        "::std::string::",
+        "::core::option::",
+        "::core::ops::",
+        "::std::vec::",
+        "::std::rc::",
+        "::std::sync::",
+        "::std::boxed::",
+    ] {
         t = t.replace(p, "");
     }
     t
+}
+
+/// How a Kotlin value of an interface the Rust API has as a trait (`Shape`, `Painter`) is held: the smart pointer
+/// (`Arc`, `Rc`) the API's own parameters hold that trait's objects in (`Rc` if none says), none for what isn't a
+/// trait of the API (a trait is what the index has methods of through it, of no type).
+pub(crate) fn trait_object(name: &str) -> Option<&'static str> {
+    let is_trait = index::ITEMS.iter().any(|i| i.via == name && i.owner.is_empty() && i.kind == Kind::Method);
+    if !is_trait {
+        return None;
+    }
+    let (arc, rc) = (format!("Arc<dyn {name}"), format!("Rc<dyn {name}"));
+    let held = |p: &str| index::ITEMS.iter().flat_map(|i| i.params).filter(|x| x.ty.contains(p)).count();
+    Some(if held(&arc) > held(&rc) { "Arc" } else { "Rc" })
 }
 
 /// What a call calls: its Rust path or method name, its parameters, and how it is called.
@@ -467,6 +493,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             suspend: false,
             stored: true,
             measure_policy: true,
+            typed: false,
         })
     } else {
         p.lambda.map(|l| LInfo {
@@ -476,9 +503,13 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             receiver: (!l.receiver.is_empty()).then(|| l.receiver.to_string()),
             suspend: l.suspend,
             // (a generic parameter's bounds are elsewhere: what a callee takes that way it keeps; so does a
-            // coroutine)
-            stored: ty.contains("'static") || ty.len() <= 2 || l.suspend,
+            // coroutine, and a shared or boxed one: an owned trait object is `'static`)
+            stored: ty.contains("'static")
+                || ty.len() <= 2
+                || l.suspend
+                || ["Rc<dyn", "Arc<dyn", "Box<dyn"].iter().any(|o| ty.contains(o)),
             measure_policy: false,
+            typed: ["Rc<dyn", "Arc<dyn", "Box<dyn"].iter().any(|o| ty.contains(o)),
         })
     };
     PInfo {
@@ -496,11 +527,17 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
     }
 }
 
-/// The index's items of a Kotlin name, `Composition…` also found as KompozR's `Kompozition…` (pasted Compose code).
+/// The index's items of a Kotlin name, `Composition…` (`compositionLocalOf` too) also found as KompozR's
+/// `Kompozition…` (pasted Compose code).
 pub(crate) fn lookup(kotlin: &str) -> &'static [Item] {
     let found = index::lookup(kotlin);
     if found.is_empty() && kotlin.contains("Composition") {
         return index::lookup(&kotlin.replace("Composition", "Kompozition"));
+    }
+    if found.is_empty()
+        && let Some(rest) = kotlin.strip_prefix("composition")
+    {
+        return index::lookup(&format!("kompozition{rest}"));
     }
     found
 }
@@ -512,13 +549,21 @@ pub(crate) fn free_functions(kotlin: &str) -> impl Iterator<Item = &'static Item
 
 /// The index's members (methods, properties) of a Kotlin name that a type of Rust name `owner` has: its own, and
 /// those of the extension traits named after it (`PointerInputScopeGestures` for `PointerInputScope`: Compose's
-/// extensions of it).
+/// extensions of it); then those of what it derefs to (a `MeasureScope`'s `Density`: Compose's supertypes), nearest
+/// first.
 pub(crate) fn members_of(owner: &str, kotlin: &str) -> impl Iterator<Item = &'static Item> + use<> {
-    let owner = owner.to_string();
-    lookup(kotlin).iter().filter(move |i| {
-        matches!(i.kind, Kind::Method | Kind::Property)
-            && (i.owner == owner || (i.owner.is_empty() && !owner.is_empty() && i.via.starts_with(owner.as_str())))
-    })
+    let items = lookup(kotlin);
+    let mut found = Vec::new();
+    if owner.is_empty() {
+        return found.into_iter();
+    }
+    for o in index::deref_chain(owner) {
+        found.extend(items.iter().filter(|i| {
+            matches!(i.kind, Kind::Method | Kind::Property)
+                && (i.owner == o || (i.owner.is_empty() && i.via.starts_with(o)))
+        }));
+    }
+    found.into_iter()
 }
 
 /// The kt shims' extension-trait methods of a Kotlin name, in the traits `traits` (any of them if empty).
@@ -575,6 +620,9 @@ pub(crate) struct Local {
     pub depth: usize,
     /// A kept closure parameter of a restartable composable (`Rc`-held: cloned when used as a value).
     pub kept_closure: bool,
+    /// A lambda's parameter given a `&mut` (`state.update { it.add(…) }`: the value to change in place): what takes
+    /// it by reference takes it reborrowed, a value of it is a clone of what it points to.
+    pub mut_ref: bool,
 }
 
 /// An implicit receiver: an extension function's `self`, a receiver lambda's scope parameter.
@@ -631,6 +679,9 @@ pub(crate) enum ValForm {
     Const,
     /// A `const` string (`&str`), read as a `String`.
     StrConst,
+    /// A `static` made by a `const fn` (a composition local: known by its address, it can't be a thread-local's
+    /// copy), read in place.
+    Static,
     /// A thread-local value made at its first read (Kotlin's initialization of a top-level property).
     ThreadLocal,
 }

@@ -39,3 +39,13 @@ harness = false
 # What the compiler says when the Kotlin is wrong (trybuild: tests/compile-fail/*.rs and their .stderr).
 [[test]]
 name = "compile_fail"
+
+# The C++ Kompoz's Kotlin-syntax tests ported (kompozable_tests.cpp's stage-9 ones).
+[[test]]
+name = "kotlin_ported"
+harness = false
+
+# Foundation's components in Kotlin's syntax.
+[[test]]
+name = "kotlin_foundation"
+harness = false

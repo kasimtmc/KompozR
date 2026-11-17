@@ -2049,6 +2049,8 @@ impl BlurRadiusSpec {
         s
     }
     /// Out from `center` (unspecified: the middle) to `fall_off_radius` (unspecified: half the shorter side).
+    ///
+    /// Kotlin: `radialGradient(startRadius: Dp, endRadius: Dp, center: Offset = Offset.Unspecified, falloffRadius: Dp = Dp.Unspecified)`
     pub fn radial_gradient(start_radius: Dp, end_radius: Dp, center: Offset, fall_off_radius: Dp) -> BlurRadiusSpec {
         BlurRadiusSpec::radial_gradient_stops(&BlurRadiusSpec::two(start_radius, end_radius), center, fall_off_radius)
     }

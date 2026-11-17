@@ -334,6 +334,8 @@ impl ImageVector {
     /// A builder (Compose's ImageVector.Builder), every parameter given; Compose's defaults: name
     /// [`DefaultGroupName`], tint color `Color::Unspecified`, tint blend mode `BlendMode::SrcIn`, not auto mirrored
     /// ([`ImageVectorBuilder::new`] takes them).
+    ///
+    /// Kotlin: `Builder(name: String = DefaultGroupName, defaultWidth: Dp, defaultHeight: Dp, viewportWidth: Float, viewportHeight: Float, tintColor: Color = Color.Unspecified, tintBlendMode: BlendMode = BlendMode.SrcIn, autoMirror: Boolean = false)`
     #[allow(clippy::too_many_arguments)]
     pub fn Builder(
         name: &str,

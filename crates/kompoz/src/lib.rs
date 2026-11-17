@@ -58,6 +58,13 @@ pub mod prelude {
     pub use kompoz_graphics::{shape, unit};
     pub use kompoz_ui::{draw, input};
 
+    // (Compose's painters and vector content: `Image(rememberVectorPainter(icon))`, `Path(pathData = …)`)
+    pub use kompoz_ui::draw::vector::{Group, Path};
+    pub use kompoz_ui::draw::{
+        BitmapPainter, BrushPainter, ColorPainter, Painter, VectorPainter, remember_vector_painter,
+        remember_vector_painter_content,
+    };
+
     pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
     pub use kompoz_platform::App;
     pub use kompoz_ui::platform::{

@@ -33,6 +33,8 @@ fn current() -> Option<Rc<RefCell<ImageVectorBuilder>>> {
 /// A vector made by composable `content` (Compose's rememberVectorPainter { Group { Path() } }), given the viewport's
 /// size: `Group` and `Path` in it make its tree. Without a viewport, its default size in px (`LocalDensity`), as
 /// Compose's. Made the same as last time, the same vector (its painter equal, its bitmaps kept).
+///
+/// Kotlin: `rememberVectorPainter(defaultWidth: Dp, defaultHeight: Dp, viewportWidth: Float, viewportHeight: Float, name: String, tintColor: Color, tintBlendMode: BlendMode, autoMirror: Boolean, content: (Float, Float) -> Unit)`
 #[kompozable]
 #[allow(clippy::too_many_arguments)]
 pub fn remember_vector_painter_content(

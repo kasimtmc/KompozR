@@ -38,6 +38,7 @@ impl Gen<'_, '_> {
             suspend: false,
             stored: true,
             measure_policy: false,
+            typed: false,
         };
         match info {
             Some(i) => self.lambda_for(l, Some(i), call_label, false),
@@ -65,6 +66,7 @@ impl Gen<'_, '_> {
                     suspend: false,
                     stored: false,
                     measure_policy: false,
+                    typed: false,
                 };
                 self.lambda_with(l, &unknown, None, call_label, transform_wraps, true)
             }
@@ -82,8 +84,9 @@ impl Gen<'_, '_> {
     ) -> TokenStream {
         let span = self.span(l.loc);
         let rt = respan(self.rt().clone(), span);
-        // (a measure policy goes through `measure_policy(…)`, which the macro memoizes without wrapping it)
-        let explicit = info.stored && (!transform_wraps || info.measure_policy);
+        // (a measure policy goes through `measure_policy(…)`, which the macro memoizes without wrapping it; a closure
+        // made a trait object is one the macro doesn't see)
+        let explicit = info.stored && (!transform_wraps || info.measure_policy || info.typed);
         let mut labels: Vec<String> = Vec::new();
         if let Some(lb) = &l.label {
             labels.push(lb.name.clone());
@@ -100,11 +103,19 @@ impl Gen<'_, '_> {
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();
         let mut unpack = TokenStream::new();
+        // (a closure made a trait object writes its parameters' types: none comes from where it goes)
+        let typed = |k: usize| -> TokenStream {
+            match info.inputs.get(k).filter(|_| info.typed).and_then(|t| written_type(t, span)) {
+                Some(t) => quote_spanned!(span=> : #t),
+                None => quote!(),
+            }
+        };
         if let Some(r) = &info.receiver {
             let name =
                 if self.receivers.is_empty() { "this".to_string() } else { format!("this{}", self.receivers.len()) };
             let i = proc_macro2::Ident::new(&name, span);
-            params.push(quote!(#i));
+            let t = typed(0);
+            params.push(quote!(#i #t));
             self.receivers.push(ImplicitReceiver {
                 rust: name,
                 ty: r.clone(),
@@ -114,6 +125,8 @@ impl Gen<'_, '_> {
         }
         let first_input = usize::from(info.receiver.is_some());
         let input_tys: Vec<Ty> = info.inputs.iter().skip(first_input).map(|t| self.input_ty(t)).collect();
+        let mut_refs: Vec<bool> =
+            info.inputs.iter().skip(first_input).map(|t| t.trim_start().starts_with("&mut")).collect();
         match &l.params {
             Some(ps) => {
                 for (k, p) in ps.iter().enumerate() {
@@ -127,7 +140,7 @@ impl Gen<'_, '_> {
                             let rt = self.rust_type(t, super::types::TypePos::Value);
                             quote_spanned!(span=> : #rt)
                         }
-                        None => quote!(),
+                        None => typed(first_input + k),
                     };
                     match &p.binding {
                         Binding::Name(n) if n.name == "_" => params.push(quote_spanned!(span=> _ #annot)),
@@ -135,6 +148,9 @@ impl Gen<'_, '_> {
                             let rust = snake(&n.name);
                             let i = self.name_ident(&rust, n.loc);
                             self.declare(&n.name, rust, LocalKind::LambdaParam, ty);
+                            if mut_refs.get(k) == Some(&true) {
+                                self.mark_mut_ref(&n.name);
+                            }
                             params.push(quote_spanned!(span=> #i #annot));
                         }
                         Binding::Destructure(entries) => {
@@ -164,12 +180,18 @@ impl Gen<'_, '_> {
                 if takes_it && uses_it(&l.body) {
                     let ty = input_tys.first().cloned().unwrap_or(Ty::Unknown);
                     self.declare("it", "it".into(), LocalKind::LambdaParam, ty);
-                    params.push(quote_spanned!(span=> it));
+                    if mut_refs.first() == Some(&true) {
+                        self.mark_mut_ref("it");
+                    }
+                    let t = typed(first_input);
+                    params.push(quote_spanned!(span=> it #t));
                 } else if takes_it {
-                    params.push(quote_spanned!(span=> _));
+                    let t = typed(first_input);
+                    params.push(quote_spanned!(span=> _ #t));
                 } else {
-                    for _ in 0..info.arity() {
-                        params.push(quote_spanned!(span=> _));
+                    for k in 0..info.arity() {
+                        let t = typed(first_input + k);
+                        params.push(quote_spanned!(span=> _ #t));
                     }
                 }
             }
@@ -240,6 +262,8 @@ impl Gen<'_, '_> {
     /// A lambda input's type, as the index writes it.
     fn input_ty(&self, text: &str) -> Ty {
         if let Some((elem, recv)) = &self.elem_hint {
+            let text = text.trim();
+            let text = text.strip_prefix("&mut ").or_else(|| text.strip_prefix('&')).unwrap_or(text);
             match text.trim() {
                 "Self::Item" | "T" => return elem.clone(),
                 "(Self::K, Self::V)" => return recv.element(),
@@ -248,6 +272,65 @@ impl Gen<'_, '_> {
         }
         Ty::from_rust(text)
     }
+}
+
+/// A Rust type of the API index's (its text) as written in generated code, when it names no generic parameter
+/// (`Self::Item`, `T`) or `impl` type: the standard library's names by their paths (`Rc` → `::std::rc::Rc`), the
+/// API's as they are (the prelude has them).
+pub(crate) fn written_type(text: &str, span: Span) -> Option<TokenStream> {
+    let generic = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w == "Self" || w == "impl" || (w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())));
+    if generic {
+        return None;
+    }
+    let tokens = text.parse::<TokenStream>().ok()?;
+    Some(respan(std_paths(tokens), span))
+}
+
+/// `tokens` with the standard library's types they name unqualified written by their paths.
+fn std_paths(tokens: TokenStream) -> TokenStream {
+    use proc_macro2::{Group, TokenTree};
+    let mut out = Vec::new();
+    let mut after_path = false;
+    for t in tokens {
+        match t {
+            TokenTree::Ident(i) if !after_path => {
+                let path = match i.to_string().as_str() {
+                    "Rc" => Some(quote!(::std::rc::Rc)),
+                    "Arc" => Some(quote!(::std::sync::Arc)),
+                    "Box" => Some(quote!(::std::boxed::Box)),
+                    "Fn" => Some(quote!(::core::ops::Fn)),
+                    "FnMut" => Some(quote!(::core::ops::FnMut)),
+                    "FnOnce" => Some(quote!(::core::ops::FnOnce)),
+                    "Option" => Some(quote!(::core::option::Option)),
+                    "Vec" => Some(quote!(::std::vec::Vec)),
+                    "String" => Some(quote!(::std::string::String)),
+                    _ => None,
+                };
+                match path {
+                    Some(p) => out.extend(p),
+                    None => out.push(TokenTree::Ident(i)),
+                }
+                after_path = false;
+            }
+            TokenTree::Group(g) => {
+                let mut ng = Group::new(g.delimiter(), std_paths(g.stream()));
+                ng.set_span(g.span());
+                out.push(TokenTree::Group(ng));
+                after_path = false;
+            }
+            TokenTree::Punct(p) => {
+                after_path = p.as_char() == ':';
+                out.push(TokenTree::Punct(p));
+            }
+            other => {
+                after_path = false;
+                out.push(other);
+            }
+        }
+    }
+    out.into_iter().collect()
 }
 
 /// Whether a lambda's body uses `it` (outside lambdas of its own that name their parameters… or take theirs).

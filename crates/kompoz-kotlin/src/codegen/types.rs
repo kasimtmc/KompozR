@@ -206,6 +206,15 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> (#x, #y, #z))
             }
             "IntRange" => quote_spanned!(span=> #kt::KtProgression<i32>),
+            // (an interface the API has as a trait: its object shared, as Kotlin's references are — `shape: Shape` is
+            // an `Arc<dyn Shape>`, as the API's own shapes are)
+            _ if args.is_empty() && super::resolve::trait_object(name).is_some() => {
+                let i = self.name_ident(name, last.name.loc);
+                match super::resolve::trait_object(name) {
+                    Some("Arc") => quote_spanned!(span=> ::std::sync::Arc<dyn #i>),
+                    _ => quote_spanned!(span=> ::std::rc::Rc<dyn #i>),
+                }
+            }
             _ => {
                 let i = self.name_ident(name, last.name.loc);
                 if args.is_empty() { quote_spanned!(span=> #i) } else { quote_spanned!(span=> #i<#(#args),*>) }
@@ -265,7 +274,16 @@ impl Gen<'_, '_> {
         } else {
             self.rust_type(&f.result, TypePos::Value).to_string()
         };
-        LInfo { kind: LambdaKind::Fn, inputs, output, receiver, suspend: f.suspend, stored, measure_policy: false }
+        LInfo {
+            kind: LambdaKind::Fn,
+            inputs,
+            output,
+            receiver,
+            suspend: f.suspend,
+            stored,
+            measure_policy: false,
+            typed: false,
+        }
     }
 }
 
