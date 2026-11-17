@@ -12,6 +12,7 @@ mod measure;
 mod modifiers;
 mod pinnable;
 mod ruler;
+pub(crate) mod subcompose;
 mod visibility;
 mod window_insets_rulers;
 
@@ -37,6 +38,10 @@ pub(crate) use ruler::RulerScopeState;
 pub use ruler::{
     HorizontalRuler, IsRulerProvided, RectRulers, Ruler, RulerCalculation, RulerProvider, RulerScope, RulersBlock,
     VerticalRuler,
+};
+pub use subcompose::{
+    NoIntrinsicsMessage, PausedPrecomposition, PrecomposedSlotHandle, SlotId, SlotIdsSet, SlotKey, SubcomposeLayout,
+    SubcomposeLayoutState, SubcomposeMeasureBlock, SubcomposeMeasureScope, SubcomposeSlotReusePolicy,
 };
 pub use visibility::{LayoutBoundsHolder, OnVisibilityChangedNode, on_visibility_changed_node};
 pub(crate) use window_insets_rulers::window_insets_rulers;

@@ -130,7 +130,7 @@ impl SemanticsNode {
 
     /// Its id: its layout node's, the same as long as that is (a fake node's, its node's moved).
     pub fn id(&self) -> u64 {
-        if self.fake_parent.is_some() { self.fake_id } else { self.layout_node.id() }
+        if self.fake_parent.is_some() { self.fake_id } else { self.layout_node.semantics_id() }
     }
 
     /// The layout node it is (a fake node's: the node it is of's).
@@ -262,7 +262,7 @@ impl SemanticsNode {
             merging_enabled: false,
             unmerged_config: config,
             fake_parent: Some(Rc::new(self.clone())),
-            fake_id: self.layout_node.id() + offset,
+            fake_id: self.layout_node.semantics_id() + offset,
         }
     }
 
@@ -424,7 +424,7 @@ impl SemanticsNode {
 
 fn fill_one_layer(node: &Rc<LayoutNode>, merging_enabled: bool, out: &mut Vec<SemanticsNode>) {
     for child in node.z_sorted_children() {
-        if !child.is_attached() {
+        if !child.is_attached() || child.is_deactivated() {
             continue;
         }
         if child.has_kind(NodeKind::Semantics) {

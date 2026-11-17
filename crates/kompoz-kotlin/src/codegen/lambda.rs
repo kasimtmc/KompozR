@@ -116,11 +116,16 @@ impl Gen<'_, '_> {
             let i = proc_macro2::Ident::new(&name, span);
             let t = typed(0);
             params.push(quote!(#i #t));
+            let by_ref = info.inputs.first().is_some_and(|t| {
+                let t = t.trim_start();
+                t.starts_with('&') && !t.starts_with("&mut")
+            });
             self.receivers.push(ImplicitReceiver {
                 rust: name,
                 ty: r.clone(),
                 labels: labels.clone(),
                 depth: boundary,
+                by_ref,
             });
         }
         let first_input = usize::from(info.receiver.is_some());
@@ -219,8 +224,16 @@ impl Gen<'_, '_> {
         self.pop_scope();
         let captures: Vec<proc_macro2::Ident> =
             frame.used.iter().filter(|u| *u != "self").map(|u| proc_macro2::Ident::new(u, span)).collect();
+        // (an outer receiver lambda's scope, given by reference: the scope itself, cloned)
+        let scopes: Vec<String> = self.receivers.iter().filter(|r| r.by_ref).map(|r| r.rust.clone()).collect();
         let lets = |span: Span| -> TokenStream {
-            let lets = captures.iter().map(|c| quote_spanned!(span=> let #c = #rt::__private::capture(&#c);));
+            let lets = captures.iter().map(|c| {
+                if scopes.contains(&c.to_string()) {
+                    quote_spanned!(span=> let #c = #rt::__private::capture(#c);)
+                } else {
+                    quote_spanned!(span=> let #c = #rt::__private::capture(&#c);)
+                }
+            });
             quote!(#(#lets)*)
         };
         let block = quote_spanned!(span=> { #unpack #body });

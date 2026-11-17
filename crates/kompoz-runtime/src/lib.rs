@@ -1,9 +1,12 @@
 //! KompozR's composition runtime, as Jetpack Compose's: composable functions that make a tree of groups, states
 //! kept in snapshots, smart recomposition (only the scopes that read a changed state run again; unchanged ones
-//! are skipped), `remember`, effects, composition locals, movable content and saveable state.
+//! are skipped), `remember`, effects, composition locals, movable content and saveable state; child compositions
+//! made from a [`CompositionContext`] (what a subcomposing layout composes its slots in), reusable content and
+//! compositions (deactivated, then composed again reusing their nodes), and compositions composed a piece at a time
+//! ([`PausedComposition`]).
 //!
 //! It knows nothing of layout or drawing: what composables emit is a [`Node`] the UI layer defines, and a host
-//! drives a [`Composition`] frame by frame.
+//! drives a [`Composition`] frame by frame (its child compositions with it).
 
 #![allow(non_upper_case_globals)]
 
@@ -15,6 +18,7 @@ pub mod __private {
 }
 mod collections;
 mod composer;
+mod context;
 mod derived;
 pub mod kt;
 mod local;
@@ -28,7 +32,13 @@ mod snapshot;
 mod state;
 
 pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
-pub use composer::{Composition, Content, Node, RecompositionStats, RememberObserver};
+pub use composer::{
+    Composition, Content, Node, PausableComposition, RecompositionStats, RememberObserver, ReusableComposition,
+};
+pub use context::{
+    CompositionContext, PausedComposition, ReusableContent, ReusableContentHost, ShouldPauseCallback,
+    remember_kompozition_context,
+};
 pub use derived::{DerivedState, derived_state_of, derived_state_of_with_policy};
 pub use kompoz_macros::{KotlinProperties, kompozable, kompozable_block, kompozable_lambda, named, named_args};
 pub use local::{

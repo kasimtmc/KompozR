@@ -5,7 +5,7 @@
 //! composable leaves. What isn't a composable's (a node's) registers its values by key with the registry
 //! ([`SaveableStateRegistry::register_provider`], Compose's) and asks for them back by key.
 
-use crate::composer::{Composer, GroupId, key_of, mix_key, stable_hash};
+use crate::composer::{Boundary, Composer, GroupId, key_of, mix_key, stable_hash};
 use crate::kompozable;
 use crate::local::{KompozitionLocal, provide_here};
 use crate::remember::remember;
@@ -25,8 +25,12 @@ struct Registry {
     savers: HashMap<u64, Box<dyn Fn() -> SavedValue>>,
     /// From a saved state, for values not made yet.
     restored: HashMap<u64, SavedValue>,
-    /// The provider's group: positions are counted from it down.
-    boundary: Option<GroupId>,
+    /// The provider's group: positions are counted from it down (through the child compositions below it too).
+    boundary: Option<Boundary>,
+    /// The positions of the values whose composables are there now, each with its place and entry: another one at
+    /// the same position elsewhere (content of the same shape in two child compositions) takes the next free one, in
+    /// the order they come; one at the same place (its content reused) takes it over, starting over.
+    claimed: HashMap<u64, Claim>,
     /// The host's: a value goes with its composable.
     forgets_leaving: bool,
     /// A holder's: the values whose composables left (kept if the provider left with them, as Compose saves a
@@ -143,16 +147,43 @@ pub(crate) fn settle_saveables() {
     drop(dropped);
 }
 
+/// Who holds a position: the `remember_saveable` group (its composition's id and the group) and its entry.
+#[derive(Clone, Copy, PartialEq)]
+struct Claim {
+    place: (u64, GroupId),
+    entry: u64,
+}
+
 /// What `remember_saveable` keeps in its group: its entry in its registry, which goes with the group — at once
-/// from the host's, from a holder's unless its provider goes too.
+/// from the host's, from a holder's unless its provider goes too (unless another entry took its position over: its
+/// content reused).
 struct Entry {
     registry: Weak<RefCell<Registry>>,
     key: u64,
+    id: u64,
+}
+
+impl Entry {
+    fn next_id() -> u64 {
+        thread_local! {
+            static NEXT: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+        }
+        NEXT.with(|n| {
+            let id = n.get();
+            n.set(id + 1);
+            id
+        })
+    }
 }
 
 impl Drop for Entry {
     fn drop(&mut self) {
         if let Some(r) = self.registry.upgrade() {
+            let owner = r.borrow().claimed.get(&self.key).is_some_and(|c| c.entry == self.id);
+            if !owner {
+                return;
+            }
+            r.borrow_mut().claimed.remove(&self.key);
             if r.borrow().forgets_leaving {
                 let dropped = r.borrow_mut().drop_value(self.key);
                 drop(dropped);
@@ -285,11 +316,23 @@ fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: imp
         Some(v) => v,
         None => {
             let (value, entry) = match registry.as_ref().map(|r| &r.inner) {
-                None => (init(), Entry { registry: Weak::new(), key: 0 }),
+                None => (init(), Entry { registry: Weak::new(), key: 0, id: 0 }),
                 Some(r) => {
                     let boundary = r.borrow().boundary;
-                    let key = c.key_below(boundary);
+                    let mut key = c.key_below(boundary);
+                    let place = (c.id, c.current_group());
+                    let entry_id = Entry::next_id();
                     let mut reg = r.borrow_mut();
+                    let mut replaced = None;
+                    while let Some(claim) = reg.claimed.get(&key).copied() {
+                        if claim.place == place {
+                            // (its content reused here: the value it had is gone, a new one made)
+                            replaced = reg.drop_value(key);
+                            break;
+                        }
+                        key = mix_key(key, 1);
+                    }
+                    reg.claimed.insert(key, Claim { place, entry: entry_id });
                     let mut dropped = None;
                     if let Some(i) = reg.leaving.iter().position(|k| *k == key) {
                         // It left with its composable, its provider still there: a new one.
@@ -303,7 +346,7 @@ fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: imp
                         .and_then(|(_, v)| v.downcast_ref::<T>().cloned());
                     let restored = reg.restored.remove(&key);
                     drop(reg);
-                    drop(dropped);
+                    drop((dropped, replaced));
                     let value = match back {
                         Some(v) => v, // back again: the value it had
                         None => {
@@ -316,7 +359,7 @@ fn remember_saveable_at<T: Clone + 'static>(key: u64, saver: Saver<T>, init: imp
                             v
                         }
                     };
-                    (value, Entry { registry: Rc::downgrade(r), key })
+                    (value, Entry { registry: Rc::downgrade(r), key, id: entry_id })
                 }
             };
             c.set_remembered(Box::new((value.clone(), Rc::new(entry))), None);
@@ -436,7 +479,7 @@ impl SaveableStateRegistry {
 /// Composes `content` with its `remember_saveable` values kept in `registry`.
 #[kompozable(inline)]
 pub fn ProvideSaveableStateRegistry(registry: &SaveableStateRegistry, content: impl FnOnce()) {
-    registry.inner.borrow_mut().boundary = Some(Composer::require().current_group());
+    registry.inner.borrow_mut().boundary = Some(Composer::require().boundary_here());
     provide_here(vec![LocalSaveableStateRegistry.provides(Some(registry.clone())).0], content);
 }
 
@@ -479,7 +522,7 @@ impl SaveableStateHolder {
         c.start_group(mix_key(key_of(Location::caller()), stable_hash(key)));
         {
             let mut r = registry.borrow_mut();
-            r.boundary = Some(c.current_group()); // positions are counted from here down
+            r.boundary = Some(c.boundary_here()); // positions are counted from here down
             r.present = true;
         }
         let presence = remember(|| Rc::new(Presence(RefCell::new(Weak::new()))));

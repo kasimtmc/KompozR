@@ -38,8 +38,11 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// measure policy through the coordinators of its modifier's layout nodes, places them, draws, takes input and
 /// describes itself through its modifier's nodes. Held as `Rc`, its parent weakly.
 pub struct LayoutNode {
-    /// Unique while the program runs: its semantics id and what a display list knows it by.
+    /// Unique while the program runs: what a display list and the measure queues know it by.
     pub(crate) id: u64,
+    /// Its semantics node's id (Compose's `semanticsId`): its `id` at first, a new one each time it is reused
+    /// for other content, so accessibility sees a new node.
+    semantics_id: Cell<u64>,
     pub(crate) this: Weak<LayoutNode>,
     parent: RefCell<Weak<LayoutNode>>,
     children: RefCell<Vec<Rc<LayoutNode>>>,
@@ -113,6 +116,12 @@ pub struct LayoutNode {
     pub(crate) overlays: RefCell<Vec<Rc<LayoutNode>>>,
     /// A popup's root: the node it was composed in.
     pub(crate) anchor: RefCell<Weak<LayoutNode>>,
+    /// A subcomposing layout's: its slots and their compositions (Compose's `subcompositionsState`), which own its
+    /// children.
+    pub(crate) subcompositions: RefCell<Option<Rc<crate::layout::subcompose::LayoutNodeSubcompositionsState>>>,
+    /// Deactivated by its composition (Compose's `isDeactivated`): kept for reuse, its modifier's nodes detached,
+    /// left out of the semantics.
+    pub(crate) is_deactivated: Cell<bool>,
 }
 
 /// A measure policy measuring nothing, 0 by 0 (a node's until one is set: Compose's ErrorMeasurePolicy stands in
@@ -128,8 +137,10 @@ impl LayoutNode {
     pub fn new() -> Rc<LayoutNode> {
         Rc::new_cyclic(|this: &Weak<LayoutNode>| {
             let inner = NodeCoordinator::new_inner(this.clone());
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
             LayoutNode {
-                id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                id,
+                semantics_id: Cell::new(id),
                 this: this.clone(),
                 parent: RefCell::new(Weak::new()),
                 children: RefCell::new(Vec::new()),
@@ -194,6 +205,8 @@ impl LayoutNode {
                 popup: RefCell::new(None),
                 overlays: RefCell::new(Vec::new()),
                 anchor: RefCell::new(Weak::new()),
+                subcompositions: RefCell::new(None),
+                is_deactivated: Cell::new(false),
             }
         })
     }
@@ -202,9 +215,20 @@ impl LayoutNode {
         self.this.upgrade().expect("a layout node in use is alive")
     }
 
-    /// Its id: unique while the program runs (its semantics node's id, what a display list knows it by).
+    /// Its id: unique while the program runs (what a display list knows it by).
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Its semantics node's id (Compose's `semanticsId`): its [`id`](Self::id) until it is reused for other
+    /// content, a new one each time it is.
+    pub fn semantics_id(&self) -> u64 {
+        self.semantics_id.get()
+    }
+
+    /// A new semantics id, as it is reused.
+    pub(crate) fn renew_semantics_id(&self) {
+        self.semantics_id.set(NEXT_ID.fetch_add(1, Ordering::Relaxed));
     }
 
     pub fn parent(&self) -> Option<Rc<LayoutNode>> {
@@ -232,6 +256,20 @@ impl LayoutNode {
     /// Whether its parent placed it in the last layout (and so it is shown).
     pub fn is_placed(&self) -> bool {
         self.is_placed.get()
+    }
+
+    /// Whether its composition deactivated it (kept for reuse; Compose's `isDeactivated`).
+    pub fn is_deactivated(&self) -> bool {
+        self.is_deactivated.get()
+    }
+
+    /// Runs `f` with requests to measure it again ignored (Compose's `ignoreRemeasureRequests`): what changes its
+    /// children while it measures them (a subcomposition) doesn't ask for another measure of it.
+    pub(crate) fn ignoring_remeasure_requests<R>(&self, f: impl FnOnce() -> R) -> R {
+        let was = self.ignore_remeasure_requests.replace(true);
+        let r = f();
+        self.ignore_remeasure_requests.set(was);
+        r
     }
 
     pub fn density(&self) -> Density {
@@ -745,11 +783,39 @@ impl LayoutNode {
 impl Node for LayoutNode {
     /// Compose's applier: the children become `children` (moved, inserted, removed), attached and detached.
     fn set_children(&self, children: &[Rc<dyn Node>]) {
-        let me = self.rc();
         let emitted: Vec<Rc<LayoutNode>> = children
             .iter()
             .map(|c| (c.clone() as Rc<dyn Any>).downcast::<LayoutNode>().expect("kompoz: a node of another kind"))
             .collect();
+        self.rc().set_layout_children(emitted);
+    }
+
+    /// Composed again for other content (Compose's `onReuse`): its modifier's nodes reset (unless it was
+    /// deactivated, which did), attached again, it measured again; a subcomposing layout's slots kept for reuse.
+    fn on_reuse(&self) {
+        LayoutNode::on_reuse(self);
+    }
+
+    /// Deactivated (Compose's `onDeactivate`): its modifier's nodes reset and detached, its slots kept for reuse,
+    /// itself left out of the semantics until it is reused.
+    fn on_deactivate(&self) {
+        LayoutNode::on_deactivate(self);
+    }
+
+    /// Gone for good (Compose's `onRelease`): a subcomposing layout's compositions disposed of.
+    fn on_release(&self) {
+        let state = self.subcompositions.borrow().clone();
+        if let Some(state) = state {
+            state.on_release();
+        }
+    }
+}
+
+impl LayoutNode {
+    /// Its children become `emitted` (moved, inserted, removed; popup roots to its overlays), as the applier makes
+    /// them.
+    pub(crate) fn set_layout_children(self: &Rc<Self>, emitted: Vec<Rc<LayoutNode>>) {
+        let me = self.clone();
         // Popup roots go to its overlays.
         let new = me.split_overlays(emitted);
         // Those that left, then the new order with those that came.

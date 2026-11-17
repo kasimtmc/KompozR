@@ -505,6 +505,7 @@ impl Gen<'_, '_> {
                 let first = Ty::from_rust(i.params[0].ty);
                 recv.ty == Ty::Unknown
                     || first == recv.ty
+                    || first.is_float() && recv.ty.is_number()
                     || first.owner().is_some() && first.owner() == recv.ty.owner()
             });
             (fits && owner_has_no(&recv.ty, &name.name)).then(|| (r.clone(), items))
@@ -512,8 +513,16 @@ impl Gen<'_, '_> {
         if let Some((r, items)) = scoped {
             let label = r.labels.first().cloned();
             let _ = self.receiver(label.as_deref());
-            let first_param_ref = items[0].params[0].ty.starts_with('&');
+            let first = items[0].params[0].ty;
+            let first_param_ref = first.starts_with('&');
             let rv = recv.ts;
+            // (Kotlin's `Int.toDp()` and `Float.toDp()` are one Rust method taking a float: the number given as one)
+            let rv = if matches!(first, "f32" | "f64") && !recv.ty.is_float() {
+                let t = proc_macro2::Ident::new(first, span);
+                quote_spanned!(span=> (#rv as #t))
+            } else {
+                rv
+            };
             let rv = if first_param_ref { quote_spanned!(span=> &#rv) } else { rv };
             let ri = proc_macro2::Ident::new(&r.rust, span);
             let c = Callee::from_item(items[0]);

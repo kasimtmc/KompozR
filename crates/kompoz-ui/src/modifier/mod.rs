@@ -7,7 +7,7 @@ pub(crate) mod diff;
 mod node;
 
 pub use node::{DelegatedNode, NodeCx, NodeHandle, NodeKind, ObserverModifierNode, TraversableNode, TraversalDecision};
-pub(crate) use node::{NodeCell, NodeRc, dispatch_for_kind};
+pub(crate) use node::{NodeCell, NodeRc, dispatch_for_kind, traverse_descendants_of};
 
 use std::any::{Any, TypeId};
 use std::fmt;

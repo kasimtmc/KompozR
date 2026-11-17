@@ -7,6 +7,7 @@
 //! calls: the next old child is taken if its key matches (the common case, no lookup), else the key is looked
 //! up among those left; whatever is left at the end has left the composition.
 
+use crate::context::{CompositionContext, ContextData, PausedComposition, Recomposer};
 use crate::read::observe_reads;
 use crate::snapshot::{ObserverHandle, Snapshot, SnapshotApplyResult, StateKey};
 use parking_lot::Mutex;
@@ -69,6 +70,18 @@ pub(crate) fn key_of(site: &Location<'_>) -> u64 {
 pub trait Node: Any {
     /// The nodes emitted below it (looking through the groups that emit none), in call order.
     fn set_children(&self, children: &[Rc<dyn Node>]);
+
+    /// Its group is composed again for other content (Compose's `ComposeNodeLifecycleCallback.onReuse`: reusable
+    /// content whose key changed, a reused composition): it is about to be updated as a new node would be.
+    fn on_reuse(&self) {}
+
+    /// Its content was deactivated (`onDeactivate`: a `ReusableContentHost` turned off, a composition
+    /// deactivated): kept for reuse, told after the composition, in the order its group's values are forgotten.
+    fn on_deactivate(&self) {}
+
+    /// It left the composition for good (`onRelease`), told after the composition as its group's values are
+    /// forgotten: the content it owns (a subcomposing layout's compositions) goes with it.
+    fn on_release(&self) {}
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -122,16 +135,25 @@ impl<T> Slab<T> {
 /// What `remember` keeps in a group.
 pub(crate) struct SlotValue {
     pub(crate) value: Box<dyn Any>,
-    pub(crate) observer: Option<Rc<dyn RememberObserver>>,
+    pub(crate) observer: Option<Observed>,
+}
+
+/// A remembered value's observer, and whether it was told it entered (else it is abandoned, not forgotten).
+pub(crate) struct Observed {
+    observer: Rc<dyn RememberObserver>,
+    entered: Rc<std::cell::Cell<bool>>,
 }
 
 /// What a remembered value is told as it enters and leaves the composition (Compose's RememberObserver; see
 /// [`remember_observer`](crate::remember_observer)). Both after the composition: what left forgotten first (in
 /// the reverse of the order it was composed in), then what entered remembered (in order), before the side
-/// effects. A remembered value's `Drop` runs where `on_forgotten` would.
+/// effects. A remembered value's `Drop` runs where `on_forgotten` would. One remembered by a composition that
+/// never got to enter (a paused composition cancelled, or disposed before it was applied) is told
+/// `on_abandoned` instead of either.
 pub trait RememberObserver {
     fn on_remembered(&self) {}
     fn on_forgotten(&self) {}
+    fn on_abandoned(&self) {}
 }
 
 /// A movable content's identity: its latest content and the group it is composed in (none while it isn't).
@@ -218,6 +240,9 @@ struct Group {
     movable: Option<Rc<MovableData>>,
     /// The composition pass it was last called in.
     composed_in: u64,
+    /// Matched while content was reused (its remembered values forgotten): the node it emits is told so
+    /// ([`Node::on_reuse`]) before it is updated.
+    reused: bool,
 }
 
 impl Group {
@@ -236,6 +261,7 @@ impl Group {
             seq: 0,
             movable: None,
             composed_in: 0,
+            reused: false,
         }
     }
 }
@@ -251,6 +277,9 @@ struct Scope {
     /// States and composition locals read, each with its place among the key's readers.
     reads: Vec<(StateKey, u32)>,
     invalid: bool,
+    /// Paused (or set) while content was being reused: run again in reuse, its old content's values forgotten
+    /// and its nodes reused.
+    reuse_on_restart: bool,
 }
 
 /// Who read each key, in the order they did (a scope gone leaves a hole, filled in as they mount up: removal is
@@ -309,6 +338,21 @@ pub(crate) struct ComposerState {
     stats: RecompositionStats,
     root: Option<GroupId>,
     composing: bool,
+    /// How deep in reused content this composes (Compose's `reusing`): a group matched there has its
+    /// remembered values forgotten, its scope run, its node reused.
+    reusing: u32,
+    /// Deactivated (its values forgotten, its groups and nodes kept for reuse): not recomposed until its
+    /// content is set again with reuse.
+    deactivated: bool,
+    /// A paused composition of it is under way (set, not applied yet): what it composes is held until it is
+    /// applied, and the recomposer leaves it alone.
+    paused: bool,
+    /// Its paused composition was cancelled: it is to be disposed of, not composed.
+    cancelled: bool,
+    /// While a paused composition resumes: whether to pause at the next restartable call.
+    pausing: Option<Rc<dyn Fn() -> bool>>,
+    /// The scopes paused in this resume (composed by the next).
+    paused_scopes: Vec<ScopeId>,
 }
 
 /// One composition's state, shared by what refers to it (derived states, the scope handles).
@@ -317,6 +361,21 @@ pub(crate) struct Composer {
     /// What applied snapshots changed, from any thread: invalidated before the next recomposition.
     pending: Arc<Mutex<Vec<StateKey>>>,
     reader: Rc<dyn Fn(StateKey)>,
+    /// Unique while the program runs (what a group of it is told apart from another composition's by).
+    pub(crate) id: u64,
+    /// The context it was made from (a child composition's: its parent's locals, key and recomposer).
+    pub(crate) parent: Option<CompositionContext>,
+    /// The contexts taken in it, which child compositions are made from (weakly: gone with their groups).
+    pub(crate) contexts: RefCell<Vec<Weak<ContextData>>>,
+    /// The recomposer it is registered with: its root composition's.
+    pub(crate) recomposer: Rc<Recomposer>,
+}
+
+/// A group of a composition: where saveable positions are counted from (a registry's provider).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Boundary {
+    pub(crate) composer: u64,
+    pub(crate) group: GroupId,
 }
 
 thread_local! {
@@ -347,7 +406,9 @@ impl Composer {
         Composer::current().expect("kompoz: a composable called outside of a composition")
     }
 
-    fn new() -> Rc<Composer> {
+    fn new(parent: Option<CompositionContext>) -> Rc<Composer> {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let recomposer = parent.as_ref().map_or_else(|| Rc::new(Recomposer::default()), |p| p.0.recomposer.clone());
         Rc::new_cyclic(|weak: &Weak<Composer>| {
             let w = weak.clone();
             let reader: Rc<dyn Fn(StateKey)> = Rc::new(move |key| {
@@ -378,9 +439,19 @@ impl Composer {
                     stats: RecompositionStats::default(),
                     root: None,
                     composing: false,
+                    reusing: 0,
+                    deactivated: false,
+                    paused: false,
+                    cancelled: false,
+                    pausing: None,
+                    paused_scopes: Vec::new(),
                 }),
                 pending: Arc::new(Mutex::new(Vec::new())),
                 reader,
+                id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                parent,
+                contexts: RefCell::new(Vec::new()),
+                recomposer,
             }
         })
     }
@@ -506,7 +577,12 @@ impl Composer {
         }
         let parent = frame.group;
         let g = match found {
-            Some(g) => g,
+            Some(g) => {
+                if st.reusing > 0 {
+                    Self::strip(st, g, false);
+                }
+                g
+            }
             None => {
                 let depth = st.groups.get(parent.0).depth + 1;
                 GroupId(st.groups.insert(Group::new(Some(parent), depth, id)))
@@ -534,19 +610,46 @@ impl Composer {
         Self::enter(&mut st, g);
     }
 
-    /// The current group's position below `boundary`: the keys of the groups in between.
-    pub(crate) fn key_below(&self, boundary: Option<GroupId>) -> u64 {
+    /// The current group's position below `boundary`: the keys of the groups in between, from this one up to
+    /// it. A child composition's continues in its parent from where its context was taken (Compose's
+    /// `compositeKeyHash` of a subcomposition), up to `boundary` in whichever composition it is (none: the top).
+    pub(crate) fn key_below(&self, boundary: Option<Boundary>) -> u64 {
+        let start = self.state.borrow().frames.last().map(|f| f.group);
+        self.key_from(start, boundary)
+    }
+
+    /// [`key_below`](Self::key_below) from `start`.
+    pub(crate) fn key_from(&self, start: Option<GroupId>, boundary: Option<Boundary>) -> u64 {
+        let (mut key, mut reached) = self.fold_up(1469598103934665603, start, boundary);
+        let mut context = self.parent.clone();
+        while !reached && let Some(ctx) = context {
+            let Some(parent) = ctx.0.composer.upgrade() else { break };
+            (key, reached) = parent.fold_up(key, ctx.0.group.get(), boundary);
+            context = parent.parent.clone();
+        }
+        key
+    }
+
+    /// Mixes the keys of `start` and the groups above it into `key`, up to `boundary` if it is one of this
+    /// composition's (and whether it was reached).
+    fn fold_up(&self, mut key: u64, start: Option<GroupId>, boundary: Option<Boundary>) -> (u64, bool) {
         let st = self.state.borrow();
-        let mut key = 1469598103934665603;
-        let mut g = st.frames.last().map(|f| f.group);
-        while let Some(id) = g
-            && Some(id) != boundary
-        {
-            let group = st.groups.get(id.0);
+        let stop = boundary.filter(|b| b.composer == self.id).map(|b| b.group);
+        let mut g = start;
+        while let Some(id) = g {
+            if Some(id) == stop {
+                return (key, true);
+            }
+            let Some(group) = st.groups.try_get(id.0) else { break };
             key = mix_key(key, group.key);
             g = group.parent;
         }
-        key
+        (key, false)
+    }
+
+    /// The group composing now, as a saveable registry's boundary.
+    pub(crate) fn boundary_here(&self) -> Boundary {
+        Boundary { composer: self.id, group: self.current_group() }
     }
 
     /// Whether what runs now is composed in a group (and so can remember): not a derived state computed outside
@@ -668,18 +771,99 @@ impl Composer {
         {
             m.group.set(None);
         }
-        st.garbage.push(Box::new(group.node.take()));
+        // Its node released (the composition's own root isn't its to release), told before what its group and
+        // the groups below it remembered are forgotten (the forgets run last pushed first), as Compose's node
+        // callbacks go in the queue of forgets.
+        if let Some(node) = group.node.take() {
+            if Some(g) != st.root {
+                st.forgets.push(Box::new(move || node.on_release()));
+            } else {
+                st.garbage.push(Box::new(node));
+            }
+        }
         st.garbage.push(Box::new(group.provided));
     }
 
     fn forget_slot_value(st: &mut ComposerState, slot: SlotValue) {
-        // The value dropped (and its observer told) after the composition.
+        // The value dropped (and its observer told) after the composition: forgotten if it entered, else abandoned.
         st.forgets.push(Box::new(move || {
             if let Some(o) = &slot.observer {
-                o.on_forgotten();
+                if o.entered.get() {
+                    o.observer.on_forgotten();
+                } else {
+                    o.observer.on_abandoned();
+                }
             }
             drop(slot);
         }));
+    }
+
+    /// `g`'s remembered values forgotten and its effects' cleanups run (after the composition), its scope's reads
+    /// dropped and its arguments with them (so it runs, not skips, the next time it is called), as content reused
+    /// or deactivated has (Compose's reuse and `deactivateToEndGroup`). Its children too with `deep`, and the
+    /// nodes then deactivated; else its node is reused when its emit runs again.
+    fn strip(st: &mut ComposerState, g: GroupId, deep: bool) {
+        let group = st.groups.get_mut(g.0);
+        let slot = group.slot.take();
+        let on_forget = group.on_forget.take();
+        let scope = group.scope;
+        let node = group.node.clone();
+        group.reused = true;
+        if let Some(f) = on_forget {
+            st.forgets.push(f);
+        }
+        if let Some(slot) = slot {
+            Self::forget_slot_value(st, slot);
+        }
+        if let Some(s) = scope {
+            Self::clear_reads(st, s);
+            st.invalid.retain(|x| *x != s);
+            st.paused_scopes.retain(|x| *x != s);
+            st.frame_scopes.retain(|x| *x != s);
+            st.timed_scopes.retain(|x| x.1 != s);
+            let scope = st.scopes.get_mut(s.0);
+            scope.invalid = false;
+            let old = scope.args.take();
+            st.garbage.push(Box::new(old));
+        }
+        if deep {
+            for c in st.groups.get(g.0).children.clone() {
+                Self::strip(st, c, true);
+            }
+            if let Some(node) = node {
+                st.forgets.push(Box::new(move || node.on_deactivate()));
+            }
+        }
+    }
+
+    /// The current group's old children (those not composed yet) deactivated: their values forgotten, their
+    /// nodes deactivated, all kept for reuse (Compose's `deactivateToEndGroup`).
+    pub(crate) fn deactivate_rest(&self) {
+        let mut st = self.state.borrow_mut();
+        let st = &mut *st;
+        let old: Vec<GroupId> = st.frames.last().expect("kompoz: no group").old.iter().flatten().copied().collect();
+        for g in old {
+            Self::strip(st, g, true);
+        }
+    }
+
+    /// The current group keeps the children it has without composing them (Compose's `skipToGroupEnd`).
+    pub(crate) fn skip_rest(&self) {
+        let mut st = self.state.borrow_mut();
+        let frame = st.frames.last_mut().expect("kompoz: no group");
+        let old = std::mem::take(&mut frame.old);
+        frame.children.extend(old.into_iter().flatten());
+        frame.lookup = None;
+        frame.cursor = 0;
+    }
+
+    /// What is composed from now on is reused content (Compose's reusing), until [`end_reuse`](Self::end_reuse).
+    pub(crate) fn begin_reuse(&self) {
+        self.state.borrow_mut().reusing += 1;
+    }
+
+    pub(crate) fn end_reuse(&self) {
+        self.state.borrow_mut().reusing -= 1;
     }
 
     fn remove_scope(st: &mut ComposerState, s: ScopeId) {
@@ -719,10 +903,15 @@ impl Composer {
         if let Some(old) = st.groups.get_mut(g.0).slot.take() {
             Self::forget_slot_value(st, old);
         }
-        if let Some(o) = &observer {
-            let o = o.clone();
-            st.after.push(Box::new(move || o.on_remembered()));
-        }
+        let observer = observer.map(|observer| {
+            let entered = Rc::new(std::cell::Cell::new(false));
+            let (o, e) = (observer.clone(), entered.clone());
+            st.after.push(Box::new(move || {
+                e.set(true);
+                o.on_remembered();
+            }));
+            Observed { observer, entered }
+        });
         st.groups.get_mut(g.0).slot = Some(SlotValue { value, observer });
     }
 
@@ -774,13 +963,19 @@ impl Composer {
         content: impl FnOnce(),
     ) {
         self.start_group(key);
-        let node = {
-            let st = self.state.borrow();
+        let (node, reused) = {
+            let mut st = self.state.borrow_mut();
             let g = st.frames.last().unwrap().group;
-            st.groups.get(g.0).node.clone()
+            let group = st.groups.get_mut(g.0);
+            (group.node.clone(), std::mem::take(&mut group.reused))
         };
         let node = match node {
-            Some(n) => n,
+            Some(n) => {
+                if reused {
+                    n.on_reuse(); // (reset before it is updated as a new one)
+                }
+                n
+            }
             None => {
                 let n = factory();
                 let mut st = self.state.borrow_mut();
@@ -832,12 +1027,27 @@ impl Composer {
                         on_invalidated: None,
                         reads: Vec::new(),
                         invalid: false,
+                        reuse_on_restart: false,
                     }));
                     st.groups.get_mut(g.0).scope = Some(s);
                     s
                 }
             }
         };
+        // A paused composition pauses here, at a restartable call (Compose's restart group boundary), when asked:
+        // the scope keeps what it had and is composed by the next resume.
+        let pausing = self.state.borrow().pausing.clone();
+        if let Some(should_pause) = pausing
+            && should_pause()
+        {
+            let mut st = self.state.borrow_mut();
+            let reusing = st.reusing > 0;
+            let scope = st.scopes.get_mut(s.0);
+            scope.invalid = true;
+            scope.reuse_on_restart |= reusing;
+            st.paused_scopes.push(s);
+            return;
+        }
         self.run(s);
     }
 
@@ -870,18 +1080,29 @@ impl Composer {
     /// Runs a scope on its own, without its parent: the composition locals come from the providers above it, and
     /// the node it emits into is told its children.
     fn restart(&self, s: ScopeId) {
-        {
+        let context_locals = self.parent.as_ref().map(|p| p.0.locals.borrow().clone()).unwrap_or_default();
+        let reuse = {
             let mut st = self.state.borrow_mut();
             let st = &mut *st;
             let g = st.scopes.get(s.0).group.unwrap();
             st.frames.clear();
-            st.locals = Self::locals_above(st, g);
+            st.locals = context_locals;
+            let above = Self::locals_above(st, g);
+            st.locals.extend(above);
             st.current_scope = None;
-        }
+            let reuse = std::mem::take(&mut st.scopes.get_mut(s.0).reuse_on_restart);
+            if reuse {
+                st.reusing += 1;
+            }
+            reuse
+        };
         self.run(s);
         let update = {
             let mut st = self.state.borrow_mut();
             let st = &mut *st;
+            if reuse {
+                st.reusing -= 1;
+            }
             let locals = std::mem::take(&mut st.locals); // (what they hold isn't the composer's to keep)
             st.garbage.push(Box::new(locals));
             let g = st.scopes.try_get(s.0).and_then(|s| s.group);
@@ -902,6 +1123,7 @@ impl Composer {
             on_invalidated: Some(on_invalidated),
             reads: Vec::new(),
             invalid: false,
+            reuse_on_restart: false,
         }))
     }
 
@@ -1037,10 +1259,23 @@ impl Composer {
     pub(crate) fn read_local(&self, local: usize) -> Option<Rc<dyn Any>> {
         let holder = {
             let st = self.state.borrow();
-            st.locals.iter().rev().find(|p| p.local == local)?.holder.clone()
+            st.locals.iter().rev().find(|p| p.local == local).map(|p| p.holder.clone())
+        };
+        let Some(holder) = holder else {
+            // (a child composition's reader of a default: told when its parent provides one)
+            self.record_context_locals_read();
+            return None;
         };
         self.record_read(holder.key);
         Some(holder.peek())
+    }
+
+    /// A child composition's running scope subscribed to which locals its context gives (told when its parent
+    /// provides others, or no longer one).
+    fn record_context_locals_read(&self) {
+        if let Some(p) = &self.parent {
+            self.record_read(p.0.locals_key);
+        }
     }
 
     /// Everything provided where this runs, outermost first, read by no one.
@@ -1057,6 +1292,7 @@ impl Composer {
         for p in locals.iter().filter(|p| p.replaced_when_changed()) {
             self.record_read(p.holder.key);
         }
+        self.record_context_locals_read();
         locals
     }
 
@@ -1066,6 +1302,7 @@ impl Composer {
         for p in &locals {
             self.record_read(p.holder.key);
         }
+        self.record_context_locals_read();
         locals
     }
 
@@ -1169,6 +1406,19 @@ impl Composer {
     /// forgotten (last composed first), what entered is remembered and its effects run, then the side effects.
     /// False if there was nothing to do.
     fn recompose(self: &Rc<Self>, frame_time_nanos: i64) -> bool {
+        if !self.compose_pass(frame_time_nanos, None) {
+            return false;
+        }
+        self.finish_composition();
+        self.apply_changes();
+        true
+    }
+
+    /// The invalid scopes run, outermost first, in a snapshot of its own applied after; false if none was. With
+    /// `should_pause` (a paused composition resuming), a restartable call pauses when it says so (as does the
+    /// next scope to run, after the first): those scopes stay invalid for the next resume, and what was
+    /// composed is held (not forgotten, remembered or applied) until the paused composition is applied.
+    fn compose_pass(self: &Rc<Self>, frame_time_nanos: i64, should_pause: Option<Rc<dyn Fn() -> bool>>) -> bool {
         self.take_pending();
         {
             let mut st = self.state.borrow_mut();
@@ -1179,11 +1429,16 @@ impl Composer {
             st.stats.recompositions += 1;
             st.pass += 1;
             st.composing = true;
+            st.pausing = should_pause.clone();
         }
         let snapshot = Snapshot::take_mutable_snapshot(None, None);
         snapshot.enter(|| {
             with_current(self, || {
+                let mut first = true;
                 loop {
+                    if !first && should_pause.as_ref().is_some_and(|pause| pause()) {
+                        break;
+                    }
                     // Outermost first: running a scope also runs (or skips) the scopes inside it, which clears their
                     // invalid flag, so they are not run twice.
                     let next = {
@@ -1200,20 +1455,24 @@ impl Composer {
                     let Some(s) = next else { break };
                     let still = self.state.borrow().scopes.try_get(s.0).is_some_and(|x| x.invalid);
                     if still {
+                        first = false;
                         self.restart(s);
                     }
                 }
-                self.finish_composition();
             })
         });
         let applied = snapshot.apply() == SnapshotApplyResult::Success;
         snapshot.dispose();
-        self.state.borrow_mut().composing = false;
+        {
+            let mut st = self.state.borrow_mut();
+            st.composing = false;
+            st.pausing = None;
+            let paused = std::mem::take(&mut st.paused_scopes);
+            st.invalid.extend(paused);
+        }
         assert!(applied, "kompoz: a state the composition wrote was written meanwhile on another thread");
-        self.apply_changes();
         true
     }
-
     /// Movable contents not called again leave.
     fn finish_composition(&self) {
         let mut st = self.state.borrow_mut();
@@ -1264,17 +1523,53 @@ impl<F: Fn()> Content for F {
 }
 
 /// A composition: content composed into a tree of groups, emitting into `root`'s node, recomposed where what it
-/// read changed. The host drives it: [`recompose`](Composition::recompose) at every frame (after
-/// [`Snapshot::send_apply_notifications`]).
+/// read changed (Compose's `Composition`, which is also its `ReusableComposition` and `PausableComposition`).
+///
+/// A root composition ([`new`](Composition::new)) is driven by its host: [`recompose`](Composition::recompose)
+/// at every frame (after [`Snapshot::send_apply_notifications`]) runs what has to run again, in it and then in
+/// the child compositions made from its contexts (each after the one it was made from, as Compose's
+/// Recomposer has parents recompose before their children). A child composition
+/// ([`with_parent`](Composition::with_parent): a [`SubcomposeLayout`]'s slot, content composed elsewhere) sees
+/// its parent's composition locals where the context was taken, continues its composite key there, and composes
+/// at once when its content is set.
+///
+/// It can be deactivated ([`deactivate`](Composition::deactivate): its remembered values forgotten, its groups
+/// and nodes kept) and composed again reusing them ([`set_content_with_reuse`](Composition::set_content_with_reuse):
+/// state starts over, nodes are reused), and its content can be composed a piece at a time
+/// ([`set_pausable_content`](Composition::set_pausable_content)) before it is applied. Dropped, it is disposed of.
+///
+/// [`SubcomposeLayout`]: ../kompoz_ui/layout/fn.SubcomposeLayout.html
 pub struct Composition {
     composer: Rc<Composer>,
     _observer: ObserverHandle,
+    disposed: std::cell::Cell<bool>,
 }
 
+/// Compose's `ReusableComposition`: a composition that can be deactivated and composed again reusing its nodes
+/// (every [`Composition`] can).
+pub type ReusableComposition = Composition;
+
+/// Compose's `PausableComposition`: a composition whose content can be composed a piece at a time (every
+/// [`Composition`] can: [`set_pausable_content`](Composition::set_pausable_content)).
+pub type PausableComposition = Composition;
+
 impl Composition {
-    /// A composition emitting into `root` (none: nodes emitted at the top are kept by no one).
+    /// A root composition emitting into `root` (none: nodes emitted at the top are kept by no one).
     pub fn new(root: Option<Rc<dyn Node>>) -> Composition {
-        let composer = Composer::new();
+        Self::make(root, None)
+    }
+
+    /// A child composition of the composition `parent` was taken in, emitting into `root` (Compose's
+    /// `Composition(applier, parent)`): it sees the locals provided where `parent` was taken, its composite keys
+    /// continue that position's, and it is recomposed with its parent's, after it.
+    pub fn with_parent(root: Option<Rc<dyn Node>>, parent: &CompositionContext) -> Composition {
+        let composition = Self::make(root, Some(parent.clone()));
+        parent.0.children.borrow_mut().push(Rc::downgrade(&composition.composer));
+        composition
+    }
+
+    fn make(root: Option<Rc<dyn Node>>, parent: Option<CompositionContext>) -> Composition {
+        let composer = Composer::new(parent);
         {
             let mut st = composer.state.borrow_mut();
             let mut g = Group::new(None, 0, 0);
@@ -1284,60 +1579,242 @@ impl Composition {
         }
         let pending = composer.pending.clone();
         let observer = Snapshot::register_apply_observer(move |changed| pending.lock().extend_from_slice(changed));
-        Composition { composer, _observer: observer }
+        Composition { composer, _observer: observer, disposed: std::cell::Cell::new(false) }
     }
 
-    /// Sets what it composes (composed at the next `recompose`): a closure, or a `#[kompozable]` taking no
-    /// arguments.
-    pub fn set_content(&self, content: impl Content + 'static) {
-        let s = {
-            let mut st = self.composer.state.borrow_mut();
-            let st = &mut *st;
-            let root = st.root.unwrap();
-            let body: Rc<dyn Fn(&dyn Any)> = Rc::new(move |_| content.compose());
-            match st.groups.get(root.0).scope {
-                Some(s) => {
-                    let old = st.scopes.get_mut(s.0).body.replace(body);
-                    st.garbage.push(Box::new(old));
-                    s
-                }
-                None => {
-                    let s = ScopeId(st.scopes.insert(Scope {
-                        group: Some(root),
-                        body: Some(body),
-                        args: Some(Rc::new(())),
-                        on_invalidated: None,
-                        reads: Vec::new(),
-                        invalid: false,
-                    }));
-                    st.groups.get_mut(root.0).scope = Some(s);
-                    s
-                }
+    /// Whether it was made from a context (a child composition).
+    pub fn is_child(&self) -> bool {
+        self.composer.parent.is_some()
+    }
+
+    /// The root scope composing `content`, made the first time (not composed yet).
+    fn set_root_content(&self, content: impl Content + 'static, reuse: bool) -> ScopeId {
+        assert!(!self.disposed.get(), "kompoz: the composition was disposed of");
+        let mut st = self.composer.state.borrow_mut();
+        let st = &mut *st;
+        assert!(!st.paused, "kompoz: a paused composition of it is under way: apply or cancel it first");
+        let root = st.root.unwrap();
+        let body: Rc<dyn Fn(&dyn Any)> = Rc::new(move |_| content.compose());
+        let reuse = std::mem::take(&mut st.deactivated) || reuse;
+        let s = match st.groups.get(root.0).scope {
+            Some(s) => {
+                let old = st.scopes.get_mut(s.0).body.replace(body);
+                st.garbage.push(Box::new(old));
+                s
+            }
+            None => {
+                let s = ScopeId(st.scopes.insert(Scope {
+                    group: Some(root),
+                    body: Some(body),
+                    args: Some(Rc::new(())),
+                    on_invalidated: None,
+                    reads: Vec::new(),
+                    invalid: false,
+                    reuse_on_restart: false,
+                }));
+                st.groups.get_mut(root.0).scope = Some(s);
+                s
             }
         };
+        st.scopes.get_mut(s.0).reuse_on_restart |= reuse;
+        s
+    }
+
+    /// Sets what it composes (Compose's `setContent`): a closure, or a `#[kompozable]` taking no arguments. A root
+    /// composition composes it at the next `recompose`; a child one at once. One deactivated composes it reusing
+    /// what it kept, as with [`set_content_with_reuse`](Composition::set_content_with_reuse).
+    pub fn set_content(&self, content: impl Content + 'static) {
+        let s = self.set_root_content(content, false);
         self.composer.invalidate_scope(s);
+        self.compose_child_now();
     }
 
-    /// Runs what has to run again (what read states changed since). False if there was nothing to do.
-    pub fn recompose(&self, frame_time_nanos: i64) -> bool {
-        self.composer.recompose(frame_time_nanos)
+    /// Sets what it composes reusing what it composed before (Compose's `ReusableComposition.setContentWithReuse`):
+    /// the groups that match are composed as new ones (their remembered values forgotten, their scopes run) and
+    /// the nodes they emit reused ([`Node::on_reuse`]), not made again. A root composition composes it at the
+    /// next `recompose`; a child one at once.
+    pub fn set_content_with_reuse(&self, content: impl Content + 'static) {
+        let s = self.set_root_content(content, true);
+        self.composer.invalidate_scope(s);
+        self.compose_child_now();
     }
 
-    /// Whether something waits to be recomposed (states changed and applied, not recomposed yet).
-    pub fn has_invalidations(&self) -> bool {
-        !self.composer.pending.lock().is_empty() || !self.composer.state.borrow().invalid.is_empty()
+    /// A child composition composes what waits at once (the frame time its recomposer last composed at).
+    fn compose_child_now(&self) {
+        if self.is_child() {
+            let t = self.composer.recomposer.frame_time.get();
+            self.composer.recompose(t);
+        }
     }
 
-    /// Whether a scope asked to be composed again at a frame (an animation running).
-    pub fn has_frame_scopes(&self) -> bool {
-        let st = self.composer.state.borrow();
-        !st.frame_scopes.is_empty() || !st.timed_scopes.is_empty()
+    /// Sets what it composes without composing it (Compose's `PausableComposition.setPausableContent`): the
+    /// [`PausedComposition`] it gives composes it a piece at a time as it is resumed, and applies it once
+    /// complete. Until then nothing it composes is remembered or run, and it isn't recomposed by its host.
+    pub fn set_pausable_content(&self, content: impl Content + 'static) -> PausedComposition {
+        self.set_pausable(content, false)
     }
 
-    /// The scopes that asked for this frame (the next, or one by `frame_time_nanos`) queued to run again.
-    pub fn invalidate_frame_scopes(&self, frame_time_nanos: i64) {
-        let due: Vec<ScopeId> = {
+    /// The same reusing what it composed before (Compose's `setPausableContentWithReuse`).
+    pub fn set_pausable_content_with_reuse(&self, content: impl Content + 'static) -> PausedComposition {
+        self.set_pausable(content, true)
+    }
+
+    fn set_pausable(&self, content: impl Content + 'static, reuse: bool) -> PausedComposition {
+        let s = self.set_root_content(content, reuse);
+        self.composer.invalidate_scope(s);
+        {
             let mut st = self.composer.state.borrow_mut();
+            st.paused = true;
+            st.cancelled = false;
+        }
+        PausedComposition::new(self.composer.clone())
+    }
+
+    /// Deactivates it (Compose's `ReusableComposition.deactivate`): what it remembered is forgotten and its effects
+    /// disposed of, its groups and nodes kept ([`Node::on_deactivate`]) to be reused by the next
+    /// [`set_content_with_reuse`](Composition::set_content_with_reuse); until then nothing in it recomposes.
+    pub fn deactivate(&self) {
+        {
+            let mut st = self.composer.state.borrow_mut();
+            let st = &mut *st;
+            assert!(!st.composing, "kompoz: a composition deactivated while it composes");
+            st.paused = false;
+            let root = st.root.unwrap();
+            for c in st.groups.get(root.0).children.clone() {
+                Composer::strip(st, c, true);
+            }
+            if let Some(s) = st.groups.get(root.0).scope {
+                Composer::clear_reads(st, s);
+                st.invalid.retain(|x| *x != s);
+                st.scopes.get_mut(s.0).invalid = false;
+            }
+            st.invalid.clear();
+            st.paused_scopes.clear();
+            st.frame_scopes.clear();
+            st.timed_scopes.clear();
+            let parked = std::mem::take(&mut st.parked);
+            Composer::destroy_in_call_order(st, parked);
+            st.deactivated = true;
+        }
+        self.composer.pending.lock().clear();
+        self.composer.apply_changes();
+    }
+
+    /// Whether it is deactivated (and not composed again since).
+    pub fn is_deactivated(&self) -> bool {
+        self.composer.state.borrow().deactivated
+    }
+
+    /// Runs what has to run again (what read states changed since), then does the same in the child compositions
+    /// made from its contexts, each after the one it was made from (Compose's Recomposer: parents before
+    /// children); those deactivated, paused or disposed of are left alone. False if there was nothing to do.
+    pub fn recompose(&self, frame_time_nanos: i64) -> bool {
+        if self.disposed.get() || !self.composer.recomposes() {
+            return false;
+        }
+        if !self.is_child() {
+            self.composer.recomposer.frame_time.set(frame_time_nanos);
+        }
+        let mut any = self.composer.recompose(frame_time_nanos);
+        for child in self.composer.descendants() {
+            if child.recomposes() {
+                any |= child.recompose(frame_time_nanos);
+            }
+        }
+        any
+    }
+
+    /// Whether something waits to be recomposed in it or its child compositions (states changed and applied,
+    /// not recomposed yet).
+    pub fn has_invalidations(&self) -> bool {
+        self.composer.has_invalidations()
+            || self.composer.descendants().iter().any(|c| c.recomposes() && c.has_invalidations())
+    }
+
+    /// Whether a scope in it or its child compositions asked to be composed again at a frame (an animation running).
+    pub fn has_frame_scopes(&self) -> bool {
+        std::iter::once(self.composer.clone()).chain(self.composer.descendants()).any(|c| {
+            let st = c.state.borrow();
+            c.recomposes() && (!st.frame_scopes.is_empty() || !st.timed_scopes.is_empty())
+        })
+    }
+
+    /// The scopes that asked for this frame (the next, or one by `frame_time_nanos`) queued to run again, in it
+    /// and its child compositions.
+    pub fn invalidate_frame_scopes(&self, frame_time_nanos: i64) {
+        for c in std::iter::once(self.composer.clone()).chain(self.composer.descendants()) {
+            c.invalidate_frame_scopes(frame_time_nanos);
+        }
+    }
+
+    /// Everything composed again (the host's environment changed): its content's scope, and its child
+    /// compositions'.
+    pub fn invalidate_all(&self) {
+        for c in std::iter::once(self.composer.clone()).chain(self.composer.descendants()) {
+            if c.recomposes() {
+                c.invalidate_root();
+            }
+        }
+    }
+
+    /// How many scopes ran and were skipped in it (not its child compositions).
+    pub fn stats(&self) -> RecompositionStats {
+        self.composer.state.borrow().stats
+    }
+
+    /// Disposes of it (Compose's `dispose`): all of it leaves, what it held forgotten last composed first (or
+    /// abandoned, if it never entered). Dropping it does the same.
+    pub fn dispose(&self) {
+        if self.disposed.replace(true) {
+            return;
+        }
+        {
+            let mut st = self.composer.state.borrow_mut();
+            let st = &mut *st;
+            st.paused = false;
+            if let Some(root) = st.root {
+                Composer::destroy(st, root);
+                st.root = None;
+            }
+            let parked = std::mem::take(&mut st.parked);
+            Composer::destroy_in_call_order(st, parked);
+            // (what a paused composition would have told never is: its values are abandoned as they go)
+            st.after.clear();
+            st.side.clear();
+        }
+        if let Some(parent) = &self.composer.parent {
+            parent.0.children.borrow_mut().retain(|c| c.upgrade().is_some_and(|c| !Rc::ptr_eq(&c, &self.composer)));
+        }
+        self.composer.apply_changes();
+    }
+
+    /// Whether it was disposed of.
+    pub fn is_disposed(&self) -> bool {
+        self.disposed.get()
+    }
+}
+
+impl Drop for Composition {
+    /// The composition disposed of.
+    fn drop(&mut self) {
+        self.dispose();
+    }
+}
+
+impl Composer {
+    /// Whether its recomposer composes it: not deactivated, nor waiting on a paused composition, nor cancelled.
+    pub(crate) fn recomposes(&self) -> bool {
+        let st = self.state.borrow();
+        !st.deactivated && !st.paused && !st.cancelled && st.root.is_some()
+    }
+
+    fn has_invalidations(&self) -> bool {
+        !self.pending.lock().is_empty() || !self.state.borrow().invalid.is_empty()
+    }
+
+    fn invalidate_frame_scopes(&self, frame_time_nanos: i64) {
+        let due: Vec<ScopeId> = {
+            let mut st = self.state.borrow_mut();
             let mut due = std::mem::take(&mut st.frame_scopes);
             st.timed_scopes.retain(|t| {
                 if t.0 <= frame_time_nanos {
@@ -1350,35 +1827,74 @@ impl Composition {
             due
         };
         for s in due {
-            self.composer.invalidate_scope(s);
+            self.invalidate_scope(s);
         }
     }
 
-    /// Everything composed again (the host's environment changed).
-    pub fn invalidate_all(&self) {
-        let root = self.composer.state.borrow().root.and_then(|r| self.composer.state.borrow().groups.get(r.0).scope);
+    fn invalidate_root(&self) {
+        let root = {
+            let st = self.state.borrow();
+            st.root.and_then(|r| st.groups.get(r.0).scope)
+        };
         if let Some(s) = root {
-            self.composer.invalidate_scope(s);
+            self.invalidate_scope(s);
         }
     }
 
-    pub fn stats(&self) -> RecompositionStats {
-        self.composer.state.borrow().stats
+    /// The compositions made from the contexts taken in it, and from theirs, each before those made from it.
+    pub(crate) fn descendants(&self) -> Vec<Rc<Composer>> {
+        let mut out = Vec::new();
+        self.collect_descendants(&mut out);
+        out
     }
-}
 
-impl Drop for Composition {
-    /// The composition disposed of: all of it leaves, what it held forgotten last composed first.
-    fn drop(&mut self) {
-        {
-            let mut st = self.composer.state.borrow_mut();
-            let st = &mut *st;
-            if let Some(root) = st.root.take() {
-                Composer::destroy(st, root);
+    fn collect_descendants(&self, out: &mut Vec<Rc<Composer>>) {
+        let contexts: Vec<Rc<ContextData>> = {
+            let mut contexts = self.contexts.borrow_mut();
+            contexts.retain(|c| c.strong_count() > 0);
+            contexts.iter().filter_map(|c| c.upgrade()).collect()
+        };
+        for ctx in contexts {
+            let children: Vec<Rc<Composer>> = ctx.children.borrow().iter().filter_map(|c| c.upgrade()).collect();
+            for child in children {
+                out.push(child.clone());
+                child.collect_descendants(out);
             }
-            let parked = std::mem::take(&mut st.parked);
-            Composer::destroy_in_call_order(st, parked);
         }
-        self.composer.apply_changes();
+    }
+
+    /// A paused composition's next piece: what is invalid composed (pausing where `should_pause` says), held
+    /// until applied. Whether it is complete.
+    pub(crate) fn resume_paused(self: &Rc<Self>, should_pause: Rc<dyn Fn() -> bool>) -> bool {
+        let t = self.recomposer.frame_time.get();
+        self.compose_pass(t, Some(should_pause));
+        self.paused_complete()
+    }
+
+    /// Whether nothing is left for a paused composition to compose (nothing it read changed since, either).
+    pub(crate) fn paused_complete(&self) -> bool {
+        self.take_pending();
+        self.state.borrow().invalid.is_empty()
+    }
+
+    /// A complete paused composition applied: what it held is done as after any composition, and it composes as
+    /// any other from now on.
+    pub(crate) fn apply_paused(&self) {
+        self.state.borrow_mut().paused = false;
+        self.finish_composition();
+        self.apply_changes();
+    }
+
+    /// A paused composition cancelled: what it remembered is abandoned when the composition is disposed of (what
+    /// it would have run never runs); what left meanwhile is forgotten.
+    pub(crate) fn cancel_paused(&self) {
+        let (after, side) = {
+            let mut st = self.state.borrow_mut();
+            st.paused = false;
+            st.cancelled = true;
+            (std::mem::take(&mut st.after), std::mem::take(&mut st.side))
+        };
+        drop((after, side));
+        self.apply_changes();
     }
 }

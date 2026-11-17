@@ -204,6 +204,10 @@ pub fn current_kompozition_local_map() -> KompozitionLocalContext {
 }
 
 impl KompozitionLocalContext {
+    pub(crate) fn from_values(values: Vec<Provided>) -> Self {
+        KompozitionLocalContext { values }
+    }
+
     /// `local`'s value in it: what is provided for it, else its default. A dynamic local's is read as it is now,
     /// and the read is told to whoever observes reads (a composable, a layout's measure, a drawing): it is told
     /// when the provider gives another value. A static local's is read by no one.

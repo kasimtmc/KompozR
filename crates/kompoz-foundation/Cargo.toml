@@ -54,3 +54,7 @@ harness = false
 [[test]]
 name = "selection"
 harness = false
+
+[[test]]
+name = "subcompose"
+harness = false

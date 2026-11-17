@@ -376,6 +376,22 @@ impl Owner {
         root_resized
     }
 
+    /// Measures `node` within `constraints` and lays it out now, apart from its parent's measure (Compose's
+    /// `measureAndLayout(layoutNode, constraints)`: a precomposed slot premeasured).
+    pub(crate) fn measure_and_layout_node(&self, node: &Rc<LayoutNode>, constraints: Constraints) {
+        let root = self.root();
+        assert!(root.is_none_or(|r| !Rc::ptr_eq(&r, node)), "kompoz: measure_and_layout_node is not for the root");
+        let nested = self.during_measure_layout.replace(true);
+        self.place_set.borrow_mut().remove(node);
+        self.do_remeasure(node, Some(constraints));
+        if node.layout_pending.get() && node.is_placed() {
+            node.replace();
+            self.request_on_positioned_callback(node);
+        }
+        self.drain_postponed();
+        self.during_measure_layout.set(nested);
+    }
+
     fn is_used_in_measure_or_layout(&self, node: &LayoutNode) -> bool {
         node.is_placed()
             || node.is_placed_by_parent.get()

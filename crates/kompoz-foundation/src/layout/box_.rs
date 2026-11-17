@@ -25,7 +25,7 @@ pub fn Box(
 /// The policy of a Box, kept while its arguments are equal (Compose's `maybeCachedBoxMeasurePolicy`), so the Box
 /// isn't measured again when it recomposes with the same ones.
 #[track_caller]
-fn box_measure_policy(alignment: Alignment, propagate_min_constraints: bool) -> Rc<dyn MeasurePolicy> {
+pub(crate) fn box_measure_policy(alignment: Alignment, propagate_min_constraints: bool) -> Rc<dyn MeasurePolicy> {
     remember_keyed((alignment.clone(), propagate_min_constraints), move || {
         Rc::new(BoxMeasurePolicy { alignment, propagate_min_constraints }) as Rc<dyn MeasurePolicy>
     })

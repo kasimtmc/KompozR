@@ -40,6 +40,7 @@ pub use host::{HostHandle, KompozHost};
 pub use layout::{
     AlignmentLine, FirstBaseline, IntrinsicMeasurable, IntrinsicMeasureScope, LastBaseline, Layout, LayoutCoordinates,
     Measurable, MeasurePolicy, MeasureResult, MeasureScope, MultiMeasureLayout, Placeable, PlacementScope,
+    PrecomposedSlotHandle, SubcomposeLayout, SubcomposeLayoutState, SubcomposeMeasureScope, SubcomposeSlotReusePolicy,
     measure_policy,
 };
 pub use modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, NodeKind};

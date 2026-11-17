@@ -15,6 +15,10 @@ pub struct TestNode {
     pub children: RefCell<Vec<Rc<TestNode>>>,
     /// How many times a composable configured it.
     pub compositions: Cell<u32>,
+    /// What the composition told it: reused, deactivated, released (Node's lifecycle callbacks).
+    pub reuses: Cell<u32>,
+    pub deactivations: Cell<u32>,
+    pub releases: Cell<u32>,
 }
 
 impl TestNode {
@@ -23,6 +27,9 @@ impl TestNode {
             name: RefCell::new(name.to_string()),
             children: RefCell::new(Vec::new()),
             compositions: Cell::new(0),
+            reuses: Cell::new(0),
+            deactivations: Cell::new(0),
+            releases: Cell::new(0),
         })
     }
 
@@ -57,6 +64,15 @@ impl Node for TestNode {
     fn set_children(&self, children: &[Rc<dyn Node>]) {
         *self.children.borrow_mut() =
             children.iter().map(|c| (c.clone() as Rc<dyn Any>).downcast::<TestNode>().expect("a test node")).collect();
+    }
+    fn on_reuse(&self) {
+        self.reuses.set(self.reuses.get() + 1);
+    }
+    fn on_deactivate(&self) {
+        self.deactivations.set(self.deactivations.get() + 1);
+    }
+    fn on_release(&self) {
+        self.releases.set(self.releases.get() + 1);
     }
 }
 

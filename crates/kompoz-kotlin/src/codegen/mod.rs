@@ -346,7 +346,13 @@ impl<'a, 'd> Gen<'a, 'd> {
                 }
                 if let Some(n) = f.receiver.as_ref().and_then(|r| r.simple_name()) {
                     let ty = owner_name(last_segment(&n));
-                    self.receivers.push(ImplicitReceiver { rust: "self".into(), ty, labels: Vec::new(), depth: 0 });
+                    self.receivers.push(ImplicitReceiver {
+                        rust: "self".into(),
+                        ty,
+                        labels: Vec::new(),
+                        depth: 0,
+                        by_ref: false,
+                    });
                 }
                 let t = self.peek_ty(e);
                 (self.scopes, self.receivers) = saved;
@@ -470,6 +476,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         ty: name.clone(),
                         labels: vec![f.name.name.clone()],
                         depth: 0,
+                        by_ref: false,
                     });
                     self.declare("this", "self".into(), LocalKind::Param, self.ty_of(r));
                     self_ty = Some((rust_ty, name));

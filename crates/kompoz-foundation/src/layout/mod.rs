@@ -1,6 +1,6 @@
 //! foundation.layout, as Compose's `androidx.compose.foundation.layout`: the layouts (`Box`, `Row`, `Column`,
-//! `Spacer`), arrangements, the padding, size, offset, aspect ratio, intrinsic size, alignment line padding and
-//! scope modifiers, window insets, and fitting inside or outside rulers.
+//! `Spacer`, `BoxWithConstraints`), arrangements, the padding, size, offset, aspect ratio, intrinsic size,
+//! alignment line padding and scope modifiers, window insets, and fitting inside or outside rulers.
 //!
 //! Compose's modifiers are extension functions of `Modifier`; here they are methods of extension traits
 //! implemented for it ([`PaddingModifiers`], [`SizeModifiers`], [`LayoutScopeModifiers`], …), with Compose's
@@ -19,6 +19,7 @@ mod alignment_line;
 mod arrangement;
 mod aspect_ratio;
 mod box_;
+mod box_with_constraints;
 mod intrinsic;
 mod offset;
 mod padding;
@@ -39,6 +40,7 @@ pub use arrangement::{
 };
 pub use aspect_ratio::AspectRatioModifiers;
 pub use box_::Box;
+pub use box_with_constraints::{BoxWithConstraints, BoxWithConstraintsScope};
 pub use intrinsic::{IntrinsicSize, IntrinsicSizeModifiers};
 pub use offset::{OffsetFn, OffsetModifiers};
 pub use padding::{CustomPaddingValues, PaddingModifiers, PaddingValues};

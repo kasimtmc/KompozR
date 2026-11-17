@@ -298,6 +298,12 @@ impl MeasureResult {
         (self.place)(scope)
     }
 
+    /// The same result placing by `placement_block` (Compose's `MeasureResult by result` with its own
+    /// `placeChildren`).
+    pub(crate) fn with_placement(self, placement_block: Rc<dyn Fn(&PlacementScope)>) -> MeasureResult {
+        MeasureResult { place: placement_block, ..self }
+    }
+
     pub(crate) fn same_lines(&self, other: &MeasureResult) -> bool {
         Rc::ptr_eq(&self.alignment_lines, &other.alignment_lines) || self.alignment_lines == other.alignment_lines
     }

@@ -643,6 +643,37 @@ impl NodeCx {
     }
 }
 
+/// The [`TraversableNode`]s with `key` in `nodes` and below them, depth first, as
+/// [`NodeCx::traverse_descendants`] visits those below a node (what a subcomposing layout's precomposed slot
+/// traverses from its virtual node: Compose's `PrecomposedSlotHandle.traverseDescendants`).
+pub(crate) fn traverse_descendants_of(
+    nodes: Vec<Rc<LayoutNode>>,
+    key: &dyn Any,
+    visit: &mut dyn FnMut(&NodeCx) -> TraversalDecision,
+) {
+    let mut stop = false;
+    visit_layout_nodes(
+        nodes,
+        NodeKind::Traversable,
+        true,
+        &mut |cx| {
+            let decision = if cx.traverse_key_is(key) { visit(cx) } else { TraversalDecision::ContinueTraversal };
+            let mut cancelled = decision == TraversalDecision::CancelTraversal;
+            if decision == TraversalDecision::ContinueTraversal {
+                cx.traverse_descendants(key, &mut |c| {
+                    let d = visit(c);
+                    if d == TraversalDecision::CancelTraversal {
+                        cancelled = true;
+                    }
+                    d
+                });
+            }
+            !cancelled
+        },
+        &mut stop,
+    );
+}
+
 /// Walks `node`'s children's chains for [`NodeCx::visit_below`].
 fn visit_layout_children(
     node: &Rc<LayoutNode>,
@@ -651,7 +682,18 @@ fn visit_layout_children(
     visit: &mut dyn FnMut(&NodeCx) -> bool,
     stop: &mut bool,
 ) {
-    for child in node.children() {
+    visit_layout_nodes(node.children(), kind, nearest_only, visit, stop);
+}
+
+/// The same over `nodes`.
+fn visit_layout_nodes(
+    nodes: Vec<Rc<LayoutNode>>,
+    kind: NodeKind,
+    nearest_only: bool,
+    visit: &mut dyn FnMut(&NodeCx) -> bool,
+    stop: &mut bool,
+) {
+    for child in nodes {
         if *stop {
             return;
         }

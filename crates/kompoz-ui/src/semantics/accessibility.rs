@@ -105,7 +105,7 @@ impl SemanticsOwner {
             Some(popup) => vec![SemanticsNode::of(popup, true)],
             None => self.root_semantics_nodes(true),
         };
-        let focused = owner.focused_layout_node().map(|n| n.id());
+        let focused = owner.focused_layout_node().map(|n| n.semantics_id());
         let mut out = Vec::new();
         for root in roots {
             visit(&root, None, &mut Vec::new(), focused, &mut out);
@@ -252,7 +252,8 @@ fn summarize(
         role: config.get(SemanticsProperties::Role),
         clickable: config.get(SemanticsActions::OnClick).is_some_and(|a| a.action.is_some()),
         enabled: !config.contains(SemanticsProperties::Disabled),
-        focused: config.get(SemanticsProperties::Focused) == Some(true) || focused == Some(node.layout_node().id()),
+        focused: config.get(SemanticsProperties::Focused) == Some(true)
+            || focused == Some(node.layout_node().semantics_id()),
         editable,
         scrollable: node.is_scroll_node() || config.contains(SemanticsActions::ScrollBy),
         heading: config.contains(SemanticsProperties::Heading),

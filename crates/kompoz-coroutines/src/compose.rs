@@ -55,6 +55,9 @@ impl RememberObserver for ScopeHolder {
     fn on_forgotten(&self) {
         self.0.cancel();
     }
+    fn on_abandoned(&self) {
+        self.0.cancel();
+    }
 }
 
 /// A scope bound to the composition: its coroutines are cancelled when the caller leaves it. Launch from event

@@ -280,10 +280,23 @@ impl LayoutNode {
     }
 
     /// The node reused for other content (Compose's `onReuse`, what a reusing layout's pool does): its nodes reset
-    /// and detached, then attached again, everything measured again.
+    /// and detached (unless it was deactivated, which did that already), then attached again, everything measured
+    /// again; a subcomposing layout's slots kept to be reused.
     pub fn on_reuse(&self) {
         assert!(self.is_attached(), "kompoz: on_reuse is for an attached layout node");
-        self.reset_chain();
+        let state = self.subcompositions.borrow().clone();
+        if let Some(state) = state {
+            state.on_reuse();
+        }
+        if self.is_deactivated.replace(false) {
+            self.invalidate_semantics();
+        } else {
+            self.reset_chain();
+        }
+        self.renew_semantics_id();
+        if let Some(owner) = self.owner() {
+            owner.semantics_changed();
+        }
         self.mark_chain_attached();
         self.run_chain_attach_lifecycle();
         if self.has_kind(NodeKind::Semantics) {
@@ -291,6 +304,25 @@ impl LayoutNode {
         }
         self.invalidate_measurements();
         self.request_relayout();
+    }
+
+    /// The node deactivated by its composition (Compose's `onDeactivate`): a subcomposing layout's slots kept to be
+    /// reused, its modifier's nodes reset and detached, itself left out of the semantics until it is reused.
+    pub fn on_deactivate(&self) {
+        let state = self.subcompositions.borrow().clone();
+        if let Some(state) = state {
+            state.on_deactivate();
+        }
+        self.is_deactivated.set(true);
+        if self.is_attached() {
+            self.reset_chain();
+            if self.semantics_configuration.borrow_mut().take().is_some() {
+                self.semantics_invalidated.set(false);
+            }
+            if let Some(owner) = self.owner() {
+                owner.semantics_changed();
+            }
+        }
     }
 }
 

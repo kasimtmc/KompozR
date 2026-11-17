@@ -528,11 +528,15 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
 }
 
 /// The index's items of a Kotlin name, `Composition…` (`compositionLocalOf` too) also found as KompozR's
-/// `Kompozition…` (pasted Compose code).
+/// `Kompozition…` (pasted Compose code), and the C++ Kompoz's `Subkompoz…` (`SubkompozLayout`, `subkompoz`) as
+/// Compose's `Subcompose…`.
 pub(crate) fn lookup(kotlin: &str) -> &'static [Item] {
     let found = index::lookup(kotlin);
     if found.is_empty() && kotlin.contains("Composition") {
         return index::lookup(&kotlin.replace("Composition", "Kompozition"));
+    }
+    if found.is_empty() && kotlin.contains("ubkompoz") {
+        return index::lookup(&kotlin.replace("Subkompoz", "Subcompose").replace("subkompoz", "subcompose"));
     }
     if found.is_empty()
         && let Some(rest) = kotlin.strip_prefix("composition")
@@ -635,6 +639,9 @@ pub(crate) struct ImplicitReceiver {
     /// Its Kotlin label: the extension function's name, the function the lambda is given to, or the lambda's own.
     pub labels: Vec<String>,
     pub depth: usize,
+    /// A receiver lambda's scope given by shared reference (`&SubcomposeMeasureScope`): a lambda kept inside it
+    /// captures a clone of the scope itself (Kotlin's lambda holds the scope object), not the reference.
+    pub by_ref: bool,
 }
 
 /// A lambda being written: the outer locals its body uses (what it captures), in the order first used.

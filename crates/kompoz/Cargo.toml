@@ -49,3 +49,8 @@ harness = false
 [[test]]
 name = "kotlin_foundation"
 harness = false
+
+# SubcomposeLayout and BoxWithConstraints in Kotlin's syntax.
+[[test]]
+name = "kotlin_subcompose"
+harness = false
