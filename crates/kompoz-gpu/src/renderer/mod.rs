@@ -20,9 +20,9 @@
 //! Its parts, as C++'s renderer.cpp has them: this module (the state, targets, `add` and the scissor), `submit`
 //! (flush, the passes, the coverage masks, pipelines and their warming), `prims` (rounded rects, lines, arcs,
 //! shadows), `paint` (colors and gradients, the frame's table), `clip`, `path` (coverage masks, kept paths), `layer`
-//! (layers, their pool, kept layers), `effect`, `shadow`, `image`, `shader` (image shaders and bakes), `mesh`,
-//! `text`, `frame` (frames kept and moved, blits), and `context` (the GraphicsContext the app draws through, each
-//! call handed to its part).
+//! (layers, their pool, kept layers), `effect`, `stretch` (Android's stretch overscroll, hwui's: not C++'s),
+//! `shadow`, `image`, `shader` (image shaders and bakes), `mesh`, `text`, `frame` (frames kept and moved, blits), and
+//! `context` (the GraphicsContext the app draws through, each call handed to its part).
 
 #![deny(unsafe_code)]
 
@@ -38,6 +38,7 @@ mod path;
 mod prims;
 mod shader;
 mod shadow;
+mod stretch;
 mod submit;
 mod text;
 
@@ -136,7 +137,8 @@ struct MaskShelf {
 }
 
 /// A pass of an effect (shaders/effects.slang): `rect` of the target made from `source` (filtered linearly, or
-/// not), with this frame's table if it reads stops, or a mask of its own in the table's place.
+/// not), with this frame's table if it reads stops, or a mask of its own in the table's place. Or, `stretch`, a
+/// stretched layer's (shaders/stretch.slang: its uniforms, `source` filtered linearly, no table).
 #[derive(Clone, Copy, Debug)]
 struct EffectDraw {
     source: TextureId,
@@ -145,6 +147,7 @@ struct EffectDraw {
     linear: bool,
     table: bool,
     mask: Option<TextureId>,
+    stretch: bool,
 }
 
 /// Part of a texture copied into a pass's target, at (x, y), instead of drawing.
@@ -372,6 +375,8 @@ pub struct Renderer {
     /// The coverage pipeline (shaders/path.slang).
     coverage_pipeline: Option<Pipeline>,
     effect_pipeline: Option<Pipeline>,
+    /// The stretch pipeline (shaders/stretch.slang).
+    stretch_pipeline: Option<Pipeline>,
     layers: layer::LayerState,
     shadows: shadow::ShadowState,
     images: image::ImageState,
@@ -445,6 +450,7 @@ impl Renderer {
             dst_copy: None,
             coverage_pipeline: None,
             effect_pipeline: None,
+            stretch_pipeline: None,
             layers: layer::LayerState::default(),
             shadows: shadow::ShadowState::default(),
             images: image::ImageState::default(),

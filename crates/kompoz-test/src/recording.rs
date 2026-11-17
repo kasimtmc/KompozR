@@ -4,7 +4,7 @@
 
 use kompoz_graphics::{
     BlendMode, Brush, Color, ColorFilter, Density, FilterQuality, ImageBitmap, LayoutDirection, Matrix, Offset,
-    Outline, Path, PathStroke, Rect, RenderEffect, Shape, Vertices, path_effected,
+    Outline, Path, PathStroke, Rect, RenderEffect, Shape, StretchEffect, Vertices, path_effected,
 };
 use kompoz_ui::draw::vector_drawn_into;
 use kompoz_ui::graphics_context::{
@@ -191,8 +191,10 @@ pub struct RecordingCanvas {
     pub layer_outlines: Vec<Path>,
     pub elevation_shadows: Vec<RecordedElevationShadow>,
     pub backdrops: Vec<RecordedBackdrop>,
-    /// Each layer's effect (`push_effect_layer`).
+    /// Each layer's effect (`push_effect_layer`, `push_stretch_layer`).
     pub layer_effects: Vec<Option<RenderEffect>>,
+    /// Each layer's stretch (`push_stretch_layer`).
+    pub layer_stretches: Vec<Option<StretchEffect>>,
     pub clip_shapes: Vec<RecordedClipShape>,
     /// Set: what lies outside isn't drawn (as a real screen culls it).
     pub visible: Option<Rect>,
@@ -324,6 +326,7 @@ impl GraphicsContext for RecordingCanvas {
     }
     fn push_layer(&mut self, bounds: Rect, radii: CornerRadii, alpha: f32, transform: LayerTransform) {
         self.layer_effects.push(None);
+        self.layer_stretches.push(None);
         self.layer_bounds.push(self.moved(bounds));
         self.layer_corners.push(radii);
         self.layer_alphas.push(alpha);
@@ -386,6 +389,15 @@ impl GraphicsContext for RecordingCanvas {
         self.push_layer(bounds, CornerRadii::Zero, alpha, LayerTransform::Identity);
         if let Some(last) = self.layer_effects.last_mut() {
             *last = Some(effect.clone());
+        }
+    }
+    fn push_stretch_layer(&mut self, bounds: Rect, stretch: &StretchEffect, effect: Option<&RenderEffect>, alpha: f32) {
+        self.push_layer(bounds, CornerRadii::Zero, alpha, LayerTransform::Identity);
+        if let Some(last) = self.layer_effects.last_mut() {
+            *last = effect.cloned();
+        }
+        if let Some(last) = self.layer_stretches.last_mut() {
+            *last = Some(*stretch);
         }
     }
     fn draw_backdrop(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {

@@ -10,7 +10,7 @@ use super::{Inputs, MAX_LAYER, Mask, Renderer};
 use crate::device::{ClearColor, Format, IRect, Texture, TextureId, TextureUsage};
 use crate::path::{PathPlacement, flatten};
 use crate::shaders::{FLAG_OUTLINE, LAYER, Prim};
-use kompoz_graphics::{Offset, Path, Projective, Rect, RenderEffect};
+use kompoz_graphics::{Offset, Path, Projective, Rect, RenderEffect, StretchEffect};
 use kompoz_ui::graphics_context::{CornerRadii, LayerContent, LayerTransform};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -36,6 +36,8 @@ pub(super) struct Layer {
     pub(super) outline: Option<Path>,
     /// An effect layer's (not cut, its own way of compositing).
     pub(super) effect: Option<RenderEffect>,
+    /// A stretched layer's (its effect's image warped as it is composited: see stretch.rs).
+    pub(super) stretch: Option<StretchEffect>,
     /// key_layer's: kept (the texture is the kept one's) or to keep; 0: none.
     pub(super) key: u64,
     pub(super) kept: bool,
@@ -232,6 +234,7 @@ impl Renderer {
             parent_scale: s,
             outline: None,
             effect: None,
+            stretch: None,
             key: 0,
             kept: false,
         };
@@ -384,32 +387,16 @@ pub(super) fn pop_layer(r: &mut Renderer) {
             },
         );
     }
-    if let Some(effect) = &layer.effect {
-        // What the effect made (kept, or made now), its pixels where they show, back in the parent's pixels.
-        let keeping = (layer.key != 0).then_some(layer.key);
-        let kept_image = keeping.and_then(|key| {
-            let k = r.layers.kept.get(&key)?;
-            if k.effect.as_ref() != Some(effect) {
-                return None;
-            }
-            let mut image = k.image?;
-            image.texture = k.effected.as_ref().map_or(texture, Texture::id);
-            Some(image.moved(layer.rect.x, layer.rect.y))
-        });
-        let image = match kept_image {
-            Some(image) => image,
-            None => {
-                let image = r.apply_effect(&layer);
-                if let Some(key) = keeping {
-                    let effected = if image.texture != texture { r.take_from_pool(image.texture) } else { None };
-                    let k = r.layers.kept.entry(key).or_default();
-                    let before = std::mem::replace(&mut k.effected, effected);
-                    k.effect = Some(effect.clone());
-                    k.image = Some(image.moved(-layer.rect.x, -layer.rect.y));
-                    r.give_to_pool(before);
-                }
-                image
-            }
+    if layer.effect.is_some() || layer.stretch.is_some() {
+        // What the effect made (kept, or made now), its pixels where they show, back in the parent's pixels; then
+        // stretched, if it is.
+        let image = match &layer.effect {
+            Some(effect) => effect_image(r, &layer, texture, effect),
+            None => EffectImage::of(&layer, texture),
+        };
+        let image = match &layer.stretch {
+            Some(stretch) => r.stretch_image(&layer, image, stretch),
+            None => image,
         };
         let p = image.prim(layer.alpha, res);
         r.add(LAYER, &p, Inputs { texture: Some(image.texture), ..Inputs::default() });
@@ -468,6 +455,34 @@ pub(super) fn pop_layer(r: &mut Renderer) {
     r.add(LAYER, &p, Inputs { texture: Some(texture), ..Inputs::default() });
 }
 
+/// What an effect layer's effect makes of its pixels: kept from when it was last made, if the layer and its effect
+/// are the same; else made now (and kept, if the layer is).
+fn effect_image(r: &mut Renderer, layer: &Layer, texture: TextureId, effect: &RenderEffect) -> EffectImage {
+    let keeping = (layer.key != 0).then_some(layer.key);
+    let kept_image = keeping.and_then(|key| {
+        let k = r.layers.kept.get(&key)?;
+        if k.effect.as_ref() != Some(effect) {
+            return None;
+        }
+        let mut image = k.image?;
+        image.texture = k.effected.as_ref().map_or(texture, Texture::id);
+        Some(image.moved(layer.rect.x, layer.rect.y))
+    });
+    if let Some(image) = kept_image {
+        return image;
+    }
+    let image = r.apply_effect(layer);
+    if let Some(key) = keeping {
+        let effected = if image.texture != texture { r.take_from_pool(image.texture) } else { None };
+        let k = r.layers.kept.entry(key).or_default();
+        let before = std::mem::replace(&mut k.effected, effected);
+        k.effect = Some(effect.clone());
+        k.image = Some(image.moved(-layer.rect.x, -layer.rect.y));
+        r.give_to_pool(before);
+    }
+    image
+}
+
 pub(super) fn layer_content(r: &Renderer) -> LayerContent {
     r.layers.pushed
 }
@@ -496,6 +511,7 @@ mod tests {
             parent_scale: 1.0,
             outline: None,
             effect: None,
+            stretch: None,
             key: 0,
             kept: false,
         };

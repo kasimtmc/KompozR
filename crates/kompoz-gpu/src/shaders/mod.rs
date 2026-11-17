@@ -1,4 +1,4 @@
-//! The renderer's shaders (`shaders/*.slang`, C++ Kompoz's as they are), compiled by `cargo xtask shaders` for every
+//! The renderer's shaders (`shaders/*.slang`, C++ Kompoz's as they are, and hwui's stretch), compiled by `cargo xtask shaders` for every
 //! backend: SPIR-V 1.3 (Vulkan 1.1), MSL (Metal) and WGSL (WebGPU), committed in `generated/` with what the
 //! generated module includes of them ([`ShaderSource`]s and each shader's version); and what the shaders read, laid
 //! out as they read it ([`layout`]'s instances, uniforms and constants).
@@ -55,7 +55,8 @@ impl fmt::Debug for ShaderSource {
 pub const VERSION: u64 = {
     let mut version = PRIMITIVES_VERSION;
     version = (version ^ PATH_VERSION).wrapping_mul(0x0000_0100_0000_01b3);
-    (version ^ EFFECTS_VERSION).wrapping_mul(0x0000_0100_0000_01b3)
+    version = (version ^ EFFECTS_VERSION).wrapping_mul(0x0000_0100_0000_01b3);
+    (version ^ STRETCH_VERSION).wrapping_mul(0x0000_0100_0000_01b3)
 };
 
 #[cfg(test)]
@@ -64,7 +65,17 @@ mod tests {
 
     #[test]
     fn every_entry_point_is_there_on_every_backend() {
-        let all = [PRIMITIVES_VS, PRIMITIVES_VS_MESH, PRIMITIVES_FS, PATH_VS, PATH_FS, EFFECTS_VS, EFFECTS_FS];
+        let all = [
+            PRIMITIVES_VS,
+            PRIMITIVES_VS_MESH,
+            PRIMITIVES_FS,
+            PATH_VS,
+            PATH_FS,
+            EFFECTS_VS,
+            EFFECTS_FS,
+            STRETCH_VS,
+            STRETCH_FS,
+        ];
         for s in all {
             let words = s.spirv_words();
             // SPIR-V 1.3, whole words.
@@ -77,7 +88,7 @@ mod tests {
         assert!(PRIMITIVES_FS.wgsl.contains("@binding(11) @group(0) var texture5_texture_0 : texture_2d<f32>;"));
         assert!(PRIMITIVES_FS.wgsl.contains("@binding(12) @group(0) var texture5_sampler_0 : sampler;"));
         assert_eq!([PRIMITIVES_VS.entry, PRIMITIVES_VS_MESH.entry, PRIMITIVES_FS.entry], ["vs", "vsMesh", "fs"]);
-        let versions = [PRIMITIVES_VERSION, PATH_VERSION, EFFECTS_VERSION, VERSION];
+        let versions = [PRIMITIVES_VERSION, PATH_VERSION, EFFECTS_VERSION, STRETCH_VERSION, VERSION];
         assert!(versions.iter().enumerate().all(|(i, v)| !versions[..i].contains(v)));
     }
 }

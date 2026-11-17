@@ -1,6 +1,6 @@
 //! Drawing through a graphics layer (C++'s `drawThroughLayer`): its matrix as Android's RenderNode makes it, its
-//! elevation shadow, its clip to its outline, its alpha, blend mode, color filter and render effect, offscreen only
-//! where it has to be; and what a blur of the node's own drawing needs to draw a node in two parts.
+//! elevation shadow, its clip to its outline, its alpha, blend mode, color filter, render effect and stretch,
+//! offscreen only where it has to be; and what a blur of the node's own drawing needs to draw a node in two parts.
 
 use crate::graphics_context::{
     ClipOp, CornerRadii, DefaultShadowColor, ElevationShadow, GraphicsContext, LayerTransform, TextDraw,
@@ -8,14 +8,15 @@ use crate::graphics_context::{
 use crate::layout::{CompositingStrategy, GraphicsLayerScope, LayerGeometry, layer_matrix, mul, rotation};
 use kompoz_graphics::{
     BlendMode, Brush, Color, ColorFilter, ColorMatrix, FilterQuality, ImageBitmap, Matrix, Offset, Outline, Path,
-    PathDirection, PathStroke, Rect, RenderEffect, Size, Vertices,
+    PathDirection, PathStroke, Rect, RenderEffect, Size, StretchEffect, Vertices,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// What a layer is drawn through, everything in px in what it is drawn in: its bounds, its geometry (the pivot
 /// where it is), how faded, how high (its outline's shadow, in its colors), whether it is cut to its outline (from
-/// the bounds' top left), through what it is composited, and how far past its bounds an offscreen layer reaches.
+/// the bounds' top left), through what it is composited (its stretch last, over its bounds), and how far past its
+/// bounds an offscreen layer reaches (not a stretched one: as hwui's layer, it is its bounds).
 #[derive(Clone, Debug)]
 #[doc(hidden)]
 pub struct LayerDraw {
@@ -30,6 +31,8 @@ pub struct LayerDraw {
     pub blend_mode: BlendMode,
     pub color_filter: Option<ColorFilter>,
     pub render_effect: Option<RenderEffect>,
+    /// Android's stretch overscroll (a graphics layer's, as foundation's overscroll sets it).
+    pub stretch: StretchEffect,
     pub strategy: CompositingStrategy,
     /// Left, top, right, bottom.
     pub outsets: [f32; 4],
@@ -51,6 +54,7 @@ impl LayerDraw {
             blend_mode: BlendMode::SrcOver,
             color_filter: None,
             render_effect: None,
+            stretch: StretchEffect::Empty,
             strategy: CompositingStrategy::Auto,
             outsets: [0.0; 4],
         }
@@ -88,6 +92,7 @@ impl LayerDraw {
             blend_mode: layer.blend_mode,
             color_filter: layer.color_filter,
             render_effect: layer.render_effect.clone(),
+            stretch: StretchEffect::Empty,
             strategy: layer.compositing_strategy,
             outsets: [
                 d.to_px(layer.outsets.left),
@@ -150,8 +155,9 @@ pub(crate) fn push_outline_clip(g: &mut dyn GraphicsContext, o: &Outline, bounds
 }
 
 /// Draws `content` (over the layer's bounds) through the layer: its matrix, its shadow, its clip to its outline,
-/// its alpha, blend mode, color filter and render effect, offscreen only where it has to be (faded without
-/// ModulateAlpha, blended, filtered, an effect, or Offscreen); nothing at all where nothing of it can show.
+/// its alpha, blend mode, color filter, render effect and stretch, offscreen only where it has to be (faded without
+/// ModulateAlpha, blended, filtered, an effect, stretched, or Offscreen); nothing at all where nothing of it can
+/// show.
 #[doc(hidden)]
 pub fn draw_layer(g: &mut dyn GraphicsContext, l: &LayerDraw, content: &mut dyn FnMut(&mut dyn GraphicsContext)) {
     let alpha = l.alpha.clamp(0.0, 1.0);
@@ -164,7 +170,8 @@ pub fn draw_layer(g: &mut dyn GraphicsContext, l: &LayerDraw, content: &mut dyn 
         || (alpha < 1.0 && l.strategy == CompositingStrategy::Auto)
         || l.blend_mode != BlendMode::SrcOver
         || l.color_filter.is_some()
-        || l.render_effect.is_some();
+        || l.render_effect.is_some()
+        || l.stretch.requires_layer();
     let modulated = !offscreen && alpha < 1.0; // (ModulateAlpha: each draw faded)
     let shadowed = l.shadow_elevation > 0.0;
     if !moved && !offscreen && !modulated && !l.clip && !shadowed {
@@ -211,13 +218,17 @@ pub fn draw_layer(g: &mut dyn GraphicsContext, l: &LayerDraw, content: &mut dyn 
             if l.blend_mode != BlendMode::SrcOver {
                 g.push_blend_mode(l.blend_mode);
             }
-            // Clipped: with an effect, by a clip around it (what the effect makes is cut, not what it is made of);
-            // else by the layer itself, to a rounded rect of its bounds or its outline.
-            let clipped = l.clip && l.render_effect.is_some();
+            // Clipped: with an effect or a stretch, by a clip around it (what the effect makes is cut, not what it is
+            // made of: hwui clips the stretched layer by its outline as it draws it); else by the layer itself, to a
+            // rounded rect of its bounds or its outline.
+            let stretched = l.stretch.requires_layer();
+            let clipped = l.clip && (l.render_effect.is_some() || stretched);
             if clipped {
                 push_outline_clip(g, o, l.bounds);
             }
-            if let Some(effect) = &l.render_effect {
+            if stretched {
+                g.push_stretch_layer(l.bounds, &l.stretch, l.render_effect.as_ref(), alpha);
+            } else if let Some(effect) = &l.render_effect {
                 g.push_effect_layer(reach, effect, alpha);
             } else if l.clip && is_rounded && at == l.bounds && l.outsets == [0.0; 4] {
                 g.push_layer(l.bounds, radii, alpha, LayerTransform::Identity);
@@ -383,6 +394,9 @@ impl GraphicsContext for StateOnly<'_> {
     }
     fn push_effect_layer(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         self.to.push_effect_layer(bounds, effect, alpha);
+    }
+    fn push_stretch_layer(&mut self, bounds: Rect, stretch: &StretchEffect, effect: Option<&RenderEffect>, alpha: f32) {
+        self.to.push_stretch_layer(bounds, stretch, effect, alpha);
     }
     fn draw_backdrop(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         if self.pass.get() {

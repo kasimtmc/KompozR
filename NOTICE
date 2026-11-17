@@ -6,6 +6,10 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 KompozR is the Rust version of Kompoz. It follows the behavior and public API of Jetpack Compose
 (Copyright The Android Open Source Project, Apache License 2.0). No source files of it are included.
 
+crates/kompoz-gpu/shaders/stretch.slang and crates/kompoz-graphics/src/stretch.rs are ported from Android's hwui
+(frameworks/base/libs/hwui/effects/StretchEffect.h and StretchEffect.cpp, the Android Open Source Project), Copyright
+2021 The Android Open Source Project, licensed under the Apache License, Version 2.0; changed as each file says.
+
 crates/kompoz-gpu/src/glyph (the coverage rasterizer and the automatic hinter) follows FreeType's code. Portions of
 this software are copyright © 2026 The FreeType Project (https://freetype.org). All rights reserved. FreeType is
 distributed under the FreeType License (FTL); KompozR uses it under that license.

@@ -48,6 +48,7 @@ mod harness;
 mod images;
 mod layers;
 mod scenes;
+mod stretch;
 mod submit;
 
 use harness::Gpu;
@@ -107,6 +108,10 @@ const ON_THE_DEVICE: &[(&str, fn(&mut Gpu))] = &[
     ("a_layer_is_kept_from_its_first_frame", layers::a_layer_is_kept_from_its_first_frame),
     ("path_shadows_are_kept", layers::path_shadows_are_kept),
     ("layer_textures_come_in_few_sizes", layers::layer_textures_come_in_few_sizes),
+    ("stretched_layers_are_hwuis", stretch::stretched_layers_are_hwuis),
+    ("stretch_comes_after_the_render_effect", stretch::stretch_comes_after_the_render_effect),
+    ("stretched_layers_are_kept_as_the_stretch_changes", stretch::stretched_layers_are_kept_as_the_stretch_changes),
+    ("stretched_layers_match_their_picture", stretch::stretched_layers_match_their_picture),
 ];
 
 /// Tests that make devices of their own, one after another (after the one device is gone), or need none.

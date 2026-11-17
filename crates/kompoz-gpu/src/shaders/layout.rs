@@ -1,7 +1,9 @@
 //! What the shaders read, laid out as they read it (C++'s renderer.hpp): the per-instance attributes of each
 //! pipeline (one buffer, no per-vertex attributes: the vertex shaders build their quads from the vertex index), the
-//! uniforms (Vulkan's push constants: float4s, at most 128 bytes) and the primitives' specialization constants; and
+//! uniforms (Vulkan's push constants: float4s, then the stretch's floats, at most 128 bytes) and the primitives' specialization constants; and
 //! their bytes, written float by float (no reinterpretation of memory: the GPU reads them in the CPU's byte order).
+
+use kompoz_graphics::StretchUniforms;
 
 /// What the GPU reads as it is: float4s, nothing between them.
 pub trait GpuData {
@@ -247,6 +249,74 @@ float4s! {
     }
 }
 
+// ---- stretch.slang ----------------------------------------------------------------------------------------------
+
+/// A stretch pass's uniforms (stretch.slang's Uniforms): four float4s, then hwui's stretch shader's sixteen floats
+/// ([`StretchUniforms`]), 128 bytes. Its instance is an effect pass's ([`EffectInstance`]).
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct StretchPassUniforms {
+    /// clip = position * to_clip.xy + to_clip.zw.
+    pub to_clip: [f32; 4],
+    /// The layer's px (from its top left) a destination texel t's middle is at: (t + 0.5) * local.xy + local.zw.
+    pub local: [f32; 4],
+    /// The content's texture coordinates at a layer px p: p * source.xy + source.zw.
+    pub source: [f32; 4],
+    /// The content's texels' middles at its edges, in texture coordinates (what it is clamped to): x0, y0, x1, y1.
+    pub edges: [f32; 4],
+    /// hwui's, as StretchEffect::getShader sets them.
+    pub stretch: StretchUniforms,
+}
+
+impl StretchPassUniforms {
+    /// Its members' names in the shader, in order (each float4's, then each float's).
+    pub const FIELDS: [&'static str; 20] = [
+        "toClip",
+        "local",
+        "source",
+        "edges",
+        "uMaxStretchIntensity",
+        "uStretchAffectedDistX",
+        "uStretchAffectedDistY",
+        "uDistanceStretchedX",
+        "uDistanceStretchedY",
+        "uInverseDistanceStretchedX",
+        "uInverseDistanceStretchedY",
+        "uDistDiffX",
+        "uDistDiffY",
+        "uScrollX",
+        "uScrollY",
+        "uOverscrollX",
+        "uOverscrollY",
+        "viewportWidth",
+        "viewportHeight",
+        "uInterpolationStrength",
+    ];
+
+    /// Its members' offsets in bytes, in order.
+    pub fn offsets() -> [u32; 20] {
+        std::array::from_fn(|i| if i < 4 { i as u32 * 16 } else { 64 + (i as u32 - 4) * 4 })
+    }
+
+    /// Its floats, in the shader's order.
+    pub fn floats(&self) -> [f32; 32] {
+        let mut out = [0.0; 32];
+        for (i, v) in [self.to_clip, self.local, self.source, self.edges].into_iter().enumerate() {
+            out[i * 4..i * 4 + 4].copy_from_slice(&v);
+        }
+        out[16..].copy_from_slice(&self.stretch.values());
+        out
+    }
+}
+
+impl GpuData for StretchPassUniforms {
+    const SIZE: usize = 128;
+    fn write_to(&self, out: &mut Vec<u8>) {
+        for v in self.floats() {
+            out.extend_from_slice(&v.to_ne_bytes());
+        }
+    }
+}
+
 /// `to_clip` for a target `width` x `height` px (the shaders' positions are its pixels, y down): clip y down where
 /// the backend's clip space is (Vulkan), else up.
 pub fn to_clip(width: f32, height: f32, clip_y_down: bool) -> [f32; 4] {
@@ -256,7 +326,9 @@ pub fn to_clip(width: f32, height: f32, clip_y_down: bool) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shaders::{EFFECTS_FS, EFFECTS_VS, PATH_VS, PRIMITIVES_FS, PRIMITIVES_VS, ShaderSource};
+    use crate::shaders::{
+        EFFECTS_FS, EFFECTS_VS, PATH_VS, PRIMITIVES_FS, PRIMITIVES_VS, STRETCH_FS, STRETCH_VS, ShaderSource,
+    };
     use std::collections::HashMap;
 
     /// What a SPIR-V module says of its interface: names, member names, locations, member offsets, spec ids.
@@ -361,6 +433,13 @@ mod tests {
         assert_eq!(uniform_members(&PRIMITIVES_FS), laid_out(PrimitiveUniforms::FIELDS));
         assert_eq!(uniform_members(&PATH_VS), laid_out(PathUniforms::FIELDS)); // (its fragment shader reads none)
         assert_eq!(uniform_members(&EFFECTS_FS), laid_out(EffectUniforms::FIELDS));
+        assert_eq!(instance_fields(&STRETCH_VS), EffectInstance::FIELDS);
+        let stretch: Vec<(u32, String)> = StretchPassUniforms::offsets()
+            .into_iter()
+            .zip(StretchPassUniforms::FIELDS)
+            .map(|(offset, name)| (offset, name.to_string()))
+            .collect();
+        assert_eq!(uniform_members(&STRETCH_FS), stretch);
         // The specialization constants by id.
         let i = interface(&PRIMITIVES_FS);
         let mut ids: Vec<(u32, &str)> = i.spec_ids.iter().map(|(id, &spec)| (spec, i.names[id].as_str())).collect();
@@ -376,6 +455,10 @@ mod tests {
         assert_eq!(PrimitiveUniforms::SIZE, 48);
         assert_eq!(PathUniforms::SIZE, 16);
         assert_eq!(EffectUniforms::SIZE, 128); // (all that push constants hold)
+        assert_eq!(StretchPassUniforms::SIZE, 128);
+        let stretched = StretchPassUniforms { local: [1.0, 2.0, 3.0, 4.0], ..StretchPassUniforms::default() };
+        assert_eq!(bytes_of(&[stretched]).len(), 128);
+        assert_eq!(stretched.floats()[4..8], [1.0, 2.0, 3.0, 4.0]);
         assert_eq!(std::mem::size_of::<Prim>(), Prim::SIZE);
         assert_eq!(std::mem::size_of::<EffectUniforms>(), EffectUniforms::SIZE);
     }

@@ -18,7 +18,7 @@ use crate::layout::{CompositingStrategy, DefaultCameraDistance, LayerGeometry};
 use crate::platform::{LocalPlatform, PlatformHandle};
 use kompoz_graphics::{
     BlendMode, Color, ColorFilter, CornerRadius, Density, ImageBitmap, IntOffset, IntSize, LayoutDirection, Offset,
-    Outline, Path, Rect, RenderEffect, RoundRect, Size,
+    Outline, Path, Rect, RenderEffect, RoundRect, Size, StretchEffect,
 };
 use kompoz_runtime::{kompozable, named, remember};
 use std::cell::RefCell;
@@ -28,7 +28,8 @@ use std::rc::Rc;
 /// What a layer is drawn with (Compose's GraphicsLayer properties), as a graphics layer draws its content: where
 /// it goes in the scope it is drawn in, how faded, scaled, turned (about its pivot: its middle unless given) and
 /// moved, how high (its outline's shadow), whether it is cut to its outline (its bounds unless given), through what
-/// it is composited.
+/// it is composited; and how it is stretched (Android's RenderNode's, which Compose's GraphicsLayer is on Android:
+/// see [`GraphicsLayer::stretch`]).
 #[derive(Clone, PartialEq, Debug)]
 pub struct GraphicsLayerProperties {
     pub top_left: IntOffset,
@@ -53,6 +54,8 @@ pub struct GraphicsLayerProperties {
     pub blend_mode: BlendMode,
     pub color_filter: Option<ColorFilter>,
     pub compositing_strategy: CompositingStrategy,
+    /// Its stretch overscroll (none unless set).
+    pub stretch: StretchEffect,
 }
 
 /// Compose's defaults: where it was recorded, as it was.
@@ -79,6 +82,7 @@ impl Default for GraphicsLayerProperties {
             blend_mode: BlendMode::SrcOver,
             color_filter: None,
             compositing_strategy: CompositingStrategy::Auto,
+            stretch: StretchEffect::Empty,
         }
     }
 }
@@ -171,6 +175,59 @@ impl GraphicsLayer {
 
     pub fn set_properties(&self, properties: GraphicsLayerProperties) {
         self.data.borrow_mut().properties = properties;
+    }
+
+    /// Its stretch (none unless [`stretch`](GraphicsLayer::stretch) set one).
+    pub fn stretch_effect(&self) -> StretchEffect {
+        self.data.borrow().properties.stretch
+    }
+
+    /// Stretches it as Android's EdgeEffect stretches the RenderNode it draws into (RenderNode.stretch, @hide on
+    /// Android, which foundation's stretch overscroll reaches through EdgeEffect.draw): `vec_x` and `vec_y` (each a
+    /// fraction of its size, -1 to 1: positive pulled from the left or top, negative from the right or bottom) added
+    /// to its stretch so far ([`StretchEffect::merge_with`]: the stretches of a frame's edges add up), at most
+    /// `max_stretch_amount_x` and `_y` px each way. The renderer warps it as hwui does when it is drawn
+    /// ([`GraphicsContext::push_stretch_layer`](crate::graphics_context::GraphicsContext::push_stretch_layer)). True,
+    /// as RenderNode's.
+    ///
+    /// ```ignore
+    /// // Each frame, in the overscroll's draw (Compose's StretchOverscrollNode, EdgeEffect.draw's numbers):
+    /// layer.clear_stretch();
+    /// layer.stretch(0.0, top_stretch, width, height); // pulled down from the top
+    /// d.record(&layer, |d| d.draw_content());
+    /// d.draw_layer(&layer);
+    /// ```
+    ///
+    /// Panics, as RenderNode throws IllegalArgumentException, for a vector that isn't finite or a most that isn't
+    /// more than 0.
+    #[track_caller]
+    pub fn stretch(&self, vec_x: f32, vec_y: f32, max_stretch_amount_x: f32, max_stretch_amount_y: f32) -> bool {
+        if !vec_x.is_finite() {
+            panic!("vecX must be a finite, non-NaN value {vec_x}");
+        }
+        if !vec_y.is_finite() {
+            panic!("vecY must be a finite, non-NaN value {vec_y}");
+        }
+        if max_stretch_amount_x <= 0.0 {
+            panic!("The max horizontal stretch amount must be >0, got {max_stretch_amount_x}");
+        }
+        if max_stretch_amount_y <= 0.0 {
+            panic!("The max vertical stretch amount must be >0, got {max_stretch_amount_y}");
+        }
+        let effect = StretchEffect::new(Offset::new(vec_x, vec_y), max_stretch_amount_x, max_stretch_amount_y);
+        self.data.borrow_mut().properties.stretch.merge_with(&effect);
+        true
+    }
+
+    /// Takes its stretch away (RenderNode.clearStretch, @hide on Android, as Views call it each frame before
+    /// EdgeEffect stretches again): false if it had none.
+    pub fn clear_stretch(&self) -> bool {
+        let stretch = &mut self.data.borrow_mut().properties.stretch;
+        if stretch.is_empty() {
+            return false;
+        }
+        stretch.set_empty();
+        true
     }
 
     /// Its outline (none: its bounds).
@@ -292,6 +349,7 @@ impl GraphicsLayer {
         l.clip = p.clip;
         l.outline = p.outline.clone().unwrap_or(Outline::Rectangle(Rect::from_offset_size(Offset::Zero, size)));
         l.render_effect = p.render_effect.clone();
+        l.stretch = p.stretch;
         l.blend_mode = p.blend_mode;
         l.color_filter = p.color_filter;
         l.strategy = p.compositing_strategy;

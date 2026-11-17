@@ -1076,6 +1076,10 @@ fn every_kind(l: &mut dyn GraphicsContext, image: &ImageBitmap) {
     l.push_effect_layer(rect(110.0, 110.0, 40.0, 40.0), &BlurEffect(3.0, 3.0, TileMode::Decal), 1.0);
     l.fill_round_rect(rect(115.0, 115.0, 10.0, 10.0), CornerRadii::Zero, Color::Black);
     l.pop_layer();
+    let stretch = StretchEffect::new(at(0.0, 0.2), 40.0, 40.0);
+    l.push_stretch_layer(rect(160.0, 110.0, 40.0, 40.0), &stretch, Some(&BlurEffect(2.0, 2.0, TileMode::Clamp)), 0.9);
+    l.fill_round_rect(rect(165.0, 115.0, 10.0, 10.0), CornerRadii::Zero, Color::Black);
+    l.pop_layer();
     l.push_clip(rect(0.0, 170.0, 50.0, 50.0));
     l.push_clip_round_rect(rect(0.0, 170.0, 40.0, 40.0), CornerRadii::all(6.0), ClipOp::Intersect);
     l.push_clip_path(&tri, at(0.0, 170.0), ClipOp::Difference);
@@ -1142,7 +1146,11 @@ fn display_list_replays_every_kind_as_drawn() {
     assert!(canvas.shadow_texts == ["gölge"] && canvas.backdrops.len() == 1 && canvas.elevation_shadows.len() == 1);
     assert!(canvas.brushed_shadows.len() == 1 && canvas.meshes.len() == 1 && canvas.layer_outlines.len() == 1);
     assert!(canvas.clip_shapes.len() == 2 && canvas.arcs.len() == 1 && canvas.stack.contains("BAF"));
-    assert_eq!(canvas.layer_effects.iter().filter(|e| e.is_some()).count(), 1);
+    assert_eq!(canvas.layer_effects.iter().filter(|e| e.is_some()).count(), 2);
+    assert_eq!(
+        canvas.layer_stretches.iter().flatten().copied().collect::<Vec<_>>(),
+        [StretchEffect::new(at(0.0, 0.2), 40.0, 40.0)]
+    );
 }
 
 fn display_list_translations_are_replayed() {
@@ -1613,6 +1621,48 @@ fn display_list_effect_layers_change_as_a_whole() {
     assert!(part.layers == 1 && part.rects.len() == 2, "{} {:?}", part.layers, part.rects);
 }
 
+fn display_list_stretched_layers_change_as_a_whole() {
+    // A stretched layer (an overscroll's): while only its stretch changes, all of it changes on the screen and what
+    // is in it is known to be the same (a canvas keeps it and warps it anew, as hwui keeps a RenderNode's layer); a
+    // change anywhere in it changes all of it (the stretch brings any of it anywhere in it); replayed as drawn.
+    let list = RefCell::new(DisplayList::new());
+    let frame = |pull: f32, color: Color| {
+        let mut list = list.borrow_mut();
+        list.begin(Size::new(400.0, 400.0));
+        list.begin_node(1);
+        list.fill_round_rect(rect(0.0, 0.0, 400.0, 400.0), CornerRadii::Zero, Color::White);
+        list.begin_node(2);
+        let stretch = StretchEffect::new(at(0.0, pull), 100.0, 100.0);
+        list.push_stretch_layer(rect(50.0, 50.0, 100.0, 100.0), &stretch, None, 1.0);
+        list.fill_round_rect(rect(60.0, 60.0, 10.0, 10.0), CornerRadii::Zero, color);
+        list.fill_round_rect(rect(120.0, 130.0, 20.0, 10.0), CornerRadii::Zero, BLUE);
+        list.pop_layer();
+        list.end_node();
+        list.fill_round_rect(rect(300.0, 300.0, 20.0, 20.0), CornerRadii::Zero, GREEN);
+        list.end_node();
+        let damage = list.end();
+        let mut canvas = RecordingCanvas::new();
+        list.replay(&mut canvas, None);
+        (damage, canvas)
+    };
+    let (_, first) = frame(0.1, RED);
+    assert!(first.layers == 1 && first.layer_stretches == [Some(StretchEffect::new(at(0.0, 0.1), 100.0, 100.0))]);
+    assert!(first.rects.len() == 4 && first.layer_effects == [None] && !first.layer_keys[0].1);
+    let (damage, again) = frame(0.2, RED);
+    let d = damage.expect("the stretch changed");
+    assert!(covers(d, rect(50.0, 50.0, 100.0, 100.0)) && covers(rect(47.0, 47.0, 106.0, 106.0), d), "{d:?}");
+    assert!(again.layer_keys[0].1 && again.layer_stretches[0] == Some(StretchEffect::new(at(0.0, 0.2), 100.0, 100.0)));
+    assert!(frame(0.2, RED).0.is_none());
+    let (damage, changed) = frame(0.2, GREEN);
+    let d = damage.expect("what is in it changed");
+    assert!(covers(d, rect(50.0, 50.0, 100.0, 100.0)) && covers(rect(47.0, 47.0, 106.0, 106.0), d), "{d:?}");
+    assert!(!changed.layer_keys[0].1);
+    // Replaying a part of it replays all of it (and the background there).
+    let mut part = RecordingCanvas::new();
+    list.borrow().replay(&mut part, Some(rect(144.0, 144.0, 4.0, 4.0)));
+    assert!(part.layers == 1 && part.rects.len() == 3, "{} {:?}", part.layers, part.rects);
+}
+
 fn display_list_replays_blur_layers() {
     // C++'s blur_is_a_graphics_layer_with_a_blur_effect, its display list half: recorded and replayed the same way.
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
@@ -1847,6 +1897,7 @@ tests!(
     display_list_damage_reaches_what_effects_and_spreads_draw,
     display_list_backdrops_are_drawn_anew_with_what_is_behind,
     display_list_effect_layers_change_as_a_whole,
+    display_list_stretched_layers_change_as_a_whole,
     display_list_replays_blur_layers,
     display_list_replays_blend_modes_in_an_offscreen_layer,
     display_list_replays_drop_and_inner_shadows,

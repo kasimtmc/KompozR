@@ -1756,6 +1756,69 @@ fn graphics_layer_render_effect_draws_through_an_effect_layer() {
     assert!(same_rect(recorded.layer_bounds[0], 0.0, 0.0, 60.0, 40.0));
 }
 
+fn graphics_layer_stretch_draws_through_a_stretched_layer() {
+    // Android's RenderNode.stretch on a graphics layer (what foundation's stretch overscroll sets): merged, cleared,
+    // checked as RenderNode checks it.
+    let layer = GraphicsLayer::new(None);
+    assert!(layer.stretch_effect().is_empty() && !layer.clear_stretch());
+    assert!(layer.stretch(0.0, 0.02, 300.0, 200.0));
+    assert!(layer.stretch(-0.01, 0.0, 100.0, 400.0)); // (a second edge's, the same frame)
+    assert_eq!(layer.stretch_effect(), StretchEffect::new(Offset::new(-0.01, 0.02), 300.0, 400.0));
+    assert_eq!(layer.properties().stretch, layer.stretch_effect());
+    assert!(layer.clear_stretch() && layer.stretch_effect() == StretchEffect::Empty);
+    let panics = |f: &dyn Fn()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err();
+    assert!(panics(&|| {
+        let _ = GraphicsLayer::new(None).stretch(f32::NAN, 0.0, 1.0, 1.0);
+    }));
+    assert!(panics(&|| {
+        let _ = GraphicsLayer::new(None).stretch(0.0, f32::INFINITY, 1.0, 1.0);
+    }));
+    assert!(panics(&|| {
+        let _ = GraphicsLayer::new(None).stretch(0.1, 0.0, 0.0, 1.0);
+    }));
+    assert!(panics(&|| {
+        let _ = GraphicsLayer::new(None).stretch(0.1, 0.0, 1.0, -1.0);
+    }));
+    // Drawn: a stretched layer over its bounds (its recording's size), cut by a clip around it if clipped, through
+    // its render effect too; faded as the layer is.
+    let stretch = StretchEffect::new(Offset::new(0.0, 0.3), 60.0, 40.0);
+    let drawn = |set: fn(&GraphicsLayer)| {
+        look(
+            kompozable_lambda!(move || {
+                let layer = remember_graphics_layer();
+                Box(modifier = Modifier.size(100.dp()).draw_with_content(move |d| {
+                    d.record_with(&layer, IntSize::new(60, 40), |i| i.draw_rect(BLUE));
+                    layer.clear_stretch();
+                    layer.stretch(0.0, 0.3, 60.0, 40.0);
+                    set(&layer);
+                    d.draw_layer(&layer);
+                }));
+            }),
+            None,
+        )
+    };
+    let plain = drawn(|_| {});
+    assert!(plain.layers == 1 && plain.layer_stretches == [Some(stretch)] && plain.layer_effects == [None]);
+    assert!(same_rect(plain.layer_bounds[0], 0.0, 0.0, 60.0, 40.0) && near(plain.layer_alphas[0], 1.0));
+    assert!(plain.clips.is_empty() && plain.clip_shapes.is_empty() && plain.rects.len() == 1);
+    let clipped = drawn(|l| {
+        l.set_clip(true);
+        l.set_round_rect_outline(Offset::Zero, Size::new(60.0, 40.0), 8.0);
+        l.set_alpha(0.5);
+        l.set_render_effect(Some(BlurEffect(2.0, 2.0, TileMode::Clamp)));
+    });
+    assert!(clipped.layers == 1 && clipped.layer_stretches == [Some(stretch)]);
+    assert!(
+        clipped.layer_effects == [Some(BlurEffect(2.0, 2.0, TileMode::Clamp))] && near(clipped.layer_alphas[0], 0.5)
+    );
+    assert!(clipped.clip_shapes.len() == 1 && near(clipped.clip_shapes[0].radii.top_left, 8.0));
+    // Stretched by nothing (an edge pulled back as far): no layer for it.
+    let undone = drawn(|l| {
+        l.stretch(0.0, -0.3, 60.0, 40.0);
+    });
+    assert!(undone.layers == 0 && undone.rects.len() == 1);
+}
+
 // ---- Caches, backgrounds, borders, shadows ------------------------------------------------------------------------
 
 fn brushes_paths_and_draw_with_cache_reach_the_canvas() {
@@ -2879,6 +2942,7 @@ fn drawn_texts_are_the_texts_drawn() {
 }
 
 tests!(
+    graphics_layer_stretch_draws_through_a_stretched_layer,
     canvas_and_draw_modifiers_draw_in_local_coordinates,
     canvas_takes_compose_named_arguments,
     drawing_takes_compose_named_arguments,

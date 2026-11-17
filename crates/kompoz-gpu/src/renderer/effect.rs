@@ -145,7 +145,7 @@ impl Renderer {
         mask: Option<TextureId>,
     ) {
         let mut pass = Pass::new(target, None);
-        pass.effect = Some(EffectDraw { source, rect, uniforms, linear, table, mask });
+        pass.effect = Some(EffectDraw { source, rect, uniforms, linear, table, mask, stretch: false });
         self.order.push(self.passes.len());
         self.passes.push(pass);
     }
@@ -434,28 +434,38 @@ impl Renderer {
     }
 }
 
-/// A layer whose content goes through `effect` as it is composited. Too big for a texture: the part around what
-/// can show, as far as the effect brings what is there into it (its resolution is 1 then).
-pub(super) fn push_effect_layer(r: &mut Renderer, bounds: Rect, effect: &RenderEffect, alpha: f32) {
+/// What can show of the current target (the pixels its clip leaves) in its pixels before its transform; none if
+/// part of it is behind the eye.
+pub(super) fn visible_before_transform(r: &Renderer) -> Option<Rect> {
     let visible = r.scissor();
     let back = r.transform.inverse();
     let (mut l, mut t, mut rr, mut b) = (1e30f32, 1e30f32, -1e30f32, -1e30f32);
-    let mut seen = true;
     for c in 0..4 {
-        if !seen {
-            break;
-        }
         let x = if c & 1 != 0 { visible.x + visible.width } else { visible.x } as f32;
         let y = if c & 2 != 0 { visible.y + visible.height } else { visible.y } as f32;
         let (q, w) = back.apply_w(x, y);
-        seen = w > 0.0;
+        if w <= 0.0 {
+            return None;
+        }
         (l, t, rr, b) = (l.min(q.x), t.min(q.y), rr.max(q.x), b.max(q.y));
     }
-    let within = seen.then(|| {
-        let out = effect.output_bounds(bounds); // (how far it takes what is drawn, either way)
-        let reach_x = (bounds.left - out.left).max(out.right - bounds.right).max(0.0) * r.scale + 1.0;
-        let reach_y = (bounds.top - out.top).max(out.bottom - bounds.bottom).max(0.0) * r.scale + 1.0;
-        Rect::new(l - reach_x, t - reach_y, rr + reach_x, b + reach_y)
+    Some(Rect::new(l, t, rr, b))
+}
+
+/// How far `effect` brings what is drawn around `bounds` into them, each way, in the target's pixels (and one more).
+pub(super) fn effect_reach(r: &Renderer, bounds: Rect, effect: &RenderEffect) -> (f32, f32) {
+    let out = effect.output_bounds(bounds); // (how far it takes what is drawn, either way)
+    let reach_x = (bounds.left - out.left).max(out.right - bounds.right).max(0.0) * r.scale + 1.0;
+    let reach_y = (bounds.top - out.top).max(out.bottom - bounds.bottom).max(0.0) * r.scale + 1.0;
+    (reach_x, reach_y)
+}
+
+/// A layer whose content goes through `effect` as it is composited. Too big for a texture: the part around what
+/// can show, as far as the effect brings what is there into it (its resolution is 1 then).
+pub(super) fn push_effect_layer(r: &mut Renderer, bounds: Rect, effect: &RenderEffect, alpha: f32) {
+    let within = visible_before_transform(r).map(|v| {
+        let (reach_x, reach_y) = effect_reach(r, bounds, effect);
+        Rect::new(v.left - reach_x, v.top - reach_y, v.right + reach_x, v.bottom + reach_y)
     });
     r.push_layer_within(bounds, CornerRadii::Zero, alpha, LayerTransform::Identity, within);
     if let Some(layer) = r.layers.stack.last_mut()
@@ -512,6 +522,7 @@ pub(super) fn draw_backdrop(r: &mut Renderer, bounds: Rect, effect: &RenderEffec
         parent_scale: r.scale,
         outline: None,
         effect: Some(effect.clone()),
+        stretch: None,
         key: 0,
         kept: false,
     };

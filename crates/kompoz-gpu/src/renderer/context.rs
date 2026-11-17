@@ -1,10 +1,10 @@
 //! The GraphicsContext the app draws through (C++'s Renderer's overrides), each call handed to the part of the
 //! renderer that draws it.
 
-use super::{Renderer, clip, effect, image, layer, mesh, path, prims, shadow, text};
+use super::{Renderer, clip, effect, image, layer, mesh, path, prims, shadow, stretch, text};
 use kompoz_graphics::{
     BlendMode, Brush, Color, ColorFilter, FilterQuality, ImageBitmap, Matrix, Offset, Outline, Path, PathStroke, Rect,
-    RenderEffect, Shadow, Vertices,
+    RenderEffect, Shadow, StretchEffect, Vertices,
 };
 use kompoz_ui::graphics_context::{
     ClipOp, CornerRadii, ElevationShadow, GraphicsContext, LayerContent, LayerTransform, ShadowLight, TextDraw,
@@ -106,6 +106,10 @@ impl GraphicsContext for Renderer {
 
     fn push_effect_layer(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         effect::push_effect_layer(self, bounds, effect, alpha);
+    }
+
+    fn push_stretch_layer(&mut self, bounds: Rect, stretch: &StretchEffect, effect: Option<&RenderEffect>, alpha: f32) {
+        stretch::push_stretch_layer(self, bounds, stretch, effect, alpha);
     }
 
     fn draw_backdrop(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {

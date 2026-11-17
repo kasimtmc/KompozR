@@ -6,7 +6,7 @@
 use kompoz_graphics::{
     BlendMode, BlurEffect, Brush, Color, ColorFilter, CornerRadius, Density, FilterQuality, ImageBitmap,
     LayoutDirection, Matrix, Offset, Outline, Path, PathCommand, PathDirection, PathStroke, Rect, RenderEffect,
-    RoundRect, Shape, Size, SolidColor, StrokeJoin, TileMode, Vertices,
+    RoundRect, Shape, Size, SolidColor, StretchEffect, StrokeJoin, TileMode, Vertices,
 };
 
 pub use kompoz_graphics::{DefaultShadowColor, Shadow};
@@ -283,7 +283,8 @@ pub trait GraphicsContext {
     /// to a rounded rect of `radii`, faded by `alpha` and transformed by `transform` (LayerTransform::Identity
     /// unless told otherwise).
     fn push_layer(&mut self, bounds: Rect, radii: CornerRadii, alpha: f32, transform: LayerTransform);
-    /// Ends the layer last pushed (push_layer, push_effect_layer, push_outline_layer, push_shape_layer).
+    /// Ends the layer last pushed (push_layer, push_effect_layer, push_stretch_layer, push_outline_layer,
+    /// push_shape_layer).
     fn pop_layer(&mut self);
     /// Draws until pop_clip() only inside `rect`, within the clips already set (Compose's Canvas.clipRect).
     fn push_clip(&mut self, rect: Rect);
@@ -311,6 +312,19 @@ pub trait GraphicsContext {
     fn push_effect_layer(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         let _ = effect;
         self.push_layer(bounds, CornerRadii::Zero, alpha, LayerTransform::Identity);
+    }
+    /// A layer (pop_layer ends it) whose content, drawn within `bounds` and cut to them, goes through `effect` if
+    /// any (as push_effect_layer's) and is then warped by `stretch` over `bounds` as it is composited, faded by
+    /// `alpha`: Android's stretch overscroll, as hwui composites a RenderNode's layer with a StretchEffect (the
+    /// stretch in the layer's own space, before the transform it is drawn through; `bounds` its width and height).
+    /// Clips set around it cut what shows. The default composites it unstretched (as Android's software canvas, which
+    /// can't stretch).
+    fn push_stretch_layer(&mut self, bounds: Rect, stretch: &StretchEffect, effect: Option<&RenderEffect>, alpha: f32) {
+        let _ = stretch;
+        match effect {
+            Some(effect) => self.push_effect_layer(bounds, effect, alpha),
+            None => self.push_layer(bounds, CornerRadii::Zero, alpha, LayerTransform::Identity),
+        }
     }
     /// What is drawn so far under `bounds` (into the same target: in an offscreen layer, into the layer), and around
     /// them as far as `effect` reaches (past that as its edge treatment says), through the effect, drawn back in

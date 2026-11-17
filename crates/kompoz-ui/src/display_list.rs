@@ -42,7 +42,7 @@ use crate::graphics_context::{
 use kompoz_graphics::{
     BlendMode, Brush, BrushKind, Color, ColorFilter, DefaultFilterQuality, Density, FilterQuality, ImageBitmap,
     LayoutDirection, Matrix, Offset, Outline, Path, PathStroke, Projective, Rect, RenderEffect, Shader, ShaderKind,
-    Shape, Size, StrokeCap, StrokeJoin, Vertices,
+    Shape, Size, StretchEffect, StrokeCap, StrokeJoin, Vertices,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -356,6 +356,8 @@ struct Command {
     filter: Option<ColorFilter>,
     /// An effect layer's, a backdrop's.
     effect: Option<RenderEffect>,
+    /// A stretched layer's (through its effect, if any, first).
+    stretch: Option<StretchEffect>,
     /// A shadow's, a path's or a shape's.
     shadow: Option<Shadow>,
     /// An elevation shadow's (at `p1`).
@@ -406,6 +408,7 @@ impl Command {
             brush: None,
             filter: None,
             effect: None,
+            stretch: None,
             shadow: None,
             elevated: None,
             shaped: None,
@@ -443,6 +446,7 @@ impl Command {
             && self.vertices == o.vertices
             && self.filter == o.filter
             && self.effect == o.effect
+            && self.stretch == o.stretch
             && self.shadow == o.shadow
             && self.elevated == o.elevated
             && self.shaped == o.shaped
@@ -904,7 +908,7 @@ impl DisplayList {
         self.add(kind);
         let end = self.recording.len() as u32;
         self.recording[push].end = end;
-        if self.recording[push].effect.is_some() {
+        if self.recording[push].effect.is_some() || self.recording[push].stretch.is_some() {
             let b = self.recording[push].bounds;
             for c in &mut self.recording[push + 1..] {
                 if !empty(c.bounds) {
@@ -1679,6 +1683,7 @@ impl DisplayList {
             check(a.vertices == b.vertices, "vertices");
             check(a.filter == b.filter, "filter");
             check(a.effect == b.effect, "effect");
+            check(a.stretch == b.stretch, "stretch");
             check(a.shadow == b.shadow, "shadow");
             check(a.elevated == b.elevated, "elevation shadow");
             check(a.shaped == b.shaped, "shape shadow");
@@ -1779,10 +1784,11 @@ fn replay_command(canvas: &mut dyn GraphicsContext, c: &Command, by: Offset) {
     let shadow = || c.shadow.as_ref().expect("a shadow");
     let text = || TextDraw { baseline: p(c.p1), ..c.text.clone().expect("text") };
     match c.kind {
-        Kind::PushLayer => match (&c.path, &c.effect) {
-            (Some(outline), _) => canvas.push_outline_layer(r(c.rect), outline, c.f2, c.transform), // (the outline from its top left)
-            (None, Some(effect)) => canvas.push_effect_layer(r(c.rect), effect, c.f2),
-            (None, None) => canvas.push_layer(r(c.rect), c.radii, c.f2, c.transform),
+        Kind::PushLayer => match (&c.path, &c.effect, &c.stretch) {
+            (Some(outline), _, _) => canvas.push_outline_layer(r(c.rect), outline, c.f2, c.transform), // (the outline from its top left)
+            (None, effect, Some(stretch)) => canvas.push_stretch_layer(r(c.rect), stretch, effect.as_ref(), c.f2),
+            (None, Some(effect), None) => canvas.push_effect_layer(r(c.rect), effect, c.f2),
+            (None, None, None) => canvas.push_layer(r(c.rect), c.radii, c.f2, c.transform),
         },
         Kind::PushClip => match c.clip {
             ClipKind::RoundRect => canvas.push_clip_round_rect(r(c.rect), c.radii, op),
@@ -2039,6 +2045,23 @@ impl GraphicsContext for DisplayList {
         // screen too (a blur brings it in): pop_layer() makes each of those commands' area its own, as a change to
         // any of them changes all of it.
         c.bounds = intersect(s.m.map_rect(effect.output_bounds(bounds)).inflate(2.0), s.clip);
+        let clip = s.m.map_rect(bounds.inflate(1.0)).inflate(2.0);
+        let rest_clip = s.rest_m.map_rect(bounds.inflate(1.0)).inflate(2.0);
+        self.push_state(s.m, s.rest_m, clip, rest_clip);
+    }
+
+    /// It shows where its effect, if any, takes what it draws (the stretch keeps that where it is, moving what shows
+    /// there): pop_layer() makes each of the commands in it have its area, as the stretch brings what is anywhere in
+    /// it to where it shows, and a change to the stretch alone changes it all while what is drawn in it stays the
+    /// same (the canvas keeps that, as hwui keeps the RenderNode's layer and warps it again).
+    fn push_stretch_layer(&mut self, bounds: Rect, stretch: &StretchEffect, effect: Option<&RenderEffect>, alpha: f32) {
+        let s = self.state();
+        let c = self.add(Kind::PushLayer);
+        (c.rect, c.f2) = (bounds, alpha);
+        c.effect = effect.cloned();
+        c.stretch = Some(*stretch);
+        let shows = effect.map_or(bounds, |e| e.output_bounds(bounds));
+        c.bounds = intersect(s.m.map_rect(shows).inflate(2.0), s.clip);
         let clip = s.m.map_rect(bounds.inflate(1.0)).inflate(2.0);
         let rest_clip = s.rest_m.map_rect(bounds.inflate(1.0)).inflate(2.0);
         self.push_state(s.m, s.rest_m, clip, rest_clip);

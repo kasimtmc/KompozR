@@ -3,14 +3,15 @@
 //! are drawn with, made once each (a variant of the shader for what a batch needs, the whole shader where the driver
 //! can't make one), made ahead on a thread of their own from the list of those an app's earlier runs made.
 
-use super::{Batch, Mask, Renderer, STOPS_WIDTH, ShaderVariant};
+use super::{Batch, EffectDraw, Mask, Renderer, STOPS_WIDTH, ShaderVariant};
 use crate::device::{
     BlendFactor, BlendOp, BlendState, BufferRef, ClearColor, Filter, Format, IRect, Pipeline, PipelineDesc, PipelineId,
     Sampler, ShaderCode, TextureId, TextureUsage, VertexAttribute, VertexFormat,
 };
 use crate::shaders::{
     EFFECTS_FS, EFFECTS_VS, EdgeInstance, GpuData, MESH_VERTICES, PATH_FS, PATH_VS, PRIMITIVES_FS, PRIMITIVES_VS,
-    PRIMITIVES_VS_MESH, PathUniforms, Prim, PrimitiveUniforms, QUAD_VERTICES, ShaderSource, bytes_of, to_clip,
+    PRIMITIVES_VS_MESH, PathUniforms, Prim, PrimitiveUniforms, QUAD_VERTICES, STRETCH_FS, STRETCH_VS, ShaderSource,
+    bytes_of, to_clip,
 };
 use kompoz_graphics::{BlendMode, Projective};
 use std::collections::VecDeque;
@@ -31,6 +32,8 @@ static COVERAGE_VERTEX: ShaderCode = code(PATH_VS);
 static COVERAGE_FRAGMENT: ShaderCode = code(PATH_FS);
 static EFFECT_VERTEX: ShaderCode = code(EFFECTS_VS);
 static EFFECT_FRAGMENT: ShaderCode = code(EFFECTS_FS);
+static STRETCH_VERTEX: ShaderCode = code(STRETCH_VS);
+static STRETCH_FRAGMENT: ShaderCode = code(STRETCH_FS);
 
 // ---- Blend modes ---------------------------------------------------------------------------------------------------
 
@@ -443,7 +446,44 @@ impl Renderer {
         self.effect_pipeline.as_ref().map(Pipeline::id)
     }
 
-    /// Runs a pass: a copy, an effect's, or its batches (the instances all at once; then each mask generation: the
+    /// The stretch pipeline (shaders/stretch.slang): an effect pass's instance, its one texture.
+    fn stretch_pipeline(&mut self, target: Format) -> Option<PipelineId> {
+        if self.stretch_pipeline.is_none() {
+            let mut desc = PipelineDesc::new(&STRETCH_VERTEX, &STRETCH_FRAGMENT);
+            desc.instance_attributes = vec![VertexAttribute { location: 0, format: VertexFormat::Float4, offset: 0 }];
+            desc.instance_stride = 16;
+            desc.textures = 1;
+            desc.blend = BlendState::OFF;
+            desc.target = target;
+            self.stretch_pipeline = self.device.create_pipeline(&desc);
+        }
+        self.stretch_pipeline.as_ref().map(Pipeline::id)
+    }
+
+    /// A stretched layer's pass: `rect` of `target` made from its content (`source`, filtered linearly).
+    fn stretch(&mut self, target: TextureId, e: &EffectDraw) {
+        let Some(pipeline) = self.stretch_pipeline(target.format()) else { return };
+        let rect =
+            [e.rect.x as f32, e.rect.y as f32, (e.rect.x + e.rect.width) as f32, (e.rect.y + e.rect.height) as f32];
+        let instance: Vec<u8> = rect.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        let buffer = self.device.write_frame_data(&instance, 16);
+        let mut uniforms = e.uniforms;
+        uniforms[..4].copy_from_slice(&to_clip(
+            target.width() as f32,
+            target.height() as f32,
+            self.device.clip_y_down(),
+        ));
+        let bytes: Vec<u8> = uniforms.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        self.device.begin_pass(target, Some(ClearColor::TRANSPARENT), &[e.source], None);
+        self.device.set_pipeline(pipeline);
+        self.device.set_uniforms(&bytes);
+        self.device.set_texture(0, e.source, Sampler { filter: Filter::Linear, ..Sampler::default() });
+        self.device.set_scissor(e.rect);
+        self.device.draw(buffer, QUAD_VERTICES, 1);
+        self.device.end_pass();
+    }
+
+    /// Runs a pass: a copy, an effect's (a stretch's), or its batches (the instances all at once; then each mask generation: the
     /// batches that read it, the target cleared only before the first).
     fn execute(&mut self, index: usize) {
         let pass = &self.passes[index];
@@ -451,6 +491,11 @@ impl Renderer {
         if let Some(copy) = pass.copy {
             self.device.copy_texture(copy.from, copy.region, target, copy.x, copy.y);
             return;
+        }
+        if let Some(e) = pass.effect
+            && e.stretch
+        {
+            return self.stretch(target, &e);
         }
         if let Some(e) = pass.effect {
             let Some(pipeline) = self.effect_pipeline(target.format()) else { return };

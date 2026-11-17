@@ -14,7 +14,7 @@ use crate::graphics_context::{
 };
 use kompoz_graphics::{
     BlendMode, Brush, Color, ColorFilter, Density, FilterQuality, ImageBitmap, LayoutDirection, Matrix, Offset,
-    Outline, Path, PathStroke, Rect, RenderEffect, Shape, Size, Vertices,
+    Outline, Path, PathStroke, Rect, RenderEffect, Shape, Size, StretchEffect, Vertices,
 };
 
 /// One call recorded, with its arguments.
@@ -40,6 +40,7 @@ enum Op {
     PushTransform(Matrix),
     PopTransform,
     PushEffectLayer(Rect, RenderEffect, f32),
+    PushStretchLayer(Rect, StretchEffect, Option<RenderEffect>, f32),
     Backdrop(Rect, RenderEffect, f32),
     PushBlendMode(BlendMode),
     PopBlendMode,
@@ -112,6 +113,9 @@ impl Picture {
                 Op::PushTransform(m) => into.push_transform(m),
                 Op::PopTransform => into.pop_transform(),
                 Op::PushEffectLayer(b, effect, alpha) => into.push_effect_layer(*b, effect, *alpha),
+                Op::PushStretchLayer(b, stretch, effect, alpha) => {
+                    into.push_stretch_layer(*b, stretch, effect.as_ref(), *alpha)
+                }
                 Op::Backdrop(b, effect, alpha) => into.draw_backdrop(*b, effect, *alpha),
                 Op::PushBlendMode(mode) => into.push_blend_mode(*mode),
                 Op::PopBlendMode => into.pop_blend_mode(),
@@ -217,6 +221,9 @@ impl GraphicsContext for Picture {
     }
     fn push_effect_layer(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         self.ops.push(Op::PushEffectLayer(bounds, effect.clone(), alpha));
+    }
+    fn push_stretch_layer(&mut self, bounds: Rect, stretch: &StretchEffect, effect: Option<&RenderEffect>, alpha: f32) {
+        self.ops.push(Op::PushStretchLayer(bounds, *stretch, effect.cloned(), alpha));
     }
     fn draw_backdrop(&mut self, bounds: Rect, effect: &RenderEffect, alpha: f32) {
         self.ops.push(Op::Backdrop(bounds, effect.clone(), alpha));

@@ -69,3 +69,23 @@ pub const PRIMITIVES_FS: ShaderSource = ShaderSource {
 /// What primitives.slang's entry points all compiled to, in eight bytes (the first of the SHA-256 of their SPIR-V,
 /// MSL and WGSL, little-endian): pipelines made from other code (an older build's, kept in a cache) aren't these.
 pub const PRIMITIVES_VERSION: u64 = 0x7b4c9387b6d5884b;
+
+/// stretch.slang's vertex entry point `vs`.
+pub const STRETCH_VS: ShaderSource = ShaderSource {
+    spirv: include_bytes!("stretch-vs.spv"),
+    msl: include_str!("stretch-vs.metal"),
+    wgsl: include_str!("stretch-vs.wgsl"),
+    entry: "vs",
+};
+
+/// stretch.slang's fragment entry point `fs`.
+pub const STRETCH_FS: ShaderSource = ShaderSource {
+    spirv: include_bytes!("stretch-fs.spv"),
+    msl: include_str!("stretch-fs.metal"),
+    wgsl: include_str!("stretch-fs.wgsl"),
+    entry: "fs",
+};
+
+/// What stretch.slang's entry points all compiled to, in eight bytes (the first of the SHA-256 of their SPIR-V,
+/// MSL and WGSL, little-endian): pipelines made from other code (an older build's, kept in a cache) aren't these.
+pub const STRETCH_VERSION: u64 = 0xa6dc8a20709ec46c;
