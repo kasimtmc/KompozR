@@ -5,6 +5,7 @@
 //! semantics) on the decoration box, the core node (scroll, cursor, selection, drawing) on the inner field, the
 //! text layout node inside it; and the selection state's handles, magnifier and toolbar.
 
+use super::core_text_field::{CoreTextFieldArgs, DecorationBox, core_text_field};
 use super::input::internal::selection::{
     TextFieldMagnifierElement, TextFieldSelectionState, TextToolbarHandler, TextToolbarState,
 };
@@ -15,11 +16,14 @@ use super::input::internal::{
 use super::input::{
     InputTransformation, KeyboardActionHandler, OutputTransformation, TextFieldLineLimits, TextFieldState,
 };
+use super::keyboard_actions::KeyboardActions;
 use super::keyboard_options::KeyboardOptions;
+use super::modifiers::text_annotated_string::OnTextLayout;
 use super::selection::{
     HandleHeight, HandlePopup, OffsetProvider, SelectionHandle, SelectionHandleAnchor, SelectionHandleInfo,
     SelectionHandleInfoKey,
 };
+use super::text_field_delegate::OnValueChange;
 use super::text_field_size::TextFieldSizeModifiers;
 use crate::gestures::{Orientation, ScrollableDefaults, ScrollableModifiers};
 use crate::interaction::MutableInteractionSource;
@@ -31,7 +35,10 @@ use kompoz_graphics::{BlendMode, Brush, Color, Dp, DpSize, Offset, Rect, Size, S
 use kompoz_runtime::{
     DisposableEffect, SideEffect, derived_state_of, kompozable, on_dispose, remember, remember_keyed,
 };
+use kompoz_runtime::{MutableState, mutable_state_of};
+use kompoz_text::TextRange;
 use kompoz_text::TextStyle;
+use kompoz_text::input::{TextFieldValue, VisualTransformation};
 use kompoz_ui::draw::Fill;
 use kompoz_ui::input::PointerInputScope;
 use kompoz_ui::platform::{
@@ -386,6 +393,198 @@ pub(crate) fn basic_text_field_impl(args: BasicTextFieldArgs) {
             },
         );
     })
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The value-based overloads
+
+/// A box the user edits the text `value` in (Compose's `BasicTextField(value: String, onValueChange, …)`, through
+/// its CoreTextField engine): the app keeps the text, the field gives each text the user makes to
+/// `on_value_change` (only a new text: a moved caret or a composition isn't one) and shows the `value` it is
+/// composed with next — the field keeps the selection and the input method's composition itself. What the user
+/// does: the keyboard and the input method while it has the focus (the keyboard shown as it takes it), the mouse
+/// (a click places the cursor, a double click selects a word, a triple one a paragraph, drags and shift extend)
+/// and touch (a tap places the cursor, with a handle; a long press selects words, with handles, a magnifier and the
+/// text toolbar); copy, cut, paste, select all, undo and redo by keys, the toolbar and accessibility.
+///
+/// Not `enabled`: neither editable nor focusable, nothing selected. `read_only`: focusable and selectable, not
+/// editable. `keyboard_options` say what keyboard the input method shows and what its action key is,
+/// `keyboard_actions` what that key does (Done hides the keyboard, Next and Previous move the focus, unless the app
+/// says otherwise). `single_line`: one line scrolling sideways, Enter the action key (`max_lines` and `min_lines`
+/// then 1); else lines wrap, the field `min_lines` to `max_lines` lines tall, scrolling down beyond.
+/// `visual_transformation` changes what is shown (a password's mask, a phone number's separators) without changing
+/// the text. `on_text_layout` hears of each layout. The cursor is drawn with `cursor_brush` (an unspecified color:
+/// none). `decoration_box` composes around the inner field (an icon, a placeholder, a border), calling it once.
+///
+/// Kotlin: `BasicTextField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, readOnly: Boolean = false, textStyle: TextStyle = TextStyle.Default, keyboardOptions: KeyboardOptions = KeyboardOptions.Default, keyboardActions: KeyboardActions = KeyboardActions.Default, singleLine: Boolean = false, maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE, minLines: Int = 1, visualTransformation: VisualTransformation = VisualTransformation.None, onTextLayout: (TextLayoutResult) -> Unit = {}, interactionSource: MutableInteractionSource? = null, cursorBrush: Brush = SolidColor(Color.Black), decorationBox: @Composable (innerTextField: @Composable () -> Unit) -> Unit = @Composable { innerTextField -> innerTextField() })`
+#[kompozable]
+#[allow(clippy::too_many_arguments)]
+pub fn BasicTextFieldString(
+    value: impl Into<String>,
+    on_value_change: impl Fn(String) + 'static,
+    #[default(Modifier)] modifier: Modifier,
+    #[default(true)] enabled: bool,
+    #[default(false)] read_only: bool,
+    #[default(TextStyle::Default)] text_style: TextStyle,
+    #[default(KeyboardOptions::Default)] keyboard_options: KeyboardOptions,
+    #[default(KeyboardActions::Default)] keyboard_actions: KeyboardActions,
+    #[default(false)] single_line: bool,
+    #[default(i32::MAX)] max_lines: i32,
+    #[default(1)] min_lines: i32,
+    #[default(VisualTransformation::None)] visual_transformation: VisualTransformation,
+    #[default(None)] on_text_layout: Option<OnTextLayout>,
+    #[default(None)] interaction_source: Option<MutableInteractionSource>,
+    #[default(BasicTextFieldDefaults::cursor_brush())] cursor_brush: Brush,
+    #[default(None)] decoration_box: Option<DecorationBox>,
+) {
+    let value: String = value;
+    // The latest value the field had (its composition with it).
+    let initial = value.clone();
+    let text_field_value_state: MutableState<TextFieldValue> =
+        remember(move || mutable_state_of(TextFieldValue::from_text(&initial, TextRange::Zero, None)));
+    // The value the field is composed with: the app's text, the field's selection and composition.
+    let text_field_value = text_field_value_state.get().with_text(&value);
+    {
+        let (state, current) = (text_field_value_state.clone(), text_field_value.clone());
+        SideEffect(move || {
+            let held = state.peek();
+            if current.selection() != held.selection() || current.composition() != held.composition() {
+                state.set(current.clone());
+            }
+        });
+    }
+    // The last text the field was composed with or told the app of: the same text isn't told twice when the
+    // field's changes come several times before the next composition.
+    let initial_text = value.clone();
+    let last_text_value: MutableState<String> = remember_keyed(value.clone(), move || mutable_state_of(initial_text));
+    let on_value_change = Rc::new(on_value_change);
+    let (state, last) = (text_field_value_state.clone(), last_text_value);
+    let core_on_value_change: OnValueChange = Rc::new(move |new_text_field_value_state: TextFieldValue| {
+        state.set(new_text_field_value_state.clone());
+        let new_text = new_text_field_value_state.text().to_string();
+        let string_changed_since_last_invocation = last.peek() != new_text;
+        last.set(new_text.clone());
+        if string_changed_since_last_invocation {
+            on_value_change(new_text);
+        }
+    });
+    core_text_field(legacy_core_args(
+        text_field_value,
+        core_on_value_change,
+        modifier,
+        enabled,
+        read_only,
+        text_style,
+        keyboard_options,
+        keyboard_actions,
+        single_line,
+        max_lines,
+        min_lines,
+        visual_transformation,
+        on_text_layout,
+        interaction_source,
+        cursor_brush,
+        decoration_box,
+    ));
+}
+
+/// A box the user edits `value` in — its text, selection and the input method's composition (Compose's
+/// `BasicTextField(value: TextFieldValue, onValueChange, …)`): each value the user makes (a new text, a moved
+/// caret or selection, a composition) given to `on_value_change`, the `value` composed next shown; as
+/// [`BasicTextFieldString`] otherwise.
+///
+/// Kotlin: `BasicTextField(value: TextFieldValue, onValueChange: (TextFieldValue) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, readOnly: Boolean = false, textStyle: TextStyle = TextStyle.Default, keyboardOptions: KeyboardOptions = KeyboardOptions.Default, keyboardActions: KeyboardActions = KeyboardActions.Default, singleLine: Boolean = false, maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE, minLines: Int = 1, visualTransformation: VisualTransformation = VisualTransformation.None, onTextLayout: (TextLayoutResult) -> Unit = {}, interactionSource: MutableInteractionSource? = null, cursorBrush: Brush = SolidColor(Color.Black), decorationBox: @Composable (innerTextField: @Composable () -> Unit) -> Unit = @Composable { innerTextField -> innerTextField() })`
+#[kompozable]
+#[allow(clippy::too_many_arguments)]
+pub fn BasicTextFieldValue(
+    value: TextFieldValue,
+    on_value_change: impl Fn(TextFieldValue) + 'static,
+    #[default(Modifier)] modifier: Modifier,
+    #[default(true)] enabled: bool,
+    #[default(false)] read_only: bool,
+    #[default(TextStyle::Default)] text_style: TextStyle,
+    #[default(KeyboardOptions::Default)] keyboard_options: KeyboardOptions,
+    #[default(KeyboardActions::Default)] keyboard_actions: KeyboardActions,
+    #[default(false)] single_line: bool,
+    #[default(i32::MAX)] max_lines: i32,
+    #[default(1)] min_lines: i32,
+    #[default(VisualTransformation::None)] visual_transformation: VisualTransformation,
+    #[default(None)] on_text_layout: Option<OnTextLayout>,
+    #[default(None)] interaction_source: Option<MutableInteractionSource>,
+    #[default(BasicTextFieldDefaults::cursor_brush())] cursor_brush: Brush,
+    #[default(None)] decoration_box: Option<DecorationBox>,
+) {
+    let composed_value = value.clone();
+    let on_value_change = Rc::new(on_value_change);
+    // Only another value is told.
+    let core_on_value_change: OnValueChange = Rc::new(move |it: TextFieldValue| {
+        if composed_value != it {
+            on_value_change(it);
+        }
+    });
+    core_text_field(legacy_core_args(
+        value,
+        core_on_value_change,
+        modifier,
+        enabled,
+        read_only,
+        text_style,
+        keyboard_options,
+        keyboard_actions,
+        single_line,
+        max_lines,
+        min_lines,
+        visual_transformation,
+        on_text_layout,
+        interaction_source,
+        cursor_brush,
+        decoration_box,
+    ));
+}
+
+/// What both value-based overloads give CoreTextField: the keyboard options as the input method's options (shown
+/// as the session starts: the legacy field shows the keyboard as it takes the focus, whatever
+/// `showKeyboardOnFocus` says), one line not wrapping and one line tall when `single_line`.
+#[allow(clippy::too_many_arguments)]
+fn legacy_core_args(
+    value: TextFieldValue,
+    on_value_change: OnValueChange,
+    modifier: Modifier,
+    enabled: bool,
+    read_only: bool,
+    text_style: TextStyle,
+    keyboard_options: KeyboardOptions,
+    keyboard_actions: KeyboardActions,
+    single_line: bool,
+    max_lines: i32,
+    min_lines: i32,
+    visual_transformation: VisualTransformation,
+    on_text_layout: Option<OnTextLayout>,
+    interaction_source: Option<MutableInteractionSource>,
+    cursor_brush: Brush,
+    decoration_box: Option<DecorationBox>,
+) -> CoreTextFieldArgs {
+    let mut ime_options = keyboard_options.to_ime_options(single_line);
+    ime_options.show_keyboard = true;
+    CoreTextFieldArgs {
+        value,
+        on_value_change,
+        modifier,
+        text_style,
+        visual_transformation,
+        on_text_layout,
+        interaction_source,
+        cursor_brush,
+        soft_wrap: !single_line,
+        max_lines: if single_line { 1 } else { max_lines },
+        min_lines: if single_line { 1 } else { min_lines },
+        ime_options,
+        keyboard_actions,
+        enabled,
+        read_only,
+        decoration_box,
+        text_scroller_position: None,
+    }
 }
 
 /// The cursor's handle while it shows (Compose's TextFieldCursorHandle): composed again only when it shows or

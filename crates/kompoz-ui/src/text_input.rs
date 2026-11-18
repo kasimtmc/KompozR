@@ -1,9 +1,12 @@
 //! Text input from the platform's input method: the host's text input service (Compose's `TextInputService` and
 //! `TextInputSession` of `androidx.compose.ui.text.input`), what both Compose APIs go through here:
 //!
-//! - the legacy one (what the value-based text field uses): a focused editor starts a session with its text,
-//!   selection and options ([`TextInputService::start_input`]) and gets what the input method does as
-//!   [`EditCommand`]s and its action key;
+//! - the legacy one: a focused editor starts a session with its text, selection and options
+//!   ([`TextInputService::start_input`]) and gets what the input method does as [`EditCommand`]s and its action
+//!   key. A service may be made over a [`PlatformTextInputService`] of its own
+//!   ([`TextInputService::with_platform_service`], Compose's `TextInputService(platformTextInputService)`): the
+//!   value-based text field's is, its service going through its modifier node into the API below (Compose 1.12's
+//!   LegacyPlatformTextInputServiceAdapter);
 //! - the one of Compose 1.7+ ([`platform_text_input`](crate::platform_text_input):
 //!   `PlatformTextInputModifierNode`, `establish_text_input_session`, `start_input_method`): a session made of a
 //!   [`PlatformTextInputMethodRequest`](crate::platform_text_input::PlatformTextInputMethodRequest), whose editor
@@ -22,13 +25,58 @@
 //! speak UTF-8 bytes already).
 
 use crate::platform::{ImeAction, ImeOptions, PlatformHandle, TextEditState};
-use kompoz_graphics::Rect;
+use kompoz_graphics::{Matrix, Rect};
 use kompoz_runtime::KompozitionLocal;
-use kompoz_text::TextRange;
+use kompoz_text::input::OffsetMapping;
+use kompoz_text::{TextLayoutResult, TextRange};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub use kompoz_text::input::{EditCommand, EditProcessor, EditingBuffer, TextFieldValue};
+
+/// What a [`TextInputService`] made over it gives its sessions to (Compose's PlatformTextInputService): the
+/// host's service is the platform's own; a value-based field makes one of its own going through its modifier node
+/// (Compose's LegacyPlatformTextInputServiceAdapter).
+pub trait PlatformTextInputService {
+    /// An editor holding `value` starts taking input (Compose's `startInput`): what the input method does to
+    /// `on_edit_command`, its action key to `on_ime_action_performed`.
+    fn start_input(
+        &self,
+        value: &TextFieldValue,
+        ime_options: &ImeOptions,
+        on_edit_command: Rc<dyn Fn(&[EditCommand])>,
+        on_ime_action_performed: Rc<dyn Fn(ImeAction)>,
+    );
+    /// Input starts without an editor (Compose's `startInput()`).
+    fn start_input_without_editor(&self) {}
+    /// Input stops (Compose's `stopInput`).
+    fn stop_input(&self);
+    /// Shows the software keyboard (Compose's `showSoftwareKeyboard`).
+    fn show_software_keyboard(&self);
+    /// Hides the software keyboard (Compose's `hideSoftwareKeyboard`).
+    fn hide_software_keyboard(&self);
+    /// The editor's value changed from `old_value` to `new_value` (Compose's `updateState`).
+    fn update_state(&self, old_value: Option<&TextFieldValue>, new_value: &TextFieldValue);
+    /// The editor's caret is at `rect` in the root (Compose's `notifyFocusedRect`).
+    fn notify_focused_rect(&self, rect: Rect) {
+        let _ = rect;
+    }
+    /// The editor's text was laid out again or moved (Compose's `updateTextLayoutResult`): its value, how its shown
+    /// text maps to it, the layout, what transforms the inner field's coordinates to the root's, the inner field's
+    /// visible bounds and the decoration box's, in the inner field's coordinates.
+    fn update_text_layout_result(
+        &self,
+        text_field_value: &TextFieldValue,
+        offset_mapping: &OffsetMapping,
+        text_layout_result: &TextLayoutResult,
+        text_field_to_root_transform: &dyn Fn(&mut Matrix),
+        inner_text_field_bounds: Rect,
+        decoration_box_bounds: Rect,
+    ) {
+        let _ = (text_field_value, offset_mapping, text_layout_result, text_field_to_root_transform);
+        let _ = (inner_text_field_bounds, decoration_box_bounds);
+    }
+}
 
 impl TextEditState {
     /// The editing buffer holding it (its selection in order).
@@ -107,6 +155,9 @@ struct ServiceState {
     session: RefCell<Option<Rc<SessionState>>>,
     /// The sessions of the 1.7+ API (Compose's owner `textInputSession` mutex).
     text_input_sessions: crate::platform_text_input::SessionMutex,
+    /// What its sessions go to when it was made over one (Compose's TextInputService(platformTextInputService)):
+    /// then the platform's callbacks aren't told, the service is.
+    platform_service: Option<Rc<dyn PlatformTextInputService>>,
 }
 
 /// What a focused editor starts its input sessions with (Compose's TextInputService and the owner's
@@ -123,7 +174,25 @@ impl TextInputService {
             platform,
             session: RefCell::new(None),
             text_input_sessions: crate::platform_text_input::SessionMutex::new(),
+            platform_service: None,
         }))
+    }
+
+    /// One whose sessions go to `platform_text_input_service` (Compose's `TextInputService(platformTextInputService)`):
+    /// a session started is the service's input started, its updates the service's, its end the service's input
+    /// stopped; one session is current at a time.
+    pub fn with_platform_service(platform_text_input_service: Rc<dyn PlatformTextInputService>) -> TextInputService {
+        TextInputService(Rc::new(ServiceState {
+            platform: PlatformHandle::default(),
+            session: RefCell::new(None),
+            text_input_sessions: crate::platform_text_input::SessionMutex::new(),
+            platform_service: Some(platform_text_input_service),
+        }))
+    }
+
+    /// The service its sessions go to, if it was made over one.
+    fn platform_service(&self) -> Option<Rc<dyn PlatformTextInputService>> {
+        self.0.platform_service.clone()
     }
 
     /// Opens a session for an editor holding `value` (Compose's `startInput`): what the input method does comes to
@@ -159,6 +228,9 @@ impl TextInputService {
         on_ime_action: Rc<dyn Fn(ImeAction)>,
         reads: Option<Rc<dyn Fn() -> TextFieldValue>>,
     ) -> TextInputSession {
+        if let Some(service) = self.platform_service() {
+            service.start_input(&value.to_value(), &options, on_edit_command.clone(), on_ime_action.clone());
+        }
         let session = Rc::new(SessionState {
             on_edit_command,
             on_ime_action,
@@ -170,6 +242,13 @@ impl TextInputService {
             version: kompoz_runtime::mutable_state_of(0),
         });
         let before = self.0.session.replace(Some(session.clone()));
+        if self.0.platform_service.is_some() {
+            // (Compose's: the current session replaced, the service's input not stopped)
+            if let Some(before) = before {
+                before.open.set(false);
+            }
+            return TextInputSession { service: self.clone(), session };
+        }
         if let Some(before) = before {
             // (The platform hears the one before close, then this one open: another field's typing begins.)
             before.open.set(false);
@@ -187,13 +266,19 @@ impl TextInputService {
     /// Shows the software keyboard for the open session again, if one is open (Compose's `showSoftwareKeyboard`).
     pub fn show_software_keyboard(&self) {
         if let Some(session) = self.current() {
-            self.tell(&session, true);
+            match self.platform_service() {
+                Some(service) => service.show_software_keyboard(),
+                None => self.tell(&session, true),
+            }
         }
     }
 
     /// Hides the software keyboard (Compose's `hideSoftwareKeyboard`).
     pub fn hide_software_keyboard(&self) {
-        self.0.platform.get().hide_software_keyboard();
+        match self.platform_service() {
+            Some(service) => service.hide_software_keyboard(),
+            None => self.0.platform.get().hide_software_keyboard(),
+        }
     }
 
     /// The open session's text, selection and composition as the input method sees them, if one is open.
@@ -352,6 +437,11 @@ impl TextInputSession {
         if !self.is_open() {
             return;
         }
+        if let Some(service) = self.service.platform_service() {
+            *self.session.state.borrow_mut() = new_value.clone();
+            service.update_state(None, &new_value.to_value());
+            return;
+        }
         let changed = *self.session.state.borrow() != *new_value;
         if changed {
             *self.session.state.borrow_mut() = new_value.clone();
@@ -359,10 +449,61 @@ impl TextInputSession {
         }
     }
 
+    /// The editor's value changed from `old_value` to `new_value` (Compose's `updateState(oldValue, newValue)`):
+    /// [`update_state`](Self::update_state) with the editor's values; false if the session isn't open.
+    pub fn update_state_from(&self, old_value: Option<&TextFieldValue>, new_value: &TextFieldValue) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+        match self.service.platform_service() {
+            Some(service) => {
+                *self.session.state.borrow_mut() = TextEditState::from_value(new_value);
+                service.update_state(old_value, new_value);
+            }
+            None => self.update_state(&TextEditState::from_value(new_value)),
+        }
+        true
+    }
+
+    /// The editor's text was laid out again or moved (Compose's `updateTextLayoutResult`), told to the service it
+    /// goes to (the host's own learns where the editor is from [`notify_focused_rect`](Self::notify_focused_rect));
+    /// false if the session isn't open.
+    pub fn update_text_layout_result(
+        &self,
+        text_field_value: &TextFieldValue,
+        offset_mapping: &OffsetMapping,
+        text_layout_result: &TextLayoutResult,
+        text_field_to_root_transform: &dyn Fn(&mut Matrix),
+        inner_text_field_bounds: Rect,
+        decoration_box_bounds: Rect,
+    ) -> bool {
+        if !self.is_open() {
+            return false;
+        }
+        if let Some(service) = self.service.platform_service() {
+            service.update_text_layout_result(
+                text_field_value,
+                offset_mapping,
+                text_layout_result,
+                text_field_to_root_transform,
+                inner_text_field_bounds,
+                decoration_box_bounds,
+            );
+        }
+        true
+    }
+
     /// Where the editor (its caret) is in the window, px (Compose's `notifyFocusedRect`): where the input method
     /// shows its candidates.
     pub fn notify_focused_rect(&self, rect: Rect) {
-        if !self.is_open() || self.session.area.get() == rect {
+        if !self.is_open() {
+            return;
+        }
+        if let Some(service) = self.service.platform_service() {
+            service.notify_focused_rect(rect);
+            return;
+        }
+        if self.session.area.get() == rect {
             return;
         }
         self.session.area.set(rect);
@@ -372,7 +513,10 @@ impl TextInputSession {
     /// Shows the software keyboard again (Compose's); false if the session isn't open.
     pub fn show_software_keyboard(&self) -> bool {
         if self.is_open() {
-            self.service.tell(&self.session, true);
+            match self.service.platform_service() {
+                Some(service) => service.show_software_keyboard(),
+                None => self.service.tell(&self.session, true),
+            }
         }
         self.is_open()
     }
@@ -393,7 +537,10 @@ impl TextInputSession {
         let current = self.service.0.session.borrow().as_ref().is_some_and(|s| Rc::ptr_eq(s, &self.session));
         if current {
             self.service.0.session.borrow_mut().take();
-            self.service.tell(&self.session, false);
+            match self.service.platform_service() {
+                Some(service) => service.stop_input(),
+                None => self.service.tell(&self.session, false),
+            }
         }
     }
 }

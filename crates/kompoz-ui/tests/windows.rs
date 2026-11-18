@@ -675,6 +675,33 @@ fn input_outside_a_non_focusable_popup_passes_through_and_dismisses_it() {
     assert_eq!(taken(&log), ["kapan"]);
 }
 
+/// A finger's press just outside a small popup goes to what is under it (Compose's popup is a window of its own:
+/// the minimum touch target of what is in it doesn't reach past it into the window below).
+fn a_touch_just_outside_a_small_popup_goes_to_the_window_under_it() {
+    let log = new_log();
+    let l = log.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let l = l.clone();
+        Tappable(l.clone(), "alttaki", Modifier.size(100.dp()).test_tag("alttaki"), move || {
+            let l2 = l.clone();
+            Popup(
+                alignment = Alignment::TopStart,
+                offset = IntOffset::new(20, 40),
+                properties = PopupProperties { dismiss_on_click_outside: false, ..PopupProperties::default() },
+                content = move || Tappable(l2.clone(), "popup", Modifier.size(20.dp()).test_tag("popup"), || {}),
+            );
+        });
+    }));
+    rule.wait_for_idle();
+    // 4 px above the popup (20 by 20 at 20, 40): within its 48 dp touch target, outside it.
+    tap(&rule, Offset::new(30.0, 36.0));
+    rule.wait_for_idle();
+    assert_eq!(taken(&log), ["alttaki"]);
+    tap(&rule, Offset::new(30.0, 50.0));
+    rule.wait_for_idle();
+    assert_eq!(taken(&log), ["popup"]);
+}
+
 fn a_focusable_popup_scopes_the_focus_keys_and_accessibility() {
     let log = new_log();
     let open = mutable_state_of(false);
@@ -826,6 +853,7 @@ tests!(
     back_handlers_in_a_popup_come_before_it_closes,
     popups_are_placed_by_their_providers_and_follow_their_anchors,
     input_outside_a_non_focusable_popup_passes_through_and_dismisses_it,
+    a_touch_just_outside_a_small_popup_goes_to_the_window_under_it,
     a_focusable_popup_scopes_the_focus_keys_and_accessibility,
     a_dialog_dismissed_only_as_it_says,
     popups_nest_above_the_one_they_were_opened_from,

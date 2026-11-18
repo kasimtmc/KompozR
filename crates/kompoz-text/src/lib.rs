@@ -52,6 +52,7 @@ pub mod text_granularity;
 pub mod text_layout_result;
 pub mod text_measurer;
 pub mod text_style;
+mod visual_transformation;
 pub mod word_boundary;
 
 pub use annotated_string::{
@@ -65,7 +66,10 @@ pub use font::{
     FontId, FontListFontFamily, FontLoadingStrategy, FontRegistry, FontSource, FontStyle, FontSynthesis, FontVariation,
     FontVariationSetting, FontVariationSettings, FontWeight, GenericFontFamily, Typeface, lerp_font_weight,
 };
-pub use input::{EditCommand, EditProcessor, EditingBuffer, TextFieldValue};
+pub use input::{
+    EditCommand, EditProcessor, EditingBuffer, OffsetMapping, PasswordVisualTransformation, TextFieldValue,
+    TransformedText, VisualTransformation,
+};
 pub use intl::{Locale, LocaleList};
 pub use line_break::{
     BreakOpportunity, BrokenLine, LineBreakParams, LineMeasure, LineWidths, TabStops, break_lines, break_opportunities,
@@ -76,7 +80,7 @@ pub use paragraph::{DefaultMaxLines, Paragraph, ParagraphIntrinsics, TextPaint, 
 pub use paragraph_style::{ParagraphStyle, lerp_paragraph_style};
 pub use placeholder::{Placeholder, PlaceholderVerticalAlign};
 pub use platform_style::{EmojiSupportMatch, PlatformParagraphStyle, PlatformSpanStyle, PlatformTextStyle};
-pub use range::TextRange;
+pub use range::{TextRange, TextRangeArgs};
 pub use shape::{FakeBackend, FakeFontFamilyResolver, FontBackend, FontMetrics, HarfrustBackend};
 pub use span_style::{SpanStyle, TextForegroundStyle, lerp_span_style};
 pub use style::{

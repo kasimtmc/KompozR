@@ -90,6 +90,11 @@ harness = false
 name = "kotlin_text_field"
 harness = false
 
+# The value-based text fields (BasicTextField(value, onValueChange)) in Kotlin's syntax.
+[[test]]
+name = "kotlin_text_field_value"
+harness = false
+
 # Non-lazy layouts, the marquee, the tooltip box and the ripple in Kotlin's syntax.
 [[test]]
 name = "kotlin_layouts"

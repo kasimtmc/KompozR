@@ -23,6 +23,8 @@ mod selectable;
 #[allow(clippy::module_inception)]
 mod selection;
 mod state;
+pub mod text_field_selection_manager;
+pub mod text_prepared_selection;
 
 pub use adjustment::{SelectionAdjustment, ensure_at_least_one_char};
 pub use colors::{LocalTextSelectionColors, TextSelectionColors};

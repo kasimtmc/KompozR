@@ -5,7 +5,9 @@
 //! layout), its layout cache, its cursor's blink and its selection ([`selection`]).
 
 pub mod codepoint_transformation;
+pub mod core_text_field_semantics_modifier;
 pub mod cursor_animation_state;
+pub mod legacy_platform_text_input_service_adapter;
 pub mod offset_mapping_calculator;
 pub mod selection;
 pub mod text_field_core_modifier;

@@ -15,6 +15,7 @@ mod basic_secure_text_field;
 mod basic_text;
 mod basic_text_field;
 pub mod context_menu;
+pub mod core_text_field;
 mod dead_key_combiner;
 mod inline_content;
 pub mod input;
@@ -27,7 +28,16 @@ pub mod long_press_text_drag_observer;
 pub mod modifiers;
 mod pointer_icon;
 pub mod selection;
+pub mod text_delegate;
+pub mod text_field_cursor;
+pub mod text_field_delegate;
+pub mod text_field_key_input;
+pub mod text_field_pointer;
+pub mod text_field_scroll;
 pub(crate) mod text_field_size;
+pub mod text_layout_result_proxy;
+pub mod undo_manager;
+pub mod validating_offset_mapping;
 
 pub use auto_size::{
     AutoSizeStepBased, StepBased, TextAutoSize, TextAutoSizeDefaults, TextAutoSizeEq, TextAutoSizeLayoutScope,
@@ -36,8 +46,10 @@ pub use autofill_highlight::{LocalAutofillHighlightBrush, LocalAutofillHighlight
 pub use basic_secure_text_field::{BasicSecureTextField, DefaultObfuscationCharacter};
 pub use basic_text::{BasicText, BasicTextValue};
 pub use basic_text_field::{
-    BasicTextField, BasicTextFieldDefaults, CursorHandle, CursorHandleHeight, CursorHandleWidth, TextFieldDecorator,
+    BasicTextField, BasicTextFieldDefaults, BasicTextFieldString, BasicTextFieldValue, CursorHandle,
+    CursorHandleHeight, CursorHandleWidth, TextFieldDecorator,
 };
+pub use core_text_field::DecorationBox;
 pub use dead_key_combiner::{COMBINING_ACCENT, COMBINING_ACCENT_MASK, DeadKeyCombiner, get_dead_char};
 pub use inline_content::{InlineContentMap, InlineTextContent};
 pub use key_event_helpers::{

@@ -14,6 +14,7 @@ use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
+use kompoz_text::TextRange;
 use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropTarget, DragAndDropTransferData};
 use kompoz_ui::input::*;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision, derived_media_query, media_query};
@@ -22,7 +23,7 @@ use kompoz_ui::platform::{
     PlatformCallbacks, TextEditState,
 };
 use kompoz_ui::strings::{LocalStrings, Strings, is_rtl_language};
-use kompoz_ui::text_input::EditCommand;
+use kompoz_ui::text_input::{EditCommand, TextFieldValue};
 use kompoz_ui::*;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -189,6 +190,81 @@ fn text_input_sessions_take_what_the_input_method_does() {
     other.dispose();
     assert_eq!(taken(&platform), ["text_input false \"x\" 30", "text_input true \"\" 0", "text_input false \"\" 0"]);
     assert!(!host.text_input("y") && !host.ime_action(ImeAction::Go));
+}
+
+/// A service made over a PlatformTextInputService of its own (Compose's `TextInputService(platformTextInputService)`):
+/// its sessions are that service's input — started, updated (the old and new values), told where the editor is
+/// and how it is laid out, the keyboard shown and hidden, stopped — one current at a time; the host's platform
+/// isn't told.
+fn a_service_over_its_own_platform_text_input_service() {
+    struct Recording(Log);
+    impl kompoz_ui::text_input::PlatformTextInputService for Recording {
+        fn start_input(
+            &self,
+            value: &TextFieldValue,
+            _ime_options: &ImeOptions,
+            on_edit_command: Rc<dyn Fn(&[EditCommand])>,
+            _on_ime_action_performed: Rc<dyn Fn(ImeAction)>,
+        ) {
+            push(&self.0, format!("start {:?}", value.text()));
+            on_edit_command(&[EditCommand::CommitText { text: "!".into(), new_cursor_position: 1 }]);
+        }
+        fn stop_input(&self) {
+            push(&self.0, "stop");
+        }
+        fn show_software_keyboard(&self) {
+            push(&self.0, "show");
+        }
+        fn hide_software_keyboard(&self) {
+            push(&self.0, "hide");
+        }
+        fn update_state(&self, old_value: Option<&TextFieldValue>, new_value: &TextFieldValue) {
+            push(&self.0, format!("update {:?} {:?}", old_value.map(|v| v.text().to_string()), new_value.text()));
+        }
+        fn notify_focused_rect(&self, rect: Rect) {
+            push(&self.0, format!("rect {}", rect.left));
+        }
+        fn update_text_layout_result(
+            &self,
+            text_field_value: &TextFieldValue,
+            _offset_mapping: &kompoz_text::input::OffsetMapping,
+            _text_layout_result: &kompoz_text::TextLayoutResult,
+            _text_field_to_root_transform: &dyn Fn(&mut kompoz_graphics::Matrix),
+            _inner_text_field_bounds: Rect,
+            _decoration_box_bounds: Rect,
+        ) {
+            push(&self.0, format!("layout {:?}", text_field_value.text()));
+        }
+    }
+    let platform = new_log();
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {}));
+    rule.host().set_callbacks(Rc::new(Recorder(platform.clone())));
+    let log = new_log();
+    let edits = new_log();
+    let service = kompoz_ui::text_input::TextInputService::with_platform_service(Rc::new(Recording(log.clone())));
+    let e = edits.clone();
+    let session = service.start_input(
+        TextEditState::caret_at_end("ab"),
+        ImeOptions::default(),
+        move |commands: &[EditCommand]| push(&e, format!("{commands:?}")),
+        |_| {},
+    );
+    assert!(session.is_open() && service.has_session());
+    assert_eq!(taken(&edits), ["[CommitText { text: \"!\", new_cursor_position: 1 }]"]);
+    let old = TextFieldValue::from_text("ab", TextRange::at(2), None);
+    assert!(session.update_state_from(Some(&old), &TextFieldValue::from_text("ab!", TextRange::at(3), None)));
+    session.notify_focused_rect(Rect::new(5.0, 0.0, 6.0, 20.0));
+    assert!(session.show_software_keyboard() && session.hide_software_keyboard());
+    // Another session is the current one: this one is closed, its updates not told.
+    let other = service.start_input(TextEditState::default(), ImeOptions::default(), |_: &[EditCommand]| {}, |_| {});
+    assert!(!session.is_open() && !session.update_state_from(None, &old));
+    session.dispose(); // (not the current one: nothing stopped)
+    other.dispose();
+    assert_eq!(
+        taken(&log),
+        ["start \"ab\"", "update Some(\"ab\") \"ab!\"", "rect 5", "show", "hide", "start \"\"", "stop"]
+    );
+    assert!(!service.has_session() && taken(&platform).is_empty());
 }
 
 fn zooms_and_pinches_are_scale_events() {
@@ -469,6 +545,7 @@ tests!(
     edit_commands_apply_as_composes_editing_buffer,
     input_methods_place_the_caret_inside_their_composing_text,
     text_input_sessions_take_what_the_input_method_does,
+    a_service_over_its_own_platform_text_input_service,
     zooms_and_pinches_are_scale_events,
     drags_from_outside_reach_the_targets_under_them,
     strings_and_right_to_left_languages,

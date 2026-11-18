@@ -1,14 +1,61 @@
 //! A range of a text (Compose's TextRange): selections, compositions, annotations' extents.
 
+use kompoz_runtime::KotlinProperties;
 use std::fmt;
 
 /// A range of a text, `start` to `end` (Compose's TextRange): UTF-8 byte offsets on character boundaries, as every
 /// offset in KompozR's text is (`&text[range.min()..range.max()]` is what it covers). `start` may be past `end`: a
 /// selection made backwards.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, KotlinProperties)]
 pub struct TextRange {
     pub start: usize,
     pub end: usize,
+}
+
+/// Compose's `TextRange(start, end)` and `TextRange(index)` (a caret): Kotlin's arguments, one as itself, two as a
+/// tuple ([`TextRangeArgs`]); plain code calls [`TextRange::new`] and [`TextRange::at`].
+#[allow(non_snake_case)]
+pub fn TextRange(args: impl TextRangeArgs) -> TextRange {
+    args.text_range()
+}
+
+/// What [`TextRange()`](fn@TextRange) is given, each overload by its types.
+pub trait TextRangeArgs {
+    fn text_range(self) -> TextRange;
+}
+
+/// Kotlin: `TextRange(index: Int)`
+impl TextRangeArgs for usize {
+    fn text_range(self) -> TextRange {
+        TextRange::at(self)
+    }
+}
+
+/// Kotlin: `TextRange(start: Int, end: Int)`
+impl TextRangeArgs for (usize, usize) {
+    fn text_range(self) -> TextRange {
+        TextRange::new(self.0, self.1)
+    }
+}
+
+/// Kotlin's Int (what its lengths and indices are): not negative (Compose's "start and end cannot be negative").
+fn offset_of(value: i32) -> usize {
+    assert!(value >= 0, "start and end cannot be negative. [start: {value}]");
+    value as usize
+}
+
+/// Kotlin's `TextRange(index: Int)` given an Int.
+impl TextRangeArgs for i32 {
+    fn text_range(self) -> TextRange {
+        TextRange::at(offset_of(self))
+    }
+}
+
+/// Kotlin's `TextRange(start: Int, end: Int)` given Ints.
+impl TextRangeArgs for (i32, i32) {
+    fn text_range(self) -> TextRange {
+        TextRange::new(offset_of(self.0), offset_of(self.1))
+    }
 }
 
 impl TextRange {

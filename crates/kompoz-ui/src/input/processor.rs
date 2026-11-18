@@ -62,7 +62,13 @@ impl PointerInputEventProcessor {
         let mut hit = HitTestResult::new();
         for change in &internal.changes {
             if is_hover || change.changed_to_down_ignore_consumed() {
-                for root in roots {
+                let last = roots.len().saturating_sub(1);
+                for (k, root) in roots.iter().enumerate() {
+                    // A popup takes what is within its bounds only (its own window in Compose: a touch target
+                    // stretched past them doesn't take a press from the window under it).
+                    if k < last && !root.coordinates().bounds_in_root().contains(change.position) {
+                        continue;
+                    }
                     hit_test_layout_node(root, change.position, &mut hit, change.r#type, true);
                     if !hit.is_empty() {
                         break;

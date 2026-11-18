@@ -7,6 +7,8 @@
 * kompozable BasicSecureTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable BasicText rdddddddddd crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable BasicTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable BasicTextFieldString rrdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable BasicTextFieldValue rrdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable BasicTooltipBox rrrddddr crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable BitmapImage rrdddddd crates/kompoz-foundation/src/image.rs
 * fn BitmapPainter rddd crates/kompoz-ui/src/draw/painter.rs
@@ -119,6 +121,7 @@ kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/t
 * kompozable Pager rrrrrrrrrrrrrrrrr crates/kompoz-foundation/src/pager/lazy_layout_pager.rs
 * fn Paragraph rrrrrdddd crates/kompoz-text/src/paragraph/mod.rs
 * fn ParagraphStyle ddddddddd crates/kompoz-text/src/paragraph_style.rs
+* fn PasswordVisualTransformation d crates/kompoz-text/src/visual_transformation.rs
 * kompozable Path rddddddddddddd crates/kompoz-ui/src/draw/vector.rs
 kompoz-platform/dbus kompozable Plus r crates/kompoz-platform/tests/dbus.rs
 * kompozable Popup dddddr crates/kompoz-ui/src/window/popup.rs
@@ -161,6 +164,7 @@ kompoz-runtime/runtime kompozable StaticView - crates/kompoz-runtime/tests/runti
 kompoz-foundation/text_field_selection kompozable Steady rr crates/kompoz-foundation/tests/text_field_selection.rs
 * fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
 kompoz/kotlin_ported fn Sticker rd crates/kompoz/tests/kotlin_ported.rs
+kompoz-foundation/text_field_value kompozable StringField rr crates/kompoz-foundation/tests/text_field_value.rs
 * fn Stroke ddddd crates/kompoz-graphics/src/draw_style.rs
 * kompozable StyleAnnotation rrr crates/kompoz-foundation/src/text/link_scope.rs
 * kompozable SubcomposeLayout ddr crates/kompoz-ui/src/layout/subcompose.rs
@@ -186,6 +190,7 @@ kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.
 kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/tests/text_input.rs
+kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-foundation/tests/text_field_value.rs
 * kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
 kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-foundation/tests/layout_modifiers.rs
 * kompozable VerticalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs

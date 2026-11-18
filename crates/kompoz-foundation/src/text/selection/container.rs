@@ -244,7 +244,7 @@ pub(crate) const OffsetDisplacementThreshold: Offset =
 /// running one's velocity, keeping its inertia), at once to or from none (Compose's
 /// `rememberAnimatedMagnifierPosition`).
 #[kompozable]
-fn remember_animated_magnifier_position(target_calculation: impl Fn() -> Offset + 'static) -> State<Offset> {
+pub(crate) fn remember_animated_magnifier_position(target_calculation: impl Fn() -> Offset + 'static) -> State<Offset> {
     let target_value = remember(|| derived_state_of(target_calculation));
     let animatable = {
         let target_value = target_value.clone();

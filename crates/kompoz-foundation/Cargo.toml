@@ -89,6 +89,10 @@ name = "text_field_selection"
 harness = false
 
 [[test]]
+name = "text_field_value"
+harness = false
+
+[[test]]
 name = "flow_layout"
 harness = false
 

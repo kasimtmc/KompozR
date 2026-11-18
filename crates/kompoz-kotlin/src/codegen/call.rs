@@ -402,7 +402,8 @@ impl Gen<'_, '_> {
                             Ty::Float => any_float,
                             Ty::Int => !any_float,
                             Ty::Long => long,
-                            Ty::OtherInt => false,
+                            // (an offset's `usize`: Kotlin's Int there — `TextRange(0, 3)`)
+                            Ty::OtherInt => !any_float && !long,
                             _ => true,
                         }
                 })

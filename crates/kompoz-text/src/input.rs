@@ -9,6 +9,9 @@ use kompoz_runtime::named;
 pub use crate::edit_command::EditCommand;
 pub use crate::edit_processor::EditProcessor;
 pub use crate::editing_buffer::{EditingBuffer, update_range_after_delete};
+pub use crate::visual_transformation::{
+    FilterText, MapOffsets, OffsetMapping, PasswordVisualTransformation, TransformedText, VisualTransformation,
+};
 
 /// The nearest character boundary of `text` at or before `offset` (within it).
 pub(crate) fn floor_boundary(text: &str, offset: usize) -> usize {
