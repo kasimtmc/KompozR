@@ -785,3 +785,33 @@ fn skewed_text_ink_leans_as_androids() {
     assert!(near(right.right, plain.right - plain.top * 0.25) && near(right.left, plain.left - plain.bottom * 0.25));
     assert!(near(left.left, plain.left + plain.top * 0.25) && near(left.right, plain.right + plain.bottom * 0.25));
 }
+
+#[test]
+fn each_paragraph_goes_its_own_way_under_content_directions() {
+    // Android's StaticLayout applies the text direction heuristic to each `\n` paragraph: under `Content` (and
+    // ContentOrLtr / ContentOrRtl) a Latin paragraph goes left to right from the left and a Hebrew one right to left
+    // from the right, each aligned, its carets and hit tests its own; `Ltr` (Compose's default through the layout
+    // direction) lays them all out left to right.
+    let text = "abc\nאבג!\nde";
+    let r = lay_fixed(text, content(16.0), 200);
+    assert_eq!(r.get_paragraph_direction(0), ResolvedTextDirection::Ltr);
+    assert_eq!(r.get_paragraph_direction(5), ResolvedTextDirection::Rtl);
+    assert_eq!(r.get_paragraph_direction(text.len() - 1), ResolvedTextDirection::Ltr);
+    let d = drawn(&r);
+    let hebrew = d.iter().find(|d| d.0 == "אבג!").unwrap_or_else(|| panic!("{d:?}"));
+    assert!(hebrew.3 && hebrew.1 > 150.0, "{hebrew:?}");
+    assert!(near(at(&r, "abc").0, 0.0) && near(at(&r, "de").0, 0.0));
+    assert!(near(r.get_line_right(1), 200.0) && r.get_line_left(1) > 150.0, "{}", r.get_line_left(1));
+    // A tap at the Hebrew line's right end puts the caret before א (byte 4), drawn on the right edge.
+    assert_eq!(r.get_offset_for_position(Offset::new(197.0, 30.0)), 4);
+    assert!(r.get_cursor_rect(4).left > 190.0, "{:?}", r.get_cursor_rect(4));
+    // A right to left text's Latin paragraph goes left to right on the left under ContentOrRtl too.
+    let rtl = lay_fixed("שלום\nabc", TextStyle { text_direction: TextDirection::ContentOrRtl, ..size(16.0) }, 200);
+    assert_eq!(rtl.get_paragraph_direction(0), ResolvedTextDirection::Rtl);
+    assert_eq!(rtl.get_paragraph_direction(10), ResolvedTextDirection::Ltr);
+    assert!(near(at(&rtl, "abc").0, 0.0));
+    // Ltr: every paragraph left to right, the Hebrew one from the left.
+    let ltr = lay_fixed(text, TextStyle { text_direction: TextDirection::Ltr, ..size(16.0) }, 200);
+    assert_eq!(ltr.get_paragraph_direction(5), ResolvedTextDirection::Ltr);
+    assert!(drawn(&ltr).iter().all(|d| d.1 < 40.0), "{:?}", drawn(&ltr));
+}

@@ -321,6 +321,11 @@ fn collection_functions() {
     assert_eq!(list, [1, 5]);
     assert_eq!(KtMutableList::set(&mut list, 1, 9), 5);
     assert_eq!(list, [1, 9]);
+    KtMutableList::reverse(&mut list);
+    assert_eq!(list, [9, 1]);
+    let state = crate::mutable_state_list_of([1, 2, 3]);
+    state.reverse();
+    assert_eq!(state.to_vec(), [3, 2, 1]);
     assert_eq!(List(3, |i| i * i), [0, 1, 4]);
 }
 

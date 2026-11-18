@@ -66,7 +66,7 @@ fun Carousel() {
         HorizontalPager(
             state = state,
             modifier = Modifier.fillMaxWidth().height(100.dp),
-            contentPadding = PaddingValues(start = 50.dp, end = 50.dp),
+            contentPadding = PaddingValues(horizontal = 50.dp),
             pageSize = PageSize.Fixed(200.dp),
             pageSpacing = 10.dp,
             snapPosition = SnapPosition.Center,

@@ -24,6 +24,7 @@ use super::selection::{
     SelectionHandleInfoKey,
 };
 use super::text_field_delegate::OnValueChange;
+use super::text_field_scroll_state::TextFieldScrollState;
 use super::text_field_size::TextFieldSizeModifiers;
 use crate::gestures::{Orientation, ScrollableDefaults, ScrollableModifiers};
 use crate::interaction::MutableInteractionSource;
@@ -344,52 +345,60 @@ pub(crate) fn basic_text_field_impl(args: BasicTextFieldArgs) {
             }
             TextFieldLineLimits::SingleLine => (1, 1),
         };
+        let menu_selection_state = text_field_selection_state.clone();
+        let body: Rc<dyn Fn()> = Rc::new(move || {
+            let inner = || {
+                // (Compose desktop's clipboard events handler: none)
+                let text_field_size = Modifier
+                    .height_for_single_line_field(&text_layout_state)
+                    .height_in_lines(&text_style, minimum_lines, maximum_lines, !single_line)
+                    .text_field_min_size(&text_style);
+                let core = TextFieldCoreModifier {
+                    is_focused: window_and_field_focused,
+                    is_drag_hovered: drag_hovered,
+                    text_layout_state: text_layout_state.clone(),
+                    text_field_state: transformed_state.clone(),
+                    text_field_selection_state: text_field_selection_state.clone(),
+                    cursor_brush: cursor_brush.clone(),
+                    writeable: enabled && !read_only,
+                    scroll_state: scroll_state.clone(),
+                    orientation,
+                };
+                let layout = TextFieldTextLayoutModifier {
+                    text_layout_state: text_layout_state.clone(),
+                    text_field_state: transformed_state.clone(),
+                    text_style: text_style.clone(),
+                    single_line,
+                    on_text_layout: on_text_layout.clone(),
+                    keyboard_options: resolved_keyboard_options.clone(),
+                };
+                let selection_state = text_field_selection_state.clone();
+                Box(
+                    modifier = text_field_size.clip_to_bounds().then_element(core),
+                    propagate_min_constraints = true,
+                    content = move || {
+                        Box(modifier = Modifier.then_element(layout));
+                        if enabled && window_and_field_focused && selection_state.is_in_touch_mode() {
+                            TextFieldSelectionHandles(selection_state.clone());
+                            if !read_only {
+                                TextFieldCursorHandle(selection_state.clone());
+                            }
+                        }
+                    },
+                );
+            };
+            decorator.decoration(&inner);
+        });
         Box(
             decoration_modifiers,
             propagate_min_constraints = true,
             content = move || {
-                // (the desktop's text context menu area: WP6's ContextMenuArea)
-                let inner = || {
-                    // (Compose desktop's clipboard events handler: none)
-                    let text_field_size = Modifier
-                        .height_for_single_line_field(&text_layout_state)
-                        .height_in_lines(&text_style, minimum_lines, maximum_lines, !single_line)
-                        .text_field_min_size(&text_style);
-                    let core = TextFieldCoreModifier {
-                        is_focused: window_and_field_focused,
-                        is_drag_hovered: drag_hovered,
-                        text_layout_state: text_layout_state.clone(),
-                        text_field_state: transformed_state.clone(),
-                        text_field_selection_state: text_field_selection_state.clone(),
-                        cursor_brush: cursor_brush.clone(),
-                        writeable: enabled && !read_only,
-                        scroll_state: scroll_state.clone(),
-                        orientation,
-                    };
-                    let layout = TextFieldTextLayoutModifier {
-                        text_layout_state: text_layout_state.clone(),
-                        text_field_state: transformed_state.clone(),
-                        text_style: text_style.clone(),
-                        single_line,
-                        on_text_layout: on_text_layout.clone(),
-                        keyboard_options: resolved_keyboard_options.clone(),
-                    };
-                    let selection_state = text_field_selection_state.clone();
-                    Box(
-                        modifier = text_field_size.clip_to_bounds().then_element(core),
-                        propagate_min_constraints = true,
-                        content = move || {
-                            Box(modifier = Modifier.then_element(layout));
-                            if enabled && window_and_field_focused && selection_state.is_in_touch_mode() {
-                                TextFieldSelectionHandles(selection_state.clone());
-                                if !read_only {
-                                    TextFieldCursorHandle(selection_state.clone());
-                                }
-                            }
-                        },
-                    );
-                };
-                decorator.decoration(&inner);
+                // (the desktop's text context menu: cut, copy, paste, select all)
+                crate::text::context_menu_area::text_field_context_menu_area(
+                    &menu_selection_state,
+                    enabled,
+                    body.clone(),
+                );
             },
         );
     })
@@ -416,7 +425,7 @@ pub(crate) fn basic_text_field_impl(args: BasicTextFieldArgs) {
 /// the text. `on_text_layout` hears of each layout. The cursor is drawn with `cursor_brush` (an unspecified color:
 /// none). `decoration_box` composes around the inner field (an icon, a placeholder, a border), calling it once.
 ///
-/// Kotlin: `BasicTextField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, readOnly: Boolean = false, textStyle: TextStyle = TextStyle.Default, keyboardOptions: KeyboardOptions = KeyboardOptions.Default, keyboardActions: KeyboardActions = KeyboardActions.Default, singleLine: Boolean = false, maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE, minLines: Int = 1, visualTransformation: VisualTransformation = VisualTransformation.None, onTextLayout: (TextLayoutResult) -> Unit = {}, interactionSource: MutableInteractionSource? = null, cursorBrush: Brush = SolidColor(Color.Black), decorationBox: @Composable (innerTextField: @Composable () -> Unit) -> Unit = @Composable { innerTextField -> innerTextField() })`
+/// Kotlin: `BasicTextField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, readOnly: Boolean = false, textStyle: TextStyle = TextStyle.Default, keyboardOptions: KeyboardOptions = KeyboardOptions.Default, keyboardActions: KeyboardActions = KeyboardActions.Default, singleLine: Boolean = false, maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE, minLines: Int = 1, visualTransformation: VisualTransformation = VisualTransformation.None, onTextLayout: (TextLayoutResult) -> Unit = {}, interactionSource: MutableInteractionSource? = null, cursorBrush: Brush = SolidColor(Color.Black), decorationBox: @Composable (innerTextField: @Composable () -> Unit) -> Unit = @Composable { innerTextField -> innerTextField() }, scrollState: TextFieldScrollState? = null)`
 #[kompozable]
 #[allow(clippy::too_many_arguments)]
 pub fn BasicTextFieldString(
@@ -436,6 +445,7 @@ pub fn BasicTextFieldString(
     #[default(None)] interaction_source: Option<MutableInteractionSource>,
     #[default(BasicTextFieldDefaults::cursor_brush())] cursor_brush: Brush,
     #[default(None)] decoration_box: Option<DecorationBox>,
+    #[default(None)] scroll_state: Option<TextFieldScrollState>,
 ) {
     let value: String = value;
     // The latest value the field had (its composition with it).
@@ -485,6 +495,7 @@ pub fn BasicTextFieldString(
         interaction_source,
         cursor_brush,
         decoration_box,
+        scroll_state,
     ));
 }
 
@@ -493,7 +504,7 @@ pub fn BasicTextFieldString(
 /// caret or selection, a composition) given to `on_value_change`, the `value` composed next shown; as
 /// [`BasicTextFieldString`] otherwise.
 ///
-/// Kotlin: `BasicTextField(value: TextFieldValue, onValueChange: (TextFieldValue) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, readOnly: Boolean = false, textStyle: TextStyle = TextStyle.Default, keyboardOptions: KeyboardOptions = KeyboardOptions.Default, keyboardActions: KeyboardActions = KeyboardActions.Default, singleLine: Boolean = false, maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE, minLines: Int = 1, visualTransformation: VisualTransformation = VisualTransformation.None, onTextLayout: (TextLayoutResult) -> Unit = {}, interactionSource: MutableInteractionSource? = null, cursorBrush: Brush = SolidColor(Color.Black), decorationBox: @Composable (innerTextField: @Composable () -> Unit) -> Unit = @Composable { innerTextField -> innerTextField() })`
+/// Kotlin: `BasicTextField(value: TextFieldValue, onValueChange: (TextFieldValue) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, readOnly: Boolean = false, textStyle: TextStyle = TextStyle.Default, keyboardOptions: KeyboardOptions = KeyboardOptions.Default, keyboardActions: KeyboardActions = KeyboardActions.Default, singleLine: Boolean = false, maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE, minLines: Int = 1, visualTransformation: VisualTransformation = VisualTransformation.None, onTextLayout: (TextLayoutResult) -> Unit = {}, interactionSource: MutableInteractionSource? = null, cursorBrush: Brush = SolidColor(Color.Black), decorationBox: @Composable (innerTextField: @Composable () -> Unit) -> Unit = @Composable { innerTextField -> innerTextField() }, scrollState: TextFieldScrollState? = null)`
 #[kompozable]
 #[allow(clippy::too_many_arguments)]
 pub fn BasicTextFieldValue(
@@ -513,6 +524,7 @@ pub fn BasicTextFieldValue(
     #[default(None)] interaction_source: Option<MutableInteractionSource>,
     #[default(BasicTextFieldDefaults::cursor_brush())] cursor_brush: Brush,
     #[default(None)] decoration_box: Option<DecorationBox>,
+    #[default(None)] scroll_state: Option<TextFieldScrollState>,
 ) {
     let composed_value = value.clone();
     let on_value_change = Rc::new(on_value_change);
@@ -539,10 +551,12 @@ pub fn BasicTextFieldValue(
         interaction_source,
         cursor_brush,
         decoration_box,
+        scroll_state,
     ));
 }
 
-/// What both value-based overloads give CoreTextField: the keyboard options as the input method's options (shown
+/// What both value-based overloads give CoreTextField (with Compose for desktop's `scrollState` an app holds, a
+/// scrollbar reading it): the keyboard options as the input method's options (shown
 /// as the session starts: the legacy field shows the keyboard as it takes the focus, whatever
 /// `showKeyboardOnFocus` says), one line not wrapping and one line tall when `single_line`.
 #[allow(clippy::too_many_arguments)]
@@ -563,6 +577,7 @@ fn legacy_core_args(
     interaction_source: Option<MutableInteractionSource>,
     cursor_brush: Brush,
     decoration_box: Option<DecorationBox>,
+    scroll_state: Option<TextFieldScrollState>,
 ) -> CoreTextFieldArgs {
     let mut ime_options = keyboard_options.to_ime_options(single_line);
     ime_options.show_keyboard = true;
@@ -583,7 +598,8 @@ fn legacy_core_args(
         enabled,
         read_only,
         decoration_box,
-        text_scroller_position: None,
+        // (Compose for desktop's overloads taking a scroll state: its scroller position)
+        text_scroller_position: scroll_state.map(|s| s.scroller_position),
     }
 }
 

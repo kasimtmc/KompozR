@@ -1166,7 +1166,12 @@ fn impl_block(cx: &Cx, imp: &ItemImpl, scan: &mut Scan) {
                 scan.items.extend(items);
             }
             ImplItem::Const(c) if is_pub(&c.vis) && !hidden(&c.attrs) => {
-                scan.items.push(value(cx, &c.ident, &c.ty, "Constant", &owner));
+                let mut it = value(cx, &c.ident, &c.ty, "Constant", &owner);
+                // (a doc line ``Kotlin: `touch` `` names it as Kotlin does: a companion's lower-case `val`)
+                if let Some(kotlin) = kotlin_doc(&c.attrs).filter(|d| !d.contains(['(', ' ', '.'])) {
+                    it.kotlin = kotlin;
+                }
+                scan.items.push(it);
             }
             _ => {}
         }

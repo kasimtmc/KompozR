@@ -1,11 +1,16 @@
 //! Taps, as Compose's `TapGestureDetector.kt`: `detect_tap_gestures` (taps, double taps, long presses, presses
-//! with a [`PressGestureScope`]), `await_first_down`, `wait_for_up_or_cancellation`.
+//! with a [`PressGestureScope`]), `await_first_down`, `wait_for_up_or_cancellation`; and Compose for desktop's
+//! `detectTapGestures(matcher, keyboardModifiers, …)` (TapGesturesDetector.skiko.kt: the events a
+//! [`PointerMatcher`] takes, with the keyboard modifiers asked for), which `detect_tap_gestures` is given a matcher
+//! or a keyboard modifiers test.
 
 use super::for_each::await_each_gesture;
+use crate::pointer_matcher::PointerMatcher;
 use kompoz_coroutines::{CoroutineScope, Job, coroutine_scope};
-use kompoz_graphics::{Density, Offset};
+use kompoz_graphics::{Density, Offset, Size};
 use kompoz_ui::input::{
-    AwaitPointerEventScope, PointerEvent, PointerEventPass, PointerInputChange, PointerInputScope, PointerType,
+    AwaitPointerEventScope, PointerEvent, PointerEventPass, PointerEventType, PointerInputChange, PointerInputScope,
+    PointerKeyboardModifiers, PointerType,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -282,20 +287,51 @@ impl PressGestureScope {
 
 pub(crate) type PositionCallback = Rc<dyn Fn(Offset)>;
 pub(crate) type PressCallback = Rc<dyn Fn(PressGestureScope, Offset) -> Pin<Box<dyn Future<Output = ()>>>>;
+/// A test of an event's keyboard modifiers (Compose's `keyboardModifiers: PointerKeyboardModifiers.() -> Boolean`).
+pub type KeyboardModifiersTest = Rc<dyn Fn(&PointerKeyboardModifiers) -> bool>;
 
 /// `detect_tap_gestures`'s callbacks, set by name, then awaited (Compose's `detectTapGestures(onDoubleTap = …,
-/// onLongPress = …, onPress = …, onTap = …)`).
+/// onLongPress = …, onPress = …, onTap = …)`). Given a [`matcher`](Self::matcher) or a
+/// [`keyboard_modifiers`](Self::keyboard_modifiers) test, it is Compose for desktop's overload
+/// `detectTapGestures(matcher = PointerMatcher.Primary, keyboardModifiers = { true }, …)` instead.
 pub struct DetectTapGestures {
     scope: PointerInputScope,
     on_double_tap: Option<PositionCallback>,
     on_long_press: Option<PositionCallback>,
     on_press: Option<PressCallback>,
     on_tap: Option<PositionCallback>,
+    matcher: Option<PointerMatcher>,
+    keyboard_modifiers: Option<KeyboardModifiersTest>,
 }
 
 impl DetectTapGestures {
     pub(crate) fn new(scope: PointerInputScope) -> DetectTapGestures {
-        DetectTapGestures { scope, on_double_tap: None, on_long_press: None, on_press: None, on_tap: None }
+        DetectTapGestures {
+            scope,
+            on_double_tap: None,
+            on_long_press: None,
+            on_press: None,
+            on_tap: None,
+            matcher: None,
+            keyboard_modifiers: None,
+        }
+    }
+
+    /// The events taken (Compose for desktop's `matcher`, [`PointerMatcher::Primary`] by default): a press and
+    /// its release both have to match; a mouse's other buttons pressed meanwhile don't end it.
+    pub fn matcher(mut self, matcher: PointerMatcher) -> Self {
+        self.matcher = Some(matcher);
+        self
+    }
+
+    /// What the keyboard's modifiers have to be for a press to count (Compose for desktop's `keyboardModifiers`);
+    /// a modifier let go before the release cancels the tap.
+    pub fn keyboard_modifiers(
+        mut self,
+        keyboard_modifiers: impl Fn(&PointerKeyboardModifiers) -> bool + 'static,
+    ) -> Self {
+        self.keyboard_modifiers = Some(Rc::new(keyboard_modifiers));
+        self
     }
 
     /// A second tap within the double tap timeout (taps then wait for it).
@@ -332,7 +368,19 @@ impl IntoFuture for DetectTapGestures {
     type IntoFuture = Pin<Box<dyn Future<Output = ()>>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        let DetectTapGestures { scope, on_double_tap, on_long_press, on_press, on_tap } = self;
+        let DetectTapGestures { scope, on_double_tap, on_long_press, on_press, on_tap, matcher, keyboard_modifiers } =
+            self;
+        if matcher.is_some() || keyboard_modifiers.is_some() {
+            let gesture = MatchedTapGesture {
+                matcher: matcher.unwrap_or_default(),
+                keyboard_modifiers: keyboard_modifiers.unwrap_or_else(|| Rc::new(|_: &PointerKeyboardModifiers| true)),
+                on_double_tap,
+                on_long_press,
+                on_press,
+                on_tap,
+            };
+            return Box::pin(gesture.detect(scope));
+        }
         Box::pin(async move {
             let density = scope.density();
             coroutine_scope(move |cs| async move {
@@ -462,6 +510,243 @@ impl TapGesture {
             None => {
                 self.launch_cancel(&reset_job);
                 self.tap(up.position);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Compose for desktop's detectTapGestures(matcher, keyboardModifiers, …)
+
+/// Compose desktop's `isAllPressedDown`: a mouse's press (a button pressed, the others may have been already), or
+/// every pointer gone down.
+pub(crate) fn is_all_pressed_down(event: &PointerEvent, require_unconsumed: bool) -> bool {
+    (event.r#type == PointerEventType::Press
+        && event.changes.iter().all(|c| c.r#type == PointerType::Mouse && (!require_unconsumed || !c.is_consumed())))
+        || event
+            .changes
+            .iter()
+            .all(|c| if require_unconsumed { c.changed_to_down() } else { c.changed_to_down_ignore_consumed() })
+}
+
+/// Compose desktop's `isAllPressedUp`: a mouse's release (of a button, others may stay pressed), or every pointer
+/// gone up.
+pub(crate) fn is_all_pressed_up(event: &PointerEvent, require_unconsumed: bool) -> bool {
+    (event.r#type == PointerEventType::Release
+        && event.changes.iter().all(|c| c.r#type == PointerType::Mouse && (!require_unconsumed || !c.is_consumed())))
+        || event
+            .changes
+            .iter()
+            .all(|c| if require_unconsumed { c.changed_to_up() } else { c.changed_to_up_ignore_consumed() })
+}
+
+/// Compose desktop's `awaitPress`: the next press `filter` takes.
+pub(crate) async fn await_press(
+    s: &AwaitPointerEventScope,
+    filter: &dyn Fn(&PointerEvent) -> bool,
+    require_unconsumed: bool,
+) -> PointerEvent {
+    loop {
+        let event = s.await_pointer_event().await;
+        if is_all_pressed_down(&event, require_unconsumed) && filter(&event) {
+            return event;
+        }
+    }
+}
+
+/// Compose desktop's `awaitReleaseOrCancelled`: the release `filter` takes; none if a pointer went out of bounds,
+/// `cancel_if` says so or a change was consumed (in the final pass). Everything consumed meanwhile when
+/// `consume_until_release`.
+pub(crate) async fn await_release_or_cancelled(
+    s: &AwaitPointerEventScope,
+    consume_until_release: bool,
+    cancel_if: &dyn Fn(&PointerEvent) -> bool,
+    filter: &dyn Fn(&PointerEvent) -> bool,
+) -> Option<PointerEvent> {
+    loop {
+        let event = s.await_pointer_event().await;
+        if event.changes.iter().any(|c| c.is_out_of_bounds(s.size(), Size::Zero)) || cancel_if(&event) {
+            return None;
+        }
+        let released = is_all_pressed_up(&event, true) && filter(&event);
+        if consume_until_release {
+            s.current_event().changes.iter().for_each(|c| c.consume());
+        }
+        // (cancelled by a consumption: the final pass after the main one looked at)
+        let consume_check = s.await_pointer_event_with(PointerEventPass::Final).await;
+        if consume_check.changes.iter().any(|c| c.is_consumed()) {
+            return None;
+        }
+        if released {
+            return Some(event);
+        }
+    }
+}
+
+/// Compose desktop's `awaitSecondPressUnconsumed`: a second press within the double tap timeout, no sooner than its
+/// minimum time after the first's release.
+async fn await_second_press_unconsumed(
+    s: &AwaitPointerEventScope,
+    first_up: &PointerInputChange,
+    filter: &dyn Fn(&PointerEvent) -> bool,
+) -> Option<PointerEvent> {
+    let vc = s.view_configuration();
+    let min_uptime = first_up.uptime_millis + vc.double_tap_min_time_millis();
+    s.with_timeout_or_null(vc.double_tap_timeout_millis(), |s| async move {
+        loop {
+            let event = await_press(&s, filter, true).await;
+            if event.changes[0].uptime_millis >= min_uptime {
+                return event;
+            }
+        }
+    })
+    .await
+}
+
+/// Compose for desktop's matcher-taking `detectTapGestures`.
+struct MatchedTapGesture {
+    matcher: PointerMatcher,
+    keyboard_modifiers: KeyboardModifiersTest,
+    on_double_tap: Option<PositionCallback>,
+    on_long_press: Option<PositionCallback>,
+    on_press: Option<PressCallback>,
+    on_tap: Option<PositionCallback>,
+}
+
+/// How a press of a matched tap ended: released, or still held when its long press timeout came, or cancelled.
+enum PressEnd {
+    Released(PointerEvent),
+    TimedOut,
+    Cancelled,
+}
+
+impl MatchedTapGesture {
+    async fn detect(self, scope: PointerInputScope) {
+        let density = scope.density();
+        let gesture = Rc::new(self);
+        coroutine_scope(move |cs| async move {
+            let press_scope = PressGestureScope::new(density);
+            loop {
+                let (gesture, cs, press_scope) = (gesture.clone(), cs.clone(), press_scope.clone());
+                scope
+                    .await_pointer_event_scope(move |s| async move { gesture.process(&s, &cs, &press_scope).await })
+                    .await;
+            }
+        })
+        .await
+    }
+
+    fn filter(&self, event: &PointerEvent) -> bool {
+        self.matcher.matches(event) && (self.keyboard_modifiers)(&event.keyboard_modifiers)
+    }
+
+    /// Launches a press's change once the reset before it is done (Compose launches them in order).
+    fn launch_after(cs: &CoroutineScope, before: &Job, block: impl Future<Output = ()> + 'static) -> Job {
+        let before = before.clone();
+        cs.launch(async move {
+            before.join().await;
+            block.await;
+        })
+    }
+
+    fn launch_on_press(&self, cs: &CoroutineScope, press: &PressGestureScope, reset: &Job, at: Offset) {
+        if let Some(on_press) = &self.on_press {
+            let (on_press, press) = (on_press.clone(), press.clone());
+            Self::launch_after(cs, reset, async move { on_press(press, at).await });
+        }
+    }
+
+    /// Waits for the press's release (within the long press timeout when there is a long press to tell).
+    async fn await_press_end(&self, s: &AwaitPointerEventScope) -> PressEnd {
+        let wait = |s: AwaitPointerEventScope| async move {
+            let cancel_if = |e: &PointerEvent| !(self.keyboard_modifiers)(&e.keyboard_modifiers);
+            await_release_or_cancelled(&s, false, &cancel_if, &|e| self.filter(e)).await
+        };
+        let release = if self.on_long_press.is_none() {
+            Some(wait(s.clone()).await)
+        } else {
+            // (Compose's `withTimeoutOrNull(longPressTimeout) { awaitReleaseOrCancelled(…) }`)
+            s.with_timeout_or_null(s.view_configuration().long_press_timeout_millis(), wait).await
+        };
+        match release {
+            None => PressEnd::TimedOut,
+            Some(None) => PressEnd::Cancelled,
+            Some(Some(r)) => {
+                r.changes.iter().for_each(|c| c.consume());
+                PressEnd::Released(r)
+            }
+        }
+    }
+
+    /// A long press: told, then everything consumed until the button the matcher takes is let go (whatever the
+    /// keyboard's modifiers then).
+    async fn long_press(
+        &self,
+        s: &AwaitPointerEventScope,
+        cs: &CoroutineScope,
+        press: &PressGestureScope,
+        reset: &Job,
+        at: Offset,
+    ) {
+        if let Some(on_long_press) = &self.on_long_press {
+            on_long_press(at);
+            let matcher = &self.matcher;
+            await_release_or_cancelled(s, true, &|_| false, &|e| matcher.matches(e)).await;
+            let press = press.clone();
+            Self::launch_after(cs, reset, async move { press.release() });
+        }
+    }
+
+    async fn process(&self, s: &AwaitPointerEventScope, cs: &CoroutineScope, press: &PressGestureScope) {
+        let p = press.clone();
+        let reset = cs.launch(async move { p.reset().await });
+        let down = await_press(s, &|e| self.filter(e), true).await;
+        down.changes[0].consume();
+        let down_at = down.changes[0].position;
+        self.launch_on_press(cs, press, &reset, down_at);
+        let first_release = match self.await_press_end(s).await {
+            PressEnd::Cancelled => {
+                let p = press.clone();
+                Self::launch_after(cs, &reset, async move { p.cancel() });
+                return;
+            }
+            PressEnd::TimedOut => {
+                self.long_press(s, cs, press, &reset, down_at).await;
+                return;
+            }
+            PressEnd::Released(r) => r,
+        };
+        let p = press.clone();
+        let released = Self::launch_after(cs, &reset, async move { p.release() });
+        let first_up_at = first_release.changes[0].position;
+        let Some(on_double_tap) = &self.on_double_tap else {
+            if let Some(on_tap) = &self.on_tap {
+                on_tap(first_up_at);
+            }
+            return;
+        };
+        let second_press = await_second_press_unconsumed(s, &first_release.changes[0], &|e| self.filter(e)).await;
+        let Some(second_press) = second_press else {
+            if let Some(on_tap) = &self.on_tap {
+                on_tap(first_up_at);
+            }
+            return;
+        };
+        second_press.changes.iter().for_each(|c| c.consume());
+        let p = press.clone();
+        let reset = Self::launch_after(cs, &released, async move { p.reset().await });
+        let second_at = second_press.changes[0].position;
+        self.launch_on_press(cs, press, &reset, second_at);
+        match self.await_press_end(s).await {
+            PressEnd::Cancelled => {
+                let p = press.clone();
+                Self::launch_after(cs, &reset, async move { p.cancel() });
+            }
+            PressEnd::TimedOut => self.long_press(s, cs, press, &reset, second_at).await,
+            PressEnd::Released(second_release) => {
+                let p = press.clone();
+                Self::launch_after(cs, &reset, async move { p.release() });
+                on_double_tap(second_release.changes[0].position);
             }
         }
     }

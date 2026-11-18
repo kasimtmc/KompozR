@@ -4,6 +4,7 @@
 use super::{PopupKind, PopupSpec};
 use crate::alignment::Alignment;
 use crate::back::{BackScope, LocalBackScope};
+use crate::input::KeyHandler;
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::modifier::Modifier;
 use crate::node::LayoutNode;
@@ -37,6 +38,26 @@ impl Default for PopupProperties {
             clipping_enabled: true,
             use_platform_default_width: false,
         }
+    }
+}
+
+/// Compose's `PopupProperties(focusable = false, dismissOnBackPress = true, dismissOnClickOutside = true,
+/// clippingEnabled = true, usePlatformDefaultWidth = false)`, named arguments in a kompozable body (and Kotlin's
+/// syntax); plain code writes the struct.
+#[kompoz_runtime::named(type)]
+pub fn PopupProperties(
+    #[default(false)] focusable: bool,
+    #[default(true)] dismiss_on_back_press: bool,
+    #[default(true)] dismiss_on_click_outside: bool,
+    #[default(true)] clipping_enabled: bool,
+    #[default(false)] use_platform_default_width: bool,
+) -> PopupProperties {
+    PopupProperties {
+        focusable,
+        dismiss_on_back_press,
+        dismiss_on_click_outside,
+        clipping_enabled,
+        use_platform_default_width,
     }
 }
 
@@ -81,7 +102,8 @@ impl PopupPositionProvider for AlignmentOffsetPositionProvider {
 /// Content shown above the window (Compose's `Popup`): placed by `popup_position_provider` if given, else at the
 /// point of the anchor's bounds `alignment` gives, aligned to it, moved by `offset`. `on_dismiss_request` runs on
 /// back (a focusable popup) and on a press outside, as `properties` say. Composed where it is called, so it gets
-/// the locals there; its content has the IsPopup semantics.
+/// the locals there; its content has the IsPopup semantics. A focusable popup's keys go to
+/// `on_preview_key_event` before its content, and to `on_key_event` after it (Compose for desktop's).
 #[kompozable]
 pub fn Popup(
     #[default(Alignment::TopStart)] alignment: Alignment,
@@ -89,6 +111,8 @@ pub fn Popup(
     #[default(None)] popup_position_provider: Option<Rc<dyn PopupPositionProvider>>,
     #[default(|| {})] on_dismiss_request: impl Fn() + 'static,
     #[default(PopupProperties::default())] properties: PopupProperties,
+    #[default(None)] on_preview_key_event: Option<KeyHandler>,
+    #[default(None)] on_key_event: Option<KeyHandler>,
     content: impl Fn() + 'static,
 ) {
     let provider = match popup_position_provider {
@@ -103,7 +127,14 @@ pub fn Popup(
         layout_direction: LocalLayoutDirection.current(),
     });
     let scope = properties.focusable.then_some(back_scope);
-    emit_popup_root(spec, scope, stack_policy(), Modifier.semantics(|c| c.popup()), content);
+    emit_popup_root(
+        spec,
+        scope,
+        stack_policy(),
+        Modifier.semantics(|c| c.popup()),
+        (on_preview_key_event, on_key_event),
+        content,
+    );
 }
 
 /// Emits a popup's root: its spec, the window root's modifiers (its own root focus target and key node), its
@@ -115,12 +146,13 @@ pub(crate) fn emit_popup_root(
     back_scope: Option<BackScope>,
     root_policy: Rc<dyn MeasurePolicy>,
     content_modifier: Modifier,
+    key_listeners: (Option<KeyHandler>, Option<KeyHandler>),
     content: impl FnOnce(),
 ) {
     let density = LocalDensity.current();
     let layout_direction = LocalLayoutDirection.current();
     let locals = current_kompozition_local_map();
-    let window_root = crate::focus::window_root_modifier()
+    let window_root = crate::focus::window_root_modifier_with_keys(key_listeners.0, key_listeners.1)
         .then(crate::layout::window_insets_rulers(crate::platform::LocalSystemInsets.current()));
     let key = current_composite_key_hash();
     emit(

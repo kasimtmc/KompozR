@@ -1,15 +1,22 @@
 //! `derived_state_of`: a value computed from states, whose readers recompose only when it changes.
 
 use crate::composer::{Composer, ScopeId};
-use crate::read::record_read;
-use crate::snapshot::StateKey;
+use crate::read::{
+    Dependency, DerivedDependency, collect_dependencies, collecting_dependencies, record_read, tell_observer,
+};
+use crate::snapshot::{StateKey, read_epoch};
 use crate::state::{SnapshotMutationPolicy, State, StateSource, structural_equality_policy};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /// A value computed from other states. Readers recompose only when the computed value itself changes, not on
-/// every change of its inputs. Made in a composition (in `remember`), it observes its inputs and recomputes as
-/// they change; elsewhere it computes at every read.
+/// every change of its inputs. Made in a composition (in `remember`), it keeps its value: it observes its inputs
+/// (computed again as the composition takes their changes, its readers told when the value changed), and it is
+/// checked as it is read, as Compose's DerivedSnapshotState: the records of the states it read, and the values
+/// of the derived states it read, are compared with what the snapshot read in sees now — anything written since
+/// (right after a write, before the composition took it; from a coroutine; in another snapshot) computes it
+/// again there, its readers told if the value changed. Made elsewhere, it computes at every read (what it reads
+/// read by its reader).
 ///
 /// ```
 /// # use kompoz_runtime::*;
@@ -33,10 +40,22 @@ struct Inner<T> {
     calc: Box<dyn Fn() -> T>,
     equivalent: Option<fn(&T, &T) -> bool>,
     value: RefCell<Option<T>>,
-    valid: Cell<bool>,
+    /// What computing it read last (Compose's ResultRecord.dependencies).
+    dependencies: RefCell<Vec<Dependency>>,
+    /// Whether every key it read is among its dependencies (a local's holder isn't: its change reaches it only
+    /// through the composition).
+    all_tracked: Cell<bool>,
+    /// Where and after how many writes it was last found up to date (Compose's validSnapshotId and
+    /// validSnapshotWriteCount): read there again with no write since, it is.
+    validated_at: Cell<Option<(i64, u64)>>,
+    /// One more at each change of its value (what a derived state reading it compares).
+    version: Cell<u64>,
+    /// One more at each computation (a check finding it computed meanwhile, by a reader it told, stops).
+    computations: Cell<u64>,
     /// The scope recording its reads, in the composition it was made in.
     observer: Cell<Option<ScopeId>>,
     composer: Weak<Composer>,
+    this: Weak<Inner<T>>,
 }
 
 impl<T> Drop for Inner<T> {
@@ -53,53 +72,135 @@ impl<T> Drop for Inner<T> {
 impl<T: Clone + 'static> Inner<T> {
     /// Computes the value again; whether it changed.
     fn recompute(&self) -> bool {
-        let next = match (self.observer.get(), self.composer.upgrade()) {
-            (Some(s), Some(c)) => c.observe_into(s, || (self.calc)()),
-            _ => (self.calc)(),
+        let (next, dependencies) = match self.observer.get() {
+            // Computed at every read: what it reads is its reader's (and dependencies of the one computing).
+            None => ((self.calc)(), Default::default()),
+            Some(s) => collect_dependencies(|| match self.composer.upgrade() {
+                Some(c) => c.observe_into(s, || (self.calc)()),
+                None => (self.calc)(),
+            }),
         };
         let changed = match &*self.value.borrow() {
             Some(old) => !self.equivalent.is_some_and(|eq| eq(old, &next)),
             None => true,
         };
-        *self.value.borrow_mut() = Some(next);
-        self.valid.set(true);
+        let old = self.value.replace(Some(next));
+        drop(old);
+        self.all_tracked.set(dependencies.all_tracked());
+        *self.dependencies.borrow_mut() = dependencies.list;
+        self.validated_at.set(Some(read_epoch()));
+        self.computations.set(self.computations.get() + 1);
+        if changed {
+            self.version.set(self.version.get() + 1);
+        }
         changed
     }
 
-    fn read(&self, subscribe: bool) -> std::cell::Ref<'_, T> {
-        if !self.valid.get() || self.observer.get().is_none() {
-            self.recompute(); // unobserved: always fresh
+    /// Whether what it read is no longer what the snapshot read in sees (Compose's `isValid`, negated).
+    fn stale(&self) -> bool {
+        if self.value.borrow().is_none() {
+            return true;
         }
+        let epoch = read_epoch();
+        if self.validated_at.get() == Some(epoch) {
+            return false;
+        }
+        let computations = self.computations.get();
+        let dependencies = self.dependencies.borrow().clone();
+        for dependency in &dependencies {
+            let changed = dependency.changed();
+            if self.computations.get() != computations {
+                // Computed meanwhile: a derived state it read changed and told its readers, this one too.
+                return false;
+            }
+            if changed {
+                return true;
+            }
+        }
+        self.validated_at.set(Some(read_epoch()));
+        false
+    }
+
+    /// Its readers told its value changed: those in its composition recompose, the others (a layout's, a
+    /// drawing's, a snapshot flow's) are told as a state's are — Compose's reads of a derived state report its
+    /// dependencies to them.
+    fn tell_readers(&self) {
+        if let Some(c) = self.composer.upgrade() {
+            c.invalidate_readers(self.key);
+        }
+        crate::snapshot::state_changed(self.key);
+    }
+
+    /// Brought up to date for a read: computed again if what it read changed, its readers told if its value did.
+    fn refresh(&self) {
+        if self.observer.get().is_none() {
+            self.recompute(); // unobserved: always fresh
+            return;
+        }
+        let had_value = self.value.borrow().is_some();
+        if self.stale() && self.recompute() && had_value {
+            self.tell_readers();
+        }
+    }
+
+    /// The composition took a change of something it read: computed again unless a read already did since
+    /// (every key it read checked by its dependencies, none changed), its readers told if its value changed.
+    fn on_inputs_changed(&self) {
+        if self.all_tracked.get() && !self.stale() {
+            return;
+        }
+        if self.recompute() {
+            self.tell_readers();
+        }
+    }
+
+    fn read(&self, subscribe: bool) -> std::cell::Ref<'_, T> {
+        self.refresh();
         if subscribe {
-            record_read(self.key);
+            if self.observer.get().is_none() {
+                tell_observer(self.key);
+            } else {
+                if collecting_dependencies() {
+                    let this: Weak<dyn DerivedDependency> = self.this.clone();
+                    crate::read::record_dependency(self.key, Dependency::Derived(this, self.version.get()));
+                }
+                record_read(self.key);
+            }
         }
         std::cell::Ref::map(self.value.borrow(), |v| v.as_ref().unwrap())
+    }
+}
+
+/// What a derived state reading this one checks of it: brought up to date, its value's version.
+impl<T: Clone + 'static> DerivedDependency for Inner<T> {
+    fn validated_version(&self) -> u64 {
+        self.refresh();
+        self.version.get()
     }
 }
 
 impl<T: Clone + 'static> DerivedState<T> {
     pub fn new(calc: impl Fn() -> T + 'static, policy: SnapshotMutationPolicy<T>) -> Self {
         let composer = Composer::current();
-        let inner = Rc::new(Inner {
+        let inner = Rc::new_cyclic(|this: &Weak<Inner<T>>| Inner {
             key: StateKey::new(),
             calc: Box::new(calc),
             equivalent: policy.equivalent,
             value: RefCell::new(None),
-            valid: Cell::new(false),
+            dependencies: RefCell::new(Vec::new()),
+            all_tracked: Cell::new(false),
+            validated_at: Cell::new(None),
+            version: Cell::new(0),
+            computations: Cell::new(0),
             observer: Cell::new(None),
             composer: composer.as_ref().map_or_else(Weak::new, Rc::downgrade),
+            this: this.clone(),
         });
         if let Some(c) = composer {
             let weak = Rc::downgrade(&inner);
-            let composer = Rc::downgrade(&c);
             let s = c.new_observer(Rc::new(move || {
-                if let (Some(inner), Some(c)) = (weak.upgrade(), composer.upgrade())
-                    && inner.recompute()
-                {
-                    c.invalidate_readers(inner.key);
-                    // Its readers outside the composition (a layout's, a drawing's, a snapshot flow's) are told
-                    // as a state's are: Compose's reads of a derived state report its dependencies to them.
-                    crate::snapshot::state_changed(inner.key);
+                if let Some(inner) = weak.upgrade() {
+                    inner.on_inputs_changed();
                 }
             }));
             inner.observer.set(Some(s));

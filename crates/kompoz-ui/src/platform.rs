@@ -10,7 +10,7 @@ use crate::graphics_context::GraphicsContext;
 use crate::layout::LayoutCoordinates;
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx};
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
-use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Path, Rect, Size};
+use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Offset, Path, Rect, Size};
 use kompoz_runtime::{KompozitionLocal, MutableState, SnapshotMutationPolicy, mutable_state_of};
 use kompoz_text::{FakeFontFamilyResolver, FontFamilyResolver, FontFamilyResolverImpl};
 use std::cell::Cell;
@@ -376,12 +376,23 @@ impl ViewConfiguration {
 // Handles the locals give
 
 /// The window the UI is in (Compose's WindowInfo): whether it has the focus, its size, the keyboard modifiers
-/// held. Read through states: what reads them is told when they change.
-#[derive(Clone, PartialEq)]
+/// held. Read through states: what reads them is told when they change. And where the last pointer event was (Compose
+/// for desktop's scene's `lastKnownPointerPosition`: not a state, read when wanted).
+#[derive(Clone)]
 pub struct WindowInfo {
     pub(crate) is_window_focused: MutableState<bool>,
     pub(crate) container_size: MutableState<IntSize>,
     pub(crate) keyboard_modifiers: MutableState<u32>,
+    pub(crate) last_known_pointer_position: Rc<Cell<Option<Offset>>>,
+}
+
+impl PartialEq for WindowInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_window_focused == other.is_window_focused
+            && self.container_size == other.container_size
+            && self.keyboard_modifiers == other.keyboard_modifiers
+            && Rc::ptr_eq(&self.last_known_pointer_position, &other.last_known_pointer_position)
+    }
 }
 
 impl Default for WindowInfo {
@@ -390,6 +401,7 @@ impl Default for WindowInfo {
             is_window_focused: mutable_state_of(true),
             container_size: mutable_state_of(IntSize::Zero),
             keyboard_modifiers: mutable_state_of(0),
+            last_known_pointer_position: Rc::new(Cell::new(None)),
         }
     }
 }
@@ -405,6 +417,11 @@ impl WindowInfo {
     /// The keyboard modifiers held (the input package's bit set).
     pub fn keyboard_modifiers(&self) -> u32 {
         self.keyboard_modifiers.get()
+    }
+    /// Where the last pointer event was, px in the window; none once the mouse left it, or before any (Compose for
+    /// desktop's `ComposeScene.lastKnownPointerPosition`).
+    pub fn last_known_pointer_position(&self) -> Option<Offset> {
+        self.last_known_pointer_position.get()
     }
 }
 

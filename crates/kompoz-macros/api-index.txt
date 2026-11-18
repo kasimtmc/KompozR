@@ -7,13 +7,14 @@
 * kompozable BasicSecureTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable BasicText rdddddddddd crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable BasicTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
-* kompozable BasicTextFieldString rrdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
-* kompozable BasicTextFieldValue rrdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable BasicTextFieldString rrddddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable BasicTextFieldValue rrddddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable BasicTooltipBox rrrddddr crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable BitmapImage rrdddddd crates/kompoz-foundation/src/image.rs
 * fn BitmapPainter rddd crates/kompoz-ui/src/draw/painter.rs
 * kompozable Box dddd crates/kompoz-foundation/src/layout/box_.rs
 * kompozable BoxWithConstraints dddr crates/kompoz-foundation/src/layout/box_with_constraints.rs
+* kompozable BoxWithTooltip rdddddr crates/kompoz-foundation/src/tooltip_area.rs
 kompoz-runtime/macros kompozable Boxed dr crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/scroll kompozable Boxes rrr crates/kompoz-foundation/tests/scroll.rs
 kompoz-runtime/macros kompozable Button rdr crates/kompoz-runtime/tests/macros.rs
@@ -28,6 +29,9 @@ kompoz-runtime/macros kompozable Column rr crates/kompoz-runtime/tests/common/mo
 kompoz-runtime/runtime kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/subcomposition kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 * fn Constraints dddd crates/kompoz-graphics/src/constraints.rs
+* kompozable ContextMenuArea rddr crates/kompoz-foundation/src/context_menu.rs
+* kompozable ContextMenuDataProvider rr crates/kompoz-foundation/src/context_menu.rs
+* fn ContextMenuItem rdr crates/kompoz-foundation/src/context_menu.rs
 kompoz-runtime/runtime kompozable ContextUser - crates/kompoz-runtime/tests/runtime.rs
 * kompozable ContextualFlowColumn rdddddddr crates/kompoz-foundation/src/layout/contextual_flow_layout.rs
 * kompozable ContextualFlowRow rdddddddr crates/kompoz-foundation/src/layout/contextual_flow_layout.rs
@@ -40,7 +44,9 @@ kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runtime.rs
 * kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable DefaultCursorHandle rr crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable DefaultOpenContextMenu rrrr crates/kompoz-foundation/src/context_menu.rs
 * kompozable Dialog rdr crates/kompoz-ui/src/window/dialog.rs
+* fn DialogProperties dddd crates/kompoz-ui/src/window/dialog.rs
 * kompozable DisableCutCopy r crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable DisableSelection r crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable DisposableEffect rr crates/kompoz-runtime/src/remember.rs
@@ -60,6 +66,7 @@ kompoz-foundation/grid kompozable GridLeaf rrrr crates/kompoz-foundation/tests/g
 * kompozable Group dddddddddr crates/kompoz-ui/src/draw/vector.rs
 * kompozable HandlePopup rrr crates/kompoz-foundation/src/text/selection/handles.rs
 * kompozable HorizontalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs
+* kompozable HorizontalScrollbar rdddd crates/kompoz-foundation/src/scrollbar.rs
 * kompozable Image rrddddd crates/kompoz-foundation/src/image.rs
 * fn ImageBitmap rrddd crates/kompoz-graphics/src/image/bitmap.rs
 * kompozable InlineChildren rr crates/kompoz-foundation/src/text/inline_content.rs
@@ -113,6 +120,9 @@ kompoz-runtime/macros kompozable Local d crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/clickable kompozable LogInteractions rr crates/kompoz-foundation/tests/clickable.rs
 kompoz-foundation/pager kompozable LogInteractions rr crates/kompoz-foundation/tests/pager.rs
 kompoz-foundation/scroll kompozable LogInteractions rr crates/kompoz-foundation/tests/scroll.rs
+* kompozable MenuItem rrr crates/kompoz-foundation/src/context_menu.rs
+* kompozable MenuItemContent rrrr crates/kompoz-foundation/src/context_menu.rs
+* kompozable MenuSeparator r crates/kompoz-foundation/src/context_menu.rs
 kompoz-runtime/runtime kompozable Middle - crates/kompoz-runtime/tests/runtime.rs
 kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/tests/text_input.rs
 * kompozable MultiContentLayout rdr crates/kompoz-ui/src/layout/composables.rs
@@ -125,7 +135,8 @@ kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/t
 * fn PasswordVisualTransformation d crates/kompoz-text/src/visual_transformation.rs
 * kompozable Path rddddddddddddd crates/kompoz-ui/src/draw/vector.rs
 kompoz-platform/dbus kompozable Plus r crates/kompoz-platform/tests/dbus.rs
-* kompozable Popup dddddr crates/kompoz-ui/src/window/popup.rs
+* kompozable Popup dddddddr crates/kompoz-ui/src/window/popup.rs
+* fn PopupProperties ddddd crates/kompoz-ui/src/window/popup.rs
 * kompozable PredictiveBackHandler dr crates/kompoz-ui/src/back.rs
 kompoz-runtime/macros kompozable Provide rr crates/kompoz-runtime/tests/macros.rs
 * kompozable ProvideSaveableStateRegistry rr crates/kompoz-runtime/src/saveable.rs
@@ -141,6 +152,9 @@ kompoz-runtime/macros fn RoundedCornerShape r crates/kompoz-runtime/tests/macros
 kompoz-foundation/lazy kompozable Row20 rr crates/kompoz-foundation/tests/lazy.rs
 kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros.rs
 kompoz/kotlin kompozable RustBadge rd crates/kompoz/tests/kotlin.rs
+kompoz/named_forms kompozable RustLayoutForms - crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustListForms rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustScrollForms - crates/kompoz/tests/named_forms.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/macros.rs
@@ -179,6 +193,7 @@ kompoz-foundation/selection kompozable Text rdd crates/kompoz-foundation/tests/s
 kompoz-runtime/macros kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/runtime kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/subcomposition kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
+* kompozable TextContextMenuArea rrrr crates/kompoz-foundation/src/text/context_menu_area.rs
 * kompozable TextFieldCursorHandle r crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable TextFieldSelectionHandles r crates/kompoz-foundation/src/text/basic_text_field.rs
 * fn TextFieldValue ddd crates/kompoz-text/src/input.rs
@@ -187,6 +202,7 @@ kompoz-runtime/subcomposition kompozable Text r crates/kompoz-runtime/tests/comm
 * fn TextLinkStyles dddd crates/kompoz-text/src/link.rs
 * fn TextStyle dddddddddddddddddddddddddd crates/kompoz-text/src/text_style.rs
 kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.rs
+* kompozable TooltipArea rdddr crates/kompoz-foundation/src/tooltip_area.rs
 * kompozable TooltipPopup rrrrr crates/kompoz-foundation/src/basic_tooltip.rs
 kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
@@ -195,6 +211,7 @@ kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-founda
 * kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
 kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-foundation/tests/layout_modifiers.rs
 * kompozable VerticalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs
+* kompozable VerticalScrollbar rdddd crates/kompoz-foundation/src/scrollbar.rs
 * kompozable WindowButtonView rrrr crates/kompoz-platform/src/app/title_bar.rs
 * kompozable WindowButtons rrrrr crates/kompoz-platform/src/app/title_bar.rs
 * kompozable WindowFrame rrrr crates/kompoz-platform/src/app/title_bar.rs
@@ -258,6 +275,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method collapse dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method combined_clickable ddddddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
 * method combined_clickable_indication rrdddddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method context_menu_open_detector ddr crates/kompoz-foundation/src/context_menu.rs Modifier as ContextMenuModifiers
 * method copy dd crates/kompoz-graphics/src/brush.rs BorderStroke
 * method copy ddd crates/kompoz-text/src/input.rs TextFieldValue
 * method copy dddd crates/kompoz-graphics/src/color.rs Color
@@ -364,7 +382,9 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method on_all_nodes_with_content_description rddd crates/kompoz-test/src/lib.rs KompozTestRule
 * method on_all_nodes_with_tag rd crates/kompoz-test/src/lib.rs KompozTestRule
 * method on_all_nodes_with_text rddd crates/kompoz-test/src/lib.rs KompozTestRule
+* method on_click ddddddr crates/kompoz-foundation/src/on_click.rs Modifier as OnClickModifiers
 * method on_click dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method on_drag dddddr crates/kompoz-foundation/src/gestures/drag_matcher.rs Modifier as OnDragModifiers
 * method on_fill_data dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method on_first_visible dddr crates/kompoz-ui/src/layout/visibility.rs Modifier
 * method on_ime_action rdr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -407,6 +427,8 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method release d crates/kompoz-test/src/input.rs MouseInjectionScope
 * kompozable remember_animated_magnifier_position r crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-foundation/src/basic_tooltip.rs
+* kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
+* kompozable remember_cursor_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_default_prefetch_scheduler - crates/kompoz-foundation/src/lazy/layout/prefetch.rs
 * kompozable remember_draggable2d_state r crates/kompoz-foundation/src/gestures/draggable2d.rs
 * kompozable remember_draggable_state r crates/kompoz-foundation/src/gestures/draggable.rs
@@ -421,6 +443,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_lazy_list_state_with_cache_window rdd crates/kompoz-foundation/src/lazy/list/state.rs
 * kompozable remember_lazy_list_state_with_prefetch_strategy ddd crates/kompoz-foundation/src/lazy/list/state.rs
 * kompozable remember_lazy_staggered_grid_state dd crates/kompoz-foundation/src/lazy/staggeredgrid/state.rs
+* kompozable remember_old_scrollbar_adapter r crates/kompoz-foundation/src/scrollbar.rs
 * kompozable remember_on_text_layout r crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable remember_overscroll_effect - crates/kompoz-foundation/src/overscroll.rs
 * kompozable remember_pager_item_provider_lambda rrr crates/kompoz-foundation/src/pager/lazy_layout_pager.rs
@@ -428,9 +451,11 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_platform_default_fling_behavior - crates/kompoz-foundation/src/gestures/fling.rs
 * kompozable remember_platform_overscroll_effect - crates/kompoz-foundation/src/overscroll_android.rs
 * kompozable remember_platform_overscroll_factory dd crates/kompoz-foundation/src/overscroll_android.rs
+* kompozable remember_popup_position_provider_at_position rddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_scroll_state d crates/kompoz-foundation/src/scroll.rs
 * kompozable remember_scrollable2d_state r crates/kompoz-foundation/src/gestures/scrollable2d_state.rs
 * kompozable remember_scrollable_state r crates/kompoz-foundation/src/gestures/scrollable_state.rs
+* kompozable remember_scrollbar_adapter r crates/kompoz-foundation/src/scrollbar.rs
 * kompozable remember_selection_controller - crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable remember_selection_state - crates/kompoz-foundation/src/text/selection/state.rs
 * kompozable remember_snap_fling_behavior r crates/kompoz-foundation/src/gestures/snapping/snap_fling_behavior.rs
@@ -438,7 +463,10 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_snap_fling_behavior_for_list rd crates/kompoz-foundation/src/gestures/snapping/lazy_list.rs
 * kompozable remember_spline_based_decay - crates/kompoz-animation/src/spline_decay.rs
 * kompozable remember_staggered_grid_item_provider_lambda rr crates/kompoz-foundation/src/lazy/staggeredgrid/grid.rs
+* kompozable remember_text_field_horizontal_scroll_state d crates/kompoz-foundation/src/text/text_field_scroll_state.rs
+* kompozable remember_text_field_scroll_state rd crates/kompoz-foundation/src/text/text_field_scroll_state.rs
 * kompozable remember_text_field_state dd crates/kompoz-foundation/src/text/input/text_field_state.rs
+* kompozable remember_text_field_vertical_scroll_state d crates/kompoz-foundation/src/text/text_field_scroll_state.rs
 * kompozable remember_text_measurer d crates/kompoz-ui/src/text.rs
 * kompozable remember_transformable_state r crates/kompoz-foundation/src/gestures/transformable_state.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs

@@ -99,3 +99,11 @@ harness = false
 [[test]]
 name = "kotlin_layouts"
 harness = false
+
+[[test]]
+name = "kotlin_desktop"
+harness = false
+
+[[test]]
+name = "named_forms"
+harness = false

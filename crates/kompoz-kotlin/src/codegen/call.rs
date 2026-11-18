@@ -274,16 +274,23 @@ impl Gen<'_, '_> {
             return self.emit(&c, Target::Path(quote!(#path), c.rust.clone()), args, loc, &n.name);
         }
         // The index's functions (and overloaded constructors: `Color(…)`).
-        let items: Vec<&'static crate::index::Item> = free_functions(&n.name).collect();
+        let mut items: Vec<&'static crate::index::Item> = free_functions(&n.name).collect();
         if !items.is_empty() {
             if items.iter().any(|i| i.has(crate::index::flags::OVERLOADED)) {
                 return self.overloaded(&n.name, items[0], args, loc);
             }
+            // (Kotlin's other constructors of the type the function is named after: its associated functions of that
+            // Kotlin name — `PaddingValues(all)` is `PaddingValues::all`, `PaddingValues(horizontal = 8.dp)` is
+            // `PaddingValues::hv`)
+            items.extend(constructor_overloads(&n.name));
             if let Some(c) = self.choose(&items, args, loc) {
                 let item = c.item.expect("an index item");
                 let name = ident(&c.rust, nspan);
                 let path = if item.krate == "kompoz_runtime" && item.module.starts_with("kt") {
                     quote_spanned!(span=> #kt::#name)
+                } else if !item.owner.is_empty() {
+                    let owner = ident(item.owner, nspan);
+                    quote_spanned!(span=> #owner::#name)
                 } else {
                     quote!(#name)
                 };

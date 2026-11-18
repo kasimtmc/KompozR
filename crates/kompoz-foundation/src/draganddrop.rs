@@ -6,8 +6,9 @@
 //! to `target`. Both are kompoz-ui's [`DragAndDropNode`]s, delegated to (the host runs drags within the app and
 //! takes those from outside: [`kompoz_ui::draganddrop`]).
 
-use crate::gestures::{AwaitPointerEventScopeGestures, await_pointer_slop_or_cancellation};
-use kompoz_graphics::{IntSize, Offset, Size};
+use crate::gestures::{PointerInputScopeGestures, PointerInputScopeMatchedDrags};
+use crate::pointer_matcher::PointerMatcher;
+use kompoz_graphics::{IntSize, Offset};
 use kompoz_runtime::named;
 use kompoz_ui::draganddrop::{
     DragAndDropEvent, DragAndDropNode, DragAndDropSourceModifierNode, DragAndDropStartTransferScope, DragAndDropTarget,
@@ -15,10 +16,7 @@ use kompoz_ui::draganddrop::{
     is_request_drag_and_drop_transfer_required, request_drag_and_drop_transfer,
 };
 use kompoz_ui::draw::{CacheDrawModifierNode, CacheDrawScope, DrawResult, DrawScope, GraphicsLayer};
-use kompoz_ui::input::{
-    AwaitPointerEventScope, PointerButton, PointerEvent, PointerEventPass, PointerEventType, PointerInputScope,
-    PointerType, SuspendingPointerInputModifierNode,
-};
+use kompoz_ui::input::{PointerButton, PointerInputScope, SuspendingPointerInputModifierNode};
 use kompoz_ui::layout::LayoutAwareModifierNode;
 use kompoz_ui::modifier::DelegatedNode;
 use kompoz_ui::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, node_capabilities};
@@ -265,151 +263,21 @@ impl LayoutAwareModifierNode for DragAndDropSourceNode {
 }
 
 /// How a source's drag starts (Compose for desktop's `DragAndDropSourceDefaults.DefaultStartDetector`): a mouse's
-/// primary drag past the touch slop (`detectDragGestures(matcher = PointerMatcher.mouse(Primary))`), a finger's
-/// long press (`detectTapGestures(matcher = PointerMatcher.touch, onLongPress)`), each its own detector, at where it
-/// went down. (Android's does the same in one loop: a mouse's drag, any other pointer's long press.)
+/// primary drag past the touch slop (`detectDragGestures(matcher = PointerMatcher.mouse(Primary), onDragStart)`), a
+/// finger's long press (`detectTapGestures(matcher = PointerMatcher.touch, onLongPress)`), each its own detector, at
+/// where it went down. (Android's does the same in one loop: a mouse's drag, any other pointer's long press.)
 async fn default_start_detector(scope: PointerInputScope, request_drag_and_drop_transfer: Rc<dyn Fn(Offset)>) {
     let request = request_drag_and_drop_transfer;
     kompoz_coroutines::coroutine_scope(move |cs| async move {
         let (s, r) = (scope.clone(), request.clone());
-        cs.launch(async move { detect_mouse_drag_start(s, r).await });
-        detect_touch_long_press(scope, request).await;
+        cs.launch(async move {
+            s.detect_drag_gestures_with_matcher(PointerMatcher::mouse(PointerButton::Primary), |_| {})
+                .on_drag_start(move |offset| r(offset))
+                .await
+        });
+        scope.detect_tap_gestures().matcher(PointerMatcher::Touch).on_long_press(move |offset| request(offset)).await;
     })
     .await
-}
-
-/// A mouse's press of its primary button (the desktop's `PointerMatcher.mouse(PointerButton.Primary)`).
-fn is_primary_mouse(event: &PointerEvent) -> bool {
-    event.button == Some(PointerButton::Primary) && event.changes.iter().all(|c| c.r#type == PointerType::Mouse)
-}
-
-/// A finger's (the desktop's `PointerMatcher.touch`: no button, all touches).
-fn is_touch(event: &PointerEvent) -> bool {
-    event.button.is_none() && event.changes.iter().all(|c| c.r#type == PointerType::Touch)
-}
-
-/// Compose desktop's `isAllPressedDown`.
-fn is_all_pressed_down(event: &PointerEvent, require_unconsumed: bool) -> bool {
-    (event.r#type == PointerEventType::Press
-        && event.changes.iter().all(|c| c.r#type == PointerType::Mouse && (!require_unconsumed || !c.is_consumed())))
-        || event
-            .changes
-            .iter()
-            .all(|c| if require_unconsumed { c.changed_to_down() } else { c.changed_to_down_ignore_consumed() })
-}
-
-/// Compose desktop's `isAllPressedUp`.
-fn is_all_pressed_up(event: &PointerEvent, require_unconsumed: bool) -> bool {
-    (event.r#type == PointerEventType::Release
-        && event.changes.iter().all(|c| c.r#type == PointerType::Mouse && (!require_unconsumed || !c.is_consumed())))
-        || event
-            .changes
-            .iter()
-            .all(|c| if require_unconsumed { c.changed_to_up() } else { c.changed_to_up_ignore_consumed() })
-}
-
-/// Compose desktop's `awaitPress`: the next press `filter` takes.
-async fn await_press(
-    s: &AwaitPointerEventScope,
-    filter: fn(&PointerEvent) -> bool,
-    require_unconsumed: bool,
-) -> PointerEvent {
-    loop {
-        let event = s.await_pointer_event().await;
-        if is_all_pressed_down(&event, require_unconsumed) && filter(&event) {
-            return event;
-        }
-    }
-}
-
-/// Compose desktop's `awaitReleaseOrCancelled`: the release `filter` takes; none if the pointer went out of
-/// bounds or a change was consumed (in the final pass).
-async fn await_release_or_cancelled(
-    s: &AwaitPointerEventScope,
-    consume_until_release: bool,
-    filter: fn(&PointerEvent) -> bool,
-) -> Option<PointerEvent> {
-    loop {
-        let event = s.await_pointer_event().await;
-        if event.changes.iter().any(|c| c.is_out_of_bounds(s.size(), Size::Zero)) {
-            return None;
-        }
-        let released = is_all_pressed_up(&event, true) && filter(&event);
-        if consume_until_release {
-            s.current_event().changes.iter().for_each(|c| c.consume());
-        }
-        // (cancelled by a consumption: the final pass after the main one looked at)
-        let consume_check = s.await_pointer_event_with(PointerEventPass::Final).await;
-        if consume_check.changes.iter().any(|c| c.is_consumed()) {
-            return None;
-        }
-        if released {
-            return Some(event);
-        }
-    }
-}
-
-/// The mouse's part (Compose desktop's `detectDragGestures(matcher)` with only `onDragStart`): a primary press
-/// dragged past the touch slop starts the drag at the press.
-async fn detect_mouse_drag_start(scope: PointerInputScope, request: Rc<dyn Fn(Offset)>) {
-    loop {
-        let request = request.clone();
-        scope
-            .await_pointer_event_scope(move |s| async move {
-                let press = await_press(&s, is_primary_mouse, false).await;
-                let down = press.changes[0].clone();
-                // (Compose desktop's awaitDragStartOnSlop)
-                let mut drag;
-                loop {
-                    drag = await_pointer_slop_or_cancellation(&s, down.id, down.r#type, None, Offset::Zero, |c, _| {
-                        c.consume()
-                    })
-                    .await;
-                    if drag.as_ref().is_none_or(|d| d.is_consumed()) {
-                        break;
-                    }
-                }
-                if drag.is_some() {
-                    request(down.position);
-                    s.drag(down.id, |c| c.consume()).await;
-                }
-            })
-            .await;
-    }
-}
-
-/// The finger's part (Compose desktop's `detectTapGestures(matcher = touch, onLongPress)`): a press nobody consumed
-/// held for the long press timeout starts the drag at it; everything consumed until it lifts.
-async fn detect_touch_long_press(scope: PointerInputScope, request: Rc<dyn Fn(Offset)>) {
-    loop {
-        let request = request.clone();
-        scope
-            .await_pointer_event_scope(move |s| async move {
-                let down = await_press(&s, is_touch, true).await;
-                down.changes[0].consume();
-                let position = down.changes[0].position;
-                let timeout = s.view_configuration().long_press_timeout_millis();
-                let cancelled = Rc::new(Cell::new(false));
-                let c = cancelled.clone();
-                let first_release = s
-                    .with_timeout_or_null(timeout, |s| async move {
-                        let release = await_release_or_cancelled(&s, false, is_touch).await;
-                        match &release {
-                            Some(r) => r.changes.iter().for_each(|c| c.consume()),
-                            None => c.set(true),
-                        }
-                        release
-                    })
-                    .await
-                    .flatten();
-                if cancelled.get() || first_release.is_some() {
-                    return;
-                }
-                request(position);
-                await_release_or_cancelled(&s, true, is_touch).await;
-            })
-            .await;
-    }
 }
 
 // ---- The default shadow ----

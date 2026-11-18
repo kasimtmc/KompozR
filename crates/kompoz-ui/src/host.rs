@@ -826,6 +826,11 @@ impl KompozHost {
     }
 
     /// The window info's keyboard modifiers (what key events carry).
+    /// Where the last pointer event was (none: the mouse left the window).
+    pub(crate) fn note_pointer_position(&self, position: Option<Offset>) {
+        self.window_info.last_known_pointer_position.set(position);
+    }
+
     pub(crate) fn window_info_keyboard_modifiers(&self, modifiers: KeyModifiers) {
         if self.window_info.keyboard_modifiers.peek() != modifiers.0 {
             self.window_info.keyboard_modifiers.set(modifiers.0);

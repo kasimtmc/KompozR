@@ -263,6 +263,11 @@ impl NodeCoordinator {
             self.invalidate_layer();
         } else if self.layout_node().is_some_and(|n| n.is_placed()) {
             self.invalidate_parent_layer();
+            // (the layout drawn again too: Compose's parent layer draws its children afresh, the display list keeps
+            // their drawings — a thumb its parent's measure made shorter, nothing else changed, isn't kept)
+            if let Some(n) = self.layout_node() {
+                n.invalidate_draw();
+            }
         }
         self.on_draw_size_changed();
         if let Some(n) = self.layout_node() {

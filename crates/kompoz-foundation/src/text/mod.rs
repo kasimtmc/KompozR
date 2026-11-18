@@ -15,6 +15,7 @@ mod basic_secure_text_field;
 mod basic_text;
 mod basic_text_field;
 pub mod context_menu;
+pub mod context_menu_area;
 pub mod core_text_field;
 mod dead_key_combiner;
 mod inline_content;
@@ -34,6 +35,7 @@ pub mod text_field_delegate;
 pub mod text_field_key_input;
 pub mod text_field_pointer;
 pub mod text_field_scroll;
+pub mod text_field_scroll_state;
 pub(crate) mod text_field_size;
 pub mod text_layout_result_proxy;
 pub mod undo_manager;
@@ -48,6 +50,10 @@ pub use basic_text::{BasicText, BasicTextValue};
 pub use basic_text_field::{
     BasicTextField, BasicTextFieldDefaults, BasicTextFieldString, BasicTextFieldValue, CursorHandle,
     CursorHandleHeight, CursorHandleWidth, TextFieldDecorator,
+};
+pub use context_menu_area::{
+    BasicTextContextMenu, LocalTextContextMenu, TextContextMenu, TextContextMenuAction, TextContextMenuArea,
+    TextManager,
 };
 pub use core_text_field::DecorationBox;
 pub use dead_key_combiner::{COMBINING_ACCENT, COMBINING_ACCENT_MASK, DeadKeyCombiner, get_dead_char};
@@ -68,4 +74,8 @@ pub use modifiers::text_annotated_string::OnTextLayout;
 pub use pointer_icon::TextPointerIcon;
 pub use selection::{
     LocalSelectionRegistrar, LocalTextSelectionColors, SelectionRegistrar, SelectionRegistrarRef, TextSelectionColors,
+};
+pub use text_field_scroll_state::{
+    TextFieldScrollState, remember_text_field_horizontal_scroll_state, remember_text_field_scroll_state,
+    remember_text_field_vertical_scroll_state,
 };

@@ -390,6 +390,9 @@ fn roots(host: &KompozHost) -> Vec<Rc<LayoutNode>> {
 
 /// Processes an event, nothing of the host borrowed while the nodes run.
 fn process(host: &KompozHost, event: PointerInputEvent, in_bounds: bool) -> ProcessResult {
+    if let Some(p) = event.pointers.first() {
+        host.note_pointer_position((event.r#type != PointerEventType::Exit).then_some(p.position));
+    }
     let processor = host.input.borrow().processor.clone();
     let result = processor.process(event, &roots(host), in_bounds);
     // (a drag a handler started: it takes the pointer once the event is handled)

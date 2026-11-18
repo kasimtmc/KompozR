@@ -1220,7 +1220,48 @@ fn rtl_nested_horizontal_scrolls_hand_over_the_right_way() {
     assert!((bounds(&rule, "tutamak").left - (kb.left - 200.0)).abs() < 0.5, "{:?} {kb:?}", bounds(&rule, "tutamak"));
 }
 
+fn pager_follows_its_page_count_and_its_derived_pages_are_read_at_once() {
+    // Compose's measure reads the state's page count (the item provider is a derived state of it, up to date when
+    // read): fewer pages than the current one's bring it to the last; settled and target pages (derived states)
+    // read right after a scroll in a coroutine are its new pages, not the old ones.
+    let count = mutable_state_of(5);
+    let pager: Rc<RefCell<Option<PagerState>>> = Rc::new(RefCell::new(None));
+    let scope = new_scope();
+    let seen: Rc<RefCell<Vec<(i32, i32)>>> = Rc::new(RefCell::new(Vec::new()));
+    let (n, p, sc) = (count.clone(), pager.clone(), scope.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let n = n.clone();
+            let state = remember_pager_state(page_count = move || n.get());
+            *p.borrow_mut() = Some(state.clone());
+            *sc.borrow_mut() = Some(remember_coroutine_scope());
+            HorizontalPager(
+                state = state.clone(),
+                modifier = Modifier.fill_max_width().height(100.dp()),
+                page_content =
+                    |page| Text(format!("Sayfa {page}"), modifier = Modifier.test_tag(format!("page{page}"))),
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    let pager = pager.borrow().clone().unwrap();
+    assert_eq!((pager.settled_page(), pager.target_page()), (0, 0));
+    let (s, out) = (pager.clone(), seen.clone());
+    launch(&scope, async move {
+        s.scroll_to_page(3).await;
+        out.borrow_mut().push((s.settled_page(), s.target_page()));
+    });
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), [(3, 3)]);
+    assert!(near(x(&rule, "page3"), 0.0));
+    count.set(2);
+    rule.wait_for_idle();
+    assert_eq!((pager.page_count(), pager.current_page(), pager.settled_page()), (2, 1, 1));
+    assert!(near(x(&rule, "page1"), 0.0) && !has(&rule, "page3"));
+}
+
 tests!(
+    pager_follows_its_page_count_and_its_derived_pages_are_read_at_once,
     horizontal_pager_drags_snaps_and_animates,
     pager_pages_of_a_fixed_size_snap_where_asked,
     pager_measured_without_end_shows_its_first_pages,

@@ -944,6 +944,7 @@ pub fn core_text_field(args: CoreTextFieldArgs) {
                 if show_handle_and_magnifier { text_field_magnifier(Modifier, &manager) } else { Modifier };
 
             let decoration_box: DecorationBox = decoration_box.unwrap_or_else(|| Rc::new(|inner: &dyn Fn()| inner()));
+            let manager_for_menu = manager.clone();
             let core = CoreInner {
                 state: state.clone(),
                 manager: manager.clone(),
@@ -968,7 +969,7 @@ pub fn core_text_field(args: CoreTextFieldArgs) {
                 show_handle_and_magnifier,
                 read_only,
             };
-            CoreTextFieldRootBox(decoration_box_modifier, move || {
+            CoreTextFieldRootBox(decoration_box_modifier, manager_for_menu, move || {
                 let core = core.clone();
                 decoration_box(&move || core.compose());
             });
@@ -979,11 +980,18 @@ pub fn core_text_field(args: CoreTextFieldArgs) {
 /// The decoration box's root (Compose's CoreTextFieldRootBox): a box passing its min constraints on.
 #[track_caller]
 #[allow(non_snake_case)]
-fn CoreTextFieldRootBox(modifier: Modifier, content: impl Fn() + 'static) {
+fn CoreTextFieldRootBox(modifier: Modifier, manager: Rc<TextFieldSelectionManager>, content: impl Fn() + 'static) {
+    let content: Rc<dyn Fn()> = Rc::new(content);
     kompoz_runtime::group(|| {
         kompoz_runtime::kompozable_block!({
-            // (the desktop's text context menu area around the content: WP6's ContextMenuArea)
-            Box(modifier = modifier, propagate_min_constraints = true, content = content);
+            // (the desktop's text context menu area around the content: cut, copy, paste, select all)
+            Box(
+                modifier = modifier,
+                propagate_min_constraints = true,
+                content = move || {
+                    crate::text::context_menu_area::legacy_text_field_context_menu_area(&manager, content.clone())
+                },
+            );
         })
     })
 }

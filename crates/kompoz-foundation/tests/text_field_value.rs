@@ -1372,7 +1372,78 @@ fn prepared_selection_keeps_the_column_for_vertical_moves() {
     assert_eq!(state.cached_x, None);
 }
 
+fn multi_line_field_paragraphs_go_their_own_way() {
+    // C++ 21925: each `\n` paragraph takes its own direction from its first strong character (Android's text
+    // direction heuristics): the Latin one from the left, the Hebrew one from the right, right to left; a click at
+    // the right end of the Hebrew line puts the caret before its first letter (not after the "!", as a left to right
+    // paragraph would have it). (Its value-based field, and the state-based one too.) Compose's text direction
+    // `Content` (ContentOrLtr here) is the C++'s default: Compose's own default, Unspecified, is the layout direction
+    // for every paragraph.
+    let text = "abc\nאבג!";
+    let style = TextStyle { text_direction: kompoz_text::TextDirection::Content, ..style16() };
+    let style2 = style.clone();
+    let value = mutable_state_of(text.to_string());
+    let state = TextFieldState::new(text);
+    let (v, s) = (value.clone(), state.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let (v, s, style) = (v.clone(), s.clone(), style2.clone());
+            Column(
+                content = move || {
+                    let v2 = v.clone();
+                    BasicTextFieldString(
+                        v.get(),
+                        move |it: String| v2.set(it),
+                        modifier = Modifier.width(200.dp()).test_tag("alan"),
+                        text_style = style.clone(),
+                    );
+                    BasicTextField(
+                        s.clone(),
+                        modifier = Modifier.width(200.dp()).test_tag("durum"),
+                        text_style = style.clone(),
+                    );
+                },
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    let p = ime(&rule);
+    let canvas = rule.draw();
+    for (tag, top) in [("alan", bounds(&rule, "alan")), ("durum", bounds(&rule, "durum"))] {
+        let drawn = |t: &str| {
+            canvas
+                .texts
+                .iter()
+                .enumerate()
+                .filter(|(_, x)| x.as_str() == t)
+                .map(|(i, _)| (canvas.baselines[i].x - top.left, canvas.rtl[i], canvas.baselines[i].y))
+                .find(|(_, _, y)| *y > top.top && *y < top.bottom)
+        };
+        let latin = drawn("abc").unwrap_or_else(|| panic!("{tag}: {:?}", canvas.texts));
+        // (the "!" a neutral at the right to left paragraph's level: one run with the letters, on their left)
+        let hebrew = drawn("אבג!").unwrap_or_else(|| panic!("{tag}: {:?}", canvas.texts));
+        assert!(latin.0 < 2.0 && !latin.1, "{tag}: {latin:?}");
+        assert!(hebrew.0 > 150.0 && hebrew.1, "{tag}: {hebrew:?}");
+    }
+    // A click at the right end of the Hebrew line: the caret before its first letter (byte 4).
+    let field = bounds(&rule, "alan");
+    rule.host().pointer_down(at(field.right - 3.0, field.top + 30.0), -1, 0, PointerType::Mouse);
+    rule.host().pointer_up(at(field.right - 3.0, field.top + 30.0), -1, 0);
+    rule.wait_for_idle();
+    assert!(
+        p.changed.borrow().last().is_some_and(|s| (s.selection_start, s.selection_end) == (4, 4)),
+        "{:?}",
+        p.changed.borrow().last().map(|s| (s.selection_start, s.selection_end))
+    );
+    let durum = bounds(&rule, "durum");
+    rule.host().pointer_down(at(durum.right - 3.0, durum.top + 30.0), -1, 0, PointerType::Mouse);
+    rule.host().pointer_up(at(durum.right - 3.0, durum.top + 30.0), -1, 0);
+    rule.wait_for_idle();
+    assert_eq!(state.selection(), TextRange::new(4, 4));
+}
+
 tests!(
+    multi_line_field_paragraphs_go_their_own_way,
     typing_goes_through_the_input_session_in_utf8,
     input_method_compositions_and_corrections,
     only_text_changes_are_text_changes,

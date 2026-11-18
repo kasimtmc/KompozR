@@ -115,3 +115,18 @@ pub fn text(s: impl ::core::convert::Into<::std::string::String>) -> ::std::stri
         );
     })
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn paddings() -> ::std::vec::Vec<PaddingValues> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        ::kompoz::runtime::kt::list_of([
+            PaddingValues::all(16.dp()),
+            PaddingValues::hv(12.dp(), 8.dp()),
+            PaddingValues::hv(50.dp(), 0.dp()),
+            PaddingValues::hv(0.dp(), 3.dp()),
+            PaddingValues(start = 1.dp(), top = 2.dp()),
+            PaddingValues(top = 5.dp()),
+        ])
+    })
+}

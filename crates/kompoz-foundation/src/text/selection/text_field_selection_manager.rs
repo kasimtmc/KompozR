@@ -245,7 +245,7 @@ impl TextFieldSelectionManager {
         }
     }
 
-    fn request_focus(&self) {
+    pub(crate) fn request_focus(&self) {
         let requester = self.focus_requester.borrow().clone();
         if let Some(r) = requester {
             r.request_focus_with(FocusDirection::Enter);

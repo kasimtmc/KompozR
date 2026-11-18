@@ -141,6 +141,7 @@ impl<A: ArrangementAxis> Arrangement<A> {
 
     /// `space` between children, the group placed by `alignment` in what is left: a [`HorizontalAlignment`] for a
     /// Row, a [`VerticalAlignment`] for a Column (Compose's `Arrangement.spacedBy(space, alignment)`).
+    /// Kotlin: `spacedBy(space: Dp, alignment: Alignment.Horizontal)`
     pub fn spaced_by_aligned<L: ArrangementAlignment<Axis = A>>(space: Dp, alignment: L) -> Arrangement<A> {
         let alignment = alignment.into_spacing_alignment();
         // (a horizontal one mirrors right to left, a vertical one has no direction)
@@ -345,6 +346,7 @@ impl AbsoluteArrangement {
 
     /// `space` between children from the left (or the top), the group placed by `alignment` (Compose's
     /// `Arrangement.Absolute.spacedBy(space, alignment)`).
+    /// Kotlin: `spacedBy(space: Dp, alignment: Alignment.Horizontal)`
     pub fn spaced_by_aligned<L: ArrangementAlignment>(space: Dp, alignment: L) -> Arrangement<L::Axis> {
         Arrangement::of(Kind::SpacedAligned {
             space,

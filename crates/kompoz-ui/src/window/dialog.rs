@@ -34,6 +34,24 @@ impl Default for DialogProperties {
     }
 }
 
+/// Compose's `DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true, usePlatformDefaultWidth =
+/// true, decorFitsSystemWindows = true)`, named arguments in a kompozable body (and Kotlin's syntax); plain code
+/// writes the struct.
+#[kompoz_runtime::named(type)]
+pub fn DialogProperties(
+    #[default(true)] dismiss_on_back_press: bool,
+    #[default(true)] dismiss_on_click_outside: bool,
+    #[default(true)] use_platform_default_width: bool,
+    #[default(true)] decor_fits_system_windows: bool,
+) -> DialogProperties {
+    DialogProperties {
+        dismiss_on_back_press,
+        dismiss_on_click_outside,
+        use_platform_default_width,
+        decor_fits_system_windows,
+    }
+}
+
 /// The platform's margins of a dialog's content (C++'s): at the sides, at the top and bottom.
 const PLATFORM_MARGIN_X: Dp = Dp(48.0);
 const PLATFORM_MARGIN_Y: Dp = Dp(24.0);
@@ -72,7 +90,7 @@ pub fn Dialog(
     }
     let policy: Rc<dyn MeasurePolicy> =
         remember_keyed(margins, move || Rc::new(DialogRootPolicy { margins }) as Rc<dyn MeasurePolicy>);
-    emit_popup_root(spec, Some(back_scope), policy, Modifier.semantics(|c| c.dialog()), content);
+    emit_popup_root(spec, Some(back_scope), policy, Modifier.semantics(|c| c.dialog()), (None, None), content);
 }
 
 /// A dialog root's policy: the window's size, its content measured within the margins and centered in them.

@@ -96,12 +96,25 @@ impl IdSet {
 // ---------------------------------------------------------------------------------------------------------------
 // Records and state objects
 
-/// What every record starts with: the snapshot that wrote it, and the next (older) one.
+/// What every record starts with: the snapshot that wrote it, the next (older) one, and its stamp: a number no
+/// other value of any state had, given anew whenever the record is written (in place too). A derived state
+/// keeps the stamps of what it read, to tell later whether what a snapshot sees of them is still that.
 #[repr(C)]
 pub(crate) struct RecordHead {
     id: AtomicI64,
     next: AtomicPtr<RecordHead>,
+    stamp: AtomicU64,
 }
+
+/// A stamp no record had (see [`RecordHead`]).
+fn next_stamp() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Relaxed)
+}
+
+/// Writes of any state in any snapshot so far (a record made, written in place, or applied to a parent): when it
+/// and the snapshot read in are as they were, no state a derived state read can have another value now.
+static WRITES: AtomicU64 = AtomicU64::new(0);
 
 /// One value of a state, written in the snapshot `head.id`.
 #[repr(C)]
@@ -112,7 +125,11 @@ struct Record<T> {
 
 fn new_record<T>(value: T, id: i64) -> *mut RecordHead {
     Box::into_raw(Box::new(Record {
-        head: RecordHead { id: AtomicI64::new(id), next: AtomicPtr::new(ptr::null_mut()) },
+        head: RecordHead {
+            id: AtomicI64::new(id),
+            next: AtomicPtr::new(ptr::null_mut()),
+            stamp: AtomicU64::new(next_stamp()),
+        },
         value,
     })) as *mut RecordHead
 }
@@ -224,9 +241,18 @@ impl<T: Clone + Send + Sync + 'static> StateCell<T> {
         self.key
     }
 
-    /// Runs `f` with the value the snapshot this thread runs in sees (told to its read observer if `observe`).
-    pub(crate) fn with<R>(&self, observe: bool, f: impl FnOnce(&T) -> R) -> R {
-        with_readable(self, observe, |r| f(unsafe { &(*(r as *const Record<T>)).value }))
+    /// Runs `f` with the value the snapshot this thread runs in sees (told to its read observer if `observe`,
+    /// and then a dependency of the derived state computing, if one is).
+    pub(crate) fn with<R>(self: &Arc<Self>, observe: bool, f: impl FnOnce(&T) -> R) -> R {
+        with_readable(&**self, observe, |r| {
+            if observe && crate::read::collecting_dependencies() {
+                // SAFETY: a record this snapshot reads (see with_readable).
+                let stamp = unsafe { (*r).stamp.load(Acquire) };
+                let object: Arc<dyn StateObject> = self.clone();
+                crate::read::record_dependency(self.key, crate::read::Dependency::State(object, stamp));
+            }
+            f(unsafe { &(*(r as *const Record<T>)).value })
+        })
     }
 
     /// Sets the value, unless it is equivalent to the one it has (its policy).
@@ -413,6 +439,7 @@ fn open_ids(g: &Globals) -> IdSet {
 
 /// A new global view (under the lock): its invalid set the open snapshots', at `id`.
 fn replace_view(g: &mut Globals, id: i64) {
+    WRITES.fetch_add(1, Release); // (what the global snapshot sees may differ: a snapshot applied, say)
     let fresh = Box::into_raw(Box::new(GlobalView { id, invalid: open_ids(g) }));
     let old = VIEW.swap(fresh, Release);
     if !old.is_null() {
@@ -552,9 +579,11 @@ fn write<'a>(object: &Arc<dyn StateObject>, decide: impl FnOnce(*mut RecordHead)
         let current = find(&**object, s.id, &s.invalid);
         let Write::Value(set) = decide(current) else { return };
         let own = unsafe { (*current).id.load(Relaxed) } == s.id && !reading();
-        if let Some(fresh) = set(own.then_some(current), s.id) {
-            prepend(&**object, fresh, s.id);
+        match set(own.then_some(current), s.id) {
+            Some(fresh) => prepend(&**object, fresh, s.id),
+            None => unsafe { (*current).stamp.store(next_stamp(), Release) },
         }
+        WRITES.fetch_add(1, Release);
         s.state.lock().modified.add(object);
         observer = s.write_observer.clone();
     } else {
@@ -572,15 +601,18 @@ fn write<'a>(object: &Arc<dyn StateObject>, decide: impl FnOnce(*mut RecordHead)
             if let Some(fresh) = set(None, id) {
                 prepend(&**object, fresh, id);
             }
+            WRITES.fetch_add(1, Release);
             let mut g = guard.borrow_mut();
             let next = g.next_id;
             g.next_id += 1;
             replace_view(&mut g, next);
         } else {
             let own = unsafe { (*current).id.load(Relaxed) } == view.id && !reading();
-            if let Some(fresh) = set(own.then_some(current), view.id) {
-                prepend(&**object, fresh, view.id);
+            match set(own.then_some(current), view.id) {
+                Some(fresh) => prepend(&**object, fresh, view.id),
+                None => unsafe { (*current).stamp.store(next_stamp(), Release) },
             }
+            WRITES.fetch_add(1, Release);
         }
         guard.borrow_mut().global_modified.add(object);
         first_global_write = !GLOBAL_DIRTY.swap(true, AcqRel);
@@ -621,6 +653,30 @@ pub fn state_changed(key: StateKey) {
             o();
         }
     }
+}
+
+/// The stamp of the record of `object` the snapshot this thread runs in sees (read by no observer): what a
+/// derived state compares with the stamp it saw when it computed.
+pub(crate) fn readable_stamp(object: &dyn StateObject) -> u64 {
+    // SAFETY: a record this snapshot reads (see with_readable).
+    with_readable(object, false, |r| unsafe { (*r).stamp.load(Acquire) })
+}
+
+/// Where this thread reads (the snapshot it runs in, or the global one as it is now) and how many writes there
+/// were so far: the same pair later says no state read here can have changed meanwhile.
+pub(crate) fn read_epoch() -> (i64, u64) {
+    let writes = WRITES.load(Acquire);
+    let current = CURRENT.with(|c| c.get());
+    // SAFETY: the Entered that set it holds it.
+    let id = match unsafe { current.as_ref() } {
+        Some(s) => s.id,
+        None if !on_ui_thread() => {
+            let _g = lock();
+            load_view(Relaxed).id
+        }
+        None => load_view(Acquire).id,
+    };
+    (id, writes)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -931,6 +987,7 @@ impl MutableSnapshot {
                     let applied = find(&**object, s.id, &s.invalid);
                     let copy = unsafe { object.copy_record(applied, p.id) };
                     prepend(&**object, copy, p.id);
+                    WRITES.fetch_add(1, Release);
                     unsafe { (*applied).id.store(INVALID_SNAPSHOT, Release) };
                     pst.modified.add(object);
                     g.to_prune.insert(object.key(), Arc::downgrade(object));

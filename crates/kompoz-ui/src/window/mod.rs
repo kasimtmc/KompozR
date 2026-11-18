@@ -9,9 +9,14 @@
 //! A popup's coordinates are the host window's (C++'s): its content's `bounds_in_root` are where it is on the
 //! window.
 
+mod desktop_popup;
 mod dialog;
 mod popup;
 
+pub use desktop_popup::{
+    PopupPositionProviderAtPosition, remember_component_rect_position_provider, remember_cursor_position_provider,
+    remember_popup_position_provider_at_position,
+};
 pub use dialog::{Dialog, DialogProperties};
 pub use popup::{AlignmentOffsetPositionProvider, Popup, PopupPositionProvider, PopupProperties};
 

@@ -97,11 +97,7 @@ kompoz! {
     fun Tasks() {
         val tasks = remember { mutableStateListOf(1, 2, 3) }
         Column {
-            Text("Ters", modifier = Modifier.clickable {
-                val reversed = tasks.reversed()
-                tasks.clear()
-                tasks.addAll(reversed)
-            })
+            Text("Ters", modifier = Modifier.clickable { tasks.reverse() })
             Text("Doldur", modifier = Modifier.clickable { tasks.clear(); tasks.addAll(listOf(4, 5)) })
             LazyColumn(modifier = Modifier.height(200.dp)) {
                 items(tasks, key = { it }) { Text("görev $it") }

@@ -24,7 +24,8 @@ use kompoz_coroutines::{Job, catch_cancellation, snapshot_flow};
 use kompoz_graphics::{Density, Dp, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::{
-    MutableState, Saveable, Saver, mutable_float_state_of, mutable_state_of, named, named_args, remember_keyed,
+    DerivedState, MutableState, Saveable, Saver, derived_state_of, mutable_float_state_of, mutable_state_of, named,
+    named_args, remember_keyed,
 };
 use kompoz_ui::input::{
     IndirectPointerEvent, IndirectPointerInputModifierNode, NestedScrollSource, PointerEvent, PointerEventPass,
@@ -369,6 +370,8 @@ struct StateInner<T> {
     last_velocity: MutableState<f32>,
     drag_target: MutableState<Option<T>>,
     anchors: MutableState<Arc<dyn DraggableAnchors<T>>>,
+    /// Compose's `targetValue`: `derivedStateOf { dragTarget ?: calculateTargetValue(offset) }`.
+    target_value: DerivedState<T>,
     // (the drag scope's: Compose's anchoredDragScope)
     left_bound: RefCell<Option<T>>,
     right_bound: RefCell<Option<T>>,
@@ -386,6 +389,26 @@ impl<T: AnchorKey> AnchoredDragScope for StateDragScope<T> {
     }
 }
 
+/// Compose's `calculateTargetValue` (its target value calculation fix on: ComposeFoundationFlags'
+/// `isAnchoredDraggableTargetValueCalculationFixEnabled`, on by default): the value at `current_offset`.
+fn calculate_target_value<T: AnchorKey>(
+    current_value: &T,
+    anchors: &Arc<dyn DraggableAnchors<T>>,
+    current_offset: f32,
+) -> T {
+    if current_offset.is_nan() {
+        return current_value.clone();
+    }
+    // Anchors may share an offset: the current value's has priority. (An anchored drag may move to a value not among
+    // the anchors yet: its NaN position falls back to the current value.)
+    let current_value_offset = anchors.position_of(current_value);
+    if current_value_offset.is_nan() || current_offset == current_value_offset {
+        current_value.clone()
+    } else {
+        anchors.closest_anchor(current_offset).unwrap_or_else(|| current_value.clone())
+    }
+}
+
 fn empty_draggable_anchors<T: AnchorKey>() -> Arc<dyn DraggableAnchors<T>> {
     Arc::new(DefaultDraggableAnchors::<T>::new(Vec::new(), Vec::new()))
 }
@@ -393,6 +416,18 @@ fn empty_draggable_anchors<T: AnchorKey>() -> Arc<dyn DraggableAnchors<T>> {
 impl<T: AnchorKey> AnchoredDraggableState<T> {
     /// Compose's primary constructor: no anchors yet.
     fn make(initial_value: T) -> AnchoredDraggableState<T> {
+        let current_value = mutable_state_of(initial_value.clone());
+        let offset = mutable_float_state_of(f32::NAN);
+        let drag_target = mutable_state_of(None);
+        let anchors = mutable_state_of(empty_draggable_anchors());
+        let target_value = {
+            let (current_value, offset, drag_target, anchors) =
+                (current_value.clone(), offset.clone(), drag_target.clone(), anchors.clone());
+            derived_state_of(move || match drag_target.get() {
+                Some(t) => t,
+                None => calculate_target_value(&current_value.get(), &anchors.get(), offset.get()),
+            })
+        };
         let inner = Rc::new(StateInner {
             confirm_value_change: RefCell::new(Rc::new(|_: &T| true)),
             positional_threshold: RefCell::new(None),
@@ -400,35 +435,18 @@ impl<T: AnchorKey> AnchoredDraggableState<T> {
             snap_animation_spec: RefCell::new(None),
             decay_animation_spec: RefCell::new(None),
             drag_mutex: MutatorMutex::new(),
-            current_value: mutable_state_of(initial_value.clone()),
+            current_value,
             settled_value: mutable_state_of(initial_value),
-            offset: mutable_float_state_of(f32::NAN),
+            offset,
             last_velocity: mutable_float_state_of(0.0),
-            drag_target: mutable_state_of(None),
-            anchors: mutable_state_of(empty_draggable_anchors()),
+            drag_target,
+            anchors,
+            target_value,
             left_bound: RefCell::new(None),
             right_bound: RefCell::new(None),
             distance: Cell::new(f32::NAN),
         });
         AnchoredDraggableState { inner }
-    }
-
-    /// Compose's `calculateTargetValue` (its target value calculation fix on: ComposeFoundationFlags'
-    /// `isAnchoredDraggableTargetValueCalculationFixEnabled`, on by default).
-    fn calculate_target_value(&self, current_offset: f32) -> T {
-        let current_value = self.inner.current_value.get();
-        if current_offset.is_nan() {
-            return current_value;
-        }
-        // Anchors may share an offset: the current value's has priority. (An anchored drag may move to a value not
-        // among the anchors yet: its NaN position falls back to the current value.)
-        let anchors = self.inner.anchors.get();
-        let current_value_offset = anchors.position_of(&current_value);
-        if current_value_offset.is_nan() || current_offset == current_value_offset {
-            current_value
-        } else {
-            anchors.closest_anchor(current_offset).unwrap_or(current_value)
-        }
     }
 
     fn confirm(&self, value: &T) -> bool {
@@ -455,15 +473,10 @@ impl<T: AnchorKey> AnchoredDraggableState<T> {
         self.inner.settled_value.get()
     }
 
-    /// Where it is heading: an animation's target, else the anchor nearest the offset (Compose's `targetValue`).
-    /// Worked out as it is read (Compose's is a derived state: KompozR's made in a composition are worked out again
-    /// only as the composition observes their inputs change, stale right after a write — an anchored drag to a
-    /// value reads it as soon as it set its target); what it reads is recorded for its readers all the same.
+    /// Where it is heading: an animation's target, else the anchor nearest the offset (Compose's `targetValue`, a
+    /// derived state: up to date when read right after a write, its readers told only when it changes).
     pub fn target_value(&self) -> T {
-        match self.inner.drag_target.get() {
-            Some(t) => t,
-            None => self.calculate_target_value(self.offset()),
-        }
+        self.inner.target_value.get()
     }
 
     /// Its offset, px; NaN before it has anchors (Compose's `offset`).

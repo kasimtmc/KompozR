@@ -463,6 +463,13 @@ impl Composer {
     // ---- Reads and invalidation ----
 
     /// Records that the running scope read `key`.
+    /// A local's holder read by the running scope (and by the derived state computing, if one is: a key it can't
+    /// check, which reaches it through the composition).
+    fn record_local_read(&self, key: StateKey) {
+        crate::read::note_read(key);
+        self.record_read(key);
+    }
+
     pub(crate) fn record_read(&self, key: StateKey) {
         let mut st = self.state.borrow_mut();
         let st = &mut *st;
@@ -1281,7 +1288,7 @@ impl Composer {
             self.record_context_locals_read();
             return None;
         };
-        self.record_read(holder.key);
+        self.record_local_read(holder.key);
         Some(holder.peek())
     }
 
@@ -1289,7 +1296,7 @@ impl Composer {
     /// provides others, or no longer one).
     fn record_context_locals_read(&self) {
         if let Some(p) = &self.parent {
-            self.record_read(p.0.locals_key);
+            self.record_local_read(p.0.locals_key);
         }
     }
 
@@ -1305,7 +1312,7 @@ impl Composer {
     pub(crate) fn locals_kept(&self) -> Vec<Provided> {
         let locals = self.state.borrow().locals.clone();
         for p in locals.iter().filter(|p| p.replaced_when_changed()) {
-            self.record_read(p.holder.key);
+            self.record_local_read(p.holder.key);
         }
         self.record_context_locals_read();
         locals
@@ -1315,7 +1322,7 @@ impl Composer {
     pub(crate) fn locals(&self) -> Vec<Provided> {
         let locals = self.state.borrow().locals.clone();
         for p in &locals {
-            self.record_read(p.holder.key);
+            self.record_local_read(p.holder.key);
         }
         self.record_context_locals_read();
         locals

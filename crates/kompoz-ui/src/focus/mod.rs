@@ -341,6 +341,24 @@ pub(crate) fn window_root_modifier() -> Modifier {
     Modifier.then_element(RootKeyInputElement).then_element(RootFocusTargetElement)
 }
 
+/// A popup's root modifiers with its key listeners (Compose for desktop's popup layer's `setKeyEventListener`):
+/// `on_preview_key_event` sees the keys going down first, `on_key_event` those going up before the root's focus
+/// moves.
+pub(crate) fn window_root_modifier_with_keys(
+    on_preview_key_event: Option<crate::input::KeyHandler>,
+    on_key_event: Option<crate::input::KeyHandler>,
+) -> Modifier {
+    let mut m = Modifier;
+    if let Some(preview) = on_preview_key_event {
+        m = m.on_preview_key_event(move |e| preview(e));
+    }
+    m = m.then_element(RootKeyInputElement);
+    if let Some(key) = on_key_event {
+        m = m.on_key_event(move |e| key(e));
+    }
+    m.then_element(RootFocusTargetElement)
+}
+
 #[derive(PartialEq)]
 struct RootKeyInputElement;
 

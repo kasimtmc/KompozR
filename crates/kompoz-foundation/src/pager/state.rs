@@ -22,8 +22,8 @@ use crate::lazy::layout::{
 use kompoz_animation::{AnimationSpec, MutatePriority, animate, spring};
 use kompoz_graphics::{Constraints, Density, Dp, Offset};
 use kompoz_runtime::{
-    MutableState, SavedValue, Saver, kompozable, mutable_state_of, named, remember_saveable_with,
-    without_read_observation,
+    DerivedState, MutableState, SavedValue, Saver, derived_state_of, kompozable, mutable_state_of, named,
+    remember_saveable_with, without_read_observation,
 };
 use kompoz_ui::semantics::CollectionInfo;
 use std::cell::{Cell, RefCell};
@@ -144,6 +144,9 @@ pub(crate) struct PagerStateInner {
     internal_interaction_source: MutableInteractionSource,
     programmatic_scroll_target_page: MutableState<i32>,
     settled_page_state: MutableState<i32>,
+    /// Compose's `settledPage` and `targetPage`: derived states (structural equality).
+    settled_page: DerivedState<i32>,
+    target_page: DerivedState<i32>,
     pub(crate) prefetch_state: LazyLayoutPrefetchState,
     pub(crate) cache_window_logic: Rc<CacheWindowLogic>,
     cache_window_scope: Rc<PagerCacheWindowScope>,
@@ -219,6 +222,18 @@ impl PagerState {
                 }
             })));
             let window: Rc<dyn LazyLayoutCacheWindow> = Rc::new(PagerCacheWindow(me.clone()));
+            // (computed through the state, which holds them: read only while it lives)
+            let state_of = |me: &Weak<PagerStateInner>| {
+                let me = me.clone();
+                move || PagerState { inner: me.upgrade().expect("a pager state's derived state read while it lives") }
+            };
+            let settled = state_of(me);
+            let settled_page = derived_state_of(move || {
+                let s = settled();
+                if s.is_scroll_in_progress() { s.inner.settled_page_state.get() } else { s.current_page() }
+            });
+            let target = state_of(me);
+            let target_page = derived_state_of(move || target().calculate_target_page());
             PagerStateInner {
                 page_count: RefCell::new(page_count),
                 page_count_generation: mutable_state_of(0),
@@ -243,6 +258,8 @@ impl PagerState {
                 internal_interaction_source: MutableInteractionSource::new(),
                 programmatic_scroll_target_page: mutable_state_of(-1),
                 settled_page_state: mutable_state_of(current_page),
+                settled_page,
+                target_page,
                 cache_window_logic: CacheWindowLogic::new(window, false),
                 cache_window_scope: Rc::new(PagerCacheWindowScope {
                     state: me.clone(),
@@ -304,18 +321,16 @@ impl PagerState {
         self.inner.scroll_position.current_page_offset_fraction.get()
     }
 
-    /// The page it last settled on: the current page when not scrolling (Compose's `settledPage`). Compose's is
-    /// a derived state; this computes at each read (what it reads observed): a derived state made in a composition
-    /// is brought up to date at the next frame in KompozR, and a coroutine reading it right after a scroll would
-    /// see the old page.
+    /// The page it last settled on: the current page when not scrolling (Compose's `settledPage`, a derived
+    /// state: up to date when read right after a scroll, its readers told only when it changes).
     pub fn settled_page(&self) -> i32 {
-        if self.is_scroll_in_progress() { self.inner.settled_page_state.get() } else { self.current_page() }
+        self.inner.settled_page.get()
     }
 
     /// The page a scroll heads to: an animated scroll's or fling's target, a drag's next page once past the
-    /// threshold, else the current page (Compose's `targetPage`; computed at each read as `settled_page`).
+    /// threshold, else the current page (Compose's `targetPage`, a derived state as `settled_page`).
     pub fn target_page(&self) -> i32 {
-        self.calculate_target_page()
+        self.inner.target_page.get()
     }
 
     fn calculate_target_page(&self) -> i32 {

@@ -115,20 +115,35 @@ fn selection_container_impl(
         SimpleLayout(modifier.then(manager.modifier()).then(magnifier), move || {
             let manager = inner_manager.clone();
             let content = content.clone();
-            KompozitionLocalProvider(&[LocalSelectionRegistrar.provides(Some(inner_registrar.clone()))], move || {
-                content();
-                // The handles, while a finger's selection has the focus.
-                if manager.is_in_touch_mode()
-                    && manager.has_focus()
-                    && !manager.is_trivially_collapsed_selection()
-                    && let Some(selection) = manager.selection()
-                {
-                    for is_start_handle in [true, false] {
-                        let manager = manager.clone();
-                        key(&is_start_handle, move || selection_handle(&manager, &selection, is_start_handle));
-                    }
-                }
-            });
+            let inner_registrar = inner_registrar.clone();
+            // (the desktop's text context menu: copy, select all)
+            let area_manager = manager.clone();
+            crate::text::context_menu_area::selection_context_menu_area(
+                &area_manager,
+                Rc::new(move || {
+                    let manager = manager.clone();
+                    let content = content.clone();
+                    KompozitionLocalProvider(
+                        &[LocalSelectionRegistrar.provides(Some(inner_registrar.clone()))],
+                        move || {
+                            content();
+                            // The handles, while a finger's selection has the focus.
+                            if manager.is_in_touch_mode()
+                                && manager.has_focus()
+                                && !manager.is_trivially_collapsed_selection()
+                                && let Some(selection) = manager.selection()
+                            {
+                                for is_start_handle in [true, false] {
+                                    let manager = manager.clone();
+                                    key(&is_start_handle, move || {
+                                        selection_handle(&manager, &selection, is_start_handle)
+                                    });
+                                }
+                            }
+                        },
+                    );
+                }),
+            );
         });
 
         let manager_key = Rc::as_ptr(&manager) as usize;

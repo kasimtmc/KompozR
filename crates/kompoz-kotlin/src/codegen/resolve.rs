@@ -561,6 +561,12 @@ pub(crate) fn free_functions(kotlin: &str) -> impl Iterator<Item = &'static Item
     lookup(kotlin).iter().filter(|i| i.kind == Kind::Function && i.owner.is_empty() && i.via.is_empty())
 }
 
+/// Kotlin's constructors of a type that a Rust type's associated functions are (their doc line naming them
+/// `Type(…)`: `PaddingValues::all` is `PaddingValues(all: Dp)`), the type's name `kotlin`.
+pub(crate) fn constructor_overloads(kotlin: &str) -> impl Iterator<Item = &'static Item> {
+    lookup(kotlin).iter().filter(move |i| i.kind == Kind::Function && i.owner == kotlin && i.via.is_empty())
+}
+
 /// The index's members (methods, properties) of a Kotlin name that a type of Rust name `owner` has: its own, and
 /// those of the extension traits named after it (`PointerInputScopeGestures` for `PointerInputScope`: Compose's
 /// extensions of it); then those of what it derefs to (a `MeasureScope`'s `Density`: Compose's supertypes), nearest

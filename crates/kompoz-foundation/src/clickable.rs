@@ -104,6 +104,7 @@ impl Modifier {
 
     /// The same showing `indication` instead (Compose's `clickable(interactionSource, indication, …)`): none shows
     /// nothing. With no source, a node factory's own source is made when first needed.
+    /// Kotlin: `clickable(interactionSource: MutableInteractionSource?, indication: Indication?, enabled: Boolean = true, onClickLabel: String? = null, role: Role? = null, onClick: () -> Unit)`
     fn clickable_indication(
         self,
         interaction_source: Option<MutableInteractionSource>,

@@ -123,3 +123,7 @@ harness = false
 [[test]]
 name = "pager"
 harness = false
+
+[[test]]
+name = "desktop"
+harness = false

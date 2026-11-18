@@ -25,14 +25,18 @@ pub trait TextContextMenuSession {
 }
 
 type ItemClick = Rc<dyn Fn(&dyn TextContextMenuSession)>;
+/// An item's leading icon, drawn in the color given (Compose's `leadingIcon: @Composable (color: Color) -> Unit`).
+pub type LeadingIcon = Rc<dyn Fn(kompoz_graphics::Color)>;
 
-/// An item of a text context menu (Compose's TextContextMenuItem): its key, its label, whether it can be chosen
-/// now, and what choosing it does (given the session, to close the menu).
+/// An item of a text context menu (Compose's TextContextMenuItem and the desktop's
+/// TextContextMenuItemWithComposableLeadingIcon): its key, its label, whether it can be chosen now, its leading icon
+/// if any, and what choosing it does (given the session, to close the menu).
 #[derive(Clone)]
 pub struct TextContextMenuItem {
     pub key: TextContextMenuKey,
     pub label: String,
     pub enabled: bool,
+    pub leading_icon: Option<LeadingIcon>,
     pub on_click: ItemClick,
 }
 
@@ -66,6 +70,7 @@ impl TextContextMenuComponent {
             key: kind.key(),
             label: kind.label().to_string(),
             enabled,
+            leading_icon: None,
             on_click: Rc::new(move |session| {
                 on_click();
                 session.close();

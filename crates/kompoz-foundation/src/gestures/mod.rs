@@ -20,6 +20,7 @@ mod anchored_draggable;
 pub(crate) mod bring_into_view_spec;
 mod content_in_view;
 mod drag;
+mod drag_matcher;
 pub(crate) mod draggable;
 mod draggable2d;
 pub(crate) mod fling;
@@ -49,7 +50,8 @@ pub use bring_into_view_spec::{
     default_calculate_scroll_distance,
 };
 pub use drag::{DetectAxisDragGestures, DetectDragGestures, DetectDragGesturesAfterLongPress};
-pub(crate) use drag::{await_all_pointers_up_with_slop_detection, await_pointer_slop_or_cancellation, pointer_slop};
+pub(crate) use drag::{await_all_pointers_up_with_slop_detection, pointer_slop};
+pub use drag_matcher::{DetectMatchedDragGestures, OnDragModifiers, OnDragNode, PointerInputScopeMatchedDrags};
 pub use draggable::{
     DefaultDraggableState, DragBlock, DragScope, DraggableModifiers, DraggableNode, DraggableState, DraggableStateEq,
     DraggableStateExtensions, OnDragStarted, OnDragStopped, remember_draggable_state,
@@ -72,7 +74,7 @@ pub use scrollable2d_state::{
     DefaultScrollable2DState, Scroll2DBlock, Scroll2DScope, Scrollable2DState, Scrollable2DStateExtensions,
     remember_scrollable2d_state,
 };
-pub use tap::{DetectTapGestures, GestureCancellation, PressGestureScope};
+pub use tap::{DetectTapGestures, GestureCancellation, KeyboardModifiersTest, PressGestureScope};
 pub(crate) use tap::{
     FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY, LongPressResult, PressCallback, detect_press_down_gesture,
     detect_tap_and_press, is_changed_to_down, wait_for_long_press,

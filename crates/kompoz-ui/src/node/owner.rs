@@ -602,7 +602,11 @@ impl Owner {
         self.checking.set(true);
         mark_all_pending(&root);
         self.measure_set.borrow_mut().add(&root);
-        self.measure_and_layout();
+        // (in a snapshot never applied: what the measures write again — a lazy list's layout info — is the check's
+        // alone, not a change its readers are told of, which would lay them out again, checked again, for ever)
+        let check = kompoz_runtime::Snapshot::take_mutable_snapshot(None, None);
+        check.enter(|| self.measure_and_layout());
+        check.dispose();
         self.on_positioned.borrow_mut().clear();
         self.checking.set(false);
         let after = self.collect_layout();

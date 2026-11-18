@@ -884,9 +884,8 @@ pub(crate) fn pager_measure_policy(c: PagerMeasureConfig) -> Rc<dyn LazyLayoutMe
             if !is_vertical { content_constraints.max_height } else { page_available_size },
         ));
         let item_provider = (c.item_provider_lambda)();
-        // (Compose's `pageCount()`: the state's page count, which made the item provider's pages — read of the
-        // provider, so the two agree while a new count reaches the provider)
-        let page_count = item_provider.item_count();
+        // (Compose's `pageCount()`: the state's page count, which the item provider's pages are made of)
+        let page_count = state.page_count();
 
         let layout_size = main_axis_available_size + before_content_padding + after_content_padding;
         let (current_page, current_page_offset) = without_read_observation(|| {

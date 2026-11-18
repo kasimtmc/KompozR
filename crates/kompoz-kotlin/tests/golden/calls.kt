@@ -39,3 +39,13 @@ fun text(s: String): String {
     val trimmed = s.trim().lowercase().replace("a", "b")
     return "$n ${trimmed.substring(1)} ${s.toInt() + 1} ${n.toString()}"
 }
+
+// Kotlin's other constructors of a type: its associated functions of that name, chosen by the arguments.
+fun paddings(): List<PaddingValues> = listOf(
+    PaddingValues(16.dp),
+    PaddingValues(12.dp, 8.dp),
+    PaddingValues(horizontal = 50.dp),
+    PaddingValues(vertical = 3.dp),
+    PaddingValues(start = 1.dp, top = 2.dp),
+    PaddingValues(top = 5.dp),
+)

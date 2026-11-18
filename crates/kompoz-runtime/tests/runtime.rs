@@ -899,6 +899,125 @@ fn derived_state_recomposes_only_when_its_value_changes() {
     assert_eq!(runs.get(), 2);
 }
 
+/// Compose's DerivedSnapshotState: a derived state made in a composition, read right after a write (before the
+/// composition took it), from a coroutine or outside any reader, is computed again then — and only then: read
+/// again with nothing written it isn't, nor when the composition takes the write it already saw.
+fn derived_state_read_after_a_write_is_up_to_date() {
+    let count = mutable_state_of(1);
+    let computed = Rc::new(Cell::new(0));
+    let runs = Rc::new(Cell::new(0));
+    let held: Rc<RefCell<Option<DerivedState<i32>>>> = Rc::new(RefCell::new(None));
+    let (c, k, r, h) = (count.clone(), computed.clone(), runs.clone(), held.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let (c, k) = (c.clone(), k.clone());
+        let doubled = remember(|| {
+            derived_state_of(move || {
+                k.set(k.get() + 1);
+                c.get() * 2
+            })
+        });
+        *h.borrow_mut() = Some(doubled.clone());
+        let r = r.clone();
+        scoped(move || {
+            r.set(r.get() + 1);
+            Text(format!("doubled={}", doubled.get()));
+        });
+    }));
+    let doubled = held.borrow().clone().unwrap();
+    assert!(rule.has("doubled=2"));
+    assert_eq!((computed.get(), runs.get()), (1, 1));
+    // Read again, nothing written: kept.
+    assert_eq!(doubled.get(), 2);
+    assert_eq!(computed.get(), 1);
+    // Written: the next read sees it at once (computed once), the reader still told.
+    count.set(5);
+    assert_eq!(doubled.get(), 10);
+    assert_eq!(doubled.peek(), 10);
+    assert_eq!(computed.get(), 2);
+    rule.wait_for_idle();
+    assert!(rule.has("doubled=10"));
+    // The composition took the write the read had seen: not computed again, its reader recomposed once.
+    assert_eq!((computed.get(), runs.get()), (2, 2));
+    // A write equal in value changes nothing for it; another state written doesn't make it compute.
+    let other = mutable_state_of(0);
+    other.set(1);
+    assert_eq!(doubled.get(), 10);
+    assert_eq!(computed.get(), 2);
+    // Written in a snapshot: seen there, not outside until applied.
+    let snapshot = Snapshot::take_mutable_snapshot(None, None);
+    snapshot.enter(|| {
+        count.set(7);
+        assert_eq!(doubled.get(), 14);
+    });
+    assert_eq!(doubled.get(), 10);
+    assert_eq!(snapshot.apply(), SnapshotApplyResult::Success);
+    snapshot.dispose();
+    assert_eq!(doubled.get(), 14);
+    rule.wait_for_idle();
+    assert!(rule.has("doubled=14"));
+}
+
+/// A derived state reading another: both brought up to date by one read after a write; a derived state of a
+/// policy that never counts values the same tells its readers once per change, not again when the composition
+/// takes it; one made outside a composition computes at every read, and a derived state reading it follows what
+/// it reads.
+fn derived_states_of_derived_states_follow_writes() {
+    let count = mutable_state_of(1);
+    let changes = Rc::new(Cell::new(0));
+    let held: Rc<RefCell<Option<(DerivedState<i32>, DerivedState<i32>, DerivedState<i32>)>>> =
+        Rc::new(RefCell::new(None));
+    let (c, ch, h) = (count.clone(), changes.clone(), held.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let c = c.clone();
+        let (inner, outer, every) = remember(|| {
+            let c2 = c.clone();
+            let inner = derived_state_of(move || c2.get() + 1);
+            let i = inner.clone();
+            let outer = derived_state_of(move || i.get() * 10);
+            let o = outer.clone();
+            let every = derived_state_of_with_policy(never_equal_policy(), move || o.get() / 10);
+            (inner, outer, every)
+        });
+        *h.borrow_mut() = Some((inner.clone(), outer.clone(), every.clone()));
+        let ch = ch.clone();
+        scoped(move || {
+            ch.set(ch.get() + 1);
+            Text(format!("every={}", every.get()));
+        });
+    }));
+    let (inner, outer, every) = held.borrow().clone().unwrap();
+    assert_eq!((inner.get(), outer.get(), every.get()), (2, 20, 2));
+    count.set(4);
+    assert_eq!(outer.get(), 50);
+    assert_eq!(inner.peek(), 5);
+    assert_eq!(every.get(), 5);
+    rule.wait_for_idle();
+    assert!(rule.has("every=5"));
+    assert_eq!(changes.get(), 2);
+    rule.wait_for_idle();
+    assert_eq!(changes.get(), 2);
+
+    // Made outside a composition: computed at every read; one made in a composition reading it follows it.
+    let base = mutable_state_of(3);
+    let b = base.clone();
+    let loose = derived_state_of(move || b.get() * 3);
+    assert_eq!(loose.get(), 9);
+    let l = loose.clone();
+    let tracked: Rc<RefCell<Option<DerivedState<i32>>>> = Rc::new(RefCell::new(None));
+    let t = tracked.clone();
+    let _rule2 = Rule::new(kompozable_lambda!(move || {
+        let l = l.clone();
+        let d = remember(|| derived_state_of(move || l.get() + 1));
+        *t.borrow_mut() = Some(d.clone());
+        Text(format!("tracked={}", d.get()));
+    }));
+    let tracked = tracked.borrow().clone().unwrap();
+    assert_eq!(tracked.get(), 10);
+    base.set(4);
+    assert_eq!(loose.get(), 12);
+    assert_eq!(tracked.get(), 13);
+}
+
 fn state_list_recomposes_on_changes() {
     let list = mutable_state_list_of(["a".to_string()]);
     let l = list.clone();
@@ -1224,6 +1343,8 @@ tests!(
     state_set_from_another_thread,
     frame_scopes_recompose_only_themselves,
     derived_state_recomposes_only_when_its_value_changes,
+    derived_state_read_after_a_write_is_up_to_date,
+    derived_states_of_derived_states_follow_writes,
     state_list_recomposes_on_changes,
     state_maps_recompose_their_readers,
     remember_updated_state_gives_effects_the_latest_value,

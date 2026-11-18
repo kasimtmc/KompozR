@@ -1206,6 +1206,9 @@ pub trait KtMutableList: KtIterable {
     fn remove_first(&mut self) -> Self::Item;
     /// Kotlin: `removeLast(): E`
     fn remove_last(&mut self) -> Self::Item;
+    /// Reverses its elements in place (a `Vec`'s own `reverse` does the same where it is called as a method).
+    /// Kotlin: `reverse()`
+    fn reverse(&mut self);
 }
 
 impl<T: Clone> KtMutableList for Vec<T> {
@@ -1261,6 +1264,9 @@ impl<T: Clone> KtMutableList for Vec<T> {
     fn remove_last(&mut self) -> T {
         self.pop().unwrap_or_else(|| panic_kt("NoSuchElementException", "List is empty."))
     }
+    fn reverse(&mut self) {
+        self.as_mut_slice().reverse();
+    }
 }
 
 /// Kotlin's `MutableList` functions a state list has (Compose's SnapshotStateList is one): taking `&self`, so a
@@ -1315,6 +1321,13 @@ impl<T: Clone + Send + Sync + 'static> SnapshotStateList<T> {
     /// Kotlin: `retainAll(predicate: (E) -> Boolean): Boolean`
     pub fn retain_all(&self, mut predicate: impl FnMut(T) -> bool) -> bool {
         self.remove_all(|v| !predicate(v))
+    }
+    /// Reverses its elements in place (one change: its readers told once).
+    /// Kotlin: `reverse()`
+    pub fn reverse(&self) {
+        if self.len() > 1 {
+            self.update(|v| v.reverse());
+        }
     }
 }
 
