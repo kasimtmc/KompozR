@@ -218,19 +218,17 @@ impl Arc {
             *p /= dist;
         }
         let lut_last_index = (LutSize - 1) as f32;
-        for i in 0..LutSize {
+        for (i, lut) in self.lut.iter_mut().enumerate().take(LutSize) {
             let pos = i as f32 / lut_last_index;
             let index = java_float_binary_search(&our_percent, pos);
             if index >= 0 {
-                self.lut[i] = index as f32 / last_index_float;
+                *lut = index as f32 / last_index_float;
             } else if index == -1 {
-                self.lut[i] = 0.0;
+                *lut = 0.0;
             } else {
                 let p1 = (-index - 2) as usize;
                 let p2 = (-index - 1) as usize;
-                let ans =
-                    (p1 as f32 + (pos - our_percent[p1]) / (our_percent[p2] - our_percent[p1])) / last_index_float;
-                self.lut[i] = ans;
+                *lut = (p1 as f32 + (pos - our_percent[p1]) / (our_percent[p2] - our_percent[p1])) / last_index_float;
             }
         }
     }

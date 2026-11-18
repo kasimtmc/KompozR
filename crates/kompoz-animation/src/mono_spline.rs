@@ -85,8 +85,8 @@ impl MonoSpline {
         }
         for i in index..n - 1 {
             if time == self.time_points[i] {
-                for j in 0..dim {
-                    v.set(j, self.values[i][j]);
+                for (j, &value) in self.values[i].iter().enumerate().take(dim) {
+                    v.set(j, value);
                 }
                 return;
             }

@@ -422,15 +422,15 @@ impl ItemInfo {
             cross_axis_offset.unwrap_or_else(|| cross_axis_offset_of(positioned_item, is_vertical));
         self.lane = positioned_item.lane();
         self.span = positioned_item.span();
-        for index in 0..count {
+        for (index, slot) in self.animations.iter_mut().enumerate().take(count) {
             match specs_of(positioned_item.get_parent_data(index)) {
                 None => {
-                    if let Some(a) = self.animations[index].take() {
+                    if let Some(a) = slot.take() {
                         a.release();
                     }
                 }
                 Some(specs) => {
-                    let animation = self.animations[index]
+                    let animation = slot
                         .get_or_insert_with(|| {
                             LazyLayoutItemAnimation::new(
                                 coroutine_scope.clone(),

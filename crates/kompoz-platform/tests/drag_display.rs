@@ -1048,6 +1048,10 @@ mod x11 {
         let socket = format!("kompoz-drag-x-{}", std::process::id());
         let compositor = wayland::Compositor::start(work, &socket, 1.0, (1280, 1024), true);
         let display = compositor.x_display.clone().expect("kwin's Xwayland");
+        // (Its own Xwayland takes no cookie: the desktop's XAUTHORITY isn't for it. Xvfb's, as xvfb-run sets it up,
+        // is what the XTEST run needs.)
+        // SAFETY: the test's main thread, no other thread running yet.
+        unsafe { std::env::remove_var("XAUTHORITY") };
         let mut input = wayland::Receiver::connect(&compositor.socket, false);
         run(work, &display, &mut input, &[("WAYLAND_DISPLAY", "")], false);
         drop(input);
@@ -1092,7 +1096,6 @@ mod x11 {
     fn run(work: &Path, display: &str, input: &mut dyn Input, env: &[(&str, &str)], escape: bool) {
         // SAFETY: the test's main thread, no other thread running yet.
         unsafe { std::env::set_var("DISPLAY", display) };
-        unsafe { std::env::remove_var("XAUTHORITY") };
         let (seen_tx, seen) = mpsc::channel();
         let (stop_tx, stop) = mpsc::channel();
         let thread = std::thread::spawn(move || receiver(seen_tx, stop));
