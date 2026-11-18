@@ -1,15 +1,19 @@
 //! Snapping, as Compose's `androidx.compose.foundation.gestures.snapping`: a fling that settles with an item lined
 //! up ([`snap_fling_behavior`], [`remember_snap_fling_behavior`]) — where to approach and where to snap told by a
-//! [`SnapLayoutInfoProvider`] (a lazy list's: [`lazy_list_snap_layout_info_provider`]), the item's place in the
+//! [`SnapLayoutInfoProvider`] (a lazy list's: [`lazy_list_snap_layout_info_provider`], a lazy grid's:
+//! [`lazy_grid_snap_layout_info_provider`], a pager's through `PagerDefaults.fling_behavior`), the item's place in the
 //! layout by a [`SnapPosition`].
 
+mod lazy_grid;
 mod lazy_list;
+mod pager;
 mod snap_fling_behavior;
 
+pub use lazy_grid::{lazy_grid_snap_layout_info_provider, remember_snap_fling_behavior_for_grid};
 pub use lazy_list::{lazy_list_snap_layout_info_provider, remember_snap_fling_behavior_for_list};
 pub use snap_fling_behavior::{SnapFlingBehavior, remember_snap_fling_behavior, snap_fling_behavior};
-// (the grids' and the pager's snapping take them too)
-#[allow(unused_imports)]
+// (the pager's snapping, through PagerDefaults)
+pub(crate) use pager::{calculate_final_snapping_bound, pager_snap_layout_info_provider};
 pub(crate) use snap_fling_behavior::{FinalSnappingItem, calculate_final_offset, calculate_final_snapping_item};
 
 use std::fmt;

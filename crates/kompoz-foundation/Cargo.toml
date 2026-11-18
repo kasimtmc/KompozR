@@ -111,3 +111,11 @@ harness = false
 [[test]]
 name = "lazy"
 harness = false
+
+[[test]]
+name = "lazy_grid"
+harness = false
+
+[[test]]
+name = "pager"
+harness = false

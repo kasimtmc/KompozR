@@ -27,6 +27,22 @@ pub trait LazyLayoutScrollScope: ScrollScope {
     fn calculate_distance_to(&self, target_index: i32, target_offset: i32) -> i32;
 }
 
+/// A lazy layout's state that gives a [`LazyLayoutScrollScope`] of a scroll scope (what Compose's overloads of
+/// `LazyLayoutScrollScope(state, scrollScope)` take: a list's, a grid's, a staggered grid's, a pager's state).
+pub trait LazyLayoutScrollScopeState {
+    fn lazy_layout_scroll_scope(&self, scroll_scope: Rc<dyn ScrollScope>) -> Rc<dyn LazyLayoutScrollScope>;
+}
+
+/// A lazy layout's scroll scope of `state` scrolling in `scroll_scope` (Compose's `LazyLayoutScrollScope(state,
+/// scrollScope)`, one for each lazy layout's state): what animating to an item scrolls in.
+/// Kotlin: `LazyLayoutScrollScope(state: LazyListState, scrollScope: ScrollScope)`
+pub fn LazyLayoutScrollScope<S: LazyLayoutScrollScopeState + ?Sized>(
+    state: &S,
+    scroll_scope: Rc<dyn ScrollScope>,
+) -> Rc<dyn LazyLayoutScrollScope> {
+    state.lazy_layout_scroll_scope(scroll_scope)
+}
+
 /// Whether item `index` is in view.
 pub(crate) fn is_item_visible(scope: &dyn LazyLayoutScrollScope, index: i32) -> bool {
     index >= scope.first_visible_item_index() && index <= scope.last_visible_item_index()

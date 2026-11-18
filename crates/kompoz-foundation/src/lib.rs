@@ -6,8 +6,9 @@
 //! focus groups, progress and selectable group semantics, bring-into-view requesters and responders, scrolling
 //! ([`gestures`]: `draggable`, `scrollable` with its flings, wheel, nested scroll and bringing into view;
 //! [`scroll`]: `ScrollState`, `vertical_scroll`, `horizontal_scroll`; [`scrollable_area`]; snapping:
-//! [`gestures::snapping`]), overscroll (Android's stretch: [`overscroll`]), lazy lists ([`lazy`]: `LazyColumn`,
-//! `LazyRow`, `LazyListState`; the `LazyLayout` core: [`lazy::layout`]), and text ([`text`]:
+//! [`gestures::snapping`]), overscroll (Android's stretch: [`overscroll`]), lazy lists and grids ([`lazy`]: `LazyColumn`,
+//! `LazyRow`, `LazyListState`; [`lazy::grid`]: `LazyVerticalGrid`, `LazyHorizontalGrid`; [`lazy::staggeredgrid`];
+//! the `LazyLayout` core: [`lazy::layout`]), pagers ([`pager`]: `HorizontalPager`, `VerticalPager`), and text ([`text`]:
 //! `BasicText` with its links, inline content and auto size; `text::selection`: `SelectionContainer`,
 //! `DisableSelection`; `text::input`: the state-based text field's model — `TextFieldState`, its buffer, undo and
 //! transformations —, keyboard options and actions, key mappings). Its modifiers extend `Modifier` through traits:
@@ -37,6 +38,7 @@ pub mod lazy;
 pub mod magnifier;
 pub mod overscroll;
 pub mod overscroll_android;
+pub mod pager;
 pub mod progress_semantics;
 pub mod relocation;
 pub mod scroll;
@@ -64,8 +66,9 @@ pub mod prelude {
     pub use crate::focusable::FocusableModifiers;
     pub use crate::focused_bounds::FocusedBoundsModifiers;
     pub use crate::gestures::snapping::{
-        SnapLayoutInfoProvider, SnapPosition, lazy_list_snap_layout_info_provider, remember_snap_fling_behavior,
-        remember_snap_fling_behavior_for_list, snap_fling_behavior,
+        SnapLayoutInfoProvider, SnapPosition, lazy_grid_snap_layout_info_provider, lazy_list_snap_layout_info_provider,
+        remember_snap_fling_behavior, remember_snap_fling_behavior_for_grid, remember_snap_fling_behavior_for_list,
+        snap_fling_behavior,
     };
     pub use crate::gestures::*;
     pub use crate::hoverable::HoverableModifiers;
@@ -77,7 +80,16 @@ pub mod prelude {
         PressInteraction,
     };
     pub use crate::layout::*;
+    pub use crate::lazy::grid::{
+        GridCells, GridItemSpan, LazyGridItemInfo, LazyGridItemSpanScope, LazyGridLayoutInfo, LazyGridScope,
+        LazyGridState, LazyHorizontalGrid, LazyVerticalGrid, remember_lazy_grid_state,
+    };
     pub use crate::lazy::layout::LazyKey;
+    pub use crate::lazy::staggeredgrid::{
+        LazyHorizontalStaggeredGrid, LazyStaggeredGridItemInfo, LazyStaggeredGridLayoutInfo, LazyStaggeredGridScope,
+        LazyStaggeredGridState, LazyVerticalStaggeredGrid, StaggeredGridCells, StaggeredGridItemSpan,
+        remember_lazy_staggered_grid_state,
+    };
     pub use kompoz_ui::draganddrop::{
         DragAndDropEvent, DragAndDropTarget, DragAndDropTransferAction, DragAndDropTransferData,
         drag_and_drop_transfer_data,
@@ -94,6 +106,10 @@ pub mod prelude {
     };
     pub use crate::overscroll_android::{
         LocalOverscrollConfiguration, OverscrollConfiguration, remember_platform_overscroll_factory,
+    };
+    pub use crate::pager::{
+        HorizontalPager, PageInfo, PageSize, PagerDefaults, PagerLayoutInfo, PagerSnapDistance, PagerState,
+        VerticalPager, remember_pager_state,
     };
     pub use crate::progress_semantics::ProgressSemanticsModifiers;
     pub use crate::relocation::{

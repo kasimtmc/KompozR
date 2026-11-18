@@ -99,7 +99,8 @@ pub(crate) trait CacheWindowScope {
     fn schedule_prefetch(&self, line_index: i32, on_item_prefetched: Rc<dyn Fn(i32, i32)>) -> Vec<PrefetchHandle>;
     fn get_visible_item_size(&self, index_in_visible_lines: i32) -> i32;
     fn get_visible_item_line(&self, index_in_visible_lines: i32) -> i32;
-    fn get_visible_line_key(&self, index_in_visible_lines: i32) -> LazyKey;
+    /// The key of a visible line (none: Compose's `CachedItem.NoKey`, a line without items).
+    fn get_visible_line_key(&self, index_in_visible_lines: i32) -> Option<LazyKey>;
     fn get_last_index_in_line(&self, line_index: i32) -> i32;
     fn get_last_line_index(&self) -> i32;
 }
@@ -513,15 +514,15 @@ impl CacheWindowLogic {
         }
     }
 
-    fn cache_visible_items_info(&self, index: i32, key: LazyKey, size: i32) {
+    fn cache_visible_items_info(&self, index: i32, key: Option<LazyKey>, size: i32) {
         let handles = {
             let mut s = self.state.borrow_mut();
             if let Some(cached) = s.window_cache_with_items.get(&index)
-                && (cached.main_axis_size != size || cached.key.as_ref() != Some(&key))
+                && (cached.main_axis_size != size || cached.key != key)
             {
                 s.should_refill_window = true;
             }
-            s.window_cache_with_items.insert(index, CachedItem { key: Some(key), main_axis_size: size });
+            s.window_cache_with_items.insert(index, CachedItem { key, main_axis_size: size });
             // (a visible item cached: its handle no longer needed)
             s.prefetch_window_start_line = s.prefetch_window_start_line.min(index);
             s.prefetch_window_end_line = s.prefetch_window_end_line.max(index);

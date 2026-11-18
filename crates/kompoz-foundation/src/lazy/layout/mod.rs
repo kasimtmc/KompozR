@@ -29,7 +29,7 @@ pub use pinnable::{LazyLayoutPinnableItem, LazyLayoutPinnedItemList, PinnedItem,
 pub use prefetch::{
     LazyLayoutPrefetchState, NestedPrefetchScope, PrefetchHandle, PrefetchRequestScope, PrefetchResultScope,
 };
-pub use scroll_scope::LazyLayoutScrollScope;
+pub use scroll_scope::{LazyLayoutScrollScope, LazyLayoutScrollScopeState};
 
 // What the lazy layouts built on the core share (the list here; grids, staggered grids and the pager).
 pub(crate) use beyond_bounds::{

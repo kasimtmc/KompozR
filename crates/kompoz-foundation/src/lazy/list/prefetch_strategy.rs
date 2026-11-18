@@ -293,8 +293,8 @@ impl CacheWindowScope for LazyListCacheWindowScope {
     fn get_visible_item_line(&self, index_in_visible_lines: i32) -> i32 {
         self.layout_info.borrow().items()[index_in_visible_lines as usize].index
     }
-    fn get_visible_line_key(&self, index_in_visible_lines: i32) -> LazyKey {
-        self.layout_info.borrow().items()[index_in_visible_lines as usize].key.clone()
+    fn get_visible_line_key(&self, index_in_visible_lines: i32) -> Option<LazyKey> {
+        Some(self.layout_info.borrow().items()[index_in_visible_lines as usize].key.clone())
     }
     fn get_last_index_in_line(&self, line_index: i32) -> i32 {
         line_index

@@ -17,8 +17,8 @@ use crate::interaction::{InteractionSource, MutableInteractionSource};
 use crate::lazy::layout::{
     AwaitFirstLayoutModifier, LazyKey, LazyLayoutBeyondBoundsInfo, LazyLayoutCacheWindow, LazyLayoutItemAnimator,
     LazyLayoutNearestRangeState, LazyLayoutPinnedItemList, LazyLayoutPrefetchState, LazyLayoutScrollScope,
-    NestedPrefetchScope, ObservableScopeInvalidator, PrefetchHandle, PrefetchResultScope, Remeasurement,
-    animate_scroll_to_item, find_index_by_key,
+    LazyLayoutScrollScopeState, NestedPrefetchScope, ObservableScopeInvalidator, PrefetchHandle, PrefetchResultScope,
+    Remeasurement, animate_scroll_to_item, find_index_by_key,
 };
 use kompoz_animation::MutatePriority;
 use kompoz_graphics::Density;
@@ -725,13 +725,12 @@ impl PartialEq for WindowKey {
 // ---------------------------------------------------------------------------------------------------------------
 // The scroll scope
 
-/// A list's scroll scope as a lazy layout's (Compose's `LazyLayoutScrollScope(state, scrollScope)`): what animating
-/// to an item scrolls in.
-pub fn LazyLayoutScrollScope(
-    state: &LazyListState,
-    scroll_scope: Rc<dyn ScrollScope>,
-) -> Rc<dyn LazyLayoutScrollScope> {
-    Rc::new(ListScrollScope { state: state.clone(), scroll_scope })
+impl LazyLayoutScrollScopeState for LazyListState {
+    /// A list's scroll scope as a lazy layout's (Compose's `LazyLayoutScrollScope(state: LazyListState,
+    /// scrollScope)`): what animating to an item scrolls in.
+    fn lazy_layout_scroll_scope(&self, scroll_scope: Rc<dyn ScrollScope>) -> Rc<dyn LazyLayoutScrollScope> {
+        Rc::new(ListScrollScope { state: self.clone(), scroll_scope })
+    }
 }
 
 struct ListScrollScope {

@@ -76,6 +76,11 @@ harness = false
 name = "kotlin_lazy"
 harness = false
 
+# Lazy grids, staggered grids and pagers in Kotlin's syntax.
+[[test]]
+name = "kotlin_grids_pager"
+harness = false
+
 [[test]]
 name = "kotlin_text_input"
 harness = false

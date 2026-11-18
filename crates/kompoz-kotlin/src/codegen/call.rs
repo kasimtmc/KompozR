@@ -451,7 +451,10 @@ impl Gen<'_, '_> {
         if let Some(q) = self.qualifier(receiver) {
             let qi = self.name_ident(&q, receiver.loc);
             let qspan = self.span(receiver.loc);
-            if is_value_object(&q) {
+            // (a Kotlin object whose members are methods of a unit struct of its name: `PagerDefaults.flingBehavior(…)`
+            // is `PagerDefaults.fling_behavior(…)`, the struct its own value)
+            let object_member = lookup(&name.name).iter().any(|i| i.kind == Kind::Method && i.owner == q);
+            if is_value_object(&q) || object_member {
                 return self.method_on(Out::plain(quote_spanned!(qspan=> #qi), Ty::named(&q)), name, args, loc);
             }
             let items: Vec<&'static crate::index::Item> =
