@@ -220,7 +220,20 @@ mod tests {
     }
 
     fn device(evtype: i32, detail: i32, flags: i32, valuators: Vec<(usize, f64)>) -> XiEvent {
-        XiEvent::Device(XiDevice { evtype, time: 0, source: 11, detail, x: 10.0, y: 20.0, flags, mods: 0, valuators })
+        XiEvent::Device(XiDevice {
+            evtype,
+            time: 0,
+            device: 2,
+            source: 11,
+            detail,
+            x: 10.0,
+            y: 20.0,
+            root_x: 110.0,
+            root_y: 220.0,
+            flags,
+            mods: 0,
+            valuators,
+        })
     }
 
     #[test]

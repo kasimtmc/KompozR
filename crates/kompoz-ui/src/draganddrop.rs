@@ -24,13 +24,13 @@
 #![allow(non_snake_case)]
 
 use crate::draw::{DrawScope, GraphicsLayer};
-use crate::graphics_context::GraphicsContext;
+use crate::graphics_context::{CornerRadii, GraphicsContext, LayerTransform};
 use crate::input::KeyModifiers;
 use crate::layout::LayoutAwareModifierNode;
 use crate::modifier::{ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, TraversableNode, TraversalDecision};
 use crate::node_capabilities;
 use crate::platform::PlatformHandle;
-use kompoz_graphics::{Density, IntSize, LayoutDirection, Offset, Rect, Size};
+use kompoz_graphics::{Density, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
 use kompoz_runtime::named;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -725,7 +725,9 @@ struct HandedOff {
 /// What a platform is given to start its own drag of a drag within the app that left the window (WP5b's: Wayland's
 /// `wl_data_device.start_drag` with a data source of its MIME types and an icon surface of its decoration, X11's
 /// XDND source): what it carries, its decoration (draw it with [`draw`](PlatformDragAndDrop::draw), `size` px at
-/// the host's density) and where the pointer is in it, the pointer's position in the window.
+/// the host's density) and where the pointer is in it, the pointer's position in the window. A platform may keep a
+/// clone while its drag runs (to draw its icon again for a screen of another scale).
+#[derive(Clone)]
 pub struct PlatformDragAndDrop {
     pub transfer_data: DragAndDropTransferData,
     pub decoration_size: Size,
@@ -733,6 +735,8 @@ pub struct PlatformDragAndDrop {
     pub pointer: Offset,
     pub density: Density,
     draw_drag_decoration: DrawDragDecoration,
+    /// The host's callbacks (what draws offscreen).
+    platform: PlatformHandle,
 }
 
 impl PlatformDragAndDrop {
@@ -740,6 +744,27 @@ impl PlatformDragAndDrop {
     pub fn draw(&self, canvas: &mut dyn GraphicsContext) {
         let mut scope = DrawScope::at(canvas, Offset::Zero, self.decoration_size, LayoutDirection::Ltr, self.density);
         (self.draw_drag_decoration)(&mut scope);
+    }
+
+    /// The decoration as the app shows it under the pointer (faded, as the drag within the app draws it) drawn into
+    /// an image `scale` times its size (a screen of another scale than the window's: its own pixels), through the
+    /// host's offscreen drawing ([`PlatformCallbacks::render_image`](crate::platform::PlatformCallbacks)): what a
+    /// platform makes its drag icon of. None where nothing draws offscreen (or the decoration is empty).
+    pub fn render_icon(&self, scale: f32) -> Option<ImageBitmap> {
+        let size = Size::new(self.decoration_size.width * scale, self.decoration_size.height * scale);
+        if !(size.width >= 1.0 && size.height >= 1.0) {
+            return None;
+        }
+        self.platform.get().render_image(size, &|canvas| {
+            let bounds = Rect::new(0.0, 0.0, size.width, size.height);
+            canvas.push_layer(bounds, CornerRadii::Zero, DecorationAlpha, LayerTransform::Identity);
+            let mut by = Matrix::IDENTITY;
+            by.scale(scale, scale, 1.0);
+            canvas.push_transform(&by);
+            self.draw(canvas);
+            canvas.pop_transform();
+            canvas.pop_layer();
+        })
     }
 }
 
@@ -928,6 +953,7 @@ impl DragAndDropManager {
                 pointer: d.pointer,
                 density,
                 draw_drag_decoration: d.draw_drag_decoration.clone(),
+                platform: self.platform.clone(),
             }
         };
         let callbacks = self.platform.get();

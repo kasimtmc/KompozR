@@ -145,6 +145,11 @@ pub trait Platform {
     /// After a frame's composition: what the platform takes from the host (the semantics tree for screen readers,
     /// the frame rate, the screen kept on).
     fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64);
+    /// A drop the platform reported (its `DropComplete`) handled: whether a target in the app took it — what the
+    /// platform tells the drag's source (XDND's `XdndFinished`, a Wayland offer finished or let go).
+    fn drop_done(&mut self, taken: bool) {
+        let _ = taken;
+    }
     /// A frame more wanted for the platform's own sake (a semantics tree still to publish).
     fn wants_frames(&self) -> bool {
         false

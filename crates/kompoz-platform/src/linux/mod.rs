@@ -11,6 +11,7 @@ pub mod dbus;
 pub mod desktop;
 pub mod event_loop;
 pub mod media;
+pub mod outgoing_drag;
 pub mod portal;
 pub mod sys;
 pub mod wallpaper;

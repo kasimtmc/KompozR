@@ -7,7 +7,7 @@
 //! pointer (wheel notches, touchpad scrolls and pinches), keyboard (xkbcommon, compose sequences, client-side repeat),
 //! touch screen, input method (text-input-v3) and graphics tablets (tablet-v2: styluses, erasers, tablet mice, pads);
 //! cursors by shape (cursor-shape-v1) or from the cursor theme (libwayland-cursor); the clipboard and drops from other
-//! apps (wl_data_device); the screen kept on (idle-inhibit); and the desktop's services ([`DesktopServices`]: the
+//! apps (wl_data_device), the app's own drags out to them ([`drag_source`]); the screen kept on (idle-inhibit); and the desktop's services ([`DesktopServices`]: the
 //! theme, the accent, the text size, the title bar's buttons, the wallpaper's colors, screen readers, a microphone and
 //! a camera).
 //!
@@ -26,6 +26,7 @@
 mod cursor;
 mod data_device;
 mod decorations;
+mod drag_source;
 pub mod ffi;
 pub mod generated;
 mod input;
@@ -50,6 +51,7 @@ use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::Rect;
 use kompoz_runtime::Content;
 use kompoz_ui::KompozHost;
+use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
 use std::cell::{Cell, RefCell};
@@ -199,6 +201,13 @@ pub(crate) struct Shared {
     text: RefCell<TextInput>,
     tablet: RefCell<Tablets>,
     clipboard: RefCell<Clipboard>,
+    /// A drag of the app's own the host asked the platform to take, started once the event that moved it out of
+    /// the window is handled ([`Platform::handled`]).
+    drag_request: RefCell<Option<PlatformDragAndDrop>>,
+    /// A drag can be taken: the window is open and a press (whose grab it starts from) happened.
+    can_drag: Cell<bool>,
+    /// A drag of the app's own runs (the compositor's).
+    dragging: Cell<bool>,
 }
 
 /// The host's callbacks on Wayland.
@@ -245,6 +254,20 @@ impl PlatformCallbacks for WaylandCallbacks {
     fn open_uri(&self, uri: &str) {
         super::desktop::open_uri(uri);
     }
+
+    /// Taken where the compositor can run it (data device 3: a drag's actions and end are told; a source allowing
+    /// copy or move: Wayland has no link) from the press it began with; started once the event is handled.
+    fn start_drag_and_drop(&self, drag: &PlatformDragAndDrop) -> bool {
+        let s = &self.0;
+        let clipboard = s.clipboard.borrow();
+        let runs = clipboard.device.is_some() && clipboard.manager.as_ref().is_some_and(|m| m.version() >= 3);
+        let actions = drag_source::actions_mask(&drag.transfer_data.supported_actions);
+        if !runs || !s.can_drag.get() || s.dragging.get() || actions == WlDataDeviceManagerDndAction::NONE {
+            return false;
+        }
+        *s.drag_request.borrow_mut() = Some(drag.clone());
+        true
+    }
 }
 
 /// The Wayland platform (C++'s WaylandPlatform). Its fields are dropped in order: the window and the seat's objects,
@@ -252,6 +275,8 @@ impl PlatformCallbacks for WaylandCallbacks {
 pub struct WaylandPlatform {
     /// (First: its threads end before the rest goes.)
     desktop: DesktopServices,
+    /// A drag of the app's own the compositor runs (before the window: its icon and source go first).
+    outgoing: Option<drag_source::OutgoingDrag>,
     window: Option<Window>,
     devices: Devices,
     outputs: Vec<OutputObject>,
@@ -304,10 +329,13 @@ pub struct WaylandPlatform {
     wheel: Wheel,
     pinch: Pinch,
     touches: BTreeMap<i32, (f64, f64)>,
-    /// What is dragged over the window (an offer) and where.
+    /// What is dragged over the window (an offer) and where; whether it is the app's own drag coming back.
     drag: Option<ObjectId>,
     drag_x: f64,
     drag_y: f64,
+    drag_own: bool,
+    /// An offer dropped on the window, finished (or let go: refused) once the core says whether it was taken.
+    dropped: Option<ObjectId>,
     // The loop.
     connection: Connection,
     busy: bool,
@@ -340,9 +368,13 @@ impl WaylandPlatform {
             text: RefCell::new(TextInput::default()),
             tablet: RefCell::new(Tablets::new(connection.clone())),
             clipboard: RefCell::new(Clipboard::default()),
+            drag_request: RefCell::new(None),
+            can_drag: Cell::new(false),
+            dragging: Cell::new(false),
         });
         let mut p = WaylandPlatform {
             desktop: DesktopServices::new(),
+            outgoing: None,
             window: None,
             devices: Devices::default(),
             outputs: Vec::new(),
@@ -382,6 +414,8 @@ impl WaylandPlatform {
             drag: None,
             drag_x: 0.0,
             drag_y: 0.0,
+            drag_own: false,
+            dropped: None,
             connection,
             busy: false,
             awaiting_callback: false,
@@ -415,6 +449,7 @@ impl WaylandPlatform {
             }
         }
         self.shared.clipboard.borrow_mut().serial = self.last_serial;
+        self.shared.can_drag.set(self.window.is_some() && self.press_serial != 0);
     }
 
     /// The core's events: what was read dispatched and handled first.
@@ -541,12 +576,24 @@ impl WaylandPlatform {
                     base.pong(serial);
                 }
             }
-            E::WlOutput(e) => self.on_output(sender, e),
+            E::WlOutput(e) => {
+                self.on_output(sender, e);
+                self.draw_icon(); // (a drag's icon over it: its scale may have changed)
+            }
+            E::WlSurface(e) if self.outgoing.as_ref().is_some_and(|o| o.is_icon(sender)) => self.on_icon_surface(e),
             E::WlSurface(e) => self.on_surface(sender, e),
+            E::WpFractionalScaleV1(e) if self.outgoing.as_ref().is_some_and(|o| o.is_icon_scale(sender)) => {
+                self.on_icon_fractional_scale(e);
+            }
             E::WpFractionalScaleV1(e) => self.on_fractional_scale(e),
             E::XdgSurface(e) => self.on_xdg_surface(e),
             E::XdgToplevel(e) => self.on_toplevel(e),
             E::ZxdgToplevelDecorationV1(e) => self.on_decoration(e),
+            E::WlCallback(WlCallbackEvent::Done { .. })
+                if self.outgoing.as_ref().is_some_and(|o| o.is_check(sender)) =>
+            {
+                self.drag_check_done();
+            }
             E::WlCallback(WlCallbackEvent::Done { .. }) => {
                 if let Some(w) = &mut self.window
                     && w.frame_callback.as_ref().is_some_and(|c| c.id() == sender)
@@ -568,8 +615,11 @@ impl WaylandPlatform {
             E::ZwpTabletPadV2(e) => self.on_tablet_pad(sender, e),
             E::WlDataOffer(e) => self.on_data_offer(sender, e),
             E::WlDataDevice(e) => self.on_data_device(e),
+            E::WlDataSource(e) if self.outgoing.as_ref().is_some_and(|o| o.is_source(sender)) => {
+                self.on_drag_source(e);
+            }
             E::WlDataSource(e) => self.on_data_source(sender, e),
-            E::WlBuffer(WlBufferEvent::Release) => self.buffer_released(sender),
+            E::WlBuffer(WlBufferEvent::Release) if !self.icon_buffer_released(sender) => self.buffer_released(sender),
             _ => {}
         }
     }
@@ -696,6 +746,7 @@ impl WaylandPlatform {
 impl Drop for WaylandPlatform {
     fn drop(&mut self) {
         self.desktop.stop();
+        self.outgoing = None;
         self.close_window();
         // (What the callbacks hold goes with the platform's objects, before the globals they came from.)
         self.shared.cursor.borrow_mut().release_pointer();
@@ -824,6 +875,11 @@ impl Platform for WaylandPlatform {
 
     fn handled(&mut self, host: &KompozHost, event: &Event) {
         self.desktop.handled(host, event);
+        self.start_outgoing_drag(); // (one the host asked for as it handled the event)
+    }
+
+    fn drop_done(&mut self, taken: bool) {
+        self.finish_drop(taken);
     }
 
     /// keep_screen_on: an idle inhibitor on the window while it is laid out (C++'s); the semantics tree to the

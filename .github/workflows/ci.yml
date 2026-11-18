@@ -41,7 +41,8 @@ jobs:
   # run, so does their absence): the Counter clicked and resized by a script on Weston's headless backend (Wayland:
   # lavapipe's WSI presents through wl_shm, which needs no GPU) and on Xvfb (X11), its shots compared and kept; then
   # the display tests (KOMPOZ_DISPLAY_TESTS=1): the Wayland platform's on a Weston of their own, the X11 platform's
-  # and the Counter's on Xvfb. The wallpaper isn't looked for (the same shots everywhere), nor the desktop's services
+  # and the Counter's on Xvfb, and the app's own drags out to another client on Xvfb driven through XTEST (Weston's
+  # headless backend has no input a client can make: the Wayland drags run on kwin, locally). The wallpaper isn't looked for (the same shots everywhere), nor the desktop's services
   # (no session bus).
   linux-display:
     runs-on: ubuntu-latest
@@ -62,7 +63,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends weston xvfb xauth dbus mesa-vulkan-drivers libvulkan1 \
             vulkan-validationlayers libwayland-client0 libwayland-cursor0 libxkbcommon0 libxkbcommon-x11-0 xkb-data \
-            libx11-6 libxi6 libxcursor1 libxrandr2 libx11-xcb1 fonts-dejavu-core
+            libx11-6 libxi6 libxcursor1 libxrandr2 libx11-xcb1 libxext6 libxtst6 fonts-dejavu-core
       # Lavapipe for every run; a runtime directory of the job's own (Weston's socket goes there); what checks a run.
       - name: Lavapipe, a runtime directory, the runs' checks
         run: |
@@ -119,13 +120,16 @@ jobs:
         run: |
           cargo test -p kompoz-platform --test wayland_display
           xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p kompoz-platform --lib display_tests
+          KOMPOZ_X11_XTEST=1 xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p kompoz-platform --test drag_display
           xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p counter --test x11
       - name: The Wayland display tests' runs that failed
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: wayland-display-test-runs
-          path: /tmp/kompoz-wayland-test-*/
+          path: |
+            /tmp/kompoz-wayland-test-*/
+            /tmp/kompoz-drag-test-*/
           if-no-files-found: ignore
 
   # The GPU renderer's tests on Vulkan on lavapipe (Mesa's, on the CPU), with the validation layers: no device is a

@@ -3,8 +3,10 @@
 //! out by hand (`repr(C)`, each checked against the system's headers: the layout tests below), the display and what
 //! the platform asks of it in safe wrappers: the connection, atoms, windows and their properties, events (core,
 //! XInput 2's, XRandR's), selections, cursors, the input method (XIM), the keyboard's keymap through xkbcommon-x11,
-//! the Vulkan surface. libXcursor, libXrandr and libX11-xcb are optional (the cursors are then X's own, the refresh
-//! rate 60 Hz, the keyboard Xlib's). The only `unsafe` code of the X11 platform, each block saying why it holds.
+//! the Vulkan surface; for a drag of the app's own (its XDND source) the grabs, the window tree under the pointer, an
+//! icon window of the screen's ARGB visual filled with an image, and libXext's shapes (its outline, no input). libXcursor,
+//! libXrandr, libX11-xcb and libXext are optional (the cursors are then X's own, the refresh rate 60 Hz, the keyboard
+//! Xlib's, a drag's icon a rectangle). The only `unsafe` code of the X11 platform, each block saying why it holds.
 //!
 //! X errors (a drag's source gone, a property not there) are the requests' own failures, ignored where they happen:
 //! Xlib's default handler would end the process.
@@ -27,6 +29,9 @@ use std::sync::OnceLock;
 pub type Xid = c_ulong;
 pub type Window = Xid;
 pub type Cursor = Xid;
+pub type Pixmap = Xid;
+type Colormap = Xid;
+type Gc = *mut c_void;
 pub type Atom = c_ulong;
 pub type Time = c_ulong;
 pub type KeySym = c_ulong;
@@ -100,8 +105,25 @@ pub const XA_STRING: Atom = 31;
 pub const XA_WM_NAME: Atom = 39;
 
 // Window creation.
+const CW_BACK_PIXEL: c_ulong = 1 << 1;
+const CW_BORDER_PIXEL: c_ulong = 1 << 3;
 const CW_BIT_GRAVITY: c_ulong = 1 << 4;
 const CW_EVENT_MASK: c_ulong = 1 << 11;
+const CW_OVERRIDE_REDIRECT: c_ulong = 1 << 9;
+const CW_SAVE_UNDER: c_ulong = 1 << 10;
+const CW_COLORMAP: c_ulong = 1 << 13;
+const TRUE_COLOR: c_int = 4;
+const ALLOC_NONE: c_int = 0;
+const IS_VIEWABLE: c_int = 2;
+const Z_PIXMAP: c_int = 2;
+const LSB_FIRST: c_int = 0;
+const GRAB_MODE_ASYNC: c_int = 1;
+const GRAB_SUCCESS: c_int = 0;
+// libXext's shapes.
+const SHAPE_BOUNDING: c_int = 0;
+const SHAPE_INPUT: c_int = 2;
+const SHAPE_SET: c_int = 0;
+const UNSORTED: c_int = 0;
 const NORTH_WEST_GRAVITY: c_int = 1;
 const INPUT_OUTPUT: c_uint = 1;
 const COPY_FROM_PARENT: c_int = 0;
@@ -111,6 +133,7 @@ const SUCCESS: Status = 0;
 
 // The cursor font's shapes.
 pub const XC_X_CURSOR: c_uint = 0;
+pub const XC_CIRCLE: c_uint = 24;
 pub const XC_CROSSHAIR: c_uint = 34;
 pub const XC_FLEUR: c_uint = 52;
 pub const XC_HAND2: c_uint = 60;
@@ -385,6 +408,80 @@ struct XSetWindowAttributes {
     override_redirect: Bool,
     colormap: Xid,
     cursor: Cursor,
+}
+
+/// `XWindowAttributes`.
+#[repr(C)]
+struct XWindowAttributes {
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    border_width: c_int,
+    depth: c_int,
+    visual: *mut c_void,
+    root: Window,
+    class: c_int,
+    bit_gravity: c_int,
+    win_gravity: c_int,
+    backing_store: c_int,
+    backing_planes: c_ulong,
+    backing_pixel: c_ulong,
+    save_under: Bool,
+    colormap: Colormap,
+    map_installed: Bool,
+    map_state: c_int,
+    all_event_masks: c_long,
+    your_event_mask: c_long,
+    do_not_propagate_mask: c_long,
+    override_redirect: Bool,
+    screen: *mut c_void,
+}
+
+/// `XVisualInfo`.
+#[repr(C)]
+struct XVisualInfo {
+    visual: *mut c_void,
+    visualid: c_ulong,
+    screen: c_int,
+    depth: c_int,
+    class: c_int,
+    red_mask: c_ulong,
+    green_mask: c_ulong,
+    blue_mask: c_ulong,
+    colormap_size: c_int,
+    bits_per_rgb: c_int,
+}
+
+/// `XImage`: an image of the client's memory to put on a drawable (its functions filled by `XInitImage`).
+#[repr(C)]
+struct XImage {
+    width: c_int,
+    height: c_int,
+    xoffset: c_int,
+    format: c_int,
+    data: *mut c_char,
+    byte_order: c_int,
+    bitmap_unit: c_int,
+    bitmap_bit_order: c_int,
+    bitmap_pad: c_int,
+    depth: c_int,
+    bytes_per_line: c_int,
+    bits_per_pixel: c_int,
+    red_mask: c_ulong,
+    green_mask: c_ulong,
+    blue_mask: c_ulong,
+    obdata: XPointer,
+    f: [*mut c_void; 6],
+}
+
+/// `XRectangle`.
+#[repr(C)]
+struct XRectangle {
+    x: c_short,
+    y: c_short,
+    width: c_ushort,
+    height: c_ushort,
 }
 
 #[repr(C)]
@@ -738,6 +835,25 @@ struct X11Functions {
     max_request_size: unsafe extern "C" fn(D) -> c_long,
     refresh_keyboard_mapping: unsafe extern "C" fn(*mut XMappingEvent) -> c_int,
     check_if_event: unsafe extern "C" fn(D, *mut RawEvent, Option<EventPredicate>, XPointer) -> Bool,
+    grab_keyboard: unsafe extern "C" fn(D, Window, Bool, c_int, c_int, Time) -> c_int,
+    ungrab_keyboard: unsafe extern "C" fn(D, Time) -> c_int,
+    query_tree: unsafe extern "C" fn(D, Window, *mut Window, *mut Window, *mut *mut Window, *mut c_uint) -> Status,
+    get_window_attributes: unsafe extern "C" fn(D, Window, *mut XWindowAttributes) -> Status,
+    match_visual_info: unsafe extern "C" fn(D, c_int, c_int, c_int, *mut XVisualInfo) -> Status,
+    create_colormap: unsafe extern "C" fn(D, Window, *mut c_void, c_int) -> Colormap,
+    free_colormap: unsafe extern "C" fn(D, Colormap) -> c_int,
+    create_pixmap: unsafe extern "C" fn(D, Xid, c_uint, c_uint, c_uint) -> Pixmap,
+    free_pixmap: unsafe extern "C" fn(D, Pixmap) -> c_int,
+    create_bitmap_from_data: unsafe extern "C" fn(D, Xid, *const c_char, c_uint, c_uint) -> Pixmap,
+    create_gc: unsafe extern "C" fn(D, Xid, c_ulong, *mut c_void) -> Gc,
+    free_gc: unsafe extern "C" fn(D, Gc) -> c_int,
+    init_image: unsafe extern "C" fn(*mut XImage) -> Status,
+    put_image: unsafe extern "C" fn(D, Xid, Gc, *mut XImage, c_int, c_int, c_int, c_int, c_uint, c_uint) -> c_int,
+    set_window_background_pixmap: unsafe extern "C" fn(D, Window, Pixmap) -> c_int,
+    clear_window: unsafe extern "C" fn(D, Window) -> c_int,
+    move_window: unsafe extern "C" fn(D, Window, c_int, c_int) -> c_int,
+    map_raised: unsafe extern "C" fn(D, Window) -> c_int,
+    sync: unsafe extern "C" fn(D, Bool) -> c_int,
 }
 
 /// libXi's.
@@ -746,6 +862,15 @@ struct XiFunctions {
     select_events: unsafe extern "C" fn(D, Window, *mut XiEventMask, c_int) -> c_int,
     query_device: unsafe extern "C" fn(D, c_int, *mut c_int) -> *mut XiDeviceInfo,
     free_device_info: unsafe extern "C" fn(*mut XiDeviceInfo),
+    grab_device: unsafe extern "C" fn(D, c_int, Window, Time, Cursor, c_int, c_int, Bool, *mut XiEventMask) -> Status,
+    ungrab_device: unsafe extern "C" fn(D, c_int, Time) -> Status,
+}
+
+/// libXext's shapes.
+struct ShapeFunctions {
+    query_extension: unsafe extern "C" fn(D, *mut c_int, *mut c_int) -> Bool,
+    combine_mask: unsafe extern "C" fn(D, Window, c_int, c_int, c_int, Pixmap, c_int),
+    combine_rectangles: unsafe extern "C" fn(D, Window, c_int, c_int, c_int, *mut XRectangle, c_int, c_int, c_int),
 }
 
 /// libXrandr's.
@@ -765,6 +890,8 @@ struct Xlib {
     /// libXcursor's `XcursorLibraryLoadCursor`.
     xcursor_load: Option<unsafe extern "C" fn(D, *const c_char) -> Cursor>,
     randr: Option<RandrFunctions>,
+    /// libXext's shapes.
+    shape: Option<ShapeFunctions>,
     /// libX11-xcb's `XGetXCBConnection` (the keyboard's keymap through xkbcommon-x11).
     xcb_connection: Option<unsafe extern "C" fn(D) -> *mut c_void>,
     _libraries: Vec<Library>,
@@ -846,6 +973,25 @@ impl Xlib {
                 max_request_size: function(l, c"XMaxRequestSize")?,
                 refresh_keyboard_mapping: function(l, c"XRefreshKeyboardMapping")?,
                 check_if_event: function(l, c"XCheckIfEvent")?,
+                grab_keyboard: function(l, c"XGrabKeyboard")?,
+                ungrab_keyboard: function(l, c"XUngrabKeyboard")?,
+                query_tree: function(l, c"XQueryTree")?,
+                get_window_attributes: function(l, c"XGetWindowAttributes")?,
+                match_visual_info: function(l, c"XMatchVisualInfo")?,
+                create_colormap: function(l, c"XCreateColormap")?,
+                free_colormap: function(l, c"XFreeColormap")?,
+                create_pixmap: function(l, c"XCreatePixmap")?,
+                free_pixmap: function(l, c"XFreePixmap")?,
+                create_bitmap_from_data: function(l, c"XCreateBitmapFromData")?,
+                create_gc: function(l, c"XCreateGC")?,
+                free_gc: function(l, c"XFreeGC")?,
+                init_image: function(l, c"XInitImage")?,
+                put_image: function(l, c"XPutImage")?,
+                set_window_background_pixmap: function(l, c"XSetWindowBackgroundPixmap")?,
+                clear_window: function(l, c"XClearWindow")?,
+                move_window: function(l, c"XMoveWindow")?,
+                map_raised: function(l, c"XMapRaised")?,
+                sync: function(l, c"XSync")?,
             }
         };
         let l = &xi;
@@ -856,6 +1002,8 @@ impl Xlib {
                 select_events: function(l, c"XISelectEvents")?,
                 query_device: function(l, c"XIQueryDevice")?,
                 free_device_info: function(l, c"XIFreeDeviceInfo")?,
+                grab_device: function(l, c"XIGrabDevice")?,
+                ungrab_device: function(l, c"XIUngrabDevice")?,
             }
         };
         let mut libraries = vec![x11, xi];
@@ -876,16 +1024,27 @@ impl Xlib {
                 })
             }
         });
+        let xext = Library::open(&["libXext.so.6", "libXext.so"]).ok();
+        let shape = xext.as_ref().and_then(|l| {
+            // SAFETY: as above, shape.h's signatures.
+            unsafe {
+                Some(ShapeFunctions {
+                    query_extension: function(l, c"XShapeQueryExtension").ok()?,
+                    combine_mask: function(l, c"XShapeCombineMask").ok()?,
+                    combine_rectangles: function(l, c"XShapeCombineRectangles").ok()?,
+                })
+            }
+        });
         let xcb = Library::open(&["libX11-xcb.so.1", "libX11-xcb.so"]).ok();
         // SAFETY: Xlib-xcb.h's signature (an xcb_connection_t* as a pointer).
         let xcb_connection = xcb.as_ref().and_then(|l| unsafe { function(l, c"XGetXCBConnection") }.ok());
-        libraries.extend([xcursor, randr_library, xcb].into_iter().flatten());
+        libraries.extend([xcursor, randr_library, xext, xcb].into_iter().flatten());
         // SAFETY: XInitThreads before any other of Xlib's calls in the process (the library only just loaded, and
         // only this module calls it), once (the libraries are loaded once).
         if unsafe { (x.init_threads)() } == 0 {
             return Err("Xlib can't be used from several threads".into());
         }
-        Ok(Xlib { x, xi: xi_functions, xcursor_load, randr, xcb_connection, _libraries: libraries })
+        Ok(Xlib { x, xi: xi_functions, xcursor_load, randr, shape, xcb_connection, _libraries: libraries })
     }
 }
 
@@ -979,6 +1138,8 @@ pub enum Decoded {
         state: i32,
     },
     ClientMessage {
+        /// The window it is about (XDND's target, whichever window it was sent to).
+        window: Window,
         message_type: Atom,
         data: [c_long; 5],
     },
@@ -1033,7 +1194,11 @@ impl XEvent {
                 PROPERTY_NOTIFY => {
                     Decoded::Property { window: e.property.window, atom: e.property.atom, state: e.property.state }
                 }
-                CLIENT_MESSAGE => Decoded::ClientMessage { message_type: e.client.message_type, data: e.client.data },
+                CLIENT_MESSAGE => Decoded::ClientMessage {
+                    window: e.client.window,
+                    message_type: e.client.message_type,
+                    data: e.client.data,
+                },
                 SELECTION_REQUEST => Decoded::SelectionRequest {
                     requestor: e.selection_request.requestor,
                     selection: e.selection_request.selection,
@@ -1064,13 +1229,16 @@ pub struct XiDevice {
     /// `XI_Motion`, `XI_ButtonPress`, `XI_ButtonRelease`, `XI_TouchBegin`, `XI_TouchUpdate`, `XI_TouchEnd`.
     pub evtype: c_int,
     pub time: Time,
-    /// The physical device it came from.
+    /// The (master) device it is of, and the physical one it came from.
+    pub device: i32,
     pub source: i32,
     /// The button, or the touch's id.
     pub detail: i32,
-    /// In the window, its pixels.
+    /// In the window, its pixels; on the screen.
     pub x: f64,
     pub y: f64,
+    pub root_x: f64,
+    pub root_y: f64,
     pub flags: i32,
     /// The modifiers in effect (an X state mask).
     pub mods: u32,
@@ -1716,6 +1884,307 @@ impl Display {
     }
 }
 
+/// A window's place and size on its parent (border outside), and whether it is shown.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WindowGeometry {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub border: i32,
+    pub viewable: bool,
+}
+
+impl WindowGeometry {
+    /// Whether (x, y) on its parent is in it (its border too).
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        let b = self.border;
+        x >= self.x && y >= self.y && x < self.x + self.width + 2 * b && y < self.y + self.height + 2 * b
+    }
+}
+
+/// A window of the screen's ARGB visual (or of its default one) and its colormap (none: the parent's).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct VisualWindow {
+    pub window: Window,
+    pub depth: u32,
+    colormap: Colormap,
+}
+
+impl Display {
+    /// XInput 2's grab of `device` (a master pointer) for `window` from `time`, showing `cursor`, its `types` of
+    /// events reported to the window (asynchronously, not to their own windows); again by the same client: the
+    /// cursor changed. Whether it was taken.
+    pub fn xi_grab_device(&self, device: c_int, window: Window, time: Time, cursor: Cursor, types: &[c_int]) -> bool {
+        let mut mask = [0u8; XI_MASK_LEN];
+        for &t in types {
+            mask[(t >> 3) as usize] |= 1 << (t & 7);
+        }
+        let mut m = XiEventMask { deviceid: device, mask_len: XI_MASK_LEN as c_int, mask: mask.as_mut_ptr() };
+        // SAFETY: the display is open; `m` points at `mask`, alive for the call.
+        let status = unsafe {
+            (self.x.xi.grab_device)(self.raw, device, window, time, cursor, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC, 0, &mut m)
+        };
+        status == SUCCESS
+    }
+
+    pub fn xi_ungrab_device(&self, device: c_int, time: Time) {
+        // SAFETY: the display is open.
+        unsafe { (self.x.xi.ungrab_device)(self.raw, device, time) };
+    }
+
+    /// The core keyboard grabbed for `window` (its keys reported to it) from `time`; whether it was taken.
+    pub fn grab_keyboard(&self, window: Window, time: Time) -> bool {
+        // SAFETY: the display is open.
+        unsafe { (self.x.x.grab_keyboard)(self.raw, window, 0, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC, time) == GRAB_SUCCESS }
+    }
+
+    pub fn ungrab_keyboard(&self, time: Time) {
+        // SAFETY: the display is open.
+        unsafe { (self.x.x.ungrab_keyboard)(self.raw, time) };
+    }
+
+    /// `window`'s children, bottom to top (the stacking order).
+    pub fn children(&self, window: Window) -> Vec<Window> {
+        let (mut root, mut parent, mut children, mut count) = (NONE, NONE, std::ptr::null_mut(), 0);
+        // SAFETY: the out pointers are valid locals; `children` is Xlib's allocation (or null), freed below.
+        let ok = unsafe { (self.x.x.query_tree)(self.raw, window, &mut root, &mut parent, &mut children, &mut count) };
+        let mut out = Vec::new();
+        if ok != 0 && !children.is_null() {
+            // SAFETY: `count` windows there.
+            out.extend_from_slice(unsafe { std::slice::from_raw_parts(children, count as usize) });
+        }
+        if !children.is_null() {
+            // SAFETY: Xlib's allocation, freed once.
+            unsafe { (self.x.x.free)(children.cast()) };
+        }
+        out
+    }
+
+    /// `window`'s place, size and whether it is shown; none if it isn't there.
+    pub fn geometry(&self, window: Window) -> Option<WindowGeometry> {
+        // SAFETY: an all-zero XWindowAttributes is a valid out struct.
+        let mut a: XWindowAttributes = unsafe { std::mem::zeroed() };
+        // SAFETY: the display is open; `a` a valid out struct.
+        if unsafe { (self.x.x.get_window_attributes)(self.raw, window, &mut a) } == 0 {
+            return None;
+        }
+        Some(WindowGeometry {
+            x: a.x,
+            y: a.y,
+            width: a.width,
+            height: a.height,
+            border: a.border_width,
+            viewable: a.map_state == IS_VIEWABLE,
+        })
+    }
+
+    /// Where (x, y) of `from` is on `to`, and `to`'s child there (none: none); none if they aren't on one screen.
+    pub fn child_at(&self, from: Window, to: Window, x: i32, y: i32) -> Option<(i32, i32, Window)> {
+        let (mut tx, mut ty, mut child) = (0, 0, NONE);
+        // SAFETY: the out pointers are valid locals.
+        let same = unsafe { (self.x.x.translate_coordinates)(self.raw, from, to, x, y, &mut tx, &mut ty, &mut child) };
+        (same != 0).then_some((tx, ty, child))
+    }
+
+    /// The default screen's number.
+    pub fn screen(&self) -> c_int {
+        // SAFETY: the display is open.
+        unsafe { (self.x.x.default_screen)(self.raw) }
+    }
+
+    /// An override-redirect window on the root at (x, y), `width` by `height`, kept out of the window manager's
+    /// way, of the screen's 32-bit TrueColor visual where `argb` and the screen has one (its own colormap), else of
+    /// the root's; transparent black until filled. None if it can't be made.
+    pub fn create_visual_window(&self, x: i32, y: i32, width: u32, height: u32, argb: bool) -> Option<VisualWindow> {
+        // SAFETY: an all-zero XVisualInfo is a valid one.
+        let mut info: XVisualInfo = unsafe { std::mem::zeroed() };
+        // SAFETY: an all-zero XSetWindowAttributes is a valid one (only the fields the mask names are read).
+        let mut attributes: XSetWindowAttributes = unsafe { std::mem::zeroed() };
+        attributes.override_redirect = 1;
+        attributes.save_under = 1;
+        let mut mask = CW_OVERRIDE_REDIRECT | CW_SAVE_UNDER | CW_BORDER_PIXEL | CW_BACK_PIXEL;
+        // SAFETY: the display is open; `info` a valid out struct.
+        let found =
+            argb && unsafe { (self.x.x.match_visual_info)(self.raw, self.screen(), 32, TRUE_COLOR, &mut info) } != 0;
+        let (visual, depth, colormap) = if found {
+            // SAFETY: the display is open; the visual is the screen's (just matched).
+            let colormap = unsafe { (self.x.x.create_colormap)(self.raw, self.root, info.visual, ALLOC_NONE) };
+            attributes.colormap = colormap;
+            mask |= CW_COLORMAP;
+            (info.visual, 32, colormap)
+        } else {
+            (std::ptr::null_mut(), COPY_FROM_PARENT, NONE)
+        };
+        // SAFETY: the display is open; `attributes` valid for the fields the mask names; the visual the screen's
+        // (or null: CopyFromParent, with the parent's depth).
+        let window = unsafe {
+            (self.x.x.create_window)(
+                self.raw,
+                self.root,
+                x,
+                y,
+                width.max(1),
+                height.max(1),
+                0,
+                depth,
+                INPUT_OUTPUT,
+                visual,
+                mask,
+                &mut attributes,
+            )
+        };
+        if window == NONE {
+            if colormap != NONE {
+                // SAFETY: made above, not used.
+                unsafe { (self.x.x.free_colormap)(self.raw, colormap) };
+            }
+            return None;
+        }
+        let depth = if found { 32 } else { self.root_depth() };
+        Some(VisualWindow { window, depth, colormap })
+    }
+
+    /// The root window's depth.
+    fn root_depth(&self) -> u32 {
+        // SAFETY: an all-zero XWindowAttributes is a valid out struct.
+        let mut a: XWindowAttributes = unsafe { std::mem::zeroed() };
+        // SAFETY: the display is open; `a` a valid out struct.
+        if unsafe { (self.x.x.get_window_attributes)(self.raw, self.root, &mut a) } == 0 {
+            return 24;
+        }
+        a.depth.max(1) as u32
+    }
+
+    /// The window made by [`create_visual_window`](Display::create_visual_window) destroyed, its colormap freed.
+    pub fn destroy_visual_window(&self, w: VisualWindow) {
+        // SAFETY: the display is open; both made on it, not used after.
+        unsafe {
+            (self.x.x.destroy_window)(self.raw, w.window);
+            if w.colormap != NONE {
+                (self.x.x.free_colormap)(self.raw, w.colormap);
+            }
+        }
+    }
+
+    /// `w` shows `pixels` (ARGB words, `width` × `height`, row by row: premultiplied for a 32-bit window, else their
+    /// colors alone) as its background, which the server draws again whenever it is exposed.
+    pub fn set_window_pixels(&self, w: &VisualWindow, width: u32, height: u32, pixels: &[u32]) {
+        let n = width as usize * height as usize;
+        if width == 0 || height == 0 || pixels.len() < n {
+            return;
+        }
+        let mut data: Vec<u32> = pixels[..n].to_vec();
+        let mut image = XImage {
+            width: width as c_int,
+            height: height as c_int,
+            xoffset: 0,
+            format: Z_PIXMAP,
+            data: data.as_mut_ptr().cast(),
+            byte_order: if cfg!(target_endian = "little") { LSB_FIRST } else { 1 },
+            bitmap_unit: 32,
+            bitmap_bit_order: LSB_FIRST,
+            bitmap_pad: 32,
+            depth: w.depth as c_int,
+            bytes_per_line: width as c_int * 4,
+            bits_per_pixel: 32,
+            red_mask: 0xff0000,
+            green_mask: 0xff00,
+            blue_mask: 0xff,
+            obdata: std::ptr::null_mut(),
+            f: [std::ptr::null_mut(); 6],
+        };
+        // SAFETY: `image` describes `data` (alive and unmoved for the calls); XInitImage only fills its functions,
+        // XPutImage reads `width` × `height` words of it; the pixmap and GC are made on the display and freed here
+        // (the window keeps its background: the server holds it); Xlib never frees `data` (the image isn't
+        // destroyed through it).
+        unsafe {
+            if (self.x.x.init_image)(&mut image) == 0 {
+                return;
+            }
+            let pixmap = (self.x.x.create_pixmap)(self.raw, w.window, width, height, w.depth);
+            if pixmap == NONE {
+                return;
+            }
+            let gc = (self.x.x.create_gc)(self.raw, pixmap, 0, std::ptr::null_mut());
+            if !gc.is_null() {
+                (self.x.x.put_image)(self.raw, pixmap, gc, &mut image, 0, 0, 0, 0, width, height);
+                (self.x.x.free_gc)(self.raw, gc);
+            }
+            (self.x.x.set_window_background_pixmap)(self.raw, w.window, pixmap);
+            (self.x.x.free_pixmap)(self.raw, pixmap);
+            (self.x.x.clear_window)(self.raw, w.window);
+        }
+        drop(data);
+    }
+
+    /// Whether libXext's shapes can be set (the library and the server's extension).
+    pub fn has_shapes(&self) -> bool {
+        let Some(shape) = &self.x.shape else { return false };
+        let (mut event, mut error) = (0, 0);
+        // SAFETY: the display is open; the out pointers are valid locals.
+        unsafe { (shape.query_extension)(self.raw, &mut event, &mut error) != 0 }
+    }
+
+    /// `window` takes no input (its input shape empty: the pointer's events, and what is under the pointer, go
+    /// through it). Whether it could be set.
+    pub fn set_no_input(&self, window: Window) -> bool {
+        let Some(shape) = self.x.shape.as_ref().filter(|_| self.has_shapes()) else { return false };
+        // SAFETY: the display is open; no rectangles (an empty region).
+        unsafe {
+            (shape.combine_rectangles)(
+                self.raw,
+                window,
+                SHAPE_INPUT,
+                0,
+                0,
+                std::ptr::null_mut(),
+                0,
+                SHAPE_SET,
+                UNSORTED,
+            )
+        };
+        true
+    }
+
+    /// `window`'s outline: the pixels of `mask` set (a bitmap, `width` × `height`, rows of whole bytes, the least
+    /// significant bit first). Whether it could be set.
+    pub fn set_outline(&self, window: Window, width: u32, height: u32, mask: &[u8]) -> bool {
+        let Some(shape) = self.x.shape.as_ref().filter(|_| self.has_shapes()) else { return false };
+        if mask.len() < width.div_ceil(8) as usize * height as usize {
+            return false;
+        }
+        // SAFETY: the display is open; `mask` holds the bitmap's rows (XCreateBitmapFromData's layout), copied into
+        // the pixmap, which is freed once the shape is set.
+        unsafe {
+            let bitmap = (self.x.x.create_bitmap_from_data)(self.raw, window, mask.as_ptr().cast(), width, height);
+            if bitmap == NONE {
+                return false;
+            }
+            (shape.combine_mask)(self.raw, window, SHAPE_BOUNDING, 0, 0, bitmap, SHAPE_SET);
+            (self.x.x.free_pixmap)(self.raw, bitmap);
+        }
+        true
+    }
+
+    pub fn move_window(&self, window: Window, x: i32, y: i32) {
+        // SAFETY: the display is open.
+        unsafe { (self.x.x.move_window)(self.raw, window, x, y) };
+    }
+
+    /// `window` shown, above its siblings.
+    pub fn map_raised(&self, window: Window) {
+        // SAFETY: the display is open.
+        unsafe { (self.x.x.map_raised)(self.raw, window) };
+    }
+
+    /// Every request sent and handled by the server.
+    pub fn sync(&self) {
+        // SAFETY: the display is open; the events stay queued.
+        unsafe { (self.x.x.sync)(self.raw, 0) };
+    }
+}
+
 impl Drop for Display {
     fn drop(&mut self) {
         // SAFETY: the display, closed once; nothing made on it is used after (its holders are gone: they hold it).
@@ -1750,10 +2219,13 @@ unsafe fn decode_xi(evtype: c_int, data: *mut c_void) -> XiEvent {
             XiEvent::Device(XiDevice {
                 evtype,
                 time: d.time,
+                device: d.deviceid,
                 source: d.sourceid,
                 detail: d.detail,
                 x: d.event_x,
                 y: d.event_y,
+                root_x: d.root_x,
+                root_y: d.root_y,
                 flags: d.flags,
                 mods: d.mods.effective as u32,
                 valuators,
@@ -2375,6 +2847,20 @@ mod tests {
         assert_eq!(offset_of!(XSetWindowAttributes, override_redirect), 88);
         assert_eq!(offset_of!(XSetWindowAttributes, cursor), 104);
         assert_eq!(size_of::<XClassHint>(), 16);
+        assert_eq!(size_of::<XWindowAttributes>(), 136);
+        assert_eq!(offset_of!(XWindowAttributes, map_state), 92);
+        assert_eq!(offset_of!(XWindowAttributes, override_redirect), 120);
+        assert_eq!(offset_of!(XWindowAttributes, screen), 128);
+        assert_eq!(size_of::<XVisualInfo>(), 64);
+        assert_eq!((offset_of!(XVisualInfo, depth), offset_of!(XVisualInfo, class)), (20, 24));
+        assert_eq!(size_of::<XImage>(), 136);
+        assert_eq!(offset_of!(XImage, data), 16);
+        assert_eq!(offset_of!(XImage, bytes_per_line), 44);
+        assert_eq!(offset_of!(XImage, bits_per_pixel), 48);
+        assert_eq!(offset_of!(XImage, red_mask), 56);
+        assert_eq!(offset_of!(XImage, obdata), 80);
+        assert_eq!(offset_of!(XImage, f), 88);
+        assert_eq!(size_of::<XRectangle>(), 8);
         assert_eq!(size_of::<XimStyles>(), 16);
         assert_eq!(offset_of!(XimStyles, supported_styles), 8);
         assert_eq!(size_of::<XimCallback>(), 16);

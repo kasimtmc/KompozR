@@ -4,7 +4,8 @@
 //! the window); the pointer, its wheel (smooth, as XInput 2 tells it), touch and touchpad pinches through XInput 2
 //! (`input`), the keyboard through xkbcommon with an input method (XIM, `keyboard`; what it composes shown in the
 //! field on the spot where it can, `preedit`), the clipboard and drops as selections (ICCCM with INCR, `selection`;
-//! XDND 5, `dnd`), the cursors of the desktop's theme (libXcursor).
+//! XDND 5, `dnd`), the app's own drags out to other apps (XDND 5's source: `dnd_source`, `drag`), the cursors of the
+//! desktop's theme (libXcursor).
 //! libX11, libXi, libXcursor, libXrandr and libX11-xcb are loaded at run time (`ffi`); where libX11 or XInput 2.2
 //! isn't there, or `$DISPLAY` isn't set, the app runs on another platform.
 //!
@@ -17,7 +18,9 @@
 #[cfg(test)]
 mod display_tests;
 mod dnd;
-mod ffi;
+mod dnd_source;
+mod drag;
+pub mod ffi;
 mod input;
 mod keyboard;
 mod metrics;
@@ -25,6 +28,7 @@ mod preedit;
 mod selection;
 
 use self::dnd::{DropTypes, XdndTarget};
+use self::drag::{OutgoingDrag, PointerAt};
 use self::ffi::{
     Atom, Cursor, Decoded, Display, InputMethod, NONE, Time, Window, XEvent, XPoint, XiEvent, vulkan_surface,
 };
@@ -40,6 +44,7 @@ use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::Rect;
 use kompoz_runtime::Content;
 use kompoz_ui::KompozHost;
+use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
 use std::cell::{Cell, RefCell};
@@ -166,6 +171,10 @@ atoms! {
     XdndSelection = c"XdndSelection",
     XdndTypeList = c"XdndTypeList",
     XdndActionCopy = c"XdndActionCopy",
+    XdndActionMove = c"XdndActionMove",
+    XdndActionLink = c"XdndActionLink",
+    XdndProxy = c"XdndProxy",
+    _NET_WM_WINDOW_TYPE_DND = c"_NET_WM_WINDOW_TYPE_DND",
 }
 
 /// The X connection's token in the event loop.
@@ -227,6 +236,13 @@ struct Shared {
     cursors: RefCell<Cursors>,
     ime: RefCell<Ime>,
     waker: Waker,
+    /// A drag of the app's own the host asked the platform to take, started once the event that moved it out of
+    /// the window is handled ([`Platform::handled`]).
+    drag_request: RefCell<Option<PlatformDragAndDrop>>,
+    /// A drag can be taken: the window is open and the pointer (or a finger) has been seen.
+    can_drag: Cell<bool>,
+    /// A drag of the app's own runs.
+    dragging: Cell<bool>,
 }
 
 impl Shared {
@@ -463,6 +479,17 @@ impl PlatformCallbacks for X11Callbacks {
     fn open_uri(&self, uri: &str) {
         open_uri(uri);
     }
+
+    /// Taken where the window is open and the pointer known, for a source allowing an action; started (XDND's
+    /// source) once the event is handled.
+    fn start_drag_and_drop(&self, drag: &PlatformDragAndDrop) -> bool {
+        let s = &self.0;
+        if !s.can_drag.get() || s.dragging.get() || drag.transfer_data.supported_actions.is_empty() {
+            return false;
+        }
+        *s.drag_request.borrow_mut() = Some(drag.clone());
+        true
+    }
 }
 
 /// The X11 platform (C++'s X11Platform): the display, its window, the loop, the input as KompozR's events.
@@ -482,6 +509,14 @@ pub struct X11Platform {
     keyboard: X11Keyboard,
     drag: XdndTarget,
     drop_types: DropTypes,
+    /// The action the window last took a drag over it with, and a drop's finish to send once the core says
+    /// whether it was taken (its source, the action).
+    drop_action: Atom,
+    pending_finish: Option<(Window, Atom)>,
+    /// Where the pointer (or a finger) last was: what a drag of the app's own follows.
+    pointer: Option<PointerAt>,
+    /// A drag of the app's own out to other apps.
+    outgoing: Option<OutgoingDrag>,
     desktop: DesktopServices,
 }
 
@@ -518,6 +553,9 @@ impl X11Platform {
             }),
             waker: event_loop.waker(),
             display,
+            drag_request: RefCell::new(None),
+            can_drag: Cell::new(false),
+            dragging: Cell::new(false),
         });
         let drop_types = DropTypes {
             uri_list: atoms.TEXT_URI_LIST,
@@ -538,6 +576,10 @@ impl X11Platform {
             keyboard,
             drag: XdndTarget::default(),
             drop_types,
+            drop_action: NONE,
+            pending_finish: None,
+            pointer: None,
+            outgoing: None,
             desktop: DesktopServices::new(),
         };
         platform.dpi_scale = platform.desktop_scale();
@@ -604,6 +646,7 @@ impl X11Platform {
         drop(ime);
         self.events.extend(preedit);
         self.events.extend(self.desktop.take_events());
+        self.drag_timeouts();
     }
 
     /// Up to `timeout` (none: until one) for an X event, a wake, the deadline or a signal (C++'s `waitForEvents`).
@@ -613,6 +656,14 @@ impl X11Platform {
         if self.display().pending() > 0 {
             return true;
         }
+        // (A drag's target not answering: woken when it is given up on.)
+        let timeout = match self.drag_deadline() {
+            Some(at) => {
+                let left = Duration::from_nanos((at - sys::monotonic_now()).max(0) as u64);
+                Some(timeout.map_or(left, |t| t.min(left)))
+            }
+            None => timeout,
+        };
         let Ok(ready) = self.event_loop.wait(timeout) else { return false };
         if ready.woken || ready.deadline {
             self.events.push_back(Event::Wake);
@@ -626,6 +677,9 @@ impl X11Platform {
     /// An event from the X server, or for it to answer (C++'s `handle`).
     fn handle(&mut self, e: &XEvent) {
         if let Some(xi) = self.display().xi_event(e) {
+            if self.outgoing.as_ref().is_some_and(|o| o.is_dragging()) && xi != XiEvent::Hierarchy {
+                return self.drag_input(&xi); // (the drag has the pointer: the app none of it)
+            }
             return self.xi_input(xi);
         }
         if self.display().is_randr_event(e) {
@@ -635,6 +689,15 @@ impl X11Platform {
         match e.decode() {
             Decoded::Key(key) => {
                 self.shared.last_time.set(key.time());
+                let keysym = self.display().lookup_keysym(&key, 0);
+                if let Some(p) = &mut self.pointer {
+                    p.mods = drag::modifiers_after(key.state(), keysym, key.is_press()); // (what a drag starts with)
+                }
+                if self.outgoing.as_ref().is_some_and(|o| o.is_dragging())
+                    && !self.drag_key(keysym, key.state(), key.is_press())
+                {
+                    return;
+                }
                 let ime = self.shared.ime.borrow();
                 let events =
                     self.keyboard.key(&self.shared.display, &ime.method, &key, sys::monotonic_now(), ime.active);
@@ -687,12 +750,15 @@ impl X11Platform {
                         self.dpi_scale = s;
                         self.events.push_back(Event::MetricsChanged);
                     }
-                } else if state == ffi::PROPERTY_DELETE {
+                } else if state == ffi::PROPERTY_DELETE && !self.send_next_drag_part(window, atom) {
                     self.shared.send_next_part(window, atom);
                 }
             }
             Decoded::ClientMessage { message_type, data, .. } => self.message(message_type, data),
             Decoded::SelectionRequest { requestor, selection, target, property, time } => {
+                if selection == a.XdndSelection && self.answer_drag_selection(requestor, target, property, time) {
+                    return;
+                }
                 self.shared.answer_selection(requestor, selection, target, property, time);
             }
             Decoded::SelectionClear { selection } => {
@@ -708,6 +774,10 @@ impl X11Platform {
     fn xi_input(&mut self, e: XiEvent) {
         if let XiEvent::Device(d) = &e {
             self.shared.last_time.set(d.time);
+            if let Some(at) = PointerAt::of(d) {
+                self.pointer = Some(at);
+                self.shared.can_drag.set(self.window() != NONE);
+            }
         }
         if e == XiEvent::Hierarchy {
             self.input.devices = Devices::new(&self.display().xi_devices());
@@ -764,19 +834,32 @@ impl X11Platform {
             }
             return;
         }
+        if kind == a.XdndStatus || kind == a.XdndFinished {
+            // (A target answering the app's own drag.)
+            return self.drag_reply(kind, data);
+        }
         if kind == a.XdndEnter {
             // The types it offers (three in the message, or its XdndTypeList).
             let list = XdndTarget::has_type_list(&data)
                 .then(|| d.property(data[0] as Window, a.XdndTypeList, false).map(|p| p.longs()).unwrap_or_default());
-            self.drag.enter(&data, list.as_deref(), &self.drop_types);
+            self.drag.enter(&data, list.as_deref(), &self.drop_types, self.window());
         } else if kind == a.XdndPosition {
             let Some((root_x, root_y)) = self.drag.position_on_screen(&data) else { return };
             let (x, y) = d
                 .translate_coordinates(d.root(), self.window(), root_x, root_y)
                 .unwrap_or((root_x - self.position.0, root_y - self.position.1));
-            let (events, flags, action) = self.drag.moved(x, y, a.XdndActionCopy);
+            // (Another app's drag taken as a copy; the app's own as asked: Move, Ctrl Copy, Ctrl+Shift Link.)
+            let asked = data[4] as Atom;
+            let own_action = [a.XdndActionCopy, a.XdndActionMove, a.XdndActionLink].contains(&asked);
+            let action = match self.drag.is_own() {
+                true if own_action => asked,
+                true => NONE,
+                false => a.XdndActionCopy,
+            };
+            let (events, flags, action) = self.drag.moved(x, y, action);
             self.events.extend(events);
-            self.drag_reply(a.XdndStatus, flags, action);
+            self.drop_action = action;
+            self.reply_to(self.drag.source(), a.XdndStatus, flags, action);
         } else if kind == a.XdndLeave {
             let events = self.drag.leave(&data);
             self.events.extend(events);
@@ -787,15 +870,13 @@ impl X11Platform {
                 Some(decode(&bytes, self.shared.encoding_of(kind).unwrap_or(Encoding::Utf8)))
             });
             let source = self.drag.source();
-            let (events, accepted, action) = self.drag.dropped(text, &self.drop_types, a.XdndActionCopy);
+            let events = self.drag.dropped(text, &self.drop_types);
             self.events.extend(events);
-            self.reply_to(source, a.XdndFinished, accepted, action);
+            // (Finished once the core says whether a target took it: `drop_done`.)
+            if let Some((old, _)) = self.pending_finish.replace((source, self.drop_action)) {
+                self.reply_to(old, a.XdndFinished, 0, NONE);
+            }
         }
-    }
-
-    /// A message to the drag's source: whether the window takes it (XdndStatus).
-    fn drag_reply(&self, kind: Atom, flags: c_long, action: Atom) {
-        self.reply_to(self.drag.source(), kind, flags, action);
     }
 
     /// A message to a drag's `source`: whether the window takes it (XdndStatus) or took it (XdndFinished).
@@ -893,6 +974,10 @@ impl Platform for X11Platform {
     }
 
     fn close_window(&mut self) {
+        if self.outgoing.is_some() {
+            self.cancel_outgoing_drag();
+        }
+        self.shared.can_drag.set(false);
         self.shared.ime.borrow_mut().method.destroy_context();
         let window = self.shared.window.replace(NONE);
         if window != NONE {
@@ -966,6 +1051,18 @@ impl Platform for X11Platform {
 
     fn handled(&mut self, host: &KompozHost, event: &Event) {
         self.desktop.handled(host, event);
+        self.start_outgoing_drag(); // (one the host asked for as it handled the event)
+    }
+
+    /// The drop's finish sent to its source: taken (with the action the window took it with) or refused.
+    fn drop_done(&mut self, taken: bool) {
+        let Some((source, action)) = self.pending_finish.take() else { return };
+        let a = self.shared.atoms;
+        if taken && action != NONE {
+            self.reply_to(source, a.XdndFinished, 1, action);
+        } else {
+            self.reply_to(source, a.XdndFinished, 0, NONE);
+        }
     }
 
     /// The screen saver held off while the app keeps the screen on (D-Bus: X11 has no inhibitor of its own); the

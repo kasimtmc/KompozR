@@ -64,3 +64,9 @@ harness = false
 [[test]]
 name = "wayland_display"
 harness = false
+
+# Drags of the app's own out to other apps on real display servers (KOMPOZ_DISPLAY_TESTS=1): Wayland on a kwin of its
+# own (its fake input drives them; skipped on Weston, which has none), X11 on the X server DISPLAY names (XTEST).
+[[test]]
+name = "drag_display"
+harness = false

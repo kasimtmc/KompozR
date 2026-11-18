@@ -155,6 +155,9 @@ pub(super) fn content_type(options: &ImeOptions) -> (ZwpTextInputV3ContentHint, 
     (hint, purpose)
 }
 
+/// Escape's evdev code (what a key event of the seat's keyboard carries).
+const KEY_ESC: u32 = 1;
+
 /// The most of a field's text an input method is told (`set_surrounding_text`: a Wayland message can't be longer).
 pub(super) const SURROUNDING_MAX: usize = 4000;
 
@@ -506,6 +509,11 @@ impl WaylandPlatform {
             WlPointerEvent::Button { serial, button, state, .. } => {
                 self.last_serial = serial;
                 let pressed = state == WlPointerButtonState::PRESSED;
+                if !pressed && self.outgoing.is_some() {
+                    // (A drag of the app's own the compositor takes the release from us: let go before it took the
+                    // drag, which then never started, unless the compositor told its source about it.)
+                    self.drag_press_released();
+                }
                 if pressed {
                     self.press_serial = serial;
                     self.press_touch = None;
@@ -585,6 +593,14 @@ impl WaylandPlatform {
             WlKeyboardEvent::Key { serial, key, state, .. } => {
                 self.last_serial = serial;
                 let down = state == WlKeyboardKeyState::PRESSED;
+                if key == KEY_ESC && self.outgoing.is_some() {
+                    // (Escape calls a drag of the app's own off, where the compositor passes it on: as within the
+                    // app.)
+                    if down {
+                        self.cancel_outgoing_drag();
+                    }
+                    return;
+                }
                 let typing = self.shared.text.borrow().active;
                 // (evdev's codes are 8 below X's, which xkbcommon takes.)
                 let (events, timer) = self.keyboard.key(key + 8, down, sys::monotonic_now(), typing);
@@ -619,6 +635,9 @@ impl WaylandPlatform {
                 self.events.push_back(Event::TouchDown { pointer: id as i64, x: x as f32, y: y as f32, time });
             }
             WlTouchEvent::Up { id, .. } => {
+                if self.outgoing.is_some() && self.press_touch == Some(id) {
+                    self.drag_press_released(); // (as a release: some compositors pass the lift on after the drag)
+                }
                 // (Not one of the window's (an edge's), or one let go for a move.)
                 let Some((x, y)) = self.touches.remove(&id) else { return };
                 self.events.push_back(Event::TouchUp { pointer: id as i64, x: x as f32, y: y as f32, time });

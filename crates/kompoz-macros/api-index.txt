@@ -44,6 +44,7 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 * kompozable DisableCutCopy r crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable DisableSelection r crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable DisposableEffect rr crates/kompoz-runtime/src/remember.rs
+kompoz-platform/drag_display kompozable DragApp - crates/kompoz-platform/tests/drag_display.rs
 kompoz-platform/wayland_display kompozable Editor - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Equal rr crates/kompoz-runtime/tests/macros.rs
 * kompozable FlexBox ddr crates/kompoz-foundation/src/layout/flex_box.rs

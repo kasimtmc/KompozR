@@ -5,6 +5,7 @@
 //! coordinates, X11's pixels), turned into px by the app core ([`Metrics::point_to_px`](super::Metrics)); times
 //! are on the platform's clock ([`Platform::now`](super::Platform::now), ns; -1: now).
 
+use kompoz_ui::draganddrop::DragAndDropTransferAction;
 use kompoz_ui::input::{Key, KeyModifiers};
 
 /// A mouse button (the left one presses; the others are buttons of a pointer event).
@@ -183,6 +184,18 @@ pub enum Event {
     DropComplete {
         x: f32,
         y: f32,
+    },
+    /// The app's own drag (one the platform took as it left the window: `PlatformCallbacks::start_drag_and_drop`)
+    /// dropped on the window, before its `DropComplete`: what it carries is the app's own (the host has it), nothing
+    /// read from the platform.
+    DropOwn {
+        x: f32,
+        y: f32,
+    },
+    /// The platform's drag of the app's own ended: dropped and taken with `action` (the one the target chose), or
+    /// not (none: called off, dropped on nothing, refused).
+    OwnDragEnded {
+        action: Option<DragAndDropTransferAction>,
     },
     // Things learned on other threads: the desktop's accent color, the wallpaper's colors, an assistive
     // technology's requests (the platform's own: Platform::handled acts on them).

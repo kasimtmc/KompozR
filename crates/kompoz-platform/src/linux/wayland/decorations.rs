@@ -186,11 +186,12 @@ impl Edges {
     }
 }
 
-/// What an edge's buffer is made of: the shadow drawn into shared memory, the compositor's buffer over it.
-fn shadow_buffer(shm: &WlShm, pixels: &[u32], width: i32, height: i32) -> Option<WlBuffer> {
+/// A buffer of `pixels` (premultiplied ARGB words, row by row) in shared memory (a memfd named `name`), the
+/// compositor's buffer over it: what an edge's shadow and a drag's icon are shown from.
+pub(super) fn shm_buffer(shm: &WlShm, name: &str, pixels: &[u32], width: i32, height: i32) -> Option<WlBuffer> {
     let stride = width.checked_mul(4)?;
     let size = usize::try_from(stride).ok()?.checked_mul(usize::try_from(height).ok()?)?;
-    let fd = sys::memfd("kompoz-edge").ok()?;
+    let fd = sys::memfd(name).ok()?;
     let file = File::from(fd);
     file.set_len(size as u64).ok()?;
     {
@@ -249,7 +250,7 @@ impl WaylandPlatform {
             }
             let Some(shm) = &g.shm else { continue };
             let pixels = shadow_pixels(place, width, height, activated, scale);
-            let Some(buffer) = shadow_buffer(shm, &pixels, place[2] * scale, place[3] * scale) else {
+            let Some(buffer) = shm_buffer(shm, "kompoz-edge", &pixels, place[2] * scale, place[3] * scale) else {
                 crate::system::log("kompoz: Wayland: no memory for the window's edges");
                 continue;
             };

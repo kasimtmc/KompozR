@@ -138,6 +138,11 @@ pub struct AppCore<P: Platform> {
     drop_files: Vec<String>,
     drop_text: String,
     drop_at: Offset,
+    /// The app's own drag was dropped (`Event::DropOwn`): what it carries is the host's.
+    drop_own: bool,
+    /// A drag of the app's own the platform has (it left the window): its MIME types (what the window is told it
+    /// carries as it comes back over it).
+    own_drag: Rc<RefCell<Option<Vec<String>>>>,
     damage_frames: i32,
     damage_wrong: i32,
     keep_frames: i32,
@@ -181,6 +186,8 @@ impl<P: Platform> AppCore<P> {
             drop_files: Vec::new(),
             drop_text: String::new(),
             drop_at: Offset::Zero,
+            drop_own: false,
+            own_drag: Rc::default(),
             damage_frames: 0,
             damage_wrong: 0,
             keep_frames: 0,
@@ -263,6 +270,13 @@ impl<P: Platform> AppCore<P> {
         Offset::new(x * self.point_to_px, y * self.point_to_px)
     }
 
+    /// What a drag coming over the window may carry, as the targets are told: the app's own drag's MIME types (one
+    /// the platform has, coming back), else what drops from other apps are taken as (which isn't told until the
+    /// drop).
+    fn drop_types(&self) -> Vec<String> {
+        self.own_drag.borrow().clone().unwrap_or_else(|| vec!["text/uri-list".into(), "text/plain".into()])
+    }
+
     // ---- Starting ----
 
     /// The app's window opened and the GPU renderer started on the first backend that does, the host made and
@@ -320,6 +334,7 @@ impl<P: Platform> AppCore<P> {
             platform: self.platform.attach(&host),
             renderer: Rc::downgrade(&gpu.renderer),
             in_frame: gpu.in_frame.clone(),
+            own_drag: self.own_drag.clone(),
         };
         host.set_callbacks(Rc::new(callbacks));
         host.set_keep_check(self.flags.keep_check);
@@ -655,17 +670,19 @@ impl<P: Platform> AppCore<P> {
                     if matches!(e, Event::KeyDown { .. }) { KeyEventType::KeyDown } else { KeyEventType::KeyUp };
                 host.send_key_event(KeyEvent::with_code_point(key, r#type, code_point, modifiers));
             }
-            // Files from a file manager, text from a browser: the drag and drop targets take them.
+            // Files from a file manager, text from a browser: the drag and drop targets take them. (The app's own
+            // drag, back over the window from the platform: with its own MIME types; the host has what it carries.)
             &Event::DropBegin { .. } => {
                 self.dropping = true;
+                self.drop_own = false;
                 self.drop_files.clear();
                 self.drop_text.clear();
-                host.external_drag_entered(vec!["text/uri-list".into(), "text/plain".into()]); // (which isn't told until the drop)
+                host.external_drag_entered(self.drop_types()); // (which isn't told until the drop)
             }
             &Event::DropMove { x, y } => {
                 if !self.dropping {
                     self.dropping = true;
-                    host.external_drag_entered(vec!["text/uri-list".into(), "text/plain".into()]);
+                    host.external_drag_entered(self.drop_types());
                 }
                 host.external_drag_moved(self.to_px(x, y));
             }
@@ -679,9 +696,16 @@ impl<P: Platform> AppCore<P> {
                 self.drop_text += text;
                 self.drop_at = self.to_px(*x, *y);
             }
+            &Event::DropOwn { x, y } => {
+                self.drop_own = true;
+                self.drop_at = self.to_px(x, y);
+            }
             &Event::DropComplete { .. } => {
                 self.dropping = false;
-                let data = if !self.drop_files.is_empty() {
+                let data = if std::mem::take(&mut self.drop_own) {
+                    let mime_types = self.own_drag.borrow().clone().unwrap_or_default();
+                    DragAndDropTransferData { mime_types, ..Default::default() } // (the host's own taken instead)
+                } else if !self.drop_files.is_empty() {
                     let files = std::mem::take(&mut self.drop_files);
                     let text = files.iter().map(|p| file_uri(p) + "\r\n").collect();
                     DragAndDropTransferData {
@@ -695,9 +719,16 @@ impl<P: Platform> AppCore<P> {
                     DragAndDropTransferData { mime_types: vec!["text/plain".into()], text, ..Default::default() }
                 } else {
                     host.external_drag_left(); // it left the window, or brought nothing
+                    self.platform.drop_done(false);
                     return;
                 };
-                host.external_drop(data, self.drop_at);
+                let taken = host.external_drop(data, self.drop_at);
+                self.platform.drop_done(taken);
+            }
+            // The platform's drag of the app's own ended: its source told.
+            &Event::OwnDragEnded { action } => {
+                self.own_drag.borrow_mut().take();
+                host.platform_drag_ended(action);
             }
             // (The lifecycle (Hidden, Minimized, Maximized, WillEnter…/DidEnterBackground) comes with
             // kompoz-lifecycle; AccentChanged, WallpaperChanged, AccessibilityRequest and Wake are the platform's
@@ -1301,6 +1332,8 @@ struct AppCallbacks {
     platform: Rc<dyn PlatformCallbacks>,
     renderer: Weak<RefCell<Renderer>>,
     in_frame: Rc<Cell<bool>>,
+    /// The MIME types of the app's own drag the platform took, until it ends (`Event::OwnDragEnded`).
+    own_drag: Rc<RefCell<Option<Vec<String>>>>,
 }
 
 impl PlatformCallbacks for AppCallbacks {
@@ -1409,5 +1442,14 @@ impl PlatformCallbacks for AppCallbacks {
     }
     fn hide_text_toolbar(&self) {
         self.platform.hide_text_toolbar();
+    }
+    /// The platform's own drag of a drag within the app that left the window; while it runs, the window is told
+    /// the app's own MIME types as it comes back over it.
+    fn start_drag_and_drop(&self, drag: &kompoz_ui::draganddrop::PlatformDragAndDrop) -> bool {
+        let taken = self.platform.start_drag_and_drop(drag);
+        if taken {
+            *self.own_drag.borrow_mut() = Some(drag.transfer_data.mime_types.clone());
+        }
+        taken
     }
 }

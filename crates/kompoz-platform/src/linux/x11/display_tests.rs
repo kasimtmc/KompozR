@@ -2,8 +2,9 @@
 //! desktop, Xvfb in CI; else they pass without running): the clipboard between two apps' windows (each with a
 //! connection and a thread of its own: the owner answers while the reader waits) as UTF-8, Latin-1, its targets and
 //! in INCR parts both ways, ownership lost to another; a drop from another client (an XDND 5 source written here)
-//! with its status and finish; the keyboard's keys and text through xkbcommon-x11, and through the input method's
-//! context; the input context's preedit style (on the spot where the method can). The windows are never mapped.
+//! with its status and finish (once the core says a target took it); the keyboard's keys and text through
+//! xkbcommon-x11, and through the input method's context; the input context's preedit style (on the spot where the
+//! method can). The windows are never mapped. (Drags of the app's own out to others: tests/drag_display.rs.)
 
 use super::ffi::{self, Decoded, Display, InputMethod, KeyEvent, NONE, Window, XEvent};
 use super::selection::{Encoding, decode};
@@ -168,6 +169,8 @@ fn drops_come_from_another_client() {
         events.extend(t.take_events());
         t.wait(Some(Duration::from_millis(5)));
     }
+    // The core took it (a target did): the finish goes.
+    crate::app::Platform::drop_done(&mut t, true);
     let (status, finished, src, copy) = source.join().unwrap();
     assert_eq!(
         events,

@@ -2,9 +2,13 @@
 //! each offer has (its MIME types), the selection read through a pipe from the app that offers it (a second at most
 //! between its writes), KompozR's own text offered from a data source (and given back from the cache while it is
 //! the selection: reading our own offer would wait on ourselves), and a drag over the window taken as a copy (a
-//! file manager's `text/uri-list`, a browser's text) and told to the core as SDL told it.
+//! file manager's `text/uri-list`, a browser's text) and told to the core as SDL told it — the app's own drag coming
+//! back over it ([`drag_source`](super::drag_source)) taken with the actions its source allows and told as the app's
+//! own (nothing read: the host has what it carries); a drop finished once the core says a target took it, else let
+//! go (its source then hears it was refused).
 
 use super::WaylandPlatform;
+use super::drag_source::actions_mask;
 use super::ffi::{Connection, Object, ObjectId};
 use super::generated::*;
 use crate::app::Event;
@@ -14,6 +18,8 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::time::Duration;
+
+type Action = WlDataDeviceManagerDndAction;
 
 /// Text, as clipboards name it, the best first.
 pub(super) const TEXT_TYPES: &[&str] = &["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "TEXT"];
@@ -27,10 +33,13 @@ pub(super) fn offered<'a>(types: &[String], wanted: &[&'a str]) -> Option<&'a st
     wanted.iter().copied().find(|w| types.iter().any(|t| t == w))
 }
 
-/// An offer and the MIME types it has.
+/// An offer, the MIME types it has, the action the compositor chose for it as a drop (none yet).
 pub(crate) struct Offer {
     offer: WlDataOffer,
     types: Vec<String>,
+    action: WlDataDeviceManagerDndAction,
+    /// A type was accepted (a drop of it can be finished).
+    accepted: bool,
 }
 
 /// The clipboard, as the platform and the host's callbacks share it.
@@ -112,11 +121,12 @@ fn receive(connection: &Connection, offer: &WlDataOffer, mime: &str) -> Option<V
     Some(out)
 }
 
-/// `text` written to `fd` (who asked for our selection), on a thread of its own: a slow reader never holds the UI.
-fn send(fd: OwnedFd, text: String) {
+/// `bytes` written to `fd` (who asked for our selection, or for what our drag carries), on a thread of its own: a
+/// slow reader never holds the UI.
+pub(super) fn send(fd: OwnedFd, bytes: Vec<u8>) {
     let spawned = std::thread::Builder::new().name("kompoz-clipboard".into()).spawn(move || {
         let _ = sys::set_nonblocking(fd.as_fd(), false);
-        let _ = std::fs::File::from(fd).write_all(text.as_bytes());
+        let _ = std::fs::File::from(fd).write_all(&bytes);
     });
     if spawned.is_err() {
         crate::system::log("kompoz: Wayland: can't send the clipboard");
@@ -126,10 +136,12 @@ fn send(fd: OwnedFd, text: String) {
 impl WaylandPlatform {
     /// An offer's MIME types (C++'s offer listener).
     pub(super) fn on_data_offer(&mut self, sender: ObjectId, e: WlDataOfferEvent) {
-        if let WlDataOfferEvent::Offer { mime_type } = e
-            && let Some(offer) = self.shared.clipboard.borrow_mut().offers.get_mut(&sender)
-        {
-            offer.types.push(mime_type);
+        let mut clipboard = self.shared.clipboard.borrow_mut();
+        let Some(offer) = clipboard.offers.get_mut(&sender) else { return };
+        match e {
+            WlDataOfferEvent::Offer { mime_type } => offer.types.push(mime_type),
+            WlDataOfferEvent::Action { dnd_action } => offer.action = dnd_action,
+            WlDataOfferEvent::SourceActions { .. } => {}
         }
     }
 
@@ -140,7 +152,7 @@ impl WaylandPlatform {
             return;
         }
         match e {
-            WlDataSourceEvent::Send { fd, .. } => send(fd, clipboard.text.clone()),
+            WlDataSourceEvent::Send { fd, .. } => send(fd, clipboard.text.clone().into_bytes()),
             WlDataSourceEvent::Cancelled => {
                 clipboard.source = None; // (destroyed)
                 clipboard.text.clear();
@@ -153,17 +165,21 @@ impl WaylandPlatform {
     pub(super) fn on_data_device(&mut self, e: WlDataDeviceEvent) {
         match e {
             WlDataDeviceEvent::DataOffer { id } => {
-                self.shared.clipboard.borrow_mut().offers.insert(id.id(), Offer { offer: id, types: Vec::new() });
+                let offer = Offer { offer: id, types: Vec::new(), action: Action::NONE, accepted: false };
+                self.shared.clipboard.borrow_mut().offers.insert(offer.offer.id(), offer);
             }
             WlDataDeviceEvent::Selection { id } => {
                 let mut clipboard = self.shared.clipboard.borrow_mut();
-                if let Some(old) = clipboard.selection.filter(|&old| Some(old) != id && Some(old) != self.drag) {
+                let dragged = [self.drag, self.dropped];
+                if let Some(old) = clipboard.selection.filter(|&old| Some(old) != id && !dragged.contains(&Some(old))) {
                     clipboard.forget(old);
                 }
                 clipboard.selection = id;
             }
             // Files from a file manager, text from a browser: taken as a copy, told to the core as SDL told them
-            // (begin, moves, each file or the text at the drop, complete; complete alone: it left).
+            // (begin, moves, each file or the text at the drop, complete; complete alone: it left). The app's own drag
+            // (the one drag of the seat, ours while it runs): any of its types, the actions its source allows (Move
+            // preferred, as within the app; the compositor's modifiers choose another).
             WlDataDeviceEvent::Enter { serial, surface, x, y, id } => {
                 if let Some(old) = self.drag.take() {
                     self.forget_offer(old);
@@ -175,12 +191,23 @@ impl WaylandPlatform {
                     return;
                 }
                 self.drag = Some(id);
+                self.drag_own = self.outgoing.is_some();
                 (self.drag_x, self.drag_y) = (x, y);
-                if let Some(offer) = self.shared.clipboard.borrow().offers.get(&id) {
-                    offer.offer.accept(serial, offered(&offer.types, DROP_TYPES));
+                let own_actions = self.outgoing.as_ref().map(|o| actions_mask(&o.state.payload().actions));
+                if let Some(offer) = self.shared.clipboard.borrow_mut().offers.get_mut(&id) {
+                    let mime = match own_actions {
+                        Some(_) => offer.types.first().map(String::as_str),
+                        None => offered(&offer.types, DROP_TYPES),
+                    };
+                    offer.offer.accept(serial, mime);
+                    offer.accepted = mime.is_some();
                     if offer.offer.version() >= 3 {
-                        let copy = WlDataDeviceManagerDndAction::COPY;
-                        offer.offer.set_actions(copy, copy);
+                        let (actions, preferred) = match own_actions {
+                            Some(mask) if mask.contains(Action::MOVE) => (mask, Action::MOVE),
+                            Some(mask) => (mask, Action::COPY),
+                            None => (Action::COPY, Action::COPY),
+                        };
+                        offer.offer.set_actions(actions, preferred);
                     }
                 }
                 let (x, y) = (x as f32, y as f32);
@@ -200,10 +227,17 @@ impl WaylandPlatform {
                 (self.drag_x, self.drag_y) = (x, y);
                 self.events.push_back(Event::DropMove { x: x as f32, y: y as f32 });
             }
+            // Dropped: what it carries read (the app's own: nothing to read, ours would wait on ourselves), finished
+            // or let go once the core says whether a target took it (`finish_drop`).
             WlDataDeviceEvent::Drop => {
                 let Some(id) = self.drag.take() else { return };
                 let (x, y) = (self.drag_x as f32, self.drag_y as f32);
-                {
+                if let Some(old) = self.dropped.replace(id) {
+                    self.forget_offer(old);
+                }
+                if std::mem::take(&mut self.drag_own) {
+                    self.events.push_back(Event::DropOwn { x, y });
+                } else {
                     let clipboard = self.shared.clipboard.borrow();
                     if let Some(offer) = clipboard.offers.get(&id) {
                         if offered(&offer.types, &["text/uri-list"]).is_some() {
@@ -216,15 +250,28 @@ impl WaylandPlatform {
                             let text = String::from_utf8_lossy(&text).into_owned();
                             self.events.push_back(Event::DropText { x, y, text });
                         }
-                        if offer.offer.version() >= 3 {
-                            offer.offer.finish();
-                        }
                     }
                 }
-                self.forget_offer(id);
                 self.events.push_back(Event::DropComplete { x, y });
             }
         }
+    }
+
+    /// The core handled the drop: finished if a target took it (with a type accepted and an action chosen, as the
+    /// protocol wants: its source hears `dnd_finished`), else let go (its source hears it was cancelled).
+    pub(super) fn finish_drop(&mut self, taken: bool) {
+        let Some(id) = self.dropped.take() else { return };
+        if taken
+            && let Some(offer) = self.shared.clipboard.borrow().offers.get(&id)
+            && offer.offer.version() >= 3
+            && offer.accepted
+            && offer.action != Action::NONE
+            && offer.action != Action::ASK
+        {
+            offer.offer.finish();
+        }
+        self.forget_offer(id);
+        let _ = self.connection.flush();
     }
 
     /// An offer done with (destroyed), unless it is still the selection.
