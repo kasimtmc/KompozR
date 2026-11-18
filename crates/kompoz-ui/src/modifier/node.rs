@@ -422,6 +422,15 @@ impl NodeCx {
         let _ = delta;
     }
 
+    /// Asks the platform's autofill to fill its layout (Compose's `DelegatableNode.requestAutofill`): the autofill
+    /// manager tells the platform the layout's semantics id and bounds.
+    pub fn request_autofill(&self) {
+        let Some(node) = self.cell.layout_node() else { return };
+        if let Some(autofill) = node.owner().and_then(|o| o.autofill()) {
+            autofill.request_autofill(&node);
+        }
+    }
+
     /// Runs `effect` once the composition's changes are applied (Compose's `Modifier.Node.sideEffect`).
     pub fn side_effect(&self, effect: impl FnOnce() + 'static) {
         match self.cell.layout_node().and_then(|n| n.owner()) {

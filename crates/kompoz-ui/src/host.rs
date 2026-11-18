@@ -201,6 +201,8 @@ impl KompozHost {
         });
         let overlays = Overlays { owner: Rc::downgrade(&owner) };
         let platform = PlatformHandle::default();
+        let autofill = crate::autofill::HostAutofillManager::new(platform.clone());
+        owner.set_autofill(autofill.clone());
         let host = KompozHost {
             owner,
             root: root.clone(),
@@ -240,6 +242,7 @@ impl KompozHost {
             idle_work: IdleWorkQueue::new(),
             scaling: Cell::new(false),
         };
+        host.semantics_owner().add_listener(autofill);
         let composition = Composition::new(Some(root as Rc<dyn kompoz_runtime::Node>));
         composition.set_content(host.root_content(Rc::new(move || content.compose())));
         *host.composition.borrow_mut() = Some(composition);
@@ -266,6 +269,7 @@ impl KompozHost {
         let media = self.media.clone();
         let deep_links = self.deep_links.clone();
         let idle_work = self.idle_work.clone();
+        let autofill = self.owner.autofill().map(|a| crate::autofill::AutofillManager(Rc::downgrade(&a)));
         move || {
             let env = environment.get();
             let content = content.clone();
@@ -296,6 +300,7 @@ impl KompozHost {
                 LocalDispatcher.provides(Some(dispatcher.clone())),
                 LocalIdleWorkQueue.provides(Some(idle_work.clone())),
                 LocalFontFamilyResolver.provides_unequal(resolver),
+                crate::autofill::LocalAutofillManager.provides(autofill.clone()),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
             let g = generation.get();
@@ -860,6 +865,17 @@ impl KompozHost {
     /// whether it was done.
     pub fn perform_semantics_action(&self, id: u64, action: SemanticsAction) -> bool {
         self.semantics_owner().perform_semantics_action(id, action)
+    }
+
+    /// Fills the node with semantics `id` with what an autofill service gave (Compose's `performAutofill`: its
+    /// `OnFillData` action); whether it took it.
+    pub fn perform_autofill(&self, id: u64, data: crate::semantics::FillableData) -> bool {
+        let Some(node) = self.semantics_owner().find(id, false) else { return false };
+        let action = node.config().get(crate::semantics::SemanticsActions::OnFillData);
+        match action.and_then(|a| a.action) {
+            Some(fill) => fill(data),
+            None => false,
+        }
     }
 
     /// How many popups and dialogs are shown (C++'s `overlayCount`).

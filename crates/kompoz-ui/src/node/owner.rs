@@ -81,9 +81,20 @@ pub(crate) struct Owner {
     /// they were.
     pub(crate) semantics_listeners: RefCell<Vec<Rc<dyn crate::semantics::SemanticsListener>>>,
     pub(crate) semantics_pending: RefCell<Vec<(Weak<LayoutNode>, Option<crate::semantics::SemanticsConfiguration>)>>,
+    /// The host's autofill (Compose's `Owner.autofillManager`).
+    autofill: RefCell<Option<Rc<crate::autofill::HostAutofillManager>>>,
 }
 
 impl Owner {
+    pub(crate) fn set_autofill(&self, autofill: Rc<crate::autofill::HostAutofillManager>) {
+        *self.autofill.borrow_mut() = Some(autofill);
+    }
+
+    /// The host's autofill manager.
+    pub(crate) fn autofill(&self) -> Option<Rc<crate::autofill::HostAutofillManager>> {
+        self.autofill.borrow().clone()
+    }
+
     pub(crate) fn set_focus_owner(&self, focus: &Rc<crate::focus::FocusOwner>) {
         *self.focus.borrow_mut() = Rc::downgrade(focus);
     }
@@ -120,6 +131,7 @@ impl Owner {
             popups: RefCell::new(Vec::new()),
             semantics_listeners: RefCell::new(Vec::new()),
             semantics_pending: RefCell::new(Vec::new()),
+            autofill: RefCell::new(None),
         })
     }
 
@@ -186,6 +198,10 @@ impl Owner {
         if node.is_popup_root() {
             self.register_popup(node);
         }
+        // Autofill hears of it with the frame's semantics (Compose's `onPostAttach`).
+        if let Some(autofill) = self.autofill() {
+            autofill.queue_post_attach(node);
+        }
     }
 
     /// A node left the tree: nothing of it is waiting any more (Compose's `onNodeDetached`).
@@ -198,6 +214,9 @@ impl Owner {
         self.place_set.borrow_mut().remove(node);
         self.on_positioned.borrow_mut().retain(|w| !std::ptr::eq(w.as_ptr(), node));
         self.frame_rates.borrow_mut().retain(|(id, _)| *id != node.id);
+        if let Some(autofill) = self.autofill() {
+            autofill.on_detach(node);
+        }
     }
 
     pub(crate) fn request_draw(&self) {
@@ -234,6 +253,9 @@ impl Owner {
         let fs = std::mem::take(&mut *self.end_apply.borrow_mut());
         for f in fs {
             f();
+        }
+        if let Some(autofill) = self.autofill() {
+            autofill.on_end_apply_changes();
         }
     }
 

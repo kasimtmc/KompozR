@@ -17,7 +17,8 @@
 //!   deref to (`DEREFS`), the types Kotlin names otherwise (`TYPES`: a struct's doc line ``Kotlin:
 //!   `Arrangement.Absolute` ``); closures' aliases written out in the parameters of their types (`Callback` →
 //!   `Rc<dyn Fn()>`); the items a file's own `macro_rules!` makes of a type's name (`transforms!(DrawScope)`),
-//!   expanded.
+//!   expanded; the fun interfaces (a trait implemented for the closures of one signature), with the lambda their SAM
+//!   constructor takes.
 //!
 //! `--check` builds both and fails if what is committed differs (CI).
 
@@ -1024,6 +1025,19 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
             }
             Item::Trait(t) if is_pub(&t.vis) && !hidden(&t.attrs) => {
                 let via = t.ident.to_string();
+                // (a fun interface: its SAM constructor takes the lambda its closures are; one of `Fn()` closures,
+                // `Content`, stands for Kotlin's `() -> Unit`, a function type, which has none)
+                if FUN_INTERFACES.with(|f| f.borrow().contains_key(&via)) {
+                    let ty: Type = syn::parse_str(&format!("impl {via}")).expect("a trait's `impl` type");
+                    let mut block = plain_param("block", &ty);
+                    block.lambda = lambda(&ty, &BTreeMap::new(), &scan.boxed_futures);
+                    if block.lambda.as_ref().is_some_and(|l| !l.inputs.is_empty() || l.output != "()" || l.suspend) {
+                        let mut it = base(cx, &via, &via, "FunInterface", "");
+                        it.params = vec![block];
+                        it.ret = via.clone();
+                        scan.items.push(it);
+                    }
+                }
                 for ti in &t.items {
                     if let TraitItem::Fn(f) = ti
                         && !hidden(&f.attrs)

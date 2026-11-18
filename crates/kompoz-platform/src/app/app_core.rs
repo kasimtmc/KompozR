@@ -1390,6 +1390,9 @@ impl PlatformCallbacks for AppCallbacks {
     fn autofill_done(&self, commit: bool) {
         self.platform.autofill_done(commit);
     }
+    fn autofill_request(&self, id: u64, bounds: Rect) {
+        self.platform.autofill_request(id, bounds);
+    }
     fn system_gesture_exclusion(&self, rects: &[kompoz_graphics::IntRect]) {
         self.platform.system_gesture_exclusion(rects);
     }

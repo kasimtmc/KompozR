@@ -20,7 +20,7 @@ use kompoz_foundation::text::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
-use kompoz_text::{AnnotatedString, SpanStyle, TextMeasurer, TextRange, TextStyle};
+use kompoz_text::{AnnotatedString, SpanStyle, TextRange, TextStyle};
 use kompoz_ui::focus::{FocusEventModifierNode, FocusState};
 use kompoz_ui::input::*;
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates, LayoutModifierNode, Measurable};
@@ -227,25 +227,19 @@ impl LayoutModifierNode for FieldNode {
     ) -> MeasureResult {
         let resolver = self.cx().current_value_of(&LocalFontFamilyResolver);
         let density = Density::new(scope.density, scope.font_scale);
-        let measurer = TextMeasurer::new(resolver, density, scope.layout_direction(), 0);
-        let text = self.config.state.visual_text();
         let style = TextStyle { font_size: 16.sp(), ..TextStyle::Default };
         let constraints_for_text = Constraints::new(0, constraints.max_width, 0, Constraints::Infinity);
-        let result = measurer.measure_with(
-            text.text(),
-            style,
-            kompoz_text::TextOverflow::Clip,
+        let layout = &self.config.layout;
+        layout.update_non_measure_inputs(
+            &self.config.state,
+            &style,
+            self.config.single_line,
             !self.config.single_line,
-            kompoz_text::DefaultMaxLines,
-            Vec::new(),
-            constraints_for_text,
-            scope.layout_direction(),
-            density,
-            measurer.default_font_family_resolver().clone(),
-            true,
+            &KeyboardOptions::Default,
         );
+        let result =
+            layout.layout_with_new_measure_inputs(density, scope.layout_direction(), resolver, constraints_for_text);
         let size = result.size;
-        self.config.layout.set_layout_result(Some(result), density);
         let placeable = measurable.measure(Constraints::fixed(size.width.max(1), size.height.max(1)));
         let (w, h) = (constraints.constrain_width(size.width.max(1)), constraints.constrain_height(size.height.max(1)));
         scope.layout(w, h, move |p| p.place(&placeable, 0, 0))

@@ -95,6 +95,23 @@ pub struct BringIntoViewRequesterNode {
     handle: Option<NodeHandle>,
 }
 
+impl BringIntoViewRequesterNode {
+    /// A node `requester` brings into view (Compose's `BringIntoViewRequesterNode(requester)`, what a text field's
+    /// text layout node delegates to).
+    pub(crate) fn new(requester: BringIntoViewRequester) -> BringIntoViewRequesterNode {
+        BringIntoViewRequesterNode { requester, handle: None }
+    }
+
+    /// Another requester brings it into view (Compose's `updateRequester`).
+    pub(crate) fn update_requester(&mut self, requester: BringIntoViewRequester) {
+        if let Some(cx) = self.handle.as_ref().and_then(NodeHandle::cx) {
+            self.requester.remove(&cx);
+            requester.add(&cx);
+        }
+        self.requester = requester;
+    }
+}
+
 impl ModifierNode for BringIntoViewRequesterNode {
     fn should_auto_invalidate(&self) -> bool {
         false

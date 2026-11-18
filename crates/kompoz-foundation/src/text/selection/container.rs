@@ -222,7 +222,7 @@ fn selection_magnifier(manager: &Rc<SelectionManager>) -> Modifier {
 }
 
 /// `Offset.VectorConverter` passing `Offset::Unspecified` on (Compose's UnspecifiedSafeOffsetVectorConverter).
-fn unspecified_safe_offset_vector_converter() -> TwoWayConverter<Offset, AnimationVector2D> {
+pub(crate) fn unspecified_safe_offset_vector_converter() -> TwoWayConverter<Offset, AnimationVector2D> {
     TwoWayConverter(
         |offset: Offset| {
             if offset.is_specified() {
@@ -236,7 +236,7 @@ fn unspecified_safe_offset_vector_converter() -> TwoWayConverter<Offset, Animati
 }
 
 /// How close to its target the magnifier's spring ends (Compose's OffsetDisplacementThreshold).
-const OffsetDisplacementThreshold: Offset =
+pub(crate) const OffsetDisplacementThreshold: Offset =
     Offset::new(Spring::DefaultDisplacementThreshold, Spring::DefaultDisplacementThreshold);
 
 /// The magnifier's position, following what `target_calculation` makes of the states it reads: at once along a

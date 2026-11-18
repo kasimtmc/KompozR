@@ -529,6 +529,10 @@ impl Owner {
     /// Tells the listeners of the semantics that changed since the last time (Compose's
     /// `notifySemanticsChange`).
     pub(crate) fn dispatch_semantics_changes(&self) {
+        // What autofill waited to read the semantics for (a focus change, a node attached).
+        if let Some(autofill) = self.autofill() {
+            autofill.flush();
+        }
         let pending = std::mem::take(&mut *self.semantics_pending.borrow_mut());
         if pending.is_empty() {
             return;

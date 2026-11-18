@@ -274,6 +274,11 @@ pub trait PlatformCallbacks {
     fn autofill_done(&self, commit: bool) {
         let _ = commit;
     }
+    /// Autofill: a field (by its semantics id, at its bounds in the window) asks to be filled (a text toolbar's
+    /// autofill item: Compose's `requestAutofill`).
+    fn autofill_request(&self, id: u64, bounds: Rect) {
+        let _ = (id, bounds);
+    }
     /// Where the system's edge swipes (back, home) are kept off, px in the window: told whenever it changes
     /// (Android's `View.setSystemGestureExclusionRects`).
     fn system_gesture_exclusion(&self, rects: &[IntRect]) {
@@ -1189,6 +1194,9 @@ pub static LocalHapticFeedback: KompozitionLocal<HapticFeedback> =
     KompozitionLocal::new_static(HapticFeedback::default);
 /// The clipboard (Compose's LocalClipboard).
 pub static LocalClipboard: KompozitionLocal<Clipboard> = KompozitionLocal::new_static(Clipboard::default);
+/// Whether a text field's cursor blinks (Compose's LocalCursorBlinkEnabled): on unless provided off (a screenshot
+/// test's steady cursor).
+pub static LocalCursorBlinkEnabled: KompozitionLocal<bool> = KompozitionLocal::new_static(|| true);
 /// The floating toolbar over selected text (Compose's LocalTextToolbar): the host's, which hands it to the
 /// platform; an app provides its own to draw it itself. Readers are told when it is another one.
 pub static LocalTextToolbar: KompozitionLocal<Rc<dyn TextToolbar>> =

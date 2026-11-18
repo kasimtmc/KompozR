@@ -75,6 +75,11 @@ harness = false
 name = "kotlin_text_input"
 harness = false
 
+# The state-based text fields (BasicTextField, BasicSecureTextField) in Kotlin's syntax.
+[[test]]
+name = "kotlin_text_field"
+harness = false
+
 # Non-lazy layouts, the marquee, the tooltip box and the ripple in Kotlin's syntax.
 [[test]]
 name = "kotlin_layouts"

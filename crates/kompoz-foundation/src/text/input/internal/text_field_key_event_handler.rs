@@ -55,6 +55,13 @@ impl TextFieldKeyEventHandler {
         }
     }
 
+    /// Forgets the column kept for Up and Down (Compose's `preparedSelectionState.resetCachedX()`): the field's
+    /// decorator calls it when its selection moved other than by these keys (typing through the input session:
+    /// Compose desktop's typed key events reset it).
+    pub fn reset_cached_x(&mut self) {
+        self.prepared_selection_state.reset_cached_x();
+    }
+
     /// Before the field's own key handling (Compose's `onPreKeyEvent`): a key that cancels a selection deselects
     /// it (`deselect`, the selection state's) and is taken.
     pub fn on_pre_key_event(

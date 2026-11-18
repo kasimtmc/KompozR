@@ -29,6 +29,9 @@
 //!   a call goes through the trait, `KtStr::split(&s, …)`);
 //! - what a type derefs to ([`DEREFS`]: a `MeasureScope`'s `Density`) is what Kotlin's supertype is: its members are
 //!   the type's too (`dp.roundToPx()` in a measure block);
+//! - a trait implemented for the closures of one signature (`impl<F: Fn(&dyn Fn())> TextFieldDecorator for F`) is a
+//!   Kotlin fun interface ([`Kind::FunInterface`]): a parameter of it (`impl T`, `Rc<dyn T>`) takes a lambda, and its
+//!   SAM constructor (`TextFieldDecorator { … }`) is that lambda;
 //! - a type Kotlin names otherwise, a nested object (`Arrangement.Absolute`), says so in a doc line ``Kotlin:
 //!   `Arrangement.Absolute` `` ([`TYPES`]);
 //! - a parameter of a closure's alias (`Callback`) is written out (`Rc<dyn Fn()>`); what a `macro_rules!` of the
@@ -86,6 +89,10 @@ pub enum Kind {
     Variant,
     /// One of Kotlin's overloads of a function taking them as a tuple ([`flags::OVERLOADED`]).
     Overload,
+    /// A Kotlin fun interface: a trait the API implements for the closures of one signature
+    /// (`impl<F: Fn(&dyn Fn())> TextFieldDecorator for F`). Its one parameter is the lambda its SAM constructor
+    /// (`TextFieldDecorator { innerTextField -> … }`) takes, of type `impl Trait`; [`Item::ret`] the trait's name.
+    FunInterface,
 }
 
 /// How a method takes its receiver.

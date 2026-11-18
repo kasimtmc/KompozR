@@ -10,7 +10,7 @@
 
 mod adjustment;
 mod colors;
-mod container;
+pub(crate) mod container;
 mod delegate;
 mod gestures;
 mod handles;

@@ -2,15 +2,18 @@
 //! text, the coordinates of the decoration box, the core field (the visible text) and the text layout node (the
 //! scrolling text), and the conversions between them.
 //!
-//! The layout itself is made by the field's layout node (Compose's TextFieldLayoutStateCache in
-//! `updateNonMeasureInputs`/`layoutWithNewMeasureInputs`, the BasicTextField composable's), which gives it here
-//! with [`set_layout_result`](TextLayoutState::set_layout_result); readers of [`layout_result`](
-//! TextLayoutState::layout_result) hear of it as of a state's change.
+//! The layout itself is kept by its [`TextFieldLayoutStateCache`]: the field's text layout node gives it its inputs
+//! ([`update_non_measure_inputs`](TextLayoutState::update_non_measure_inputs) as it is updated,
+//! [`layout_with_new_measure_inputs`](TextLayoutState::layout_with_new_measure_inputs) as it measures), and
+//! [`layout_result`](TextLayoutState::layout_result) reads it as a derived state (laid out again on demand).
 
+use super::text_field_layout_state_cache::TextFieldLayoutStateCache;
+use super::transformed_text_field_state::TransformedTextFieldState;
 use crate::relocation::BringIntoViewRequester;
-use kompoz_graphics::{Density, Dp, Offset, Rect};
+use crate::text::keyboard_options::KeyboardOptions;
+use kompoz_graphics::{Constraints, Density, Dp, LayoutDirection, Offset, Rect};
 use kompoz_runtime::{MutableState, mutable_state_of};
-use kompoz_text::TextLayoutResult;
+use kompoz_text::{FontFamilyResolver, TextLayoutResult, TextStyle};
 use kompoz_ui::layout::LayoutCoordinates;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -42,7 +45,7 @@ pub type OnTextFieldLayout = Rc<dyn Fn(Density, &dyn Fn() -> Option<TextLayoutRe
 
 /// A field's text layout and the coordinates of its parts (Compose's TextLayoutState).
 pub struct TextLayoutState {
-    layout_result: Observed<Option<TextLayoutResult>>,
+    layout_cache: TextFieldLayoutStateCache,
     /// The scrolling text's node.
     text_layout_node_coordinates: Observed<Option<LayoutCoordinates>>,
     /// The visible inner field.
@@ -65,7 +68,7 @@ impl Default for TextLayoutState {
 impl TextLayoutState {
     pub fn new() -> TextLayoutState {
         TextLayoutState {
-            layout_result: Observed::new(None),
+            layout_cache: TextFieldLayoutStateCache::new(),
             text_layout_node_coordinates: Observed::new(None),
             core_node_coordinates: Observed::new(None),
             decorator_node_coordinates: Observed::new(None),
@@ -75,19 +78,52 @@ impl TextLayoutState {
         }
     }
 
-    /// The layout of the shown text, if it was laid out (read as a state).
+    /// The layout of the shown text, if it can be made now (Compose's `layoutResult`): read as a derived state —
+    /// readers are told when the text or a layout input changes.
     pub fn layout_result(&self) -> Option<TextLayoutResult> {
-        self.layout_result.get()
+        self.layout_cache.value()
     }
 
-    /// The field's node made a layout (its readers told); `on_text_layout` hears of it.
-    pub fn set_layout_result(&self, layout_result: Option<TextLayoutResult>, density: Density) {
-        self.layout_result.set(layout_result);
+    /// The inputs that don't come from the measure pass (Compose's `updateNonMeasureInputs`): the readers of the
+    /// layout are told if they change it.
+    pub fn update_non_measure_inputs(
+        &self,
+        text_field_state: &TransformedTextFieldState,
+        text_style: &TextStyle,
+        single_line: bool,
+        soft_wrap: bool,
+        keyboard_options: &KeyboardOptions,
+    ) {
+        self.layout_cache.update_non_measure_inputs(
+            text_field_state,
+            text_style,
+            single_line,
+            soft_wrap,
+            keyboard_options,
+        );
+    }
+
+    /// The inputs from the measure pass and the layout they make, told to `on_text_layout` (Compose's
+    /// `layoutWithNewMeasureInputs`). [`update_non_measure_inputs`](Self::update_non_measure_inputs) comes first.
+    pub fn layout_with_new_measure_inputs(
+        &self,
+        density: Density,
+        layout_direction: LayoutDirection,
+        font_family_resolver: Rc<dyn FontFamilyResolver>,
+        constraints: Constraints,
+    ) -> TextLayoutResult {
+        let result = self.layout_cache.layout_with_new_measure_inputs(
+            density,
+            layout_direction,
+            font_family_resolver,
+            constraints,
+        );
         let callback = self.on_text_layout.borrow().clone();
         if let Some(on_text_layout) = callback {
-            let latest = || self.layout_result.value.borrow().clone();
+            let latest = || self.layout_cache.value();
             on_text_layout(density, &latest);
         }
+        result
     }
 
     /// What hears of each layout (Compose's `onTextLayout`).

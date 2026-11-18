@@ -4,7 +4,9 @@
 # <scope> <kind> <name> <parameters> <owner>
 * kompozable BackHandler dr crates/kompoz-ui/src/back.rs
 * kompozable Bar rrr crates/kompoz-platform/src/app/title_bar.rs
+* kompozable BasicSecureTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable BasicText rdddddddddd crates/kompoz-foundation/src/text/basic_text.rs
+* kompozable BasicTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable BasicTooltipBox rrrddddr crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable BitmapImage rrdddddd crates/kompoz-foundation/src/image.rs
 * fn BitmapPainter rddd crates/kompoz-ui/src/draw/painter.rs
@@ -34,7 +36,10 @@ kompoz-platform/app_core kompozable Counter r crates/kompoz-platform/tests/app_c
 kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runtime.rs
+* kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable DefaultCursorHandle rr crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable Dialog rdr crates/kompoz-ui/src/window/dialog.rs
+* kompozable DisableCutCopy r crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable DisableSelection r crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable DisposableEffect rr crates/kompoz-runtime/src/remember.rs
 kompoz-platform/wayland_display kompozable Editor - crates/kompoz-platform/tests/wayland_display.rs
@@ -143,6 +148,7 @@ kompoz-ui/tree kompozable Stack dr crates/kompoz-ui/tests/tree.rs
 kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
 * fn StartOffset rd crates/kompoz-animation/src/spec.rs
 kompoz-runtime/runtime kompozable StaticView - crates/kompoz-runtime/tests/runtime.rs
+kompoz-foundation/text_field_selection kompozable Steady rr crates/kompoz-foundation/tests/text_field_selection.rs
 * fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
 kompoz/kotlin_ported fn Sticker rd crates/kompoz/tests/kotlin_ported.rs
 * fn Stroke ddddd crates/kompoz-graphics/src/draw_style.rs
@@ -158,6 +164,8 @@ kompoz-foundation/selection kompozable Text rdd crates/kompoz-foundation/tests/s
 kompoz-runtime/macros kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/runtime kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/subcomposition kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
+* kompozable TextFieldCursorHandle r crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable TextFieldSelectionHandles r crates/kompoz-foundation/src/text/basic_text_field.rs
 * fn TextFieldValue ddd crates/kompoz-text/src/input.rs
 * fn TextGeometricTransform dd crates/kompoz-text/src/style/mod.rs
 * fn TextIndent dd crates/kompoz-text/src/style/mod.rs

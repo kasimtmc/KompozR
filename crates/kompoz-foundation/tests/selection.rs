@@ -335,7 +335,7 @@ fn selection_container_selects_and_copies_text() {
 }
 
 fn text_toolbar_of_ones_own_is_told_instead_of_kompoz_drawing_one() {
-    // C++ 25310's SelectionContainer part (its text field part is stage 10's): a toolbar provided through
+    // C++ 25310's SelectionContainer part (its field part: text_field_selection.rs): a toolbar provided through
     // LocalTextToolbar is told where the selection is and what it can do — copy and select all — once while
     // nothing changes, again when it does, and hidden when the selection goes. (Compose's toolbar rect is the
     // selection's bounding box in the root, made four handle heights taller: room for the handles under it.)
@@ -596,7 +596,7 @@ fn two_texts_under_a_box(toolbar: Rc<RecordingToolbar>) -> KompozTestRule {
 }
 
 fn dragging_a_handle_shows_the_text_magnifier() {
-    // C++ 6685's SelectionContainer part (its text field part is stage 10's): while a finger drags a handle the
+    // C++ 6685's SelectionContainer part (its field part: text_field_selection.rs): while a finger drags a handle the
     // magnifier shows where the drag is — its x within the line, at the line's middle — and the toolbar is out of
     // the way; both go with the finger, the magnifier eased to another line by a spring (Compose's
     // animatedSelectionMagnifier). (A handle's drag starts past the 8 px touch slop, which it doesn't move by: 40
@@ -646,7 +646,7 @@ fn dragging_a_handle_shows_the_text_magnifier() {
 }
 
 fn selection_handles_point_at_their_end_and_hold_its_line_by_the_middle() {
-    // C++ 6749's SelectionContainer part (its text field part is stage 10's): each handle's point is a square at
+    // C++ 6749's SelectionContainer part (its field part: text_field_selection.rs): each handle's point is a square at
     // its top, towards the text — the start's on its right, at the selection's start; the end's on its left. A
     // handle dragged moves its end from where it points (the line's bottom, a pixel up), less the touch slop:
     // dragged up 30 px the start goes up a line, into the first text, by word there (C++ held the handle by its

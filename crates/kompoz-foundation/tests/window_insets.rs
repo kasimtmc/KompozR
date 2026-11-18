@@ -828,7 +828,10 @@ fn ime_nested_scroll_takes_what_is_dispatched_past_the_end() {
                         Box(Modifier.size(100.dp()).nested_scroll(Rc::new(Nothing), dispatcher = Some(d.clone())));
                     },
                 );
-                Box(Modifier.size(10.dp()).semantics(|c| c.set_is_editable(true)).focus_requester(&f).focus_target());
+                BasicTextField(
+                    remember_text_field_state(String::new()),
+                    modifier = Modifier.size(10.dp()).focus_requester(&f),
+                );
             },
         );
     }));
@@ -867,7 +870,7 @@ fn ime_nested_scroll_takes_what_is_dispatched_past_the_end() {
 }
 
 fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
-    // C++ 832 (a node that says it can be edited in place of its text field: the text field is its own work's):
+    // C++ 832 (its TextField a BasicTextField):
     // a list scrolled past its end, a field focused, brings the keyboard up with the finger; up and back down in
     // one drag, it goes down first, never under its bottom, the list taking the rest; pushed down mid-list or at
     // its start, the keyboard isn't taken hold of.
@@ -887,7 +890,10 @@ fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
                         }
                     },
                 );
-                Box(Modifier.size(10.dp()).semantics(|c| c.set_is_editable(true)).focus_requester(&f).focus_target());
+                BasicTextField(
+                    remember_text_field_state(String::new()),
+                    modifier = Modifier.size(10.dp()).focus_requester(&f),
+                );
             },
         );
     }));

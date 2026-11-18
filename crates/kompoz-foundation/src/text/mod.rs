@@ -10,7 +10,10 @@
 //! [`platform_default_key_mapping`]), dead keys ([`DeadKeyCombiner`]) and typed key events ([`is_typed_event`]).
 
 mod auto_size;
+mod autofill_highlight;
+mod basic_secure_text_field;
 mod basic_text;
+mod basic_text_field;
 pub mod context_menu;
 mod dead_key_combiner;
 mod inline_content;
@@ -24,11 +27,17 @@ pub mod long_press_text_drag_observer;
 pub mod modifiers;
 mod pointer_icon;
 pub mod selection;
+pub(crate) mod text_field_size;
 
 pub use auto_size::{
     AutoSizeStepBased, StepBased, TextAutoSize, TextAutoSizeDefaults, TextAutoSizeEq, TextAutoSizeLayoutScope,
 };
+pub use autofill_highlight::{LocalAutofillHighlightBrush, LocalAutofillHighlightColor};
+pub use basic_secure_text_field::{BasicSecureTextField, DefaultObfuscationCharacter};
 pub use basic_text::{BasicText, BasicTextValue};
+pub use basic_text_field::{
+    BasicTextField, BasicTextFieldDefaults, CursorHandle, CursorHandleHeight, CursorHandleWidth, TextFieldDecorator,
+};
 pub use dead_key_combiner::{COMBINING_ACCENT, COMBINING_ACCENT_MASK, DeadKeyCombiner, get_dead_char};
 pub use inline_content::{InlineContentMap, InlineTextContent};
 pub use key_event_helpers::{

@@ -608,7 +608,7 @@ fn bring_into_view_requesters_scroll_their_node_into_view() {
 }
 
 fn a_focus_request_brings_the_node_into_view() {
-    // C++ 11025 (its Button and TextField focusable boxes: Material is stage 12's, the text field the text field's):
+    // C++ 11025 (its Button a focusable box: Material is stage 12's; its TextField a BasicTextField):
     // far below and no keyboard to make room for, scrolled to anyway; back up.
     let scroll = ScrollState::new(0);
     let (below, above) = (FocusRequester::new(), FocusRequester::new());
@@ -622,8 +622,10 @@ fn a_focus_request_brings_the_node_into_view() {
                 Box(modifier =
                     Modifier.height(60.dp()).fill_max_width().focus_requester(&a).focusable().test_tag("üst"));
                 Box(modifier = Modifier.height(1500.dp()));
-                Box(modifier =
-                    Modifier.height(56.dp()).fill_max_width().focus_requester(&b).focusable().test_tag("alan"));
+                BasicTextField(
+                    remember_text_field_state(String::new()),
+                    modifier = Modifier.height(56.dp()).fill_max_width().focus_requester(&b).test_tag("alan"),
+                );
                 Box(modifier = Modifier.height(1500.dp()));
             },
         );
@@ -794,9 +796,8 @@ fn scrolling_turned_off_for_the_user_and_scrolling_from_the_end() {
 }
 
 fn focus_moved_by_keys_scrolls_into_view_and_so_does_the_keyboard() {
-    // C++ 20849's scrolling (its Buttons and TextField focusable boxes: Material is stage 12's, the text field the
-    // text field's): Tab brings the focused one into view, Shift+Tab back up; the focused field a keyboard comes up
-    // over (the scroll's viewport shrinking by its padding) is kept above it; a window that gets shorter too; not
+    // C++ 20849's scrolling (its Buttons focusable boxes: Material is stage 12's; its TextField a BasicTextField): Tab brings the focused one into view, Shift+Tab back up; the focused field a keyboard comes up
+    // over (the scroll's viewport shrinking by its padding) has its cursor kept above it; a window that gets shorter too; not
     // once scrolled away from it.
     let scroll = ScrollState::new(0);
     let field = FocusRequester::new();
@@ -809,8 +810,11 @@ fn focus_moved_by_keys_scrolls_into_view_and_so_does_the_keyboard() {
                 for i in 0..20 {
                     Box(modifier = Modifier.fill_max_width().height(60.dp()).focusable().test_tag(format!("b{i}")));
                 }
-                Box(modifier =
-                    Modifier.fill_max_width().height(60.dp()).focus_requester(&f).focusable().test_tag("field"));
+                BasicTextField(
+                    remember_text_field_state(String::new()),
+                    modifier = Modifier.fill_max_width().height(60.dp()).focus_requester(&f).test_tag("field"),
+                    text_style = kompoz_text::TextStyle { font_size: 16.sp(), ..kompoz_text::TextStyle::Default },
+                );
             },
         );
     }));
@@ -837,8 +841,10 @@ fn focus_moved_by_keys_scrolls_into_view_and_so_does_the_keyboard() {
     };
     rule.host().set_system_insets(insets);
     rule.wait_for_idle();
+    // Compose keeps the field's focus rect in view — its cursor, its first line (20 px) — not all of it (the
+    // C++ kept its text area).
     let editing = bounds(&rule, "field");
-    assert!(editing.bottom <= 500.5 && editing.bottom > 450.0, "{editing:?}");
+    assert!(near(editing.top + 20.0, 500.0, 0.5), "{editing:?}");
     // A window that isn't edge to edge gets shorter instead.
     rule.host().set_system_insets(kompoz_ui::platform::SystemInsets::default());
     rule.wait_for_idle();
@@ -846,7 +852,7 @@ fn focus_moved_by_keys_scrolls_into_view_and_so_does_the_keyboard() {
     rule.host().set_viewport_size(IntSize::new(400, 500));
     rule.wait_for_idle();
     let editing = bounds(&rule, "field");
-    assert!(editing.bottom <= 500.5 && editing.bottom > 450.0, "{editing:?}");
+    assert!(editing.top + 20.0 <= 500.5 && editing.top + 20.0 > 450.0, "{editing:?}");
     scroll_to(&rule, &scroll, 0); // scrolled away from it, then taller again: it stays where it is
     rule.host().set_viewport_size(IntSize::new(400, 800));
     rule.wait_for_idle();

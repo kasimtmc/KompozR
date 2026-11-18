@@ -281,6 +281,30 @@ pub struct MagnifierNode {
     layer: Option<GraphicsLayer>,
 }
 
+impl MagnifierNode {
+    /// A magnifier with the defaults showing what is around `source_center` (px in the layout; unspecified:
+    /// nothing shown), telling `on_size_changed` its size (Compose's `MagnifierNode(sourceCenter, onSizeChanged,
+    /// useTextDefault = true)`, what a text field delegates to).
+    pub(crate) fn new(
+        source_center: impl Fn(&Density) -> Offset + 'static,
+        on_size_changed: Option<Rc<dyn Fn(DpSize)>>,
+    ) -> MagnifierNode {
+        MagnifierElement {
+            settings: Settings {
+                source_center: Rc::new(source_center),
+                magnifier_center: None,
+                on_size_changed,
+                zoom: f32::NAN,
+                size: DpSize::Unspecified,
+                corner_radius: Dp::Unspecified,
+                elevation: Dp::Unspecified,
+                clip: true,
+            },
+        }
+        .create()
+    }
+}
+
 impl ModifierNode for MagnifierNode {
     node_capabilities!(draw, global_position_aware, semantics, observer);
 

@@ -31,16 +31,25 @@ struct ArgRef<'e> {
 enum ArgValue<'e> {
     Expr(&'e Expr),
     Lambda(&'e Lambda),
+    /// A fun interface's SAM constructor (`TextFieldDecorator { innerTextField -> … }`, `expr`): given to a
+    /// parameter taking a lambda, its lambda, as Kotlin's SAM conversion makes the one the other.
+    Sam {
+        expr: &'e Expr,
+        lambda: &'e Lambda,
+    },
 }
 
 impl ArgValue<'_> {
     fn is_lambda(&self) -> bool {
-        matches!(self, ArgValue::Lambda(_) | ArgValue::Expr(Expr { kind: ExprKind::Lambda(_), .. }))
+        matches!(
+            self,
+            ArgValue::Lambda(_) | ArgValue::Sam { .. } | ArgValue::Expr(Expr { kind: ExprKind::Lambda(_), .. })
+        )
     }
 
     fn lambda(&self) -> Option<&Lambda> {
         match self {
-            ArgValue::Lambda(l) => Some(l),
+            ArgValue::Lambda(l) | ArgValue::Sam { lambda: l, .. } => Some(l),
             ArgValue::Expr(Expr { kind: ExprKind::Lambda(l), .. }) => Some(l),
             ArgValue::Expr(Expr { kind: ExprKind::Annotated { expr, .. }, .. }) => match &expr.kind {
                 ExprKind::Lambda(l) => Some(l),
@@ -85,7 +94,13 @@ impl Gen<'_, '_> {
         let span = self.span(e.loc);
         let mut list: Vec<ArgRef> = args
             .iter()
-            .map(|a| ArgRef { name: a.name.as_ref(), value: ArgValue::Expr(&a.value), spread: a.spread, loc: a.loc })
+            .map(|a| {
+                let value = match self.sam_lambda(&a.value) {
+                    Some(lambda) => ArgValue::Sam { expr: &a.value, lambda },
+                    None => ArgValue::Expr(&a.value),
+                };
+                ArgRef { name: a.name.as_ref(), value, spread: a.spread, loc: a.loc }
+            })
             .collect();
         if let Some(l) = trailing {
             list.push(ArgRef { name: None, value: ArgValue::Lambda(l), spread: false, loc: l.loc });
@@ -106,6 +121,25 @@ impl Gen<'_, '_> {
             return out;
         }
         self.typed_call(out, callee, type_args, span)
+    }
+
+    /// The lambda of a fun interface's SAM constructor (`TextFieldDecorator { … }`, `KeyboardActionHandler({ … })`):
+    /// a call of the interface's name (none of the file's or a local's) with a lambda its only argument.
+    fn sam_lambda<'e>(&self, e: &'e Expr) -> Option<&'e Lambda> {
+        let ExprKind::Call { callee, type_args, args, trailing_lambda } = &e.kind else { return None };
+        let ExprKind::Name(n) = &callee.kind else { return None };
+        if !type_args.is_empty() || self.is_local(&n.name) || self.file.function(&n.name).is_some() {
+            return None;
+        }
+        fun_interface(&n.name)?;
+        match (args.as_slice(), trailing_lambda) {
+            ([], Some(l)) => Some(l),
+            ([a], None) if a.name.is_none() && !a.spread => match &a.value.kind {
+                ExprKind::Lambda(l) => Some(l),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// `listOf<String>()`: the type arguments of what makes a collection or a state as the value's type (a Rust
@@ -256,6 +290,33 @@ impl Gen<'_, '_> {
                 return self.emit(&c, Target::Path(path, c.rust.clone()), args, loc, &n.name);
             }
             return Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown);
+        }
+        // A fun interface's SAM constructor (`TextFieldDecorator { innerTextField -> … }`) as a value: its lambda made
+        // the trait's object as the API holds it (`Rc<dyn TextFieldDecorator>`: Kotlin's value of the interface).
+        if let Some(fi) = fun_interface(&n.name)
+            && let [a] = args
+            && a.name.is_none()
+            && let Some(l) = a.value.lambda()
+        {
+            let mut info = Callee::from_item(fi).params.remove(0).lambda.expect("a fun interface's lambda");
+            // (kept, as a trait object is: capturing clones; its parameters typed for Rust to find the blanket impl)
+            (info.stored, info.typed) = (true, true);
+            let closure = self.lambda_for(l, Some(&info), Some(&n.name), false);
+            let t = ident(&n.name, nspan);
+            let ptr = if trait_object(&n.name) == Some("Arc") { "Arc" } else { "Rc" };
+            let (ty, made) = if ptr == "Arc" {
+                (
+                    quote_spanned!(span=> ::std::sync::Arc<dyn #t>),
+                    quote_spanned!(span=> ::std::sync::Arc::new(#closure)),
+                )
+            } else {
+                (quote_spanned!(span=> ::std::rc::Rc<dyn #t>), quote_spanned!(span=> ::std::rc::Rc::new(#closure)))
+            };
+            let f = self.fresh("f", span);
+            return Out::plain(
+                quote_spanned!(span=> { let #f: #ty = #made; #f }),
+                Ty::from_rust(&format!("{ptr}<dyn {}>", n.name)),
+            );
         }
         // A type's constructor or a function the index doesn't know (Rust's own, another file's): as written, its
         // arguments as given — a string literal to a PascalCase one (a composable of another file, a constructor) as
@@ -742,7 +803,7 @@ impl Gen<'_, '_> {
             }
             match m.given[k][0].value {
                 ArgValue::Expr(e) => Some(self.peek_ty(e).element()).filter(|t| *t != Ty::Unknown),
-                ArgValue::Lambda(_) => None,
+                ArgValue::Lambda(_) | ArgValue::Sam { .. } => None,
             }
         })
     }
@@ -978,6 +1039,12 @@ impl Gen<'_, '_> {
         if is_keys(p) {
             return self.keys_tuple(&[a], span);
         }
+        // (a SAM constructor to what takes no lambda: the interface's value it makes)
+        if let ArgValue::Sam { expr, .. } = a.value
+            && p.lambda.is_none()
+        {
+            return self.arg_value(&ArgRef { value: ArgValue::Expr(expr), ..*a }, Some(p), transform_wraps);
+        }
         if let Some(l) = a.value.lambda() {
             let label = self.call_labels.last().cloned();
             let closure = self.lambda_for(l, p.lambda.as_ref(), label.as_deref(), transform_wraps);
@@ -1158,6 +1225,7 @@ impl Gen<'_, '_> {
                 let label = self.call_labels.last().cloned();
                 self.lambda_for(l, None, label.as_deref(), false)
             }
+            ArgValue::Sam { expr, .. } => self.value_want(expr, Want { str_ok: true, any: None }),
             ArgValue::Expr(e) => match &e.kind {
                 ExprKind::Lambda(l) => self.lambda_for(l, None, None, false),
                 _ => self.value_want(e, Want { str_ok: true, any: None }),

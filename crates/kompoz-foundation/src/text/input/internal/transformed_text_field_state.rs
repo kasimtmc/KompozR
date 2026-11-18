@@ -102,6 +102,11 @@ impl TransformedTextFieldState {
         }))
     }
 
+    /// Whether `other` is this very object (Compose's `===`).
+    pub fn same_as(&self, other: &TransformedTextFieldState) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+
     /// The state it shows.
     pub fn text_field_state(&self) -> &TextFieldState {
         &self.0.text_field_state

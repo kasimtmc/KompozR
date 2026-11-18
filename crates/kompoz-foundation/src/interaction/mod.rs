@@ -26,6 +26,7 @@ macro_rules! identity_eq {
 }
 
 mod drag;
+pub(crate) mod drag_and_drop_hover;
 mod focus;
 mod hover;
 mod press;

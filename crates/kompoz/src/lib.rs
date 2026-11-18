@@ -73,10 +73,14 @@ pub mod prelude {
     pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
     pub use kompoz_platform::App;
     pub use kompoz_ui::platform::{
-        LocalClipboard, LocalDeepLinks, LocalDensity, LocalDynamicTonalPalette, LocalFocusManager,
-        LocalFontFamilyResolver, LocalHapticFeedback, LocalImeController, LocalInputModeManager, LocalLayoutDirection,
-        LocalPlatform, LocalSoftwareKeyboardController, LocalSystemInsets, LocalSystemTheme, LocalTextToolbar,
-        LocalUriHandler, LocalViewConfiguration, LocalWallpaperTonalPalette, LocalWindowInfo,
+        LocalClipboard, LocalCursorBlinkEnabled, LocalDeepLinks, LocalDensity, LocalDynamicTonalPalette,
+        LocalFocusManager, LocalFontFamilyResolver, LocalHapticFeedback, LocalImeController, LocalInputModeManager,
+        LocalLayoutDirection, LocalPlatform, LocalSoftwareKeyboardController, LocalSystemInsets, LocalSystemTheme,
+        LocalTextToolbar, LocalUriHandler, LocalViewConfiguration, LocalWallpaperTonalPalette, LocalWindowInfo,
     };
     pub use kompoz_ui::semantics::Role;
+    // (the state-based text fields, Compose's androidx.compose.foundation.text; the keyboard's options, its
+    // androidx.compose.ui.text.input)
+    pub use kompoz_foundation::text::{BasicSecureTextField, BasicTextField, TextFieldDecorator};
+    pub use kompoz_ui::platform::{ImeAction, KeyboardCapitalization, KeyboardType};
 }

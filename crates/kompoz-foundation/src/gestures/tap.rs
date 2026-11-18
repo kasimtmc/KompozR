@@ -280,8 +280,8 @@ impl PressGestureScope {
 // ---------------------------------------------------------------------------------------------------------------
 // detect_tap_gestures
 
-type PositionCallback = Rc<dyn Fn(Offset)>;
-type PressCallback = Rc<dyn Fn(PressGestureScope, Offset) -> Pin<Box<dyn Future<Output = ()>>>>;
+pub(crate) type PositionCallback = Rc<dyn Fn(Offset)>;
+pub(crate) type PressCallback = Rc<dyn Fn(PressGestureScope, Offset) -> Pin<Box<dyn Future<Output = ()>>>>;
 
 /// `detect_tap_gestures`'s callbacks, set by name, then awaited (Compose's `detectTapGestures(onDoubleTap = …,
 /// onLongPress = …, onPress = …, onTap = …)`).
@@ -465,4 +465,76 @@ impl TapGesture {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// detect_tap_and_press
+
+/// Taps and presses without waiting for a double tap or a long press (Compose's internal `detectTapAndPress`, a
+/// text field's): each down is consumed and told to `on_press` (with the scope awaiting its release), each up to
+/// `on_tap`.
+pub(crate) async fn detect_tap_and_press(
+    scope: PointerInputScope,
+    on_press: Option<PressCallback>,
+    on_tap: Option<PositionCallback>,
+) {
+    let density = scope.density();
+    coroutine_scope(move |cs| async move {
+        let press_scope = PressGestureScope::new(density);
+        await_each_gesture(&scope, move |s| {
+            let gesture = TapGesture {
+                cs: cs.clone(),
+                press: press_scope.clone(),
+                on_double_tap: None,
+                on_long_press: None,
+                on_press: on_press.clone(),
+                on_tap: on_tap.clone(),
+            };
+            async move {
+                let press = gesture.press.clone();
+                let reset_job = gesture.cs.launch(async move { press.reset().await });
+                let down = await_first_down(&s, true, PointerEventPass::Main).await;
+                down.consume();
+                gesture.launch_on_press(&reset_job, down.position);
+                match wait_for_up_or_cancellation(&s, PointerEventPass::Main).await {
+                    None => {
+                        gesture.launch_cancel(&reset_job);
+                    }
+                    Some(up) => {
+                        up.consume();
+                        gesture.launch_release(&reset_job);
+                        gesture.tap(up.position);
+                    }
+                }
+            }
+        })
+        .await
+    })
+    .await
+}
+
+/// Reports each down, unconsumed or not, and the up of that pointer when `on_up` is given (Compose's internal
+/// `detectPressDownGesture`, the selection handles').
+pub(crate) async fn detect_press_down_gesture(
+    scope: PointerInputScope,
+    on_down: Rc<dyn Fn(Offset)>,
+    on_up: Option<Rc<dyn Fn()>>,
+) {
+    await_each_gesture(&scope, move |s| {
+        let (on_down, on_up) = (on_down.clone(), on_up.clone());
+        async move {
+            let down = await_first_down(&s, false, PointerEventPass::Main).await;
+            on_down(down.position);
+            if let Some(on_up) = on_up {
+                loop {
+                    let event = s.await_pointer_event().await;
+                    if !event.changes.iter().any(|c| c.id == down.id && c.pressed) {
+                        break;
+                    }
+                }
+                on_up();
+            }
+        }
+    })
+    .await
 }

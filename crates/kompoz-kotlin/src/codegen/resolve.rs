@@ -594,6 +594,15 @@ pub(crate) fn kt_members(kotlin: &str, traits: &[&str]) -> Vec<&'static Item> {
         .collect()
 }
 
+/// The fun interface of a Kotlin name (`TextFieldDecorator`), unless the API has a function of that name, which
+/// its calls call (`OutputTransformation { … }`: `output_transformation`).
+pub(crate) fn fun_interface(kotlin: &str) -> Option<&'static Item> {
+    if free_functions(kotlin).next().is_some() {
+        return None;
+    }
+    lookup(kotlin).iter().find(|i| i.kind == Kind::FunInterface && i.params.first().is_some_and(|p| p.lambda.is_some()))
+}
+
 /// Whether a PascalCase name is a value object of the index (`Modifier`, `LocalDensity`): `.` after it, not `::`.
 pub(crate) fn is_value_object(name: &str) -> bool {
     lookup(name)
@@ -601,10 +610,13 @@ pub(crate) fn is_value_object(name: &str) -> bool {
         .any(|i| i.kind == Kind::Value && i.owner.is_empty() && !i.module.contains(|c: char| c.is_uppercase()))
 }
 
-/// The index's items owned by a type of Rust name `owner` (its associated functions, constants, entries).
+/// The index's items owned by a type of Rust name `owner` (its associated functions, constants, entries); a function
+/// Kotlin names qualified (`TextFieldLineLimits.MultiLine(…)`, Rust's `multi_line`: a doc line's name) too.
 pub(crate) fn associated(owner: &str, kotlin: &str) -> Vec<&'static Item> {
-    lookup(kotlin)
-        .iter()
+    let qualified =
+        lookup(&format!("{owner}.{kotlin}")).iter().filter(|i| i.owner == owner && i.kind == Kind::Function);
+    qualified
+        .chain(lookup(kotlin).iter())
         .filter(|i| {
             (i.owner == owner && matches!(i.kind, Kind::Function | Kind::Constant | Kind::Variant))
                 || (i.kind == Kind::Value && i.module.rsplit("::").next() == Some(owner))

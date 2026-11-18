@@ -108,8 +108,9 @@ pub mod prelude {
         SelectionContainerWithState, SelectionState, TextSelectionColors, remember_selection_state,
     };
     pub use crate::text::{
-        BasicText, BasicTextValue, InlineContentMap, InlineTextContent, KeyboardActionScope, KeyboardActions,
-        KeyboardOptions, OnTextLayout, StepBased, TextAutoSize, TextAutoSizeDefaults,
+        BasicSecureTextField, BasicText, BasicTextField, BasicTextValue, InlineContentMap, InlineTextContent,
+        KeyboardActionScope, KeyboardActions, KeyboardOptions, OnTextLayout, StepBased, TextAutoSize,
+        TextAutoSizeDefaults, TextFieldDecorator,
     };
     pub use crate::{BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, Image, VectorImage};
     pub use crate::{MutatePriority, MutatorMutex};

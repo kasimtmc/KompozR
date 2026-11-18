@@ -51,7 +51,8 @@ pub use scrollable_state::{
 };
 pub use tap::{DetectTapGestures, GestureCancellation, PressGestureScope};
 pub(crate) use tap::{
-    FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY, LongPressResult, is_changed_to_down, wait_for_long_press,
+    FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY, LongPressResult, PressCallback, detect_press_down_gesture,
+    detect_tap_and_press, is_changed_to_down, wait_for_long_press,
 };
 pub use transform::DetectTransformGestures;
 

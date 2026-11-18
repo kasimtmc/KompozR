@@ -64,6 +64,12 @@ impl FocusOwner {
         if target.is_none() || !same {
             self.captured.set(false);
         }
+        // Autofill hears the focus moved (Compose's autofill `onFocusChanged`), with the frame's semantics.
+        if !same && let Some(autofill) = self.owner().and_then(|o| o.autofill()) {
+            let before = previous.as_ref().and_then(|p| p.layout_node());
+            let after = target.and_then(|t| t.layout_node());
+            autofill.queue_focus_changed(before.as_ref(), after.as_ref());
+        }
         if let Some(previous) = previous
             && !same
         {

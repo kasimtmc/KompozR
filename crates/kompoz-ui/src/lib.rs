@@ -10,6 +10,7 @@
 #![allow(non_upper_case_globals, non_snake_case)]
 
 pub mod alignment;
+pub mod autofill;
 pub mod back;
 pub mod display_list;
 pub mod draganddrop;
