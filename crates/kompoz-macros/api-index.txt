@@ -299,7 +299,7 @@ kompoz-runtime/macros method copy dddd crates/kompoz-runtime/tests/macros.rs Col
 * method drag dr crates/kompoz-foundation/src/gestures/draggable.rs S as DraggableStateExtensions
 * method drag dr crates/kompoz-foundation/src/gestures/draggable2d.rs S as Draggable2DStateExtensions
 * method drag_and_drop rrdd crates/kompoz-test/src/input.rs MouseInjectionScope
-* fn drag_and_drop_transfer_data ddddddd crates/kompoz-ui/src/draganddrop.rs
+* fn drag_and_drop_transfer_data dddddddd crates/kompoz-ui/src/draganddrop.rs
 * method draggable rrdddddd crates/kompoz-foundation/src/gestures/draggable.rs Modifier as DraggableModifiers
 * method draggable2d rdddddd crates/kompoz-foundation/src/gestures/draggable2d.rs Modifier as Draggable2DModifiers
 * method draw_arc rrrrdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope

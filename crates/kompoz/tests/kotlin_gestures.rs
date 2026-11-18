@@ -13,6 +13,7 @@ mod common;
 
 use kompoz::prelude::*;
 use kompoz::test::{KompozTestRule, Text};
+use kompoz::ui::clipboard::ClipEntry;
 use kompoz::ui::draganddrop::{DragAndDropEvent, DragAndDropTarget};
 use kompoz::ui::input::PointerType;
 use std::cell::RefCell;
@@ -93,8 +94,7 @@ fn gestures_as_compose_writes_them() {
     // A drop from outside on the target, by its MIME type.
     let h = rule.host();
     assert!(h.external_drag_entered(vec!["text/plain".into()]));
-    let data =
-        DragAndDropTransferData { mime_types: vec!["text/plain".into()], text: "elma".into(), ..Default::default() };
+    let data = DragAndDropTransferData { clip_entry: ClipEntry::with_plain_text("elma"), ..Default::default() };
     assert!(h.external_drop(data, Offset::new(20.0, 140.0)));
     assert_eq!(*dropped.borrow(), ["elma"]);
 }

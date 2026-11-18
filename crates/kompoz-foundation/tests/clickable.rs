@@ -433,11 +433,11 @@ impl PlatformCallbacks for Recorded {
     fn haptic_feedback(&self, kind: HapticFeedbackType) {
         self.felt.borrow_mut().push(kind);
     }
-    fn get_clipboard(&self) -> Option<String> {
-        self.clipboard.borrow().clone()
+    fn get_clip_entry(&self) -> Option<kompoz_ui::clipboard::ClipEntry> {
+        self.clipboard.borrow().clone().map(kompoz_ui::clipboard::ClipEntry::with_plain_text)
     }
-    fn set_clipboard(&self, text: &str) {
-        *self.clipboard.borrow_mut() = Some(text.to_string());
+    fn set_clip_entry(&self, entry: Option<kompoz_ui::clipboard::ClipEntry>) {
+        *self.clipboard.borrow_mut() = entry.and_then(|e| e.read_plain_text());
     }
 }
 
@@ -451,7 +451,7 @@ fn platform_services_open_links_and_long_clicks_are_felt() {
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         let links = LocalUriHandler.current();
         let haptics = LocalHapticFeedback.current();
-        let clip = kompoz_ui::platform::LocalClipboard.current();
+        let clip = kompoz_ui::platform::LocalClipboardManager.current();
         let (v, lc) = (v.clone(), lc.clone());
         Column(move || {
             let links = links.clone();
@@ -465,8 +465,8 @@ fn platform_services_open_links_and_long_clicks_are_felt() {
             Text(
                 "pano",
                 modifier = Modifier.clickable(move || {
-                    v.set(clip.get_text().unwrap_or_default());
-                    clip.set_text("kopya");
+                    v.set(clip.get_text().map(|t| t.text().to_string()).unwrap_or_default());
+                    clip.set_text(kompoz_text::AnnotatedString::new("kopya"));
                 }),
             );
             let (a, b) = (lc.clone(), lc.clone());

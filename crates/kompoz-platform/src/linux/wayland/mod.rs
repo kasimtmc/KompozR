@@ -51,6 +51,7 @@ use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::Rect;
 use kompoz_runtime::Content;
 use kompoz_ui::KompozHost;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
@@ -242,12 +243,14 @@ impl PlatformCallbacks for WaylandCallbacks {
         let _ = self.0.connection.flush();
     }
 
-    fn get_clipboard(&self) -> Option<String> {
-        self.0.clipboard.borrow_mut().read(&self.0.connection)
+    fn get_clip_entry(&self) -> Option<ClipEntry> {
+        self.0.clipboard.borrow().entry(&Rc::downgrade(&self.0))
     }
 
-    fn set_clipboard(&self, text: &str) {
-        self.0.clipboard.borrow_mut().write(text);
+    /// (Another app's entry read first, as it is: it may go once ours replaces it.)
+    fn set_clip_entry(&self, entry: Option<ClipEntry>) {
+        let entry = entry.map(|e| e.materialized());
+        self.0.clipboard.borrow_mut().write(entry);
         let _ = self.0.connection.flush();
     }
 
@@ -336,6 +339,8 @@ pub struct WaylandPlatform {
     drag_own: bool,
     /// An offer dropped on the window, finished (or let go: refused) once the core says whether it was taken.
     dropped: Option<ObjectId>,
+    /// What it carries, until the core takes it (`take_drop_entry`).
+    dropped_entry: Option<ClipEntry>,
     // The loop.
     connection: Connection,
     busy: bool,
@@ -416,6 +421,7 @@ impl WaylandPlatform {
             drag_y: 0.0,
             drag_own: false,
             dropped: None,
+            dropped_entry: None,
             connection,
             busy: false,
             awaiting_callback: false,
@@ -876,6 +882,10 @@ impl Platform for WaylandPlatform {
     fn handled(&mut self, host: &KompozHost, event: &Event) {
         self.desktop.handled(host, event);
         self.start_outgoing_drag(); // (one the host asked for as it handled the event)
+    }
+
+    fn take_drop_entry(&mut self) -> Option<ClipEntry> {
+        self.dropped_entry.take()
     }
 
     fn drop_done(&mut self, taken: bool) {

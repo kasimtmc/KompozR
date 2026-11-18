@@ -24,6 +24,7 @@
 //! [`EditingBuffer`]). A platform speaking UTF-16 or code points converts at its boundary (text-input-v3 and XIM
 //! speak UTF-8 bytes already).
 
+use crate::clipboard::ClipEntry;
 use crate::platform::{ImeAction, ImeOptions, PlatformHandle, TextEditState};
 use kompoz_graphics::{Matrix, Rect};
 use kompoz_runtime::KompozitionLocal;
@@ -148,6 +149,17 @@ struct SessionState {
     /// Counted up as the input method's view moves with its commands (what follows the editor's value reads it,
     /// so that the editor going back to a value it had is seen as a change from what the input method sees).
     version: kompoz_runtime::MutableState<u64>,
+    /// What takes content the input method commits (images, files: Android's `commitContent`), and the MIME types
+    /// it takes (Android's `EditorInfo.contentMimeTypes`); none: text only.
+    content: RefCell<Option<ContentReceiver>>,
+}
+
+/// What an editor takes besides text from the input method: of `mime_types`, given to `on_commit_content` (the
+/// content and its link URI) which says whether it took it.
+#[derive(Clone)]
+pub(crate) struct ContentReceiver {
+    pub mime_types: Vec<String>,
+    pub on_commit_content: Rc<dyn Fn(ClipEntry, Option<String>) -> bool>,
 }
 
 struct ServiceState {
@@ -240,6 +252,7 @@ impl TextInputService {
             open: Cell::new(true),
             value: reads,
             version: kompoz_runtime::mutable_state_of(0),
+            content: RefCell::new(None),
         });
         let before = self.0.session.replace(Some(session.clone()));
         if self.0.platform_service.is_some() {
@@ -289,6 +302,29 @@ impl TextInputService {
     /// The open session's options, if one is open.
     pub fn session_options(&self) -> Option<ImeOptions> {
         self.current().map(|s| s.options.clone())
+    }
+
+    /// The MIME types of content the open session's editor takes from the input method besides text (Android's
+    /// `EditorInfo.contentMimeTypes`): empty if it takes text only, or none is open.
+    pub fn session_content_mime_types(&self) -> Vec<String> {
+        self.current().and_then(|s| s.content.borrow().as_ref().map(|c| c.mime_types.clone())).unwrap_or_default()
+    }
+
+    /// Content the input method commits (an image or a file a keyboard sends: Android's
+    /// `InputConnection.commitContent`, with its link URI) to the open session's editor: whether it took it (false
+    /// if none is open or it takes text only). No borrow is held while the editor runs.
+    pub fn commit_content(&self, content: ClipEntry, link_uri: Option<String>) -> bool {
+        let Some(session) = self.current() else { return false };
+        let receiver = session.content.borrow().clone();
+        let Some(receiver) = receiver else { return false };
+        let taken = (receiver.on_commit_content)(content, link_uri);
+        self.resync(&session);
+        taken
+    }
+
+    /// The open `session` takes content as `receiver` says (the 1.7+ API's request).
+    pub(crate) fn set_content_receiver(&self, session: &TextInputSession, receiver: Option<ContentReceiver>) {
+        *session.session.content.borrow_mut() = receiver;
     }
 
     /// Whether a session is open.

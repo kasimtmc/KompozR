@@ -27,31 +27,35 @@ mod metrics;
 mod preedit;
 mod selection;
 
-use self::dnd::{DropTypes, XdndTarget};
+use self::dnd::XdndTarget;
 use self::drag::{OutgoingDrag, PointerAt};
 use self::ffi::{
     Atom, Cursor, Decoded, Display, InputMethod, NONE, Time, Window, XEvent, XPoint, XiEvent, vulkan_surface,
 };
 use self::input::{Devices, Input};
 use self::keyboard::X11Keyboard;
-use self::selection::{Clipboard, Encoding, IncrReader, decode, encode, part_size};
+use self::selection::{Clipboard, IncrReader, part_size};
 use super::desktop::{DesktopServices, open_uri};
 use super::event_loop::{EventLoop, Waker};
 use super::sys::{self, PollFd};
 use crate::app::{AppConfig, AppCore, DisplayPlatform, Event, Metrics, Platform};
+use crate::linux::transfer::{Payload, X11_TEXT_TYPES};
 use crate::system::{log, preferred_language};
 use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::Rect;
 use kompoz_runtime::Content;
 use kompoz_ui::KompozHost;
+use kompoz_ui::clipboard::{ClipDataReader, ClipEntry, ClipItem, ClipMetadata, is_plain_text_type};
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ffi::{CStr, c_long};
 use std::process::ExitCode;
 use std::rc::Rc;
+use std::rc::Weak;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -156,9 +160,6 @@ atoms! {
     TARGETS = c"TARGETS",
     INCR = c"INCR",
     TEXT = c"TEXT",
-    TEXT_PLAIN_UTF8 = c"text/plain;charset=utf-8",
-    TEXT_PLAIN = c"text/plain",
-    TEXT_URI_LIST = c"text/uri-list",
     RESOURCE_MANAGER = c"RESOURCE_MANAGER",
     KOMPOZ_SELECTION = c"KOMPOZ_SELECTION",
     XdndAware = c"XdndAware",
@@ -233,6 +234,10 @@ struct Shared {
     /// The last input event's time (what selections are owned and asked for at).
     last_time: Cell<Time>,
     clipboard: RefCell<Clipboard>,
+    /// The names of the atoms read (they never change on a server).
+    atom_names: RefCell<HashMap<Atom, String>>,
+    /// Counted up as each drop is done with: what a drop offers is read only until then.
+    drop_generation: Cell<u64>,
     cursors: RefCell<Cursors>,
     ime: RefCell<Ime>,
     waker: Waker,
@@ -271,16 +276,14 @@ impl Shared {
         self.display.flush();
     }
 
-    /// What a text target's bytes are; none: not a text target.
-    fn encoding_of(&self, target: Atom) -> Option<Encoding> {
-        let a = &self.atoms;
-        if target == ffi::XA_STRING {
-            Some(Encoding::Latin1)
-        } else if [a.UTF8_STRING, a.TEXT, a.TEXT_PLAIN_UTF8, a.TEXT_PLAIN].contains(&target) {
-            Some(Encoding::Utf8)
-        } else {
-            None
+    /// `atom`'s name (asked of the server once).
+    fn atom_name(&self, atom: Atom) -> Option<String> {
+        if let Some(name) = self.atom_names.borrow().get(&atom) {
+            return Some(name.clone());
         }
+        let name = self.display.atom_name(atom)?;
+        self.atom_names.borrow_mut().insert(atom, name.clone());
+        Some(name)
     }
 
     /// An event `matches` takes waited for (what else comes stays queued), a second at most (C++'s `await`).
@@ -340,38 +343,76 @@ impl Shared {
         }
     }
 
-    /// The clipboard's text: the app's own if it holds it, else the owner's as UTF-8, else as Latin-1 (C++'s
-    /// `readClipboard`).
-    fn read_clipboard(&self) -> Option<String> {
+    /// The types `selection`'s owner offers (its `TARGETS`, as names), asked for at `time`; none if it doesn't
+    /// say.
+    fn targets_of(&self, selection: Atom, time: Time) -> Option<Vec<String>> {
+        let (bytes, kind) = self.convert(selection, self.atoms.TARGETS, time)?;
+        if kind != ffi::XA_ATOM && kind != self.atoms.TARGETS {
+            return None;
+        }
+        let (atoms, _) = bytes.as_chunks::<{ std::mem::size_of::<c_long>() }>();
+        Some(atoms.iter().filter_map(|&a| self.atom_name(c_long::from_ne_bytes(a) as Atom)).collect())
+    }
+
+    /// What the clipboard holds (C++'s `readClipboard`, all of it): the app's own entry if it holds it; else the
+    /// owner's, of the types it offers (UTF-8 and Latin-1 text if it doesn't say), read as they are asked for while
+    /// it owns the clipboard.
+    fn clip_entry(self: &Rc<Self>) -> Option<ClipEntry> {
         let owner = self.display.selection_owner(self.atoms.CLIPBOARD);
         {
             let c = self.clipboard.borrow();
             if owner == self.window.get() && c.owned {
-                return Some(c.text.clone());
+                return c.payload.as_ref().map(|p| p.entry().clone());
             }
         }
         if owner == NONE {
             return None;
         }
-        for target in [self.atoms.UTF8_STRING, ffi::XA_STRING] {
-            if let Some((bytes, kind)) = self.convert(self.atoms.CLIPBOARD, target, self.last_time.get()) {
-                return Some(decode(&bytes, self.encoding_of(kind).unwrap_or(Encoding::Utf8)));
-            }
+        let time = self.last_time.get();
+        let types = self
+            .targets_of(self.atoms.CLIPBOARD, time)
+            .unwrap_or_else(|| vec!["UTF8_STRING".to_string(), "STRING".to_string()]);
+        let metadata = ClipMetadata::of_offered(&types);
+        let data: Vec<String> = types.into_iter().filter(|t| metadata.mime_types().contains(t)).collect();
+        if data.is_empty() {
+            return None;
         }
-        None
+        let reader = SelectionReader {
+            shared: Rc::downgrade(self),
+            selection: self.atoms.CLIPBOARD,
+            owner,
+            time,
+            drop_generation: None,
+        };
+        Some(ClipEntry::with_metadata(vec![ClipItem::from_reader(data, Rc::new(reader))], metadata))
     }
 
-    /// The app's text on the clipboard (C++'s `writeClipboard`): the window owns CLIPBOARD, answering for it.
-    fn write_clipboard(&self, text: &str) {
+    /// `entry` on the clipboard (C++'s `writeClipboard`, all its types): the window owns CLIPBOARD, answering for
+    /// it with each type the entry is offered as; none: the clipboard let go.
+    fn set_clip_entry(&self, entry: Option<ClipEntry>) {
         let window = self.window.get();
+        let Some(entry) = entry else {
+            let owned = std::mem::take(&mut self.clipboard.borrow_mut().owned);
+            if owned {
+                self.display.set_selection_owner(self.atoms.CLIPBOARD, NONE, self.last_time.get());
+            }
+            let mut c = self.clipboard.borrow_mut();
+            c.payload = None;
+            c.targets.clear();
+            return;
+        };
+        let payload = Payload::of_entry(&entry); // (another app's read now: it goes once the app owns it)
+        let names = payload.offered(X11_TEXT_TYPES);
+        let targets: Vec<(Atom, String)> = names.into_iter().map(|n| (self.display.intern_atom(&n), n)).collect();
         self.display.set_selection_owner(self.atoms.CLIPBOARD, window, self.last_time.get());
         let mut c = self.clipboard.borrow_mut();
-        c.text = text.to_string();
+        c.payload = Some(payload);
+        c.targets = targets;
         c.owned = window != NONE && self.display.selection_owner(self.atoms.CLIPBOARD) == window;
     }
 
-    /// Another app asking for the clipboard the app holds (C++'s `answerSelection`): what types it can have, or the
-    /// text (in parts when it is larger than a request carries).
+    /// Another app asking for the clipboard the app holds (C++'s `answerSelection`): what types it can have, or one
+    /// of them (in parts when it is larger than a request carries).
     fn answer_selection(&self, requestor: Window, selection: Atom, target: Atom, property: Atom, time: Time) {
         let (d, a) = (&self.display, &self.atoms);
         let into = if property != NONE { property } else { target }; // (an obsolete client's)
@@ -379,18 +420,20 @@ impl Shared {
         let mut c = self.clipboard.borrow_mut();
         if selection == a.CLIPBOARD && c.owned {
             if target == a.TARGETS {
-                let targets = [a.TARGETS, a.UTF8_STRING, ffi::XA_STRING, a.TEXT, a.TEXT_PLAIN_UTF8, a.TEXT_PLAIN];
-                d.set_property_32(requestor, into, ffi::XA_ATOM, &targets.map(|t| t as c_long));
+                let mut targets = vec![a.TARGETS as c_long];
+                targets.extend(c.targets.iter().map(|t| t.0 as c_long));
+                d.set_property_32(requestor, into, ffi::XA_ATOM, &targets);
                 answered = into;
-            } else if let Some(encoding) = self.encoding_of(target) {
+            } else if let Some(name) = c.target_name(target).map(str::to_string)
+                && let Some(bytes) = c.payload.as_ref().and_then(|p| p.bytes(&name, X11_TEXT_TYPES))
+            {
                 let kind = if target == a.TEXT { a.UTF8_STRING } else { target };
-                let data = encode(&c.text, encoding);
-                if data.len() > part_size(d.max_request_bytes()) {
+                if bytes.len() > part_size(d.max_request_bytes()) {
                     d.select_input(requestor, ffi::PROPERTY_CHANGE_MASK);
-                    d.set_property_32(requestor, into, a.INCR, &[data.len() as c_long]);
-                    c.start_transfer(requestor, into, kind);
+                    d.set_property_32(requestor, into, a.INCR, &[bytes.len() as c_long]);
+                    c.transfers.start(requestor, into, kind, bytes);
                 } else {
-                    d.set_property_8(requestor, into, kind, &data);
+                    d.set_property_8(requestor, into, kind, &bytes);
                 }
                 answered = into;
             }
@@ -404,17 +447,58 @@ impl Shared {
     /// (C++'s `sendNextPart`).
     fn send_next_part(&self, window: Window, property: Atom) {
         let d = &self.display;
-        let mut c = self.clipboard.borrow_mut();
-        let Some(t) = c.transfers().iter().find(|t| t.requestor == window && t.property == property).copied() else {
-            return;
-        };
-        let data = encode(&c.text, self.encoding_of(t.kind).unwrap_or(Encoding::Utf8));
-        let Some(part) = c.next_part(window, property, data.len(), part_size(d.max_request_bytes())) else { return };
+        let next = self.clipboard.borrow_mut().transfers.next_part(window, property, part_size(d.max_request_bytes()));
+        let Some((part, data)) = next else { return };
         d.set_property_8(window, property, part.kind, &data[part.range]);
         if part.done {
             d.select_input(window, ffi::NO_EVENT_MASK);
         }
         d.flush();
+    }
+
+    /// What a drop from another app offers (`offered`: its types, the drag's `XdndSelection` asked for at `time`),
+    /// read as it is asked for until the drop is done.
+    fn drop_entry(self: &Rc<Self>, offered: &[(Atom, String)], time: Time) -> ClipEntry {
+        let names: Vec<String> = offered.iter().map(|t| t.1.clone()).collect();
+        let metadata = ClipMetadata::of_offered(&names);
+        let reader = SelectionReader {
+            shared: Rc::downgrade(self),
+            selection: self.atoms.XdndSelection,
+            owner: NONE,
+            time,
+            drop_generation: Some(self.drop_generation.get()),
+        };
+        ClipEntry::with_metadata(vec![ClipItem::from_reader(names, Rc::new(reader))], metadata)
+    }
+}
+
+/// Reads a type of another app's selection: the clipboard while the same window owns it, or a drop's
+/// `XdndSelection` until that drop is done.
+struct SelectionReader {
+    shared: Weak<Shared>,
+    selection: Atom,
+    /// The clipboard's owner when it was read (a drop's: none).
+    owner: Window,
+    time: Time,
+    /// The drop it is of (the shared count then).
+    drop_generation: Option<u64>,
+}
+
+impl ClipDataReader for SelectionReader {
+    fn read(&self, mime_type: &str) -> Option<Vec<u8>> {
+        let shared = self.shared.upgrade()?;
+        match self.drop_generation {
+            Some(g) if shared.drop_generation.get() != g => return None,
+            None if shared.display.selection_owner(self.selection) != self.owner => return None,
+            _ => {}
+        }
+        let target = shared.display.intern_atom(mime_type);
+        let (bytes, kind) = shared.convert(self.selection, target, self.time)?;
+        // (Text asked for by a UTF-8 name and given as Latin-1 `STRING`: made UTF-8, as the name says.)
+        if kind == ffi::XA_STRING && mime_type != "STRING" && is_plain_text_type(mime_type) {
+            return Some(bytes.iter().map(|&b| char::from(b)).collect::<String>().into_bytes());
+        }
+        Some(bytes)
     }
 }
 
@@ -468,12 +552,12 @@ impl PlatformCallbacks for X11Callbacks {
         self.0.show_cursor();
     }
 
-    fn get_clipboard(&self) -> Option<String> {
-        self.0.read_clipboard()
+    fn get_clip_entry(&self) -> Option<ClipEntry> {
+        self.0.clip_entry()
     }
 
-    fn set_clipboard(&self, text: &str) {
-        self.0.write_clipboard(text);
+    fn set_clip_entry(&self, entry: Option<ClipEntry>) {
+        self.0.set_clip_entry(entry);
     }
 
     fn open_uri(&self, uri: &str) {
@@ -508,7 +592,8 @@ pub struct X11Platform {
     input: Input,
     keyboard: X11Keyboard,
     drag: XdndTarget,
-    drop_types: DropTypes,
+    /// What the last drop carries, until the core takes it (`take_drop_entry`).
+    dropped: Option<ClipEntry>,
     /// The action the window last took a drag over it with, and a drop's finish to send once the core says
     /// whether it was taken (its source, the action).
     drop_action: Atom,
@@ -543,6 +628,8 @@ impl X11Platform {
             window: Cell::new(NONE),
             last_time: Cell::new(ffi::CURRENT_TIME),
             clipboard: RefCell::new(Clipboard::default()),
+            atom_names: RefCell::new(HashMap::new()),
+            drop_generation: Cell::new(0),
             cursors: RefCell::new(Cursors { made: [NONE; 9], icon: PointerIcon::Default }),
             ime: RefCell::new(Ime {
                 method: InputMethod::new(display.clone()),
@@ -557,12 +644,6 @@ impl X11Platform {
             can_drag: Cell::new(false),
             dragging: Cell::new(false),
         });
-        let drop_types = DropTypes {
-            uri_list: atoms.TEXT_URI_LIST,
-            text_plain_utf8: atoms.TEXT_PLAIN_UTF8,
-            utf8_string: atoms.UTF8_STRING,
-            text_plain: atoms.TEXT_PLAIN,
-        };
         let mut platform = X11Platform {
             shared,
             event_loop,
@@ -575,7 +656,7 @@ impl X11Platform {
             input,
             keyboard,
             drag: XdndTarget::default(),
-            drop_types,
+            dropped: None,
             drop_action: NONE,
             pending_finish: None,
             pointer: None,
@@ -839,10 +920,14 @@ impl X11Platform {
             return self.drag_reply(kind, data);
         }
         if kind == a.XdndEnter {
-            // The types it offers (three in the message, or its XdndTypeList).
+            // The types it offers (three in the message, or its XdndTypeList), with their names.
             let list = XdndTarget::has_type_list(&data)
                 .then(|| d.property(data[0] as Window, a.XdndTypeList, false).map(|p| p.longs()).unwrap_or_default());
-            self.drag.enter(&data, list.as_deref(), &self.drop_types, self.window());
+            let offered = XdndTarget::offered_atoms(&data, list.as_deref())
+                .into_iter()
+                .filter_map(|t| Some((t, self.shared.atom_name(t)?)))
+                .collect();
+            self.drag.enter(&data, offered, self.window());
         } else if kind == a.XdndPosition {
             let Some((root_x, root_y)) = self.drag.position_on_screen(&data) else { return };
             let (x, y) = d
@@ -864,13 +949,11 @@ impl X11Platform {
             let events = self.drag.leave(&data);
             self.events.extend(events);
         } else if kind == a.XdndDrop {
-            let Some(request) = self.drag.drop_request(&data) else { return };
-            let text = request.and_then(|r| {
-                let (bytes, kind) = self.shared.convert(a.XdndSelection, r.kind, r.time)?;
-                Some(decode(&bytes, self.shared.encoding_of(kind).unwrap_or(Encoding::Utf8)))
-            });
+            // (What it carries read from its source as a target asks for it, until the core says it is done.)
+            let Some(time) = self.drag.drop_time(&data) else { return };
+            self.dropped = time.map(|t| self.shared.drop_entry(self.drag.offered(), t));
             let source = self.drag.source();
-            let events = self.drag.dropped(text, &self.drop_types);
+            let events = self.drag.dropped(self.dropped.is_some());
             self.events.extend(events);
             // (Finished once the core says whether a target took it: `drop_done`.)
             if let Some((old, _)) = self.pending_finish.replace((source, self.drop_action)) {
@@ -1055,7 +1138,13 @@ impl Platform for X11Platform {
     }
 
     /// The drop's finish sent to its source: taken (with the action the window took it with) or refused.
+    fn take_drop_entry(&mut self) -> Option<ClipEntry> {
+        self.dropped.take()
+    }
+
     fn drop_done(&mut self, taken: bool) {
+        // (What the drop offered can't be read from here on.)
+        self.shared.drop_generation.set(self.shared.drop_generation.get() + 1);
         let Some((source, action)) = self.pending_finish.take() else { return };
         let a = self.shared.atoms;
         if taken && action != NONE {

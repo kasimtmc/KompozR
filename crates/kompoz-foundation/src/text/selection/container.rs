@@ -16,6 +16,7 @@ use kompoz_runtime::{
     mutable_state_of, on_dispose, remember, remember_keyed, remember_saveable_with,
 };
 use kompoz_text::AnnotatedString;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::input::PointerInputScope;
 use kompoz_ui::layout::layout_into;
 use kompoz_ui::platform::{LocalClipboard, LocalDensity, LocalHapticFeedback, LocalTextToolbar};
@@ -94,7 +95,9 @@ fn selection_container_impl(
         let coroutine_scope = remember_coroutine_scope();
         manager.set_haptic_feedback(Some(LocalHapticFeedback.current()));
         let copy_handler = remember_keyed(clipboard.clone(), move || {
-            Rc::new(move |text: AnnotatedString| clipboard.set_text(text.text())) as Rc<dyn Fn(AnnotatedString)>
+            Rc::new(move |text: AnnotatedString| {
+                clipboard.set_clip_entry_now(Some(ClipEntry::with_annotated_string(text)))
+            }) as Rc<dyn Fn(AnnotatedString)>
         });
         manager.set_on_copy_handler(Some(copy_handler));
         manager.set_text_toolbar(Some(LocalTextToolbar.current()));

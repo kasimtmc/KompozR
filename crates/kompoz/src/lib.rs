@@ -72,11 +72,14 @@ pub mod prelude {
 
     pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
     pub use kompoz_platform::App;
+    // (the clipboard's entries, Compose's androidx.compose.ui.platform.ClipEntry & co.)
+    pub use kompoz_ui::clipboard::{ClipEntry, ClipItem, ClipMetadata};
     pub use kompoz_ui::platform::{
-        LocalClipboard, LocalCursorBlinkEnabled, LocalDeepLinks, LocalDensity, LocalDynamicTonalPalette,
-        LocalFocusManager, LocalFontFamilyResolver, LocalHapticFeedback, LocalImeController, LocalInputModeManager,
-        LocalLayoutDirection, LocalPlatform, LocalSoftwareKeyboardController, LocalSystemInsets, LocalSystemTheme,
-        LocalTextToolbar, LocalUriHandler, LocalViewConfiguration, LocalWallpaperTonalPalette, LocalWindowInfo,
+        LocalClipboard, LocalClipboardManager, LocalCursorBlinkEnabled, LocalDeepLinks, LocalDensity,
+        LocalDynamicTonalPalette, LocalFocusManager, LocalFontFamilyResolver, LocalHapticFeedback, LocalImeController,
+        LocalInputModeManager, LocalLayoutDirection, LocalPlatform, LocalSoftwareKeyboardController, LocalSystemInsets,
+        LocalSystemTheme, LocalTextToolbar, LocalUriHandler, LocalViewConfiguration, LocalWallpaperTonalPalette,
+        LocalWindowInfo,
     };
     pub use kompoz_ui::semantics::Role;
     // (the state-based text fields, Compose's androidx.compose.foundation.text; the keyboard's options, its

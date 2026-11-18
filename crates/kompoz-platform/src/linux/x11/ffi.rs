@@ -756,6 +756,7 @@ struct X11Functions {
     root_window: unsafe extern "C" fn(D, c_int) -> Window,
     set_error_handler: unsafe extern "C" fn(Option<ErrorHandler>) -> Option<ErrorHandler>,
     intern_atoms: unsafe extern "C" fn(D, *mut *mut c_char, c_int, Bool, *mut Atom) -> Status,
+    get_atom_name: unsafe extern "C" fn(D, Atom) -> *mut c_char,
     create_window: unsafe extern "C" fn(
         D,
         Window,
@@ -925,6 +926,7 @@ impl Xlib {
                 root_window: function(l, c"XRootWindow")?,
                 set_error_handler: function(l, c"XSetErrorHandler")?,
                 intern_atoms: function(l, c"XInternAtoms")?,
+                get_atom_name: function(l, c"XGetAtomName")?,
                 create_window: function(l, c"XCreateWindow")?,
                 destroy_window: function(l, c"XDestroyWindow")?,
                 map_window: function(l, c"XMapWindow")?,
@@ -1409,6 +1411,31 @@ impl Display {
             (self.x.x.intern_atoms)(self.raw, pointers.as_mut_ptr(), names.len() as c_int, 0, atoms.as_mut_ptr())
         };
         atoms
+    }
+
+    /// The atom named `name`, made if it isn't (NONE for a name with a NUL).
+    pub fn intern_atom(&self, name: &str) -> Atom {
+        match std::ffi::CString::new(name) {
+            Ok(name) => self.intern_atoms(&[name.as_c_str()])[0],
+            Err(_) => NONE,
+        }
+    }
+
+    /// `atom`'s name; none for an atom that isn't one (its error ignored).
+    pub fn atom_name(&self, atom: Atom) -> Option<String> {
+        if atom == NONE {
+            return None;
+        }
+        // SAFETY: the display is open; the result is Xlib's allocation (or null for a bad atom), read then freed.
+        unsafe {
+            let name = (self.x.x.get_atom_name)(self.raw, atom);
+            if name.is_null() {
+                return None;
+            }
+            let owned = CStr::from_ptr(name).to_string_lossy().into_owned();
+            (self.x.x.free)(name.cast());
+            Some(owned)
+        }
     }
 
     /// A top-level window of `width` by `height` pixels, the screen's visual, its contents kept at the top left

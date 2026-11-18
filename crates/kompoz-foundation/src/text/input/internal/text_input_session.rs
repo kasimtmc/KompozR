@@ -13,12 +13,15 @@
 
 use super::text_layout_state::TextLayoutState;
 use super::transformed_text_field_state::TransformedTextFieldState;
+use crate::content::internal::ReceiveContentConfiguration;
+use crate::content::{PlatformTransferableContent, TransferableContent, TransferableContentSource};
 use crate::text::input::text_field_buffer::adjust_text_range;
 use crate::text::input::{TextFieldBuffer, TextFieldCharSequence};
 use kompoz_graphics::Offset;
 use kompoz_text::input::{EditCommand, TextFieldValue};
 use kompoz_text::segment::{find_following_break, find_preceding_break};
 use kompoz_text::{TextLayoutResult, TextRange};
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::platform::{ImeAction, ImeOptions};
 use kompoz_ui::platform_text_input::{
     PlatformTextInputMethodRequest, PlatformTextInputSessionScope, SessionFuture, TextEditingScope, TextEditorState,
@@ -237,12 +240,15 @@ impl TextEditingScope for BufferEditingScope<'_> {
 /// Starts the platform's input method for a field until cancelled (Compose's desktop
 /// `platformSpecificTextInputSession`): its request reads `state`'s untransformed value, applies the input method's
 /// commands to it as the user, runs `on_ime_action` for the action key, and says where the caret, the field, its
-/// visible text and its text's top left are from `layout_state`.
+/// visible text and its text's top left are from `layout_state`. Under a content receiver
+/// (`receive_content_configuration`) it takes any content the input method commits besides text, given to the
+/// receivers (Compose's Android session: `contentMimeTypes` all, `commitContent` to `onCommitContent`).
 pub fn platform_specific_text_input_session(
     session: &PlatformTextInputSessionScope,
     state: TransformedTextFieldState,
     layout_state: Rc<TextLayoutState>,
     ime_options: ImeOptions,
+    receive_content_configuration: Option<Rc<dyn ReceiveContentConfiguration>>,
     on_ime_action: Option<Rc<dyn Fn(ImeAction)>>,
 ) -> SessionFuture {
     let value_state = state.clone();
@@ -275,6 +281,19 @@ pub fn platform_specific_text_input_session(
         unclipped_text_offset_in_root: Rc::new(move || l5.text_layout_node_coordinates().map(|c| c.position_in_root())),
         edit_text: Rc::new(move |block: &mut dyn FnMut(&mut dyn TextEditingScope)| {
             text_state.edit_untransformed_text_as_user(false, |buffer| block(&mut BufferEditingScope(buffer)));
+        }),
+        content_mime_types: match receive_content_configuration {
+            Some(_) => vec!["*/*".to_string()],
+            None => Vec::new(),
+        },
+        on_commit_content: receive_content_configuration.map(|configuration| {
+            Rc::new(move |entry: ClipEntry, link_uri: Option<String>| {
+                let metadata = entry.clip_metadata().clone();
+                let platform = PlatformTransferableContent { link_uri };
+                let content =
+                    TransferableContent::new(entry, metadata, TransferableContentSource::Keyboard, Some(platform));
+                configuration.on_commit_content(content)
+            }) as Rc<dyn Fn(ClipEntry, Option<String>) -> bool>
         }),
     };
     session.start_input_method(request)

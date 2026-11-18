@@ -26,6 +26,7 @@ mod border;
 mod canvas;
 pub mod clickable;
 pub mod clip_scrollable_container;
+pub mod content;
 pub mod context_menu;
 pub mod draganddrop;
 mod edge_effect;
@@ -71,6 +72,10 @@ pub mod prelude {
     };
     pub use crate::clickable::{Callback, ClickableModifiers};
     pub use crate::clip_scrollable_container::{ClipScrollableContainerModifiers, MaxSupportedElevation};
+    pub use crate::content::{
+        ContentReceiverModifiers, MediaType, PlatformTransferableContent, ReceiveContentListener, TransferableContent,
+        TransferableContentSource,
+    };
     pub use crate::context_menu::{
         ContextMenuArea, ContextMenuData, ContextMenuDataProvider, ContextMenuItem, ContextMenuModifiers,
         ContextMenuRepresentation, ContextMenuState, ContextMenuStatus, DarkDefaultContextMenuRepresentation,

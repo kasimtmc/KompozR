@@ -5,6 +5,8 @@
 //! drags; and the clipboard actions (cut, copy, paste, select all).
 
 use super::text_field_handle_state::TextFieldHandleState;
+use crate::content::internal::ReceiveContentConfiguration;
+use crate::content::{TransferableContent, TransferableContentSource};
 use crate::gestures::{PointerInputScopeGestures, PressCallback, detect_press_down_gesture, detect_tap_and_press};
 use crate::interaction::{MutableInteractionSource, PressInteraction};
 use crate::text::input::TextFieldCharSequence;
@@ -22,6 +24,7 @@ use kompoz_graphics::LayoutDirection;
 use kompoz_graphics::{Density, Dp, Offset, Rect};
 use kompoz_runtime::{DerivedState, MutableState, derived_state_of, mutable_state_of, without_read_observation};
 use kompoz_text::{AnnotatedString, ResolvedTextDirection, TextLayoutResult, TextRange};
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::input::{PointerEventPass, PointerInputScope};
 use kompoz_ui::layout::LayoutCoordinates;
 use kompoz_ui::platform::{Clipboard, HapticFeedback, HapticFeedbackType};
@@ -57,7 +60,7 @@ pub trait TextToolbarHandler {
     fn hide_text_toolbar(&self);
 }
 
-/// What the clipboard has to paste (Compose desktop's ClipboardPasteState): updated before a menu shows.
+/// What the clipboard has to paste (Compose's ClipboardPasteState): updated before a menu shows.
 struct ClipboardPasteState {
     clipboard: Clipboard,
     has_text: bool,
@@ -69,12 +72,17 @@ impl ClipboardPasteState {
         ClipboardPasteState { clipboard, has_text: false, has_clip: false }
     }
 
-    /// Reads the clipboard again (KompozR's clipboards hold text: a clip is its text).
+    /// Reads what the clipboard holds again: any entry (a clip), one described as text.
     fn update(&mut self) {
-        self.has_text = self.clipboard.get_text().is_some_and(|t| !t.is_empty());
-        self.has_clip = self.has_text;
+        let entry = self.clipboard.get_clip_entry_now();
+        self.has_text = entry.as_ref().is_some_and(ClipEntry::has_text);
+        self.has_clip = entry.is_some();
     }
 }
+
+/// What gives a field's selection state the configuration of the content receiver around the field, if any
+/// (Compose's `receiveContentConfiguration: (() -> ReceiveContentConfiguration?)?`, the decorator's).
+pub type ReceiveContentConfigurationProvider = Rc<dyn Fn() -> Option<Rc<dyn ReceiveContentConfiguration>>>;
 
 /// A field's selection behaviours and gestures (Compose's TextFieldSelectionState). Made by BasicTextField
 /// (remembered per transformed state), updated as it recomposes, shared by its nodes.
@@ -106,6 +114,8 @@ pub struct TextFieldSelectionState {
     previous_raw_drag_offset: Cell<Option<usize>>,
     press_interaction: RefCell<Option<PressInteraction::Press>>,
     clipboard_paste_state: RefCell<ClipboardPasteState>,
+    /// What gives the content receiver's configuration around the field (Compose's `receiveContentConfiguration`).
+    receive_content_configuration: RefCell<Option<ReceiveContentConfigurationProvider>>,
     derived_visible_content_bounds: RefCell<Option<DerivedState<Option<Rect>>>>,
 }
 
@@ -164,6 +174,7 @@ impl TextFieldSelectionState {
             previous_raw_drag_offset: Cell::new(None),
             press_interaction: RefCell::new(None),
             clipboard_paste_state: RefCell::new(ClipboardPasteState::new(clipboard)),
+            receive_content_configuration: RefCell::new(None),
             derived_visible_content_bounds: RefCell::new(None),
         });
         let weak = Rc::downgrade(&state);
@@ -928,7 +939,7 @@ impl TextFieldSelectionState {
     /// Cuts the selected text to the clipboard (Compose's `cut`).
     pub fn cut(&self) {
         if let Some(value) = self.cut_with_result() {
-            self.clipboard.borrow().set_text(value.text());
+            self.clipboard.borrow().set_clip_entry_now(Some(ClipEntry::with_annotated_string(value)));
         }
     }
 
@@ -956,7 +967,7 @@ impl TextFieldSelectionState {
     /// (Compose's `copy`).
     pub fn copy(&self, cancel_selection: bool) {
         if let Some(value) = self.copy_with_result(cancel_selection) {
-            self.clipboard.borrow().set_text(value.text());
+            self.clipboard.borrow().set_clip_entry_now(Some(ClipEntry::with_annotated_string(value)));
         }
     }
 
@@ -978,9 +989,29 @@ impl TextFieldSelectionState {
     }
 
     /// Whether paste can be offered (Compose's `canShowPasteMenuItem`): editable, and text in the clipboard as it
-    /// was last read ([`update_clipboard_entry`](Self::update_clipboard_entry)).
+    /// was last read ([`update_clipboard_entry`](Self::update_clipboard_entry)) — or, under a content receiver,
+    /// anything (its listener takes what it takes).
     pub fn can_show_paste_menu_item(&self) -> bool {
-        self.is_paste_allowed() && self.clipboard_paste_state.borrow().has_text
+        if !self.is_paste_allowed() {
+            return false;
+        }
+        let paste_state = self.clipboard_paste_state.borrow();
+        if paste_state.has_text {
+            return true;
+        }
+        paste_state.has_clip && self.receive_content_configuration().is_some()
+    }
+
+    /// The configuration of the content receiver around the field, if any (the decorator's provider asked).
+    fn receive_content_configuration(&self) -> Option<Rc<dyn ReceiveContentConfiguration>> {
+        let provider = self.receive_content_configuration.borrow().clone();
+        provider.and_then(|p| p())
+    }
+
+    /// What gives the content receiver's configuration (Compose's settable `receiveContentConfiguration`: the
+    /// decorator's while it is attached).
+    pub fn set_receive_content_configuration(&self, provider: Option<ReceiveContentConfigurationProvider>) {
+        *self.receive_content_configuration.borrow_mut() = provider;
     }
 
     /// Compose's `isPasteAllowed`.
@@ -988,13 +1019,39 @@ impl TextFieldSelectionState {
         self.editable()
     }
 
-    /// Pastes the clipboard's text over the selection, a step of its own in the undo history (Compose's
-    /// `paste`, as plain text: KompozR has no receiveContent).
+    /// Pastes what the clipboard holds, a step of its own in the undo history (Compose's `paste`): under a content
+    /// receiver it goes to the receivers first (from the clipboard), what they leave of its plain text in place of
+    /// the selection; else its text does.
     pub fn paste(&self, is_from_hardware_source: bool) {
-        let text = self.clipboard.borrow().get_text();
-        let Some(text) = text else { return };
+        let Some(receive_content_configuration) = self.receive_content_configuration() else {
+            return self.paste_as_plain_text(is_from_hardware_source);
+        };
+        let clip_entry = self.clipboard.borrow().get_clip_entry_now();
+        let Some(clip_entry) = clip_entry else { return self.paste_as_plain_text(is_from_hardware_source) };
+        let clip_metadata = clip_entry.clip_metadata().clone();
+        let remaining = receive_content_configuration.receive_content_listener().on_receive(TransferableContent::new(
+            clip_entry,
+            clip_metadata,
+            TransferableContentSource::Clipboard,
+            None,
+        ));
+        if let Some(clipboard_text) = remaining.and_then(|r| r.clip_entry().read_plain_text()) {
+            self.text_field_state.replace_selected_text(
+                &clipboard_text,
+                false,
+                TextFieldEditUndoBehavior::NeverMerge,
+                true,
+                is_from_hardware_source,
+            );
+        }
+    }
+
+    /// Pastes the clipboard's text over the selection (Compose's `pasteAsPlainText`: the first item's).
+    fn paste_as_plain_text(&self, is_from_hardware_source: bool) {
+        let clipboard_text = self.clipboard.borrow().get_clip_entry_now().and_then(|e| e.read_text());
+        let Some(clipboard_text) = clipboard_text else { return };
         self.text_field_state.replace_selected_text(
-            &text,
+            &clipboard_text,
             false,
             TextFieldEditUndoBehavior::NeverMerge,
             true,

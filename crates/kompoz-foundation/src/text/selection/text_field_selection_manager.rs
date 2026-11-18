@@ -28,6 +28,7 @@ use kompoz_runtime::{MutableState, mutable_state_of, remember, remember_keyed, w
 use kompoz_text::input::{OffsetMapping, TextFieldValue, VisualTransformation};
 use kompoz_text::{AnnotatedString, ResolvedTextDirection, TextRange};
 use kompoz_ui::Modifier;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::focus::{FocusDirection, FocusRequester};
 use kompoz_ui::input::PointerInputScope;
 use kompoz_ui::platform::{
@@ -364,11 +365,11 @@ impl TextFieldSelectionManager {
     }
 
     /// Reads whether the clipboard has text to paste (Compose's `updateClipboardEntry`, its desktop
-    /// `hasAvailableTextToPaste`).
+    /// `hasAvailableTextToPaste`: an entry described as text).
     pub fn update_clipboard_entry(&self) {
         let clipboard = self.clipboard.borrow().clone();
         if let Some(clipboard) = clipboard {
-            self.has_available_text_to_paste.set(clipboard.get_text().is_some_and(|t| !t.is_empty()));
+            self.has_available_text_to_paste.set(clipboard.get_clip_entry_now().is_some_and(|e| e.has_text()));
         }
     }
 
@@ -423,7 +424,7 @@ impl TextFieldSelectionManager {
         if let Some(value_to_copy) = self.copy_with_result(cancel_selection) {
             let clipboard = self.clipboard.borrow().clone();
             if let Some(clipboard) = clipboard {
-                clipboard.set_text(value_to_copy.text());
+                clipboard.set_clip_entry_now(Some(ClipEntry::with_annotated_string(value_to_copy)));
             }
         }
     }
@@ -449,11 +450,12 @@ impl TextFieldSelectionManager {
         Some(selected_text)
     }
 
-    /// Pastes the clipboard's text over the selection (Compose's `paste()`).
+    /// Pastes the clipboard's text over the selection, its styles where the app copied styled text (Compose's
+    /// `paste()`: `readAnnotatedString`).
     pub fn paste(&self) {
         let clipboard = self.clipboard.borrow().clone();
-        let Some(text) = clipboard.and_then(|c| c.get_text()) else { return };
-        self.paste_text(&AnnotatedString::new(text));
+        let Some(text) = clipboard.and_then(|c| c.get_clip_entry_now()?.read_annotated_string()) else { return };
+        self.paste_text(&text);
     }
 
     /// Pastes `text` over the selection, the caret after it, a step of its own in the history (Compose's
@@ -482,7 +484,7 @@ impl TextFieldSelectionManager {
         if let Some(value_to_cut) = self.cut_with_result() {
             let clipboard = self.clipboard.borrow().clone();
             if let Some(clipboard) = clipboard {
-                clipboard.set_text(value_to_cut.text());
+                clipboard.set_clip_entry_now(Some(ClipEntry::with_annotated_string(value_to_cut)));
             }
         }
     }

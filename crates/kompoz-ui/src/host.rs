@@ -283,6 +283,7 @@ impl KompozHost {
                 LocalInputModeManager.provides(input_mode_manager.clone()),
                 LocalHapticFeedback.provides(HapticFeedback(platform.clone())),
                 LocalClipboard.provides(Clipboard(platform.clone())),
+                LocalClipboardManager.provides(ClipboardManager(platform.clone())),
                 LocalUriHandler.provides(UriHandler(platform.clone(), deep_links.clone())),
                 LocalDeepLinks.provides(deep_links.clone()),
                 LocalTextInputService.provides(text_input.clone()),
@@ -1166,6 +1167,13 @@ impl KompozHost {
     /// What an input method did, to the open session's editor (Compose's `onEditCommand`); false if none is open.
     pub fn send_edit_commands(&self, commands: &[EditCommand]) -> bool {
         self.text_input.send(commands)
+    }
+
+    /// Content an input method commits (an image or a file a keyboard sends, with its link URI: Android's
+    /// `InputConnection.commitContent`; Linux's input methods send none) to the open session's editor: whether it
+    /// took it (a state-based field under a `contentReceiver`).
+    pub fn commit_content(&self, content: ClipEntry, link_uri: Option<String>) -> bool {
+        self.text_input.commit_content(content, link_uri)
     }
 
     /// The input method's action key (Done, Next, Search, …: C++'s `imeAction`) to the open session's editor;

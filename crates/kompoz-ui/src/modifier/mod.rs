@@ -4,8 +4,10 @@
 
 pub(crate) mod chain;
 pub(crate) mod diff;
+mod local;
 mod node;
 
+pub use local::{ModifierLocal, ModifierLocalMap, ModifierLocalModifierNode, modifier_local_of};
 pub use node::{
     DelegatableNode, DelegatedNode, NodeCx, NodeHandle, NodeKind, ObserverModifierNode, TraversableNode,
     TraversalDecision,
@@ -244,6 +246,9 @@ pub trait ModifierNode: Any {
     fn as_traversable(&mut self) -> Option<&mut dyn TraversableNode> {
         None
     }
+    fn as_modifier_local(&mut self) -> Option<&mut dyn ModifierLocalModifierNode> {
+        None
+    }
     fn as_observer(&mut self) -> Option<&mut dyn ObserverModifierNode> {
         None
     }
@@ -255,7 +260,7 @@ pub trait ModifierNode: Any {
 /// Names: `layout`, `draw`, `semantics`, `parent_data`, `layout_aware`, `global_position_aware`,
 /// `unplaced_aware`, `pointer_input`, `indirect_pointer_input`, `key_input`, `soft_keyboard_interception`,
 /// `rotary_input`, `focus_target`, `focus_properties`, `focus_event`, `bring_into_view`, `beyond_bounds_layout`,
-/// `traversable`, `observer`.
+/// `traversable`, `modifier_local`, `observer`.
 #[macro_export]
 macro_rules! node_capabilities {
     ($($cap:ident),* $(,)?) => {
@@ -315,6 +320,9 @@ macro_rules! node_capabilities {
     };
     (@one beyond_bounds_layout) => {
         fn as_beyond_bounds_layout(&mut self) -> Option<&mut dyn $crate::focus::BeyondBoundsLayout> { Some(self) }
+    };
+    (@one modifier_local) => {
+        fn as_modifier_local(&mut self) -> Option<&mut dyn $crate::modifier::ModifierLocalModifierNode> { Some(self) }
     };
     (@one traversable) => {
         fn as_traversable(&mut self) -> Option<&mut dyn $crate::modifier::TraversableNode> { Some(self) }

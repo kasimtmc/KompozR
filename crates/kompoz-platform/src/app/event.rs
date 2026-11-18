@@ -162,10 +162,13 @@ pub enum Event {
     },
     /// The system's back (Android's button).
     Back,
-    /// A drag from another app: begun, moved over the window, a file's path or some text, dropped.
+    /// A drag from another app: begun (offering `mime_types`, as the platform describes them: empty, not told),
+    /// moved over the window, what it carries (a file's path or some text, as a script gives them; or what the
+    /// platform reads: `DropData`), dropped.
     DropBegin {
         x: f32,
         y: f32,
+        mime_types: Vec<String>,
     },
     DropMove {
         x: f32,
@@ -180,6 +183,12 @@ pub enum Event {
         x: f32,
         y: f32,
         text: String,
+    },
+    /// What it dropped is the platform's to give ([`Platform::take_drop_entry`](super::Platform::take_drop_entry)):
+    /// all it offers, read as a target asks for it until the drop is done.
+    DropData {
+        x: f32,
+        y: f32,
     },
     DropComplete {
         x: f32,

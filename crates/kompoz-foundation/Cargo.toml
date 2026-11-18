@@ -125,5 +125,9 @@ name = "pager"
 harness = false
 
 [[test]]
+name = "content"
+harness = false
+
+[[test]]
 name = "desktop"
 harness = false

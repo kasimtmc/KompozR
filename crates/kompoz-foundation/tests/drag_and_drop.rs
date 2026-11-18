@@ -13,6 +13,7 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::draw::DrawScope;
 use kompoz_ui::input::*;
@@ -77,8 +78,7 @@ impl DragAndDropTarget for Never {
 
 fn fruit_data(name: &str) -> DragAndDropTransferData {
     DragAndDropTransferData {
-        mime_types: vec!["text/plain".into()],
-        text: name.to_string(),
+        clip_entry: ClipEntry::with_plain_text(name),
         local_state: Some(Rc::new(name.to_string())),
         ..Default::default()
     }
@@ -137,7 +137,7 @@ fn drag_and_drop_carries_data_from_a_source_to_a_target() {
                                 return true;
                             }
                             let mut left = f.peek();
-                            left.retain(|n| n.as_str() != e.text());
+                            left.retain(|n| *n != e.text());
                             f.set(left);
                             let mut inn = b.peek();
                             inn.push(e.text().to_string());
@@ -234,10 +234,10 @@ fn drops_from_outside_the_app_reach_the_targets() {
                         log: l.clone(),
                         on_drop: Box::new(move |e: &DragAndDropEvent| {
                             let data = e.transfer_data.clone().unwrap_or_default();
-                            let what = data.files.first().cloned().unwrap_or(data.text.clone());
+                            let what = data.files().first().cloned().unwrap_or(data.text());
                             let p = e.position_in_root;
                             push(&l, format!("drop {what} at {},{}", p.x as i32, p.y as i32));
-                            !data.files.is_empty()
+                            !data.files().is_empty()
                         }),
                     }) as Rc<dyn DragAndDropTarget>
                 });
@@ -263,9 +263,7 @@ fn drops_from_outside_the_app_reach_the_targets() {
     h.external_drag_moved(at(100.0, 300.0));
     h.external_drag_moved(at(100.0, 50.0));
     let data = DragAndDropTransferData {
-        mime_types: vec!["text/uri-list".into()],
-        text: "file:///tmp/a%20b.png\r\n".into(),
-        files: vec!["/tmp/a b.png".into()],
+        clip_entry: ClipEntry::with_files(vec!["/tmp/a b.png".into()]),
         ..Default::default()
     };
     assert!(h.external_drop(data, at(100.0, 60.0)));
@@ -277,8 +275,7 @@ fn drops_from_outside_the_app_reach_the_targets() {
     h.external_drag_left();
     assert_eq!(taken(&log), ["should true", "started", "entered", "exited", "ended"]);
     // Text dropped where nothing said where it was: the target asks again, by what it is.
-    let text =
-        DragAndDropTransferData { mime_types: vec!["text/plain".into()], text: "merhaba".into(), ..Default::default() };
+    let text = DragAndDropTransferData { clip_entry: ClipEntry::with_plain_text("merhaba"), ..Default::default() };
     assert!(!h.external_drop(text, at(100.0, 50.0)));
     assert_eq!(taken(&log), ["should false"]);
 }
@@ -355,7 +352,7 @@ struct Outgoing {
 
 impl PlatformCallbacks for Outgoing {
     fn start_drag_and_drop(&self, drag: &PlatformDragAndDrop) -> bool {
-        self.drags.borrow_mut().push((drag.transfer_data.text.clone(), drag.decoration_size, drag.decoration_offset));
+        self.drags.borrow_mut().push((drag.transfer_data.text(), drag.decoration_size, drag.decoration_offset));
         let mut canvas = RecordingCanvas::new();
         drag.draw(&mut canvas);
         self.decorations.borrow_mut().push(canvas);
@@ -444,7 +441,7 @@ fn a_drag_leaving_the_window_goes_to_the_platform() {
     h.external_drag_entered(vec!["text/plain".into()]);
     h.external_drag_moved(at(100.0, 100.0));
     let platform_data =
-        DragAndDropTransferData { mime_types: vec!["text/plain".into()], text: "elma".into(), ..Default::default() };
+        DragAndDropTransferData { clip_entry: ClipEntry::with_plain_text("elma"), ..Default::default() };
     assert!(h.external_drop(platform_data, at(100.0, 100.0)));
     h.platform_drag_ended(Some(DragAndDropTransferAction::Move));
     rule.wait_for_idle();

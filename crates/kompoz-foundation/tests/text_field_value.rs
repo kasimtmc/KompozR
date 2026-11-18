@@ -65,11 +65,11 @@ struct Ime {
 }
 
 impl PlatformCallbacks for Ime {
-    fn get_clipboard(&self) -> Option<String> {
-        self.clipboard.borrow().clone()
+    fn get_clip_entry(&self) -> Option<kompoz_ui::clipboard::ClipEntry> {
+        self.clipboard.borrow().clone().map(kompoz_ui::clipboard::ClipEntry::with_plain_text)
     }
-    fn set_clipboard(&self, text: &str) {
-        *self.clipboard.borrow_mut() = Some(text.to_string());
+    fn set_clip_entry(&self, entry: Option<kompoz_ui::clipboard::ClipEntry>) {
+        *self.clipboard.borrow_mut() = entry.and_then(|e| e.read_plain_text());
     }
     fn text_input(&self, active: bool, _area: Rect, _state: &TextEditState, options: &ImeOptions) {
         self.shown.borrow_mut().push((active, options.clone()));

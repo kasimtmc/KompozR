@@ -7,6 +7,7 @@ use super::{AppConfig, Event};
 use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::Rect;
 use kompoz_ui::KompozHost;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::media_query::MediaInfo;
 use kompoz_ui::platform::PlatformCallbacks;
 use std::rc::Rc;
@@ -145,6 +146,11 @@ pub trait Platform {
     /// After a frame's composition: what the platform takes from the host (the semantics tree for screen readers,
     /// the frame rate, the screen kept on).
     fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64);
+    /// What a drop the platform reported (its `Event::DropData`) carries: all it offers, read from its source as a
+    /// target asks for it until the drop is done (`drop_done`). Taken once.
+    fn take_drop_entry(&mut self) -> Option<ClipEntry> {
+        None
+    }
     /// A drop the platform reported (its `DropComplete`) handled: whether a target in the app took it — what the
     /// platform tells the drag's source (XDND's `XdndFinished`, a Wayland offer finished or let go).
     fn drop_done(&mut self, taken: bool) {

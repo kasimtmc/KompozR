@@ -104,8 +104,9 @@ impl Gen<'_, '_> {
 
     pub(crate) fn value_want(&mut self, e: &Expr, want: Want) -> TokenStream {
         // (Kotlin's `Any` from an `if`/`when` with branches of their own types — `if (it == 0) null else "satır"` —:
-        // each branch made it)
-        if want.any.is_some() {
+        // each branch made it; a nullable result too — `if (…) content else content.consume { … }` —: each branch
+        // in `Some` unless it is nullable already)
+        if want.any.is_some() || want.some {
             match &e.kind {
                 ExprKind::If { condition, then, otherwise: Some(o) } => {
                     return self.if_expr(condition, then, Some(o), Tail::Value(want), e.loc).ts;
@@ -543,14 +544,20 @@ impl Gen<'_, '_> {
         let qi = quote_spanned!(qspan=> #qi);
         // A value object's member: a method (`LocalDensity.current`).
         if is_value_object(q) {
+            let mut value_ty = Ty::Unknown;
             let m = members_of(q, &name.name).next().or_else(|| {
                 lookup(q).iter().find(|i| i.kind == Kind::Value).and_then(|v| {
-                    let owner = Ty::from_rust(v.ret);
-                    owner.owner().and_then(|o| members_of(o, &name.name).next())
+                    value_ty = Ty::from_rust(v.ret);
+                    value_ty.owner().and_then(|o| members_of(o, &name.name).next())
                 })
             });
             let rust = m.map(|i| i.rust.to_string()).unwrap_or_else(|| snake(&name.name));
-            let ty = m.map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::Unknown);
+            // (a generic value's member giving its type argument — `LocalClipboard.current`, a
+            // `KompozitionLocal<Clipboard>`'s `T` — is of that type: its methods are known)
+            let ty = match (m, &value_ty) {
+                (Some(i), Ty::Named(_, a)) if a.len() == 1 && super::call::is_type_parameter(i.ret) => a[0].clone(),
+                _ => m.map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::Unknown),
+            };
             let mi = ident(&rust, self.span(name.loc));
             return Out::plain(quote_spanned!(span=> #qi.#mi()), ty);
         }

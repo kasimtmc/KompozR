@@ -4,7 +4,7 @@
 //! the action asked for, as within the app: Move, Ctrl Copy, Ctrl+Shift Link) followed until the release; the
 //! target under the pointer found as XDND has it (the top-level window there and down from it the first with
 //! `XdndAware` of version 3 or later, or an `XdndProxy` pointing to itself); `XdndSelection` owned by the window,
-//! its requests answered with what the drag carries ([`DragPayload`]: its targets, each type as its bytes, in INCR
+//! its requests answered with what the drag carries ([`Payload`]: its targets, each type as its bytes, in INCR
 //! parts when large); the cursor of the action the target takes (the theme's `dnd-copy`, `dnd-move`, `dnd-link`,
 //! `dnd-no-drop`); the app's events meanwhile held back (it gets no pointer events during the platform's drag), its
 //! own window a target like any other (the drag comes back to it through the receiving side, as the app's own).
@@ -16,17 +16,17 @@
 //! more) as its shape — taking no input (an empty input shape: the target under it is found through it; without
 //! libXext's shapes the window tree is walked past it). One scale: X11 has one for the screen (Xft.dpi).
 //!
-//! [`DragPayload`]: crate::linux::outgoing_drag::DragPayload
+//! [`Payload`]: crate::linux::transfer::Payload
 
 use super::X11Platform;
 use super::dnd_source::{
     ActionAtoms, DragCursor, DropTarget, Message, MessageKind, XDND_OLDEST, XDND_VERSION, XdndSource,
 };
 use super::ffi::{self, Atom, Cursor, KeySym, NONE, Time, VisualWindow, Window, XiDevice, XiEvent};
-use super::selection::{Clipboard, part_size};
+use super::selection::{Transfers, part_size};
 use crate::app::Event;
-use crate::linux::outgoing_drag::{DragPayload, X11_TEXT_TYPES, premultiplied_argb};
 use crate::linux::sys;
+use crate::linux::transfer::{Payload, X11_TEXT_TYPES, premultiplied_argb};
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use std::ffi::{CString, c_long};
 
@@ -116,7 +116,7 @@ struct Icon {
 /// A drag of the app's own on X11.
 pub(super) struct OutgoingDrag {
     source: XdndSource,
-    payload: DragPayload,
+    payload: Payload,
     /// The targets offered (each type's atom and name), the best first.
     targets: Vec<(Atom, String)>,
     actions: ActionAtoms,
@@ -132,7 +132,7 @@ pub(super) struct OutgoingDrag {
     /// The target found under the last top-level window (found again only when it changes).
     found: Option<(Window, Option<DropTarget>)>,
     /// The data's transfers in parts (INCR).
-    transfers: Clipboard,
+    transfers: Transfers,
 }
 
 impl OutgoingDrag {
@@ -179,7 +179,7 @@ impl X11Platform {
             self.events.push_back(Event::OwnDragEnded { action: None });
             return;
         }
-        let payload = DragPayload::new(&drag.transfer_data);
+        let payload = Payload::new(&drag.transfer_data);
         let names = payload.offered(X11_TEXT_TYPES);
         let cnames: Vec<CString> = names.iter().filter_map(|n| CString::new(n.as_str()).ok()).collect();
         let refs: Vec<&std::ffi::CStr> = cnames.iter().map(|c| c.as_c_str()).collect();
@@ -206,7 +206,7 @@ impl X11Platform {
             cursors: Vec::new(),
             at: (x, y, time),
             found: None,
-            transfers: Clipboard::default(),
+            transfers: Transfers::default(),
         };
         let cursor = self.drag_cursor(&mut o, DragCursor::NoDrop);
         if let Follow::Mouse { device } = o.follow {
@@ -519,7 +519,7 @@ impl X11Platform {
             if bytes.len() > part_size(d.max_request_bytes()) {
                 d.select_input(requestor, ffi::PROPERTY_CHANGE_MASK);
                 d.set_property_32(requestor, into, a.INCR, &[bytes.len() as c_long]);
-                o.transfers.start_transfer(requestor, into, kind);
+                o.transfers.start(requestor, into, kind, bytes);
             } else {
                 d.set_property_8(requestor, into, kind, &bytes);
             }
@@ -533,20 +533,12 @@ impl X11Platform {
     /// A requestor took a part of the drag's data (deleted the property): the next one. Whether it was the drag's.
     pub(super) fn send_next_drag_part(&mut self, window: Window, property: Atom) -> bool {
         let d = self.shared.display.clone();
-        let a = self.shared.atoms;
         let Some(o) = &mut self.outgoing else { return false };
-        let Some(t) = o.transfers.transfers().iter().find(|t| t.requestor == window && t.property == property).copied()
-        else {
+        if !o.transfers.transfers().iter().any(|t| t.requestor == window && t.property == property) {
             return false;
-        };
+        }
         o.source.activity(sys::monotonic_now());
-        let name = if t.kind == a.UTF8_STRING && !o.targets.iter().any(|x| x.0 == a.UTF8_STRING) {
-            "TEXT".to_string()
-        } else {
-            o.targets.iter().find(|x| x.0 == t.kind).map(|x| x.1.clone()).unwrap_or_default()
-        };
-        let bytes = o.payload.bytes(&name, X11_TEXT_TYPES).unwrap_or_default();
-        let Some(part) = o.transfers.next_part(window, property, bytes.len(), part_size(d.max_request_bytes())) else {
+        let Some((part, bytes)) = o.transfers.next_part(window, property, part_size(d.max_request_bytes())) else {
             return true;
         };
         d.set_property_8(window, property, part.kind, &bytes[part.range]);

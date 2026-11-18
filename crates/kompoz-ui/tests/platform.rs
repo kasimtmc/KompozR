@@ -15,6 +15,7 @@ use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
 use kompoz_text::TextRange;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropTarget, DragAndDropTransferData};
 use kompoz_ui::input::*;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision, derived_media_query, media_query};
@@ -312,7 +313,7 @@ struct Recording {
 
 impl DragAndDropTarget for Recording {
     fn on_drop(&self, event: &DragAndDropEvent) -> bool {
-        let data = event.transfer_data.as_ref().map(|d| d.text.clone()).unwrap_or_default();
+        let data = event.transfer_data.as_ref().map(|d| d.text()).unwrap_or_default();
         push(&self.log, format!("{} drop {data}", self.name));
         self.takes
     }
@@ -363,14 +364,10 @@ fn drags_from_outside_reach_the_targets_under_them() {
     assert_eq!(taken(&log), ["outer entered", "outer moved 50,150", "files exited"]);
     h.external_drag_moved(at(50.0, 40.0));
     taken(&log);
-    let data = DragAndDropTransferData {
-        mime_types: vec!["text/uri-list".into()],
-        text: "file:///tmp/a.png\r\n".into(),
-        files: vec!["/tmp/a.png".into()],
-        ..Default::default()
-    };
+    let data =
+        DragAndDropTransferData { clip_entry: ClipEntry::with_files(vec!["/tmp/a.png".into()]), ..Default::default() };
     assert!(h.external_drop(data, at(50.0, 40.0)));
-    assert_eq!(taken(&log), ["files moved 50,40", "files drop file:///tmp/a.png\r\n", "outer ended", "files ended"]);
+    assert_eq!(taken(&log), ["files moved 50,40", "files drop file:///tmp/a.png", "outer ended", "files ended"]);
     // Text comes and leaves without a drop.
     assert!(h.external_drag_entered(vec!["text/plain".into()]));
     h.external_drag_moved(at(20.0, 120.0));
@@ -391,8 +388,7 @@ fn drags_from_outside_reach_the_targets_under_them() {
         ]
     );
     // Dropped on a target that doesn't take it: not taken.
-    let data =
-        DragAndDropTransferData { mime_types: vec!["text/plain".into()], text: "merhaba".into(), ..Default::default() };
+    let data = DragAndDropTransferData { clip_entry: ClipEntry::with_plain_text("merhaba"), ..Default::default() };
     assert!(!h.external_drop(data, at(20.0, 120.0)));
     let log = taken(&log);
     assert!(

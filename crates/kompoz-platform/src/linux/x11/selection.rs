@@ -1,47 +1,26 @@
 //! The clipboard as X selections (ICCCM; C++'s `readClipboard`, `writeClipboard`, `answerSelection`,
-//! `sendNextPart`): the text the app put there, the requests it answers (its targets, the text as UTF-8 or Latin-1),
-//! a large text sent in parts (INCR) to each requestor in turn, and what reading another app's selection gathers.
-//! The parts that don't need the server, so that they can be tested as they are.
+//! `sendNextPart`): what the app put there (its [`Payload`]: every type of its entry, as targets) and the requests it
+//! answers, large data sent in parts (INCR) to each requestor in turn, and what reading another app's selection in
+//! parts gathers. The parts that don't need the server, so that they can be tested as they are.
 
 use super::ffi::{Atom, Window};
+use crate::linux::transfer::Payload;
 use std::ops::Range;
-
-/// What a text target's bytes are: UTF-8 (`UTF8_STRING`, `TEXT`, `text/plain;charset=utf-8`, and `text/plain` as
-/// apps send it) or Latin-1 (`STRING`, as ICCCM has it).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Encoding {
-    Utf8,
-    Latin1,
-}
-
-/// `text` in `encoding` (Latin-1: what it can't hold as '?').
-pub fn encode(text: &str, encoding: Encoding) -> Vec<u8> {
-    match encoding {
-        Encoding::Utf8 => text.as_bytes().to_vec(),
-        Encoding::Latin1 => text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect(),
-    }
-}
-
-/// Bytes in `encoding` as text (UTF-8 that isn't valid: replaced where it isn't).
-pub fn decode(bytes: &[u8], encoding: Encoding) -> String {
-    match encoding {
-        Encoding::Utf8 => String::from_utf8_lossy(bytes).into_owned(),
-        Encoding::Latin1 => bytes.iter().map(|&b| char::from(b)).collect(),
-    }
-}
+use std::rc::Rc;
 
 /// The most of a property one request sets (C++'s `partSize`): what a request carries less its header, at most
-/// 256 KiB; a larger text goes in parts.
+/// 256 KiB; larger data goes in parts.
 pub fn part_size(max_request_bytes: usize) -> usize {
     max_request_bytes.saturating_sub(256).clamp(1, 1 << 18)
 }
 
-/// A large text being sent in parts (INCR): to which window's property, as which type, from where.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Data being sent in parts (INCR): to which window's property, as which type, what, from where.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Transfer {
     pub requestor: Window,
     pub property: Atom,
     pub kind: Atom,
+    pub data: Rc<[u8]>,
     pub offset: usize,
 }
 
@@ -55,42 +34,56 @@ pub struct Part {
     pub done: bool,
 }
 
-/// The clipboard the app holds (C++'s `clipboard_`, `ownsClipboard_`, `transfers_`).
+/// The transfers in parts going on (C++'s `transfers_`): the clipboard's, a drag's.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
-pub struct Clipboard {
-    /// The text put there (UTF-8).
-    pub text: String,
-    /// The app's window owns the CLIPBOARD selection.
-    pub owned: bool,
-    transfers: Vec<Transfer>,
+pub struct Transfers {
+    list: Vec<Transfer>,
 }
 
-impl Clipboard {
+impl Transfers {
+    /// A transfer in parts begins: its first part goes when the requestor deletes the INCR property.
+    pub fn start(&mut self, requestor: Window, property: Atom, kind: Atom, data: Rc<[u8]>) {
+        // (A new request into the same property replaces one going on.)
+        self.list.retain(|t| !(t.requestor == requestor && t.property == property));
+        self.list.push(Transfer { requestor, property, kind, data, offset: 0 });
+    }
+
     /// A requestor took a part (deleted `property` of `window`): the next part of its transfer, if it has one going
-    /// (C++'s `sendNextPart`), `data` being the text as the transfer's type has it.
-    pub fn next_part(&mut self, window: Window, property: Atom, data_len: usize, part_size: usize) -> Option<Part> {
-        let i = self.transfers.iter().position(|t| t.requestor == window && t.property == property)?;
-        let t = &mut self.transfers[i];
-        let start = t.offset.min(data_len);
-        let n = part_size.min(data_len - start);
+    /// (C++'s `sendNextPart`), and the data it is of.
+    pub fn next_part(&mut self, window: Window, property: Atom, part_size: usize) -> Option<(Part, Rc<[u8]>)> {
+        let i = self.list.iter().position(|t| t.requestor == window && t.property == property)?;
+        let t = &mut self.list[i];
+        let data = t.data.clone();
+        let start = t.offset.min(data.len());
+        let n = part_size.min(data.len() - start);
         t.offset = start + n;
         let part = Part { kind: t.kind, range: start..start + n, done: n == 0 };
         if part.done {
-            self.transfers.remove(i);
+            self.list.remove(i);
         }
-        Some(part)
-    }
-
-    /// A transfer in parts begins: its first part goes when the requestor deletes the INCR property.
-    pub fn start_transfer(&mut self, requestor: Window, property: Atom, kind: Atom) {
-        // (A new request into the same property replaces one going on.)
-        self.transfers.retain(|t| !(t.requestor == requestor && t.property == property));
-        self.transfers.push(Transfer { requestor, property, kind, offset: 0 });
+        Some((part, data))
     }
 
     /// The transfers going on.
     pub fn transfers(&self) -> &[Transfer] {
-        &self.transfers
+        &self.list
+    }
+}
+
+/// The clipboard the app holds (C++'s `clipboard_`, `ownsClipboard_`, `transfers_`): what it offers, as targets
+/// (each type's atom and name), whether its window owns CLIPBOARD, the transfers in parts going on.
+#[derive(Default)]
+pub struct Clipboard {
+    pub payload: Option<Payload>,
+    pub targets: Vec<(Atom, String)>,
+    pub owned: bool,
+    pub transfers: Transfers,
+}
+
+impl Clipboard {
+    /// The name of `target`, one it offers.
+    pub fn target_name(&self, target: Atom) -> Option<&str> {
+        self.targets.iter().find(|t| t.0 == target).map(|t| t.1.as_str())
     }
 }
 
@@ -124,12 +117,13 @@ mod tests {
     }
 
     #[test]
-    fn a_large_text_goes_in_parts_then_an_empty_one() {
-        let mut c = Clipboard { text: "x".repeat(10), owned: true, ..Clipboard::default() };
+    fn large_data_goes_in_parts_then_an_empty_one() {
+        let mut t = Transfers::default();
         let (w, p, utf8) = (0x400001, 77, 300);
-        c.start_transfer(w, p, utf8);
-        assert_eq!(c.next_part(0x500000, p, 10, 4), None); // (another window's property)
-        let parts: Vec<Part> = std::iter::from_fn(|| c.next_part(w, p, 10, 4)).collect();
+        let data: Rc<[u8]> = Rc::from(&b"xxxxxxxxxx"[..]);
+        t.start(w, p, utf8, data.clone());
+        assert_eq!(t.next_part(0x500000, p, 4), None); // (another window's property)
+        let parts: Vec<Part> = std::iter::from_fn(|| t.next_part(w, p, 4).map(|(part, _)| part)).collect();
         assert_eq!(
             parts,
             [
@@ -139,18 +133,22 @@ mod tests {
                 Part { kind: utf8, range: 10..10, done: true },
             ]
         );
-        assert!(c.transfers().is_empty());
-        // Two requestors at once, each in its own place; the text changing meanwhile ends a transfer early.
-        c.start_transfer(1, p, utf8);
-        c.start_transfer(2, p, utf8);
-        c.start_transfer(2, p, utf8); // (asked again: begun again)
-        assert_eq!(c.transfers().len(), 2);
-        assert_eq!(c.next_part(1, p, 10, 6).unwrap().range, 0..6);
-        assert_eq!(c.next_part(2, p, 10, 6).unwrap().range, 0..6);
-        assert_eq!(c.next_part(1, p, 3, 6), Some(Part { kind: utf8, range: 3..3, done: true }));
-        assert_eq!(c.next_part(2, p, 10, 6).unwrap().range, 6..10);
-        assert!(c.next_part(2, p, 10, 6).unwrap().done);
-        assert!(c.transfers().is_empty());
+        assert!(t.transfers().is_empty());
+        // Two requestors at once, each in its own place, each of its own data.
+        let png: Rc<[u8]> = Rc::from(&[1u8, 2, 3][..]);
+        t.start(1, p, utf8, data.clone());
+        t.start(2, p, 400, png.clone());
+        t.start(2, p, 400, png.clone()); // (asked again: begun again)
+        assert_eq!(t.transfers().len(), 2);
+        let (part, of) = t.next_part(1, p, 6).unwrap();
+        assert_eq!((part.range, Rc::ptr_eq(&of, &data)), (0..6, true));
+        let (part, of) = t.next_part(2, p, 2).unwrap();
+        assert_eq!((part.kind, part.range, Rc::ptr_eq(&of, &png)), (400, 0..2, true));
+        assert_eq!(t.next_part(2, p, 2).unwrap().0.range, 2..3);
+        assert!(t.next_part(2, p, 2).unwrap().0.done);
+        assert_eq!(t.next_part(1, p, 6).unwrap().0.range, 6..10);
+        assert!(t.next_part(1, p, 6).unwrap().0.done);
+        assert!(t.transfers().is_empty());
     }
 
     #[test]
@@ -160,14 +158,5 @@ mod tests {
         assert_eq!(r.part("aç".as_bytes()), None);
         assert_eq!(r.part(b"").as_deref(), Some("Sayaç".as_bytes()));
         assert_eq!(r.part(b""), Some(Vec::new()));
-    }
-
-    #[test]
-    fn text_targets_encode_as_their_charset() {
-        assert_eq!(encode("Sayaç €", Encoding::Utf8), "Sayaç €".as_bytes());
-        assert_eq!(encode("Sayaç €", Encoding::Latin1), b"Saya\xe7 ?");
-        assert_eq!(decode(b"Saya\xe7", Encoding::Latin1), "Sayaç");
-        assert_eq!(decode("ğ".as_bytes(), Encoding::Utf8), "ğ");
-        assert_eq!(decode(b"\xff", Encoding::Utf8), "\u{fffd}");
     }
 }

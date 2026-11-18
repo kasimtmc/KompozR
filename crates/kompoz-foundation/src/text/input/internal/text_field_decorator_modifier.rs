@@ -8,12 +8,18 @@ use super::text_field_key_event_handler::{ClipboardKeyCommandsHandler, TextField
 use super::text_input_session::platform_specific_text_input_session;
 use super::text_layout_state::TextLayoutState;
 use super::transformed_text_field_state::TransformedTextFieldState;
+use crate::content::internal::{
+    ReceiveContentConfiguration, drag_and_drop_request_permission, get_receive_content_configuration,
+};
+use crate::content::{MediaType, TransferableContent, TransferableContentSource};
 use crate::focusable::{FocusableNode, apply_focusable_semantics};
 use crate::interaction::MutableInteractionSource;
 use crate::interaction::drag_and_drop_hover::DragAndDropHoverInteraction;
 use crate::text::autofill_highlight::{
     LocalAutofillHighlightBrush, LocalAutofillHighlightColor, autofill_highlight_color, resolve_autofill_highlight,
 };
+use crate::text::input::internal::selection::ReceiveContentConfigurationProvider;
+use crate::text::input::internal::undo::TextFieldEditUndoBehavior;
 use crate::text::input::{InputTransformation, KeyboardActionHandler};
 use crate::text::key_mapping::KeyCommand;
 use crate::text::keyboard_options::KeyboardOptions;
@@ -241,8 +247,16 @@ impl DecoratorShared {
                 s.on_ime_action_performed(action);
             }
         });
+        let receive_content_configuration = get_receive_content_configuration(&cx);
         let session = establish_text_input_session(&*session_node.borrow(), &session_node.cx(), move |scope| {
-            platform_specific_text_input_session(&scope, state, layout, ime_options, Some(on_ime_action))
+            platform_specific_text_input_session(
+                &scope,
+                state,
+                layout,
+                ime_options,
+                receive_content_configuration,
+                Some(on_ime_action),
+            )
         });
         if let Some(old) = self.input_session_job.borrow_mut().take() {
             old.cancel();
@@ -294,6 +308,18 @@ impl DecoratorShared {
             }
             _ => false,
         }
+    }
+
+    /// The nearest content receiver's configuration around the field (Compose's `getReceiveContentConfiguration`).
+    fn receive_content_configuration(&self) -> Option<Rc<dyn ReceiveContentConfiguration>> {
+        get_receive_content_configuration(&self.cx()?)
+    }
+
+    /// What gives the selection state the receiver's configuration (Compose's
+    /// `receiveContentConfigurationProvider`).
+    fn receive_content_configuration_provider(self: &Rc<Self>) -> ReceiveContentConfigurationProvider {
+        let weak = Rc::downgrade(self);
+        Rc::new(move || weak.upgrade()?.receive_content_configuration())
     }
 
     /// Asks the platform's autofill to fill this field (Compose's `requestAutofill`, the toolbar's autofill item).
@@ -476,6 +502,10 @@ impl TextFieldDecoratorModifierNode {
             if let Some(p) = &self.pointer_input_node {
                 p.borrow().reset_pointer_input_handler();
             }
+            if s.handle().is_some_and(|h| h.is_attached()) {
+                e.text_field_selection_state
+                    .set_receive_content_configuration(Some(s.receive_content_configuration_provider()));
+            }
             if s.handle().is_some_and(|h| h.is_attached())
                 && s.is_focused()
                 && s.toolbar_and_handles_visibility_observer_job.borrow().is_some()
@@ -546,13 +576,18 @@ impl ModifierNode for TextFieldDecoratorModifierNode {
             self.pointer_input_node = Some(cx.delegate(SuspendingPointerInputModifierNode::new(block)));
         }
         if self.drag_and_drop_node.is_none() {
-            let target: Rc<dyn DragAndDropTarget> =
-                Rc::new(TextFieldDropTarget { shared: Rc::downgrade(&self.shared), enter: Cell::new(None) });
-            // The desktop's text drops (Compose's skiko `textFieldDragAndDropNode`): none start.
-            self.drag_and_drop_node =
-                Some(cx.delegate(DragAndDropTargetModifierNode(|_: &DragAndDropEvent| false, target)));
+            let target = Rc::new(TextFieldDropTarget { shared: Rc::downgrade(&self.shared), enter: Cell::new(None) });
+            // (Compose's `textFieldDragAndDropNode` with the decorator's callbacks, Android's actual: a drag is
+            // taken if it is text, or anything under a content receiver)
+            let hints = target.clone();
+            let should_start = move |event: &DragAndDropEvent| {
+                hints.hint_media_types().iter().any(|m| *m == MediaType::All || event.has_mime_type(m.representation()))
+            };
+            self.drag_and_drop_node = Some(cx.delegate(DragAndDropTargetModifierNode(should_start, target)));
         }
         self.shared.update_window_focus();
+        let provider = self.shared.receive_content_configuration_provider();
+        self.shared.selection_state().set_receive_content_configuration(Some(provider));
         if self.shared.enabled.get() {
             self.delegate_focusable(cx);
         }
@@ -561,12 +596,14 @@ impl ModifierNode for TextFieldDecoratorModifierNode {
     fn on_detach(&mut self, _cx: &NodeCx) {
         self.shared.dispose_input_session();
         self.shared.toolbar_and_handles_visibility_observer_job.borrow_mut().take();
+        self.shared.selection_state().set_receive_content_configuration(None);
     }
 }
 
-/// The field's drop target (Compose's `textFieldDragAndDropNode` with the decorator's callbacks, its desktop
-/// actual): it takes no drop — its `should_start` refuses every one — so what it would do over the field (the
-/// hover interactions, the cursor following the drag) never runs on the desktop.
+/// The field's drop target (Compose's `textFieldDragAndDropNode` with the decorator's callbacks, Android's actual —
+/// Compose for desktop leaves it unimplemented, refusing every drag): it takes text, or under a content receiver
+/// anything (the receiver's listener says what it takes); over the field the caret follows the drag; a drop's
+/// content goes to the receivers first, what they leave of its plain text in place of the selection.
 struct TextFieldDropTarget {
     shared: std::rc::Weak<DecoratorShared>,
     /// The enter emitted to the interaction source (Compose's `dragEnterEvent`).
@@ -580,11 +617,40 @@ impl TextFieldDropTarget {
             shared.interaction_source.borrow().try_emit(DragAndDropHoverInteraction::Exit::new(enter));
         }
     }
+
+    /// The types the field takes (Compose's `hintMediaTypes`): any under a content receiver (its listener decides),
+    /// else text.
+    fn hint_media_types(&self) -> Vec<MediaType> {
+        match self.shared.upgrade().and_then(|s| s.receive_content_configuration()) {
+            Some(_) => vec![MediaType::All],
+            None => vec![MediaType::Text],
+        }
+    }
 }
 
 impl DragAndDropTarget for TextFieldDropTarget {
-    fn on_drop(&self, _event: &DragAndDropEvent) -> bool {
-        false
+    fn on_drop(&self, event: &DragAndDropEvent) -> bool {
+        let Some(shared) = self.shared.upgrade() else { return false };
+        let receive_content_configuration = shared.receive_content_configuration();
+        if receive_content_configuration.is_some() {
+            drag_and_drop_request_permission(event);
+        }
+        self.emit_drag_exit_event(&shared);
+        shared.selection_state().clear_handle_dragging();
+        let clip_entry = event.clip_entry().cloned().unwrap_or_default();
+        let mut plain_text = clip_entry.read_plain_text();
+        // (Under a receiver every drop is taken: the receiver's listener evaluates it.)
+        if let Some(configuration) = receive_content_configuration {
+            let clip_metadata = clip_entry.clip_metadata().clone();
+            let transferable_content =
+                TransferableContent::new(clip_entry, clip_metadata, TransferableContentSource::DragAndDrop, None);
+            let remaining = configuration.receive_content_listener().on_receive(transferable_content);
+            plain_text = remaining.and_then(|r| r.clip_entry().read_plain_text());
+        }
+        if let Some(text) = plain_text {
+            shared.state().replace_selected_text(&text, false, TextFieldEditUndoBehavior::MergeIfPossible, true, false);
+        }
+        true
     }
 
     fn on_entered(&self, _event: &DragAndDropEvent) {
@@ -592,13 +658,16 @@ impl DragAndDropTarget for TextFieldDropTarget {
         let enter = DragAndDropHoverInteraction::Enter::new();
         shared.interaction_source.borrow().try_emit(enter);
         self.enter.set(Some(enter));
+        // (The field isn't a receiver but behaves as one: the receivers around it hear the drag came in.)
+        if let Some(configuration) = shared.receive_content_configuration() {
+            configuration.receive_content_listener().on_drag_enter();
+        }
     }
 
-    fn on_moved(&self, _event: &DragAndDropEvent) {
-        // (the desktop's actual moves with no position: Offset.Zero)
+    fn on_moved(&self, event: &DragAndDropEvent) {
         let Some(shared) = self.shared.upgrade() else { return };
         let layout = shared.text_layout_state.borrow().clone();
-        let position_on_text_field = layout.from_window_to_decoration(Offset::Zero);
+        let position_on_text_field = layout.from_window_to_decoration(event.position_in_root);
         if let Some(cursor) = layout.get_offset_for_position(position_on_text_field, true) {
             shared.state().select_chars_in(TextRange::at(cursor));
         }
@@ -609,6 +678,9 @@ impl DragAndDropTarget for TextFieldDropTarget {
         let Some(shared) = self.shared.upgrade() else { return };
         self.emit_drag_exit_event(&shared);
         shared.selection_state().clear_handle_dragging();
+        if let Some(configuration) = shared.receive_content_configuration() {
+            configuration.receive_content_listener().on_drag_exit();
+        }
     }
 
     fn on_ended(&self, _event: &DragAndDropEvent) {

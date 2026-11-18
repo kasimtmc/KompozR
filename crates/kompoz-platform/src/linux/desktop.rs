@@ -347,40 +347,8 @@ pub fn open_uri(uri: &str) {
     }
 }
 
-/// The local files a `text/uri-list` names (C++'s `filesInUriList`): its `file:` URIs, a host before the path
-/// dropped, percent-decoded; comments and other schemes left out.
-pub fn files_in_uri_list(list: &str) -> Vec<String> {
-    let mut files = Vec::new();
-    for line in list.split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        let Some(rest) = line.strip_prefix("file://") else { continue };
-        let path = match rest.find('/') {
-            Some(slash) => &rest[slash..],
-            None => continue,
-        };
-        let bytes = path.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            let hex = |b: u8| (b as char).to_digit(16);
-            if bytes[i] == b'%'
-                && i + 2 < bytes.len()
-                && let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
-            {
-                out.push((h * 16 + l) as u8);
-                i += 3;
-            } else {
-                out.push(bytes[i]);
-                i += 1;
-            }
-        }
-        let path = String::from_utf8_lossy(&out).into_owned();
-        if !path.is_empty() {
-            files.push(path);
-        }
-    }
-    files
-}
+/// The local files a `text/uri-list` names (C++'s `filesInUriList`): kompoz-ui's.
+pub use kompoz_ui::clipboard::files_in_uri_list;
 
 #[cfg(test)]
 mod tests {

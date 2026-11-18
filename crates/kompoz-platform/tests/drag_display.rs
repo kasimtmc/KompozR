@@ -3,7 +3,9 @@
 //! Copy and Move allowed — and a drop target of its own, dragged by input the test makes, to a receiver written here
 //! (another client): the data it reads (each type it asks for), the action the drag ends with on both sides, a drop
 //! on nothing and Escape ending it untaken, and the drag brought back over the app's own window and dropped on its
-//! target (what it carries the app's own: its local state too).
+//! target (what it carries the app's own: its local state too). And on Wayland the clipboard both ways (WP7): the
+//! app's entry (HTML and its text, an image, a type of its own) read by the receiver as each type (the image as
+//! PNG), the receiver's (HTML, a large image through the pipe, its own type) read by the app.
 //!
 //! - Wayland: on KDE's kwin_wayland with a virtual output, on a session bus and configuration of its own (kwin
 //!   writes its settings: never into the user's; its window rules place the two windows side by side, undecorated),
@@ -23,7 +25,12 @@ use kompoz_graphics::*;
 use kompoz_platform::App;
 use kompoz_runtime::*;
 use kompoz_ui::Modifier;
-use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropTarget, DragAndDropTransferAction, DragAndDropTransferData};
+use kompoz_ui::clipboard::{ClipEntry, ClipItem, ClipValue};
+use kompoz_ui::draganddrop::{
+    DragAndDropEvent, DragAndDropTarget, DragAndDropTransferAction, DragAndDropTransferData,
+    drag_and_drop_transfer_data,
+};
+use kompoz_ui::platform::LocalClipboard;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::rc::Rc;
@@ -35,12 +42,20 @@ const TEXT: &str = "Merhaba, sürükle bırak!";
 const FILE: &str = "/tmp/kompoz sürükle/ç.txt";
 const OWN_TYPE: &str = "application/x-kompoz-test";
 
+/// What the app's drags carry: its text (as text and its own type), its file.
+fn transfer_entry() -> ClipEntry {
+    named_args!(drag_and_drop_transfer_data(
+        text = TEXT.to_string(),
+        mime_types = vec!["text/uri-list".into(), "text/plain".into(), OWN_TYPE.into()],
+        files = vec![FILE.into()],
+    ))
+    .clip_entry
+}
+
 /// What the app's drags carry.
 fn transfer() -> DragAndDropTransferData {
     DragAndDropTransferData {
-        mime_types: vec!["text/uri-list".into(), "text/plain".into(), OWN_TYPE.into()],
-        text: TEXT.into(),
-        files: vec![FILE.into()],
+        clip_entry: transfer_entry(),
         local_state: Some(Rc::new("yerel".to_string())),
         supported_actions: vec![DragAndDropTransferAction::Copy, DragAndDropTransferAction::Move],
         on_transfer_completed: Some(Rc::new(|action| eprintln!("kompoz-drag: completed {action:?}"))),
@@ -59,16 +74,86 @@ impl DragAndDropTarget for AppTarget {
     }
 }
 
-/// The app: a source (120 × 80 dp at 20, 20) and a target (200 × 120 dp at 20, 140), a 360 × 300 dp window.
+/// An image of `width` × `height` pixels, the same each time (noise: what PNG can't make much smaller).
+fn noise(width: i32, height: i32, seed: u32) -> ImageBitmap {
+    let mut state = seed;
+    let pixels = (0..width * height * 4)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            (state >> 24) as u8
+        })
+        .collect();
+    ImageBitmap::from_pixels(width, height, pixels).unwrap()
+}
+
+/// Its pixels' sum: what the log tells of an image.
+fn checksum(image: &ImageBitmap) -> u64 {
+    image.pixels().iter().map(|&b| u64::from(b)).sum()
+}
+
+const HTML: &str = "<b>Kalın</b> yazı";
+const RECEIVER_TYPE: &str = "application/x-kompoz-receiver";
+
+/// What the app copies: HTML and its text, an image, a type of its own.
+fn copied() -> ClipEntry {
+    ClipEntry::new(vec![
+        ClipItem::with_html_text(TEXT, HTML),
+        ClipItem::with_image(noise(5, 4, 7)),
+        ClipItem::of(vec![(OWN_TYPE.into(), ClipValue::Bytes(Rc::from(&[1u8, 2, 3][..])))]),
+    ])
+}
+
+/// What the app pastes, logged: its types, its HTML, its image (size and sum), its text, the receiver's type.
+fn log_pasted(entry: Option<ClipEntry>) {
+    let Some(entry) = entry else {
+        eprintln!("kompoz-drag: pasted nothing");
+        return;
+    };
+    let item = &entry.items()[0];
+    let image = item.image().map(|i| format!("{}x{} {}", i.width(), i.height(), checksum(&i))).unwrap_or_default();
+    let own = item.bytes(RECEIVER_TYPE).map(|b| b.to_vec()).unwrap_or_default();
+    eprintln!(
+        "kompoz-drag: pasted {} | {} | {image} | {} | {own:?}",
+        entry.clip_metadata().mime_types().join(","),
+        item.html_text().unwrap_or_default(),
+        entry.read_plain_text().unwrap_or_default(),
+    );
+}
+
+/// The app: a source (120 × 80 dp at 20, 20) with a copy button (100 × 40 dp at 200, 20) and a paste button (100 ×
+/// 40 dp at 200, 70) beside it, and a target (200 × 120 dp at 20, 140), a 360 × 300 dp window.
 #[kompozable]
 fn DragApp() {
+    let clipboard = LocalClipboard.current();
     Column(
         modifier = Modifier.fill_max_size().background(Color::White).padding(20.dp()),
-        content = || {
-            Box(modifier = Modifier
-                .size_wh(120.dp(), 80.dp())
-                .background(Color::from_argb(0xff3f51b5))
-                .drag_and_drop_source(|_| Some(transfer())));
+        content = move || {
+            let clipboard = clipboard.clone();
+            Row(move || {
+                Box(modifier = Modifier
+                    .size_wh(120.dp(), 80.dp())
+                    .background(Color::from_argb(0xff3f51b5))
+                    .drag_and_drop_source(|_| Some(transfer())));
+                Spacer(Modifier.width(60.dp()));
+                let (copy, paste) = (clipboard.clone(), clipboard.clone());
+                Column(move || {
+                    let (copy, paste) = (copy.clone(), paste.clone());
+                    Box(modifier = Modifier
+                        .size_wh(100.dp(), 40.dp())
+                        .background(Color::from_argb(0xff4caf50))
+                        .clickable(move || {
+                            copy.set_clip_entry_now(Some(copied()));
+                            eprintln!("kompoz-drag: copied");
+                        }));
+                    Spacer(Modifier.height(10.dp()));
+                    Box(modifier = Modifier
+                        .size_wh(100.dp(), 40.dp())
+                        .background(Color::from_argb(0xffff9800))
+                        .clickable(move || log_pasted(paste.get_clip_entry_now())));
+                });
+            });
             Spacer(Modifier.height(40.dp()));
             let target: Rc<dyn DragAndDropTarget> = remember(|| Rc::new(AppTarget) as Rc<dyn DragAndDropTarget>);
             Box(modifier = Modifier
@@ -80,9 +165,11 @@ fn DragApp() {
 }
 
 /// Where things are, in the app's window's points (its top left at the screen's on X11 as found, at 0, 0 on
-/// Wayland): the source's middle, a point past the window, the app's target.
+/// Wayland): the source's middle, a point past the window, the app's target, its copy and paste buttons.
 const SOURCE: (i32, i32) = (80, 60);
 const TARGET: (i32, i32) = (120, 200);
+const COPY_BUTTON: (i32, i32) = (250, 40);
+const PASTE_BUTTON: (i32, i32) = (250, 90);
 /// The receiver's window: at 400, 0, 300 × 300.
 const RECEIVER: (i32, i32, i32, i32) = (400, 0, 300, 300);
 
@@ -291,8 +378,16 @@ mod wayland {
         shm: Option<WlShm>,
         seat: Option<WlSeat>,
         manager: Option<WlDataDeviceManager>,
+        pointer: Option<WlPointer>,
+        /// Its own selection, and what it offers (each type and its bytes).
+        source: Option<WlDataSource>,
+        pub offering: Vec<(String, Vec<u8>)>,
         registry: Option<WlRegistry>,
         connection: Connection,
+        /// The last button's serial over its window (what a selection is set with).
+        button_serial: u32,
+        /// The clipboard's offer as the compositor last told it (while the receiver has the keyboard).
+        selection: Option<ObjectId>,
     }
 
     impl Receiver {
@@ -322,6 +417,11 @@ mod wayland {
                 shm: None,
                 seat: None,
                 manager: None,
+                pointer: None,
+                source: None,
+                offering: Vec::new(),
+                button_serial: 0,
+                selection: None,
             };
             r.roundtrip();
             r.roundtrip();
@@ -337,6 +437,7 @@ mod wayland {
                 panic!("the compositor lacks a global the receiver needs")
             };
             r.device = manager.get_data_device(seat);
+            r.pointer = seat.get_pointer();
             let surface = compositor.create_surface().unwrap();
             let xdg_surface = wm_base.get_xdg_surface(&surface).unwrap();
             let toplevel = xdg_surface.get_toplevel().unwrap();
@@ -422,6 +523,28 @@ mod wayland {
                 E::WlDataDevice(WlDataDeviceEvent::DataOffer { id }) => {
                     self.offers.insert(id.id(), (id, Vec::new(), 0));
                 }
+                E::WlDataDevice(WlDataDeviceEvent::Selection { id }) => {
+                    if let Some(old) = self.selection.take().filter(|&old| Some(old) != id) {
+                        self.offers.remove(&old);
+                    }
+                    self.selection = id;
+                }
+                E::WlPointer(WlPointerEvent::Button { serial, .. }) => self.button_serial = serial,
+                E::WlDataSource(WlDataSourceEvent::Send { mime_type, fd })
+                    if self.source.as_ref().is_some_and(|s| s.id() == sender) =>
+                {
+                    // (on a thread of its own: the app reads while the receiver goes on)
+                    let bytes = self.offering.iter().find(|(m, _)| *m == mime_type).map(|t| t.1.clone());
+                    std::thread::spawn(move || {
+                        let _ = sys::set_nonblocking(fd.as_fd(), false);
+                        let _ = std::io::Write::write_all(&mut std::fs::File::from(fd), &bytes.unwrap_or_default());
+                    });
+                }
+                E::WlDataSource(WlDataSourceEvent::Cancelled)
+                    if self.source.as_ref().is_some_and(|s| s.id() == sender) =>
+                {
+                    self.source = None;
+                }
                 E::WlDataOffer(WlDataOfferEvent::Offer { mime_type }) => {
                     if let Some(o) = self.offers.get_mut(&sender) {
                         o.1.push(mime_type);
@@ -449,26 +572,7 @@ mod wayland {
                 E::WlDataDevice(WlDataDeviceEvent::Drop) => {
                     let Some(id) = self.current.take() else { return };
                     let Some((offer, types, action)) = self.offers.remove(&id) else { return };
-                    let read = |mime: &str| -> String {
-                        let (r, w) = sys::pipe(false).unwrap();
-                        offer.receive(mime, w.as_fd());
-                        drop(w);
-                        self.connection.flush().unwrap();
-                        let mut file = std::fs::File::from(r);
-                        let mut out = Vec::new();
-                        let mut buffer = [0u8; 4096];
-                        loop {
-                            let mut fd = [PollFd::readable(file.as_raw_fd())];
-                            if sys::poll(&mut fd, Some(Duration::from_secs(5))).unwrap_or(0) == 0 {
-                                break;
-                            }
-                            match file.read(&mut buffer) {
-                                Ok(0) | Err(_) => break,
-                                Ok(n) => out.extend_from_slice(&buffer[..n]),
-                            }
-                        }
-                        String::from_utf8_lossy(&out).into_owned()
-                    };
+                    let read = |mime: &str| String::from_utf8_lossy(&self.receive(&offer, mime)).into_owned();
                     let received = Received {
                         uri_list: read("text/uri-list"),
                         text: read("text/plain;charset=utf-8"),
@@ -481,6 +585,59 @@ mod wayland {
                 }
                 _ => {}
             }
+        }
+
+        /// What `offer` holds as `mime`, read through a pipe from the app offering it.
+        fn receive(&self, offer: &WlDataOffer, mime: &str) -> Vec<u8> {
+            let (r, w) = sys::pipe(false).unwrap();
+            offer.receive(mime, w.as_fd());
+            drop(w);
+            self.connection.flush().unwrap();
+            let mut file = std::fs::File::from(r);
+            let mut out = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let mut fd = [PollFd::readable(file.as_raw_fd())];
+                if sys::poll(&mut fd, Some(Duration::from_secs(5))).unwrap_or(0) == 0 {
+                    break;
+                }
+                match file.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => out.extend_from_slice(&buffer[..n]),
+                }
+            }
+            out
+        }
+
+        /// The clipboard's types and what it holds as each of `wanted` (the receiver having the keyboard).
+        pub fn clipboard(&self, wanted: &[&str]) -> (Vec<String>, Vec<Vec<u8>>) {
+            let Some((offer, types, _)) = self.selection.and_then(|id| self.offers.get(&id)) else {
+                return (Vec::new(), Vec::new());
+            };
+            (types.clone(), wanted.iter().map(|m| self.receive(offer, m)).collect())
+        }
+
+        /// Its own entry on the clipboard: `offering`'s types, from a source of its own, with its last click's
+        /// serial.
+        pub fn copy(&mut self, offering: Vec<(String, Vec<u8>)>) {
+            let (Some(manager), Some(device)) = (&self.manager, &self.device) else { panic!("no data device") };
+            let source = manager.create_data_source().expect("a data source");
+            for (m, _) in &offering {
+                source.offer(m);
+            }
+            device.set_selection(Some(&source), self.button_serial);
+            self.source = Some(source);
+            self.offering = offering;
+            self.pump(Duration::from_millis(100));
+        }
+
+        /// A click at (`x`, `y`) on the screen.
+        pub fn click(&mut self, x: i32, y: i32) {
+            self.move_to(x, y);
+            Input::pump(self, Duration::from_millis(100));
+            self.button(true);
+            self.button(false);
+            Input::pump(self, Duration::from_millis(200));
         }
 
         fn make_buffer(&self) -> Option<WlBuffer> {
@@ -658,6 +815,50 @@ mod wayland {
         }
     }
 
+    /// The clipboard both ways (WP7): the app's entry read by the receiver as each of its types; the receiver's
+    /// (HTML, an image larger than a pipe holds at once, a type of its own) read by the app.
+    fn clipboard(work: &Path, r: &mut Receiver, receiver_middle: (i32, i32)) {
+        // The app copies; the receiver, given the keyboard (a click), reads what it offers.
+        r.click(COPY_BUTTON.0, COPY_BUTTON.1);
+        assert!(wait_for(work, "kompoz-drag: copied", 1, &mut |t| r.pump(t)), "no copy:\n{}", tail(&log(work)));
+        r.click(receiver_middle.0, receiver_middle.1);
+        let wanted = ["text/html", "text/plain;charset=utf-8", "UTF8_STRING", "image/png", OWN_TYPE];
+        let (types, got) = r.clipboard(&wanted);
+        assert_eq!(
+            types,
+            ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "text/html", "image/png", OWN_TYPE],
+            "the app's clipboard types"
+        );
+        assert_eq!(String::from_utf8_lossy(&got[0]), HTML);
+        assert_eq!((String::from_utf8_lossy(&got[1]), String::from_utf8_lossy(&got[2])), (TEXT.into(), TEXT.into()));
+        let png = kompoz_graphics::decode_to_image_bitmap(&got[3]).expect("the app's image as PNG");
+        assert_eq!(png.pixels(), noise(5, 4, 7).pixels());
+        assert_eq!(got[4], [1, 2, 3]);
+        // The receiver copies its own (an image larger than a pipe holds: written as the app reads it); the app,
+        // given the keyboard, pastes it.
+        let image = noise(300, 200, 11);
+        let png = kompoz_graphics::encode_png(300, 200, &image.pixels()).unwrap();
+        assert!(png.len() > 65536, "{} bytes", png.len());
+        r.copy(vec![
+            ("text/html".into(), "<i>alıcıdan</i>".as_bytes().to_vec()),
+            ("image/png".into(), png),
+            ("text/plain;charset=utf-8".into(), "alıcıdan".as_bytes().to_vec()),
+            (RECEIVER_TYPE.into(), vec![9, 8, 7]),
+        ]);
+        r.click(SOURCE.0 + 100, 250); // (the app given the keyboard: its window's empty part)
+        r.click(PASTE_BUTTON.0, PASTE_BUTTON.1);
+        assert!(wait_for(work, "kompoz-drag: pasted", 1, &mut |t| r.pump(t)), "no paste:\n{}", tail(&log(work)));
+        let pasted = log(work).lines().find(|l| l.starts_with("kompoz-drag: pasted")).unwrap().to_string();
+        assert_eq!(
+            pasted,
+            format!(
+                "kompoz-drag: pasted text/html,image/png,text/plain;charset=utf-8,{RECEIVER_TYPE} | <i>alıcıdan</i> | \
+                 300x200 {} | alıcıdan | [9, 8, 7]",
+                checksum(&image)
+            )
+        );
+    }
+
     /// The drags on kwin at `scale` (its output `size` pixels: 800 × 600 points), the app's icon `icon` pixels.
     pub fn run(work: &Path, scale: f64, size: (u32, u32), icon_pixels: (u32, u32)) {
         let compositor = Compositor::start(work, &format!("kompoz-drag-{}", std::process::id()), scale, size, false);
@@ -723,6 +924,9 @@ mod wayland {
         assert_eq!(r.drops.len(), 3, "the finger's drag: no drop:\n{}", tail(&log(work)));
         assert_eq!(r.drops[2].text, TEXT);
         assert_eq!(completed(work, 5), "Some(Copy)");
+        if scale == 1.0 {
+            clipboard(work, &mut r, receiver_middle);
+        }
         drop(app);
 
         // The icon (the protocol's traffic): a surface given with start_drag, its buffer the decoration's pixels at

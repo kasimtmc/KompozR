@@ -12,6 +12,7 @@
 pub mod alignment;
 pub mod autofill;
 pub mod back;
+pub mod clipboard;
 pub mod display_list;
 pub mod draganddrop;
 pub mod draw;

@@ -21,6 +21,7 @@ use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
 use kompoz_text::{AnnotatedString, SpanStyle, TextRange, TextStyle};
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::focus::{FocusEventModifierNode, FocusState};
 use kompoz_ui::input::*;
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates, LayoutModifierNode, Measurable};
@@ -108,6 +109,7 @@ impl FieldNode {
                 c.state.clone(),
                 c.layout.clone(),
                 c.ime_options.clone(),
+                None,
                 Some(on_ime_action),
             )
         });
@@ -137,17 +139,17 @@ impl kompoz_ui::input::KeyInputModifierNode for FieldNode {
             match command {
                 KeyCommand::COPY => {
                     if !selected.is_empty() {
-                        clipboard.set_text(&selected);
+                        clipboard.set_clip_entry_now(Some(ClipEntry::with_plain_text(selected)));
                     }
                 }
                 KeyCommand::CUT => {
                     if !selected.is_empty() {
-                        clipboard.set_text(&selected);
+                        clipboard.set_clip_entry_now(Some(ClipEntry::with_plain_text(selected)));
                         state.delete_selected_text(true);
                     }
                 }
                 KeyCommand::PASTE => {
-                    if let Some(text) = clipboard.get_text() {
+                    if let Some(text) = clipboard.get_clip_entry_now().and_then(|e| e.read_text()) {
                         state.replace_selected_text(&text, true, TextFieldEditUndoBehavior::NeverMerge, true, true);
                     }
                 }
@@ -330,11 +332,11 @@ impl PlatformCallbacks for Ime {
     fn text_input_changed(&self, state: &TextEditState) {
         self.changed.borrow_mut().push(state.clone());
     }
-    fn get_clipboard(&self) -> Option<String> {
-        Some(self.clipboard.borrow().clone())
+    fn get_clip_entry(&self) -> Option<kompoz_ui::clipboard::ClipEntry> {
+        Some(kompoz_ui::clipboard::ClipEntry::with_plain_text(self.clipboard.borrow().clone()))
     }
-    fn set_clipboard(&self, text: &str) {
-        *self.clipboard.borrow_mut() = text.to_string();
+    fn set_clip_entry(&self, entry: Option<kompoz_ui::clipboard::ClipEntry>) {
+        *self.clipboard.borrow_mut() = entry.and_then(|e| e.read_plain_text()).unwrap_or_default();
     }
     fn hide_software_keyboard(&self) {
         self.hidden.set(self.hidden.get() + 1);

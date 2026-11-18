@@ -1,12 +1,12 @@
 //! Drags of the app's own out to other apps (WP5b; Compose's are the platform's from the start, KompozR's leave the
 //! window as drags within the app): `wl_data_device.start_drag` with a `wl_data_source` of our own offering what the
-//! drag carries ([`DragPayload`]: files as `text/uri-list`, text, the app's own types) and the actions its source
-//! allows (copy, move: Wayland has no link), from the press that started it (the implicit grab's serial), with an
-//! icon surface showing the decoration as the app drew it under the pointer, the pointer where it was in it. The
-//! compositor runs the drag from there: the app gets no pointer events meanwhile; over the window it comes back as
-//! a drop offer like any other (told to the core as the app's own: its data is the host's), and its end — taken
-//! with the action the compositor settled on (`dnd_finished`), or not (`cancelled`: dropped on nothing, refused,
-//! called off) — goes to the core as [`Event::OwnDragEnded`].
+//! drag carries ([`Payload`]: files as `text/uri-list`, text, HTML, an image, the app's own types) and the actions
+//! its source allows (copy, move: Wayland has no link), from the press that started it (the implicit grab's
+//! serial), with an icon surface showing the decoration as the app drew it under the pointer, the pointer where it
+//! was in it. The compositor runs the drag from there: the app gets no pointer events meanwhile; over the window it
+//! comes back as a drop offer like any other (told to the core as the app's own: its data is the host's), and its
+//! end — taken with the action the compositor settled on (`dnd_finished`), or not (`cancelled`: dropped on nothing,
+//! refused, called off) — goes to the core as [`Event::OwnDragEnded`].
 //!
 //! The icon is drawn for the scale it is shown at: the window's to begin with, then its own surface's as the
 //! compositor tells it (fractional-scale with a viewport, else the whole scale it prefers or of the outputs it is
@@ -16,14 +16,14 @@
 //! done) ends it untaken. (A compositor may pass a finger's lift to the app after ending the drag it started:
 //! KWin does, after the source heard the drop.)
 //!
-//! [`DragPayload`]: crate::linux::outgoing_drag::DragPayload
+//! [`Payload`]: crate::linux::transfer::Payload
 
 use super::WaylandPlatform;
 use super::decorations::shm_buffer;
 use super::ffi::{Object, ObjectId};
 use super::generated::*;
 use crate::app::Event;
-use crate::linux::outgoing_drag::{DragPayload, WAYLAND_TEXT_TYPES, premultiplied_argb};
+use crate::linux::transfer::{Payload, WAYLAND_TEXT_TYPES, premultiplied_argb};
 use kompoz_ui::draganddrop::{DragAndDropTransferAction, PlatformDragAndDrop};
 
 type Action = WlDataDeviceManagerDndAction;
@@ -77,7 +77,7 @@ pub(super) enum SourceStep {
 /// ends cancelled; the source keeps serving until it is finished.)
 #[derive(Debug)]
 pub(super) struct SourceState {
-    payload: DragPayload,
+    payload: Payload,
     action: Action,
     /// The compositor told the source something (the drag runs: it started).
     heard: bool,
@@ -85,7 +85,7 @@ pub(super) struct SourceState {
 }
 
 impl SourceState {
-    pub fn new(payload: DragPayload) -> SourceState {
+    pub fn new(payload: Payload) -> SourceState {
         SourceState { payload, action: Action::NONE, heard: false, ended: false }
     }
 
@@ -96,7 +96,7 @@ impl SourceState {
     }
 
     /// What it carries.
-    pub fn payload(&self) -> &DragPayload {
+    pub fn payload(&self) -> &Payload {
         &self.payload
     }
 
@@ -112,7 +112,8 @@ impl SourceState {
             SourceEvent::Target(_) | SourceEvent::DropPerformed => {}
             SourceEvent::Action(action) => self.action = action,
             SourceEvent::Send(mime) => {
-                return SourceStep::Send(self.payload.bytes(&mime, WAYLAND_TEXT_TYPES).unwrap_or_default());
+                let bytes = self.payload.bytes(&mime, WAYLAND_TEXT_TYPES);
+                return SourceStep::Send(bytes.map(|b| b.to_vec()).unwrap_or_default());
             }
             SourceEvent::Finished => {
                 self.ended = true;
@@ -249,7 +250,7 @@ impl WaylandPlatform {
         if self.outgoing.is_some() {
             return; // (one at a time: the host starts none while one is with the platform)
         }
-        let payload = DragPayload::new(&drag.transfer_data);
+        let payload = Payload::new(&drag.transfer_data);
         let mask = actions_mask(&payload.actions);
         let source = {
             let clipboard = self.shared.clipboard.borrow();
@@ -476,12 +477,12 @@ mod tests {
     use kompoz_ui::draganddrop::DragAndDropTransferAction as A;
 
     fn state(text: &str, files: &[&str]) -> SourceState {
-        SourceState::new(DragPayload {
-            text: text.into(),
-            files: files.iter().map(|f| f.to_string()).collect(),
-            mime_types: vec!["text/plain".into()],
-            actions: vec![A::Copy, A::Move, A::Link],
-        })
+        use kompoz_ui::draganddrop::drag_and_drop_transfer_data;
+        let data = kompoz_runtime::named_args!(drag_and_drop_transfer_data(
+            text = text.to_string(),
+            files = files.iter().map(|f| f.to_string()).collect(),
+        ));
+        SourceState::new(Payload::new(&data))
     }
 
     #[test]

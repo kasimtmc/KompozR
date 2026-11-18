@@ -1437,7 +1437,7 @@ fn owner_has_no(t: &Ty, name: &str) -> bool {
 }
 
 /// Whether a parameter's Rust type is a type parameter (`T`): what a generic member extension extends.
-fn is_type_parameter(ty: &str) -> bool {
+pub(crate) fn is_type_parameter(ty: &str) -> bool {
     let t = ty.trim();
     t.len() == 1 && t.chars().all(|c| c.is_ascii_uppercase())
 }

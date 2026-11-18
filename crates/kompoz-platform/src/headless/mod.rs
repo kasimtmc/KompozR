@@ -12,6 +12,7 @@ use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::Rect;
 use kompoz_runtime::Content;
 use kompoz_ui::KompozHost;
+use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::media_query::MediaInfo;
 use kompoz_ui::platform::PlatformCallbacks;
 use std::cell::{Cell, RefCell};
@@ -68,7 +69,7 @@ impl EventQueue {
 /// The callbacks the headless platform gives the host: waking its loop, a clipboard of the app's own.
 struct HeadlessCallbacks {
     queue: Arc<EventQueue>,
-    clipboard: RefCell<Option<String>>,
+    clipboard: RefCell<Option<ClipEntry>>,
 }
 
 impl PlatformCallbacks for HeadlessCallbacks {
@@ -76,11 +77,11 @@ impl PlatformCallbacks for HeadlessCallbacks {
         let queue = self.queue.clone();
         Some(Arc::new(move || queue.post(Event::Wake)))
     }
-    fn get_clipboard(&self) -> Option<String> {
+    fn get_clip_entry(&self) -> Option<ClipEntry> {
         self.clipboard.borrow().clone()
     }
-    fn set_clipboard(&self, text: &str) {
-        *self.clipboard.borrow_mut() = Some(text.to_string());
+    fn set_clip_entry(&self, entry: Option<ClipEntry>) {
+        *self.clipboard.borrow_mut() = entry.map(|e| e.materialized());
     }
 }
 

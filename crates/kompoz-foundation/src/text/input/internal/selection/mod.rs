@@ -9,5 +9,6 @@ pub use text_field_handle_state::TextFieldHandleState;
 pub(crate) use text_field_magnifier::TextFieldMagnifierElement;
 pub use text_field_magnifier::{TextFieldMagnifierNode, calculate_selection_magnifier_center_android};
 pub use text_field_selection_state::{
-    DefaultCursorThickness, InputType, TextFieldSelectionState, TextToolbarHandler, TextToolbarState,
+    DefaultCursorThickness, InputType, ReceiveContentConfigurationProvider, TextFieldSelectionState,
+    TextToolbarHandler, TextToolbarState,
 };

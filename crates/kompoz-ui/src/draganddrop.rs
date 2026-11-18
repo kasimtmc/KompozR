@@ -23,14 +23,20 @@
 // (Compose's names: `DragAndDropSourceModifierNode(…)` and its siblings are functions)
 #![allow(non_snake_case)]
 
-use crate::draw::{DrawScope, GraphicsLayer};
+use crate::clipboard::{
+    ClipEntry, ClipItem, ClipMetadata, ClipValue, MIMETYPE_TEXT_PLAIN, MIMETYPE_TEXT_URILIST, compare_mime_types,
+    file_path_of_uri, is_plain_text_type,
+};
+use crate::draw::{BitmapPainter, DrawScope, GraphicsLayer};
 use crate::graphics_context::{CornerRadii, GraphicsContext, LayerTransform};
 use crate::input::KeyModifiers;
 use crate::layout::LayoutAwareModifierNode;
 use crate::modifier::{ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, TraversableNode, TraversalDecision};
 use crate::node_capabilities;
 use crate::platform::PlatformHandle;
-use kompoz_graphics::{Density, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
+use kompoz_graphics::{
+    Density, FilterQuality, ImageBitmap, IntOffset, IntSize, LayoutDirection, Matrix, Offset, Rect, Size,
+};
 use kompoz_runtime::named;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -66,17 +72,15 @@ impl fmt::Debug for DragAndDropTransferAction {
 }
 
 /// What a drag carries (Compose's DragAndDropTransferData, the platforms' own there: Android's ClipData with its
-/// local state, the desktop's transferable with its actions): its MIME types ("text/plain", "text/uri-list" for
-/// files), its text (the files' `file:` URIs, a line each, for a uri-list), the files' paths; within the app,
-/// anything (`local_state`, Android's); the actions its source allows (the desktop's `supportedActions`, all three
-/// by default), where the pointer is in its decoration (the desktop's `dragDecorationOffset`; none: its middle,
-/// Android's touch point) and what its source is told as it ends (the desktop's `onTransferCompleted`: the action
-/// a target took it with, or none).
+/// local state, the desktop's transferable with its actions): a [`ClipEntry`] — text, HTML, an image, files (as
+/// `file://` URIs), any type of the app's —, described by its MIME types; within the app, anything (`local_state`,
+/// Android's); the actions its source allows (the desktop's `supportedActions`, all three by default), where the
+/// pointer is in its decoration (the desktop's `dragDecorationOffset`; none: its middle, Android's touch point) and
+/// what its source is told as it ends (the desktop's `onTransferCompleted`: the action a target took it with, or
+/// none). A drop from another app carries what that app offers, read as it is asked for.
 #[derive(Clone)]
 pub struct DragAndDropTransferData {
-    pub mime_types: Vec<String>,
-    pub text: String,
-    pub files: Vec<String>,
+    pub clip_entry: ClipEntry,
     pub local_state: Option<Rc<dyn Any>>,
     pub supported_actions: Vec<DragAndDropTransferAction>,
     pub drag_decoration_offset: Option<Offset>,
@@ -86,9 +90,7 @@ pub struct DragAndDropTransferData {
 impl Default for DragAndDropTransferData {
     fn default() -> Self {
         DragAndDropTransferData {
-            mime_types: Vec::new(),
-            text: String::new(),
-            files: Vec::new(),
+            clip_entry: ClipEntry::default(),
             local_state: None,
             supported_actions: vec![
                 DragAndDropTransferAction::Copy,
@@ -110,12 +112,9 @@ fn same_rc<T: ?Sized>(a: &Option<Rc<T>>, b: &Option<Rc<T>>) -> bool {
 }
 
 impl PartialEq for DragAndDropTransferData {
-    /// The same text, types, files, actions and offset, the same local state and completion callback (by
-    /// instance).
+    /// The same entry, local state and completion callback (by instance), actions and offset.
     fn eq(&self, o: &Self) -> bool {
-        self.mime_types == o.mime_types
-            && self.text == o.text
-            && self.files == o.files
+        self.clip_entry == o.clip_entry
             && same_rc(&self.local_state, &o.local_state)
             && self.supported_actions == o.supported_actions
             && self.drag_decoration_offset == o.drag_decoration_offset
@@ -126,9 +125,7 @@ impl PartialEq for DragAndDropTransferData {
 impl fmt::Debug for DragAndDropTransferData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("DragAndDropTransferData")
-            .field("mime_types", &self.mime_types)
-            .field("text", &self.text)
-            .field("files", &self.files)
+            .field("clip_entry", &self.clip_entry)
             .field("local_state", &self.local_state.is_some())
             .field("supported_actions", &self.supported_actions)
             .field("drag_decoration_offset", &self.drag_decoration_offset)
@@ -137,9 +134,25 @@ impl fmt::Debug for DragAndDropTransferData {
 }
 
 impl DragAndDropTransferData {
-    /// Whether it says it is of `mime_type`.
+    /// Its MIME types (its entry's metadata).
+    pub fn mime_types(&self) -> Vec<String> {
+        self.clip_entry.clip_metadata().mime_types().to_vec()
+    }
+
+    /// Whether it is of `mime_type` (wildcards matched as Android's `hasMimeType`: `text/*`).
     pub fn has_mime_type(&self, mime_type: &str) -> bool {
-        self.mime_types.iter().any(|m| m == mime_type)
+        self.clip_entry.clip_metadata().has_mime_type(mime_type)
+    }
+
+    /// What it carries as text: its items' text (a line between each), else its URIs ([`ClipEntry::coerce_to_text`]:
+    /// a file manager's drop).
+    pub fn text(&self) -> String {
+        self.clip_entry.read_plain_text().unwrap_or_else(|| self.clip_entry.coerce_to_text())
+    }
+
+    /// The local files it carries (its `file:` URIs' paths).
+    pub fn files(&self) -> Vec<String> {
+        self.clip_entry.files()
     }
 
     /// Its local state, if it is a `T`.
@@ -148,11 +161,41 @@ impl DragAndDropTransferData {
     }
 }
 
-/// What a drag carries, by name (KompozR's: Compose's is each platform's own class): `mime_types` "text/plain" for
-/// text by default.
-/// Kotlin: `DragAndDropTransferData(text: String = "", mimeTypes: List<String> = listOf("text/plain"), files: List<String> = emptyList(), localState: Any? = null, supportedActions: List<DragAndDropTransferAction> = listOf(DragAndDropTransferAction.Copy, DragAndDropTransferAction.Move, DragAndDropTransferAction.Link), dragDecorationOffset: Offset? = null, onTransferCompleted: ((DragAndDropTransferAction?) -> Unit)? = null)`
+/// The entry of a drag given as text, its MIME types and files (KompozR's named form): an item holding `text` as
+/// each of `mime_types` (the app's own types served as its text; `text/uri-list` left to the files when there are
+/// some; `text/plain` too when there is text but no plain text type), then an item per file; described by
+/// `mime_types` in the app's order.
+fn entry_of(text: String, mime_types: Vec<String>, files: Vec<String>) -> ClipEntry {
+    let mut items = Vec::new();
+    let mut representations: Vec<(String, ClipValue)> = mime_types
+        .iter()
+        .filter(|m| files.is_empty() || *m != MIMETYPE_TEXT_URILIST)
+        .cloned()
+        .map(|m| (m, ClipValue::Text(text.clone())))
+        .collect();
+    if !text.is_empty() && !representations.iter().any(|(m, _)| is_plain_text_type(m)) {
+        representations.push((MIMETYPE_TEXT_PLAIN.into(), ClipValue::Text(text)));
+    }
+    if !representations.is_empty() {
+        items.push(ClipItem::of(representations));
+    }
+    items.extend(files.iter().map(|f| ClipItem::with_file(f)));
+    // (described by its types as the app gave them, then those its items add: text/plain, text/uri-list)
+    let mut described = mime_types;
+    for t in ClipEntry::new(items.clone()).clip_metadata().mime_types() {
+        if !described.iter().any(|d| compare_mime_types(d, t)) {
+            described.push(t.clone());
+        }
+    }
+    ClipEntry::with_metadata(items, ClipMetadata::new(described))
+}
+
+/// What a drag carries, by name (KompozR's: Compose's is each platform's own class): its `clip_entry` (Android's
+/// ClipData), or one made of `text` (as each of `mime_types`, "text/plain" by default) and `files`.
+/// Kotlin: `DragAndDropTransferData(clipEntry: ClipEntry? = null, text: String = "", mimeTypes: List<String> = listOf("text/plain"), files: List<String> = emptyList(), localState: Any? = null, supportedActions: List<DragAndDropTransferAction> = listOf(DragAndDropTransferAction.Copy, DragAndDropTransferAction.Move, DragAndDropTransferAction.Link), dragDecorationOffset: Offset? = null, onTransferCompleted: ((DragAndDropTransferAction?) -> Unit)? = null)`
 #[named]
 pub fn drag_and_drop_transfer_data(
+    #[default(None)] clip_entry: Option<ClipEntry>,
     #[default(String::new())] text: String,
     #[default(vec!["text/plain".to_string()])] mime_types: Vec<String>,
     #[default(Vec::new())] files: Vec<String>,
@@ -163,9 +206,7 @@ pub fn drag_and_drop_transfer_data(
     #[default(None)] on_transfer_completed: Option<Rc<dyn Fn(Option<DragAndDropTransferAction>)>>,
 ) -> DragAndDropTransferData {
     DragAndDropTransferData {
-        mime_types,
-        text,
-        files,
+        clip_entry: clip_entry.unwrap_or_else(|| entry_of(text, mime_types, files)),
         local_state,
         supported_actions,
         drag_decoration_offset,
@@ -173,11 +214,77 @@ pub fn drag_and_drop_transfer_data(
     }
 }
 
+/// What a drag carries as the desktop reads it (Compose desktop's DragData, of `DragAndDropEvent.dragData()`):
+/// files (local `file:` URIs), else an image, else text (of its best text type), else something else.
+#[derive(Clone, PartialEq, Debug)]
+pub enum DragData {
+    FilesList(ClipEntry),
+    Image(ClipEntry),
+    Text { best_mime_type: String, entry: ClipEntry },
+    Unknown,
+}
+
+impl DragData {
+    /// What `entry` is, as the desktop sees it (Compose desktop's `Transferable.dragData`).
+    pub fn of(entry: &ClipEntry) -> DragData {
+        let metadata = entry.clip_metadata();
+        if metadata.has_mime_type(MIMETYPE_TEXT_URILIST) && !entry.files().is_empty() {
+            DragData::FilesList(entry.clone())
+        } else if metadata.has_mime_type("image/*") {
+            DragData::Image(entry.clone())
+        } else if let Some(best) = metadata
+            .mime_types()
+            .iter()
+            .find(|m| is_plain_text_type(m))
+            .or_else(|| metadata.mime_types().iter().find(|m| compare_mime_types(m, "text/*")))
+        {
+            DragData::Text { best_mime_type: best.clone(), entry: entry.clone() }
+        } else {
+            DragData::Unknown
+        }
+    }
+
+    /// The files' URIs (Compose desktop's `FilesList.readFiles`); none for another kind.
+    pub fn read_files(&self) -> Vec<String> {
+        match self {
+            DragData::FilesList(entry) => entry.uris().into_iter().filter(|u| file_path_of_uri(u).is_some()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The image, painted (Compose desktop's `Image.readImage`); none for another kind, or one that can't be read.
+    pub fn read_image(&self) -> Option<BitmapPainter> {
+        match self {
+            DragData::Image(entry) => entry.image().map(|i| {
+                let size = IntSize::new(i.width(), i.height());
+                BitmapPainter::new(i, IntOffset::Zero, size, FilterQuality::Low)
+            }),
+            _ => None,
+        }
+    }
+
+    /// The text (Compose desktop's `Text.readText`); empty for another kind.
+    pub fn read_text(&self) -> String {
+        match self {
+            DragData::Text { entry, .. } => entry.read_plain_text().unwrap_or_else(|| entry.coerce_to_text()),
+            _ => String::new(),
+        }
+    }
+
+    /// The text's best type (Compose desktop's `Text.bestMimeType`); empty for another kind.
+    pub fn best_mime_type(&self) -> &str {
+        match self {
+            DragData::Text { best_mime_type, .. } => best_mime_type,
+            _ => "",
+        }
+    }
+}
+
 /// A drag's moment (Compose's DragAndDropEvent): what it may carry (its MIME types: all that is known of a drag
 /// from outside before its drop), where it is (px in the window), what it carries (a drag within the app: from its
-/// start; from outside: at its drop), the action the user picks (the desktop's `action`: within the app Move,
-/// Ctrl Copy, Ctrl+Shift Link, as AWT's, of those the source allows), and as it ends whether a target took it
-/// (Android's `DragEvent.getResult`).
+/// start; from outside: at its drop, read as it is asked for), the action the user picks (the desktop's `action`:
+/// within the app Move, Ctrl Copy, Ctrl+Shift Link, as AWT's, of those the source allows), and as it ends whether a
+/// target took it (Android's `DragEvent.getResult`).
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct DragAndDropEvent {
     pub action: Option<DragAndDropTransferAction>,
@@ -193,14 +300,29 @@ impl DragAndDropEvent {
         &self.mime_types
     }
 
-    /// Whether it may be of `mime_type`.
-    pub fn has_mime_type(&self, mime_type: &str) -> bool {
-        self.mime_types.iter().any(|m| m == mime_type)
+    /// Its MIME types as a description (Android's `DragEvent.getClipDescription`).
+    pub fn clip_metadata(&self) -> ClipMetadata {
+        ClipMetadata::new(self.mime_types.clone())
     }
 
-    /// Its text, once known (empty before).
-    pub fn text(&self) -> &str {
-        self.transfer_data.as_ref().map_or("", |d| d.text.as_str())
+    /// Whether it may be of `mime_type` (wildcards matched as Android's `hasMimeType`: `text/*`).
+    pub fn has_mime_type(&self, mime_type: &str) -> bool {
+        self.mime_types.iter().any(|m| compare_mime_types(m, mime_type))
+    }
+
+    /// What it carries, once known (Android's `DragEvent.getClipData`).
+    pub fn clip_entry(&self) -> Option<&ClipEntry> {
+        self.transfer_data.as_ref().map(|d| &d.clip_entry)
+    }
+
+    /// What it carries as text, once known (empty before).
+    pub fn text(&self) -> String {
+        self.transfer_data.as_ref().map(DragAndDropTransferData::text).unwrap_or_default()
+    }
+
+    /// What it carries as the desktop reads it (Compose desktop's `dragData()`): unknown before it is known.
+    pub fn drag_data(&self) -> DragData {
+        self.clip_entry().map_or(DragData::Unknown, DragData::of)
     }
 
     /// Its local state, if it carries a `T` (a drag within the app).
@@ -911,7 +1033,7 @@ impl DragAndDropManager {
     fn in_app_event(&self, drag: &InAppDrag, modifiers: KeyModifiers) -> DragAndDropEvent {
         DragAndDropEvent {
             action: drop_action(modifiers, &drag.data.supported_actions),
-            mime_types: drag.data.mime_types.clone(),
+            mime_types: drag.data.mime_types(),
             position_in_root: drag.pointer,
             transfer_data: Some(drag.data.clone()),
             result: false,
@@ -1085,13 +1207,13 @@ impl DragAndDropManager {
     /// the target under it takes it, every target is told it ended. Whether it was taken.
     pub(crate) fn external_drop(&self, data: DragAndDropTransferData, position: Offset) -> bool {
         if self.external.borrow().is_none() {
-            self.external_entered(data.mime_types.clone());
+            self.external_entered(data.mime_types());
         }
         self.external_moved(position);
         let Some(root) = self.root() else { return false };
         let data = self.handed_off.borrow().as_ref().map_or(data, |h| h.data.clone());
         let mut event = DragAndDropEvent {
-            mime_types: data.mime_types.clone(),
+            mime_types: data.mime_types(),
             position_in_root: position,
             transfer_data: Some(data),
             ..DragAndDropEvent::default()

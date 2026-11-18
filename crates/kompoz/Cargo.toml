@@ -105,5 +105,9 @@ name = "kotlin_desktop"
 harness = false
 
 [[test]]
+name = "kotlin_content"
+harness = false
+
+[[test]]
 name = "named_forms"
 harness = false

@@ -13,7 +13,10 @@ use kompoz_test::*;
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode};
 use kompoz_ui::graphics_context::{ClipOp, CornerRadii, GraphicsContext, LayerTransform, NodeRecording, TextDraw};
 use kompoz_ui::layout::LayoutIdKey;
-use kompoz_ui::modifier::{ObserverModifierNode, TraversableNode, TraversalDecision};
+use kompoz_ui::modifier::{
+    ModifierLocal, ModifierLocalMap, ModifierLocalModifierNode, ObserverModifierNode, TraversableNode,
+    TraversalDecision, modifier_local_of,
+};
 use kompoz_ui::platform::{
     FrameRateCategory, LocalLayoutDirection, LocalWindowInfo, SystemInsets, is_system_in_dark_theme,
 };
@@ -582,6 +585,74 @@ fn nodes_find_each_other_up_and_down_the_tree() {
     assert_eq!(found, ["up middle", "up outer", "down same", "down child", "down grandchild", "nearest middle"]);
 }
 
+// ---- Modifier locals -------------------------------------------------------------------------------------------
+
+static Theme: ModifierLocal<&'static str> = modifier_local_of(|| "default");
+
+/// Provides `Theme` (Compose's ModifierLocalModifierNode).
+#[derive(PartialEq)]
+struct Provide(&'static str);
+
+struct ProvideNode(ModifierLocalMap);
+
+impl ModifierNodeElement for Provide {
+    type Node = ProvideNode;
+    fn create(&self) -> ProvideNode {
+        ProvideNode(ModifierLocalMap::of(&Theme, self.0))
+    }
+    fn update(&self, node: &mut ProvideNode) {
+        node.0.set(&Theme, self.0);
+    }
+}
+
+impl ModifierNode for ProvideNode {
+    node_capabilities!(modifier_local);
+}
+
+impl ModifierLocalModifierNode for ProvideNode {
+    fn provided_values(&self) -> &ModifierLocalMap {
+        &self.0
+    }
+}
+
+/// Reads `Theme` when attached.
+#[derive(PartialEq)]
+struct Read(&'static str);
+
+struct ReadNode(&'static str);
+
+impl ModifierNodeElement for Read {
+    type Node = ReadNode;
+    fn create(&self) -> ReadNode {
+        ReadNode(self.0)
+    }
+    fn update(&self, _: &mut ReadNode) {}
+}
+
+impl ModifierNode for ReadNode {
+    fn on_attach(&mut self, cx: &NodeCx) {
+        let theme = cx.modifier_local_current(&Theme);
+        FOUND.with(|f| f.borrow_mut().push(format!("{} {theme}", self.0)));
+    }
+}
+
+fn modifier_locals_come_from_the_nearest_provider_above() {
+    FOUND.with(|f| f.borrow_mut().clear());
+    let _rule = KompozTestRule::new(kompozable_lambda!(|| {
+        Stack(modifier = Modifier.then_element(Read("root")).then_element(Provide("outer")), || {
+            Stack(modifier = Modifier.then_element(Read("before")).then_element(Provide("inner")), || {
+                Leaf(1, 1, modifier = Modifier.then_element(Read("inside")));
+            });
+            Leaf(1, 1, modifier = Modifier.then_element(Read("beside")));
+        });
+        Leaf(1, 1, modifier = Modifier.then_element(Read("outside")));
+    }));
+    let mut found = FOUND.with(|f| f.borrow().clone());
+    found.retain(|s| !s.starts_with("up") && !s.starts_with("down") && !s.starts_with("nearest"));
+    found.sort();
+    assert_eq!(found, ["before outer", "beside outer", "inside inner", "outside default", "root default"]);
+}
+
 /// Reads a state in `observe_reads` when attached and counts the changes it is told of.
 #[derive(PartialEq)]
 struct Watcher(MutableState<i32>);
@@ -1014,6 +1085,7 @@ fn system_gesture_exclusion_keeps_the_rects_in_view() {
 }
 
 tests!(
+    modifier_locals_come_from_the_nearest_provider_above,
     coordinates_tell_where_layouts_are_and_map_between_them,
     a_layer_moves_and_clips_what_coordinates_tell,
     size_placement_and_position_callbacks_are_told_as_compose,

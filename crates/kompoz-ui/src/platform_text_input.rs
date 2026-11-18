@@ -11,9 +11,10 @@
 //! each batch of commands and whenever what it holds changes, where the input method is shown changes, or its
 //! selection leaves a composition (which is finished then, as Compose desktop's DesktopTextInputService2 does).
 
+use crate::clipboard::ClipEntry;
 use crate::modifier::{ModifierNode, NodeCx};
 use crate::platform::{ImeAction, ImeOptions};
-use crate::text_input::{EditCommand, LocalTextInputService, TextInputService, TextInputSession};
+use crate::text_input::{ContentReceiver, EditCommand, LocalTextInputService, TextInputService, TextInputSession};
 use kompoz_coroutines::{CoroutineScope, Job, coroutine_scope, current_job, snapshot_flow};
 use kompoz_graphics::{Offset, Rect};
 use kompoz_runtime::{KompozitionLocal, KompozitionLocalProvider, MutableState, mutable_state_of, remember_keyed};
@@ -133,6 +134,12 @@ pub struct PlatformTextInputMethodRequest {
     pub unclipped_text_offset_in_root: Rc<dyn Fn() -> Option<Offset>>,
     /// Edits the text: what the block does through its scope is applied together after it.
     pub edit_text: Rc<dyn Fn(&mut dyn FnMut(&mut dyn TextEditingScope))>,
+    /// The MIME types of content the editor takes from the input method besides text (Android's
+    /// `EditorInfo.contentMimeTypes`; `*/*`: any); empty: text only.
+    pub content_mime_types: Vec<String>,
+    /// What takes content the input method commits (an image a keyboard sends: Android's `commitContent`), given it
+    /// and its link URI: whether it took it. None: text only.
+    pub on_commit_content: Option<Rc<dyn Fn(ClipEntry, Option<String>) -> bool>>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -271,6 +278,11 @@ impl TextInputService {
                 on_ime_action,
             );
             let version = session.version();
+            let content = request.on_commit_content.clone().map(|on_commit_content| ContentReceiver {
+                mime_types: request.content_mime_types.clone(),
+                on_commit_content,
+            });
+            service.set_content_receiver(&session, content);
             let _close = CloseOnDrop(session);
             coroutine_scope(move |scope| async move {
                 // What the editor holds, followed: the input method told where it differs from what it sees. (With

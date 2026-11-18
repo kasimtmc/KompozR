@@ -122,23 +122,8 @@ pub fn preferred_language() -> Option<String> {
     None
 }
 
-/// A dropped file's path as a `file:` URI (C++'s `fileUri`, a `text/uri-list`'s line): Windows' backslashes and
-/// drive letters turned around, anything but letters, digits and `-._~/:` percent-encoded.
-pub fn file_uri(path: &str) -> String {
-    let mut path = path.replace('\\', "/");
-    if path.as_bytes().get(1) == Some(&b':') {
-        path.insert(0, '/');
-    }
-    let mut out = String::from("file://");
-    for b in path.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
+/// A dropped file's path as a `file:` URI (C++'s `fileUri`, a `text/uri-list`'s line): kompoz-ui's.
+pub use kompoz_ui::clipboard::file_uri;
 
 #[cfg(test)]
 mod tests {

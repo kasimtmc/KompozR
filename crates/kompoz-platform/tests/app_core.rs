@@ -332,7 +332,7 @@ struct Drops(Log);
 impl DragAndDropTarget for Drops {
     fn on_drop(&self, event: &DragAndDropEvent) -> bool {
         let data = event.transfer_data.clone().unwrap_or_default();
-        push(&self.0, format!("drop {:?} {:?} {:?}", data.mime_types, data.text, data.files));
+        push(&self.0, format!("drop {:?} {:?} {:?}", data.mime_types(), data.text(), data.files()));
         true
     }
 }
@@ -475,14 +475,14 @@ fn the_platforms_events_are_the_hosts_input() {
     session.dispose();
     // Files dropped from a file manager: a uri-list; text from a browser: plain text; nothing: it left.
     for e in [
-        Event::DropBegin { x: 20.0, y: 20.0 },
+        Event::DropBegin { x: 20.0, y: 20.0, mime_types: Vec::new() },
         Event::DropMove { x: 21.0, y: 20.0 },
         Event::DropFile { x: 21.0, y: 20.0, path: "/tmp/a b.png".into() },
         Event::DropComplete { x: 21.0, y: 20.0 },
         Event::DropMove { x: 20.0, y: 20.0 },
         Event::DropText { x: 20.0, y: 20.0, text: "merhaba".into() },
         Event::DropComplete { x: 20.0, y: 20.0 },
-        Event::DropBegin { x: 20.0, y: 20.0 },
+        Event::DropBegin { x: 20.0, y: 20.0, mime_types: Vec::new() },
         Event::DropComplete { x: 20.0, y: 20.0 },
     ] {
         core.handle(&e);
@@ -490,7 +490,7 @@ fn the_platforms_events_are_the_hosts_input() {
     assert_eq!(
         taken(&log),
         [
-            "drop [\"text/uri-list\"] \"file:///tmp/a%20b.png\\r\\n\" [\"/tmp/a b.png\"]",
+            "drop [\"text/uri-list\"] \"file:///tmp/a%20b.png\" [\"/tmp/a b.png\"]",
             "drop [\"text/plain\"] \"merhaba\" []",
         ]
     );

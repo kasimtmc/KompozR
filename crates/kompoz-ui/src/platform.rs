@@ -6,13 +6,14 @@
 //! modifiers whose effect is the window's
 //! (`keep_screen_on`, `sensitive_content`, `preferred_frame_rate`, `system_gesture_exclusion`).
 
+pub use crate::clipboard::{ClipEntry, ClipItem, ClipMetadata};
 use crate::graphics_context::GraphicsContext;
 use crate::layout::LayoutCoordinates;
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx};
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Density, ImageBitmap, IntRect, IntSize, LayoutDirection, Offset, Path, Rect, Size};
 use kompoz_runtime::{KompozitionLocal, MutableState, SnapshotMutationPolicy, mutable_state_of};
-use kompoz_text::{FakeFontFamilyResolver, FontFamilyResolver, FontFamilyResolverImpl};
+use kompoz_text::{AnnotatedString, FakeFontFamilyResolver, FontFamilyResolver, FontFamilyResolverImpl};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -219,11 +220,16 @@ pub trait PlatformCallbacks {
         let _ = (model, size);
         done(None);
     }
-    fn get_clipboard(&self) -> Option<String> {
+    /// What the clipboard holds (Compose's `Clipboard.getClipEntry`): another app's read only as its items are asked
+    /// for ([`ClipItem::from_reader`](crate::clipboard::ClipItem::from_reader)); the app's own as it put it there.
+    /// None when it holds nothing.
+    fn get_clip_entry(&self) -> Option<ClipEntry> {
         None
     }
-    fn set_clipboard(&self, text: &str) {
-        let _ = text;
+    /// Puts `entry` on the clipboard, offered to other apps as its types (Compose's `Clipboard.setClipEntry`); none
+    /// clears it.
+    fn set_clip_entry(&self, entry: Option<ClipEntry>) {
+        let _ = entry;
     }
     /// Dark icons over light system bars (true) or light icons over dark ones.
     fn system_bars_appearance(&self, light_status_bars: bool, light_navigation_bars: bool) {
@@ -495,16 +501,63 @@ impl HapticFeedback {
     }
 }
 
-/// The clipboard (Compose's Clipboard), its text.
+/// The clipboard (Compose's Clipboard): what it holds as a [`ClipEntry`] (text, HTML, images, URIs, any type),
+/// read and set through the platform. Compose's suspend; KompozR's platforms answer at once (another app's items
+/// are read as they are asked for), so the `_now` forms do the same without a coroutine.
 #[derive(Clone, PartialEq, Default)]
 pub struct Clipboard(pub(crate) PlatformHandle);
 
 impl Clipboard {
-    pub fn get_text(&self) -> Option<String> {
-        self.0.get().get_clipboard()
+    /// What the clipboard holds (Compose's `getClipEntry`); none when it holds nothing.
+    pub async fn get_clip_entry(&self) -> Option<ClipEntry> {
+        self.get_clip_entry_now()
     }
-    pub fn set_text(&self, text: &str) {
-        self.0.get().set_clipboard(text);
+
+    /// Puts `clip_entry` on the clipboard (Compose's `setClipEntry`); none clears it.
+    pub async fn set_clip_entry(&self, clip_entry: Option<ClipEntry>) {
+        self.set_clip_entry_now(clip_entry);
+    }
+
+    /// [`get_clip_entry`](Clipboard::get_clip_entry) without suspending.
+    pub fn get_clip_entry_now(&self) -> Option<ClipEntry> {
+        self.0.get().get_clip_entry()
+    }
+
+    /// [`set_clip_entry`](Clipboard::set_clip_entry) without suspending.
+    pub fn set_clip_entry_now(&self, clip_entry: Option<ClipEntry>) {
+        self.0.get().set_clip_entry(clip_entry);
+    }
+}
+
+/// The clipboard as text (Compose's ClipboardManager, deprecated there for [`Clipboard`]): its text, and its entry
+/// without suspending (Android's `getClip`/`setClip`).
+#[derive(Clone, PartialEq, Default)]
+pub struct ClipboardManager(pub(crate) PlatformHandle);
+
+impl ClipboardManager {
+    /// Puts `annotated_string` on the clipboard (its styles kept within the app).
+    pub fn set_text(&self, annotated_string: AnnotatedString) {
+        self.0.get().set_clip_entry(Some(ClipEntry::with_annotated_string(annotated_string)));
+    }
+
+    /// The clipboard's text: its first item's (with the styles the app gave it); none if it has none.
+    pub fn get_text(&self) -> Option<AnnotatedString> {
+        self.0.get().get_clip_entry()?.read_annotated_string()
+    }
+
+    /// Whether the clipboard holds text that isn't empty.
+    pub fn has_text(&self) -> bool {
+        self.get_text().is_some_and(|t| !t.text().is_empty())
+    }
+
+    /// What the clipboard holds (Compose's `getClip`).
+    pub fn get_clip(&self) -> Option<ClipEntry> {
+        self.0.get().get_clip_entry()
+    }
+
+    /// Puts `clip_entry` on the clipboard (Compose's `setClip`); none clears it.
+    pub fn set_clip(&self, clip_entry: Option<ClipEntry>) {
+        self.0.get().set_clip_entry(clip_entry);
     }
 }
 
@@ -1219,6 +1272,9 @@ pub static LocalHapticFeedback: KompozitionLocal<HapticFeedback> =
     KompozitionLocal::new_static(HapticFeedback::default);
 /// The clipboard (Compose's LocalClipboard).
 pub static LocalClipboard: KompozitionLocal<Clipboard> = KompozitionLocal::new_static(Clipboard::default);
+/// The clipboard as text (Compose's LocalClipboardManager, deprecated there for [`LocalClipboard`]).
+pub static LocalClipboardManager: KompozitionLocal<ClipboardManager> =
+    KompozitionLocal::new_static(ClipboardManager::default);
 /// Whether a text field's cursor blinks (Compose's LocalCursorBlinkEnabled): on unless provided off (a screenshot
 /// test's steady cursor).
 pub static LocalCursorBlinkEnabled: KompozitionLocal<bool> = KompozitionLocal::new_static(|| true);

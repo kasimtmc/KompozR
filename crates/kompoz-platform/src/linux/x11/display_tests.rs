@@ -1,15 +1,18 @@
 //! The X11 platform against a real X server (`KOMPOZ_DISPLAY_TESTS=1`, `DISPLAY` naming one: Xwayland on a Wayland
 //! desktop, Xvfb in CI; else they pass without running): the clipboard between two apps' windows (each with a
 //! connection and a thread of its own: the owner answers while the reader waits) as UTF-8, Latin-1, its targets and
-//! in INCR parts both ways, ownership lost to another; a drop from another client (an XDND 5 source written here)
-//! with its status and finish (once the core says a target took it); the keyboard's keys and text through
+//! in INCR parts both ways, all of an entry's types (HTML, an image as PNG — a large one in INCR parts —, a type of
+//! the app's own), read only as they are asked for, ownership lost to another; a drop from another client (an XDND 5
+//! source written here) with its status, what it offers read as a target asks for it (and no longer once the drop is
+//! done) and its finish (once the core says a target took it); the keyboard's keys and text through
 //! xkbcommon-x11, and through the input method's context; the input context's preedit style (on the spot where the
 //! method can). The windows are never mapped. (Drags of the app's own out to others: tests/drag_display.rs.)
 
 use super::ffi::{self, Decoded, Display, InputMethod, KeyEvent, NONE, Window, XEvent};
-use super::selection::{Encoding, decode};
 use super::{X11Platform, sys};
-use crate::app::Event;
+use crate::app::{Event, Platform};
+use kompoz_graphics::{ImageBitmap, decode_to_image_bitmap};
+use kompoz_ui::clipboard::{ClipEntry, ClipItem, ClipValue, decode_text};
 use kompoz_ui::input::{Key, KeyModifiers};
 use std::ffi::c_long;
 use std::sync::mpsc;
@@ -40,11 +43,37 @@ fn wait(d: &Display, mut matches: impl FnMut(&XEvent) -> bool) -> Option<XEvent>
     None
 }
 
-/// What the clipboard's owner is told to do.
+/// What the clipboard's owner is told to do (an entry isn't sent across threads: it is made there).
 enum Owner {
-    Set(String),
+    Text(String),
+    /// Text, its HTML, an image and a type of the app's own.
+    Rich,
+    /// An image larger than a request carries.
+    LargeImage,
     /// Answer requests until told otherwise; then say whether it still owns the clipboard.
     Stop,
+}
+
+/// An image of `width` × `height` pixels of noise (what PNG can't make smaller), the same each time.
+fn noise(width: i32, height: i32) -> ImageBitmap {
+    let mut state = 0x2545_f491_u32;
+    let pixels = (0..width * height * 4)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            (state >> 24) as u8
+        })
+        .collect();
+    ImageBitmap::from_pixels(width, height, pixels).unwrap()
+}
+
+fn rich() -> ClipEntry {
+    ClipEntry::new(vec![
+        ClipItem::with_html_text("kalın yazı", "<b>kalın</b> yazı"),
+        ClipItem::with_image(noise(3, 2)),
+        ClipItem::of(vec![("application/x-kompoz-test".into(), ClipValue::Bytes(std::rc::Rc::from(&[7u8, 0, 9][..])))]),
+    ])
 }
 
 #[test]
@@ -57,13 +86,16 @@ fn the_clipboard_goes_between_windows() {
     let owner = std::thread::spawn(move || {
         let mut a = platform();
         loop {
-            match received.try_recv() {
-                Ok(Owner::Set(text)) => {
-                    a.shared.write_clipboard(&text);
-                    told.send(a.shared.clipboard.borrow().owned).unwrap();
-                }
+            let entry = match received.try_recv() {
+                Ok(Owner::Text(text)) => Some(ClipEntry::with_plain_text(text)),
+                Ok(Owner::Rich) => Some(rich()),
+                Ok(Owner::LargeImage) => Some(ClipEntry::with_image(noise(400, 300))),
                 Ok(Owner::Stop) => break,
-                Err(_) => {}
+                Err(_) => None,
+            };
+            if let Some(entry) = entry {
+                a.shared.set_clip_entry(Some(entry));
+                told.send(a.shared.clipboard.borrow().owned).unwrap();
             }
             a.pump();
             a.wait(Some(Duration::from_millis(5)));
@@ -72,25 +104,29 @@ fn the_clipboard_goes_between_windows() {
         told.send(a.shared.clipboard.borrow().owned).unwrap();
     });
     let b = platform();
-    let set = |text: &str| {
-        commands.send(Owner::Set(text.to_string())).unwrap();
+    let set = |what: Owner| {
+        commands.send(what).unwrap();
         assert!(replies.recv().unwrap(), "the owner owns the clipboard");
     };
+    let read = || b.shared.clip_entry().expect("the clipboard holds something");
 
     // Text with letters beyond Latin-1, as UTF8_STRING.
-    set("Sayaç: ğüşıöç €");
-    assert_eq!(b.shared.read_clipboard().as_deref(), Some("Sayaç: ğüşıöç €"));
+    set(Owner::Text("Sayaç: ğüşıöç €".into()));
+    let entry = read();
+    assert_eq!(entry.read_plain_text().as_deref(), Some("Sayaç: ğüşıöç €"));
+    assert!(entry.has_text());
     // What it can be had as; as STRING, Latin-1 (what Latin-1 lacks as '?').
     let a = b.shared.atoms;
     let (targets, kind) = b.shared.convert(a.CLIPBOARD, a.TARGETS, ffi::CURRENT_TIME).expect("the targets");
     assert_eq!(kind, ffi::XA_ATOM);
     let (longs, _) = targets.as_chunks::<{ size_of::<c_long>() }>();
     let targets: Vec<u64> = longs.iter().map(|&l| c_long::from_ne_bytes(l) as u64).collect();
-    for t in [a.TARGETS, a.UTF8_STRING, ffi::XA_STRING, a.TEXT, a.TEXT_PLAIN_UTF8, a.TEXT_PLAIN] {
-        assert!(targets.contains(&t), "{t} among the targets");
+    let d = b.display();
+    for t in ["TARGETS", "UTF8_STRING", "STRING", "TEXT", "text/plain;charset=utf-8", "text/plain"] {
+        assert!(targets.contains(&d.intern_atom(t)), "{t} among the targets");
     }
     let (latin1, kind) = b.shared.convert(a.CLIPBOARD, ffi::XA_STRING, ffi::CURRENT_TIME).expect("as STRING");
-    assert_eq!((decode(&latin1, Encoding::Latin1).as_str(), kind), ("Sayaç: ?ü??öç ?", ffi::XA_STRING));
+    assert_eq!((decode_text(&latin1, "STRING").as_str(), kind), ("Sayaç: ?ü??öç ?", ffi::XA_STRING));
     let (text, kind) = b.shared.convert(a.CLIPBOARD, a.TEXT, ffi::CURRENT_TIME).expect("as TEXT");
     assert_eq!((String::from_utf8(text).unwrap().as_str(), kind), ("Sayaç: ğüşıöç €", a.UTF8_STRING));
     assert!(b.shared.convert(a.CLIPBOARD, a.XdndActionCopy, ffi::CURRENT_TIME).is_none()); // (not a target)
@@ -98,15 +134,46 @@ fn the_clipboard_goes_between_windows() {
     // A text larger than a request carries: in INCR parts, sent and read.
     let large: String = (0..300_000).map(|i| char::from(b'a' + (i % 26) as u8)).chain("ş".chars()).collect();
     assert!(large.len() > super::part_size(b.display().max_request_bytes()));
-    set(&large);
-    assert_eq!(b.shared.read_clipboard().as_deref(), Some(large.as_str()));
+    set(Owner::Text(large.clone()));
+    assert_eq!(read().read_plain_text().as_deref(), Some(large.as_str()));
 
-    // The reader puts its own text there: the owner loses it, and the reader reads its own.
-    b.shared.write_clipboard("benim");
-    assert_eq!(b.shared.read_clipboard().as_deref(), Some("benim"));
+    // All of an entry's types: described before anything is read, each read as it is asked for.
+    set(Owner::Rich);
+    let entry = read();
+    let types = entry.clip_metadata().mime_types();
+    for t in ["text/html", "image/png", "application/x-kompoz-test", "text/plain;charset=utf-8", "STRING"] {
+        assert!(types.iter().any(|m| m == t), "{t} among {types:?}");
+    }
+    assert!(entry.clip_metadata().has_mime_type("image/*"));
+    let item = &entry.items()[0];
+    assert!(item.is_read_on_request());
+    assert_eq!(item.text().as_deref(), Some("kalın yazı"));
+    assert_eq!(item.html_text().as_deref(), Some("<b>kalın</b> yazı"));
+    assert_eq!(item.image().expect("the image").pixels(), noise(3, 2).pixels());
+    assert_eq!(item.bytes("application/x-kompoz-test").as_deref(), Some(&[7u8, 0, 9][..]));
+    assert_eq!(item.bytes("image/jpeg"), None); // (not offered)
+
+    // An image larger than a request carries: PNG in INCR parts.
+    set(Owner::LargeImage);
+    let entry = read();
+    let png = entry.items()[0].bytes("image/png").expect("the image's PNG");
+    assert!(png.len() > super::part_size(b.display().max_request_bytes()), "{} bytes", png.len());
+    assert_eq!(decode_to_image_bitmap(&png).unwrap().pixels(), noise(400, 300).pixels());
+
+    // The reader puts its own entry there: the owner loses it, and the reader reads its own (as it put it there);
+    // what it read of the owner's can no longer be read.
+    let before = read();
+    b.shared.set_clip_entry(Some(rich()));
+    let own = read();
+    assert!(!own.items()[0].is_read_on_request());
+    assert_eq!(own.items()[1].image().unwrap().pixels(), noise(3, 2).pixels());
+    assert_eq!(before.items()[0].bytes("text/html"), None);
     commands.send(Owner::Stop).unwrap();
     assert!(!replies.recv().unwrap(), "the owner was told it lost the clipboard");
     owner.join().unwrap();
+    // Let go: the clipboard holds nothing.
+    b.shared.set_clip_entry(None);
+    assert!(b.shared.clip_entry().is_none());
 }
 
 #[test]
@@ -116,7 +183,7 @@ fn drops_come_from_another_client() {
     }
     let mut t = platform();
     let target = t.window();
-    // The drag's source: another client, on its own thread, offering two files.
+    // The drag's source: another client, on its own thread, offering two files and HTML.
     let source = std::thread::spawn(move || {
         let d = Display::open().unwrap();
         let names = [
@@ -128,13 +195,14 @@ fn drops_come_from_another_client() {
             c"XdndSelection",
             c"text/uri-list",
             c"XdndActionCopy",
+            c"text/html",
         ];
-        let [enter, position, status, drop, finished, selection, uri_list, copy] =
+        let [enter, position, status, drop, finished, selection, uri_list, copy, html] =
             d.intern_atoms(&names).try_into().unwrap();
         let src: Window = d.create_window(1, 1, ffi::PROPERTY_CHANGE_MASK).unwrap();
         d.set_selection_owner(selection, src, ffi::CURRENT_TIME);
         let send = |kind, data: [c_long; 5]| d.send_client_message(target, target, kind, data, ffi::NO_EVENT_MASK);
-        send(enter, [src as c_long, 5 << 24, uri_list as c_long, 0, 0]);
+        send(enter, [src as c_long, 5 << 24, uri_list as c_long, html as c_long, 0]);
         send(position, [src as c_long, 0, (50 << 16) | 60, 0, copy as c_long]);
         let message = |kind| {
             let e =
@@ -159,6 +227,7 @@ fn drops_come_from_another_client() {
             b"file:///tmp/a%20b.png\r\nfile:///home/kasim/G%C3%B6r.txt\r\n",
         );
         d.send_selection_notify(requestor, selection, kind, property, time);
+        // (Only what a target asks for is read: the HTML isn't.)
         let finished = message(finished);
         (status, finished, src, copy)
     });
@@ -169,19 +238,24 @@ fn drops_come_from_another_client() {
         events.extend(t.take_events());
         t.wait(Some(Duration::from_millis(5)));
     }
-    // The core took it (a target did): the finish goes.
-    crate::app::Platform::drop_done(&mut t, true);
-    let (status, finished, src, copy) = source.join().unwrap();
+    let mime_types = vec!["text/uri-list".to_string(), "text/html".into()];
     assert_eq!(
         events,
         [
-            Event::DropBegin { x: 50.0, y: 60.0 },
+            Event::DropBegin { x: 50.0, y: 60.0, mime_types },
             Event::DropMove { x: 50.0, y: 60.0 },
-            Event::DropFile { x: 50.0, y: 60.0, path: "/tmp/a b.png".into() },
-            Event::DropFile { x: 50.0, y: 60.0, path: "/home/kasim/Gör.txt".into() },
+            Event::DropData { x: 50.0, y: 60.0 },
             Event::DropComplete { x: 50.0, y: 60.0 },
         ]
     );
+    // A target reads the files (the source asked for them now), as the core would before it says it is done.
+    let entry = t.take_drop_entry().expect("what the drop carries");
+    assert!(t.take_drop_entry().is_none());
+    assert_eq!(entry.files(), ["/tmp/a b.png", "/home/kasim/Gör.txt"]);
+    // The core took it (a target did): the finish goes; what it offered can't be read from then on.
+    t.drop_done(true);
+    assert_eq!(entry.items()[0].bytes("text/html"), None);
+    let (status, finished, src, copy) = source.join().unwrap();
     // Taken, each move to be told, copied; then finished, accepted, copied.
     assert_eq!((status[0] as Window, status[1], status[4] as u64), (target, 3, copy));
     assert_eq!((finished[0] as Window, finished[1], finished[2] as u64), (target, 1, copy));

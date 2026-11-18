@@ -127,6 +127,9 @@ impl LegacyPlatformTextInputServiceAdapter {
             text_clipping_rect_in_root: Rc::new(move || clipping.get()),
             unclipped_text_offset_in_root: Rc::new(move || unclipped.get()),
             edit_text,
+            // (the legacy field takes text only: Compose's takes no content)
+            content_mime_types: Vec::new(),
+            on_commit_content: None,
         }
     }
 }
