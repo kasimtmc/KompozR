@@ -16,29 +16,47 @@
 //! });
 //! ```
 
+mod anchored_draggable;
 pub(crate) mod bring_into_view_spec;
 mod content_in_view;
 mod drag;
 pub(crate) mod draggable;
+mod draggable2d;
 pub(crate) mod fling;
 mod for_each;
 mod indirect_drag;
 mod mouse_wheel;
 pub(crate) mod scrollable;
+mod scrollable2d;
+mod scrollable2d_state;
 pub(crate) mod scrollable_state;
 pub mod snapping;
 mod tap;
 mod transform;
+mod transformable;
+mod transformable_state;
 
+pub use anchored_draggable::{
+    AnchorKey, AnchoredDragBlock, AnchoredDragScope, AnchoredDragToTargetBlock, AnchoredDraggableDefaults,
+    AnchoredDraggableModifiers, AnchoredDraggableNode, AnchoredDraggableState, ConfirmValueChange,
+    DefaultDraggableAnchors, DraggableAnchors, DraggableAnchorsConfig, DraggableAnchorsEq,
+    anchored_draggable_state_configured, anchored_draggable_state_configured_with_anchors,
+    anchored_draggable_state_confirming, anchored_draggable_state_with_anchors,
+    anchored_draggable_state_with_anchors_confirming, default_snap_animation_spec,
+};
 pub use bring_into_view_spec::{
     BringIntoViewSpec, BringIntoViewSpecEq, DefaultBringIntoViewSpec, LocalBringIntoViewSpec,
     default_calculate_scroll_distance,
 };
 pub use drag::{DetectAxisDragGestures, DetectDragGestures, DetectDragGesturesAfterLongPress};
-pub(crate) use drag::{await_all_pointers_up_with_slop_detection, pointer_slop};
+pub(crate) use drag::{await_all_pointers_up_with_slop_detection, await_pointer_slop_or_cancellation, pointer_slop};
 pub use draggable::{
     DefaultDraggableState, DragBlock, DragScope, DraggableModifiers, DraggableNode, DraggableState, DraggableStateEq,
     DraggableStateExtensions, OnDragStarted, OnDragStopped, remember_draggable_state,
+};
+pub use draggable2d::{
+    DefaultDraggable2DState, Drag2DBlock, Drag2DScope, Draggable2DModifiers, Draggable2DNode, Draggable2DState,
+    Draggable2DStateExtensions, remember_draggable2d_state,
 };
 pub use fling::{
     DefaultFlingBehavior, FlingBehavior, FlingBehaviorEq, ScrollableDefaultFlingBehavior, TargetedFlingBehavior,
@@ -49,12 +67,22 @@ pub use scrollable_state::{
     DefaultScrollableState, LocalFuture, ScrollBlock, ScrollIndicatorState, ScrollScope, ScrollableState,
     ScrollableStateEq, ScrollableStateExtensions, remember_scrollable_state,
 };
+pub use scrollable2d::{Scrollable2DModifiers, Scrollable2DNode};
+pub use scrollable2d_state::{
+    DefaultScrollable2DState, Scroll2DBlock, Scroll2DScope, Scrollable2DState, Scrollable2DStateExtensions,
+    remember_scrollable2d_state,
+};
 pub use tap::{DetectTapGestures, GestureCancellation, PressGestureScope};
 pub(crate) use tap::{
     FIRST_DOWN_REFERS_TO_PRIMARY_MOUSE_BUTTON_ONLY, LongPressResult, PressCallback, detect_press_down_gesture,
     detect_tap_and_press, is_changed_to_down, wait_for_long_press,
 };
 pub use transform::DetectTransformGestures;
+pub use transformable::{TransformableModifiers, TransformableNode};
+pub use transformable_state::{
+    DefaultTransformableState, OnTransformation, TransformBlock, TransformScope, TransformableState,
+    TransformableStateExtensions, remember_transformable_state,
+};
 
 use kompoz_graphics::Offset;
 use kompoz_ui::input::{

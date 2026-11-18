@@ -215,6 +215,16 @@ impl<T: 'static> Saver<T> {
         Saver { save: Rc::new(save), restore: Rc::new(restore) }
     }
 
+    /// Writes `value` out (Compose's `Saver.save`).
+    pub fn save(&self, value: &T) -> SavedValue {
+        (self.save)(value)
+    }
+
+    /// Reads a value back (Compose's `Saver.restore`): none if it can't.
+    pub fn restore(&self, saved: &SavedValue) -> Option<T> {
+        (self.restore)(saved)
+    }
+
     /// The same saving a state of the value (Compose's stateSaver).
     pub fn for_state(&self) -> Saver<MutableState<T>>
     where

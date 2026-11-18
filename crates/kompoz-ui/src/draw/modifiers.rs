@@ -253,6 +253,15 @@ pub struct CacheDrawModifierNode {
     handle: Option<NodeHandle>,
 }
 
+/// A node drawing what `on_build_draw_cache` builds, to delegate to (Compose's `CacheDrawModifierNode(onBuildDrawCache)`):
+/// built again as `draw_with_cache`'s is.
+#[allow(non_snake_case)]
+pub fn CacheDrawModifierNode(
+    on_build_draw_cache: impl Fn(&mut CacheDrawScope) -> DrawResult + 'static,
+) -> CacheDrawModifierNode {
+    CacheDrawModifierNode::new(Rc::new(on_build_draw_cache))
+}
+
 impl CacheDrawModifierNode {
     pub(crate) fn new(build: BuildFn) -> CacheDrawModifierNode {
         CacheDrawModifierNode { build, result: None, built_for: None, layers: Vec::new(), handle: None }

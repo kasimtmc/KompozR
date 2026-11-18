@@ -48,6 +48,9 @@ pub(crate) struct Want {
     pub str_ok: bool,
     /// Kotlin's `Any` as the Rust API holds it (a lazy list's key, a slot's id): the value made one.
     pub any: Option<AnyWrap>,
+    /// The place is an `Option` (a lambda's result of Kotlin's `T?`: `dragAndDropSource { … }`'s data): a value of a
+    /// type known not to be nullable given in `Some`.
+    pub some: bool,
 }
 
 /// A Rust type holding a value of any type, Kotlin's `Any` (a key compared by its value): `LazyKey::new(v)`.
@@ -132,6 +135,14 @@ impl Gen<'_, '_> {
         };
         match want.any {
             Some(w) => self.any_value(ts, &out.ty, kind, w, span),
+            None if want.some
+                && kind != OutKind::Null
+                && !out.ty.is_nullable()
+                && out.ty != Ty::Unknown
+                && out.ty != Ty::Unit =>
+            {
+                quote_spanned!(span=> ::core::option::Option::Some(#ts))
+            }
             None => ts,
         }
     }
@@ -798,7 +809,7 @@ impl Gen<'_, '_> {
         let ts = match kind {
             OutKind::StrLit | OutKind::IntLit => return o,
             OutKind::Local if !value => o.ts,
-            _ => self.finish(o, Want { str_ok: true, any: None }, e.loc),
+            _ => self.finish(o, Want { str_ok: true, any: None, some: false }, e.loc),
         };
         match wider {
             Some(w) if w != ty && ty.is_number() => {

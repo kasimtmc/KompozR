@@ -449,8 +449,8 @@ fn graphics_as_compose_writes_it() {
     assert_eq!(outline.bounds().width(), 10.0);
 }
 
-// ---- gestures_as_compose_writes_them (the anchored and plain draggables are stage 10's, the drop target needs an
-// object expression: stage 14) -----------------------------------------------------------------------------------
+// ---- gestures_as_compose_writes_them (its draggable, anchored draggable and drop target — a target given from Rust:
+// an object expression is stage 14's — are kotlin_gestures.rs') -----------------------------------------------------
 
 kompoz! {
     // (pointerInput { detectTapGestures(onTap = { }) }, a drag's points in a state list)

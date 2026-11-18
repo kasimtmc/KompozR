@@ -24,7 +24,9 @@ pub mod vector;
 pub use bitmap::{BitmapRenderer, draw_into_bitmap, pending_draws, set_bitmap_renderer};
 pub use canvas::{Canvas, CanvasState, Paint, PaintingStyle};
 pub use graphics_layer::{GraphicsLayer, GraphicsLayerProperties, remember_graphics_layer};
-pub use modifiers::{BlurScope, BlurType, BlurredEdgeTreatment, CacheDrawScope, DrawResult, ShadowScope};
+pub use modifiers::{
+    BlurScope, BlurType, BlurredEdgeTreatment, CacheDrawModifierNode, CacheDrawScope, DrawResult, ShadowScope,
+};
 pub use painter::{
     BitmapPainter, BrushPainter, ColorPainter, DrawPainter, Painter, VectorPainter, draw_vector,
     remember_vector_painter, vector_drawn_into,

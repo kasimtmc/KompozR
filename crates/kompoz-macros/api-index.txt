@@ -190,18 +190,31 @@ kompoz-foundation/selection kompozable WithToolbar rr crates/kompoz-foundation/t
 kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method add_group ddddddddd crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method add_path rddddddddddddd crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method anchored_drag dr crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
+* method anchored_drag_to_target rdr crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
+* method anchored_draggable rrdddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
+* method anchored_draggable_reversed rrrdddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
+* method anchored_draggable_reversed_starting_immediately rrrddddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
+* method anchored_draggable_starting_immediately rrddddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
 * fn animate rrddr crates/kompoz-animation/src/suspend.rs
+* method animate_by rrrdddd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method animate_decay rdd crates/kompoz-animation/src/suspend.rs AnimationState
 * method animate_decay rrd crates/kompoz-animation/src/animatable.rs Animatable
 * method animate_item ddd crates/kompoz-foundation/src/lazy/list/item_scope.rs Modifier as LazyItemScopeModifiers
 * method animate_move_by rd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method animate_move_to rd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method animate_pan_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
+* method animate_rotate_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
+* method animate_scroll_by rd crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
 * method animate_scroll_by rd crates/kompoz-foundation/src/gestures/scrollable_state.rs S as ScrollableStateExtensions
 * method animate_scroll_to rd crates/kompoz-foundation/src/scroll.rs ScrollState
 * method animate_scroll_to_item rd crates/kompoz-foundation/src/lazy/list/state.rs LazyListState
+* method animate_to rd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method animate_to rddd crates/kompoz-animation/src/animatable.rs Animatable
 * method animate_to rddd crates/kompoz-animation/src/suspend.rs AnimationState
+* method animate_to_with_decay rrdd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * fn animate_value rrrddr crates/kompoz-animation/src/suspend.rs
+* method animate_zoom_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method append_inline_content rd crates/kompoz-text/src/annotated_string.rs AnnotatedStringBuilder
 * method area rdddd crates/kompoz-foundation/src/layout/grid.rs GridConfigurationScope
 * method aspect_ratio rd crates/kompoz-foundation/src/layout/aspect_ratio.rs Modifier as AspectRatioModifiers
@@ -246,8 +259,11 @@ kompoz-runtime/macros method copy dddd crates/kompoz-runtime/tests/macros.rs Col
 * method double_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method double_click dd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method drag dr crates/kompoz-foundation/src/gestures/draggable.rs S as DraggableStateExtensions
+* method drag dr crates/kompoz-foundation/src/gestures/draggable2d.rs S as Draggable2DStateExtensions
 * method drag_and_drop rrdd crates/kompoz-test/src/input.rs MouseInjectionScope
+* fn drag_and_drop_transfer_data ddddddd crates/kompoz-ui/src/draganddrop.rs
 * method draggable rrdddddd crates/kompoz-foundation/src/gestures/draggable.rs Modifier as DraggableModifiers
+* method draggable2d rdddddd crates/kompoz-foundation/src/gestures/draggable2d.rs Modifier as Draggable2DModifiers
 * method draw_arc rrrrdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
 * method draw_circle rdddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
 * method draw_image rddddd crates/kompoz-ui/src/draw/scope.rs DrawScope
@@ -341,6 +357,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method page_right dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method page_up dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method paint rddddd crates/kompoz-ui/src/draw/painter.rs Modifier
+* method pan_by rd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method paste_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method path ddddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method pinch rrrrd crates/kompoz-test/src/input.rs TouchInjectionScope
@@ -360,6 +377,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_animated_magnifier_position r crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable remember_default_prefetch_scheduler - crates/kompoz-foundation/src/lazy/layout/prefetch.rs
+* kompozable remember_draggable2d_state r crates/kompoz-foundation/src/gestures/draggable2d.rs
 * kompozable remember_draggable_state r crates/kompoz-foundation/src/gestures/draggable.rs
 * kompozable remember_graphics_layer - crates/kompoz-ui/src/draw/graphics_layer.rs
 * kompozable remember_lazy_layout_bring_into_view_spec rrr crates/kompoz-foundation/src/lazy/layout/support.rs
@@ -373,6 +391,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_platform_overscroll_effect - crates/kompoz-foundation/src/overscroll_android.rs
 * kompozable remember_platform_overscroll_factory dd crates/kompoz-foundation/src/overscroll_android.rs
 * kompozable remember_scroll_state d crates/kompoz-foundation/src/scroll.rs
+* kompozable remember_scrollable2d_state r crates/kompoz-foundation/src/gestures/scrollable2d_state.rs
 * kompozable remember_scrollable_state r crates/kompoz-foundation/src/gestures/scrollable_state.rs
 * kompozable remember_selection_controller - crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable remember_selection_state - crates/kompoz-foundation/src/text/selection/state.rs
@@ -381,6 +400,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_spline_based_decay - crates/kompoz-animation/src/spline_decay.rs
 * kompozable remember_text_field_state dd crates/kompoz-foundation/src/text/input/text_field_state.rs
 * kompozable remember_text_measurer d crates/kompoz-ui/src/text.rs
+* kompozable remember_transformable_state r crates/kompoz-foundation/src/gestures/transformable_state.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
 * fn repeatable rrdd crates/kompoz-animation/src/spec.rs
@@ -392,16 +412,19 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method required_width_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 * method right_click d crates/kompoz-test/src/input.rs MouseInjectionScope
 * method rotate rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method rotate_by rd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method rotate_rad rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tests/layout_modifiers.rs
 * method scale rrd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 * method scale_uniform rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* method scroll dr crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
 * method scroll dr crates/kompoz-foundation/src/gestures/scrollable_state.rs S as ScrollableStateExtensions
 * method scroll rd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method scroll_by dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method scroll_to_index dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method scroll_to_item rd crates/kompoz-foundation/src/lazy/list/state.rs LazyListState
 * method scrollable rrdddddd crates/kompoz-foundation/src/gestures/scrollable.rs Modifier as ScrollableModifiers
+* method scrollable2d rdddd crates/kompoz-foundation/src/gestures/scrollable2d.rs Modifier as Scrollable2DModifiers
 * method scrollable_area rrddddd crates/kompoz-foundation/src/scrollable_area.rs Modifier as ScrollableAreaModifiers
 * method scrollable_area_with_overscroll rrrddddd crates/kompoz-foundation/src/scrollable_area.rs Modifier as ScrollableAreaModifiers
 * method selectable rdddr crates/kompoz-foundation/src/selection/selectable.rs Modifier as SelectableModifiers
@@ -420,7 +443,9 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * fn snap d crates/kompoz-animation/src/spec.rs
 * fn spring ddd crates/kompoz-animation/src/spec.rs
 * method sticky_header ddr crates/kompoz-foundation/src/lazy/list/dsl.rs LazyListScope
+* method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
 * method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable_state.rs S as ScrollableStateExtensions
+* method stop_transformation d crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method stylus_hover_icon rdd crates/kompoz-ui/src/input/hover_icon.rs Modifier
 * method swipe rrd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method swipe_down ddd crates/kompoz-test/src/input.rs TouchInjectionScope
@@ -432,11 +457,15 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * method toggleable rdddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 * method toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macros.rs
+* method transform dr crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
+* method transformable rdd crates/kompoz-foundation/src/gestures/transformable.rs Modifier as TransformableModifiers
+* method transformable_with_can_pan rrdd crates/kompoz-foundation/src/gestures/transformable.rs Modifier as TransformableModifiers
 * method translate dd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 * method tri_state_toggleable rdddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 * method tri_state_toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 * method triple_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
 * fn tween ddd crates/kompoz-animation/src/spec.rs
+* method update_anchors rd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method update_bounds dd crates/kompoz-animation/src/animatable.rs Animatable
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
@@ -445,3 +474,4 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * method wrap_content_height dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 * method wrap_content_size dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 * method wrap_content_width dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method zoom_by rd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions

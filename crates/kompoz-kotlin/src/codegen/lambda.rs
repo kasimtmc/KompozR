@@ -103,7 +103,10 @@ impl Gen<'_, '_> {
         let boundary = self.scopes.len() - 1;
         self.frames.push(CaptureFrame { boundary, used: Vec::new() });
         // (a result of Kotlin's `Any` — a key lambda's —: made the Rust type holding it)
-        let result = Want { str_ok: false, any: known.and_then(|k| super::expr::AnyWrap::of_rust(&k.output)) };
+        let any = known.and_then(|k| super::expr::AnyWrap::of_rust(&k.output));
+        let some =
+            any.is_none() && known.is_some_and(|k| super::resolve::plain_type_text(&k.output).starts_with("Option<"));
+        let result = Want { str_ok: false, any, some };
         self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len(), result });
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();
@@ -125,7 +128,15 @@ impl Gen<'_, '_> {
             let name =
                 if self.receivers.is_empty() { "this".to_string() } else { format!("this{}", self.receivers.len()) };
             let i = proc_macro2::Ident::new(&name, span);
-            let t = typed(0);
+            // (a receiver of the callee's type parameters, `&mut DraggableAnchorsConfig<T>`, written with them
+            // inferred: nothing else tells the closure its type)
+            let t = match (typed(0).is_empty(), info.inputs.first()) {
+                (true, Some(input)) if names_type_parameter(input) => match written_type(input, span) {
+                    Some(t) => quote_spanned!(span=> : #t),
+                    None => quote!(),
+                },
+                _ => typed(0),
+            };
             params.push(quote!(#i #t));
             receiver_ident = Some(i.clone());
             let by_ref = info.inputs.first().is_some_and(|t| {
@@ -362,6 +373,12 @@ impl Gen<'_, '_> {
         flush(&mut word, &mut out);
         out
     }
+}
+
+/// Whether a type's text names a type parameter of the function's (a single capital letter: `Config<T>`).
+fn names_type_parameter(text: &str) -> bool {
+    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w.len() == 1 && w.chars().all(|c| c.is_ascii_uppercase()))
 }
 
 /// A Rust type of the API index's (its text) as written in generated code, when it names no generic parameter

@@ -78,6 +78,10 @@ pub mod prelude {
     };
     pub use crate::layout::*;
     pub use crate::lazy::layout::LazyKey;
+    pub use kompoz_ui::draganddrop::{
+        DragAndDropEvent, DragAndDropTarget, DragAndDropTransferAction, DragAndDropTransferData,
+        drag_and_drop_transfer_data,
+    };
     // (a lazy item's content type: Kotlin's `Any`, a subcomposition's slot id)
     pub use crate::lazy::{
         LazyColumn, LazyItemScopeModifiers, LazyListItemInfo, LazyListLayoutInfo, LazyListScope, LazyListState,

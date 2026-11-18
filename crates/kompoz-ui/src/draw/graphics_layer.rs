@@ -392,6 +392,26 @@ impl GraphicsLayer {
         self.keep(picture, size);
     }
 
+    /// The same, what it draws owned by no node (the markers of the nodes drawn in it left out): what a drag's
+    /// decoration shows of nodes drawn where they are too.
+    pub(crate) fn record_flat(
+        &self,
+        density: Density,
+        layout_direction: LayoutDirection,
+        size: IntSize,
+        block: impl FnOnce(&mut DrawScope<'_>),
+    ) {
+        let mut picture = Picture::new();
+        {
+            let mut scope = DrawScope::at(&mut picture, Offset::Zero, size.to_size(), layout_direction, density);
+            let outer = KEPT_PASS.replace(false);
+            block(&mut scope);
+            KEPT_PASS.set(outer);
+        }
+        picture.strip_nodes();
+        self.keep(picture, size);
+    }
+
     fn keep(&self, picture: Picture, size: IntSize) {
         let mut d = self.data.borrow_mut();
         d.picture = Some(Rc::new(picture));

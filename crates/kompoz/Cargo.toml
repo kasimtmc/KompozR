@@ -67,6 +67,11 @@ harness = false
 name = "kotlin_scroll"
 harness = false
 
+# Draggables, anchored and 2D drags, transformable and drag and drop in Kotlin's syntax.
+[[test]]
+name = "kotlin_gestures"
+harness = false
+
 [[test]]
 name = "kotlin_lazy"
 harness = false

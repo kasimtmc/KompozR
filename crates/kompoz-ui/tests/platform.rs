@@ -291,6 +291,7 @@ fn drags_from_outside_reach_the_targets_under_them() {
         mime_types: vec!["text/uri-list".into()],
         text: "file:///tmp/a.png\r\n".into(),
         files: vec!["/tmp/a.png".into()],
+        ..Default::default()
     };
     assert!(h.external_drop(data, at(50.0, 40.0)));
     assert_eq!(taken(&log), ["files moved 50,40", "files drop file:///tmp/a.png\r\n", "outer ended", "files ended"]);
@@ -314,7 +315,8 @@ fn drags_from_outside_reach_the_targets_under_them() {
         ]
     );
     // Dropped on a target that doesn't take it: not taken.
-    let data = DragAndDropTransferData { mime_types: vec!["text/plain".into()], text: "merhaba".into(), files: vec![] };
+    let data =
+        DragAndDropTransferData { mime_types: vec!["text/plain".into()], text: "merhaba".into(), ..Default::default() };
     assert!(!h.external_drop(data, at(20.0, 120.0)));
     let log = taken(&log);
     assert!(

@@ -391,7 +391,56 @@ fn roots(host: &KompozHost) -> Vec<Rc<LayoutNode>> {
 /// Processes an event, nothing of the host borrowed while the nodes run.
 fn process(host: &KompozHost, event: PointerInputEvent, in_bounds: bool) -> ProcessResult {
     let processor = host.input.borrow().processor.clone();
-    processor.process(event, &roots(host), in_bounds)
+    let result = processor.process(event, &roots(host), in_bounds);
+    // (a drag a handler started: it takes the pointer once the event is handled)
+    drag_and_drop_takes_pointer(host);
+    result
+}
+
+// ---- A drag and drop within the app: it has the pointer it follows ----
+
+/// A drag within the app just started (a source's, as a gesture's handler or a coroutine asked): it takes the
+/// pointer down — the first finger, else the mouse — and the gesture's handlers are cancelled (C++'s
+/// `startDragAndDrop`: no click, no scroll), as a platform's drag takes the pointer from the app.
+pub(crate) fn drag_and_drop_takes_pointer(host: &KompozHost) {
+    if !host.drag_and_drop.is_pending() {
+        return;
+    }
+    let (pointer_id, at) = {
+        let state = host.input.borrow();
+        let first_touch = state.touches.borrow().first().map(|t| (t.host_id, t.position));
+        match first_touch {
+            Some((id, position)) => (Some(id), position),
+            None => (None, state.mouse_position().unwrap_or(Offset::Unspecified)),
+        }
+    };
+    pointer_cancel(host);
+    host.drag_and_drop.take_pointer(pointer_id, at);
+    host.request_redraw();
+}
+
+/// Whether `pointer_id` (a finger's host id, else the mouse's: `None`) is the one the drag within the app follows.
+fn is_drag_pointer(host: &KompozHost, pointer_id: Option<i64>) -> bool {
+    host.drag_and_drop.pointer_id() == pointer_id
+}
+
+/// Whether `pointer_id` is a finger down (not the mouse).
+fn is_touch(host: &KompozHost, pointer_id: i64) -> bool {
+    host.input.borrow().touches.borrow().iter().any(|p| p.host_id == pointer_id)
+}
+
+/// The drag within the app's pointer moved to `position`.
+fn drag_and_drop_move(host: &KompozHost, position: Offset) {
+    let modifiers = host.input.borrow().keyboard_modifiers.get();
+    host.drag_and_drop.move_in_app(position, modifiers, host.viewport_size(), host.density());
+    host.request_redraw();
+}
+
+/// The drag within the app's pointer was let go at `position`: dropped there.
+fn drag_and_drop_drop(host: &KompozHost, position: Offset) {
+    let modifiers = host.input.borrow().keyboard_modifiers.get();
+    host.drag_and_drop.end_in_app(Some((position, modifiers)));
+    host.request_redraw();
 }
 
 // The entry points the host calls. Each returns whether the event went to a pointer input node (`scroll`: whether
@@ -407,6 +456,10 @@ pub(crate) fn pointer_down(
 ) -> bool {
     if pointer_type == PointerType::Mouse {
         return mouse_button(host, position, time_nanos, PointerButton::Primary, true, Some(pointer_id));
+    }
+    if host.drag_and_drop.is_dragging() {
+        // (a drag within the app has the pointer: another finger goes nowhere, as under a platform's drag)
+        return false;
     }
     {
         // (a finger joining a press that only dismissed a popup goes nowhere too)
@@ -446,6 +499,18 @@ pub(crate) fn pointer_move(host: &KompozHost, position: Offset, time_nanos: i64,
     if host.input.borrow().swallowed.borrow().contains(&pointer_id) {
         return false;
     }
+    if host.drag_and_drop.is_dragging() {
+        // (the drag's pointer moves it; the rest go nowhere)
+        let touch = is_touch(host, pointer_id);
+        if is_drag_pointer(host, Some(pointer_id)) || (!touch && is_drag_pointer(host, None)) {
+            if !touch {
+                host.input.borrow().mouse_at(Some(pointer_id), position);
+            }
+            drag_and_drop_move(host, position);
+            return true;
+        }
+        return false;
+    }
     let event = {
         let state = host.input.borrow();
         let is_touch = {
@@ -472,6 +537,14 @@ pub(crate) fn pointer_move(host: &KompozHost, position: Offset, time_nanos: i64,
 
 /// Several fingers moved at once: one event (a platform batching its pointers, as Android's ACTION_MOVE).
 pub(crate) fn pointer_moves(host: &KompozHost, moves: &[(i64, Offset)], time_nanos: i64) -> bool {
+    if host.drag_and_drop.is_dragging() {
+        let dragged = moves.iter().find(|(id, _)| is_drag_pointer(host, Some(*id)));
+        if let Some((_, position)) = dragged {
+            drag_and_drop_move(host, *position);
+            return true;
+        }
+        return false;
+    }
     let event = {
         let state = host.input.borrow();
         let mut any = false;
@@ -491,6 +564,15 @@ pub(crate) fn pointer_moves(host: &KompozHost, moves: &[(i64, Offset)], time_nan
 
 /// A pointer went up: a finger, else the mouse's primary button (or the first one pressed).
 pub(crate) fn pointer_up(host: &KompozHost, position: Offset, time_nanos: i64, pointer_id: i64) -> bool {
+    if host.drag_and_drop.is_dragging() {
+        // (the drag's pointer let go: dropped; another lifted goes nowhere)
+        let touch = is_touch(host, pointer_id);
+        if is_drag_pointer(host, Some(pointer_id)) || (!touch && is_drag_pointer(host, None)) {
+            drag_and_drop_drop(host, position);
+            return true;
+        }
+        return false;
+    }
     {
         let state = host.input.borrow();
         let mut swallowed = state.swallowed.borrow_mut();
@@ -542,6 +624,18 @@ pub(crate) fn mouse_button(
     pointer_id: Option<i64>,
 ) -> bool {
     const MOUSE: i64 = i64::MIN;
+    if host.drag_and_drop.is_dragging() {
+        // (the mouse dragging: let go, it drops; the rest goes nowhere)
+        let following_mouse = is_drag_pointer(host, None);
+        if following_mouse {
+            host.input.borrow().mouse_at(pointer_id, position);
+            if !pressed {
+                drag_and_drop_drop(host, position);
+                return true;
+            }
+        }
+        return false;
+    }
     {
         let state = host.input.borrow();
         let mut swallowed = state.swallowed.borrow_mut();
@@ -602,6 +696,11 @@ fn clear_focus_pressed_outside(host: &KompozHost, position: Offset) {
 
 /// The gesture under way was cancelled (the platform took it): every node on a hit path is told.
 pub(crate) fn pointer_cancel(host: &KompozHost) {
+    if host.drag_and_drop.is_dragging() && !host.drag_and_drop.is_pending() {
+        // (the platform took the gesture: the drag is called off)
+        host.drag_and_drop.end_in_app(None);
+        host.request_redraw();
+    }
     let processor = {
         let state = host.input.borrow();
         state.touches.borrow_mut().clear();
@@ -770,8 +869,23 @@ pub(crate) fn pan(host: &KompozHost, position: Offset, r#type: PointerEventType,
 /// none took that is Escape or Back going down goes back (the platform's back). The modifiers held are what pointer
 /// events and the window info carry; a key down puts the UI in keyboard mode. Whether it was taken.
 pub(crate) fn key_event(host: &KompozHost, event: KeyEvent) -> bool {
+    let modifiers_changed = host.input.borrow().keyboard_modifiers.get() != event.modifiers;
     host.input.borrow().keyboard_modifiers.set(event.modifiers);
     host.window_info_keyboard_modifiers(event.modifiers);
+    if host.drag_and_drop.is_dragging() {
+        if event.key == Key::Escape {
+            // (Escape calls the drag off: C++'s; a platform's drag does the same)
+            if event.r#type == KeyEventType::KeyDown {
+                host.drag_and_drop.end_in_app(None);
+                host.request_redraw();
+            }
+            return true;
+        }
+        if modifiers_changed {
+            // (Ctrl or Shift change the drop's action: AWT's dropActionChanged)
+            host.drag_and_drop.modifiers_changed_in_app(event.modifiers);
+        }
+    }
     if event.r#type == KeyEventType::KeyDown {
         host.request_keyboard_mode();
     }

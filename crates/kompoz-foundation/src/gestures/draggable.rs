@@ -429,8 +429,9 @@ pub(crate) enum DragEvent {
 }
 
 /// The drag's deltas, handed one by one to what the owner's mutation does with them, until the drag ends
-/// (Compose's `forEachDelta: suspend ((DragDelta) -> Unit) -> Unit`).
-pub(crate) type ForEachDelta = Box<dyn FnOnce(Rc<dyn Fn(DragDelta)>) -> LocalFuture<'static, ()>>;
+/// (Compose's `forEachDelta: suspend ((DragDelta) -> Unit) -> Unit`): called again when the mutation restarts its
+/// block (anchoredDraggable's, as its anchors change), from the event it was at.
+pub(crate) type ForEachDelta = Rc<dyn Fn(Rc<dyn Fn(DragDelta)>) -> LocalFuture<'static, ()>>;
 
 /// What a drag gesture node does with its drags (Compose's DragGestureNode's abstract members): `draggable`'s and
 /// `scrollable`'s.
@@ -577,7 +578,8 @@ impl DragGestureCore {
                 // node's scope, the drag is cancelled as it goes)
                 let mut cancel_guard = CancelOnDrop(Some(me.clone()));
                 let (c, ch) = (current.clone(), channel.clone());
-                let for_each_delta: ForEachDelta = Box::new(move |process_delta| {
+                let for_each_delta: ForEachDelta = Rc::new(move |process_delta| {
+                    let (c, ch) = (c.clone(), ch.clone());
                     Box::pin(async move {
                         loop {
                             match c.get() {

@@ -22,7 +22,7 @@ use kompoz_coroutines::{Job, snapshot_flow};
 use kompoz_graphics::{IntSize, Offset};
 use kompoz_runtime::{MutableState, mutable_state_of};
 use kompoz_text::{AnnotatedString, TextRange};
-use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropTarget, DragAndDropTargetNode};
+use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropNode, DragAndDropTarget, DragAndDropTargetModifierNode};
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode};
 use kompoz_ui::focus::{FocusDirection, FocusProperties, FocusPropertiesModifierNode, Focusability};
 use kompoz_ui::input::{KeyEvent, KeyInputModifierNode, PointerEvent, PointerEventPass, PointerInputModifierNode};
@@ -308,7 +308,7 @@ impl DecoratorShared {
 pub struct TextFieldDecoratorModifierNode {
     shared: Rc<DecoratorShared>,
     pointer_input_node: Option<DelegatedNode<SuspendingPointerInputModifierNode>>,
-    drag_and_drop_node: Option<DelegatedNode<DragAndDropTargetNode>>,
+    drag_and_drop_node: Option<DelegatedNode<DragAndDropNode>>,
     text_field_key_event_handler: TextFieldKeyEventHandler,
     /// The shown text's selection after the last key event: another one means it moved otherwise (typing
     /// through the input session), and the column Up and Down keep is forgotten.
@@ -549,7 +549,8 @@ impl ModifierNode for TextFieldDecoratorModifierNode {
             let target: Rc<dyn DragAndDropTarget> =
                 Rc::new(TextFieldDropTarget { shared: Rc::downgrade(&self.shared), enter: Cell::new(None) });
             // The desktop's text drops (Compose's skiko `textFieldDragAndDropNode`): none start.
-            self.drag_and_drop_node = Some(cx.delegate(DragAndDropTargetNode::new(Rc::new(|_| false), target)));
+            self.drag_and_drop_node =
+                Some(cx.delegate(DragAndDropTargetModifierNode(|_: &DragAndDropEvent| false, target)));
         }
         self.shared.update_window_focus();
         if self.shared.enabled.get() {

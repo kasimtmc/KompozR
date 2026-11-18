@@ -697,15 +697,22 @@ fn split_top(s: &str, sep: char) -> Vec<String> {
 /// is.
 fn camel(name: &str) -> String {
     let name = name.trim_start_matches("r#");
-    if !name.contains('_') || name.chars().next().is_some_and(|c| c.is_uppercase()) {
+    if name.chars().next().is_some_and(|c| c.is_uppercase()) {
         return name.to_string();
     }
+    let chars: Vec<char> = name.chars().collect();
     let mut out = String::new();
     let mut up = false;
-    for c in name.chars() {
+    for (i, &c) in chars.iter().enumerate() {
+        // (a dimension's `2d` after a word is Kotlin's `2D`: `draggable2d` → `draggable2D`; `is_1d` stays `is1d`)
+        let dimension = c == 'd'
+            && i > 1
+            && chars[i - 1].is_ascii_digit()
+            && chars[i - 2].is_ascii_alphabetic()
+            && chars.get(i + 1).is_none_or(|n| *n == '_');
         if c == '_' {
             up = !out.is_empty();
-        } else if up {
+        } else if up || dimension {
             out.extend(c.to_uppercase());
             up = false;
         } else {
@@ -1626,6 +1633,10 @@ mod tests {
         assert_eq!(camel("join_to_string"), "joinToString");
         assert_eq!(camel("r#type"), "type");
         assert_eq!(camel("LaunchedEffect"), "LaunchedEffect");
+        assert_eq!(camel("draggable2d"), "draggable2D");
+        assert_eq!(camel("remember_scrollable2d_state"), "rememberScrollable2DState");
+        assert_eq!(camel("x2y"), "x2y");
+        assert_eq!(camel("is_1d"), "is1d");
     }
 
     #[test]

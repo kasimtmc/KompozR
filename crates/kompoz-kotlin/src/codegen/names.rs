@@ -32,7 +32,8 @@ pub(crate) fn is_pascal(name: &str) -> bool {
 }
 
 /// A Kotlin camelCase name in Rust's snake_case (`fillMaxSize` → `fill_max_size`, `toPx` → `to_px`, `isHTML` →
-/// `is_html`, `x2y` → `x2y`); a PascalCase name is kept (`Column`), as is one with an underscore already.
+/// `is_html`, `x2y` → `x2y`, `draggable2D` → `draggable2d`, `rememberDraggable2DState` →
+/// `remember_draggable2d_state`); a PascalCase name is kept (`Column`), as is one with an underscore already.
 pub(crate) fn snake(name: &str) -> String {
     if is_pascal(name) || name.contains('_') {
         return name.to_string();
@@ -40,7 +41,12 @@ pub(crate) fn snake(name: &str) -> String {
     let chars: Vec<char> = name.chars().collect();
     let mut out = String::with_capacity(name.len() + 4);
     for (i, &c) in chars.iter().enumerate() {
-        if c.is_uppercase() {
+        // (a dimension's `2D` is Rust's `2d`: `draggable2D` → `draggable2d`)
+        let dimension =
+            c == 'D' && i > 0 && chars[i - 1].is_ascii_digit() && chars.get(i + 1).is_none_or(|n| n.is_uppercase());
+        if dimension {
+            out.push('d');
+        } else if c.is_uppercase() {
             let after_lower = i > 0 && (chars[i - 1].is_lowercase() || chars[i - 1].is_ascii_digit());
             let ends_acronym =
                 i > 0 && chars[i - 1].is_uppercase() && chars.get(i + 1).is_some_and(|n| n.is_lowercase());
@@ -88,6 +94,8 @@ mod tests {
         assert_eq!(snake("toPx"), "to_px");
         assert_eq!(snake("isHTMLText"), "is_html_text");
         assert_eq!(snake("x2y"), "x2y");
+        assert_eq!(snake("draggable2D"), "draggable2d");
+        assert_eq!(snake("rememberDraggable2DState"), "remember_draggable2d_state");
         assert_eq!(snake("count"), "count");
         assert_eq!(snake("Column"), "Column");
         assert_eq!(snake("MAX_VALUE"), "MAX_VALUE");

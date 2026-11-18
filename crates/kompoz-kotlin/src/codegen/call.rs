@@ -206,7 +206,7 @@ impl Gen<'_, '_> {
             for (k, a) in args.iter().enumerate() {
                 vals.push(match (a.value, params.get(k)) {
                     (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() => {
-                        self.value_want(e, Want { str_ok: false, any: None })
+                        self.value_want(e, Want { str_ok: false, any: None, some: false })
                     }
                     (ArgValue::Expr(e), Some(to)) if to.is_number() && !a.value.is_lambda() => {
                         let from = self.peek_ty(e);
@@ -328,7 +328,7 @@ impl Gen<'_, '_> {
         for a in args {
             let v = match a.value {
                 ArgValue::Expr(e) if pascal && !a.value.is_lambda() => {
-                    self.value_want(e, Want { str_ok: false, any: None })
+                    self.value_want(e, Want { str_ok: false, any: None, some: false })
                 }
                 _ => self.loose_arg(a),
             };
@@ -433,7 +433,12 @@ impl Gen<'_, '_> {
             vals.into_iter().map(|v| v.unwrap_or_else(|| quote_spanned!(span=> ::core::unreachable!()))).collect();
         let name = ident(f.rust, span);
         let arg = if vals.len() == 1 { vals[0].clone() } else { quote_spanned!(span=> (#(#vals),*)) };
-        Out::plain(quote_spanned!(span=> #name(#arg)), Ty::from_rust(f.ret))
+        // (what it gives: its overloads' associated type, `A::Animatable`, is the type of that name)
+        let ret = match f.ret.rsplit_once("::") {
+            Some((_, assoc)) if assoc.chars().next().is_some_and(char::is_uppercase) => Ty::named(assoc),
+            _ => Ty::from_rust(f.ret),
+        };
+        Out::plain(quote_spanned!(span=> #name(#arg)), ret)
     }
 
     // ---- `recv.name(…)` ----------------------------------------------------------------------------------------
@@ -1105,12 +1110,12 @@ impl Gen<'_, '_> {
         // (Kotlin's `Any` — a key, a content type —: the value made the Rust type holding it, in `Some` for an optional
         // one; each branch of an `if`/`when`)
         if let Some(w) = AnyWrap::of_rust(&p.ty) {
-            return self.value_want(e, Want { str_ok: false, any: Some(w) });
+            return self.value_want(e, Want { str_ok: false, any: Some(w), some: false });
         }
         let o = self.expr(e);
         let nullable_arg = o.kind == OutKind::Null || o.ty.is_nullable();
         let arg_ty = o.ty.clone();
-        let v = self.finish(o, Want { str_ok: p.takes_str(), any: None }, e.loc);
+        let v = self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false }, e.loc);
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
@@ -1225,10 +1230,10 @@ impl Gen<'_, '_> {
                 let label = self.call_labels.last().cloned();
                 self.lambda_for(l, None, label.as_deref(), false)
             }
-            ArgValue::Sam { expr, .. } => self.value_want(expr, Want { str_ok: true, any: None }),
+            ArgValue::Sam { expr, .. } => self.value_want(expr, Want { str_ok: true, any: None, some: false }),
             ArgValue::Expr(e) => match &e.kind {
                 ExprKind::Lambda(l) => self.lambda_for(l, None, None, false),
-                _ => self.value_want(e, Want { str_ok: true, any: None }),
+                _ => self.value_want(e, Want { str_ok: true, any: None, some: false }),
             },
         }
     }
@@ -1327,7 +1332,10 @@ fn element_ty(t: &str) -> String {
 /// Whether a parameter's type is a trait's (`impl DelayTime`, `impl Into<Brush>`): what it takes isn't told here.
 fn takes_any(t: &str) -> bool {
     let t = plain_type_text(t);
-    (t.starts_with("impl") && !t.starts_with("implInto<String>") && !t.starts_with("implFn")) || t.len() <= 2
+    // (a type parameter: `T`, `R`, `T2` — not a short type's name, `Dp`)
+    let type_parameter =
+        !t.is_empty() && t.len() <= 2 && t.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    (t.starts_with("impl") && !t.starts_with("implInto<String>") && !t.starts_with("implFn")) || type_parameter
 }
 
 /// Whether an argument of type `a` may go to a parameter of type `p` (as far as is known).

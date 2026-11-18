@@ -57,7 +57,7 @@ pub fn Pulse(log: impl ::core::ops::Fn(f32) + 'static) {
                     scale
                         .animate_to(
                             1_f32,
-                            ::std::sync::Arc::new(keyframes(|this| {
+                            ::std::sync::Arc::new(keyframes(|this: &mut KeyframesSpecConfig<_>| {
                                 this.set_duration_millis(400);
                                 this.at(1.3_f32, 100).using(FastOutSlowInEasing);
                                 this.at(0.9_f32, 250);

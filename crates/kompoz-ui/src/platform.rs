@@ -296,6 +296,14 @@ pub trait PlatformCallbacks {
     }
     /// Hides the text toolbar.
     fn hide_text_toolbar(&self) {}
+    /// Starts the platform's own drag and drop of `drag`, a drag within the app that left the window (as Compose's
+    /// drags are the platform's: Wayland's data device with an icon surface of its decoration, X11's XDND source):
+    /// whether it took it. It reports the drag over the window again as `external_drag_*` (the host knows it for
+    /// its own: what it carries comes back with it) and its end with `KompozHost::platform_drag_ended`.
+    fn start_drag_and_drop(&self, drag: &crate::draganddrop::PlatformDragAndDrop) -> bool {
+        let _ = drag;
+        false
+    }
 }
 
 /// The callbacks of a headless host: nothing.

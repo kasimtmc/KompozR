@@ -684,10 +684,15 @@ impl<P: Platform> AppCore<P> {
                 let data = if !self.drop_files.is_empty() {
                     let files = std::mem::take(&mut self.drop_files);
                     let text = files.iter().map(|p| file_uri(p) + "\r\n").collect();
-                    DragAndDropTransferData { mime_types: vec!["text/uri-list".into()], text, files }
+                    DragAndDropTransferData {
+                        mime_types: vec!["text/uri-list".into()],
+                        text,
+                        files,
+                        ..Default::default()
+                    }
                 } else if !self.drop_text.is_empty() {
                     let text = std::mem::take(&mut self.drop_text);
-                    DragAndDropTransferData { mime_types: vec!["text/plain".into()], text, files: Vec::new() }
+                    DragAndDropTransferData { mime_types: vec!["text/plain".into()], text, ..Default::default() }
                 } else {
                     host.external_drag_left(); // it left the window, or brought nothing
                     return;

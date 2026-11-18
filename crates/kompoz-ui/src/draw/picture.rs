@@ -73,6 +73,12 @@ impl Picture {
         Picture::default()
     }
 
+    /// Its calls without the nodes' markers: what it draws, owned by none (a drag's decoration, drawn elsewhere
+    /// than the nodes it shows: the display list keeps nodes by where they are drawn).
+    pub(crate) fn strip_nodes(&mut self) {
+        self.ops.retain(|o| !matches!(o, Op::BeginNode(_) | Op::EndNode));
+    }
+
     /// How many calls it holds.
     pub fn len(&self) -> usize {
         self.ops.len()

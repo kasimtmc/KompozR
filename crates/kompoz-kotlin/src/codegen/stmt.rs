@@ -728,7 +728,7 @@ impl Gen<'_, '_> {
                         {
                             self.number(n, e.loc, true).ts
                         } else {
-                            self.value_want(e, Want { str_ok: true, any: None })
+                            self.value_want(e, Want { str_ok: true, any: None, some: false })
                         };
                         quote_spanned!(span=> #s == #v)
                     }

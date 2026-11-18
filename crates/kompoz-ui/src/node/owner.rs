@@ -75,6 +75,8 @@ pub(crate) struct Owner {
     gesture_exclusion: RefCell<Vec<(usize, kompoz_graphics::IntRect)>>,
     gesture_exclusion_changed: Cell<bool>,
     focus: RefCell<Weak<crate::focus::FocusOwner>>,
+    /// The host's drag and drop (what source nodes start their drags through).
+    drag_and_drop: RefCell<Weak<crate::draganddrop::DragAndDropManager>>,
     /// The popup roots in the tree, bottom first (the window package's).
     pub(crate) popups: RefCell<Vec<Weak<LayoutNode>>>,
     /// Told of semantics changes (the semantics package's), and the layouts whose semantics changed with what
@@ -97,6 +99,15 @@ impl Owner {
 
     pub(crate) fn set_focus_owner(&self, focus: &Rc<crate::focus::FocusOwner>) {
         *self.focus.borrow_mut() = Rc::downgrade(focus);
+    }
+
+    pub(crate) fn set_drag_and_drop(&self, manager: &Rc<crate::draganddrop::DragAndDropManager>) {
+        *self.drag_and_drop.borrow_mut() = Rc::downgrade(manager);
+    }
+
+    /// The host's drag and drop.
+    pub(crate) fn drag_and_drop(&self) -> Option<Rc<crate::draganddrop::DragAndDropManager>> {
+        self.drag_and_drop.borrow().upgrade()
     }
 
     /// The host's focus state.
@@ -128,6 +139,7 @@ impl Owner {
             gesture_exclusion: RefCell::new(Vec::new()),
             gesture_exclusion_changed: Cell::new(false),
             focus: RefCell::new(Weak::new()),
+            drag_and_drop: RefCell::new(Weak::new()),
             popups: RefCell::new(Vec::new()),
             semantics_listeners: RefCell::new(Vec::new()),
             semantics_pending: RefCell::new(Vec::new()),

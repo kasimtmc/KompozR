@@ -4,7 +4,7 @@
 
 use crate::back::{BackDispatcher, BackDispatcherRef, BackEventCompat, LocalBackDispatcher};
 use crate::display_list::DisplayList;
-use crate::draganddrop::{self, DragAndDropEvent, DragAndDropSession, DragAndDropTransferData, RootDragAndDropElement};
+use crate::draganddrop::{DragAndDropManager, DragAndDropTransferAction, DragAndDropTransferData};
 use crate::focus::{FocusDirection, FocusManager, FocusOwner};
 use crate::graphics_context::GraphicsContext;
 use crate::idle::{IdleEntry, IdleScope, IdleWork, IdleWorkQueue, LocalIdleWorkQueue};
@@ -15,7 +15,6 @@ use crate::input::{
 };
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::media_query::{LocalUiMediaScope, MediaInfo, UiMediaScope};
-use crate::modifier::NodeHandle;
 use crate::node::{LayoutNode, Owner};
 use crate::platform::*;
 use crate::semantics::{AccessibilityNode, SemanticsAction, SemanticsOwner};
@@ -161,9 +160,8 @@ pub struct KompozHost {
     /// What the app runs on (LocalUiMediaScope), and the device as the platform last told it.
     media: UiMediaScope,
     media_info: Cell<MediaInfo>,
-    /// The root's drag and drop node, and the drag from outside under way (with what it may carry).
-    drag_and_drop_root: Rc<RefCell<Option<NodeHandle>>>,
-    drag_session: RefCell<Option<(DragAndDropSession, Vec<String>)>>,
+    /// Drag and drop: the root node, the drag under way (within the app, or from outside).
+    pub(crate) drag_and_drop: Rc<DragAndDropManager>,
     /// The links the app is opened with.
     deep_links: DeepLinks,
     /// Work waiting for the time between frames, in the order asked.
@@ -180,11 +178,13 @@ impl KompozHost {
         let root = LayoutNode::new();
         root.set_measure_policy(Rc::new(RootMeasurePolicy { layer: Rc::new(|_| {}) }));
         let system_insets = SystemInsetsHolder::default();
-        let drag_and_drop_root = Rc::new(RefCell::new(None));
+        let platform = PlatformHandle::default();
+        let drag_and_drop = DragAndDropManager::new(platform.clone());
+        owner.set_drag_and_drop(&drag_and_drop);
         root.set_modifier(
             crate::focus::window_root_modifier()
                 .then(crate::layout::window_insets_rulers(system_insets.clone()))
-                .then_element(RootDragAndDropElement(drag_and_drop_root.clone())),
+                .then_element(drag_and_drop.root_element()),
         );
         let focus = Rc::new(FocusOwner::default());
         *focus.owner.borrow_mut() = Rc::downgrade(&owner);
@@ -200,7 +200,6 @@ impl KompozHost {
             wallpaper_palette: None,
         });
         let overlays = Overlays { owner: Rc::downgrade(&owner) };
-        let platform = PlatformHandle::default();
         let autofill = crate::autofill::HostAutofillManager::new(platform.clone());
         owner.set_autofill(autofill.clone());
         let host = KompozHost {
@@ -236,8 +235,7 @@ impl KompozHost {
             text_input: TextInputService::new(platform.clone()),
             media: UiMediaScope::new(),
             media_info: Cell::new(MediaInfo::default()),
-            drag_and_drop_root,
-            drag_session: RefCell::new(None),
+            drag_and_drop,
             deep_links: DeepLinks::new(),
             idle_work: IdleWorkQueue::new(),
             scaling: Cell::new(false),
@@ -491,6 +489,8 @@ impl KompozHost {
         }
         self.frame_time.set(time_nanos);
         self.dispatcher.run(time_nanos);
+        // (a drag a coroutine started — a long press's — takes its pointer)
+        crate::input::drag_and_drop_takes_pointer(self);
         {
             let composition = self.composition.borrow();
             let Some(composition) = composition.as_ref() else { return false };
@@ -596,6 +596,8 @@ impl KompozHost {
     pub fn draw(&self, canvas: &mut dyn GraphicsContext) {
         self.root.draw(canvas);
         self.overlays.draw(canvas);
+        // (a drag within the app: its decoration under the pointer, over all)
+        self.drag_and_drop.draw(canvas, self.viewport.get().to_size(), self.density());
     }
 
     /// Whether the next frame has work: states changed and not yet seen, scopes or layouts waiting, coroutines
@@ -1206,76 +1208,44 @@ impl KompozHost {
         taken
     }
 
-    // ---- Drags from outside the app ----
+    // ---- Drag and drop ----
 
-    /// The root's drag and drop node, while attached.
-    fn drag_and_drop_root(&self) -> Option<crate::modifier::NodeCx> {
-        self.drag_and_drop_root.borrow().as_ref().and_then(|h| h.cx())
+    /// Whether a drag within the app is under way (a source's: the host has the pointer it follows).
+    pub fn is_dragging_and_dropping(&self) -> bool {
+        self.drag_and_drop.is_dragging()
     }
 
     /// A drag from outside the app (files from a file manager, text from a browser) came over the window, carrying
     /// one of `mime_types` (C++'s `externalDragEntered`): the drag and drop targets that want it are told it
-    /// started. Whether any wants it.
+    /// started. Whether any wants it. (A drag of the app's own the platform took as it left the window, coming
+    /// back: with what it carries.)
     pub fn external_drag_entered(&self, mime_types: Vec<String>) -> bool {
-        self.end_external_drag(None);
-        let Some(root) = self.drag_and_drop_root() else { return false };
-        let event = DragAndDropEvent { mime_types: mime_types.clone(), ..DragAndDropEvent::default() };
-        let mut session = DragAndDropSession::default();
-        let accepted = draganddrop::accept(&root, &event, &mut session);
-        draganddrop::started(&session, &event);
-        *self.drag_session.borrow_mut() = Some((session, mime_types));
-        accepted
+        self.drag_and_drop.external_entered(mime_types)
     }
 
     /// It moved over the window, to `position` (px): the targets it enters, moves over and leaves are told (C++'s
     /// `externalDragMoved`).
     pub fn external_drag_moved(&self, position: Offset) {
-        let Some(root) = self.drag_and_drop_root() else { return };
-        let session = self.drag_session.borrow_mut().take();
-        let Some((session, mime_types)) = session else { return };
-        let event =
-            DragAndDropEvent { mime_types: mime_types.clone(), position_in_root: position, transfer_data: None };
-        draganddrop::moved(&root, &event, &session);
-        *self.drag_session.borrow_mut() = Some((session, mime_types));
+        self.drag_and_drop.external_moved(position);
     }
 
     /// It was dropped at `position` (px) with `data` (C++'s `externalDrop`): the target under it takes it, then
     /// every target is told the drag ended. Whether it was taken.
     pub fn external_drop(&self, data: DragAndDropTransferData, position: Offset) -> bool {
-        if self.drag_session.borrow().is_none() {
-            self.external_drag_entered(data.mime_types.clone());
-        }
-        self.external_drag_moved(position);
-        let Some(root) = self.drag_and_drop_root() else { return false };
-        let event = DragAndDropEvent {
-            mime_types: data.mime_types.clone(),
-            position_in_root: position,
-            transfer_data: Some(data),
-        };
-        let taken = draganddrop::dropped(&root, &event);
-        self.end_external_drag(Some(event));
-        taken
+        self.drag_and_drop.external_drop(data, position)
     }
 
     /// It left the window, or ended without a drop (C++'s `externalDragLeft`): the target it was over is told it
     /// left, every one that it ended.
     pub fn external_drag_left(&self) {
-        let mime_types = self.drag_session.borrow().as_ref().map(|(_, m)| m.clone());
-        let Some(mime_types) = mime_types else { return };
-        let event = DragAndDropEvent { mime_types, ..DragAndDropEvent::default() };
-        if let Some(root) = self.drag_and_drop_root() {
-            draganddrop::exited(&root, &event);
-        }
-        self.end_external_drag(Some(event));
+        self.drag_and_drop.external_left();
     }
 
-    /// The drag under way (if any) ended: every target that took part told.
-    fn end_external_drag(&self, event: Option<DragAndDropEvent>) {
-        let Some((_, mime_types)) = self.drag_session.borrow_mut().take() else { return };
-        let event = event.unwrap_or(DragAndDropEvent { mime_types, ..DragAndDropEvent::default() });
-        if let Some(root) = self.drag_and_drop_root() {
-            draganddrop::ended(&root, &event);
-        }
+    /// The platform's drag of the app's own (a drag within the app it took as it left the window:
+    /// [`PlatformCallbacks::start_drag_and_drop`]) ended, dropped with `action` or not taken (none): its source is
+    /// told (Compose desktop's `onTransferCompleted`).
+    pub fn platform_drag_ended(&self, action: Option<DragAndDropTransferAction>) {
+        self.drag_and_drop.platform_drag_ended(action);
     }
 }
 

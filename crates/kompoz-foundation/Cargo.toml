@@ -37,6 +37,14 @@ name = "gestures"
 harness = false
 
 [[test]]
+name = "gestures2d"
+harness = false
+
+[[test]]
+name = "drag_and_drop"
+harness = false
+
+[[test]]
 name = "draw"
 harness = false
 
