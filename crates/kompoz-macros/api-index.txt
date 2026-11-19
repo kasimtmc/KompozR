@@ -44,6 +44,7 @@ kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/test
 kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runtime.rs
 * kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
+* kompozable CustomizedLookaheadAnimationVisualDebugging rr crates/kompoz-animation/src/lookahead_debug.rs
 * kompozable DefaultCursorHandle rr crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable DefaultOpenContextMenu rrrr crates/kompoz-foundation/src/context_menu.rs
 * kompozable Dialog rdr crates/kompoz-ui/src/window/dialog.rs
@@ -121,6 +122,7 @@ kompoz-runtime/macros kompozable Local d crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/clickable kompozable LogInteractions rr crates/kompoz-foundation/tests/clickable.rs
 kompoz-foundation/pager kompozable LogInteractions rr crates/kompoz-foundation/tests/pager.rs
 kompoz-foundation/scroll kompozable LogInteractions rr crates/kompoz-foundation/tests/scroll.rs
+* kompozable LookaheadAnimationVisualDebugging ddddddr crates/kompoz-animation/src/lookahead_debug.rs
 * kompozable LookaheadScope r crates/kompoz-ui/src/layout/lookahead.rs
 * kompozable MenuItem rrr crates/kompoz-foundation/src/context_menu.rs
 * kompozable MenuItemContent rrrr crates/kompoz-foundation/src/context_menu.rs
@@ -186,6 +188,7 @@ kompoz-foundation/text_field_value kompozable StringField rr crates/kompoz-found
 * fn Stroke ddddd crates/kompoz-graphics/src/draw_style.rs
 * kompozable StyleAnnotation rrr crates/kompoz-foundation/src/text/link_scope.rs
 * kompozable SubcomposeLayout ddr crates/kompoz-ui/src/layout/subcompose.rs
+kompoz-animation/bounds kompozable TabRowStandIn r crates/kompoz-animation/tests/bounds.rs
 kompoz-foundation/tooltip kompozable Tagged rrrr crates/kompoz-foundation/tests/tooltip.rs
 kompoz-runtime/macros kompozable Tagged rdd crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/windows kompozable Tappable rrrr crates/kompoz-ui/tests/windows.rs
@@ -237,10 +240,13 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method anchored_draggable_reversed_starting_immediately rrrddddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
 * method anchored_draggable_starting_immediately rrddddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
 * fn animate rrddr crates/kompoz-animation/src/suspend.rs
+* method animate_bounds rddd crates/kompoz-animation/src/bounds.rs Modifier as BoundsModifiers
 * method animate_by rrrdddd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method animate_color ddr crates/kompoz-animation/src/transition.rs Transition
 * method animate_color rrrd crates/kompoz-animation/src/infinite_transition.rs InfiniteTransition
 * kompozable animate_color_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_content_size ddd crates/kompoz-animation/src/content_size.rs Modifier as ContentSizeModifiers
+* method animate_content_size_top_start dd crates/kompoz-animation/src/content_size.rs Modifier as ContentSizeModifiers
 * method animate_decay rdd crates/kompoz-animation/src/suspend.rs AnimationState
 * method animate_decay rrd crates/kompoz-animation/src/animatable.rs Animatable
 * method animate_dp ddr crates/kompoz-animation/src/transition.rs Transition

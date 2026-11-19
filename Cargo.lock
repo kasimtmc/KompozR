@@ -374,6 +374,7 @@ dependencies = [
  "kompoz-graphics",
  "kompoz-runtime",
  "kompoz-test",
+ "kompoz-text",
  "kompoz-ui",
 ]
 

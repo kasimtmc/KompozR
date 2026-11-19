@@ -429,8 +429,8 @@ pub(crate) struct LazyListMeasureResult {
     pub(crate) can_scroll_forward: bool,
     pub(crate) consumed_scroll: f32,
     pub(crate) measure_result: MeasureResult,
-    /// A gesture's scroll back at the end, in a lookahead pass (stage 11's lookahead reads it).
-    #[allow(dead_code)]
+    /// What its approach would scroll back at the end, in a lookahead pass (the state animates it away between
+    /// the passes).
     pub(crate) scroll_back_amount: f32,
     pub(crate) remeasure_needed: bool,
     pub(crate) coroutine_scope: Option<CoroutineScope>,
@@ -901,14 +901,17 @@ pub(crate) fn measure_lazy_list(
     let invalidator = a.placement_scope_invalidator.clone();
     let is_looking_ahead = a.is_looking_ahead;
     let placement = Box::new(move |scope: &PlacementScope| {
-        // (Compose tags this placement as the motion frame of reference's — lookahead's approach, stage 11's)
-        for item in &positioned_items {
-            item.place(scope, is_looking_ahead);
-        }
-        // (the sticking items after the others)
-        for item in &sticking_items {
-            item.place(scope, is_looking_ahead);
-        }
+        // (a motion frame of reference's placement: it scrolls — what reads these offsets may apply their changes at
+        // once rather than animate them, not to chase the scroll)
+        scope.with_motion_frame_of_reference_placement(|scope| {
+            for item in &positioned_items {
+                item.place(scope, is_looking_ahead);
+            }
+            // (the sticking items after the others)
+            for item in &sticking_items {
+                item.place(scope, is_looking_ahead);
+            }
+        });
         // (read while placing: the state places again by invalidating it)
         invalidator.attach_to_scope();
     });

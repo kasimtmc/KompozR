@@ -296,8 +296,8 @@ fn lazy_grid_measure_policy(c: GridMeasureConfig) -> Rc<dyn LazyLayoutMeasurePol
     Rc::new(move |scope: &LazyLayoutMeasureScope, container_constraints: Constraints| -> MeasureResult {
         let state = &c.state;
         state.inner.measurement_scope_invalidator.attach_to_scope();
-        // (lookahead is stage 11's: never here)
-        let is_looking_ahead = false;
+        let is_looking_ahead = scope.is_looking_ahead();
+        // (whether the lookahead pass ran: in a lookahead scope)
         let is_in_lookahead_scope = state.inner.has_lookahead_occurred.get() || is_looking_ahead;
         let is_vertical = c.is_vertical;
         check_scrollable_container_constraints(
@@ -433,8 +433,13 @@ fn lazy_grid_measure_policy(c: GridMeasureConfig) -> Rc<dyn LazyLayoutMeasurePol
             &state.inner.beyond_bounds_info,
         );
 
-        // (stage 11's lookahead reads the scroll delta between the passes otherwise)
-        let scroll_to_be_consumed = state.inner.scroll_to_be_consumed.get();
+        // (the lookahead pass scrolls; the approach after it by what it scrolled back of that, animated away)
+        let scroll_to_be_consumed = if is_looking_ahead || !is_in_lookahead_scope {
+            state.inner.scroll_to_be_consumed.get()
+        } else {
+            state.scroll_delta_between_passes()
+        };
+        let approach_layout_info = state.inner.approach_layout_info.borrow().as_ref().map(|r| r.layout_info());
 
         let sticky = StickToTopPlacement;
         let sticky_items_placement: Option<&dyn StickyItemsPlacement> =
@@ -469,7 +474,7 @@ fn lazy_grid_measure_policy(c: GridMeasureConfig) -> Rc<dyn LazyLayoutMeasurePol
                 pinned_items,
                 is_in_lookahead_scope,
                 is_looking_ahead,
-                approach_layout_info: None,
+                approach_layout_info,
                 coroutine_scope: c.coroutine_scope.clone(),
                 placement_scope_invalidator: state.inner.placement_scope_invalidator.clone(),
                 platform: c.platform.clone(),

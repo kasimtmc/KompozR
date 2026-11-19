@@ -453,8 +453,8 @@ pub(crate) struct LazyStaggeredGridMeasureResult {
     pub(crate) first_visible_item_scroll_offsets: Vec<i32>,
     pub(crate) consumed_scroll: f32,
     pub(crate) measure_result: MeasureResult,
-    /// A gesture's scroll back at the end, in a lookahead pass (stage 11's lookahead reads it).
-    #[allow(dead_code)]
+    /// What its approach would scroll back at the end, in a lookahead pass (the state animates it away between
+    /// the passes).
     pub(crate) scroll_back_amount: f32,
     pub(crate) can_scroll_forward: bool,
     pub(crate) is_vertical: bool,
@@ -616,7 +616,7 @@ pub(crate) struct LazyStaggeredGridMeasureContext<'a> {
     pub(crate) platform: Option<PlatformHandle>,
     pub(crate) is_in_lookahead_scope: bool,
     pub(crate) is_looking_ahead: bool,
-    /// The last approach pass's items (stage 11's lookahead: none yet).
+    /// The last approach pass's items (in a lookahead scope, after one).
     pub(crate) approach_visible_items: Option<Vec<LazyStaggeredGridItemInfo>>,
     pub(crate) measured_item_provider: LazyStaggeredGridMeasureProvider<'a>,
     pub(crate) lane_count: i32,
@@ -686,8 +686,13 @@ pub(crate) fn measure_staggered_grid(
         platform,
         is_in_lookahead_scope,
         is_looking_ahead,
-        // (stage 11's lookahead keeps the approach pass's layout)
-        approach_visible_items: None,
+        // (the last approach pass's items: those past the lookahead's kept for it)
+        approach_visible_items: state
+            .inner
+            .approach_layout_info
+            .borrow()
+            .as_ref()
+            .map(|r| r.visible_items_info.iter().map(|i| i.info()).collect()),
         measured_item_provider,
         lane_count,
     };
@@ -1320,10 +1325,13 @@ impl LazyStaggeredGridMeasureContext<'_> {
             (self.reverse_layout, self.content_offset, self.is_looking_ahead);
         let invalidator = self.state.inner.placement_scope_invalidator.clone();
         let placement = Box::new(move |scope: &PlacementScope| {
-            // (Compose tags this placement as the motion frame of reference's — lookahead's approach, stage 11's)
-            for item in &positioned_items {
-                item.place(scope, reverse_layout, content_offset, is_looking_ahead);
-            }
+            // (a motion frame of reference's placement: it scrolls — what reads these offsets may apply their changes
+            // at once rather than animate them, not to chase the scroll)
+            scope.with_motion_frame_of_reference_placement(|scope| {
+                for item in &positioned_items {
+                    item.place(scope, reverse_layout, content_offset, is_looking_ahead);
+                }
+            });
             // (read while placing: the state places again by invalidating it)
             invalidator.attach_to_scope();
         });
@@ -1388,7 +1396,7 @@ impl LazyStaggeredGridMeasureContext<'_> {
     }
 
     /// The items the last approach pass showed after those in view, kept in a lookahead pass (Compose's
-    /// `itemsRetainedForLookahead`; stage 11's lookahead: none without it).
+    /// `itemsRetainedForLookahead`).
     fn items_retained_for_lookahead(
         &self,
         last_visible_item_index: i32,

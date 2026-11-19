@@ -36,22 +36,28 @@ mod animatable;
 mod animate_as_state;
 mod animation;
 mod arc_spline;
+mod bounds;
 mod color;
+mod content_size;
 mod converter;
 mod decay;
 mod deferred_target;
 mod easing;
 mod float_spec;
 mod infinite_transition;
+mod lookahead_debug;
 mod mono_spline;
 mod mono_spline_keyframes;
 mod mutator;
 mod seekable;
+mod skip_to_lookahead_size;
 mod spec;
 mod spline_decay;
 mod spring_simulation;
 mod state;
 mod suspend;
+#[cfg(test)]
+mod tests;
 mod transition;
 mod vector;
 mod vectorized;
@@ -63,7 +69,9 @@ pub use animate_as_state::{
     animate_size_as_state, animate_value_as_state,
 };
 pub use animation::{Animation, DecayAnimation, TargetBasedAnimation, create_animation, float_decay_animation};
+pub use bounds::{BoundsModifiers, BoundsTransform};
 pub use color::ColorVectorConverter;
+pub use content_size::{ContentSizeModifiers, SizeAnimationFinishedListener};
 pub use converter::{TwoWayConverter, VectorConverter, VisibilityThreshold, visibility_threshold_of};
 pub use decay::{
     DecayAnimationSpec, FloatDecayAnimationSpec, FloatDecaySpecOf, FloatDecayTarget, FloatExponentialDecaySpec,
@@ -83,6 +91,7 @@ pub use infinite_transition::{
     AnyInfiniteTransitionAnimationState, InfiniteTransition, InfiniteTransitionAnimationState,
     remember_infinite_transition,
 };
+pub use lookahead_debug::{CustomizedLookaheadAnimationVisualDebugging, LookaheadAnimationVisualDebugging};
 pub use mutator::{MutatePriority, MutatorMutex};
 pub use seekable::{SeekableTransitionState, SeekingAnimationState};
 pub use spec::{

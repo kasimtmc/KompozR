@@ -118,6 +118,12 @@ harness = false
 name = "kotlin_transitions"
 harness = false
 
+# Lookahead animations of bounds (animateContentSize, animateBounds, BoundsTransform, the visual debugging) in
+# Kotlin's syntax.
+[[test]]
+name = "kotlin_bounds"
+harness = false
+
 [[test]]
 name = "named_forms"
 harness = false

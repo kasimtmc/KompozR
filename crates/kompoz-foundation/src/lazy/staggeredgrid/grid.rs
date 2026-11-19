@@ -298,8 +298,8 @@ fn staggered_grid_measure_policy(c: StaggeredGridMeasureConfig) -> Rc<dyn LazyLa
     Rc::new(move |scope: &LazyLayoutMeasureScope, constraints: Constraints| -> MeasureResult {
         let state = &c.state;
         state.inner.measurement_scope_invalidator.attach_to_scope();
-        // (lookahead is stage 11's: never here)
-        let is_looking_ahead = false;
+        let is_looking_ahead = scope.is_looking_ahead();
+        // (whether the lookahead pass ran: in a lookahead scope)
         let is_in_lookahead_scope = state.inner.has_lookahead_occurred.get() || is_looking_ahead;
         check_scrollable_container_constraints(constraints, c.orientation);
         let density = scope.density();

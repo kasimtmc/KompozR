@@ -16,6 +16,7 @@ mod lazy_layout;
 mod measured_item;
 mod pinnable;
 mod prefetch;
+mod scroll_delta;
 mod scroll_scope;
 mod semantics;
 mod support;
@@ -47,6 +48,7 @@ pub(crate) use measured_item::{
     apply_sticky_items, updated_visible_items,
 };
 pub(crate) use prefetch::UnspecifiedNestedPrefetchCount;
+pub(crate) use scroll_delta::LazyLayoutScrollDeltaBetweenPasses;
 pub(crate) use scroll_scope::animate_scroll_to_item;
 pub(crate) use semantics::{
     LazyLayoutSemanticState, estimated_lazy_max_scroll_offset, estimated_lazy_scroll_offset, lazy_layout_semantics,

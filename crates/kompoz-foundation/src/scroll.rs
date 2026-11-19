@@ -435,13 +435,16 @@ impl LayoutModifierNode for ScrollNode {
             let abs_scroll = if reverse_scrolling { scroll - side } else { -scroll };
             let x_offset = if is_vertical { 0 } else { abs_scroll };
             let y_offset = if is_vertical { abs_scroll } else { 0 };
-            // (Compose tags it as direct manipulation for lookahead's approach: stage 11's)
-            pl.place_relative_with_layer_block(
-                &placeable,
-                IntOffset::new(x_offset, y_offset),
-                layer_block.clone(),
-                0.0,
-            );
+            // (tagged as direct manipulation: what reads this offset may leave it out — an approach layout applies
+            // it at once rather than animating it)
+            pl.with_motion_frame_of_reference_placement(|pl| {
+                pl.place_relative_with_layer_block(
+                    &placeable,
+                    IntOffset::new(x_offset, y_offset),
+                    layer_block.clone(),
+                    0.0,
+                );
+            });
         })
     }
 

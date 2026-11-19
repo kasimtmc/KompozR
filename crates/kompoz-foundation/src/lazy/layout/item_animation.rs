@@ -120,7 +120,7 @@ pub(crate) struct LazyLayoutItemAnimation {
     pub(crate) target_offset: Cell<IntOffset>,
     /// Where it was placed last (where a disappearing item is drawn).
     pub(crate) placement_offset: Cell<IntOffset>,
-    /// The lookahead pass's offset (stage 11's lookahead: never set here).
+    /// The lookahead pass's offset: where the approach animates the item to (in a lookahead scope).
     pub(crate) lookahead_offset: Cell<IntOffset>,
     pub(crate) layer: RefCell<Option<GraphicsLayer>>,
     placement_delta_animation: Animatable<IntOffset, AnimationVector2D>,

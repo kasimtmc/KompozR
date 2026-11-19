@@ -564,7 +564,8 @@ impl LayoutNode {
     pub(crate) fn on_coordinates_used(&self) {
         let state = self.layout_state.get();
         if state == LayoutState::LayingOut || state == LayoutState::LookaheadLayingOut {
-            self.set_coordinates_accessed(!self.laying_out_children.get(), true);
+            // (read placing its children, or as its modifiers place: each flag cleared as that placement runs again)
+            self.set_coordinates_accessed(self.laying_out_children.get(), true);
         }
         if state == LayoutState::LookaheadLayingOut {
             let laying_out = self.lookahead_pass().is_some_and(|d| d.laying_out_children.get());

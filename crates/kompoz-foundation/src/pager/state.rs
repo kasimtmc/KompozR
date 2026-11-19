@@ -121,8 +121,10 @@ pub struct PagerState {
 pub(crate) struct PagerStateInner {
     page_count: RefCell<Rc<dyn Fn() -> i32>>,
     page_count_generation: MutableState<u64>,
-    /// Lookahead (stage 11's): never yet.
+    /// Whether it was measured in a lookahead pass (Compose's `hasLookaheadOccurred`): in a lookahead scope.
     has_lookahead_occurred: Cell<bool>,
+    /// The last approach pass's result, in a lookahead scope (Compose's `approachLayoutInfo`).
+    approach_layout_info: RefCell<Option<Rc<PagerMeasureResult>>>,
     /// The last gesture's move from its down to its up (Compose's `upDownDifference`).
     pub(crate) up_down_difference: MutableState<Offset>,
     scroll_position: PagerScrollPosition,
@@ -238,6 +240,7 @@ impl PagerState {
                 page_count: RefCell::new(page_count),
                 page_count_generation: mutable_state_of(0),
                 has_lookahead_occurred: Cell::new(false),
+                approach_layout_info: RefCell::new(None),
                 up_down_difference: mutable_state_of(Offset::Zero),
                 scroll_position: PagerScrollPosition::new(current_page, current_page_offset_fraction),
                 first_visible_page: Cell::new(current_page),
@@ -455,10 +458,20 @@ impl PagerState {
             inner.is_last_scroll_backward.set(scroll_delta < 0);
         }
 
-        // (stage 11's lookahead keeps an approach result to scroll alike)
         let current = inner.layout_info.borrow().clone();
-        let scrolled_layout_info =
+        let mut scrolled_layout_info =
             current.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32)).map(Rc::new);
+        let approach = inner.approach_layout_info.borrow().clone();
+        if scrolled_layout_info.is_some()
+            && let Some(approach) = approach
+        {
+            // (the lookahead's scrolled without a measure: the approach's too if it can be — they may differ — else
+            // both are measured)
+            match approach.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32)) {
+                Some(scrolled_approach) => *inner.approach_layout_info.borrow_mut() = Some(Rc::new(scrolled_approach)),
+                None => scrolled_layout_info = None,
+            }
+        }
         match scrolled_layout_info {
             Some(scrolled) => {
                 self.apply_measure_result(scrolled, inner.has_lookahead_occurred.get(), true);
@@ -514,7 +527,11 @@ impl PagerState {
         // (the number of items a nested prefetch of this pager prefetches)
         inner.prefetch_state.set_ideal_nested_prefetch_count(result.visible_pages_info.len() as i32);
         inner.latest_page_size_with_spacing.set(result.page_size + result.page_spacing);
-        // (stage 11's lookahead records an approach pass's result apart)
+        if !is_looking_ahead && inner.has_lookahead_occurred.get() {
+            // (after a lookahead pass: the approach's result, kept apart)
+            *inner.approach_layout_info.borrow_mut() = Some(result);
+            return;
+        }
         if is_looking_ahead {
             inner.has_lookahead_occurred.set(true);
         }

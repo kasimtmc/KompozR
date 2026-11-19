@@ -17,9 +17,9 @@ use crate::gestures::{
 use crate::interaction::{InteractionSource, MutableInteractionSource};
 use crate::lazy::layout::{
     AwaitFirstLayoutModifier, LazyKey, LazyLayoutBeyondBoundsInfo, LazyLayoutCacheWindow, LazyLayoutItemAnimator,
-    LazyLayoutNearestRangeState, LazyLayoutPinnedItemList, LazyLayoutPrefetchState, LazyLayoutScrollScope,
-    LazyLayoutScrollScopeState, NestedPrefetchScope, ObservableScopeInvalidator, PrefetchHandle, PrefetchResultScope,
-    Remeasurement, animate_scroll_to_item, find_index_by_key,
+    LazyLayoutNearestRangeState, LazyLayoutPinnedItemList, LazyLayoutPrefetchState, LazyLayoutScrollDeltaBetweenPasses,
+    LazyLayoutScrollScope, LazyLayoutScrollScopeState, NestedPrefetchScope, ObservableScopeInvalidator, PrefetchHandle,
+    PrefetchResultScope, Remeasurement, animate_scroll_to_item, find_index_by_key,
 };
 use kompoz_animation::MutatePriority;
 use kompoz_graphics::Density;
@@ -128,8 +128,12 @@ pub struct LazyGridState {
 
 pub(crate) struct LazyGridStateInner {
     pub(crate) prefetch_strategy: Rc<dyn LazyGridPrefetchStrategy>,
-    /// Lookahead (stage 11's): never yet.
+    /// Whether it was measured in a lookahead pass (Compose's `hasLookaheadOccurred`): in a lookahead scope.
     pub(crate) has_lookahead_occurred: Cell<bool>,
+    /// The last approach pass's result, in a lookahead scope (Compose's `approachLayoutInfo`).
+    pub(crate) approach_layout_info: RefCell<Option<Rc<LazyGridMeasureResult>>>,
+    /// What the approach scrolls by besides the lookahead's scroll (Compose's `_lazyLayoutScrollDeltaBetweenPasses`).
+    scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses,
     execute_requests_in_high_priority_mode: Cell<bool>,
     scroll_position: LazyGridScrollPosition,
     /// The last measure's result, its readers told through the counter (Compose's `layoutInfoState`).
@@ -212,6 +216,8 @@ impl LazyGridState {
             LazyGridStateInner {
                 prefetch_strategy,
                 has_lookahead_occurred: Cell::new(false),
+                approach_layout_info: RefCell::new(None),
+                scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses::new(),
                 execute_requests_in_high_priority_mode: Cell::new(false),
                 scroll_position: LazyGridScrollPosition::new(
                     first_visible_item_index,
@@ -356,10 +362,22 @@ impl LazyGridState {
             let pre_scroll_to_be_consumed = inner.scroll_to_be_consumed.get();
             let int_delta = fast_round_to_int(inner.scroll_to_be_consumed.get());
             let current = inner.layout_info.borrow().clone();
-            // (stage 11's lookahead keeps an approach result to scroll alike)
-            let scrolled_layout_info = current
+            let mut scrolled_layout_info = current
                 .copy_with_scroll_delta_without_remeasure(int_delta, !inner.has_lookahead_occurred.get())
                 .map(Rc::new);
+            let approach = inner.approach_layout_info.borrow().clone();
+            if scrolled_layout_info.is_some()
+                && let Some(approach) = approach
+            {
+                // (the lookahead's scrolled without a measure: the approach's too if it can be — they may differ —
+                // else both are measured)
+                match approach.copy_with_scroll_delta_without_remeasure(int_delta, true) {
+                    Some(scrolled_approach) => {
+                        *inner.approach_layout_info.borrow_mut() = Some(Rc::new(scrolled_approach))
+                    }
+                    None => scrolled_layout_info = None,
+                }
+            }
             match scrolled_layout_info {
                 Some(scrolled) => {
                     self.apply_measure_result(scrolled.clone(), inner.has_lookahead_occurred.get(), true);
@@ -422,7 +440,22 @@ impl LazyGridState {
         let inner = &self.inner;
         // (the number of items a nested prefetch of this grid prefetches)
         inner.prefetch_state.set_ideal_nested_prefetch_count(result.visible_items_info.len() as i32);
-        // (stage 11's lookahead records an approach pass's result apart)
+        if !is_looking_ahead && inner.has_lookahead_occurred.get() {
+            // (after a lookahead pass: the approach's result, kept apart; the delta between the passes done with
+            // once the approach is where the lookahead is — both scrolled alike)
+            *inner.approach_layout_info.borrow_mut() = Some(result.clone());
+            without_read_observation(|| {
+                let delta = &inner.scroll_delta_between_passes;
+                if delta.is_active()
+                    && result.first_visible_line_scroll_offset == inner.scroll_position.scroll_offset.get()
+                    && result.first_visible_line_first_item().map(|i| i.index_value())
+                        == Some(inner.scroll_position.index.get())
+                {
+                    delta.stop();
+                }
+            });
+            return;
+        }
         if is_looking_ahead {
             inner.has_lookahead_occurred.set(true);
         }
@@ -441,7 +474,19 @@ impl LazyGridState {
                 inner.prefetch_strategy.on_visible_items_updated(&scope, &result.layout_info());
             }
         }
+        if is_looking_ahead && let Some(scope) = &result.coroutine_scope {
+            inner.scroll_delta_between_passes.update_scroll_delta_for_approach(
+                result.scroll_back_amount,
+                result.density,
+                scope,
+            );
+        }
         inner.num_measure_passes.set(inner.num_measure_passes.get() + 1);
+    }
+
+    /// The scroll the approach pass measures with after a lookahead pass (Compose's `scrollDeltaBetweenPasses`).
+    pub(crate) fn scroll_delta_between_passes(&self) -> f32 {
+        self.inner.scroll_delta_between_passes.scroll_delta_between_passes()
     }
 
     pub(crate) fn update_scroll_position_if_the_first_item_was_moved(
@@ -642,8 +687,16 @@ impl LazyGridPrefetchScope for GridPrefetchScope {
         on_prefetch_finished: Option<Rc<dyn Fn(&dyn super::prefetch_strategy::LazyGridPrefetchResultScope)>>,
     ) -> Vec<PrefetchHandle> {
         let Some(inner) = self.0.upgrade() else { return Vec::new() };
-        // (not read: a scroll prefetching doesn't make what scrolls read the result)
-        let measure_result = inner.layout_info.borrow().clone();
+        // (not read: a scroll prefetching doesn't make what scrolls read the result; in a lookahead scope, the
+        // approach's, what is composed)
+        let measure_result = if inner.has_lookahead_occurred.get() {
+            match inner.approach_layout_info.borrow().clone() {
+                Some(r) => r,
+                None => return Vec::new(),
+            }
+        } else {
+            inner.layout_info.borrow().clone()
+        };
         let orientation = measure_result.orientation;
         let items_in_line_info = (measure_result.prefetch_info_retriever)(line_index);
         let line_item_count = items_in_line_info.len();

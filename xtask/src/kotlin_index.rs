@@ -1523,7 +1523,16 @@ fn receiver_of(first: &Type) -> String {
         other => other,
     };
     let Type::Path(p) = inner else { return String::new() };
-    let name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+    let mut name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+    // (a scope shared as a trait object, `&Rc<dyn LookaheadScope>`: the trait is the receiver's type)
+    if matches!(name.as_str(), "Rc" | "Arc" | "Box")
+        && let Some(syn::PathArguments::AngleBracketed(args)) = p.path.segments.last().map(|s| &s.arguments)
+        && let Some(syn::GenericArgument::Type(Type::TraitObject(object))) = args.args.first()
+        && let Some(TypeParamBound::Trait(t)) = object.bounds.first()
+        && let Some(segment) = t.path.segments.last()
+    {
+        name = segment.ident.to_string();
+    }
     let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform", "Config"].iter().any(|s| name.ends_with(s))
         || matches!(
             name.as_str(),
@@ -1681,6 +1690,7 @@ mod tests {
             impl TextFieldState {
                 pub fn edit(&self, block: impl FnOnce(&mut TextFieldBuffer)) {}
             }
+            pub fn LookaheadScope(content: impl Fn(&Rc<dyn LookaheadScope>) + 'static) {}
             "#,
         )
         .unwrap();
@@ -1702,6 +1712,9 @@ mod tests {
         // A text field state's edit block: `TextFieldBuffer.() -> Unit`.
         let edit = find("edit").params[0].lambda.as_ref().unwrap();
         assert_eq!(edit.receiver, "TextFieldBuffer");
+        // A scope shared as a trait object: `LookaheadScope.() -> Unit`.
+        let content = find("LookaheadScope").params[0].lambda.as_ref().unwrap();
+        assert_eq!(content.receiver, "LookaheadScope");
         assert!(find("awaitFrame").flags.contains("SUSPEND"));
         assert!(find("delay").flags.contains("SUSPEND"));
         let effect = find("LaunchedEffect").params[1].lambda.as_ref().unwrap();

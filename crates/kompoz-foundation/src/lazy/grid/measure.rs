@@ -626,8 +626,8 @@ pub(crate) struct LazyGridMeasureResult {
     pub(crate) can_scroll_forward: bool,
     pub(crate) consumed_scroll: f32,
     pub(crate) measure_result: MeasureResult,
-    /// A gesture's scroll back at the end, in a lookahead pass (stage 11's lookahead reads it).
-    #[allow(dead_code)]
+    /// What its approach would scroll back at the end, in a lookahead pass (the state animates it away between
+    /// the passes).
     pub(crate) scroll_back_amount: f32,
     pub(crate) remeasure_needed: bool,
     pub(crate) coroutine_scope: Option<CoroutineScope>,
@@ -789,7 +789,7 @@ pub(crate) struct MeasureArgs<'a> {
     pub(crate) pinned_items: Vec<i32>,
     pub(crate) is_in_lookahead_scope: bool,
     pub(crate) is_looking_ahead: bool,
-    /// The last approach pass's layout (stage 11's lookahead: none yet).
+    /// The last approach pass's layout (in a lookahead scope, after one).
     pub(crate) approach_layout_info: Option<LazyGridLayoutInfo>,
     pub(crate) coroutine_scope: CoroutineScope,
     pub(crate) placement_scope_invalidator: ObservableScopeInvalidator,
@@ -1114,13 +1114,17 @@ pub(crate) fn measure_lazy_grid(
     let invalidator = a.placement_scope_invalidator.clone();
     let is_looking_ahead = a.is_looking_ahead;
     let placement = Box::new(move |scope: &PlacementScope| {
-        // (Compose tags this placement as the motion frame of reference's — lookahead's approach, stage 11's)
-        for item in &positioned_items {
-            item.place(scope, is_looking_ahead);
-        }
-        for item in &sticking_items {
-            item.place(scope, is_looking_ahead);
-        }
+        // (a motion frame of reference's placement: it scrolls — what reads these offsets may apply their changes at
+        // once rather than animate them, not to chase the scroll)
+        scope.with_motion_frame_of_reference_placement(|scope| {
+            for item in &positioned_items {
+                item.place(scope, is_looking_ahead);
+            }
+            // (the sticking items after the others)
+            for item in &sticking_items {
+                item.place(scope, is_looking_ahead);
+            }
+        });
         // (read while placing: the state places again by invalidating it)
         invalidator.attach_to_scope();
     });
@@ -1173,7 +1177,7 @@ fn calculate_extra_items(
 }
 
 /// The lines the last approach pass showed after those in view, kept in a lookahead pass so their items aren't
-/// disposed of too early (Compose's `linesRetainedForLookahead`; stage 11's lookahead: none without it).
+/// disposed of too early (Compose's `linesRetainedForLookahead`).
 fn lines_retained_for_lookahead(
     last_visible_item_index: i32,
     items_count: i32,

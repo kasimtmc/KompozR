@@ -15,8 +15,8 @@ use crate::interaction::{InteractionSource, MutableInteractionSource};
 use crate::lazy::layout::{
     AwaitFirstLayoutModifier, LazyKey, LazyLayoutBeyondBoundsInfo, LazyLayoutItemAnimator, LazyLayoutItemProvider,
     LazyLayoutMeasuredItem, LazyLayoutNearestRangeState, LazyLayoutPinnedItemList, LazyLayoutPrefetchState,
-    LazyLayoutScrollScope, LazyLayoutScrollScopeState, ObservableScopeInvalidator, PrefetchHandle, Remeasurement,
-    animate_scroll_to_item, find_index_by_key,
+    LazyLayoutScrollDeltaBetweenPasses, LazyLayoutScrollScope, LazyLayoutScrollScopeState, ObservableScopeInvalidator,
+    PrefetchHandle, Remeasurement, animate_scroll_to_item, find_index_by_key,
 };
 use kompoz_animation::MutatePriority;
 use kompoz_graphics::Constraints;
@@ -177,8 +177,12 @@ pub struct LazyStaggeredGridState {
 }
 
 pub(crate) struct LazyStaggeredGridStateInner {
-    /// Lookahead (stage 11's): never yet.
+    /// Whether it was measured in a lookahead pass (Compose's `hasLookaheadOccurred`): in a lookahead scope.
     pub(crate) has_lookahead_occurred: Cell<bool>,
+    /// The last approach pass's result, in a lookahead scope (Compose's `approachLayoutInfo`).
+    pub(crate) approach_layout_info: RefCell<Option<Rc<LazyStaggeredGridMeasureResult>>>,
+    /// What the approach scrolls by besides the lookahead's scroll (Compose's `_lazyLayoutScrollDeltaBetweenPasses`).
+    scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses,
     pub(crate) scroll_position: LazyStaggeredGridScrollPosition,
     layout_info: RefCell<Rc<LazyStaggeredGridMeasureResult>>,
     layout_info_generation: MutableState<u64>,
@@ -258,6 +262,8 @@ impl LazyStaggeredGridState {
             });
             LazyStaggeredGridStateInner {
                 has_lookahead_occurred: Cell::new(false),
+                approach_layout_info: RefCell::new(None),
+                scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses::new(),
                 scroll_position: LazyStaggeredGridScrollPosition::new(
                     initial_first_visible_items,
                     initial_first_visible_offsets,
@@ -343,10 +349,14 @@ impl LazyStaggeredGridState {
         self.inner.scroll_position.nearest_range_state.value()
     }
 
-    /// The scroll a measure applies (Compose's `scrollToBeConsumed(isLookingAhead)`; stage 11's lookahead reads
-    /// the delta between the passes otherwise).
-    pub(crate) fn scroll_to_be_consumed(&self, _is_looking_ahead: bool) -> f32 {
-        self.inner.scroll_to_be_consumed.get()
+    /// The scroll a measure applies (Compose's `scrollToBeConsumed(isLookingAhead)`): the lookahead pass's (or
+    /// outside a lookahead scope) the scroll; the approach's after a lookahead, what it scrolled back of that.
+    pub(crate) fn scroll_to_be_consumed(&self, is_looking_ahead: bool) -> f32 {
+        if is_looking_ahead || !self.inner.has_lookahead_occurred.get() {
+            self.inner.scroll_to_be_consumed.get()
+        } else {
+            self.inner.scroll_delta_between_passes.scroll_delta_between_passes()
+        }
     }
 
     /// Takes a scroll of `distance` (Compose's `onScroll`).
@@ -363,9 +373,22 @@ impl LazyStaggeredGridState {
             let pre_scroll_to_be_consumed = inner.scroll_to_be_consumed.get();
             let int_delta = fast_round_to_int(inner.scroll_to_be_consumed.get());
             let current = inner.layout_info.borrow().clone();
-            let scrolled_layout_info = current
+            let mut scrolled_layout_info = current
                 .copy_with_scroll_delta_without_remeasure(int_delta, !inner.has_lookahead_occurred.get())
                 .map(Rc::new);
+            let approach = inner.approach_layout_info.borrow().clone();
+            if scrolled_layout_info.is_some()
+                && let Some(approach) = approach
+            {
+                // (the lookahead's scrolled without a measure: the approach's too if it can be — they may differ —
+                // else both are measured)
+                match approach.copy_with_scroll_delta_without_remeasure(int_delta, true) {
+                    Some(scrolled_approach) => {
+                        *inner.approach_layout_info.borrow_mut() = Some(Rc::new(scrolled_approach))
+                    }
+                    None => scrolled_layout_info = None,
+                }
+            }
             match scrolled_layout_info {
                 Some(scrolled) => {
                     self.apply_measure_result(scrolled.clone(), inner.has_lookahead_occurred.get(), true);
@@ -484,7 +507,21 @@ impl LazyStaggeredGridState {
         visible_items_stayed_the_same: bool,
     ) {
         let inner = &self.inner;
-        // (stage 11's lookahead records an approach pass's result apart)
+        if !is_looking_ahead && inner.has_lookahead_occurred.get() {
+            // (after a lookahead pass: the approach's result, kept apart; the delta between the passes done with
+            // once the approach is where the lookahead is)
+            *inner.approach_layout_info.borrow_mut() = Some(result.clone());
+            without_read_observation(|| {
+                let delta = &inner.scroll_delta_between_passes;
+                if delta.is_active()
+                    && result.first_visible_item_indices == inner.scroll_position.indices()
+                    && result.first_visible_item_scroll_offsets == inner.scroll_position.scroll_offsets()
+                {
+                    delta.stop();
+                }
+            });
+            return;
+        }
         if is_looking_ahead {
             inner.has_lookahead_occurred.set(true);
         }
@@ -498,6 +535,13 @@ impl LazyStaggeredGridState {
         }
         inner.can_scroll_backward.set(result.can_scroll_backward());
         inner.can_scroll_forward.set(result.can_scroll_forward);
+        if is_looking_ahead && let Some(scope) = &result.coroutine_scope {
+            inner.scroll_delta_between_passes.update_scroll_delta_for_approach(
+                result.scroll_back_amount,
+                result.density,
+                scope,
+            );
+        }
         inner.measure_pass_count.set(inner.measure_pass_count.get() + 1);
     }
 

@@ -320,8 +320,8 @@ fn lazy_list_measure_policy(c: ListMeasureConfig) -> Rc<dyn LazyLayoutMeasurePol
     Rc::new(move |scope: &LazyLayoutMeasureScope, container_constraints: Constraints| -> MeasureResult {
         let state = &c.state;
         state.inner.measurement_scope_invalidator.attach_to_scope();
-        // (lookahead is stage 11's: never here)
-        let is_looking_ahead = false;
+        let is_looking_ahead = scope.is_looking_ahead();
+        // (whether the lookahead pass ran: in a lookahead scope)
         let has_lookahead_occurred = state.inner.has_lookahead_occurred.get() || is_looking_ahead;
         let is_vertical = c.is_vertical;
         check_scrollable_container_constraints(
@@ -426,8 +426,12 @@ fn lazy_list_measure_policy(c: ListMeasureConfig) -> Rc<dyn LazyLayoutMeasurePol
             &state.inner.beyond_bounds_info,
         );
 
-        let scroll_to_be_consumed =
-            if is_looking_ahead || !has_lookahead_occurred { state.inner.scroll_to_be_consumed.get() } else { 0.0 };
+        // (the lookahead pass scrolls; the approach after it by what it scrolled back of that, animated away)
+        let scroll_to_be_consumed = if is_looking_ahead || !has_lookahead_occurred {
+            state.inner.scroll_to_be_consumed.get()
+        } else {
+            state.scroll_delta_between_passes()
+        };
 
         let sticky = StickToTopPlacement;
         let sticky_items_placement: Option<&dyn StickyItemsPlacement> =

@@ -13,6 +13,7 @@ workspace = true
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
 
 [dev-dependencies]
@@ -45,4 +46,8 @@ harness = false
 
 [[test]]
 name = "infinite_transition"
+harness = false
+
+[[test]]
+name = "bounds"
 harness = false

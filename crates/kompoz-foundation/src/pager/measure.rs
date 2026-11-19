@@ -635,10 +635,13 @@ pub(crate) fn measure_pager(scope: &LazyLayoutMeasureScope, a: PagerMeasureArgs<
     let invalidator = a.placement_scope_invalidator.clone();
     let pages_to_place = positioned_pages.clone();
     let placement = Box::new(move |scope: &PlacementScope| {
-        // (Compose tags this placement as the motion frame of reference's — lookahead's approach, stage 11's)
-        for page in &pages_to_place {
-            page.place(scope);
-        }
+        // (a motion frame of reference's placement: it scrolls — what reads these offsets may apply their changes at
+        // once rather than animate them, not to chase the scroll)
+        scope.with_motion_frame_of_reference_placement(|scope| {
+            for page in &pages_to_place {
+                page.place(scope);
+            }
+        });
         // (read while placing: the state places again by invalidating it)
         invalidator.attach_to_scope();
     });
@@ -945,8 +948,7 @@ pub(crate) fn pager_measure_policy(c: PagerMeasureConfig) -> Rc<dyn LazyLayoutMe
             },
         );
         let result = Rc::new(measure_result);
-        // (stage 11's lookahead: never looking ahead here)
-        state.apply_measure_result(result.clone(), false, false);
+        state.apply_measure_result(result.clone(), scope.is_looking_ahead(), false);
         // (the cache window's pages kept around after the logic saw the result: Compose's `keepAroundItems`)
         let logic = &state.inner.cache_window_logic;
         if logic.has_valid_bounds() && !result.visible_pages_info.is_empty() {

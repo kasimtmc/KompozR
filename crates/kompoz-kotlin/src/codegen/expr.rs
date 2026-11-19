@@ -245,7 +245,10 @@ impl Gen<'_, '_> {
                 Some(r) => {
                     let i = proc_macro2::Ident::new(&r.rust, span);
                     let ty = Ty::from_rust(&r.ty);
-                    let kind = if r.rust == "self" && !ty.is_copy() { OutKind::Local } else { OutKind::Plain };
+                    // (`self`, or a receiver lent by reference — `this@LookaheadScope` of an `&Rc<dyn LookaheadScope>`
+                    // —: a clone where a value is taken, as Kotlin's reference is)
+                    let kind =
+                        if (r.rust == "self" || r.by_ref) && !ty.is_copy() { OutKind::Local } else { OutKind::Plain };
                     Out { ts: quote!(#i), ty, kind }
                 }
                 None => {
