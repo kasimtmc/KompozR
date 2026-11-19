@@ -63,10 +63,10 @@ pub fn Pulse(log: impl ::core::ops::Fn(f32) + 'static) {
                                 this.at(0.9_f32, 250);
                             })),
                             block = ::core::option::Option::Some({
-                                let __kz_f1: ::std::boxed::Box<dyn ::core::ops::FnMut(&'_ Animatable<_, _>)> =
+                                let __kz_f1: ::std::boxed::Box<dyn ::core::ops::FnMut(&'_ Animatable<f32, _>)> =
                                     ::std::boxed::Box::new({
                                         let log = ::kompoz::runtime::__private::capture(&log);
-                                        move |this: &'_ Animatable<_, _>| {
+                                        move |this: &'_ Animatable<f32, _>| {
                                             log(this.value());
                                         }
                                     });
@@ -126,10 +126,10 @@ pub fn Forever(ticks: impl ::core::ops::Fn(f32) + 'static) {
                     repeat_mode = RepeatMode::Restart,
                 )),
                 block = ::core::option::Option::Some({
-                    let __kz_f2: ::std::boxed::Box<dyn ::core::ops::FnMut(&'_ Animatable<_, _>)> =
+                    let __kz_f2: ::std::boxed::Box<dyn ::core::ops::FnMut(&'_ Animatable<f32, _>)> =
                         ::std::boxed::Box::new({
                             let ticks = ::kompoz::runtime::__private::capture(&ticks);
-                            move |this: &'_ Animatable<_, _>| {
+                            move |this: &'_ Animatable<f32, _>| {
                                 ticks(this.value());
                             }
                         });

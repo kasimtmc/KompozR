@@ -163,9 +163,14 @@ impl Gen<'_, '_> {
     /// The setter of an implicit receiver's property `kotlin` (`scaleX = 2f` in `graphicsLayer { }`).
     fn receiver_setter(&mut self, kotlin: &str) -> Option<(ImplicitReceiver, proc_macro2::Ident)> {
         let setter = format!("set_{}", snake(kotlin));
+        // (a trait's setter too: a scope lent as a trait object, `alpha = 0.5f` in a MutableTransform's block)
+        let mut chars = kotlin.chars();
+        let kotlin_setter =
+            chars.next().map(|c| format!("set{}{}", c.to_uppercase(), chars.as_str())).unwrap_or_default();
         let r = self.receivers.iter().rev().find(|r| {
             crate::index::ITEMS.iter().any(|i| i.owner == r.ty && i.rust == setter)
                 || members_of(&r.ty, kotlin).any(|i| i.has(crate::index::flags::SETTER))
+                || members_of(&r.ty, &kotlin_setter).any(|i| i.rust == setter && i.params.len() == 1)
         })?;
         let r = r.clone();
         let label = r.labels.first().cloned();

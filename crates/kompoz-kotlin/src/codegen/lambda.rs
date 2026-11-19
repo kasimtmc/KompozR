@@ -169,7 +169,7 @@ impl Gen<'_, '_> {
             .iter()
             .skip(first_input)
             .map(|t| {
-                outer_type_arg.is_some() && is_lent_type_param(t)
+                outer_type_arg.is_some() && is_lent_type_param(t, &self.type_param)
                     || outer_owner_arg.is_some() && lent_type_parameter(t).is_some()
             })
             .collect();
@@ -379,7 +379,7 @@ impl Gen<'_, '_> {
         let mut out = String::new();
         let mut word = String::new();
         let flush = |word: &mut String, out: &mut String| {
-            if word == "T" {
+            if *word == self.type_param {
                 out.push_str(&rust);
             } else {
                 out.push_str(word);
@@ -535,7 +535,7 @@ fn std_paths(tokens: TokenStream) -> TokenStream {
 
 /// Whether a lambda input's type (an index's text) is a shared reference to the callee's type parameter: `&T`,
 /// `&'a T`.
-fn is_lent_type_param(text: &str) -> bool {
+fn is_lent_type_param(text: &str, name: &str) -> bool {
     let Some(rest) = text.trim().strip_prefix('&') else { return false };
     let rest = rest.trim_start();
     if rest.starts_with("mut ") {
@@ -545,7 +545,7 @@ fn is_lent_type_param(text: &str) -> bool {
         Some(r) => r.split_once(' ').map_or("", |(_, t)| t.trim()),
         None => rest,
     };
-    rest == "T"
+    rest == name
 }
 
 /// The type parameter a shared reference names (`&S`, `&'a S`: a single capital letter), lent to a lambda.

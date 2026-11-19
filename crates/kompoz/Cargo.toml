@@ -133,3 +133,8 @@ harness = false
 [[test]]
 name = "named_forms"
 harness = false
+
+# Enter and exit transitions, AnimatedVisibility, AnimatedContent and Crossfade in Kotlin's syntax.
+[[test]]
+name = "kotlin_animated"
+harness = false

@@ -89,6 +89,9 @@ pub mod prelude {
         LocalWindowInfo,
     };
     pub use kompoz_ui::semantics::Role;
+    // (a layer's transform origin, Compose's androidx.compose.ui.graphics.TransformOrigin: `scaleIn(transformOrigin =
+    // TransformOrigin(0f, 0f))`)
+    pub use kompoz_ui::layout::TransformOrigin;
     // (the state-based text fields, Compose's androidx.compose.foundation.text; the keyboard's options, its
     // androidx.compose.ui.text.input)
     pub use kompoz_foundation::text::{BasicSecureTextField, BasicTextField, TextFieldDecorator};

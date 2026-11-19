@@ -23,6 +23,11 @@ impl TransformOrigin {
     }
 }
 
+/// Compose's constructor `TransformOrigin(pivotFractionX, pivotFractionY)`.
+pub const fn TransformOrigin(pivot_fraction_x: f32, pivot_fraction_y: f32) -> TransformOrigin {
+    TransformOrigin::new(pivot_fraction_x, pivot_fraction_y)
+}
+
 impl Default for TransformOrigin {
     fn default() -> Self {
         TransformOrigin::Center

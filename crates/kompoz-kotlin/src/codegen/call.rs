@@ -273,6 +273,17 @@ impl Gen<'_, '_> {
             let path = ident(&c.rust, nspan);
             return self.emit(&c, Target::Path(quote!(#path), c.rust.clone()), args, loc, &n.name);
         }
+        // An extension of the layout scope it is in (`RowScope.AnimatedVisibility(…)` in a Row's content): Kotlin's
+        // implicit receiver the Rust content closure doesn't take.
+        if let Some(scope) = self.layout_scopes.last() {
+            let items: Vec<&'static crate::index::Item> = free_functions(&format!("{scope}.{}", n.name)).collect();
+            if !items.is_empty()
+                && let Some(c) = self.choose(&items, args, loc)
+            {
+                let name = ident(&c.rust, nspan);
+                return self.emit(&c, Target::Path(quote!(#name), c.rust.clone()), args, loc, &n.name);
+            }
+        }
         // The index's functions (and overloaded constructors: `Color(…)`).
         let mut items: Vec<&'static crate::index::Item> = free_functions(&n.name).collect();
         if !items.is_empty() {
@@ -592,6 +603,9 @@ impl Gen<'_, '_> {
             };
             let mut c = c;
             c.ret = kt_ret(&c.ret, item.ret, &elem, &recv_ty);
+            // (`apply { … }`, `run { … }`: Kotlin's `T.() -> R`, the receiver's value lent as `&mut Self`, is a receiver
+            // lambda of the receiver's type)
+            receiver_of_self(&mut c, &recv_ty, "&mut Self");
             self.elem_hint = Some((elem, recv_ty));
             let out = self.emit(&c, Target::Ufcs(quote_spanned!(span=> #kt::#t), r), args, loc, &name.name);
             self.elem_hint = None;
@@ -809,11 +823,50 @@ impl Gen<'_, '_> {
     /// The call of `c` through `target` with `args` (a generic one's element type `T` bound from the collection it is
     /// given, for its lambdas: [`Gen::type_arg`]).
     fn emit(&mut self, c: &Callee, target: Target, args: &[ArgRef], loc: Loc, kotlin: &str) -> Out {
-        let bound = self.map_args(c, args).ok().and_then(|m| self.collection_type_arg(c, &m));
+        // (`with(x) { … }`: Kotlin's `T.() -> R`, `x` lent as `&mut T`, is a receiver lambda of `x`'s type)
+        let with;
+        let c = match (c.item, args.first()) {
+            (Some(i), Some(ArgRef { value: ArgValue::Expr(first), .. }))
+                if i.krate == "kompoz_runtime" && i.module.starts_with("kt") && i.rust == "with" =>
+            {
+                let mut w = c.clone();
+                receiver_of_self(&mut w, &self.peek_ty(first), "&mut T");
+                with = w;
+                &with
+            }
+            _ => c,
+        };
+        let bound = self.map_args(c, args).ok().and_then(|m| {
+            self.collection_type_arg(c, &m).map(|t| ("T".to_string(), t)).or_else(|| self.direct_type_arg(c, &m))
+        });
+        let (name, bound) = match bound {
+            Some((name, t)) => (name, Some(t)),
+            None => ("T".to_string(), None),
+        };
+        let saved_name = std::mem::replace(&mut self.type_param, name);
         let saved = std::mem::replace(&mut self.type_arg, bound);
+        let saved_scope = std::mem::replace(&mut self.layout_scope_callee, layout_scope_of(c));
         let out = self.emit_bound(c, target, args, loc, kotlin);
         self.type_arg = saved;
+        self.type_param = saved_name;
+        self.layout_scope_callee = saved_scope;
         out
+    }
+
+    /// A generic callee's type parameter given as a value (`AnimatedContent(targetState: S, …)`), and the type of the
+    /// argument given to it, known: what its lambdas' `&S` are, written out where a closure made a trait object
+    /// can't take it from where it goes (`contentKey = { … }`).
+    fn direct_type_arg(&self, c: &Callee, m: &Mapping) -> Option<(String, Ty)> {
+        c.params.iter().enumerate().find_map(|(k, p)| {
+            let t = p.ty.trim();
+            if !is_type_parameter(t) || m.given[k].len() != 1 {
+                return None;
+            }
+            match m.given[k][0].value {
+                ArgValue::Expr(e) => Some((t.to_string(), self.peek_ty(e))).filter(|(_, ty)| *ty != Ty::Unknown),
+                ArgValue::Lambda(_) | ArgValue::Sam { .. } => None,
+            }
+        })
     }
 
     /// The element type of the collection a generic callee's `T` comes from (`items: impl LazyListItems<T>`, `Vec<T>`,
@@ -1072,7 +1125,16 @@ impl Gen<'_, '_> {
         }
         if let Some(l) = a.value.lambda() {
             let label = self.call_labels.last().cloned();
+            // (a Row's, a Column's, a Box's content: in its layout scope)
+            let scope = self.layout_scope_callee.take().filter(|_| p.rust == "content");
+            if let Some(s) = scope {
+                self.layout_scopes.push(s);
+            }
             let closure = self.lambda_for(l, p.lambda.as_ref(), label.as_deref(), transform_wraps);
+            if scope.is_some() {
+                self.layout_scopes.pop();
+                self.layout_scope_callee = scope;
+            }
             let t = plain_type_text(&p.ty);
             // (a shared or boxed closure, `Rc<dyn Fn()>` — `Callback` —, in an `Option` or not)
             let (some, owned) = match t.strip_prefix("Option<") {
@@ -1447,6 +1509,37 @@ fn ambiguous_member(name: &str) -> bool {
             | "toInt"
             | "toFloat"
     )
+}
+
+/// A scope function's lambda lent the value as `lent` (`&mut Self`, `&mut T`) made a receiver lambda of `ty`'s type
+/// (Kotlin's `T.() -> R` of `apply`, `run`, `with`), the type known.
+fn receiver_of_self(c: &mut Callee, ty: &Ty, lent: &str) {
+    let Some(owner) = ty.owner().map(str::to_string) else { return };
+    for p in c.params.iter_mut() {
+        if let Some(l) = p.lambda.as_mut()
+            && l.receiver.is_none()
+            && l.inputs.first().is_some_and(|i| i.trim() == lent)
+        {
+            l.receiver = Some(owner.clone());
+        }
+    }
+}
+
+/// The layout scope (Kotlin's receiver marked `@LayoutScopeMarker`) a foundation layout's `content` lambda has in
+/// Kotlin, which its Rust closure doesn't take: a Row's (and FlowRow's) `RowScope`, a Column's `ColumnScope`, a Box's
+/// `BoxScope` (it hides the outer ones, as the marker's DSL rule does: `Row { Box { AnimatedVisibility(…) } }` is the
+/// plain one).
+pub(crate) fn layout_scope_of(c: &Callee) -> Option<&'static str> {
+    let item = c.item?;
+    if item.krate != "kompoz_foundation" || !item.owner.is_empty() {
+        return None;
+    }
+    match item.rust {
+        "Row" | "FlowRow" => Some("RowScope"),
+        "Column" | "FlowColumn" => Some("ColumnScope"),
+        "Box" | "BoxWithConstraints" => Some("BoxScope"),
+        _ => None,
+    }
 }
 
 /// Whether a value of type `t` has no method `name` of its own (a member extension of a scope may be meant).

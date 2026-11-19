@@ -34,15 +34,20 @@ extern crate self as kompoz_animation;
 
 mod animatable;
 mod animate_as_state;
+mod animated_content;
+mod animated_visibility;
 mod animation;
 mod arc_spline;
 mod bounds;
 mod color;
 mod content_size;
 mod converter;
+mod crossfade;
 mod decay;
+mod deferred_enter_exit;
 mod deferred_target;
 mod easing;
+mod enter_exit;
 mod float_spec;
 mod infinite_transition;
 mod lookahead_debug;
@@ -68,14 +73,26 @@ pub use animate_as_state::{
     animate_int_offset_as_state, animate_int_size_as_state, animate_offset_as_state, animate_rect_as_state,
     animate_size_as_state, animate_value_as_state,
 };
+pub use animated_content::{
+    AnimatedContent, AnimatedContentScope, AnimatedContentTransitionScope, ContentKey, ContentTransform, SizeTransform,
+    SlideDirection, default_content_transform, default_size_animation_spec,
+};
+pub use animated_visibility::{
+    AnimatedVisibility, AnimatedVisibilityScope, AnimatedVisibilityWithState, ColumnAnimatedVisibility,
+    ColumnAnimatedVisibilityWithState, RowAnimatedVisibility, RowAnimatedVisibilityWithState,
+};
 pub use animation::{Animation, DecayAnimation, TargetBasedAnimation, create_animation, float_decay_animation};
 pub use bounds::{BoundsModifiers, BoundsTransform};
 pub use color::ColorVectorConverter;
 pub use content_size::{ContentSizeModifiers, SizeAnimationFinishedListener};
 pub use converter::{TwoWayConverter, VectorConverter, VisibilityThreshold, visibility_threshold_of};
+pub use crossfade::Crossfade;
 pub use decay::{
     DecayAnimationSpec, FloatDecayAnimationSpec, FloatDecaySpecOf, FloatDecayTarget, FloatExponentialDecaySpec,
     VectorizedDecayAnimationSpec, exponential_decay, generate_decay_animation_spec,
+};
+pub use deferred_enter_exit::{
+    MutableContentTransform, MutableTransform, MutableTransformBlock, MutableTransformScope,
 };
 pub use deferred_target::DeferredTargetAnimation;
 pub use easing::{
@@ -85,6 +102,11 @@ pub use easing::{
     EaseOut, EaseOutBack, EaseOutBounce, EaseOutCirc, EaseOutCubic, EaseOutElastic, EaseOutExpo, EaseOutQuad,
     EaseOutQuart, EaseOutQuint, EaseOutSine, Easing, FastOutLinearInEasing, FastOutSlowInEasing, LinearEasing,
     LinearOutSlowInEasing, PathEasing, arc_easing,
+};
+pub use enter_exit::{
+    EnterExitState, EnterTransition, ExitTransition, expand_horizontally, expand_in, expand_vertically, fade_in,
+    fade_out, scale_in, scale_out, shrink_horizontally, shrink_out, shrink_vertically, slide_in, slide_in_horizontally,
+    slide_in_vertically, slide_out, slide_out_horizontally, slide_out_vertically, unveil_in, veil_out,
 };
 pub use float_spec::{FloatAnimationSpec, FloatSpringSpec, FloatTweenSpec};
 pub use infinite_transition::{

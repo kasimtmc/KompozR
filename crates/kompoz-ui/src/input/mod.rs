@@ -96,6 +96,43 @@ pub trait PointerInputModifierNode {
     fn touch_bounds_expansion(&self) -> TouchBoundsExpansion {
         TouchBoundsExpansion::None
     }
+    /// Whether its layout, and what is in it, takes no input now: hit tests pass the layout by (no taps, scrolls or
+    /// hovers reach it or its children) and focus searches skip what is in it. KompozR's, not Compose's: content
+    /// leaving through `AnimatedVisibility`/`AnimatedContent` takes none (C++ Kompoz's `ignoringInput`, the user's
+    /// choice over Compose 1.12, which lets it take input until it is gone).
+    fn blocks_input(&self) -> bool {
+        false
+    }
+}
+
+/// Whether a pointer input node of `node`'s chain says the layout takes no input ([`PointerInputModifierNode::
+/// blocks_input`]).
+pub(crate) fn layout_blocks_input(node: &LayoutNode) -> bool {
+    if !node.has_kind(crate::modifier::NodeKind::PointerInput) {
+        return false;
+    }
+    let mut blocks = false;
+    node.head_to_tail(crate::modifier::NodeKind::PointerInput, &mut |c| {
+        if !blocks && c.meta.attached.get() {
+            let mut n = c.node.borrow_mut();
+            if let Some(p) = n.as_pointer_input() {
+                blocks = p.blocks_input();
+            }
+        }
+    });
+    blocks
+}
+
+/// Whether `node` or a layout it is in takes no input ([`layout_blocks_input`]).
+pub(crate) fn input_blocked_at(node: &Rc<LayoutNode>) -> bool {
+    let mut at = Some(node.clone());
+    while let Some(n) = at {
+        if layout_blocks_input(&n) {
+            return true;
+        }
+        at = n.parent();
+    }
+    false
 }
 
 /// An indirect pointer node left its chain: its stream is cancelled (Compose's autoInvalidate of the kind).

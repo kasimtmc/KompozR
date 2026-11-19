@@ -139,6 +139,16 @@ pub(crate) struct Gen<'a, 'd> {
     /// `items_list(items: impl LazyListItems<T>, key: Rc<dyn Fn(&T) -> LazyKey>)`): what its lambdas' `T` is, written
     /// out where a closure made a trait object can't take it from where it goes.
     pub type_arg: Option<Ty>,
+    /// The name of the type parameter [`Gen::type_arg`] binds (`T` of a collection's element, `S` of
+    /// `AnimatedContent(targetState: S, …)`'s state).
+    pub type_param: String,
+    /// The layout scope of the call whose arguments are being written (`RowScope` for a Row: see
+    /// [`call::layout_scope_of`]): its `content` lambda's.
+    pub layout_scope_callee: Option<&'static str>,
+    /// The layout scopes (Kotlin's `@LayoutScopeMarker` receivers) of the content lambdas being written, innermost
+    /// last: a call of a name one of them extends goes to the innermost's (`AnimatedVisibility(…)` in a Row's
+    /// content is `RowScope.AnimatedVisibility`), a Box's hiding the outer ones (the marker's DSL rule).
+    pub layout_scopes: Vec<&'static str>,
     counter: usize,
 }
 
@@ -159,6 +169,9 @@ impl<'a, 'd> Gen<'a, 'd> {
             elem_hint: None,
             owner_arg: None,
             type_arg: None,
+            type_param: "T".to_string(),
+            layout_scope_callee: None,
+            layout_scopes: Vec::new(),
             counter: 0,
         }
     }

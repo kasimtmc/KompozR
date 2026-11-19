@@ -533,8 +533,8 @@ fn the_view_configuration_times_a_long_click() {
 }
 
 fn leaving_content_takes_no_taps() {
-    // C++'s leaving_content_takes_no_taps without its animations (stage 11): content gone takes no taps — the
-    // cards replaced by the detail, the button hidden.
+    // C++'s leaving_content_takes_no_taps without its animations (their half is kompoz-animation's tests/animated.rs):
+    // content gone takes no taps — the cards replaced by the detail, the button hidden.
     let selected = mutable_state_of(-1);
     let shown = mutable_state_of(true);
     let button_clicks = Rc::new(Cell::new(0));

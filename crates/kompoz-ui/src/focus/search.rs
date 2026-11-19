@@ -395,6 +395,10 @@ fn collect_accessible_children(cell: &NodeRc, out: &mut Vec<NodeRc>) {
         if !child.meta.attached.get() {
             continue;
         }
+        // (what is in a layout taking no input: KompozR's PointerInputModifierNode::blocks_input)
+        if child.layout_node().is_some_and(|n| crate::input::input_blocked_at(&n)) {
+            continue;
+        }
         if fetch_focus_properties(&child).can_focus {
             out.push(child);
         } else {

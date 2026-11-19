@@ -138,6 +138,12 @@ impl VisitMut for NameLifetimes<'_> {
     fn visit_type_impl_trait_mut(&mut self, _: &mut TypeImplTrait) {
         // (an `impl Fn(&T)`'s lifetimes are its own: higher-ranked)
     }
+    fn visit_parenthesized_generic_arguments_mut(&mut self, _: &mut ParenthesizedGenericArguments) {
+        // (so are a `dyn Fn(&T)`'s, a shared closure's: `Option<Rc<dyn Fn(&S) -> SlotKey>>`)
+    }
+    fn visit_type_fn_ptr_mut(&mut self, _: &mut TypeFnPtr) {
+        // (and a `fn(&T)`'s)
+    }
 }
 
 /// Gives the output's elided lifetimes the one elision gives them (`__call` takes its builder by value, so it has
@@ -588,6 +594,12 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             (Some(b), Some(d)) => {
                 let fp = fn_pointer(p)?;
                 bounds.push(quote!(#pi: #rt::__private::ImplArg<#fp>, <#pi as #rt::__private::ImplArg<#fp>>::Out: #b));
+                // (rustc doesn't take a projection's `'static` from the where clause when its default's fn pointer is
+                // higher-ranked, `for<'a> fn(&'a T)`: it asks it of the slot's type, `Unset` or `Set<V>`, so that is
+                // bound too)
+                if b.iter().any(|b| matches!(b, TypeParamBound::Lifetime(l) if l.ident == "static")) {
+                    bounds.push(quote!(#pi: 'static));
+                }
                 lets.push(quote!(let #a = #rt::__private::ImplArg::<#fp>::pick(self.#fi, { let d: #fp = #d; d });));
             }
         }

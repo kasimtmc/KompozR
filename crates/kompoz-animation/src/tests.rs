@@ -1,6 +1,7 @@
 //! Unit tests of what SharedTransitionScope (stage 11 WP4) is built on and no public API reaches yet: the
-//! SkipToLookaheadSize node (its `ScaleToBounds` too) and the debug helper's shared transition visualizations. One
-//! test, its parts in turn, on the one thread made the UI thread.
+//! SkipToLookaheadSize node (its `ScaleToBounds` too), the debug helper's shared transition visualizations and the
+//! shared mutable transform state of a deferred phase. One test, its parts in turn, on the one thread made the UI
+//! thread.
 
 use crate::lookahead_debug::LookaheadAnimationVisualDebugHelper;
 use crate::skip_to_lookahead_size::{
@@ -169,10 +170,59 @@ fn the_debug_helper_draws_a_shared_transition() {
     scope.cancel();
 }
 
+/// The shared mutable transform state of a content's deferred phase (stage 11 WP3's, what a shared element reads
+/// through its modifier local): the block's values combined with the transition's while deferring, the ones it
+/// last gave handed over (velocities tracked against the test time source) once it stops, the block's own values.
+fn a_deferred_phases_values_are_handed_over() {
+    use crate::deferred_enter_exit::{MutableTransform, SharedMutableTransformState, TEST_TIME_SOURCE};
+    let now = Rc::new(std::cell::Cell::new(0i64));
+    let n = now.clone();
+    TEST_TIME_SOURCE.with(|t| *t.borrow_mut() = Some(Rc::new(move || n.get())));
+    let state = SharedMutableTransformState::new();
+    let transform = MutableTransform();
+    let step = Rc::new(std::cell::Cell::new(1));
+    let s = step.clone();
+    transform.update(move |scope, full: IntSize| {
+        let k = s.get();
+        scope.set_scale(1.0 - 0.1 * k as f32);
+        scope.set_offset(IntOffset::new(full.width / 10 * k, 0));
+        scope.set_transform_origin(kompoz_ui::layout::TransformOrigin::new(0.0, 0.0));
+    });
+    state.set_mutable_data(Some(transform));
+    state.set_is_mutating(true);
+    // Deferring: the block's values over the transition's, tracked.
+    for k in 1..=3 {
+        step.set(k);
+        now.set(16 * k as i64);
+        let slide = state.combined_slide(IntOffset::Zero, IntSize::new(100, 40));
+        assert_eq!(slide, IntOffset::new(10 * k, 0));
+        assert!((state.combined_scale(1.0) - (1.0 - 0.1 * k as f32)).abs() < 1e-5);
+    }
+    assert!(state.scale_requires_animation() && state.slide_requires_animation());
+    assert!(state.transform_origin_requires_animation());
+    assert_eq!(state.active_offset(), IntOffset::new(30, 0));
+    assert!((state.active_scale() - 0.7).abs() < 1e-5 && (state.last_manual_scale() - 0.7).abs() < 1e-5);
+    assert_eq!(state.last_manual_slide(), IntOffset::new(30, 0));
+    assert_eq!(state.active_transform_origin(), kompoz_ui::layout::TransformOrigin::new(0.0, 0.0));
+    assert!(state.slide_handoff_value().is_none() && state.parent_layout_coordinates().is_none());
+    // Handed over: the last values, the velocities (10 px and -0.1 every 16 ms).
+    state.set_is_mutating(false);
+    assert_eq!(state.slide_handoff_value(), Some(IntOffset::new(30, 0)));
+    let v = state.slide_handoff_velocity().expect("handed over");
+    assert!((v.v1 - 625.0).abs() < 1.0 && v.v2.abs() < 1e-3, "{v:?}");
+    let sv = state.scale_handoff_velocity().expect("handed over");
+    assert!((sv.value + 6.25).abs() < 0.1, "{sv:?}");
+    // Cleared: nothing left.
+    state.clear();
+    assert!(!state.is_handoff_active() && !state.slide_requires_animation() && state.mutable_data().is_none());
+    TEST_TIME_SOURCE.with(|t| *t.borrow_mut() = None);
+}
+
 #[test]
 fn what_shared_transitions_are_built_on() {
     set_ui_thread();
     skip_to_lookahead_size_measures_at_the_lookahead_constraints();
     scale_to_bounds_scales_the_content_into_the_size_on_the_way();
     the_debug_helper_draws_a_shared_transition();
+    a_deferred_phases_values_are_handed_over();
 }

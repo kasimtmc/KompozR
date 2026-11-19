@@ -1523,6 +1523,14 @@ fn receiver_of(first: &Type) -> String {
         Type::Reference(r) => &*r.elem,
         other => other,
     };
+    // (a scope lent as a trait object, `&mut dyn MutableTransformScope`: the trait is the receiver's type)
+    if let Type::TraitObject(object) = inner
+        && let Some(TypeParamBound::Trait(t)) = object.bounds.first()
+        && let Some(segment) = t.path.segments.last()
+    {
+        let name = segment.ident.to_string();
+        return if name.ends_with("Scope") { name } else { String::new() };
+    }
     let Type::Path(p) = inner else { return String::new() };
     let mut name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
     // (a scope shared as a trait object, `&Rc<dyn LookaheadScope>`: the trait is the receiver's type)

@@ -561,7 +561,8 @@ fn hit_test_child(c: &Rc<NodeCoordinator>, position: Offset, r: &mut HitTestResu
     }
     r.sibling_hits(|r| {
         for child in layout_node.z_sorted_children().iter().rev() {
-            if !child.is_placed() {
+            // (a layout taking no input: KompozR's PointerInputModifierNode::blocks_input)
+            if !child.is_placed() || super::layout_blocks_input(child) {
                 continue;
             }
             hit_test_layout_node(child, position, r, pt, in_layer);

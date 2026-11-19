@@ -212,7 +212,15 @@ impl LayoutNode {
                         c.set_layout_cell(layout_cell);
                         c.clone()
                     }
-                    None => NodeCoordinator::new_modifier(weak.clone(), node.clone(), layout_cell),
+                    None => {
+                        let c = NodeCoordinator::new_modifier(weak.clone(), node.clone(), layout_cell);
+                        // (made in a lookahead scope, it has its lookahead side from the start: Compose's
+                        // LayoutModifierNodeCoordinator's `lookaheadDelegate` initializer)
+                        if self.is_in_lookahead_scope() {
+                            c.ensure_lookahead_delegate();
+                        }
+                        c
+                    }
                 };
                 *coordinator.wrapped_by.borrow_mut() = Rc::downgrade(&next);
                 *next.wrapped.borrow_mut() = Some(coordinator.clone());

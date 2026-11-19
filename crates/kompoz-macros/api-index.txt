@@ -2,6 +2,11 @@
 # Written by `cargo xtask kotlin-index` (don't edit by hand); read by kompoz-macros and kompoz-kotlin.
 # The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one.
 # <scope> <kind> <name> <parameters> <owner>
+* kompozable AnimatedContent rdddddr crates/kompoz-animation/src/animated_content.rs
+* method AnimatedContent ddddr crates/kompoz-animation/src/animated_content.rs Transition
+* kompozable AnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs
+* method AnimatedVisibility rdddr crates/kompoz-animation/src/animated_visibility.rs Transition
+* kompozable AnimatedVisibilityWithState rddddr crates/kompoz-animation/src/animated_visibility.rs
 * kompozable BackHandler dr crates/kompoz-ui/src/back.rs
 * kompozable Bar rrr crates/kompoz-platform/src/app/title_bar.rs
 * kompozable BasicSecureTextField rdddddddddddddd crates/kompoz-foundation/src/text/basic_secure_text_field.rs
@@ -29,7 +34,10 @@ kompoz-runtime/macros kompozable Column rr crates/kompoz-runtime/tests/common/mo
 kompoz-runtime/runtime kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/state_observer kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/subcomposition kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
+* kompozable ColumnAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs
+* kompozable ColumnAnimatedVisibilityWithState rddddr crates/kompoz-animation/src/animated_visibility.rs
 * fn Constraints dddd crates/kompoz-graphics/src/constraints.rs
+* fn ContentTransform rrdd crates/kompoz-animation/src/animated_content.rs
 * kompozable ContextMenuArea rddr crates/kompoz-foundation/src/context_menu.rs
 * kompozable ContextMenuDataProvider rr crates/kompoz-foundation/src/context_menu.rs
 * fn ContextMenuItem rdr crates/kompoz-foundation/src/context_menu.rs
@@ -43,10 +51,14 @@ kompoz-platform/app_core kompozable Counter r crates/kompoz-platform/tests/app_c
 kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runtime.rs
+* kompozable Crossfade rdddr crates/kompoz-animation/src/crossfade.rs
+* method Crossfade dddr crates/kompoz-animation/src/crossfade.rs Transition
 * kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable CustomizedLookaheadAnimationVisualDebugging rr crates/kompoz-animation/src/lookahead_debug.rs
 * kompozable DefaultCursorHandle rr crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable DefaultOpenContextMenu rrrr crates/kompoz-foundation/src/context_menu.rs
+* method DeferredAnimatedContent dddddr crates/kompoz-animation/src/animated_content.rs DeferredTransition
+* method DeferredAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs DeferredTransition
 * kompozable Dialog rdr crates/kompoz-ui/src/window/dialog.rs
 * fn DialogProperties dddd crates/kompoz-ui/src/window/dialog.rs
 * kompozable DisableCutCopy r crates/kompoz-foundation/src/text/basic_secure_text_field.rs
@@ -131,6 +143,8 @@ kompoz-runtime/runtime kompozable Middle - crates/kompoz-runtime/tests/runtime.r
 kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/tests/text_input.rs
 * kompozable MultiContentLayout rdr crates/kompoz-ui/src/layout/composables.rs
 * kompozable MultiMeasureLayout drr crates/kompoz-ui/src/layout/composables.rs
+* fn MutableContentTransform ddddd crates/kompoz-animation/src/deferred_enter_exit.rs
+* fn MutableTransform ddd crates/kompoz-animation/src/deferred_enter_exit.rs
 * fn OverscrollConfiguration dd crates/kompoz-foundation/src/overscroll_android.rs
 * fn PaddingValues dddd crates/kompoz-foundation/src/layout/padding.rs
 * kompozable Pager rrrrrrrrrrrrrrrrr crates/kompoz-foundation/src/pager/lazy_layout_pager.rs
@@ -154,12 +168,16 @@ kompoz-ui/focus kompozable RestorableRow r crates/kompoz-ui/tests/focus.rs
 kompoz-runtime/macros fn RoundedCornerShape r crates/kompoz-runtime/tests/macros.rs
 * kompozable Row dddr crates/kompoz-foundation/src/layout/row_column.rs
 kompoz-foundation/lazy kompozable Row20 rr crates/kompoz-foundation/tests/lazy.rs
+* kompozable RowAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs
+* kompozable RowAnimatedVisibilityWithState rddddr crates/kompoz-animation/src/animated_visibility.rs
 kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros.rs
+kompoz/named_forms kompozable RustAnimatedForms rrr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustAnimationForms rr crates/kompoz/tests/named_forms.rs
 kompoz/kotlin kompozable RustBadge rd crates/kompoz/tests/kotlin.rs
 kompoz/named_forms kompozable RustLayoutForms - crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustListForms rr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustScrollForms - crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustSliding r crates/kompoz/tests/named_forms.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/macros.rs
@@ -212,6 +230,9 @@ kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.
 * kompozable TooltipArea rdddr crates/kompoz-foundation/src/tooltip_area.rs
 * kompozable TooltipPopup rrrrr crates/kompoz-foundation/src/basic_tooltip.rs
 kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros.rs
+* kompozable TransitionAnimatedContent rrrrrrr crates/kompoz-animation/src/animated_content.rs
+* kompozable TransitionAnimatedVisibility rrrrrrr crates/kompoz-animation/src/animated_visibility.rs
+* kompozable TransitionCrossfade rrrrr crates/kompoz-animation/src/crossfade.rs
 kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/tests/text_input.rs
 kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-foundation/tests/text_field_value.rs
@@ -251,6 +272,7 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method animate_decay rrd crates/kompoz-animation/src/animatable.rs Animatable
 * method animate_dp ddr crates/kompoz-animation/src/transition.rs Transition
 * kompozable animate_dp_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_enter_exit rddd crates/kompoz-animation/src/animated_visibility.rs AnimatedVisibilityScope
 * method animate_float ddr crates/kompoz-animation/src/transition.rs Transition
 * method animate_float rrrd crates/kompoz-animation/src/infinite_transition.rs InfiniteTransition
 * kompozable animate_float_as_state rdddd crates/kompoz-animation/src/animate_as_state.rs
@@ -360,7 +382,12 @@ kompoz-runtime/runtime kompozable effect rrr crates/kompoz-runtime/tests/runtime
 * method enter d crates/kompoz-test/src/input.rs MouseInjectionScope
 * method exit d crates/kompoz-test/src/input.rs MouseInjectionScope
 * method expand dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* fn expand_horizontally dddd crates/kompoz-animation/src/enter_exit.rs
+* fn expand_in dddd crates/kompoz-animation/src/enter_exit.rs
+* fn expand_vertically dddd crates/kompoz-animation/src/enter_exit.rs
 * fn exponential_decay dd crates/kompoz-animation/src/decay.rs
+* fn fade_in dd crates/kompoz-animation/src/enter_exit.rs
+* fn fade_out dd crates/kompoz-animation/src/enter_exit.rs
 * method fill_max_column_width d crates/kompoz-foundation/src/layout/flow_layout.rs Modifier as FlowLayoutScopeModifiers
 * method fill_max_height d crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 kompoz-runtime/macros method fill_max_height d crates/kompoz-runtime/tests/macros.rs Modifier
@@ -533,6 +560,8 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method rotate_rad rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tests/layout_modifiers.rs
 * method scale rrd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* fn scale_in ddd crates/kompoz-animation/src/enter_exit.rs
+* fn scale_out ddd crates/kompoz-animation/src/enter_exit.rs
 * method scale_uniform rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 * method scroll dr crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
 * method scroll dr crates/kompoz-foundation/src/gestures/scrollable_state.rs S as ScrollableStateExtensions
@@ -557,9 +586,20 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 * method set_text_substitution_action dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method shadow rdddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
 * method show_text_substitution dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* fn shrink_horizontally dddd crates/kompoz-animation/src/enter_exit.rs
+* fn shrink_out dddd crates/kompoz-animation/src/enter_exit.rs
+* fn shrink_vertically dddd crates/kompoz-animation/src/enter_exit.rs
 kompoz-runtime/macros method size d crates/kompoz-runtime/tests/macros.rs Modifier as OtherModifiers
 kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modifier as LayoutModifiers
 * method size_in dddd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* fn slide_in dr crates/kompoz-animation/src/enter_exit.rs
+* fn slide_in_horizontally dd crates/kompoz-animation/src/enter_exit.rs
+* fn slide_in_vertically dd crates/kompoz-animation/src/enter_exit.rs
+* method slide_into_container rdd crates/kompoz-animation/src/animated_content.rs AnimatedContentTransitionScope
+* fn slide_out dr crates/kompoz-animation/src/enter_exit.rs
+* fn slide_out_horizontally dd crates/kompoz-animation/src/enter_exit.rs
+* method slide_out_of_container rdd crates/kompoz-animation/src/animated_content.rs AnimatedContentTransitionScope
+* fn slide_out_vertically dd crates/kompoz-animation/src/enter_exit.rs
 * method smooth_scroll rdd crates/kompoz-test/src/input.rs MouseInjectionScope
 * fn snap d crates/kompoz-animation/src/spec.rs
 * fn spring ddd crates/kompoz-animation/src/spec.rs
@@ -587,12 +627,14 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * method tri_state_toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 * method triple_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
 * fn tween ddd crates/kompoz-animation/src/spec.rs
+* fn unveil_in ddd crates/kompoz-animation/src/enter_exit.rs
 * method update_anchors rd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method update_bounds dd crates/kompoz-animation/src/animatable.rs Animatable
 * method update_target rrd crates/kompoz-animation/src/deferred_target.rs DeferredTargetAnimation
 * kompozable update_transition rd crates/kompoz-animation/src/transition.rs
 * kompozable update_transition_of_state rd crates/kompoz-animation/src/transition.rs
 * kompozable value_as_state rrrrrr crates/kompoz-animation/src/animate_as_state.rs
+* fn veil_out ddd crates/kompoz-animation/src/enter_exit.rs
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method wait_until ddr crates/kompoz-test/src/lib.rs KompozTestRule

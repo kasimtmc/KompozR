@@ -22,6 +22,13 @@
 //!   `animateFloat(label =) { }`, `animateDp(label =, transitionSpec = { … isTransitioningTo … }) { }`,
 //!   `rememberInfiniteTransition(label =).animateFloat(initialValue =, targetValue =, animationSpec =)`. (Its
 //!   AnimatedVisibility, AnimatedContent, Crossfade and SharedTransitionLayout parts are WP3's and WP4's.)
+//! - C++ 7683's AnimatedVisibility, AnimatedContent and Crossfade parts and C++ 8240's (`graphics_forms_take_compose_
+//!   named_arguments`) stage-11 parts (stage 11 WP3): `AnimatedVisibility(visible =, enter =, exit =, label =) { }`
+//!   (in a Column: ColumnScope's), `AnimatedContent(targetState =, transitionSpec = { … togetherWith … }, label =)
+//!   { n -> }`, `Crossfade(targetState =, label =) { }`, the slides' lambdas of the full size (`slideInVertically { it
+//!   / 2 }`: half its height below half way), `AnimatedVisibility(visibleState =, enter =) { }`, `animateEnterExit(exit
+//!   =)` by name, `fadeIn(animationSpec =)`, `fadeOut(targetAlpha =)`, `slideOutVertically(animationSpec =) { }`,
+//!   `scaleOut(targetScale =)`, `spring(dampingRatio =, stiffness =)`.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -377,7 +384,151 @@ fn animations_take_compose_named_arguments() {
     assert_eq!(rust.borrow().last().unwrap(), "2 1 40 10 true");
 }
 
+// ---- C++ 7683's and 8240's AnimatedVisibility, AnimatedContent and Crossfade parts --------------------------------
+
+kompoz! {
+    @Composable
+    fun AnimatedForms(on: Boolean, count: Int, shown: MutableTransitionState<Boolean>) {
+        val bouncy = spring<Float>(dampingRatio = 0.2f, stiffness = 200f)
+        Column {
+            AnimatedVisibility(visible = on, enter = slideInVertically { it / 2 } + fadeIn(), exit = slideOutVertically { -it }, label = "details") {
+                Text("ayrıntı")
+            }
+            AnimatedContent(
+                targetState = count,
+                transitionSpec = {
+                    if (targetState > initialState) slideInVertically { it } togetherWith slideOutVertically { -it }
+                    else slideInVertically { -it } togetherWith slideOutVertically { it }
+                },
+                label = "count",
+            ) { n -> Text("sayı $n") }
+            Crossfade(targetState = on, label = "page") { v -> Text(if (v) "açık" else "kapalı") }
+            AnimatedVisibility(visibleState = shown, enter = fadeIn(animationSpec = tween(100)) + scaleIn(animationSpec = bouncy),
+                               exit = fadeOut(targetAlpha = 0.5f) + slideOutVertically(animationSpec = tween(100)) { it }) {
+                Box(modifier = Modifier.animateEnterExit(exit = scaleOut(targetScale = 0.5f)).size(10.dp).testTag("giren"))
+            }
+        }
+    }
+
+    @Composable
+    fun Sliding(visible: Boolean) {
+        AnimatedVisibility(visible, enter = slideInVertically(tween(100, easing = LinearEasing)) { it / 2 }, exit = ExitTransition.None) {
+            Box(modifier = Modifier.size(100.dp).testTag("kayan"))
+        }
+    }
+}
+
+#[kompozable]
+fn RustAnimatedForms(on: bool, count: i32, shown: MutableTransitionState<bool>) {
+    let bouncy: Arc<dyn FiniteAnimationSpec<f32>> = Arc::new(SpringSpec::<f32>::new(0.2, 200.0, None));
+    Column(move || {
+        ColumnAnimatedVisibility(
+            visible = on,
+            enter = slide_in_vertically(initial_offset_y = |it| it / 2) + fade_in(),
+            exit = slide_out_vertically(target_offset_y = |it| -it),
+            label = "details".into(),
+            content = |_| Text("ayrıntı (Rust)"),
+        );
+        AnimatedContent(
+            target_state = count,
+            transition_spec = |s: &AnimatedContentTransitionScope<i32>| {
+                if s.target_state() > s.initial_state() {
+                    slide_in_vertically(initial_offset_y = |it| it)
+                        .together_with(slide_out_vertically(target_offset_y = |it| -it))
+                } else {
+                    slide_in_vertically(initial_offset_y = |it| -it)
+                        .together_with(slide_out_vertically(target_offset_y = |it| it))
+                }
+            },
+            label = "count".into(),
+            content = |_, n: i32| Text(format!("sayı {n} (Rust)")),
+        );
+        Crossfade(
+            target_state = on,
+            label = "page".into(),
+            content = |v: bool| Text(if v { "açık (Rust)" } else { "kapalı (Rust)" }),
+        );
+        let bouncy = bouncy.clone();
+        ColumnAnimatedVisibilityWithState(
+            visible_state = shown.clone(),
+            enter = fade_in(animation_spec = Arc::new(tween(100))) + scale_in(animation_spec = bouncy),
+            exit = fade_out(target_alpha = 0.5)
+                + slide_out_vertically(animation_spec = Arc::new(tween(100)), target_offset_y = |it| it),
+            content = |s: &AnimatedVisibilityScope| {
+                let m = s.animate_enter_exit(Modifier, exit = scale_out(target_scale = 0.5));
+                Box(modifier = m.size(10.dp()).test_tag("giren (Rust)"));
+            },
+        );
+    });
+}
+
+#[kompozable]
+fn RustSliding(visible: bool) {
+    let linear: Arc<dyn FiniteAnimationSpec<IntOffset>> = Arc::new(TweenSpec::new(100, 0, LinearEasing));
+    AnimatedVisibility(
+        visible,
+        enter = slide_in_vertically(linear, |h| h / 2),
+        exit = ExitTransition::None,
+        content = |_| Box(modifier = Modifier.size(100.dp()).test_tag("kayan")),
+    );
+}
+
+fn animated_forms_take_compose_named_arguments() {
+    let on = mutable_state_of(false);
+    let count = mutable_state_of(0);
+    let (shown, rust_shown) = (MutableTransitionState(false), MutableTransitionState(false));
+    shown.set_target_state(true);
+    rust_shown.set_target_state(true);
+    let (o, c, s, rs) = (on.clone(), count.clone(), shown.clone(), rust_shown.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            AnimatedForms(o.get(), c.get(), s.clone());
+            RustAnimatedForms(o.get(), c.get(), rs.clone());
+        }),
+        IntSize::new(400, 800),
+    );
+    rule.wait_for_idle();
+    for suffix in ["", " (Rust)"] {
+        assert!(rule.on_node_with_text(&format!("sayı 0{suffix}")).exists());
+        assert!(rule.on_node_with_text(&format!("kapalı{suffix}")).exists());
+        assert!(!rule.on_node_with_text(&format!("ayrıntı{suffix}")).exists());
+        assert!(rule.on_node_with_tag(&format!("giren{suffix}")).exists());
+    }
+    assert!(shown.current_state() && rust_shown.current_state());
+    on.set(true);
+    count.set(1);
+    rule.wait_for_idle();
+    for suffix in ["", " (Rust)"] {
+        assert!(rule.on_node_with_text(&format!("sayı 1{suffix}")).exists());
+        assert!(!rule.on_node_with_text(&format!("sayı 0{suffix}")).exists());
+        assert!(rule.on_node_with_text(&format!("açık{suffix}")).exists());
+        assert!(rule.on_node_with_text(&format!("ayrıntı{suffix}")).exists());
+    }
+    shown.set_target_state(false);
+    rust_shown.set_target_state(false);
+    rule.wait_for_idle();
+    assert!(!rule.on_node_with_tag("giren").exists() && !rule.on_node_with_tag("giren (Rust)").exists());
+    // The slides' lambdas: a content 100 tall hidden by slideInVertically { it / 2 } sits 25 below its place half way.
+    for rust in [false, true] {
+        let vis = mutable_state_of(false);
+        let v = vis.clone();
+        let slide = KompozTestRule::new(kompozable_lambda!(move || {
+            if rust {
+                RustSliding(v.get());
+            } else {
+                Sliding(v.get());
+            }
+        }));
+        vis.set(true);
+        slide.advance_frame(); // (composed; the slide starts at the next frame, as Compose's: C++'s a frame earlier)
+        slide.advance_time_by(64);
+        let y = bounds(&slide, "kayan").top;
+        assert!(y > 20.0 && y < 30.0, "{rust}: {y}");
+    }
+}
+
 tests![
+    animated_forms_take_compose_named_arguments,
     animations_take_compose_named_arguments,
     state_forms_take_compose_named_arguments,
     scroll_forms_take_compose_named_arguments,

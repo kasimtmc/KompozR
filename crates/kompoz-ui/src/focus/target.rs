@@ -295,7 +295,8 @@ pub(crate) fn find_active_focus_node(cell: &NodeRc) -> Option<NodeRc> {
 
 /// Whether focus search may go to it: its layout placed and attached (Compose's `isEligibleForFocusSearch`).
 pub(crate) fn is_eligible_for_focus_search(cell: &NodeRc) -> bool {
-    cell.layout_node().is_some_and(|n| n.is_attached() && n.is_placed())
+    // (not in a layout taking no input: KompozR's PointerInputModifierNode::blocks_input)
+    cell.layout_node().is_some_and(|n| n.is_attached() && n.is_placed() && !crate::input::input_blocked_at(&n))
 }
 
 /// Its focus rect in its root's coordinates (Compose's `focusRect`).
