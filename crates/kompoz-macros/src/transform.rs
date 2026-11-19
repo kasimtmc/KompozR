@@ -15,9 +15,10 @@
 //!   composable is reached through its type (`TextStyle::__kz_builder()`) when called with named arguments or more
 //!   positional ones than its parameters without a default, as the API index or the body's own items tell;
 //! - a lowercase path call or a method call is rewritten when an argument is named (`name = value`), or when it
-//!   gives more positional arguments than the callee's parameters without a default (and no more than all), the
-//!   callee known from the API index (`known`) or the body's own items (`color.copy(0.5)`,
-//!   `top_app_bar_colors(red)`). A function's name counts only on a path of modules (`f(…)`, `module::f(…)`), not a
+//!   gives more positional arguments than the callee's parameters without a default (and no more than all), or
+//!   when the callee has a `#[memoized]` parameter and the arguments fill its parameters (its closure gets its
+//!   identity: `LocalX.provides_computed(|s| …)`), the callee known from the API index (`known`) or the body's own
+//!   items (`color.copy(0.5)`, `top_app_bar_colors(red)`). A function's name counts only on a path of modules (`f(…)`, `module::f(…)`), not a
 //!   type's (`Type::f(…)`). A raw name keeps a call as written (`x.r#copy(1)`, `r#Font(a, b)`), and so do the
 //!   names `#[kompozable(plain(copy, …))]` lists: methods of other types with the name of an indexed one;
 //! - positional arguments fill the parameters in order, except a last unnamed closure, which goes to the last
@@ -554,19 +555,19 @@ impl Transformer {
             return Route::Keep;
         }
         let named = args.iter().any(|a| named_arg(a).is_some());
-        let overflows = !named
+        let by_builder = !named
             && seg.arguments.is_none()
             && module_path(&p.path)
-            && self.known.function_overflows(&name, args.len(), args.last().is_some_and(last_is_closure));
+            && self.known.function_rewritten(&name, args.len(), args.last().is_some_and(last_is_closure));
         if is_pascal(&name) {
-            if named || overflows {
+            if named || by_builder {
                 if self.known.is_plain_function(&name) { Route::Type } else { Route::Probe { named } }
             } else if self.plain {
                 Route::Keep
             } else {
                 Route::Probe { named: false }
             }
-        } else if named || overflows {
+        } else if named || by_builder {
             Route::Type
         } else {
             Route::Keep
@@ -581,7 +582,7 @@ impl Transformer {
         }
         m.args.iter().any(|a| named_arg(a).is_some())
             || (m.turbofish.is_none()
-                && self.known.method_overflows(&name, m.args.len(), m.args.last().is_some_and(last_is_closure)))
+                && self.known.method_rewritten(&name, m.args.len(), m.args.last().is_some_and(last_is_closure)))
     }
 
     /// What is done with each of `args` (a rewritten call's if `rewritten`).

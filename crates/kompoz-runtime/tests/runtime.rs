@@ -722,6 +722,106 @@ fn dynamic_locals_are_read_live_and_static_ones_compose_their_keepers_again() {
     assert_eq!(runs(&KEEPER_RUNS), 2);
 }
 
+// ---- Computed locals (Compose 1.7's providesComputed, compositionLocalWithComputedDefaultOf) ----------------------
+
+static LocalBase: KompozitionLocal<i32> = KompozitionLocal::new(|| 1);
+static LocalTwice: KompozitionLocal<i32> = KompozitionLocal::new(|| 0);
+static LocalThrice: KompozitionLocal<i32> =
+    kompozition_local_with_computed_default_of(|scope| scope.current_value(&LocalBase) * 3);
+
+fn computed_locals_are_computed_where_they_are_read() {
+    // Compose's ComputedValueHolder: the computation reads the other locals as its reader sees them (a provider
+    // below the computed one's counts); a computed default the same; a value provided for either takes its place.
+    reset(&KEEPER_RUNS);
+    let rule = Rule::new(kompozable_lambda!(|| {
+        Text(format!("default={}/{}", LocalTwice.current(), LocalThrice.current()));
+        KompozitionLocalProvider(&[LocalTwice.provides_computed(|scope| scope.current_value(&LocalBase) * 2)], || {
+            Text(format!("outer={}/{}", LocalTwice.current(), LocalThrice.current()));
+            KompozitionLocalProvider(&[LocalBase.provides(10)], || {
+                Text(format!("inner={}/{}", LocalTwice.current(), LocalThrice.current()));
+                Keeper();
+                KompozitionLocalProvider(&[LocalThrice.provides(7), LocalTwice.provides(5)], || {
+                    Text(format!("given={}/{}", LocalTwice.current(), LocalThrice.current()));
+                });
+            });
+        });
+    }));
+    assert!(rule.has("default=0/3") && rule.has("outer=2/3"), "{:?}", rule.names());
+    assert!(rule.has("inner=20/30") && rule.has("given=5/7"), "{:?}", rule.names());
+    // Read from the locals a layout keeps: computed there, from what they hold.
+    assert_eq!(kept(|k| format!("{}/{}", k.get(&LocalTwice), k.peek(&LocalThrice))), "20/30");
+}
+
+static LocalTint: KompozitionLocal<i32> = KompozitionLocal::new(|| 0);
+
+thread_local! {
+    static PROVIDER_RUNS: Cell<u32> = const { Cell::new(0) };
+    static TINT_RUNS: Cell<u32> = const { Cell::new(0) };
+}
+
+#[kompozable]
+fn TintReader() {
+    bump(&TINT_RUNS);
+    Text(format!("tint={}", LocalTint.current()));
+}
+
+#[kompozable]
+fn TintedContent() {
+    TintReader();
+    Keeper();
+}
+
+fn a_computed_local_is_followed_by_its_readers_alone() {
+    // What the computation reads is its reader's read: a state it reads changing composes the reader again (and
+    // tells whoever read it from kept locals), not the provider. The provider composing again with a closure that
+    // captures the same values keeps it (Compose's memoized lambda, the holder kept): no reader is told; one that
+    // captures another value is another value: its readers, and the layouts keeping it, compose again.
+    reset(&PROVIDER_RUNS);
+    reset(&TINT_RUNS);
+    reset(&KEEPER_RUNS);
+    let (tint, other, offset) = (mutable_state_of(1), mutable_state_of(0), mutable_state_of(0));
+    let (t, o, f) = (tint.clone(), other.clone(), offset.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        bump(&PROVIDER_RUNS);
+        let _ = o.get();
+        let add = f.get();
+        let tint = t.clone();
+        KompozitionLocalProvider(&[LocalTint.provides_computed(move |_| tint.get() * 10 + add)], || TintedContent());
+    }));
+    let runs_now = || (runs(&PROVIDER_RUNS), runs(&TINT_RUNS), runs(&KEEPER_RUNS));
+    assert!(rule.has("tint=10") && runs_now() == (1, 1, 1));
+    tint.set(2);
+    rule.wait_for_idle();
+    assert!(rule.has("tint=20"), "{:?}", rule.names());
+    assert_eq!(runs_now(), (1, 2, 1)); // the reader alone
+    // Read from the kept locals: computed there, its state read observed (a measure reading it would run again).
+    let read_keys = Rc::new(RefCell::new(Vec::<StateKey>::new()));
+    let rk = read_keys.clone();
+    let observed = observe_reads(Rc::new(move |k| rk.borrow_mut().push(k)), || kept(|k| k.get(&LocalTint).to_string()));
+    assert!(observed == "20" && read_keys.borrow().len() == 1);
+    let changed = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<StateKey>::new()));
+    let c = changed.clone();
+    let _observer = Snapshot::register_apply_observer(move |keys| c.lock().extend_from_slice(keys));
+    tint.set(3);
+    rule.wait_for_idle();
+    assert!(changed.lock().contains(&read_keys.borrow()[0]));
+    assert!(rule.has("tint=30") && runs_now() == (1, 3, 1));
+    // The provider composed again for something else, its closure capturing the same: its readers stay.
+    other.set(1);
+    rule.wait_for_idle();
+    assert_eq!(runs_now(), (2, 3, 1));
+    // Another value captured: another computation, read again (the keeper keeps the new one).
+    offset.set(5);
+    rule.wait_for_idle();
+    assert!(rule.has("tint=35"), "{:?}", rule.names());
+    assert_eq!(runs_now(), (3, 4, 2));
+    assert_eq!(kept(|k| k.get(&LocalTint).to_string()), "35");
+    // (the new computation followed as the old one was)
+    tint.set(4);
+    rule.wait_for_idle();
+    assert!(rule.has("tint=45") && runs_now() == (3, 5, 2));
+}
+
 #[kompozable]
 fn ContextUser() {
     Text(format!("ctx={}/{}", LocalSpeed.current(), LocalUnit.current()));
@@ -1335,6 +1435,8 @@ tests!(
     changed_argument_reruns_child,
     local_change_reaches_reader_under_skipped_parent,
     dynamic_locals_are_read_live_and_static_ones_compose_their_keepers_again,
+    computed_locals_are_computed_where_they_are_read,
+    a_computed_local_is_followed_by_its_readers_alone,
     a_context_provided_again_follows_its_provider,
     values_registered_by_key_are_saved_and_given_back_once,
     partial_recomposition_keeps_node_order,

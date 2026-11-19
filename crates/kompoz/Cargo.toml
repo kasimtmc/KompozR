@@ -124,6 +124,12 @@ harness = false
 name = "kotlin_animated_vector"
 harness = false
 
+# Composition locals computed where they are read (providesComputed, compositionLocalWithComputedDefaultOf) in
+# Kotlin's syntax.
+[[test]]
+name = "kotlin_locals"
+harness = false
+
 # Lookahead animations of bounds (animateContentSize, animateBounds, BoundsTransform, the visual debugging) in
 # Kotlin's syntax.
 [[test]]

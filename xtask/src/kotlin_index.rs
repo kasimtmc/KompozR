@@ -3,8 +3,8 @@
 //!
 //! - `crates/kompoz-macros/api-index.txt`, what the macros read (its format and its writer:
 //!   `crates/kompoz-macros/src/api_index.rs`, shared here by `#[path]`): every `#[named]` and `#[kompozable]`
-//!   function and every `#[named]` impl's method with a defaulted parameter, of every target of every package, with
-//!   which of their parameters have defaults;
+//!   function and every `#[named]` impl's method with a defaulted or `#[memoized]` parameter, of every target of every
+//!   package, with which of their parameters have defaults and which are memoized;
 //! - `crates/kompoz-kotlin/src/index/generated.rs`, what the Kotlin syntax's generator reads (its types:
 //!   `crates/kompoz-kotlin/src/index/mod.rs`): the public API of the crates Kotlin code calls — functions,
 //!   methods, extension traits' methods, associated functions, properties (`#[derive(KotlinProperties)]`), value
@@ -393,6 +393,17 @@ fn defaults_of(sig: &Signature) -> Vec<bool> {
         .collect()
 }
 
+/// Whether each parameter is `#[memoized]`.
+fn memoized_of(sig: &Signature) -> Vec<bool> {
+    sig.inputs
+        .iter()
+        .filter_map(|a| match a {
+            FnArg::Typed(pt) => Some(pt.attrs.iter().any(|a| a.path().is_ident("memoized"))),
+            FnArg::Receiver(_) => None,
+        })
+        .collect()
+}
+
 impl<'ast> Visit<'ast> for ApiVisitor<'_> {
     fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
         self.function(&f.attrs, &f.sig);
@@ -408,13 +419,14 @@ impl<'ast> Visit<'ast> for ApiVisitor<'_> {
             };
             for item in &imp.items {
                 let ImplItem::Fn(m) = item else { continue };
-                let defaults = defaults_of(&m.sig);
-                if defaults.iter().any(|d| *d) {
+                let (defaults, memoized) = (defaults_of(&m.sig), memoized_of(&m.sig));
+                if defaults.iter().any(|d| *d) || memoized.iter().any(|m| *m) {
                     self.out.push(Entry {
                         scope: self.scope.clone(),
                         kind: EntryKind::Method,
                         name: unraw(&m.sig.ident),
                         defaults,
+                        memoized,
                         owner: owner.clone(),
                     });
                 }
@@ -446,6 +458,7 @@ impl ApiVisitor<'_> {
             kind,
             name: unraw(&sig.ident),
             defaults: defaults_of(sig),
+            memoized: memoized_of(sig),
             owner: self.file.clone(),
         });
     }
@@ -1280,6 +1293,9 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     if has_attr(attrs, "named") || it.params.iter().any(|p| p.default.as_ref().is_some_and(|d| !d.0)) {
         it.flags.insert("NAMED");
     }
+    if typed.iter().any(|pt| pt.attrs.iter().any(|a| a.path().is_ident("memoized"))) {
+        it.flags.insert("MEMOIZED");
+    }
     let mut out = Vec::new();
     // (Kotlin's overloads, as a tuple: `fn Color(args: impl ColorArgs)`)
     if let [only] = typed.as_slice()
@@ -1385,6 +1401,17 @@ fn lambda(ty: &Type, bounds: &BTreeMap<String, Vec<TypeParamBound>>, boxed: &Box
         Type::TraitObject(o) => from_bounds(&o.bounds.iter().cloned().collect::<Vec<_>>(), bounds, boxed),
         Type::Reference(r) => lambda(&r.elem, bounds, boxed),
         Type::Paren(p) => lambda(&p.elem, bounds, boxed),
+        // (a function pointer: a lambda capturing nothing — `compositionLocalOf { … }`, a computed default's
+        // `CompositionLocalAccessorScope.() -> T`)
+        Type::FnPtr(f) => {
+            let inputs: Vec<String> = f.inputs.iter().map(|a| text(a.ty.to_token_stream())).collect();
+            let output = match &f.output {
+                ReturnType::Default => "()".to_string(),
+                ReturnType::Type(_, t) => text(t.to_token_stream()),
+            };
+            let receiver = f.inputs.first().map(|a| receiver_of(&a.ty)).unwrap_or_default();
+            Some(KLambda { kind: "Fn", inputs, output, receiver, suspend: false, boxed: false })
+        }
         Type::Path(p) => {
             let seg = p.path.segments.last()?;
             let name = seg.ident.to_string();

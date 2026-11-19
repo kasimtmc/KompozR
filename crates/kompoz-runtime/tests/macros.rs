@@ -531,6 +531,52 @@ fn a_memoized_parameter_is_kept_by_its_identity() {
     assert_eq!((plain.id(), plain.remember(|f| f())), (None, 3));
 }
 
+/// A type with methods taking a memoized closure (by `&self`, and by `&'static self` as a composition local's
+/// `provides_computed` does): they give its identity back.
+struct Ids;
+
+#[named]
+impl Ids {
+    fn of(&self, #[memoized] make: impl Fn() -> String + 'static) -> Option<u64> {
+        make.id()
+    }
+
+    fn of_static(&'static self, #[memoized] make: impl Fn() -> String + 'static) -> (Option<u64>, String) {
+        (make.id(), make.into_value()())
+    }
+}
+
+static IDS: Ids = Ids;
+
+fn a_memoized_method_parameter_has_its_identity_from_a_positional_call() {
+    // (the method has no defaulted parameter: its positional call goes through its builder all the same, the API index
+    // marking the memoized parameter, and the closure keeps its identity while what it captures stays the same)
+    let tick = mutable_state_of(0);
+    let word = mutable_state_of("a".to_string());
+    let (t, w) = (tick.clone(), word.clone());
+    let seen = Rc::new(RefCell::new(Vec::<(Option<u64>, Option<u64>, String)>::new()));
+    let s = seen.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        Label(format!("tick {t}"));
+        let word = w.get();
+        let by_ref = Ids.of(move || word.clone());
+        let word = w.get();
+        let (by_static, made) = IDS.of_static(move || format!("made of {word}"));
+        s.borrow_mut().push((by_ref, by_static, made));
+    }));
+    tick.set(1);
+    rule.wait_for_idle();
+    word.set("b".into());
+    rule.wait_for_idle();
+    let seen = seen.borrow();
+    let [(a0, s0, m0), (a1, s1, _), (a2, s2, m2)] = seen.as_slice() else { panic!("{seen:?}") };
+    assert!(a0.is_some() && s0.is_some() && m0 == "made of a" && m2 == "made of b");
+    assert!(a1 == a0 && s1 == s0, "the same captures: the same identities");
+    assert!(a2 != a0 && s2 != s0, "other captures: other identities");
+    // A plain call (outside a composable body): no identity.
+    assert_eq!(Ids.of(String::new), None);
+}
+
 // ---- Captures ------------------------------------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -766,6 +812,7 @@ tests!(
     closures_are_the_same_while_what_they_capture_is,
     a_closure_parameter_passed_on_keeps_its_identity,
     a_memoized_parameter_is_kept_by_its_identity,
+    a_memoized_method_parameter_has_its_identity_from_a_positional_call,
     positional_arguments_past_the_required_ones_go_through_the_builder,
     a_call_can_be_kept_as_written,
     pascal_case_functions_are_functions_everywhere,

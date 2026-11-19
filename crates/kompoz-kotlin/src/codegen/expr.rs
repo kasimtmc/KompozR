@@ -552,6 +552,13 @@ impl Gen<'_, '_> {
             };
             return Out::plain(quote_spanned!(span=> #kt::#t::#m(#arg)), Ty::from_rust(item.ret));
         }
+        // A member extension property of an implicit receiver (`LocalX.currentValue` in a `providesComputed { }`), the
+        // value's type having no member of that name.
+        if recv.ty.owner().is_some_and(|o| members_of(o, &name.name).next().is_none())
+            && let Some((r, item)) = self.extension_property(&recv.ty, &name.name)
+        {
+            return self.extension_property_read(recv, &r, item, loc);
+        }
         let (rust, ty, by_value) =
             match recv.ty.owner().and_then(|o| members_of(o, &name.name).find(|i| i.params.is_empty())) {
                 Some(item) => (
@@ -569,6 +576,21 @@ impl Gen<'_, '_> {
         };
         let m = ident(&rust, mspan);
         Out::plain(quote_spanned!(span=> #r.#m()), ty)
+    }
+
+    /// A member extension property `item` of the implicit receiver `r` read of `recv`: `r.item(&recv)`.
+    fn extension_property_read(&mut self, recv: Out, r: &ImplicitReceiver, item: &index::Item, loc: Loc) -> Out {
+        let span = self.span(loc);
+        let ri = proc_macro2::Ident::new(&r.rust, span);
+        let m = ident(item.rust, span);
+        let ty = owner_arg_ret(&recv.ty, item.ret);
+        let arg = if item.params[0].ty.trim_start().starts_with('&') {
+            let v = recv.ts;
+            quote_spanned!(span=> &#v)
+        } else {
+            self.finish(recv, Want::default(), loc)
+        };
+        Out::plain(quote_spanned!(span=> #ri.#m(#arg)), ty)
     }
 
     /// `Q.name` where `Q` is a type or an object.
@@ -593,6 +615,12 @@ impl Gen<'_, '_> {
                     value_ty.owner().and_then(|o| members_of(o, &name.name).next())
                 })
             });
+            // (a member extension property of a receiver: `LocalDensity.currentValue` in a `providesComputed { }`)
+            if m.is_none()
+                && let Some((r, item)) = self.extension_property(&value_ty, &name.name)
+            {
+                return self.extension_property_read(Out::plain(qi, value_ty), &r, item, loc);
+            }
             let rust = m.map(|i| i.rust.to_string()).unwrap_or_else(|| snake(&name.name));
             // (a generic value's member giving its type argument — `LocalClipboard.current`, a
             // `KompozitionLocal<Clipboard>`'s `T` — is of that type: its methods are known)
@@ -937,29 +965,47 @@ impl Gen<'_, '_> {
                 if let Some(out) = self.infix_member(name, lhs, rhs, loc) {
                     return out;
                 }
-                // An infix member of the index (`LocalX provides v`).
-                let item = lookup(other).iter().find(|i| i.kind == Kind::Method && i.params.len() == 1);
-                let Some(item) = item else {
+                // An infix member of the index on a value of a type KompozR can't tell (`LocalX provides v`, `LocalX` a
+                // `val` of another file).
+                let items: Vec<&'static index::Item> =
+                    lookup(other).iter().filter(|i| i.kind == Kind::Method && i.params.len() == 1).collect();
+                let Some(item) = items.first().copied() else {
                     return Out::plain(self.later(loc, &format!("the infix function `{other}`")), Ty::Unknown);
                 };
                 // (a name whose declaration isn't seen, in place: a static of another file, `LocalSpacing provides …`)
-                let a = match &lhs.kind {
+                let recv = match &lhs.kind {
                     ExprKind::Name(n) if self.unseen(&n.name) => {
                         let i = self.name_ident(&value_name(&n.name), n.loc);
-                        quote!(#i)
+                        Out::plain(quote!(#i), Ty::Unknown)
                     }
-                    _ => self.expr(lhs).ts,
+                    _ => {
+                        let o = self.expr(lhs);
+                        Out { ty: Ty::Unknown, ..o }
+                    }
                 };
+                if items.iter().any(|i| i.rust != item.rust) {
+                    // (members of several Rust names: the one kind of callee it and its argument fit, as a method
+                    // call's)
+                    return self.infix_call(recv, lhs, name, rhs, loc);
+                }
+                // (all of one Rust name: written as each of them is, its argument as it is — Rust finds the method on
+                // the value's type —, what it gives theirs where they agree)
                 let b = self.value(rhs);
+                let a = recv.ts;
                 let m = ident(item.rust, self.span(name.loc));
-                Out::plain(quote_spanned!(span=> #a.#m(#b)), Ty::from_rust(item.ret))
+                let ret = if items.iter().all(|i| i.ret == item.ret) { Ty::from_rust(item.ret) } else { Ty::Unknown };
+                Out::plain(quote_spanned!(span=> #a.#m(#b)), ret)
             }
         }
     }
 
     // ---- Inference without writing -----------------------------------------------------------------------------
 
-    /// What an expression's type is, as far as can be told without writing it (no capture recorded).
+    /// What an expression's type is, as far as can be told without writing it (no capture recorded): Kotlin's
+    /// inference as the index tells the callees — a generic callee's result told by its arguments and by what its
+    /// lambdas give (`remember { … }`, `with(x) { … }`, `x.let { … }`), a lambda looked into with its receiver (the
+    /// scope's type, or the value a scope function lends) and its parameters' types known, a block's own locals, a
+    /// member extension of a receiver (`LocalX.currentValue`, `1.3f at 100`), a shared value's members.
     pub(crate) fn peek_ty(&self, e: &Expr) -> Ty {
         match &e.kind {
             ExprKind::Number(n) => match n.kind {
@@ -974,14 +1020,14 @@ impl Gen<'_, '_> {
             ExprKind::Bool(_) | ExprKind::Is { .. } => Ty::Bool,
             ExprKind::Null => Ty::Nullable(Box::new(Ty::Unknown)),
             ExprKind::Name(n) => {
-                if let Some(l) = self.scopes.iter().rev().find_map(|s| s.get(&n.name)) {
-                    return l.ty.clone();
+                if let Some(t) = self.peeked_local(&n.name) {
+                    return t;
                 }
                 if let Some(v) = self.file.vals.get(&n.name) {
                     return v.ty.clone();
                 }
                 if let Some(i) =
-                    self.receivers.iter().rev().find_map(|r| members_of(&r.ty, &n.name).find(|i| i.params.is_empty()))
+                    self.receiver_tys().iter().find_map(|r| members_of(r, &n.name).find(|i| i.params.is_empty()))
                 {
                     return Ty::from_rust(i.ret);
                 }
@@ -993,10 +1039,10 @@ impl Gen<'_, '_> {
             }
             ExprKind::This { label } => {
                 let r = match label {
-                    None => self.receivers.last(),
-                    Some(l) => self.receivers.iter().rev().find(|r| r.labels.contains(&l.name)),
+                    None => self.receiver_tys().into_iter().next(),
+                    Some(l) => self.receivers.iter().rev().find(|r| r.labels.contains(&l.name)).map(|r| r.ty.clone()),
                 };
-                r.map(|r| Ty::from_rust(&r.ty)).unwrap_or(Ty::Unknown)
+                r.map(|r| Ty::from_rust(&r)).unwrap_or(Ty::Unknown)
             }
             ExprKind::Paren(x) | ExprKind::Annotated { expr: x, .. } => self.peek_ty(x),
             ExprKind::Prefix { op: PrefixOp::Not, .. } => Ty::Bool,
@@ -1038,7 +1084,33 @@ impl Gen<'_, '_> {
                     if matches!(t, Ty::Range(_)) { t } else { Ty::Range(Box::new(t)) }
                 }
                 "to" => Ty::Pair(Box::new(self.peek_ty(lhs)), Box::new(self.peek_ty(rhs))),
-                _ => self.peek_ty(lhs),
+                "and" | "or" | "xor" | "shl" | "shr" | "ushr" => self.peek_ty(lhs),
+                // (an infix member: the left side's type's, or a member extension of a receiver — `1.3f at 100` in a
+                // `keyframes { }` block, the config's `at(value: T, …)` —; the file's own infix extension)
+                other => {
+                    let l = self.peek_ty(lhs).non_null();
+                    if let Some(i) = self.method_of(&l, other) {
+                        return owner_arg_ret(&l, i.ret);
+                    }
+                    if let Some(f) = self.file.extension(other, l.owner()) {
+                        return f.ret.clone();
+                    }
+                    self.receiver_tys()
+                        .iter()
+                        .find_map(|r| {
+                            members_of(r, other).find(|i| {
+                                i.kind == Kind::Method && i.params.len() == 2 && {
+                                    let first = Ty::from_rust(i.params[0].ty);
+                                    super::call::is_type_parameter(i.params[0].ty)
+                                        || first.owner().is_some() && first.owner() == l.owner()
+                                        || first.is_float() && l.is_number()
+                                        || first == l
+                                }
+                            })
+                        })
+                        .map(|i| Ty::from_rust(i.ret))
+                        .unwrap_or(Ty::Unknown)
+                }
             },
             ExprKind::If { then, otherwise, .. } => {
                 let a = self.peek_block(then);
@@ -1064,12 +1136,18 @@ impl Gen<'_, '_> {
                         return Ty::named(&q);
                     }
                     if is_value_object(&q) {
-                        return members_of(&q, &name.name).next().map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::Unknown);
+                        if let Some(i) = members_of(&q, &name.name).next() {
+                            return Ty::from_rust(i.ret);
+                        }
+                        // (a member extension property of a receiver: `LocalX.currentValue`)
+                        let value = value_object_ty(&q);
+                        return self.peek_extension_property(&value, &name.name);
                     }
                     return associated(&q, &name.name).first().map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::named(&q));
                 }
-                let r = self.peek_ty(receiver);
-                let t = self.member_ty(&r.non_null(), &name.name, false);
+                let r = self.peek_ty(receiver).non_null();
+                let t = self.member_ty(&r, &name.name, false);
+                let t = if t == Ty::Unknown { self.peek_extension_property(&r, &name.name) } else { t };
                 if *safe { t.nullable() } else { t }
             }
             ExprKind::Call { callee, type_args, args, trailing_lambda } => {
@@ -1083,12 +1161,144 @@ impl Gen<'_, '_> {
         }
     }
 
-    /// The type of a block's value (its last expression).
+    /// The type of a block's value (its last expression), the locals it declares before it known as far as their
+    /// values tell (`remember { val a = Animatable(0f); a }`).
     pub(crate) fn peek_block(&self, b: &Block) -> Ty {
-        match b.stmts.last() {
-            Some(Stmt { kind: StmtKind::Expr(e), .. }) => self.peek_ty(e),
-            _ => Ty::Unit,
+        let Some(Stmt { kind: StmtKind::Expr(e), .. }) = b.stmts.last() else { return Ty::Unit };
+        if b.stmts.len() == 1 {
+            return self.peek_ty(e);
         }
+        self.peek_scopes.borrow_mut().push(std::collections::HashMap::new());
+        for s in &b.stmts[..b.stmts.len() - 1] {
+            let StmtKind::Decl(Decl::Property(p)) = &s.kind else { continue };
+            let Binding::Name(n) = &p.binding else { continue };
+            let ty = match (&p.ty, &p.init) {
+                (Some(t), _) => self.ty_of(t),
+                (None, PropertyInit::Value(v)) => self.peek_ty(v),
+                (None, PropertyInit::Delegate(d)) => self.delegate_ty(d),
+                (None, PropertyInit::None) => Ty::Unknown,
+            };
+            self.peek_scopes.borrow_mut().last_mut().expect("its scope").insert(n.name.clone(), ty);
+        }
+        let t = self.peek_ty(e);
+        self.peek_scopes.borrow_mut().pop();
+        t
+    }
+
+    /// The type of a local of the name as inference sees it: one a block it looks into declares, else one in scope.
+    fn peeked_local(&self, name: &str) -> Option<Ty> {
+        if let Some(t) = self.peek_scopes.borrow().iter().rev().find_map(|s| s.get(name)) {
+            return Some(t.clone());
+        }
+        self.scopes.iter().rev().find_map(|s| s.get(name)).map(|l| l.ty.clone())
+    }
+
+    /// The Rust types of the implicit receivers, innermost first: those of the lambdas inference looks into, then
+    /// those of the lambdas and extension functions being written.
+    pub(crate) fn receiver_tys(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.peek_receivers.borrow().iter().rev().cloned().collect();
+        out.extend(self.receivers.iter().rev().map(|r| r.ty.clone()));
+        out
+    }
+
+    /// What `lambda` given to a parameter taking `info` gives, its receiver (a scope's type, or the value the call is
+    /// made on where it is lent it: `apply`, `run`, `with`) and its parameters (`it`, the names it gives them) known to
+    /// inference as the index's types tell. `lent` is that value's type and the name of the type parameter the
+    /// callee lends it as (`Self` for a method of it — its `Self::Item`s its elements —, `T` for `with(x) { }`).
+    pub(crate) fn peek_lambda(&self, lambda: &Lambda, info: Option<&index::Lambda>, lent: Option<(&Ty, &str)>) -> Ty {
+        let mut inputs: Vec<Ty> = Vec::new();
+        let mut receiver = None;
+        if let Some(info) = info {
+            let bare = |t: &str| {
+                let t = t.trim();
+                t.strip_prefix("&mut ").or_else(|| t.strip_prefix('&')).unwrap_or(t).trim().to_string()
+            };
+            let lent_ty = |t: &str| match lent {
+                Some((ty, name)) if bare(t) == name => Some(ty.clone()),
+                Some((ty, "Self")) if bare(t) == "Self::Item" => Some(ty.element()),
+                _ => None,
+            };
+            let mut rest = info.inputs.iter();
+            if !info.receiver.is_empty() {
+                receiver = Some(info.receiver.to_string());
+                rest.next();
+            } else if let Some(first) = info.inputs.first()
+                && first.trim().starts_with("&mut")
+                && let Some((ty, name)) = lent
+                && bare(first) == name
+            {
+                // (Kotlin's `T.() -> R` of a scope function, the value lent as `&mut Self` / `&mut T`)
+                receiver = ty.owner().map(str::to_string);
+                rest.next();
+            }
+            for t in rest {
+                inputs.push(lent_ty(t).unwrap_or_else(|| Ty::from_rust(t)));
+            }
+        }
+        let mut scope = std::collections::HashMap::new();
+        match &lambda.params {
+            Some(ps) => {
+                for (k, p) in ps.iter().enumerate() {
+                    if let Binding::Name(n) = &p.binding {
+                        let ty = p.ty.as_ref().map(|t| self.ty_of(t)).or_else(|| inputs.get(k).cloned());
+                        scope.insert(n.name.clone(), ty.unwrap_or(Ty::Unknown));
+                    }
+                }
+            }
+            None => {
+                if let [only] = inputs.as_slice() {
+                    scope.insert("it".to_string(), only.clone());
+                }
+            }
+        }
+        self.peek_scopes.borrow_mut().push(scope);
+        let pushed = receiver.is_some();
+        if let Some(r) = receiver {
+            self.peek_receivers.borrow_mut().push(r);
+        }
+        let t = self.peek_block(&lambda.body);
+        if pushed {
+            self.peek_receivers.borrow_mut().pop();
+        }
+        self.peek_scopes.borrow_mut().pop();
+        t
+    }
+
+    /// The method `name` a value of type `recv` has, as the index tells: its type's own (or its extension traits',
+    /// what it derefs to), else a kt shim's of its Kotlin type.
+    fn method_of(&self, recv: &Ty, name: &str) -> Option<&'static index::Item> {
+        if let Some(o) = recv.owner()
+            && let Some(i) = members_of(o, name).find(|i| i.kind == Kind::Method)
+        {
+            return Some(i);
+        }
+        kt_members(name, recv.kt_traits()).into_iter().next()
+    }
+
+    /// A member extension property of an implicit receiver (Kotlin's `val T.name` declared in a scope:
+    /// `LocalX.currentValue` in a `CompositionLocalAccessorScope`) that a value of type `recv` has, as inference sees
+    /// the receivers: its type.
+    fn peek_extension_property(&self, recv: &Ty, name: &str) -> Ty {
+        self.receiver_tys()
+            .iter()
+            .find_map(|r| extension_member(r, recv, name, 1))
+            .map(|i| owner_arg_ret(recv, i.ret))
+            .unwrap_or(Ty::Unknown)
+    }
+
+    /// The innermost implicit receiver (written) with a member extension property `name` that a value of type `recv`
+    /// has, and the property's getter.
+    pub(crate) fn extension_property(
+        &mut self,
+        recv: &Ty,
+        name: &str,
+    ) -> Option<(ImplicitReceiver, &'static index::Item)> {
+        let found =
+            self.receivers.iter().rev().find_map(|r| extension_member(&r.ty, recv, name, 1).map(|i| (r.clone(), i)))?;
+        // (a use: captured from a lambda)
+        let labels = found.0.labels.first().cloned();
+        let _ = self.receiver(labels.as_deref());
+        Some(found)
     }
 
     /// The type of a member `name` of a value of type `recv` (`call`: a method called).
@@ -1127,7 +1337,7 @@ impl Gen<'_, '_> {
                 if let Some(f) = self.file.function(&n.name) {
                     return f.ret.clone();
                 }
-                if let Some(i) = self.receivers.iter().rev().find_map(|r| members_of(&r.ty, &n.name).next()) {
+                if let Some(i) = self.receiver_tys().iter().find_map(|r| members_of(r, &n.name).next()) {
                     return Ty::from_rust(i.ret);
                 }
                 match n.name.as_str() {
@@ -1162,12 +1372,48 @@ impl Gen<'_, '_> {
                         if let Some(r) = ret {
                             return r;
                         }
-                        return self.file.extension(&name.name, Some(&q)).map(|f| f.ret.clone()).unwrap_or(Ty::Unknown);
+                        if let Some(f) = self.file.extension(&name.name, Some(&q)) {
+                            return f.ret.clone();
+                        }
+                        // (a member extension of a receiver: `Modifier.animateEnterExit()` in a `with(scope) { }`)
+                        let value = if q == "Modifier" { Ty::named("Modifier") } else { value_object_ty(&q) };
+                        return self
+                            .receiver_tys()
+                            .iter()
+                            .find_map(|r| extension_member(r, &value, &name.name, usize::MAX))
+                            .map(|i| owner_arg_ret(&value, i.ret))
+                            .unwrap_or(Ty::Unknown);
                     }
                     return associated(&q, &name.name).first().map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::Unknown);
                 }
                 let r = self.peek_ty(receiver).non_null();
-                let t = self.member_ty(&r, &name.name, true);
+                let mut t = self.member_ty(&r, &name.name, true);
+                // (a method giving what a lambda it is given gives: `x.run { … }`, `x.let { … }`)
+                if let Some(lambda) = trailing.or_else(|| {
+                    args.iter().rev().find_map(|a| match &a.value.kind {
+                        ExprKind::Lambda(l) => Some(l),
+                        _ => None,
+                    })
+                }) && t == Ty::Unknown
+                    && let Some(info) = self.method_of(&r, &name.name).and_then(|i| {
+                        let info = i.params.iter().rev().find_map(|p| p.lambda)?;
+                        (is_type_param_text(i.ret) && info.output.trim() == i.ret.trim()).then_some(info)
+                    })
+                {
+                    let given = self.peek_lambda(lambda, Some(&info), Some((&r, "Self")));
+                    if given != Ty::Unknown && given != Ty::Unit {
+                        t = given;
+                    }
+                }
+                if t == Ty::Unknown {
+                    // (a member extension of a receiver: `placeable.place(…)`'s, `x.animateEnterExit()`)
+                    t = self
+                        .receiver_tys()
+                        .iter()
+                        .find_map(|rt| extension_member(rt, &r, &name.name, usize::MAX))
+                        .map(|i| owner_arg_ret(&r, i.ret))
+                        .unwrap_or(Ty::Unknown);
+                }
                 if *safe { t.nullable() } else { t }
             }
             _ => Ty::Unknown,
@@ -1242,13 +1488,18 @@ impl Gen<'_, '_> {
                 let last = k + 1 == item.params.len();
                 let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| n.name == item.params[k].kotlin));
                 let by_place = args.iter().filter(|a| a.name.is_none()).nth(k);
+                // (`with(x) { … }`: its lambda's receiver is `x`'s type)
+                let with_ty = (item.krate == "kompoz_runtime" && item.module.starts_with("kt") && item.rust == "with")
+                    .then(|| args.first().map(|a| self.peek_ty(&a.value)))
+                    .flatten();
+                let info = item.params[k].lambda;
                 let value = match (by_name.or(by_place), trailing) {
                     (Some(a), _) => match &a.value.kind {
-                        ExprKind::Lambda(l) => self.peek_block(&l.body),
+                        ExprKind::Lambda(l) => self.peek_lambda(l, info.as_ref(), with_ty.as_ref().map(|t| (t, "T"))),
                         _ if item.params[k].ty.trim() == g || item.params[k].vararg => self.peek_ty(&a.value),
                         _ => Ty::Unknown,
                     },
-                    (None, Some(l)) if last => self.peek_block(&l.body),
+                    (None, Some(l)) if last => self.peek_lambda(l, info.as_ref(), with_ty.as_ref().map(|t| (t, "T"))),
                     _ => Ty::Unknown,
                 };
                 if value == Ty::Unit { Ty::Unknown } else { value }
@@ -1342,10 +1593,37 @@ fn number_constant(q: &str, name: &str, span: Span) -> Option<(TokenStream, Ty)>
 
 use crate::pos::Loc;
 
+/// A value object's type (`LocalDensity`'s `KompozitionLocal<Density>`).
+fn value_object_ty(q: &str) -> Ty {
+    lookup(q)
+        .iter()
+        .find(|i| i.kind == Kind::Value && i.owner.is_empty())
+        .map(|v| Ty::from_rust(v.ret))
+        .unwrap_or(Ty::Unknown)
+}
+
+/// A member extension of a receiver of Rust type `receiver` (a method taking the value it extends first) for a value
+/// of type `recv` (known: the method's first parameter of its type), of `params` parameters with that value (a
+/// property's: 1; any: `usize::MAX`).
+fn extension_member(receiver: &str, recv: &Ty, name: &str, params: usize) -> Option<&'static index::Item> {
+    let owner = recv.owner()?;
+    members_of(receiver, name).find(|i| {
+        i.kind == Kind::Method
+            && !i.params.is_empty()
+            && (params == usize::MAX || i.params.len() == params)
+            && Ty::from_rust(i.params[0].ty).owner() == Some(owner)
+    })
+}
+
+/// Whether a type's text is a type parameter (`T`, `R`, `U`).
+fn is_type_param_text(t: &str) -> bool {
+    super::call::is_type_parameter(t)
+}
+
 /// What a member of a generic type of one type argument gives (`State<Float>`'s `value`, a `T`): that argument when
 /// the member gives its type parameter, else its own type.
 fn owner_arg_ret(recv: &Ty, ret: &str) -> Ty {
-    match recv {
+    match recv.through_shared() {
         Ty::Named(_, a) if a.len() == 1 && super::call::is_type_parameter(ret) => a[0].clone(),
         _ => Ty::from_rust(ret),
     }

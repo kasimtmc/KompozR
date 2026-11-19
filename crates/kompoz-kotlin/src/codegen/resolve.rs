@@ -122,12 +122,26 @@ impl Ty {
         }
     }
 
-    /// Its Rust type's name as the API index names owners (`Size`, `Modifier`); none for what has none there.
+    /// Its Rust type's name as the API index names owners (`Size`, `Modifier`); none for what has none there. A shared
+    /// or boxed value's is what it holds (`Rc<dyn Measurable>`: a `Measurable`, Kotlin's reference to one, whose
+    /// methods Rust's calls reach through it).
     pub fn owner(&self) -> Option<&str> {
         match self {
+            Ty::Named(n, a) if matches!(n.as_str(), "Rc" | "Arc" | "Box") && a.len() == 1 => a[0].owner(),
             Ty::Named(n, _) => Some(n),
             Ty::String => Some("String"),
             _ => None,
+        }
+    }
+
+    /// What a shared or boxed value holds (`Rc<dyn Measurable>` → `Measurable`), else itself: the type whose members
+    /// its owner's are ([`Ty::owner`]).
+    pub fn through_shared(&self) -> &Ty {
+        match self {
+            Ty::Named(n, a) if matches!(n.as_str(), "Rc" | "Arc" | "Box") && a.len() == 1 && a[0].owner().is_some() => {
+                a[0].through_shared()
+            }
+            t => t,
         }
     }
 
@@ -780,5 +794,16 @@ mod tests {
         assert_eq!(Ty::from_rust("()"), Ty::Unit);
         assert!(matches!(Ty::from_rust("impl Fn(i32) -> bool + 'static"), Ty::Fun(_)));
         assert_eq!(Ty::from_rust("KtProgression<i32>"), Ty::Range(Box::new(Ty::Int)));
+    }
+
+    #[test]
+    fn a_shared_values_members_are_what_it_holds() {
+        // (Kotlin's reference to a Measurable: Rust's calls reach its methods through the `Rc`)
+        let shared = Ty::from_rust("Rc<dyn Measurable>");
+        assert_eq!((shared.owner(), shared.through_shared()), (Some("Measurable"), &Ty::named("Measurable")));
+        let state = Ty::from_rust("Arc<State<f32>>");
+        assert_eq!(state.through_shared(), &Ty::Named("State".into(), vec![Ty::Float]));
+        // (a shared closure is no type's)
+        assert_eq!(Ty::from_rust("Rc<dyn Fn()>").owner(), None);
     }
 }

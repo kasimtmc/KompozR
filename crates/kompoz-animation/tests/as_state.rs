@@ -164,10 +164,9 @@ fn animated_states_are_read_where_they_are_needed() {
 
 // ---- C++ 15976 ----------------------------------------------------------------------------------------------------
 
-/// A local of an animated state (C++ provides its AnimatedState to a Color local, an overload Compose hasn't: a local
-/// of a `State<Color>` is Compose's way to have the readers alone follow it).
-static LocalTint: KompozitionLocal<State<Color>> =
-    KompozitionLocal::new(|| State::from(mutable_state_of(Color::Black)));
+/// A color local, as Compose's LocalContentColor (C++ provided its AnimatedState to it, an overload Compose hasn't:
+/// Compose's way is `LocalContentColor providesComputed { color.value }`, the State read where the local is).
+static LocalTint: KompozitionLocal<Color> = KompozitionLocal::new(|| Color::Black);
 
 /// A composable of its own, skipped when its caller composes again (its arguments the same: none), as Icon and Text
 /// are: what it read alone composes it again.
@@ -188,12 +187,12 @@ fn a_local_provided_from_an_animated_state_is_followed_by_its_readers_alone() {
         c.set(c.get() + 1);
         let color = animate_color_as_state(if o.get() { Color::White } else { Color::Black }, linear(160));
         let (r, s) = (r.clone(), s.clone());
-        KompozitionLocalProvider(&[LocalTint.provides(color)], move || {
+        KompozitionLocalProvider(&[LocalTint.provides_computed(move |_| color.value())], move || {
             // (a reader of its own, as Icon and Text are)
             let (r, s) = (r.clone(), s.clone());
             reader(move || {
                 r.set(r.get() + 1);
-                s.set(LocalTint.current().value());
+                s.set(LocalTint.current());
             });
         });
     }));
@@ -217,11 +216,11 @@ fn a_local_provided_from_an_animated_state_is_followed_by_its_readers_alone() {
         }
         let color = animate_color_as_state(Color::Red, Arc::new(snap()));
         let tr = tr.clone();
-        KompozitionLocalProvider(&[LocalTint.provides(color)], move || {
+        KompozitionLocalProvider(&[LocalTint.provides_computed(move |_| color.value())], move || {
             let tr = tr.clone();
             reader(move || {
                 tr.set(tr.get() + 1);
-                let _ = LocalTint.current().value();
+                let _ = LocalTint.current();
             });
         });
     }));
@@ -230,24 +229,27 @@ fn a_local_provided_from_an_animated_state_is_followed_by_its_readers_alone() {
     same.wait_for_idle();
     assert!(ticks.get() == 2 && tick_reads.get() == reads_once, "{} {} {}", ticks.get(), tick_reads.get(), reads_once);
 
-    // Given another state (or a plain value's) again, its readers read that.
+    // Given a plain value (or another state's) again, its readers read that.
     let other = mutable_state_of(false);
     let (ot, s) = (other.clone(), seen.clone());
-    let green = State::from(mutable_state_of(Color::Green));
     let swapped = KompozTestRule::new(kompozable_lambda!(move || {
         let a = animate_color_as_state(Color::Red, Arc::new(snap()));
         let _b = animate_color_as_state(Color::Blue, Arc::new(snap()));
-        let provided = if ot.get() { LocalTint.provides(green.clone()) } else { LocalTint.provides(a) };
+        let provided =
+            if ot.get() { LocalTint.provides(Color::Green) } else { LocalTint.provides_computed(move |_| a.value()) };
         let s = s.clone();
         KompozitionLocalProvider(&[provided], move || {
             let s = s.clone();
-            reader(move || s.set(LocalTint.current().value()));
+            reader(move || s.set(LocalTint.current()));
         });
     }));
     assert_eq!(seen.get(), Color::Red);
     other.set(true);
     swapped.wait_for_idle();
     assert_eq!(seen.get(), Color::Green);
+    other.set(false);
+    swapped.wait_for_idle();
+    assert_eq!(seen.get(), Color::Red);
 }
 
 // ---- C++ 24327, its animateFloatAsState part -----------------------------------------------------------------------

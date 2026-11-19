@@ -1,6 +1,6 @@
 # KompozR's API index: the #[named] and #[kompozable] functions and the #[named] methods with defaults.
 # Written by `cargo xtask kotlin-index` (don't edit by hand); read by kompoz-macros and kompoz-kotlin.
-# The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one.
+# The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one (R, D #[memoized]).
 # <scope> <kind> <name> <parameters> <owner>
 * kompozable AnimatedContent rdddddr crates/kompoz-animation/src/animated_content.rs
 * method AnimatedContent ddddr crates/kompoz-animation/src/animated_content.rs Transition
@@ -67,7 +67,7 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 kompoz-platform/drag_display kompozable DragApp - crates/kompoz-platform/tests/drag_display.rs
 kompoz-platform/wayland_display kompozable Editor - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Equal rr crates/kompoz-runtime/tests/macros.rs
-* kompozable FlexBox ddr crates/kompoz-foundation/src/layout/flex_box.rs
+* kompozable FlexBox dDr crates/kompoz-foundation/src/layout/flex_box.rs
 * kompozable FlowColumn dddddddr crates/kompoz-foundation/src/layout/flow_layout.rs
 kompoz-coroutines/coroutines kompozable FlowReader r crates/kompoz-coroutines/tests/coroutines.rs
 * kompozable FlowRow dddddddr crates/kompoz-foundation/src/layout/flow_layout.rs
@@ -75,7 +75,7 @@ kompoz-coroutines/coroutines kompozable FlowReader r crates/kompoz-coroutines/te
 kompoz-runtime/macros kompozable Forwarding rr crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/tree kompozable GapLeaf - crates/kompoz-ui/tests/tree.rs
 kompoz-runtime/macros kompozable GradientCard r crates/kompoz-runtime/tests/macros.rs
-* kompozable Grid rdr crates/kompoz-foundation/src/layout/grid.rs
+* kompozable Grid Rdr crates/kompoz-foundation/src/layout/grid.rs
 kompoz-foundation/grid kompozable GridLeaf rrrr crates/kompoz-foundation/tests/grid.rs
 * kompozable Group dddddddddr crates/kompoz-ui/src/draw/vector.rs
 * kompozable HandlePopup rrr crates/kompoz-foundation/src/text/selection/handles.rs
@@ -99,7 +99,7 @@ kompoz-runtime/macros kompozable Items rdr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable Items r crates/kompoz-runtime/tests/runtime.rs
 kompoz-ui/layouts kompozable Items r crates/kompoz-ui/tests/layouts.rs
 kompoz-runtime/runtime kompozable Keeper - crates/kompoz-runtime/tests/runtime.rs
-kompoz-runtime/macros kompozable Keeping r crates/kompoz-runtime/tests/macros.rs
+kompoz-runtime/macros kompozable Keeping R crates/kompoz-runtime/tests/macros.rs
 * fn KeyboardActions dddddd crates/kompoz-foundation/src/text/keyboard_actions.rs
 * fn KeyboardOptions ddddddd crates/kompoz-foundation/src/text/keyboard_options.rs
 kompoz-foundation/pager kompozable Keyed r crates/kompoz-foundation/tests/pager.rs
@@ -109,7 +109,7 @@ kompoz-foundation/lazy kompozable KeyedItem r crates/kompoz-foundation/tests/laz
 kompoz-runtime/macros kompozable Label rdd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/subcomposition kompozable Label r crates/kompoz-runtime/tests/subcomposition.rs
 * kompozable LaunchedEffect rr crates/kompoz-coroutines/src/compose.rs
-* kompozable Layout ddr crates/kompoz-ui/src/layout/composables.rs
+* kompozable Layout ddR crates/kompoz-ui/src/layout/composables.rs
 * kompozable LayoutWithLinksAndInlineContent rrrrrrr crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable LazyColumn dddddddddr crates/kompoz-foundation/src/lazy/list/dsl.rs
 * kompozable LazyGrid rrrrrrrrrrrr crates/kompoz-foundation/src/lazy/grid/grid.rs
@@ -142,7 +142,7 @@ kompoz-foundation/scroll kompozable LogInteractions rr crates/kompoz-foundation/
 kompoz-runtime/runtime kompozable Middle - crates/kompoz-runtime/tests/runtime.rs
 kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/tests/text_input.rs
 * kompozable MultiContentLayout rdr crates/kompoz-ui/src/layout/composables.rs
-* kompozable MultiMeasureLayout drr crates/kompoz-ui/src/layout/composables.rs
+* kompozable MultiMeasureLayout drR crates/kompoz-ui/src/layout/composables.rs
 * fn MutableContentTransform ddddd crates/kompoz-animation/src/deferred_enter_exit.rs
 * fn MutableTransform ddd crates/kompoz-animation/src/deferred_enter_exit.rs
 * fn OverscrollConfiguration dd crates/kompoz-foundation/src/overscroll_android.rs
@@ -226,6 +226,8 @@ kompoz-runtime/subcomposition kompozable Text r crates/kompoz-runtime/tests/comm
 * fn TextIndent dd crates/kompoz-text/src/style/mod.rs
 * fn TextLinkStyles dddd crates/kompoz-text/src/link.rs
 * fn TextStyle dddddddddddddddddddddddddd crates/kompoz-text/src/text_style.rs
+kompoz-runtime/runtime kompozable TintReader - crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/runtime kompozable TintedContent - crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.rs
 * kompozable TooltipArea rdddr crates/kompoz-foundation/src/tooltip_area.rs
 * kompozable TooltipPopup rrrrr crates/kompoz-foundation/src/basic_tooltip.rs
@@ -444,6 +446,8 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method mutate dr crates/kompoz-animation/src/mutator.rs MutatorMutex
 * method mutate_with rdr crates/kompoz-animation/src/mutator.rs MutatorMutex
 * method nested_scroll rd crates/kompoz-ui/src/input/nested_scroll.rs Modifier
+kompoz-runtime/macros method of R crates/kompoz-runtime/tests/macros.rs Ids
+kompoz-runtime/macros method of_static R crates/kompoz-runtime/tests/macros.rs Ids
 * method offset dd crates/kompoz-foundation/src/layout/offset.rs Modifier as OffsetModifiers
 * method on_all_nodes rd crates/kompoz-test/src/lib.rs KompozTestRule
 * method on_all_nodes_with_content_description rddd crates/kompoz-test/src/lib.rs KompozTestRule
@@ -488,6 +492,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method press_key rd crates/kompoz-test/src/input.rs KeyInjectionScope
 * kompozable produce_state rrr crates/kompoz-coroutines/src/compose.rs
 * method progress_semantics rdd crates/kompoz-foundation/src/progress_semantics.rs Modifier as ProgressSemanticsModifiers
+* method provides_computed R crates/kompoz-runtime/src/local.rs KompozitionLocal
 * method read_pixels rdddddd crates/kompoz-graphics/src/image/bitmap.rs ImageBitmap
 * method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs ContentDrawScope
 * method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs DrawScope

@@ -2,7 +2,9 @@
 //! which of their parameters have a default. What the macros can't see (other crates, other items of a crate) they
 //! read here: a call given more positional arguments than the parameters without a default goes through the
 //! callee's builder (`Font(source, FontWeight::Bold)`, `color.copy(0.5)`), a named call of a PascalCase function
-//! that isn't a composable goes through its type (`TextStyle::__kz_builder()`).
+//! that isn't a composable goes through its type (`TextStyle::__kz_builder()`), and a call of one with a
+//! `#[memoized]` parameter goes through its builder whenever its arguments fill the parameters (which gives the
+//! closure it is given its identity: `LocalX.provides_computed(|s| …)`).
 //!
 //! `cargo xtask kotlin-index` writes it (`crates/kompoz-macros/api-index.txt`, checked in; `--check` in CI) with
 //! [`render`]; kompoz-macros reads it with [`parse`]. This file is shared as it is (`#[path]`): std only.
@@ -18,6 +20,7 @@
 //! * fn Font rdddd crates/kompoz-text/src/font/font.rs
 //! * method copy dddd crates/kompoz-graphics/src/constraints.rs Constraints
 //! * method padding dddd crates/kompoz-foundation/src/layout/padding.rs Modifier as FoundationLayoutModifiers
+//! * method provides_computed R crates/kompoz-runtime/src/local.rs KompozitionLocal
 //! * kompozable Counter - examples/counter/src/main.rs
 //! kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
 //! ```
@@ -32,13 +35,13 @@
 //!   `#[named]` impl, `#[named(trait …)]` ones included).
 //! - `name`: the function's or method's name as written (no `r#`).
 //! - `parameters`: one letter per parameter in order (the receiver not counted), `r` for one without a
-//!   `#[default(…)]`, `d` for one with; `-` for none.
+//!   `#[default(…)]`, `d` for one with, in upper case (`R`, `D`) for a `#[memoized]` one; `-` for none.
 //! - `owner`: where it is, for readers (the macros don't use it): the file, relative to the workspace root, with
 //!   `/` separators; for a method then a space and the impl's type as written (its last path segment, generics
 //!   left out), and ` as <Trait>` for a `#[named(trait Trait)]` impl.
 //!
 //! What is listed: every `#[named]` and `#[kompozable]` function, and every method of a `#[named]` impl that has a
-//! defaulted parameter (the others are plain methods), of every target of every workspace package (`src/`,
+//! defaulted or `#[memoized]` parameter (the others are plain methods), of every target of every workspace package (`src/`,
 //! `tests/` but not trybuild's `tests/ui/`, `examples/`, `benches/`; items inside function bodies too, not what
 //! macro invocations hold: `macro_rules!` bodies, `quote!`), and nothing else. Lines are sorted by name, then
 //! scope (`*` first, then by package, then crate), kind (`fn`, `kompozable`, `method`), parameters and owner
@@ -114,6 +117,8 @@ pub struct Entry {
     pub name: String,
     /// Whether each parameter has a default, in order (not the receiver).
     pub defaults: Vec<bool>,
+    /// Whether each parameter is `#[memoized]`, in order (as many as `defaults`).
+    pub memoized: Vec<bool>,
     /// Where it is, for readers (see the format).
     pub owner: String,
 }
@@ -124,12 +129,26 @@ impl Entry {
         self.defaults.iter().filter(|d| !**d).count()
     }
 
+    /// Whether a parameter is `#[memoized]`.
+    pub fn has_memoized(&self) -> bool {
+        self.memoized.contains(&true)
+    }
+
     /// The `parameters` field.
     pub fn pattern(&self) -> String {
         if self.defaults.is_empty() {
             return "-".into();
         }
-        self.defaults.iter().map(|d| if *d { 'd' } else { 'r' }).collect()
+        self.defaults
+            .iter()
+            .zip(&self.memoized)
+            .map(|(d, m)| match (*d, *m) {
+                (false, false) => 'r',
+                (true, false) => 'd',
+                (false, true) => 'R',
+                (true, true) => 'D',
+            })
+            .collect()
     }
 
     /// The order lines are written in.
@@ -142,7 +161,7 @@ impl Entry {
 pub const HEADER: &str = "\
 # KompozR's API index: the #[named] and #[kompozable] functions and the #[named] methods with defaults.
 # Written by `cargo xtask kotlin-index` (don't edit by hand); read by kompoz-macros and kompoz-kotlin.
-# The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one.
+# The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one (R, D #[memoized]).
 # <scope> <kind> <name> <parameters> <owner>
 ";
 
@@ -185,19 +204,23 @@ pub fn parse(text: &str) -> Result<Vec<Entry>, String> {
         if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(format!("api index, line {n}: `{name}` isn't a name"));
         }
-        let defaults = match next("parameters")? {
-            "-" => Vec::new(),
+        let (defaults, memoized) = match next("parameters")? {
+            "-" => (Vec::new(), Vec::new()),
             p => p
                 .chars()
                 .map(|c| match c {
-                    'r' => Ok(false),
-                    'd' => Ok(true),
-                    _ => Err(format!("api index, line {n}: parameters are `r` and `d` (or `-`), not `{p}`")),
+                    'r' => Ok((false, false)),
+                    'd' => Ok((true, false)),
+                    'R' => Ok((false, true)),
+                    'D' => Ok((true, true)),
+                    _ => Err(format!("api index, line {n}: parameters are `r`, `d`, `R` and `D` (or `-`), not `{p}`")),
                 })
-                .collect::<Result<_, _>>()?,
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .unzip(),
         };
         let owner = next("owner")?.to_string();
-        entries.push(Entry { scope, kind, name, defaults, owner });
+        entries.push(Entry { scope, kind, name, defaults, memoized, owner });
     }
     Ok(entries)
 }
@@ -214,6 +237,7 @@ mod tests {
                 kind: Kind::Fn,
                 name: "Twice".into(),
                 defaults: vec![false, true],
+                memoized: vec![false; 2],
                 owner: "crates/kompoz-runtime/tests/macros.rs".into(),
             },
             Entry {
@@ -221,6 +245,7 @@ mod tests {
                 kind: Kind::Method,
                 name: "copy".into(),
                 defaults: vec![true; 4],
+                memoized: vec![false; 4],
                 owner: "crates/kompoz-graphics/src/constraints.rs Constraints".into(),
             },
             Entry {
@@ -228,12 +253,22 @@ mod tests {
                 kind: Kind::Kompozable,
                 name: "Counter".into(),
                 defaults: Vec::new(),
+                memoized: Vec::new(),
                 owner: "examples/counter/src/main.rs".into(),
+            },
+            Entry {
+                scope: Scope::All,
+                kind: Kind::Kompozable,
+                name: "Layout".into(),
+                defaults: vec![true, true, false],
+                memoized: vec![false, true, false],
+                owner: "crates/kompoz-ui/src/layout/composables.rs".into(),
             },
         ];
         let text = render(&entries);
         assert!(text.ends_with(
             "* kompozable Counter - examples/counter/src/main.rs\n\
+             * kompozable Layout dDr crates/kompoz-ui/src/layout/composables.rs\n\
              kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs\n\
              * method copy dddd crates/kompoz-graphics/src/constraints.rs Constraints\n"
         ));
@@ -242,7 +277,8 @@ mod tests {
         let mut want = entries;
         want.sort();
         assert_eq!(back, want);
-        assert_eq!(want.iter().map(Entry::required).collect::<Vec<_>>(), [0, 0, 1]);
+        assert_eq!(want.iter().map(Entry::required).collect::<Vec<_>>(), [0, 1, 0, 1]);
+        assert_eq!(want.iter().map(Entry::has_memoized).collect::<Vec<_>>(), [false, true, false, false]);
         assert!(parse("* fn x rx f").unwrap_err().contains("line 1"));
         assert!(parse("# c\n\nmine fn x r f").unwrap_err().contains("line 3"));
     }

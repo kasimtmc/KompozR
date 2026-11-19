@@ -15,6 +15,8 @@
 //!   where a call leaves them out); `vararg` marks a parameter Kotlin passes as several arguments (an array here:
 //!   `listOf(1, 2)` → `list_of([1, 2])`);
 //! - a Rust parameter of type `Option<T>` takes `Some(v)` for a Kotlin value and `None` for `null`;
+//! - a function pointer parameter (`fn(&KompozitionLocalAccessorScope) -> T`) takes a lambda capturing nothing, its
+//!   receiver a scope as a closure's is (`compositionLocalWithComputedDefaultOf { LocalX.currentValue }`);
 //! - `#[named]`/`#[kompozable]` defaults are Rust expressions ([`Default::Rust`]): such a callee is called through
 //!   its builder (`#[kompozable]` does that) when a call leaves them out or names them;
 //! - Kotlin's overloads of a constructor that differ by their types (`Color(Int)`, `Color(Float, Float, Float)`) are
@@ -180,6 +182,9 @@ pub mod flags {
     pub const REACHABLE: u16 = 1 << 6;
     /// A `const fn`: what it makes can be a `static` (`compositionLocalOf { … }`).
     pub const CONST: u16 = 1 << 7;
+    /// A parameter is `#[memoized]`: in a composable body `#[kompozable]` rewrites its calls, giving the closure
+    /// passed to it its identity (and capturing for it), as it does a rewritten call's (`LocalX.provides_computed(…)`).
+    pub const MEMOIZED: u16 = 1 << 8;
 }
 
 impl Item {

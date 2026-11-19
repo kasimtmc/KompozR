@@ -251,7 +251,16 @@ impl Gen<'_, '_> {
                 };
                 let (value, ty) = match init {
                     PropertyInit::Value(e) => {
-                        let o = self.expr(e);
+                        // (a lambda given a function type: its parameters (and receiver) of that type's, as Kotlin
+                        // types them — `val stop: (Animatable<Float, AnimationVector1D>) -> Unit = { it.stop() }`)
+                        let o = match (&e.kind, p.ty.as_ref().and_then(|t| t.as_function().filter(|_| !t.nullable))) {
+                            (ExprKind::Lambda(l), Some(f)) => {
+                                let mut info = self.lambda_info(f, true);
+                                info.typed = true;
+                                Out::plain(self.lambda(l, Some(&info), None), Ty::Unknown)
+                            }
+                            _ => self.expr(e),
+                        };
                         let ty = match &declared {
                             Some((t, _)) => t.clone(),
                             None => o.ty.clone(),
@@ -284,7 +293,7 @@ impl Gen<'_, '_> {
     }
 
     /// What a delegate's reads give (`remember { mutableStateOf(0) }` → an `Int`).
-    fn delegate_ty(&self, d: &Expr) -> Ty {
+    pub(crate) fn delegate_ty(&self, d: &Expr) -> Ty {
         match &d.kind {
             ExprKind::Call { callee, args, trailing_lambda, .. } => {
                 let name = match &callee.kind {

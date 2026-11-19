@@ -87,7 +87,7 @@ pub fn collections() -> i32 {
             total > 0,
             ::core::option::Option::Some(&|| ::std::string::String::from("pozitif olmalı")),
         );
-        return total.clone() + ::kompoz::runtime::kt::KtList::get(&xs, 0);
+        return total + ::kompoz::runtime::kt::KtList::get(&xs, 0);
     })
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]

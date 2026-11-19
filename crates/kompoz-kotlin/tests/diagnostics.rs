@@ -120,3 +120,80 @@ fn names_rust_cant_have() {
     let (d, _) = diagnose_at("fun `two words`() {}\nfun `self`() {}", 1);
     assert_eq!(d, ["1:5: `two words` can't be a name in Rust", "2:5: `self` can't be a name in Rust"]);
 }
+
+#[test]
+fn a_method_of_several_types_on_a_value_of_a_type_kompozr_cant_tell_asks_for_the_type() {
+    // (`animateTo` is Animatable's, AnchoredDraggableState's, AnimationState's, DeferredTransitionState's and
+    // SeekableTransitionState's: which one Kotlin calls its type tells, never a guess by the arguments)
+    let text = "\
+@Composable
+fun Animated() {
+    val x = madeElsewhere()
+    LaunchedEffect(Unit) {
+        x.animateTo(1f)
+        madeElsewhere().animateTo(1f)
+        listOf(madeElsewhere()).forEach { it.animateTo(1f) }
+        listOf(madeElsewhere()).forEach { a -> a.snapTo(1f) }
+        madeElsewhere().forEach { }
+    }
+}
+";
+    let owners = "(`AnchoredDraggableState`, `Animatable`, `AnimationState`, `DeferredTransitionState` and \
+                  `SeekableTransitionState` have one)";
+    let snap_owners = "(`AnchoredDraggableState`, `Animatable` and `SeekableTransitionState` have one)";
+    assert_eq!(
+        diagnose(text),
+        [
+            format!(
+                "5:9: write `x`'s type: KompozR can't tell which `animateTo` it calls {owners} (`val x: Type = …`)"
+            ),
+            format!(
+                "6:9: write the type of the value `animateTo` is called on: KompozR can't tell which `animateTo` it \
+                 calls {owners} (a `val x: Type = …` of it, then `x.animateTo(…)`)"
+            ),
+            format!(
+                "7:43: name the lambda's parameter and write its type: KompozR can't tell which `animateTo` it calls \
+                 {owners} (`{{ x: Type -> x.animateTo(…) }}`)"
+            ),
+            format!(
+                "8:48: write `a`'s type: KompozR can't tell which `snapTo` it calls {snap_owners} (`{{ a: Type -> … }}`)"
+            ),
+            // (a list's, a map's — Kotlin's standard types, the kt shims' — or DraggableAnchors')
+            "9:9: write the type of the value `forEach` is called on: KompozR can't tell which `forEach` it calls \
+             (Kotlin's standard types and `DraggableAnchors` have one) (a `val x: Type = …` of it, then \
+             `x.forEach(…)`)"
+                .to_string(),
+        ]
+    );
+}
+
+#[test]
+fn a_method_on_a_value_of_a_type_kompozr_tells_resolves_by_it() {
+    // (its type written, given by `remember { … }`'s block — its own locals too —, a delegate's, a parameter's, a
+    // lambda's declared function type, a receiver lambda's (`with`, `run`), a call's result: no error; a method only
+    // one type has, on a value of a type it can't tell, is that type's)
+    let text = "\
+@Composable
+fun Animated(seekable: SeekableTransitionState<Int>, deferred: DeferredTransitionState<Int>) {
+    val written: Animatable<Float, AnimationVector1D> = madeElsewhere()
+    val remembered = remember { Animatable(0f) }
+    val built = remember { val a = Animatable(0f); a }
+    var delegated by remember { mutableStateOf(Animatable(0f)) }
+    val unknown = madeElsewhere()
+    LaunchedEffect(Unit) {
+        written.animateTo(1f)
+        remembered.animateTo(1f)
+        built.animateTo(1f)
+        delegated.animateTo(1f)
+        seekable.animateTo(2)
+        deferred.animateTo(3)
+        with(remembered) { animateTo(2f) }
+        remembered.run { animateTo(3f) }
+        remember { Animatable(0f) }.animateTo(4f)
+        unknown.updateBounds(upperBound = 1f)
+        val stop: suspend (Animatable<Float, AnimationVector1D>) -> Unit = { it.stop() }
+    }
+}
+";
+    assert_eq!(diagnose(text), Vec::<String>::new());
+}

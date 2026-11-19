@@ -307,6 +307,8 @@ pub(crate) fn generics(
 pub(crate) enum Receiver {
     Value(Type),
     Ref(Type, bool),
+    /// `&'static self` (a `static`'s method: a composition local's).
+    Static(Type),
 }
 
 /// The items of a builder (named with its prefix, next to the function), the type its `new` makes, and the generic
@@ -346,6 +348,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     let own_lifetimes: Vec<&Generic> = generics.iter().filter(|g| g.lifetime && g.inferred).collect();
     let elided = match (recv, own_lifetimes.as_slice()) {
         (Some(Receiver::Ref(..)), _) => Some(Lifetime::new("'__kzr", Span::call_site())),
+        (Some(Receiver::Static(_)), _) => Some(Lifetime::new("'static", Span::call_site())),
         (_, [only]) => Some(syn::parse2(only.name.clone())?),
         _ => None,
     };
@@ -375,6 +378,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         Receiver::Value(t) => quote!(#t),
         Receiver::Ref(t, false) => quote!(&'__kzr #t),
         Receiver::Ref(t, true) => quote!(&'__kzr mut #t),
+        Receiver::Static(t) => quote!(&'static #t),
     });
     let recv_lt = matches!(recv, Some(Receiver::Ref(..))).then(|| quote!('__kzr,));
     let recv_field = recv_ty.as_ref().map(|t| quote!(recv: #t,));
@@ -613,11 +617,25 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     // (an impl's generics, which `new` starts the builder with: declared on it)
     let outer_g: Vec<Ts> =
         lifetimes.iter().chain(types.iter()).filter(|g| !g.inferred).map(|g| g.name.clone()).collect();
+    // (a `&'static self` receiver: the impl's type parameters are `'static`, as the receiver's type wants)
+    let static_bounds: Vec<Ts> = match recv {
+        Some(Receiver::Static(_)) => types
+            .iter()
+            .filter(|g| !g.inferred)
+            .map(|g| {
+                let n = &g.name;
+                quote!(#n: 'static)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let static_wc = (!static_bounds.is_empty()).then(|| quote!(where #(#static_bounds),*));
+    bounds.extend(static_bounds.iter().cloned());
     let items = quote! {
         #(#missing)*
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
-        #vis struct #builder_name<#recv_lt #(#all_g,)* #(#ps),*> {
+        #vis struct #builder_name<#recv_lt #(#all_g,)* #(#ps),*> #static_wc {
             _g: #phantom,
             #recv_field
             #ids_field
@@ -625,11 +643,11 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         }
         #[doc(hidden)]
         #[allow(non_snake_case, clippy::needless_lifetimes)]
-        #vis fn #new_name<#recv_lt #(#outer_g,)* #(#free_names,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> {
+        #vis fn #new_name<#recv_lt #(#outer_g,)* #(#free_names,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> #static_wc {
             #builder_name { _g: ::core::marker::PhantomData, #new_init #ids_init #(#fs: #initial),* }
         }
         #[allow(clippy::type_complexity, clippy::too_many_arguments, non_snake_case)]
-        impl<#recv_lt #(#all_g,)* #(#ps),*> #builder_name<#recv_lt #(#all_g,)* #(#ps),*> {
+        impl<#recv_lt #(#all_g,)* #(#ps),*> #builder_name<#recv_lt #(#all_g,)* #(#ps),*> #static_wc {
             #(#setters)*
         }
         #[allow(clippy::type_complexity, clippy::too_many_arguments)]

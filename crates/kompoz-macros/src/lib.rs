@@ -18,8 +18,11 @@
 //! name for a plain call with the parameters it has without a default, callable anywhere (`TextStyle()`,
 //! `RoundedCornerShape(8.dp())`); its builder is reached through a type of its name: a hidden `struct Name {}`, or
 //! with `#[named(type)]` the type of that name it makes (`TextStyle`: an associated function of it). A
-//! `#[memoized]` parameter is given to the body as a `Memoized`: the value and its identity as a memoized closure
-//! (what `Layout` keeps its measure policy by).
+//! `#[memoized]` parameter (of a function or a `#[named]` impl's method) is given to the body as a `Memoized`: the
+//! value and its identity as a memoized closure (what `Layout` keeps its measure policy by, a composition local's
+//! `provides_computed` its computation); a call of it goes through its builder, which gives that identity, whenever
+//! its arguments fill the parameters (the API index marks such parameters). A `#[named]` method may take
+//! `&'static self` (a `static`'s, as a composition local is).
 //!
 //! `kompozable_lambda!(|| …)` is a closure written as a `#[kompozable]` body (content given from plain code);
 //! `kompozable_block!({ … })` an expression written as one, in place (in a method); `named_args!(…)` an expression
@@ -585,10 +588,12 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             continue;
         };
         let mut params = take_params(&mut m.sig)?;
-        if let Some(span) = params.iter().find_map(|p| p.memoized) {
-            return Err(Error::new(span, "kompoz: #[memoized] goes on a parameter of a function, not a method"));
-        }
-        if params.iter().all(|p| p.default.is_none()) {
+        // The parameters keeping the identity of a memoized closure given to them (its calls go through the builder,
+        // which gives them that identity, even without a defaulted parameter).
+        let wants_id: Vec<bool> = params.iter().map(|p| p.memoized.is_some()).collect();
+        let pass_ids = wants_id.contains(&true);
+        let n = params.len();
+        if params.iter().all(|p| p.default.is_none()) && !pass_ids {
             if ext.is_some() {
                 m.vis = Visibility::Inherited;
                 let docs = m.attrs.iter().filter(|a| a.path().is_ident("doc"));
@@ -602,7 +607,13 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             Some(FnArg::Receiver(r)) => match &r.kind {
                 ReceiverKind::Value => Receiver::Value(self_ty.clone()),
                 ReceiverKind::Reference(_, None, mutability) => Receiver::Ref(self_ty.clone(), mutability.is_some()),
-                _ => return Err(Error::new(r.span(), "kompoz: #[named] methods take `self`, `&self` or `&mut self`")),
+                ReceiverKind::Reference(_, Some(l), None) if l.ident == "static" => Receiver::Static(self_ty.clone()),
+                _ => {
+                    return Err(Error::new(
+                        r.span(),
+                        "kompoz: #[named] methods take `self`, `&self`, `&mut self` or `&'static self`",
+                    ));
+                }
             },
             _ => return Err(Error::new(m.sig.span(), "kompoz: #[named] in an impl is for methods (with `self`)")),
         };
@@ -625,13 +636,14 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             wc.predicates.extend(w.predicates.iter().cloned());
         }
         let args: Vec<Ident> = (0..params.len()).map(|i| format_ident!("__a{i}")).collect();
+        let ids = pass_ids.then(|| quote!(__kz_ids));
         // (through the trait by name: another trait in scope may have a method of the same name)
         let call = match &ext {
             Some(e) => {
                 let t = &e.name;
-                quote!(<#self_ty as #t #impl_tg>::#imp_name(__self, #(#args),*))
+                quote!(<#self_ty as #t #impl_tg>::#imp_name(__self, #(#args,)* #ids))
             }
-            None => quote!(__self.#imp_name(#(#args),*)),
+            None => quote!(__self.#imp_name(#(#args,)* #ids)),
         };
         let built = builder(Spec {
             rt: &rt,
@@ -643,7 +655,7 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             recv: Some(&recv),
             prefix: &prefix,
             vis: &vis,
-            wants_id: &vec![false; params.len()],
+            wants_id: &wants_id,
             free_ok: true,
         })?;
         gens.clear();
@@ -681,12 +693,14 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
         let (mgi, _, mwc) = m.sig.generics.split_for_impl();
         let attrs = m.attrs.clone();
         let method_vis = if ext.is_some() { quote!() } else { quote!(#vis) };
+        // (a plain call gives its closures no identity)
+        let no_ids = pass_ids.then(|| quote!([::core::option::Option::None; #n]));
         let inner_call = match &ext {
             Some(e) => {
                 let t = &e.name;
-                quote!(<Self as #t #impl_tg>::#imp_name(__self, #(#all),*))
+                quote!(<Self as #t #impl_tg>::#imp_name(__self, #(#all,)* #no_ids))
             }
-            None => quote!(__self.#imp_name(#(#all),*)),
+            None => quote!(__self.#imp_name(#(#all,)* #no_ids)),
         };
         items.push(parse_quote! {
             #(#attrs)*
@@ -702,6 +716,16 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             decls.push(quote!(#(#docs)* fn #name #mgi(#decl_receiver, #(#req),*) #output #mwc;));
         }
         m.sig.ident = imp_name;
+        if pass_ids {
+            // `#[memoized]` parameters, as the body gets them.
+            m.sig.inputs.push(parse_quote!(__kz_ids: [::core::option::Option<u64>; #n]));
+            let memoized = params.iter().enumerate().filter(|(_, p)| p.memoized.is_some()).map(|(k, p)| {
+                let i = &p.ident;
+                quote!(let #i = #rt::__private::memoized(#i, __kz_ids[#k]);)
+            });
+            let block = &m.block;
+            m.block = parse_quote!({ #(#memoized)* #block });
+        }
         m.attrs.retain(|a| !a.path().is_ident("doc"));
         m.attrs.push(parse_quote!(#[doc(hidden)]));
         if ext.is_some() {

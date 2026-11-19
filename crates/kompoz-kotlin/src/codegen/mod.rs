@@ -149,6 +149,12 @@ pub(crate) struct Gen<'a, 'd> {
     /// last: a call of a name one of them extends goes to the innermost's (`AnimatedVisibility(…)` in a Row's
     /// content is `RowScope.AnimatedVisibility`), a Box's hiding the outer ones (the marker's DSL rule).
     pub layout_scopes: Vec<&'static str>,
+    /// What inference without writing ([`Gen::peek_ty`]) knows inside a lambda or block it looks into: the locals
+    /// the block declares before its value (`remember { val a = Animatable(0f); a }`), innermost last…
+    pub peek_scopes: std::cell::RefCell<Vec<HashMap<String, Ty>>>,
+    /// …and the receivers (Rust type names) of the receiver lambdas it looks into (`with(scope) { … }`,
+    /// `providesComputed { … }`), innermost last.
+    pub peek_receivers: std::cell::RefCell<Vec<String>>,
     counter: usize,
 }
 
@@ -172,6 +178,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             type_param: "T".to_string(),
             layout_scope_callee: None,
             layout_scopes: Vec::new(),
+            peek_scopes: Default::default(),
+            peek_receivers: Default::default(),
             counter: 0,
         }
     }

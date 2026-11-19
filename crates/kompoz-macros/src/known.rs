@@ -18,20 +18,27 @@ fn index() -> Result<&'static [Entry]> {
     }
 }
 
-/// A function's or method's parameters: what it is, and whether each has a default.
+/// A function's or method's parameters: what it is, whether each has a default, and whether one is `#[memoized]`.
 struct Shape {
     kind: Kind,
     defaults: Vec<bool>,
+    memoized: bool,
 }
 
 impl Shape {
-    /// Whether `n` positional arguments (the last a closure, which goes to the last parameter, if
-    /// `last_closure`) are more than its parameters without a default (what its plain form takes) and fill every
-    /// one of those in its builder.
-    fn overflows(&self, n: usize, last_closure: bool) -> bool {
-        let total = self.defaults.len();
+    /// Whether a call of it with `n` positional arguments goes through its builder: they are more than its
+    /// parameters without a default (what its plain form takes), or it has a `#[memoized]` parameter (the builder
+    /// gives a closure its identity), and they fill every one of those in its builder ([`Shape::fills`]).
+    fn rewritten(&self, n: usize, last_closure: bool) -> bool {
         let required = self.defaults.iter().filter(|d| !**d).count();
-        if n <= required || n > total {
+        (n > required || (self.memoized && n > 0)) && self.fills(n, last_closure)
+    }
+
+    /// Whether `n` positional arguments (the last a closure, which goes to the last parameter, if `last_closure`)
+    /// fill every parameter without a default in its builder, and are no more than its parameters.
+    fn fills(&self, n: usize, last_closure: bool) -> bool {
+        let total = self.defaults.len();
+        if n > total {
             return false;
         }
         let mut given = vec![false; total];
@@ -58,14 +65,14 @@ impl Known {
         let krate = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
         let mut known = Known::default();
         for e in index()?.iter().filter(|e| e.scope.includes(&package, &krate)) {
-            known.add(e.kind, &e.name, e.defaults.clone());
+            known.add(e.kind, &e.name, e.defaults.clone(), e.has_memoized());
         }
         Ok(known)
     }
 
-    fn add(&mut self, kind: Kind, name: &str, defaults: Vec<bool>) {
+    fn add(&mut self, kind: Kind, name: &str, defaults: Vec<bool>, memoized: bool) {
         let map = if kind == Kind::Method { &mut self.methods } else { &mut self.functions };
-        map.entry(name.to_string()).or_default().push(Shape { kind, defaults });
+        map.entry(name.to_string()).or_default().push(Shape { kind, defaults, memoized });
     }
 
     /// Adds the `#[named]` and `#[kompozable]` functions and `#[named]` impls' methods defined in a body, at any
@@ -79,15 +86,15 @@ impl Known {
         Items(self).visit_expr(e);
     }
 
-    /// Whether a call of the function `name` with `n` positional arguments (see `Shape::overflows`) goes through
+    /// Whether a call of the function `name` with `n` positional arguments (see `Shape::rewritten`) goes through
     /// its builder.
-    pub(crate) fn function_overflows(&self, name: &str, n: usize, last_closure: bool) -> bool {
-        self.functions.get(name).is_some_and(|s| s.iter().any(|s| s.overflows(n, last_closure)))
+    pub(crate) fn function_rewritten(&self, name: &str, n: usize, last_closure: bool) -> bool {
+        self.functions.get(name).is_some_and(|s| s.iter().any(|s| s.rewritten(n, last_closure)))
     }
 
     /// The same for a method.
-    pub(crate) fn method_overflows(&self, name: &str, n: usize, last_closure: bool) -> bool {
-        self.methods.get(name).is_some_and(|s| s.iter().any(|s| s.overflows(n, last_closure)))
+    pub(crate) fn method_rewritten(&self, name: &str, n: usize, last_closure: bool) -> bool {
+        self.methods.get(name).is_some_and(|s| s.iter().any(|s| s.rewritten(n, last_closure)))
     }
 
     /// Whether `name` is a `#[named]` function that isn't a composable (and nothing of its name is one): its
@@ -112,7 +119,7 @@ impl<'ast> Visit<'ast> for Items<'_> {
             None
         };
         if let Some(kind) = kind {
-            self.0.add(kind, &f.sig.ident.to_string(), defaults(&f.sig));
+            self.0.add(kind, &f.sig.ident.to_string(), defaults(&f.sig), has_memoized(&f.sig));
         }
         visit::visit_item_fn(self, f);
     }
@@ -120,9 +127,9 @@ impl<'ast> Visit<'ast> for Items<'_> {
         if has_attr(&i.attrs, "named") {
             for item in &i.items {
                 if let ImplItem::Fn(m) = item {
-                    let defaults = defaults(&m.sig);
-                    if defaults.contains(&true) {
-                        self.0.add(Kind::Method, &m.sig.ident.to_string(), defaults);
+                    let (defaults, memoized) = (defaults(&m.sig), has_memoized(&m.sig));
+                    if defaults.contains(&true) || memoized {
+                        self.0.add(Kind::Method, &m.sig.ident.to_string(), defaults, memoized);
                     }
                 }
             }
@@ -147,6 +154,14 @@ fn defaults(sig: &Signature) -> Vec<bool> {
         .collect()
 }
 
+/// Whether a parameter has `#[memoized]`.
+fn has_memoized(sig: &Signature) -> bool {
+    sig.inputs.iter().any(|arg| match arg {
+        FnArg::Typed(pt) => pt.attrs.iter().any(|a| a.path().is_ident("memoized")),
+        FnArg::Receiver(_) => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,14 +174,23 @@ mod tests {
 
     #[test]
     fn a_call_overflows_where_its_builder_gets_every_parameter_without_a_default() {
-        let shape = |p: &str| Shape { kind: Kind::Method, defaults: p.chars().map(|c| c == 'd').collect() };
+        let shape = |p: &str| Shape {
+            kind: Kind::Method,
+            defaults: p.chars().map(|c| c.eq_ignore_ascii_case(&'d')).collect(),
+            memoized: p.contains(['R', 'D']),
+        };
         // `copy(alpha = …, red = …)`: one or two given in order.
-        assert!(shape("dd").overflows(1, false) && shape("dd").overflows(2, false));
-        assert!(!shape("dd").overflows(0, false) && !shape("dd").overflows(3, false));
+        assert!(shape("dd").rewritten(1, false) && shape("dd").rewritten(2, false));
+        assert!(!shape("dd").rewritten(0, false) && !shape("dd").rewritten(3, false));
         // `translate(left = 0, top = 0, block)`: the block given last, a closure; not as the plain call takes it.
-        assert!(shape("ddr").overflows(3, true) && shape("ddr").overflows(2, true));
-        assert!(!shape("ddr").overflows(2, false) && !shape("ddr").overflows(1, true));
+        assert!(shape("ddr").rewritten(3, true) && shape("ddr").rewritten(2, true));
+        assert!(!shape("ddr").rewritten(2, false) && !shape("ddr").rewritten(1, true));
         // `background(color, shape = …)`.
-        assert!(shape("rd").overflows(2, false) && !shape("rd").overflows(1, false));
+        assert!(shape("rd").rewritten(2, false) && !shape("rd").rewritten(1, false));
+        // `LocalX.provides_computed(|s| …)`: a memoized closure, through the builder (its plain form all it takes).
+        assert!(shape("R").rewritten(1, true) && !shape("R").rewritten(0, false) && !shape("R").rewritten(2, true));
+        // `Layout(modifier, policy, content)`-like: a memoized parameter left to its default, or given.
+        assert!(shape("dDr").rewritten(1, true) && shape("dDr").rewritten(3, true));
+        assert!(!shape("dDr").rewritten(2, false));
     }
 }

@@ -1,8 +1,9 @@
 //! Composition locals: values handed down the composition (Compose's CompositionLocal).
 
 use crate::composer::{Composer, Provided, ValueHolder};
-use crate::kompozable;
+use crate::remember::Memoized;
 use crate::state::SnapshotMutationPolicy;
+use crate::{kompozable, named};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -17,6 +18,12 @@ use std::rc::Rc;
 /// keeps) is observed as any state read is, so that phase runs again without anything composing. A static local
 /// (Compose's `staticCompositionLocalOf`, [`KompozitionLocal::new_static`]) is for values that hardly change: its
 /// provider giving another one composes again whoever read it, the layouts that keep it included.
+///
+/// A value may also be computed where it is read (Compose 1.7's computed locals): a provider's
+/// [`provides_computed`](KompozitionLocal::provides_computed), or a local's computed default
+/// ([`KompozitionLocal::new_computed`]). The computation runs at each read, reading the other locals as they are
+/// there (`scope.current_value(&LocalX)`) and any state it likes: those reads are the reader's own, so what it read
+/// changing composes (or measures, or draws) that reader again, and nothing else.
 ///
 /// ```
 /// # use kompoz_runtime::*;
@@ -47,8 +54,9 @@ fn no_plain_default<T>() -> T {
     unreachable!("kompoz: a computed local's default is computed")
 }
 
-/// Where a computed local's default reads the other locals (Compose's CompositionLocalAccessorScope): the
-/// composition reading it, the context of a node reading it, or (outside of both) their defaults.
+/// Where a computed value (a provider's [`provides_computed`](KompozitionLocal::provides_computed), a local's computed
+/// default) reads the other locals (Compose's CompositionLocalAccessorScope): where it is read — the composition
+/// reading it, the context of a node reading it, or (outside of both) their defaults.
 pub struct KompozitionLocalAccessorScope<'a> {
     source: AccessorSource<'a>,
 }
@@ -63,7 +71,8 @@ enum AccessorSource<'a> {
 }
 
 impl KompozitionLocalAccessorScope<'_> {
-    /// `local`'s value where the computed local is read (Compose's `CompositionLocal.currentValue`).
+    /// `local`'s value where the computed one is read (Compose's `CompositionLocal.currentValue`, an extension
+    /// property in the scope: Kotlin's `LocalX.currentValue`), the read the reader's.
     pub fn current_value<U: Clone + 'static>(&self, local: &KompozitionLocal<U>) -> U {
         match &self.source {
             AccessorSource::Composer => local.current(),
@@ -72,6 +81,23 @@ impl KompozitionLocalAccessorScope<'_> {
             AccessorSource::Defaults => local.default_value(),
         }
     }
+}
+
+/// What a provider's [`provides_computed`](KompozitionLocal::provides_computed) gives a local (Compose's
+/// ComputedValueHolder): its computation, run where the local is read, and that closure's identity as a memoized
+/// closure (the same while the values it captures are: a provider giving it again keeps its holder, and its
+/// readers aren't told, as Compose keeps a holder given the same lambda).
+struct ComputedValueHolder<T> {
+    compute: Rc<dyn Fn(&KompozitionLocalAccessorScope) -> T>,
+    id: Option<u64>,
+}
+
+/// A provided value as it is read in `scope`: a computed one computed there.
+fn provided_value<T: Clone + 'static>(value: &Rc<dyn Any>, scope: &KompozitionLocalAccessorScope) -> T {
+    if let Some(computed) = value.downcast_ref::<ComputedValueHolder<T>>() {
+        return (computed.compute)(scope);
+    }
+    value.downcast_ref::<T>().expect("a local's value of another type").clone()
 }
 
 impl<T: Clone + 'static> KompozitionLocal<T> {
@@ -109,14 +135,16 @@ impl<T: Clone + 'static> KompozitionLocal<T> {
     }
 
     /// The value: the nearest provider's, else the default. Reading it subscribes the running scope: it
-    /// recomposes when the provider above it gives a different value.
+    /// recomposes when the provider above it gives a different value (a computed one: when what its computation
+    /// read changes, or the provider gives another computation).
     pub fn current(&self) -> T {
         if let Some(c) = Composer::current() {
+            let scope = KompozitionLocalAccessorScope { source: AccessorSource::Composer };
             if let Some(v) = c.read_local(self.id()) {
-                return v.downcast_ref::<T>().expect("a local's value of another type").clone();
+                return provided_value(&v, &scope);
             }
             if let Some(compute) = self.computed {
-                return compute(&KompozitionLocalAccessorScope { source: AccessorSource::Composer });
+                return compute(&scope);
             }
         }
         self.default_value()
@@ -196,6 +224,55 @@ impl<T: Clone + 'static> KompozitionLocal<T> {
     }
 }
 
+#[named]
+impl<T: Clone + 'static> KompozitionLocal<T> {
+    /// `local providesComputed { … }` (Compose 1.7's): the value is computed where the local is read, each time,
+    /// `compute` reading the other locals as they are there (`scope.current_value(&LocalX)`) and any state: those
+    /// reads are the reader's, so a state it reads changing composes again only the composables (or measures,
+    /// draws) that read the local, not the provider. A provider giving it again with a closure capturing the same
+    /// values (as Compose's memoized lambda) keeps it, its readers untold; another closure is another value, whose
+    /// readers compose again (as a static local's).
+    ///
+    /// ```
+    /// # use kompoz_runtime::*;
+    /// static LocalTint: KompozitionLocal<u32> = KompozitionLocal::new(|| 0);
+    /// static LocalHalfTint: KompozitionLocal<u32> = KompozitionLocal::new(|| 0);
+    /// #[kompozable]
+    /// fn Tinted(tint: State<u32>) {
+    ///     KompozitionLocalProvider(
+    ///         &[LocalHalfTint.provides_computed(move |scope| scope.current_value(&LocalTint) + tint.value() / 2)],
+    ///         || {
+    ///             let half = LocalHalfTint.current();
+    ///         },
+    ///     );
+    /// }
+    /// ```
+    pub fn provides_computed(
+        &'static self,
+        #[memoized] compute: impl Fn(&KompozitionLocalAccessorScope) -> T + 'static,
+    ) -> ProvidedValue {
+        let compute: Memoized<_> = compute;
+        let id = compute.id();
+        let holder = ComputedValueHolder::<T> { compute: Rc::new(compute.into_value()), id };
+        // (the same computation: the same identity, a memoized closure's; Compose's `compute === previous.compute`)
+        let same: Rc<dyn Fn(&dyn Any, &dyn Any) -> bool> = Rc::new(|a: &dyn Any, b: &dyn Any| {
+            match (a.downcast_ref::<ComputedValueHolder<T>>(), b.downcast_ref::<ComputedValueHolder<T>>()) {
+                (Some(a), Some(b)) => a.id.is_some() && a.id == b.id,
+                _ => false,
+            }
+        });
+        ProvidedValue(Provided {
+            local: self.id(),
+            holder: ValueHolder::new(Rc::new(holder)),
+            equals: same,
+            if_missing: false,
+            // (Compose's computed provision isn't dynamic: another one is a holder of its own)
+            dynamic: false,
+            shared: false,
+        })
+    }
+}
+
 /// Compose's `compositionLocalOf { default }`: a dynamic local.
 pub const fn kompozition_local_of<T: Clone + 'static>(default: fn() -> T) -> KompozitionLocal<T> {
     KompozitionLocal::new(default)
@@ -227,6 +304,8 @@ pub const fn static_kompozition_local_of<T: Clone + 'static>(default: fn() -> T)
 pub struct ProvidedValue(pub(crate) Provided);
 
 /// Composes `content` with `values` provided to it and to what it calls.
+///
+/// Kotlin: `KompozitionLocalProvider(vararg values: ProvidedValue, content: () -> R)`
 #[kompozable(inline)]
 pub fn KompozitionLocalProvider<R>(values: &[ProvidedValue], content: impl FnOnce() -> R) -> R {
     provide_here(values.iter().map(|v| v.0.clone()).collect(), content)
@@ -279,16 +358,20 @@ impl KompozitionLocalContext {
         match self.values.iter().rev().find(|p| p.local == local.id()) {
             Some(p) => {
                 let value = if p.dynamic { p.holder.read() } else { p.holder.peek() };
-                value.downcast_ref::<T>().expect("a local's value of another type").clone()
+                // (a computed one computed here, its reads told as the other locals' are)
+                provided_value(&value, &KompozitionLocalAccessorScope { source: AccessorSource::Context(self, true) })
             }
             None => local.default_in(self, true),
         }
     }
 
-    /// The same, read by no one.
+    /// The same, read by no one (a computed one's reads of the other locals too).
     pub fn peek<T: Clone + 'static>(&self, local: &KompozitionLocal<T>) -> T {
         match self.values.iter().rev().find(|p| p.local == local.id()) {
-            Some(p) => p.holder.peek().downcast_ref::<T>().expect("a local's value of another type").clone(),
+            Some(p) => provided_value(
+                &p.holder.peek(),
+                &KompozitionLocalAccessorScope { source: AccessorSource::Context(self, false) },
+            ),
             None => local.default_in(self, false),
         }
     }

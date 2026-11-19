@@ -6,7 +6,17 @@
 //!
 //! A call that names an argument or leaves a default out goes through the builder `#[kompozable]` (or
 //! `named_args!`) makes: the generator writes `f(a, name = b)` and the macro rewrites it. A PascalCase call in a
-//! composable body always goes through `Probe` (the macro's), whatever its arguments.
+//! composable body always goes through `Probe` (the macro's), whatever its arguments; so does a call of a callee with
+//! a `#[memoized]` parameter (`LocalX.provides_computed(…)`), whose closure the macro memoizes.
+//!
+//! A method call on a value calls what the value's type has, as Kotlin does: its own methods (its extension traits',
+//! what it derefs to, a shared value's — `Rc<dyn Measurable>` — what it holds), the kt shims' of its Kotlin type, a
+//! member extension of an implicit receiver; the type inferred as far as Kotlin's own inference goes (see
+//! [`Gen::peek_ty`]). On a value of a type the generator can't tell, the one kind of callee the name and arguments
+//! fit is called (a method only one type has, a kt shim of one trait, a receiver's member extension); several kinds
+//! are an error asking for the value's type ("write `x`'s type: …"), never one picked by how well the arguments fit
+//! (`animateTo` is Animatable's, SeekableTransitionState's, DeferredTransitionState's…: a guess could call another
+//! type's method of the name).
 
 use super::expr::{AnyWrap, Out, OutKind, Want};
 use super::names::{ident, is_pascal, snake};
@@ -58,6 +68,24 @@ impl ArgValue<'_> {
             _ => None,
         }
     }
+}
+
+/// A kind of callee a method call on a value of a type KompozR can't tell may be ([`Gen::unknown_receiver_kinds`]):
+/// what an error names it by, and the callee.
+struct CalleeKind {
+    label: String,
+    callee: Candidate,
+}
+
+enum Candidate {
+    /// One kt shim trait's member: called through it.
+    Kt(Callee),
+    /// A member of Kotlin's standard types several kt shim traits have, or Rust's own types too: as written.
+    Std,
+    /// A member extension of an implicit receiver.
+    Scoped(ImplicitReceiver, Vec<&'static crate::index::Item>),
+    /// A method of a type of the index.
+    Owned(Callee),
 }
 
 /// How the callee is reached.
@@ -117,6 +145,9 @@ impl Gen<'_, '_> {
                 Out::plain(quote_spanned!(span=> (#f)(#(#vals),*)), Ty::Unknown)
             }
         };
+        // (what a generic callee gives, told by its arguments — `remember { Animatable(0f) }`, `with(x) { … }`,
+        // `x.run { … }` —: as inference reads the call)
+        let out = if out.ty == Ty::Unknown { Out { ty: self.peek_ty(e), ..out } } else { out };
         if type_args.is_empty() {
             return out;
         }
@@ -247,7 +278,7 @@ impl Gen<'_, '_> {
             let recv =
                 Out { ts: quote!(#ri), ty, kind: if r.rust == "self" { OutKind::Local } else { OutKind::Plain } };
             let _ = items;
-            return self.method_on(recv, n, args, loc);
+            return self.method_on(recv, None, n, args, loc);
         }
         if let Some((r, items, file)) = found {
             let label = r.labels.first().cloned();
@@ -474,7 +505,8 @@ impl Gen<'_, '_> {
             // is `PagerDefaults.fling_behavior(…)`, the struct its own value)
             let object_member = lookup(&name.name).iter().any(|i| i.kind == Kind::Method && i.owner == q);
             if is_value_object(&q) || object_member {
-                return self.method_on(Out::plain(quote_spanned!(qspan=> #qi), Ty::named(&q)), name, args, loc);
+                let recv = Out::plain(quote_spanned!(qspan=> #qi), Ty::named(&q));
+                return self.method_on(recv, Some(receiver), name, args, loc);
             }
             let items: Vec<&'static crate::index::Item> =
                 associated(&q, &name.name).into_iter().filter(|i| i.kind == Kind::Function).collect();
@@ -497,11 +529,12 @@ impl Gen<'_, '_> {
             let it = self.fresh("it", span);
             let inner_ty = recv.ty.non_null();
             let value = self.finish(recv, Want::default(), receiver.loc);
-            let inner = self.method_on(Out { ts: quote!(#it), ty: inner_ty, kind: OutKind::Plain }, name, args, loc);
+            let inner_recv = Out { ts: quote!(#it), ty: inner_ty, kind: OutKind::Plain };
+            let inner = self.method_on(inner_recv, Some(receiver), name, args, loc);
             let ts = inner.ts;
             return Out::plain(quote_spanned!(span=> #kt::safe!(#value, |#it| #ts)), inner.ty.nullable());
         }
-        self.method_on(recv, name, args, loc)
+        self.method_on(recv, Some(receiver), name, args, loc)
     }
 
     /// `lhs name rhs` (an infix call) as a call of a member: the left side's type's own (`entity using easing`, one
@@ -518,14 +551,19 @@ impl Gen<'_, '_> {
             return None;
         }
         let recv = self.expr(lhs);
-        let arg = ArgRef { name: None, value: ArgValue::Expr(rhs), spread: false, loc: rhs.loc };
-        Some(self.method_on(recv, name, &[arg], loc))
+        Some(self.infix_call(recv, lhs, name, rhs, loc))
     }
 
-    /// A method call on a value written as `recv`.
-    fn method_on(&mut self, recv: Out, name: &Ident, args: &[ArgRef], loc: Loc) -> Out {
+    /// `lhs name rhs` as a method call of `name` on `recv` (`lhs` written).
+    pub(crate) fn infix_call(&mut self, recv: Out, lhs: &Expr, name: &Ident, rhs: &Expr, loc: Loc) -> Out {
+        let arg = ArgRef { name: None, value: ArgValue::Expr(rhs), spread: false, loc: rhs.loc };
+        self.method_on(recv, Some(lhs), name, &[arg], loc)
+    }
+
+    /// A method call on a value written as `recv` (the expression `recv_expr`, where it is one written: what an
+    /// error asking for its type names).
+    fn method_on(&mut self, recv: Out, recv_expr: Option<&Expr>, name: &Ident, args: &[ArgRef], loc: Loc) -> Out {
         let span = self.span(loc);
-        let nspan = self.span(name.loc);
         let kt = self.kt(span);
         // `x.toString()`: Kotlin's text of it.
         if name.name == "toString" && args.is_empty() {
@@ -548,8 +586,8 @@ impl Gen<'_, '_> {
                 && let Some(c) = self.choose(&items, args, loc)
             {
                 let kind = c.item.map_or(Receiver::Ref, |i| i.receiver);
-                let hint = match &recv.ty {
-                    Ty::Named(_, a) if a.len() == 1 => Some((a[0].clone(), recv.ty.clone())),
+                let hint = match recv.ty.through_shared() {
+                    Ty::Named(_, a) if a.len() == 1 => Some((a[0].clone(), recv.ty.through_shared().clone())),
                     _ => None,
                 };
                 let owner_arg = hint.as_ref().map(|(a, _)| a.clone()).filter(|a| *a != Ty::Unknown);
@@ -562,104 +600,200 @@ impl Gen<'_, '_> {
                 return out;
             }
         }
-        // The kt shims: through their trait.
-        let traits = recv.ty.kt_traits();
-        let kt_items = if recv.ty == Ty::Unknown {
-            let all = kt_members(&name.name, &[]);
-            let one_trait = all.first().is_some_and(|f| all.iter().all(|i| i.via == f.via));
-            if one_trait && !ambiguous_member(&name.name) { all } else { Vec::new() }
-        } else {
-            kt_members(&name.name, traits)
-        };
-        if !kt_items.is_empty()
-            && let Some(c) = self.choose_quiet(&kt_items, args)
-        {
-            let item = c.item.expect("an index item");
-            let t = proc_macro2::Ident::new(item.via, nspan);
-            let elem = recv.ty.element();
-            let recv_ty = recv.ty.clone();
-            let r = match (item.receiver, recv.kind) {
-                (Receiver::Value, _) => {
-                    let v = self.finish(recv, Want::default(), loc);
-                    quote!(#v)
-                }
-                // (a `&mut` held: reborrowed)
-                (Receiver::RefMut, OutKind::RefMut) => {
-                    let ts = recv.ts;
-                    quote_spanned!(span=> &mut *#ts)
-                }
-                (_, OutKind::RefMut) => {
-                    let ts = recv.ts;
-                    quote_spanned!(span=> &*#ts)
-                }
-                (Receiver::RefMut, _) => {
-                    let ts = recv.ts;
-                    quote_spanned!(span=> &mut #ts)
-                }
-                _ => {
-                    let ts = recv.ts;
-                    quote_spanned!(span=> &#ts)
-                }
-            };
-            let mut c = c;
-            c.ret = kt_ret(&c.ret, item.ret, &elem, &recv_ty);
-            // (`apply { … }`, `run { … }`: Kotlin's `T.() -> R`, the receiver's value lent as `&mut Self`, is a receiver
-            // lambda of the receiver's type)
-            receiver_of_self(&mut c, &recv_ty, "&mut Self");
-            self.elem_hint = Some((elem, recv_ty));
-            let out = self.emit(&c, Target::Ufcs(quote_spanned!(span=> #kt::#t), r), args, loc, &name.name);
-            self.elem_hint = None;
-            return out;
+        // A value of a known type: a kt shim's member through its trait, or a member extension of an implicit
+        // receiver; else a method the index doesn't know of the type (Rust's own, a trait's), as written.
+        if recv.ty != Ty::Unknown {
+            let kt_items = kt_members(&name.name, recv.ty.kt_traits());
+            if !kt_items.is_empty()
+                && let Some(c) = self.choose_quiet(&kt_items, args)
+            {
+                return self.kt_call(recv, c, args, loc, name);
+            }
+            if let Some((r, items)) = self.scoped_member(&recv.ty, &name.name) {
+                return self.scoped_call(recv, &r, &items, args, loc, name);
+            }
+            return self.as_written(recv, name, args, loc);
         }
-        // A member extension of an implicit receiver (`placeable.place(x, y)` in a PlacementScope; a generic one,
-        // `1.3f at 100` in a `keyframes { }` block, the config's `at(value: T, …)`, extends any value).
-        let scoped = self.receivers.iter().rev().find_map(|r| {
+        // A value of a type KompozR can't tell: the one kind of callee its name and arguments fit, never one picked
+        // among several (Kotlin knows the type: a guess could call another type's method of that name).
+        let kinds = self.unknown_receiver_kinds(&name.name, args);
+        match <[_; 1]>::try_from(kinds) {
+            Ok([kind]) => match kind.callee {
+                Candidate::Kt(c) => self.kt_call(recv, c, args, loc, name),
+                Candidate::Scoped(r, items) => self.scoped_call(recv, &r, &items, args, loc, name),
+                Candidate::Owned(c) => {
+                    let kind = c.item.map_or(Receiver::Ref, |i| i.receiver);
+                    let r = self.finish_recv(recv, kind, loc);
+                    self.emit(&c, Target::Method(r), args, loc, &name.name)
+                }
+                // (a member of Kotlin's standard types: Rust finds it on the value's own type, the kt shims' traits
+                // in scope)
+                Candidate::Std => self.as_written(recv, name, args, loc),
+            },
+            Err(kinds) if kinds.is_empty() => self.as_written(recv, name, args, loc),
+            Err(kinds) => {
+                let owners: Vec<String> = kinds.into_iter().map(|k| k.label).collect();
+                let message = self.unknown_receiver_message(recv_expr, &name.name, owners);
+                self.error(loc, message);
+                Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown)
+            }
+        }
+    }
+
+    /// The kinds of callee a method call of `name` with `args` on a value of a type KompozR can't tell may be, each
+    /// of them fitting the arguments: a kt shim's member (Kotlin's standard types: one trait's, called through it; or
+    /// several traits', or a name Rust's own types have too, which Rust's call finds), a member extension of the
+    /// innermost implicit receiver having one, and each type of the index having a method of it (its own, its
+    /// extension traits', what it derefs to: one kind).
+    fn unknown_receiver_kinds(&self, name: &str, args: &[ArgRef]) -> Vec<CalleeKind> {
+        let mut kinds = Vec::new();
+        let kt_items = kt_members(name, &[]);
+        if !kt_items.is_empty() {
+            let one_trait = kt_items.iter().all(|i| i.via == kt_items[0].via);
+            if one_trait && !ambiguous_member(name) {
+                if let Some(c) = self.choose_among(&kt_items, args, true) {
+                    kinds.push(CalleeKind {
+                        label: format!("`{}`", kt_type_name(kt_items[0].via)),
+                        callee: Candidate::Kt(c),
+                    });
+                }
+            } else if self.choose_among(&kt_items, args, true).is_some() {
+                kinds.push(CalleeKind { label: "Kotlin's standard types".to_string(), callee: Candidate::Std });
+            }
+        }
+        let scoped = self.scoped_member(&Ty::Unknown, name);
+        let scope_ty = scoped.as_ref().map(|(r, _)| r.ty.clone());
+        if let Some((r, items)) = scoped
+            && items.iter().any(|i| {
+                let c = Callee::from_item(i);
+                self.fit_detail(&Callee { params: c.params[1..].to_vec(), ..c }, args).is_some_and(|(_, m)| !m)
+            })
+        {
+            let label = format!("`{}`'s member extension", r.ty);
+            kinds.push(CalleeKind { label, callee: Candidate::Scoped(r, items) });
+        }
+        // (the index's methods of the name by the type they are members of: a type and its extension traits are one,
+        // and so are a type and what it derefs to)
+        let mut owners: Vec<(String, Vec<&'static crate::index::Item>)> = Vec::new();
+        for i in lookup(name).iter().filter(|i| i.kind == Kind::Method && !i.via.starts_with("Kt")) {
+            let owner = if i.owner.is_empty() { i.via } else { i.owner };
+            if scope_ty.as_deref().is_some_and(|s| crate::index::deref_chain(s).contains(&owner)) {
+                continue;
+            }
+            match owners.iter_mut().find(|(o, _)| {
+                o == owner
+                    || crate::index::deref_chain(o).contains(&owner)
+                    || crate::index::deref_chain(owner).contains(&o.as_str())
+                    || (i.owner.is_empty() && i.via.starts_with(o.as_str()))
+            }) {
+                Some((_, items)) => items.push(i),
+                None => owners.push((owner.to_string(), vec![i])),
+            }
+        }
+        for (owner, items) in owners {
+            if let Some(c) = self.choose_among(&items, args, true) {
+                kinds.push(CalleeKind { label: format!("`{owner}`"), callee: Candidate::Owned(c) });
+            }
+        }
+        kinds
+    }
+
+    /// The innermost implicit receiver with a member extension `name` (a method whose first parameter is the value
+    /// it extends: `placeable.place(x, y)` in a PlacementScope; a generic one, `1.3f at 100` in a `keyframes { }`
+    /// block, the config's `at(value: T, …)`, extends any value) that a value of type `ty` (unknown: any) may take,
+    /// unless the value's own type has a member of that name.
+    fn scoped_member(&self, ty: &Ty, name: &str) -> Option<(ImplicitReceiver, Vec<&'static crate::index::Item>)> {
+        self.receivers.iter().rev().find_map(|r| {
             let items: Vec<&'static crate::index::Item> =
-                members_of(&r.ty, &name.name).filter(|i| i.kind == Kind::Method && !i.params.is_empty()).collect();
+                members_of(&r.ty, name).filter(|i| i.kind == Kind::Method && !i.params.is_empty()).collect();
             let fits = items.iter().any(|i| {
                 let first = Ty::from_rust(i.params[0].ty);
-                recv.ty == Ty::Unknown
-                    || first == recv.ty
-                    || first.is_float() && recv.ty.is_number()
+                *ty == Ty::Unknown
+                    || first == *ty
+                    || first.is_float() && ty.is_number()
                     || first == Ty::Unknown && is_type_parameter(i.params[0].ty)
-                    || first.owner().is_some() && first.owner() == recv.ty.owner()
+                    || first.owner().is_some() && first.owner() == ty.owner()
             });
-            (fits && owner_has_no(&recv.ty, &name.name)).then(|| (r.clone(), items))
-        });
-        if let Some((r, items)) = scoped {
-            let label = r.labels.first().cloned();
-            let _ = self.receiver(label.as_deref());
-            let first = items[0].params[0].ty;
-            let first_param_ref = first.starts_with('&');
-            let rv = recv.ts;
-            // (Kotlin's `Int.toDp()` and `Float.toDp()` are one Rust method taking a float: the number given as one)
-            let rv = if matches!(first, "f32" | "f64") && !recv.ty.is_float() {
-                let t = proc_macro2::Ident::new(first, span);
-                quote_spanned!(span=> (#rv as #t))
-            } else {
-                rv
-            };
-            let rv = if first_param_ref { quote_spanned!(span=> &#rv) } else { rv };
-            let ri = proc_macro2::Ident::new(&r.rust, span);
-            let c = Callee::from_item(items[0]);
-            let rest = Callee { params: c.params[1..].to_vec(), ..c };
-            return self.emit(&rest, Target::MethodFirst(quote!(#ri), rv), args, loc, &name.name);
-        }
-        // Any method of the name the index knows (the receiver's type unknown).
-        let items: Vec<&'static crate::index::Item> = lookup(&name.name)
-            .iter()
-            .filter(|i| {
-                i.kind == Kind::Method && i.via.is_empty() || i.kind == Kind::Method && !i.via.starts_with("Kt")
-            })
-            .collect();
-        if !items.is_empty()
-            && let Some(c) = self.choose_quiet(&items, args)
-        {
-            let kind = c.item.map_or(Receiver::Ref, |i| i.receiver);
-            let r = self.finish_recv(recv, kind, loc);
-            return self.emit(&c, Target::Method(r), args, loc, &name.name);
-        }
-        // Unknown: as written.
+            (fits && owner_has_no(ty, name)).then(|| (r.clone(), items))
+        })
+    }
+
+    /// A kt shim's member `c` called on `recv` through its trait.
+    fn kt_call(&mut self, recv: Out, c: Callee, args: &[ArgRef], loc: Loc, name: &Ident) -> Out {
+        let span = self.span(loc);
+        let nspan = self.span(name.loc);
+        let kt = self.kt(span);
+        let item = c.item.expect("an index item");
+        let t = proc_macro2::Ident::new(item.via, nspan);
+        let elem = recv.ty.element();
+        let recv_ty = recv.ty.clone();
+        let r = match (item.receiver, recv.kind) {
+            (Receiver::Value, _) => {
+                let v = self.finish(recv, Want::default(), loc);
+                quote!(#v)
+            }
+            // (a `&mut` held: reborrowed)
+            (Receiver::RefMut, OutKind::RefMut) => {
+                let ts = recv.ts;
+                quote_spanned!(span=> &mut *#ts)
+            }
+            (_, OutKind::RefMut) => {
+                let ts = recv.ts;
+                quote_spanned!(span=> &*#ts)
+            }
+            (Receiver::RefMut, _) => {
+                let ts = recv.ts;
+                quote_spanned!(span=> &mut #ts)
+            }
+            _ => {
+                let ts = recv.ts;
+                quote_spanned!(span=> &#ts)
+            }
+        };
+        let mut c = c;
+        c.ret = kt_ret(&c.ret, item.ret, &elem, &recv_ty);
+        // (`apply { … }`, `run { … }`: Kotlin's `T.() -> R`, the receiver's value lent as `&mut Self`, is a receiver
+        // lambda of the receiver's type)
+        receiver_of_self(&mut c, &recv_ty, "&mut Self");
+        self.elem_hint = Some((elem, recv_ty));
+        let out = self.emit(&c, Target::Ufcs(quote_spanned!(span=> #kt::#t), r), args, loc, &name.name);
+        self.elem_hint = None;
+        out
+    }
+
+    /// A member extension of the implicit receiver `r` (one of `items`) called on `recv`: `r.name(&recv, …)`.
+    fn scoped_call(
+        &mut self,
+        recv: Out,
+        r: &ImplicitReceiver,
+        items: &[&'static crate::index::Item],
+        args: &[ArgRef],
+        loc: Loc,
+        name: &Ident,
+    ) -> Out {
+        let span = self.span(loc);
+        let label = r.labels.first().cloned();
+        let _ = self.receiver(label.as_deref());
+        let first = items[0].params[0].ty;
+        let first_param_ref = first.starts_with('&');
+        let rv = recv.ts;
+        // (Kotlin's `Int.toDp()` and `Float.toDp()` are one Rust method taking a float: the number given as one)
+        let rv = if matches!(first, "f32" | "f64") && !recv.ty.is_float() {
+            let t = proc_macro2::Ident::new(first, span);
+            quote_spanned!(span=> (#rv as #t))
+        } else {
+            rv
+        };
+        let rv = if first_param_ref { quote_spanned!(span=> &#rv) } else { rv };
+        let ri = proc_macro2::Ident::new(&r.rust, span);
+        let c = Callee::from_item(items[0]);
+        let rest = Callee { params: c.params[1..].to_vec(), ..c };
+        self.emit(&rest, Target::MethodFirst(quote!(#ri), rv), args, loc, &name.name)
+    }
+
+    /// `recv.name(…)` as written: a method the index doesn't know, its arguments as given.
+    fn as_written(&mut self, recv: Out, name: &Ident, args: &[ArgRef], loc: Loc) -> Out {
+        let span = self.span(loc);
         let r = recv.ts;
         let m = self.name_ident(&snake(&name.name), name.loc);
         let mut vals = Vec::new();
@@ -701,10 +835,19 @@ impl Gen<'_, '_> {
     }
 
     fn choose_quiet(&self, items: &[&'static crate::index::Item], args: &[ArgRef]) -> Option<Callee> {
+        self.choose_among(items, args, false)
+    }
+
+    /// The item of `items` the arguments fit best (`strict`: of those none of whose arguments is of a type known not
+    /// to fit its parameter).
+    fn choose_among(&self, items: &[&'static crate::index::Item], args: &[ArgRef], strict: bool) -> Option<Callee> {
         let mut best: Option<(i32, Callee)> = None;
         for item in items {
             let c = Callee::from_item(item);
-            let Some(score) = self.fit(&c, args) else { continue };
+            let Some((score, mismatched)) = self.fit_detail(&c, args) else { continue };
+            if strict && mismatched {
+                continue;
+            }
             if best.as_ref().is_none_or(|(s, _)| score > *s) {
                 best = Some((score, c));
             }
@@ -712,16 +855,18 @@ impl Gen<'_, '_> {
         best.map(|(_, c)| c)
     }
 
-    /// How well arguments fit a callee (none: they don't).
-    fn fit(&self, c: &Callee, args: &[ArgRef]) -> Option<i32> {
+    /// How well arguments fit a callee (none: they don't), and whether an argument is of a type known not to fit its
+    /// parameter (which counts against it: what is known of types is partial).
+    fn fit_detail(&self, c: &Callee, args: &[ArgRef]) -> Option<(i32, bool)> {
         // (the named arguments of the builder it gives: `detectTapGestures(onTap = { … })`)
         let (args, links) = split_chain(c, args)?;
         if !links.is_empty() && c.params.is_empty() {
-            return Some(0);
+            return Some((0, false));
         }
         let args = args.as_slice();
         let m = self.map_args(c, args).ok()?;
         let mut score = 0;
+        let mut mismatched = false;
         for (k, p) in c.params.iter().enumerate() {
             let given = &m.given[k];
             if given.is_empty() {
@@ -759,6 +904,7 @@ impl Gen<'_, '_> {
                     let ty = self.peek_ty(e);
                     if !compatible(&ty, &p.ty()) {
                         score -= 5;
+                        mismatched = true;
                     } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y) {
                         score += 1;
                     }
@@ -772,7 +918,7 @@ impl Gen<'_, '_> {
             }
             score += 2;
         }
-        Some(score - c.params.len() as i32)
+        Some((score - c.params.len() as i32, mismatched))
     }
 
     /// Which parameter each argument goes to.
@@ -909,7 +1055,12 @@ impl Gen<'_, '_> {
         let builder = c.builder && !(given_set == required && in_order);
         let missing_kotlin =
             c.params.iter().enumerate().any(|(k, p)| m.given[k].is_empty() && matches!(p.default, PDefault::Kotlin(_)));
-        let rewritten = (builder && !(missing_kotlin && !c.builder)) || (pascal_path && self.fun.kompozable);
+        // (a callee with a `#[memoized]` parameter: `#[kompozable]` rewrites its calls whatever their arguments,
+        // memoizing the closure — `LocalX providesComputed { … }` —, so it captures for it)
+        let memoized = c.item.is_some_and(|i| i.has(crate::index::flags::MEMOIZED));
+        let rewritten = (builder && !(missing_kotlin && !c.builder))
+            || (pascal_path && self.fun.kompozable)
+            || (memoized && self.fun.kompozable);
         let transform_wraps = rewritten && self.fun.kompozable;
         let call_label = kotlin.to_string();
         // Each argument: its name when named, its value, whether it is a lambda.
@@ -1539,6 +1690,63 @@ pub(crate) fn layout_scope_of(c: &Callee) -> Option<&'static str> {
         "Column" | "FlowColumn" => Some("ColumnScope"),
         "Box" | "BoxWithConstraints" => Some("BoxScope"),
         _ => None,
+    }
+}
+
+/// The Kotlin type a kt shim trait's members are of (`KtStr`: `String`'s).
+fn kt_type_name(via: &str) -> &str {
+    match via {
+        "KtStr" => "String",
+        "KtNullableStr" => "String?",
+        "KtList" | "KtListOfLists" | "KtListOfNullable" => "List",
+        "KtMutableList" => "MutableList",
+        "KtMapExt" => "Map",
+        "KtChar" => "Char",
+        "KtFloat" => "Float",
+        "KtNumber" => "Int",
+        "KtPair" | "KtComponents" => "Pair",
+        "KtComponent3" | "KtTriple" => "Triple",
+        "KtResult" => "Result",
+        "KtScope" => "Any",
+        other => other,
+    }
+}
+
+impl Gen<'_, '_> {
+    /// The error of a method call `name` on a value (`recv`) of a type KompozR can't tell, which types `owners` have
+    /// a method of that name fitting its arguments: Kotlin's own knowledge of the type asked for, where it is written
+    /// (a local's declaration, a lambda's parameter; a value of another expression held in a local first).
+    pub(crate) fn unknown_receiver_message(&self, recv: Option<&Expr>, name: &str, mut owners: Vec<String>) -> String {
+        owners.sort();
+        owners.dedup();
+        let which = match owners.as_slice() {
+            [a] => format!("{a} has one"),
+            [a, b] => format!("{a} and {b} have one"),
+            _ => format!("{} and {} have one", owners[..owners.len() - 1].join(", "), owners[owners.len() - 1]),
+        };
+        let tell = format!("KompozR can't tell which `{name}` it calls ({which})");
+        let local = |n: &str| self.scopes.iter().rev().find_map(|s| s.get(n)).map(|l| l.kind.clone());
+        match recv.map(|e| &e.kind) {
+            Some(ExprKind::Name(n)) if n.name == "it" && local("it") == Some(LocalKind::LambdaParam) => {
+                format!("name the lambda's parameter and write its type: {tell} (`{{ x: Type -> x.{name}(…) }}`)")
+            }
+            Some(ExprKind::Name(n)) => match local(&n.name) {
+                Some(LocalKind::LambdaParam) => {
+                    format!("write `{0}`'s type: {tell} (`{{ {0}: Type -> … }}`)", n.name)
+                }
+                Some(LocalKind::Delegated) => format!("write `{0}`'s type: {tell} (`val {0}: Type by …`)", n.name),
+                Some(LocalKind::Val | LocalKind::Var) => {
+                    format!("write `{0}`'s type: {tell} (`val {0}: Type = …`)", n.name)
+                }
+                Some(LocalKind::Param) => format!("{tell}: `{}`'s declared type doesn't tell it", n.name),
+                // (a value the generator doesn't see declared: another file's)
+                _ => format!("{tell}: `{}` is declared where KompozR can't see its type", n.name),
+            },
+            _ => format!(
+                "write the type of the value `{name}` is called on: {tell} (a `val x: Type = …` of it, then \
+                 `x.{name}(…)`)"
+            ),
+        }
     }
 }
 
