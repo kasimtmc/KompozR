@@ -13,6 +13,11 @@
 //! - a suspending one: an `async` block (`LaunchedEffect(k) { … }`), or a closure giving one (`pointerInput(k) { … }`;
 //!   boxed, `Box::pin(async move { … })`, where the closure is a trait object giving `Pin<Box<dyn Future>>`:
 //!   `draggable`'s `onDragStopped`), whose suspending calls are awaited;
+//! - one run in place in a coroutine whose body suspends (`with(anim) { animateTo(1f) }`, `repeat(3) { delay(10) }`:
+//!   Kotlin's inline lambdas suspend with their caller): an async closure, borrowing as the plain one does, given to
+//!   the callee's suspending twin (`kt::with_async(…, async |this| …).await`, see `kompoz_runtime::kt`); a callee
+//!   without one (Kotlin's `crossinline` lambdas, functions Kotlin doesn't inline) can't take it, an error as in
+//!   Kotlin. `return@label` in it returns from the closure, as in the plain one;
 //! - `Layout`'s measure policy: through `measure_policy(…)`, which gives Rust its parameters' types.
 //!
 //! Its parameters: as written, or `it` when it takes one and names none. Its body's last expression is its value,
@@ -41,6 +46,8 @@ impl Gen<'_, '_> {
             stored: true,
             measure_policy: false,
             typed: false,
+            twin: false,
+            file_inline: false,
         };
         match info {
             Some(i) => self.lambda_for(l, Some(i), call_label, false),
@@ -59,21 +66,34 @@ impl Gen<'_, '_> {
     ) -> TokenStream {
         match info {
             Some(i) => self.lambda_with(l, i, Some(i), call_label, transform_wraps, false),
-            None => {
-                let unknown = LInfo {
-                    kind: LambdaKind::Fn,
-                    inputs: Vec::new(),
-                    output: String::new(),
-                    receiver: None,
-                    suspend: false,
-                    boxed: false,
-                    stored: false,
-                    measure_policy: false,
-                    typed: false,
-                };
-                self.lambda_with(l, &unknown, None, call_label, transform_wraps, true)
-            }
+            None => self.lambda_in_place(l, call_label, false, transform_wraps),
         }
+    }
+
+    /// A lambda given to a parameter the index doesn't know (a method Rust finds by its name), run in place: it
+    /// borrows; `twin`: the callee has a suspending twin (each kt shim the name may be has one), so in a coroutine it
+    /// may suspend.
+    pub(crate) fn lambda_in_place(
+        &mut self,
+        l: &Lambda,
+        call_label: Option<&str>,
+        twin: bool,
+        transform_wraps: bool,
+    ) -> TokenStream {
+        let unknown = LInfo {
+            kind: LambdaKind::Fn,
+            inputs: Vec::new(),
+            output: String::new(),
+            receiver: None,
+            suspend: false,
+            boxed: false,
+            stored: false,
+            measure_policy: false,
+            typed: false,
+            twin,
+            file_inline: false,
+        };
+        self.lambda_with(l, &unknown, None, call_label, transform_wraps, true)
     }
 
     fn lambda_with(
@@ -265,6 +285,9 @@ impl Gen<'_, '_> {
             // (a kept lambda runs later, outside the coroutine around it)
             self.in_async = false;
         }
+        // (one run in place in a coroutine — Kotlin's inline function's — suspends with it when its body does)
+        let in_place = was_async && !suspend && !info.stored;
+        let awaits_before = self.awaits;
         let tail = if known.is_some_and(|k| k.unit_output()) || (known.is_some() && info.kind == LambdaKind::Future) {
             Tail::Unit
         } else {
@@ -286,6 +309,32 @@ impl Gen<'_, '_> {
             }
         }
         self.in_async = was_async;
+        let suspends = in_place && self.awaits > awaits_before;
+        if suspend || info.stored {
+            // (its suspension points are its own coroutine's, or errors: none of the code around it)
+            self.awaits = awaits_before;
+        }
+        if suspends {
+            if info.twin {
+                // (an async closure, which the callee's suspending twin takes: the call is awaited)
+                self.inline_async = true;
+            } else {
+                let (name, at) = self.last_await.clone().unwrap_or_else(|| (String::new(), l.loc));
+                if info.file_inline {
+                    self.later(at, "a suspending call in a lambda given to the file's own `inline fun`");
+                } else {
+                    let callee = call_label.map_or_else(|| "its callee".to_string(), |c| format!("`{c}`"));
+                    self.error(
+                        at,
+                        format!(
+                            "`{name}` suspends, in a lambda {callee} doesn't run in the coroutine: Kotlin suspends in a \
+                             coroutine and in the lambdas an inline function runs in place (`with`, `let`, `apply`, \
+                             `forEach`, `map`, `repeat`, …; not a `crossinline` one: `sortedBy`'s)"
+                        ),
+                    );
+                }
+            }
+        }
         self.receivers.truncate(receivers_before);
         self.type_arg = outer_type_arg;
         self.owner_arg = outer_owner_arg;
@@ -332,6 +381,9 @@ impl Gen<'_, '_> {
             } else {
                 quote_spanned!(span=> |#(#params),*| { #inner async move #block })
             }
+        } else if suspends && info.twin {
+            // (run in place, suspending with the coroutine: borrowing what it uses, as the plain one does)
+            quote_spanned!(span=> async |#(#params),*| #block)
         } else {
             let mv = if explicit { quote!(move) } else { quote!() };
             match shared.and_then(|_| written_type(&info.output, span)) {
@@ -365,6 +417,8 @@ impl Gen<'_, '_> {
             match bare {
                 "Self::Item" | "T" => return elem.clone(),
                 "(Self::K, Self::V)" => return recv.element(),
+                // (a scope function's `it`: the value itself, `x.let { it… }`)
+                "Self" if *recv != Ty::Unknown => return recv.clone(),
                 _ => {}
             }
         }

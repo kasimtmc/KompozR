@@ -44,6 +44,8 @@ pub(crate) struct FunTy {
     pub ret: Ty,
     /// Its receiver's Rust type name, when the Rust side passes it (`DrawScope`).
     pub receiver: Option<String>,
+    /// `suspend (A) -> R`: a call of a value of it is awaited.
+    pub suspend: bool,
 }
 
 impl Ty {
@@ -296,7 +298,7 @@ impl TypeText<'_> {
                     }
                 }
                 let ret = if self.eat("->") { self.ty() } else { Ty::Unit };
-                Ty::Fun(Box::new(FunTy { params, ret, receiver: None }))
+                Ty::Fun(Box::new(FunTy { params, ret, receiver: None, suspend: false }))
             } else if w == "Into" {
                 let a = self.args();
                 a.into_iter().next().unwrap_or(Ty::Unknown)
@@ -390,6 +392,12 @@ pub(crate) struct LInfo {
     /// Made a shared or boxed trait object (`Rc<dyn Fn(&TextLayoutResult)>`, `Callback`): its parameters are written
     /// with their types, which a closure can't take from where it goes then.
     pub typed: bool,
+    /// The callee runs it in place and has a suspending twin ([`index::flags::ASYNC_TWIN`]: Kotlin's inline function,
+    /// a kt shim's): in a coroutine it may suspend, an async closure given to the twin.
+    pub twin: bool,
+    /// A lambda of the file's own `inline fun`, run in place: one that suspends needs the function's suspending form
+    /// (stage 14's inline functions).
+    pub file_inline: bool,
 }
 
 impl LInfo {
@@ -491,7 +499,13 @@ pub(crate) struct Callee {
 
 impl Callee {
     pub fn from_item(item: &'static Item) -> Callee {
-        let params = item.params.iter().map(param_of_item).collect();
+        let mut params: Vec<PInfo> = item.params.iter().map(param_of_item).collect();
+        // (Kotlin's inline function with a suspending twin: its lambdas run in place may suspend in a coroutine)
+        if item.has(index::flags::ASYNC_TWIN) {
+            for l in params.iter_mut().filter_map(|p| p.lambda.as_mut()).filter(|l| !l.stored) {
+                l.twin = true;
+            }
+        }
         Callee {
             rust: item.rust.to_string(),
             params,
@@ -518,6 +532,8 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             stored: true,
             measure_policy: true,
             typed: false,
+            twin: false,
+            file_inline: false,
         })
     } else {
         p.lambda.map(|l| LInfo {
@@ -538,6 +554,8 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             // Rust to find the trait's blanket impl)
             typed: ["Rc<dyn", "Arc<dyn", "Box<dyn"].iter().any(|o| ty.contains(o))
                 || (ty.starts_with("impl ") && !["Fn(", "FnMut(", "FnOnce(", "Future"].iter().any(|f| ty.contains(f))),
+            twin: false,
+            file_inline: false,
         })
     };
     PInfo {

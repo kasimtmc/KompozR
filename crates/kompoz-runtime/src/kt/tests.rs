@@ -497,3 +497,357 @@ fn top_level_values_read_by_name() {
     static PLACE: NotClone = NotClone(7);
     assert_eq!(top_level_with!(PLACE, |p| p.0), 7);
 }
+
+/// `f` run to its end (a no-op waker: what it waits on is a [`Yield`], ready when polled again).
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
+/// A suspension point: pending once, then ready (each lambda below suspends there, as a `delay` would).
+struct Yield(bool);
+impl std::future::Future for Yield {
+    type Output = ();
+    fn poll(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.0 {
+            std::task::Poll::Ready(())
+        } else {
+            self.0 = true;
+            std::task::Poll::Pending
+        }
+    }
+}
+fn suspend() -> Yield {
+    Yield(false)
+}
+
+#[test]
+fn suspending_twins_do_what_their_shims_do() {
+    let xs = vec![3, 1, 4, 1, 5];
+    block_on(async {
+        // (the elements each lambda sees, in order: a twin calls it as its shim does — as often, as far)
+        let mut seen = Vec::new();
+        assert_eq!(
+            xs.map_async(async |x| {
+                suspend().await;
+                x * 2
+            })
+            .await,
+            KtList::map(&xs, |x| x * 2)
+        );
+        assert_eq!(
+            xs.filter_async(async |x| {
+                suspend().await;
+                x > 1
+            })
+            .await,
+            KtList::filter(&xs, |x| x > 1)
+        );
+        assert_eq!(
+            xs.fold_async(0, async |a, x| {
+                suspend().await;
+                a * 10 + x
+            })
+            .await,
+            xs.fold(0, |a, x| a * 10 + x)
+        );
+        assert_eq!(
+            xs.reduce_async(async |a, x| {
+                suspend().await;
+                a - x
+            })
+            .await,
+            KtList::reduce(&xs, |a, x| a - x)
+        );
+        assert_eq!(
+            xs.sum_of_async(async |x| {
+                suspend().await;
+                x
+            })
+            .await,
+            14
+        );
+        assert_eq!(
+            xs.max_by_async(async |x| {
+                suspend().await;
+                -x
+            })
+            .await,
+            KtList::max_by(&xs, |x| -x)
+        );
+        assert_eq!(
+            xs.min_of_async(async |x| {
+                suspend().await;
+                x
+            })
+            .await,
+            1
+        );
+        assert_eq!(
+            xs.group_by_async(async |x| {
+                suspend().await;
+                x % 2
+            })
+            .await,
+            xs.group_by(|x| x % 2)
+        );
+        assert_eq!(
+            xs.partition_async(async |x| {
+                suspend().await;
+                x > 2
+            })
+            .await,
+            KtList::partition(&xs, |x| x > 2)
+        );
+        assert_eq!(
+            xs.distinct_by_async(async |x| {
+                suspend().await;
+                x
+            })
+            .await,
+            xs.distinct_by(|x| x)
+        );
+        assert_eq!(
+            xs.map_not_null_async(async |x| {
+                suspend().await;
+                (x > 1).then_some(x)
+            })
+            .await,
+            [3, 4, 5]
+        );
+        assert_eq!(
+            xs.index_of_last_async(async |x| {
+                suspend().await;
+                x == 1
+            })
+            .await,
+            3
+        );
+        assert_eq!(
+            xs.associate_by_async(async |x| {
+                suspend().await;
+                x
+            })
+            .await,
+            xs.associate_by(|x| x)
+        );
+        // (short-circuits where the shim does)
+        assert!(
+            xs.any_that_async(async |x| {
+                seen.push(x);
+                suspend().await;
+                x == 4
+            })
+            .await
+        );
+        assert_eq!(std::mem::take(&mut seen), [3, 1, 4]);
+        assert!(
+            !xs.all_async(async |x| {
+                seen.push(x);
+                suspend().await;
+                x > 2
+            })
+            .await
+        );
+        assert_eq!(std::mem::take(&mut seen), [3, 1]);
+        assert_eq!(
+            xs.take_while_async(async |x| {
+                seen.push(x);
+                suspend().await;
+                x > 2
+            })
+            .await,
+            [3]
+        );
+        assert_eq!(
+            xs.drop_while_async(async |x| {
+                seen.push(x);
+                suspend().await;
+                x > 2
+            })
+            .await,
+            [1, 4, 1, 5]
+        );
+        assert_eq!(std::mem::take(&mut seen), [3, 1, 3, 1]);
+        assert_eq!(
+            xs.first_or_null_that_async(async |x| {
+                seen.push(x);
+                suspend().await;
+                x > 3
+            })
+            .await,
+            Some(4)
+        );
+        assert_eq!(std::mem::take(&mut seen), [3, 1, 4]);
+        xs.for_each_indexed_async(async |i, x| {
+            suspend().await;
+            seen.push(i * 10 + x)
+        })
+        .await;
+        assert_eq!(std::mem::take(&mut seen), [3, 11, 24, 31, 45]);
+        // (strings by characters, UTF-16 indices; maps by entries)
+        let s = "aé𝄞b";
+        assert_eq!(
+            s.filter_async(async |c| {
+                suspend().await;
+                c != 'é'
+            })
+            .await,
+            KtStr::filter(&s, |c| c != 'é')
+        );
+        s.for_each_indexed_async(async |i, _| {
+            suspend().await;
+            seen.push(i)
+        })
+        .await;
+        assert_eq!(std::mem::take(&mut seen), [0, 1, 2, 4]);
+        assert_eq!(s.if_empty_async(async || unreachable!()).await, s);
+        let m = map_of([to("a", 1), to("b", 2)]);
+        assert_eq!(
+            m.map_values_async(async |(_, v)| {
+                suspend().await;
+                v * 3
+            })
+            .await,
+            m.map_values(|(_, v)| v * 3)
+        );
+        assert_eq!(
+            m.filter_keys_async(async |k| {
+                suspend().await;
+                k == "b"
+            })
+            .await,
+            m.filter_keys(|k| k == "b")
+        );
+        let mut cache: KtMap<String, i32> = KtMap::new();
+        assert_eq!(
+            cache
+                .get_or_put_async("k".into(), async || {
+                    suspend().await;
+                    7
+                })
+                .await,
+            7
+        );
+        assert_eq!(cache.get_or_put_async("k".into(), async || unreachable!()).await, 7);
+        // (scope functions, `run`, `with`, `repeat`, `List(n)`, the safe call, `?:`)
+        assert_eq!(
+            5.let_async(async |x| {
+                suspend().await;
+                x + 1
+            })
+            .await,
+            6
+        );
+        assert_eq!(
+            vec![1]
+                .apply_async(async |v| {
+                    suspend().await;
+                    v.push(2)
+                })
+                .await,
+            [1, 2]
+        );
+        assert_eq!(
+            with_async(String::from("a"), async |s| {
+                suspend().await;
+                s.push('b');
+                s.clone()
+            })
+            .await,
+            "ab"
+        );
+        assert_eq!(
+            run_async(async || {
+                suspend().await;
+                3
+            })
+            .await,
+            3
+        );
+        assert_eq!(
+            4.take_if_async(async |x| {
+                suspend().await;
+                x > 3
+            })
+            .await,
+            Some(4)
+        );
+        assert_eq!(
+            4.take_unless_async(async |x| {
+                suspend().await;
+                x > 3
+            })
+            .await,
+            None
+        );
+        repeat_async(3, async |i| {
+            suspend().await;
+            seen.push(i)
+        })
+        .await;
+        assert_eq!(std::mem::take(&mut seen), [0, 1, 2]);
+        assert_eq!(
+            List_async(3, async |i| {
+                suspend().await;
+                i * i
+            })
+            .await,
+            [0, 1, 4]
+        );
+        assert_eq!(
+            safe_async(Some(2), async |x| {
+                suspend().await;
+                x * 2
+            })
+            .await,
+            Some(4)
+        );
+        assert_eq!(safe_async(None::<i32>, async |_| -> i32 { unreachable!() }).await, None);
+        assert_eq!(
+            elvis_async(None, async || {
+                suspend().await;
+                9
+            })
+            .await,
+            9
+        );
+        assert_eq!(elvis_async(Some(1), async || -> i32 { unreachable!() }).await, 1);
+        assert_eq!(elvis_async(None::<i32>, async || Some(2)).await, Some(2));
+    });
+    // Kotlin's exceptions, as their shims throw them.
+    assert_eq!(
+        thrown(|| {
+            block_on(xs.first_that_async(async |x| x > 9));
+        }),
+        "NoSuchElementException: Collection contains no element matching the predicate."
+    );
+    assert_eq!(
+        thrown(|| {
+            block_on(Vec::<i32>::new().reduce_async(async |a, b| a + b));
+        }),
+        "UnsupportedOperationException: Empty collection can't be reduced."
+    );
+    assert_eq!(
+        thrown(|| block_on(require_async(
+            false,
+            Some(&async || {
+                suspend().await;
+                "no".to_string()
+            })
+        ))),
+        "IllegalArgumentException: no"
+    );
+    assert_eq!(
+        thrown(|| {
+            block_on(check_not_null_async(None::<i32>, Some(&async || "gone".to_string())));
+        }),
+        "IllegalStateException: gone"
+    );
+    block_on(check_async(true, Some(&async || -> String { unreachable!() })));
+}

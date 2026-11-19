@@ -130,6 +130,12 @@ harness = false
 name = "kotlin_locals"
 harness = false
 
+# Kotlin's inline functions (scope functions, repeat, a list's forEach/map…) whose lambdas suspend with their
+# coroutine, in Kotlin's syntax.
+[[test]]
+name = "kotlin_inline_suspend"
+harness = false
+
 # Lookahead animations of bounds (animateContentSize, animateBounds, BoundsTransform, the visual debugging) in
 # Kotlin's syntax.
 [[test]]

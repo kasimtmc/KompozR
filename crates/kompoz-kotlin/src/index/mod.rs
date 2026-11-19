@@ -185,6 +185,10 @@ pub mod flags {
     /// A parameter is `#[memoized]`: in a composable body `#[kompozable]` rewrites its calls, giving the closure
     /// passed to it its identity (and capturing for it), as it does a rewritten call's (`LocalX.provides_computed(…)`).
     pub const MEMOIZED: u16 = 1 << 8;
+    /// Kotlin's inline function (a kt shim's: `with`, `let`, `forEach`, `repeat`, `map`…) with a suspending twin, a
+    /// `#[doc(hidden)] async fn <rust>_async` taking its lambdas as async closures: a lambda given to it in a coroutine
+    /// may suspend (Kotlin's inline lambdas suspend with their caller), the call then going to the twin, awaited.
+    pub const ASYNC_TWIN: u16 = 1 << 9;
 }
 
 impl Item {

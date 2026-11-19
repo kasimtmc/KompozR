@@ -382,6 +382,7 @@ fn number_format(s: &str) -> ! {
 /// lengths in UTF-16 units, parameters in Kotlin's order. `str`'s own methods of the same names (`trim`, `split`,
 /// `contains`, `replace`, `repeat`, `starts_with`, `lines`…) come first in a method call on a `&str`: Kotlin's are
 /// `KtStr::split(&s, …)`.
+#[allow(async_fn_in_trait)]
 pub trait KtStr: AsRef<str> {
     /// Kotlin: `length: Int`
     fn length(&self) -> i32 {
@@ -870,6 +871,91 @@ pub trait KtStr: AsRef<str> {
     #[track_caller]
     fn format(&self, args: &[&dyn KtToString]) -> String {
         super::format::format(self.as_ref(), args)
+    }
+
+    // ---- The suspending twins (see the kt module's doc): Kotlin's inline functions, their lambdas async closures ----
+
+    #[doc(hidden)]
+    async fn if_empty_async(&self, default_value: impl AsyncFnOnce() -> String) -> String {
+        if self.as_ref().is_empty() { default_value().await } else { self.as_ref().to_string() }
+    }
+    #[doc(hidden)]
+    async fn if_blank_async(&self, default_value: impl AsyncFnOnce() -> String) -> String {
+        if self.is_blank() { default_value().await } else { self.as_ref().to_string() }
+    }
+    #[doc(hidden)]
+    async fn filter_async(&self, mut predicate: impl AsyncFnMut(char) -> bool) -> String {
+        let mut out = String::new();
+        for c in self.as_ref().chars() {
+            if predicate(c).await {
+                out.push(c);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_not_async(&self, mut predicate: impl AsyncFnMut(char) -> bool) -> String {
+        let mut out = String::new();
+        for c in self.as_ref().chars() {
+            if !predicate(c).await {
+                out.push(c);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn map_async<R>(&self, mut transform: impl AsyncFnMut(char) -> R) -> Vec<R> {
+        let mut out = Vec::new();
+        for c in self.as_ref().chars() {
+            out.push(transform(c).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn for_each_async(&self, mut action: impl AsyncFnMut(char)) {
+        for c in self.as_ref().chars() {
+            action(c).await;
+        }
+    }
+    #[doc(hidden)]
+    async fn for_each_indexed_async(&self, mut action: impl AsyncFnMut(i32, char)) {
+        let mut i = 0;
+        for c in self.as_ref().chars() {
+            action(i, c).await;
+            i += c.len_utf16() as i32;
+        }
+    }
+    #[doc(hidden)]
+    async fn any_that_async(&self, mut predicate: impl AsyncFnMut(char) -> bool) -> bool {
+        for c in self.as_ref().chars() {
+            if predicate(c).await {
+                return true;
+            }
+        }
+        false
+    }
+    #[doc(hidden)]
+    async fn all_async(&self, mut predicate: impl AsyncFnMut(char) -> bool) -> bool {
+        for c in self.as_ref().chars() {
+            if !predicate(c).await {
+                return false;
+            }
+        }
+        true
+    }
+    #[doc(hidden)]
+    async fn none_that_async(&self, predicate: impl AsyncFnMut(char) -> bool) -> bool {
+        !self.any_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn count_that_async(&self, mut predicate: impl AsyncFnMut(char) -> bool) -> i32 {
+        let mut n = 0;
+        for c in self.as_ref().chars() {
+            if predicate(c).await {
+                n += 1;
+            }
+        }
+        n
     }
 }
 

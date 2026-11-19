@@ -338,6 +338,22 @@ fn param_default(attrs: &[Attribute]) -> Option<String> {
     }
 }
 
+/// The functions among `fns` (one scope's: a module's, a trait's, an impl's) that have a suspending twin, a
+/// `#[doc(hidden)] async fn <name>_async` beside them: Kotlin's inline functions, whose lambdas may suspend with their
+/// caller (the kt shims' convention; see `kompoz_runtime::kt`).
+fn async_twins<'a>(fns: impl Iterator<Item = (&'a [Attribute], &'a Signature)>) -> BTreeSet<String> {
+    fns.filter(|(attrs, sig)| hidden(attrs) && sig.asyncness.is_some())
+        .filter_map(|(_, sig)| unraw(&sig.ident).strip_suffix("_async").map(str::to_string))
+        .collect()
+}
+
+/// Flags the items of a function that has a suspending twin (`ASYNC_TWIN`).
+fn mark_twins(items: &mut [KItem], twins: &BTreeSet<String>) {
+    for it in items.iter_mut().filter(|it| twins.contains(&it.rust)) {
+        it.flags.insert("ASYNC_TWIN");
+    }
+}
+
 /// Whether an item is `#[doc(hidden)]`.
 fn hidden(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|a| {
@@ -1006,10 +1022,15 @@ fn is_pub(v: &Visibility) -> bool {
 }
 
 fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
+    let twins = async_twins(items.iter().filter_map(|i| match i {
+        Item::Fn(f) => Some((f.attrs.as_slice(), &f.sig)),
+        _ => None,
+    }));
     for item in items {
         match item {
             Item::Fn(f) if is_pub(&f.vis) && !hidden(&f.attrs) => {
-                let it = function(cx, &f.attrs, &f.sig, "", "", scan);
+                let mut it = function(cx, &f.attrs, &f.sig, "", "", scan);
+                mark_twins(&mut it, &twins);
                 scan.items.extend(it);
             }
             Item::Const(c) if is_pub(&c.vis) && !hidden(&c.attrs) => {
@@ -1059,11 +1080,16 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                         scan.items.push(it);
                     }
                 }
+                let twins = async_twins(t.items.iter().filter_map(|i| match i {
+                    TraitItem::Fn(f) => Some((f.attrs.as_slice(), &f.sig)),
+                    _ => None,
+                }));
                 for ti in &t.items {
                     if let TraitItem::Fn(f) = ti
                         && !hidden(&f.attrs)
                     {
-                        let it = function(cx, &f.attrs, &f.sig, "", &via, scan);
+                        let mut it = function(cx, &f.attrs, &f.sig, "", &via, scan);
+                        mark_twins(&mut it, &twins);
                         scan.items.extend(it);
                     }
                 }
@@ -1162,6 +1188,10 @@ fn impl_block(cx: &Cx, imp: &ItemImpl, scan: &mut Scan) {
     let blanket = matches!(&*imp.self_ty, Type::Path(p) if p.path.segments.len() == 1
         && imp.generics.type_params().any(|g| g.ident == p.path.segments[0].ident));
     let owner = if blanket { String::new() } else { type_name(&imp.self_ty) };
+    let twins = async_twins(imp.items.iter().filter_map(|i| match i {
+        ImplItem::Fn(f) => Some((f.attrs.as_slice(), &f.sig)),
+        _ => None,
+    }));
     for item in &imp.items {
         match item {
             ImplItem::Fn(f) => {
@@ -1171,6 +1201,7 @@ fn impl_block(cx: &Cx, imp: &ItemImpl, scan: &mut Scan) {
                     continue;
                 }
                 let mut items = function(cx, &f.attrs, &f.sig, &owner, &via, scan);
+                mark_twins(&mut items, &twins);
                 if named.is_some() {
                     for it in &mut items {
                         it.flags.insert("NAMED");
@@ -1722,7 +1753,14 @@ mod tests {
             pub trait KtStr {
                 /// Kotlin: `padStart(length: Int, padChar: Char = ' '): String`
                 fn pad_start(&self, length: i32, pad_char: char) -> String;
+                fn for_each(&self, action: impl FnMut(char)) {}
+                #[doc(hidden)]
+                async fn for_each_async(&self, action: impl AsyncFnMut(char)) {}
+                fn map_async_like(&self) {}
             }
+            pub fn repeat(times: i32, action: impl FnMut(i32)) {}
+            #[doc(hidden)]
+            pub async fn repeat_async(times: i32, action: impl AsyncFnMut(i32)) {}
             impl TextFieldState {
                 pub fn edit(&self, block: impl FnOnce(&mut TextFieldBuffer)) {}
             }
@@ -1753,6 +1791,10 @@ mod tests {
         assert_eq!(content.receiver, "LookaheadScope");
         assert!(find("awaitFrame").flags.contains("SUSPEND"));
         assert!(find("delay").flags.contains("SUSPEND"));
+        // Kotlin's inline functions with a suspending twin (`<name>_async`, hidden: not an item of its own).
+        assert!(find("forEach").flags.contains("ASYNC_TWIN") && find("repeat").flags.contains("ASYNC_TWIN"));
+        assert!(!find("padStart").flags.contains("ASYNC_TWIN") && !find("mapAsyncLike").flags.contains("ASYNC_TWIN"));
+        assert!(scan.items.iter().all(|i| !i.rust.ends_with("_async")));
         let effect = find("LaunchedEffect").params[1].lambda.as_ref().unwrap();
         assert!(effect.suspend && effect.kind == "Future");
         assert_eq!(find("Modifier").kind, "Value");

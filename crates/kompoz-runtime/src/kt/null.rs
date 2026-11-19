@@ -93,6 +93,7 @@ impl<R> KtFlattenPlain for &KtNullProbe<Option<R>> {
 /// Kotlin's scope functions, on every value: `x.r#let { … }`, `x.also { … }`, `x.apply { … }` (the block gets the
 /// value as its receiver, `&mut`), `x.run { … }`, `x.take_if { … }`, `x.take_unless { … }`. A lambda that gets the
 /// value as `it` gets it itself (a clone where the value is kept too).
+#[allow(async_fn_in_trait)]
 pub trait KtScope: Sized {
     /// Kotlin: `let(block: (T) -> R): R`
     fn r#let<R>(self, block: impl FnOnce(Self) -> R) -> R {
@@ -129,6 +130,44 @@ pub trait KtScope: Sized {
     {
         if predicate(self.clone()) { None } else { Some(self) }
     }
+
+    // ---- The suspending twins (see the kt module's doc): Kotlin's inline functions, their lambdas async closures ----
+
+    #[doc(hidden)]
+    async fn let_async<R>(self, block: impl AsyncFnOnce(Self) -> R) -> R {
+        block(self).await
+    }
+    #[doc(hidden)]
+    async fn also_async(self, block: impl AsyncFnOnce(Self)) -> Self
+    where
+        Self: Clone,
+    {
+        block(self.clone()).await;
+        self
+    }
+    #[doc(hidden)]
+    async fn apply_async(mut self, block: impl AsyncFnOnce(&mut Self)) -> Self {
+        block(&mut self).await;
+        self
+    }
+    #[doc(hidden)]
+    async fn run_async<R>(mut self, block: impl AsyncFnOnce(&mut Self) -> R) -> R {
+        block(&mut self).await
+    }
+    #[doc(hidden)]
+    async fn take_if_async(self, predicate: impl AsyncFnOnce(Self) -> bool) -> Option<Self>
+    where
+        Self: Clone,
+    {
+        if predicate(self.clone()).await { Some(self) } else { None }
+    }
+    #[doc(hidden)]
+    async fn take_unless_async(self, predicate: impl AsyncFnOnce(Self) -> bool) -> Option<Self>
+    where
+        Self: Clone,
+    {
+        if predicate(self.clone()).await { None } else { Some(self) }
+    }
 }
 
 impl<T> KtScope for T {}
@@ -143,4 +182,35 @@ pub fn run<R>(block: impl FnOnce() -> R) -> R {
 /// Kotlin: `with(receiver: T, block: T.() -> R): R`
 pub fn with<T, R>(mut receiver: T, block: impl FnOnce(&mut T) -> R) -> R {
     block(&mut receiver)
+}
+
+/// [`run`]'s suspending twin (see the kt module's doc).
+#[doc(hidden)]
+pub async fn run_async<R>(block: impl AsyncFnOnce() -> R) -> R {
+    block().await
+}
+
+/// [`with`]'s suspending twin (see the kt module's doc).
+#[doc(hidden)]
+pub async fn with_async<T, R>(mut receiver: T, block: impl AsyncFnOnce(&mut T) -> R) -> R {
+    block(&mut receiver).await
+}
+
+/// [`safe`] whose `f` suspends (`a?.f()` in a coroutine, `f` a suspending call: Kotlin's safe call is no function, its
+/// call suspends with its caller).
+#[doc(hidden)]
+pub async fn safe_async<T, R>(value: Option<T>, f: impl AsyncFnOnce(T) -> R) -> Option<R> {
+    match value {
+        Some(v) => Some(f(v).await),
+        None => None,
+    }
+}
+
+/// [`elvis`] whose `otherwise` suspends (`a ?: load()` in a coroutine).
+#[doc(hidden)]
+pub async fn elvis_async<T, R: KtElvis<T>>(value: Option<T>, otherwise: impl AsyncFnOnce() -> R) -> R::Out {
+    match value {
+        Some(v) => R::kt_from_value(v),
+        None => otherwise().await.kt_from_other(),
+    }
 }

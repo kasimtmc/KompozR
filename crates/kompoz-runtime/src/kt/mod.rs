@@ -16,6 +16,17 @@
 //! ``Kotlin: `name(param: Type = default, …)` ``: the API index (`cargo xtask kotlin-index`) reads it, and the
 //! generator fills a call's missing arguments from those defaults (Kotlin expressions). A Rust `Option<T>` parameter
 //! takes `Some(v)` for a Kotlin value given and `None` for null.
+//!
+//! Kotlin's inline functions (`with`, `let`, `run`, `apply`, `also`, `takeIf`, `repeat`, `forEach`, `map`, `filter`,
+//! `fold`, `getOrPut`, `require`, …) run their lambdas in place: in a coroutine such a lambda suspends with its caller
+//! (`with(anim) { animateTo(1f) }`, `repeat(3) { delay(10) }`). Each shim of one has a suspending twin, `#[doc(hidden)]`
+//! and named `<name>_async` next to it (in its trait, its impl, or its module), taking the lambdas as async closures
+//! (`AsyncFnOnce`/`AsyncFnMut`) and otherwise the same: same parameters in the same order, same evaluation order, same
+//! results. The generator calls it, awaited, where a lambda given to the shim suspends; the API index marks the shims
+//! that have one (`ASYNC_TWIN`). Kotlin's `crossinline` lambdas (`sortedBy`), and the functions Kotlin doesn't inline
+//! (`removeAll(predicate)`, `joinToString(transform)`, `lazy`), have none: their lambdas can't suspend, as in Kotlin.
+//! A twin's exception is at the shim's line (an `async fn` can't be `#[track_caller]`), as a Kotlin stack trace has
+//! an inline function's own line on top.
 
 pub mod collections;
 pub mod delegate;
@@ -36,6 +47,8 @@ pub use collections::{
     empty_set, float_array_of, int_array_of, list_of, list_of_not_null, map_of, mutable_list_of, mutable_map_of,
     mutable_set_of, set_of, to,
 };
+#[doc(hidden)]
+pub use collections::{List_async, MutableList_async};
 pub use delegate::{
     KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, lazy, post_dec, post_inc, pre_dec, pre_inc,
 };
@@ -45,6 +58,8 @@ pub use math::{
     log2, log10, max, max_of, min, min_of, pow, round, sign, sin, sinh, sqrt, tan, tanh, to_char, truncate,
 };
 pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
+#[doc(hidden)]
+pub use null::{elvis_async, run_async, safe_async, with_async};
 pub use range::{
     IndexedValue, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to, is_in, range_to, step,
     until,
@@ -96,6 +111,30 @@ pub fn check(value: bool, lazy_message: Option<&dyn Fn() -> String>) {
     }
 }
 
+/// [`require`]'s suspending twin (see the module's doc): its message's lambda an async closure.
+#[doc(hidden)]
+pub async fn require_async(value: bool, lazy_message: Option<&impl AsyncFn() -> String>) {
+    if !value {
+        let message = match lazy_message {
+            Some(m) => m().await,
+            None => "Failed requirement.".to_string(),
+        };
+        panic_kt("IllegalArgumentException", &message);
+    }
+}
+
+/// [`check`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+pub async fn check_async(value: bool, lazy_message: Option<&impl AsyncFn() -> String>) {
+    if !value {
+        let message = match lazy_message {
+            Some(m) => m().await,
+            None => "Check failed.".to_string(),
+        };
+        panic_kt("IllegalStateException", &message);
+    }
+}
+
 /// Kotlin's `requireNotNull(value)`: the value, else an IllegalArgumentException.
 /// Kotlin: `requireNotNull(value: T?, lazyMessage: (() -> Any)? = null): T`
 #[track_caller]
@@ -122,6 +161,36 @@ pub fn check_not_null<T>(value: Option<T>, lazy_message: Option<&dyn Fn() -> Str
     }
 }
 
+/// [`require_not_null`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+pub async fn require_not_null_async<T>(value: Option<T>, lazy_message: Option<&impl AsyncFn() -> String>) -> T {
+    match value {
+        Some(v) => v,
+        None => {
+            let message = match lazy_message {
+                Some(m) => m().await,
+                None => "Required value was null.".to_string(),
+            };
+            panic_kt("IllegalArgumentException", &message)
+        }
+    }
+}
+
+/// [`check_not_null`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+pub async fn check_not_null_async<T>(value: Option<T>, lazy_message: Option<&impl AsyncFn() -> String>) -> T {
+    match value {
+        Some(v) => v,
+        None => {
+            let message = match lazy_message {
+                Some(m) => m().await,
+                None => "Required value was null.".to_string(),
+            };
+            panic_kt("IllegalStateException", &message)
+        }
+    }
+}
+
 /// Kotlin's `error(message)`: an IllegalStateException, never returning (a value of any type: `x ?: error("…")`
 /// is a `match` whose arm is this).
 /// Kotlin: `error(message: Any): Nothing`
@@ -145,6 +214,14 @@ pub fn TODO(reason: Option<&str>) -> ! {
 /// Kotlin: `repeat(times: Int, action: (Int) -> Unit)`
 pub fn repeat(times: i32, action: impl FnMut(i32)) {
     (0..times.max(0)).for_each(action);
+}
+
+/// [`repeat`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+pub async fn repeat_async(times: i32, mut action: impl AsyncFnMut(i32)) {
+    for i in 0..times.max(0) {
+        action(i).await;
+    }
 }
 
 /// Kotlin's `println(message)`: its text (Kotlin's `toString()`) and a line end, on the standard output.

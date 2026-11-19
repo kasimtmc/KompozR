@@ -717,7 +717,13 @@ impl Transformer {
             "debug_assert",
             "dbg",
         ];
-        if !exprs.contains(&name.as_str()) {
+        // (the kt shims' macros the Kotlin syntax writes — `kt::safe!(a, |it| …)`, `kt::flatten!(…)`,
+        // `kt::template!(…)` —: of expressions, whose calls are a composable body's as any)
+        let segments: Vec<String> = mac.path.segments.iter().map(|s| s.ident.to_string()).collect();
+        let kt = segments.len() >= 2
+            && segments[segments.len() - 2] == "kt"
+            && matches!(name.as_str(), "safe" | "flatten" | "template");
+        if !exprs.contains(&name.as_str()) && !kt {
             return;
         }
         if let Ok(mut items) = Punctuated::<Expr, Token![,]>::parse_terminated.parse2(mac.tokens.clone()) {

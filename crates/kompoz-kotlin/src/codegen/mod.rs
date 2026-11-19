@@ -32,6 +32,8 @@
 //! | lambdas | closures: borrowing where the callee runs them before returning (Kotlin's inline functions), else capturing clones (`#[kompozable]` does that for the calls it rewrites); a shared one (`Callback`, `Rc<dyn Fn(&T)>`) made one, its parameters typed; a parameter given a `&mut` (`state.update { it.add(…) }`) reborrowed |
 //! | receiver lambdas (`Canvas { drawCircle(…) }`) | a closure taking the scope (`|this| this.draw_circle(…)`): free names that are its members resolve through it |
 //! | suspend lambdas (`LaunchedEffect(k) { delay(1) }`) | `async move { delay(1).await }`: known suspending calls are awaited |
+//! | an inline function's lambda that suspends in a coroutine (`with(a) { animateTo(1f) }`, `xs.forEach { delay(1) }`) | an async closure to the kt shim's suspending twin, awaited: `kt::with_async(a, async \|this\| this.animate_to(1.0).await).await` |
+//! | `a?.f()`, `a ?: b` whose `f`/`b` suspends | `kt::flatten!(kt::safe_async(a, async \|it\| it.f().await).await)`, `kt::elvis_async(a, async \|\| b).await` |
 //!
 //! Extension functions: `fun Modifier.framed(width: Dp = 2.dp): Modifier` is a method of an extension trait,
 //! `#[named(pub trait ModifierFramedExt)] impl Modifier { fn framed(self, #[default(2.dp())] width: Dp) -> Modifier }`:
@@ -125,6 +127,14 @@ pub(crate) struct Gen<'a, 'd> {
     pub fun: FnState,
     /// In an `async` block: suspending calls are awaited.
     pub in_async: bool,
+    /// How many `.await`s have been written ([`Gen::awaited`]): a lambda run in place whose body adds some suspends.
+    pub awaits: usize,
+    /// The last suspending call awaited (its Kotlin name and place): what an error about a lambda that can't suspend
+    /// points at.
+    pub last_await: Option<(String, Loc)>,
+    /// A lambda given to the call whose arguments are being written suspends (an async closure): the call goes to the
+    /// callee's suspending twin, awaited.
+    pub inline_async: bool,
     pub loops: Vec<LoopCx>,
     pub lambdas: Vec<LambdaCx>,
     /// The names of the calls whose arguments are being written (a lambda's implicit label).
@@ -169,6 +179,9 @@ impl<'a, 'd> Gen<'a, 'd> {
             frames: Vec::new(),
             fun: FnState::default(),
             in_async: false,
+            awaits: 0,
+            last_await: None,
+            inline_async: false,
             loops: Vec::new(),
             lambdas: Vec::new(),
             call_labels: Vec::new(),
@@ -208,6 +221,18 @@ impl<'a, 'd> Gen<'a, 'd> {
         let rt = respan(self.rt().clone(), span);
         let (line, column) = (loc.start.line, loc.start.column);
         quote_spanned!(span=> #rt::key(&(#line, #column), || #ts))
+    }
+
+    /// `.await` at `span`, counted: a suspension point of the coroutine being written. `kotlin` names the suspending
+    /// call it awaits; none for a call that suspends because a lambda in it does (a twin's, a safe call's): the
+    /// suspending call in that lambda is the one named.
+    pub fn awaited(&mut self, kotlin: Option<&str>, loc: Loc) -> TokenStream {
+        self.awaits += 1;
+        if let Some(k) = kotlin {
+            self.last_await = Some((k.to_string(), loc));
+        }
+        let span = self.span(loc);
+        quote_spanned!(span=> .await)
     }
 
     /// A fresh name for something the generator binds (`__kz_w0`).
@@ -510,6 +535,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         self.loops.clear();
         self.lambdas.clear();
         self.in_async = suspend;
+        self.inline_async = false;
 
         // The receiver of an extension function: `self`.
         let mut self_ty = None;

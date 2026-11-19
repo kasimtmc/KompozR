@@ -220,9 +220,9 @@ impl Gen<'_, '_> {
             } else {
                 quote!(#i)
             };
-            let (receiver, ret, params) = match &l.ty {
-                Ty::Fun(ft) => (ft.receiver.clone(), ft.ret.clone(), ft.params.clone()),
-                _ => (None, Ty::Unknown, Vec::new()),
+            let (receiver, ret, params, suspend) = match &l.ty {
+                Ty::Fun(ft) => (ft.receiver.clone(), ft.ret.clone(), ft.params.clone(), ft.suspend),
+                _ => (None, Ty::Unknown, Vec::new(), false),
             };
             let mut vals = Vec::new();
             if let Some(r) = receiver {
@@ -244,8 +244,23 @@ impl Gen<'_, '_> {
                         let v = self.value(e);
                         self.kotlin_number(v, &from, to, span)
                     }
-                    _ => self.loose_arg(a),
+                    // (its lambda labeled with its name: `return@f`)
+                    _ => self.with_label(&n.name, |me| me.loose_arg(a)),
                 });
+            }
+            // (a value of a suspending function type: its call suspends)
+            if suspend {
+                if !self.in_async {
+                    self.error(
+                        loc,
+                        format!(
+                            "`{}` suspends: call it from a coroutine (`LaunchedEffect`, `launch`, a `suspend fun`)",
+                            n.name
+                        ),
+                    );
+                }
+                let a = self.awaited(Some(&n.name), loc);
+                return Out::plain(quote_spanned!(span=> #f(#(#vals),*) #a), ret);
             }
             return Out::plain(quote_spanned!(span=> #f(#(#vals),*)), ret);
         }
@@ -377,7 +392,7 @@ impl Gen<'_, '_> {
                 ArgValue::Expr(e) if pascal && !a.value.is_lambda() => {
                     self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None })
                 }
-                _ => self.loose_arg(a),
+                _ => self.with_label(&n.name, |me| me.loose_arg(a)),
             };
             vals.push(match a.name {
                 Some(an) => {
@@ -519,7 +534,8 @@ impl Gen<'_, '_> {
                 );
             }
             let m = self.name_ident(&snake(&name.name), name.loc);
-            let vals: Vec<TokenStream> = args.iter().map(|a| self.loose_arg(a)).collect();
+            let vals: Vec<TokenStream> =
+                args.iter().map(|a| self.with_label(&name.name, |me| me.loose_arg(a))).collect();
             return Out::plain(quote_spanned!(span=> #qi::#m(#(#vals),*)), Ty::Unknown);
         }
         let recv = self.expr(receiver);
@@ -528,8 +544,17 @@ impl Gen<'_, '_> {
             let inner_ty = recv.ty.non_null();
             let value = self.finish(recv, Want::default(), receiver.loc);
             let inner_recv = Out { ts: quote!(#it), ty: inner_ty, kind: OutKind::Plain };
+            let awaits = self.awaits;
             let inner = self.method_on(inner_recv, Some(receiver), name, args, loc);
             let ts = inner.ts;
+            // (a suspending call: Kotlin's safe call is no function, it suspends with the coroutine)
+            if self.in_async && self.awaits > awaits {
+                let a = self.awaited(None, loc);
+                return Out::plain(
+                    quote_spanned!(span=> #kt::flatten!(#kt::safe_async(#value, async |#it| #ts) #a)),
+                    inner.ty.nullable(),
+                );
+            }
             return Out::plain(quote_spanned!(span=> #kt::safe!(#value, |#it| #ts)), inner.ty.nullable());
         }
         self.method_on(recv, Some(receiver), name, args, loc)
@@ -606,6 +631,18 @@ impl Gen<'_, '_> {
                 && let Some(c) = self.choose_quiet(&kt_items, args)
             {
                 return self.kt_call(recv, c, args, loc, name);
+            }
+            // (a Kotlin map's member its kt traits don't have: `KtMap`'s own — `getOrPut` —, its parameters known)
+            if let Ty::Map(..) = &recv.ty {
+                let items: Vec<&'static crate::index::Item> =
+                    members_of("KtMap", &name.name).filter(|i| i.kind == Kind::Method).collect();
+                if !items.is_empty()
+                    && let Some(c) = self.choose_quiet(&items, args)
+                {
+                    let kind = c.item.map_or(Receiver::Ref, |i| i.receiver);
+                    let r = self.finish_recv(recv, kind, loc);
+                    return self.emit(&c, Target::Method(r), args, loc, &name.name);
+                }
             }
             if let Some((r, items)) = self.scoped_member(&recv.ty, &name.name) {
                 return self.scoped_call(recv, &r, &items, args, loc, name);
@@ -788,14 +825,24 @@ impl Gen<'_, '_> {
         self.emit(&rest, Target::MethodFirst(quote!(#ri), rv), args, loc, &name.name)
     }
 
-    /// `recv.name(…)` as written: a method the index doesn't know, its arguments as given.
+    /// `recv.name(…)` as written: a method the index doesn't know (or a kt shim's Rust finds by its name: Kotlin's
+    /// standard types' member of several traits), its arguments as given, its lambdas labeled with its name
+    /// (`return@forEach`). A lambda that suspends (in a coroutine) goes to the suspending twin when every kt shim of the
+    /// name has one (`x.for_each_async(async |it| …).await`).
     fn as_written(&mut self, recv: Out, name: &Ident, args: &[ArgRef], loc: Loc) -> Out {
         let span = self.span(loc);
         let r = recv.ts;
         let m = self.name_ident(&snake(&name.name), name.loc);
+        let twin = kt_twin(&name.name);
+        let outer_inline = std::mem::replace(&mut self.inline_async, false);
         let mut vals = Vec::new();
         for a in args {
-            let v = self.loose_arg(a);
+            let v = self.with_label(&name.name, |me| match a.value {
+                ArgValue::Lambda(l) | ArgValue::Expr(Expr { kind: ExprKind::Lambda(l), .. }) => {
+                    me.lambda_in_place(l, Some(&name.name), twin.is_some(), false)
+                }
+                _ => me.loose_arg(a),
+            });
             vals.push(match a.name {
                 Some(an) => {
                     let ai = ident(&snake(&an.name), self.span(an.loc));
@@ -803,6 +850,13 @@ impl Gen<'_, '_> {
                 }
                 None => v,
             });
+        }
+        if std::mem::replace(&mut self.inline_async, outer_inline)
+            && let Some(t) = twin
+        {
+            let m = ident(&t, self.span(name.loc));
+            let a = self.awaited(None, loc);
+            return Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*) #a), Ty::Unknown);
         }
         Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*)), Ty::Unknown)
     }
@@ -1060,6 +1114,8 @@ impl Gen<'_, '_> {
             || (memoized && self.fun.kompozable);
         let transform_wraps = rewritten && self.fun.kompozable;
         let call_label = kotlin.to_string();
+        // (whether a lambda given to it suspends: told by the lambdas written below)
+        let outer_inline = std::mem::replace(&mut self.inline_async, false);
         // Each argument: its name when named, its value, whether it is a lambda.
         let mut vals: Vec<(Option<proc_macro2::Ident>, TokenStream, bool)> = Vec::new();
         if builder && c.builder {
@@ -1125,6 +1181,8 @@ impl Gen<'_, '_> {
                 vals.push((None, v, m.given[k].iter().any(|a| a.value.is_lambda())));
             }
         }
+        // (a lambda in it suspends: Kotlin's inline function's, whose suspending twin takes it, awaited)
+        let twin = std::mem::replace(&mut self.inline_async, outer_inline);
         // A method of a scope taken `&mut` whose arguments read the scope (`drawRect(…, size = Size(size.width, …))`):
         // the arguments first, in order (as Kotlin evaluates them), then the call, which borrows the scope.
         let mut hoisted = TokenStream::new();
@@ -1152,7 +1210,9 @@ impl Gen<'_, '_> {
                 None => v,
             })
             .collect();
-        let await_ = if c.suspend {
+        let await_ = if twin {
+            self.awaited(None, loc)
+        } else if c.suspend {
             if !self.in_async {
                 self.error(
                     loc,
@@ -1161,22 +1221,27 @@ impl Gen<'_, '_> {
                     ),
                 );
             }
-            quote_spanned!(span=> .await)
+            self.awaited(Some(kotlin), loc)
         } else {
             quote!()
         };
+        // (the suspending twin: `<name>_async`, beside it)
+        let rust = if twin { format!("{}_async", c.rust) } else { c.rust.clone() };
         let ts = match target {
-            Target::Path(p, _) => quote_spanned!(span=> #p(#(#vals),*) #await_),
+            Target::Path(p, _) => {
+                let p = if twin { renamed_last(p, &rust) } else { p };
+                quote_spanned!(span=> #p(#(#vals),*) #await_)
+            }
             Target::Method(r) => {
-                let name = ident(&c.rust, span);
+                let name = ident(&rust, span);
                 quote_spanned!(span=> #r.#name(#(#vals),*) #await_)
             }
             Target::Ufcs(t, r) => {
-                let name = ident(&c.rust, span);
+                let name = ident(&rust, span);
                 quote_spanned!(span=> #t::#name(#r #(, #vals)*) #await_)
             }
             Target::MethodFirst(r, first) => {
-                let name = ident(&c.rust, span);
+                let name = ident(&rust, span);
                 quote_spanned!(span=> #r.#name(#first #(, #vals)*) #await_)
             }
         };
@@ -1216,7 +1281,8 @@ impl Gen<'_, '_> {
             ts = quote_spanned!(span=> #ts.#mi(#v));
         }
         if self.in_async {
-            ts = quote_spanned!(span=> #ts.await);
+            let a = self.awaited(Some(kotlin), loc);
+            ts = quote_spanned!(span=> #ts #a);
         }
         Out::plain(ts, Ty::Unit)
     }
@@ -1615,6 +1681,36 @@ fn kt_ret(c: &Ty, text: &str, elem: &Ty, recv: &Ty) -> Ty {
         }
         _ => c.clone(),
     }
+}
+
+/// The Rust name of the suspending twin of the kt shims' method `kotlin` taking a lambda, when each of them (of every
+/// trait, and the kt types' own: `KtMap::get_or_put`) has one of one name (`forEach`: `for_each_async`): what a method
+/// call of it Rust finds by its name calls where its lambda suspends.
+fn kt_twin(kotlin: &str) -> Option<String> {
+    let items: Vec<&'static crate::index::Item> = lookup(kotlin)
+        .iter()
+        .filter(|i| {
+            i.krate == "kompoz_runtime"
+                && i.module.starts_with("kt")
+                && i.kind == Kind::Method
+                && i.params.iter().any(|p| p.lambda.is_some())
+        })
+        .collect();
+    let first = items.first()?;
+    items
+        .iter()
+        .all(|i| i.has(crate::index::flags::ASYNC_TWIN) && i.rust == first.rust)
+        .then(|| format!("{}_async", first.rust))
+}
+
+/// `path` with its last name `name` (a function's suspending twin: `kt::with` → `kt::with_async`).
+fn renamed_last(path: TokenStream, name: &str) -> TokenStream {
+    use proc_macro2::TokenTree;
+    let mut all: Vec<TokenTree> = path.into_iter().collect();
+    if let Some(TokenTree::Ident(i)) = all.iter_mut().rev().find(|t| matches!(t, TokenTree::Ident(_))) {
+        *i = ident(name, i.span());
+    }
+    all.into_iter().collect()
 }
 
 /// Kotlin members a Rust type the generator meets may have a method of its own named so: called through the kt

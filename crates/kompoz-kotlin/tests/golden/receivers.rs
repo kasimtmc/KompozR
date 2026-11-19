@@ -48,7 +48,7 @@ pub fn Animated(seekable: SeekableTransitionState<i32>, deferred: DeferredTransi
         let stop = move |it: Animatable<f32, AnimationVector1D>| async move {
             it.stop().await;
         };
-        stop(remembered.clone());
+        stop(remembered.clone()).await;
     });
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]

@@ -91,6 +91,7 @@ impl Gen<'_, '_> {
                 params: f.params.iter().map(|p| self.ty_of(&p.ty)).collect(),
                 ret: self.ty_of(&f.result),
                 receiver: f.receiver.as_ref().and_then(|r| receiver_name(r)),
+                suspend: f.suspend,
             })),
             TypeKind::Error => Ty::Unknown,
         };
@@ -285,6 +286,8 @@ impl Gen<'_, '_> {
             stored,
             measure_policy: false,
             typed: false,
+            twin: false,
+            file_inline: !stored,
         }
     }
 }

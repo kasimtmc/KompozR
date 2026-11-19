@@ -48,6 +48,22 @@ pub fn List<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
 pub fn MutableList<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
     List(size, init)
 }
+/// [`List`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub async fn List_async<T>(size: i32, mut init: impl AsyncFnMut(i32) -> T) -> Vec<T> {
+    let mut out = Vec::new();
+    for i in 0..size.max(0) {
+        out.push(init(i).await);
+    }
+    out
+}
+/// [`MutableList`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub async fn MutableList_async<T>(size: i32, init: impl AsyncFnMut(i32) -> T) -> Vec<T> {
+    List_async(size, init).await
+}
 /// Kotlin: `intArrayOf(vararg elements: Int): IntArray`
 pub fn int_array_of<I: IntoIterator<Item = i32>>(elements: I) -> Vec<i32> {
     elements.into_iter().collect()
@@ -368,6 +384,18 @@ impl<K: PartialEq, V: Clone> KtMap<K, V> {
             }
         }
     }
+    /// [`get_or_put`](Self::get_or_put)'s suspending twin (see the module's doc).
+    #[doc(hidden)]
+    pub async fn get_or_put_async(&mut self, key: K, default: impl AsyncFnOnce() -> V) -> V {
+        match self.position(&key) {
+            Some(i) => self.entries[i].1.clone(),
+            None => {
+                let v = default().await;
+                self.entries.push((key, v.clone()));
+                v
+            }
+        }
+    }
 }
 
 impl<K: PartialEq, V: PartialEq> PartialEq for KtMap<K, V> {
@@ -542,6 +570,7 @@ fn lesser<T: PartialOrd>(a: T, b: T) -> T {
 /// and without a predicate, the predicate's is `…_that` (`any()`, `any_that { … }`); a Rust method of the same
 /// name on the type comes first (`Vec::is_empty`, `Vec::remove`), so a caller that must have Kotlin's calls
 /// through the trait (`KtList::contains(&list, x)`).
+#[allow(async_fn_in_trait)]
 pub trait KtList: KtIterable {
     /// Kotlin: `size: Int`
     fn size(&self) -> i32 {
@@ -1139,6 +1168,411 @@ pub trait KtList: KtIterable {
     {
         self.kt_iter().collect()
     }
+
+    // ---- The suspending twins (see the module's doc): Kotlin's inline functions, their lambdas async closures ----
+
+    #[doc(hidden)]
+    async fn get_or_else_async(&self, index: i32, default_value: impl AsyncFnOnce(i32) -> Self::Item) -> Self::Item {
+        match self.get_or_null(index) {
+            Some(v) => v,
+            None => default_value(index).await,
+        }
+    }
+    #[doc(hidden)]
+    async fn first_that_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Self::Item {
+        match self.first_or_null_that_async(predicate).await {
+            Some(v) => v,
+            None => panic_kt("NoSuchElementException", "Collection contains no element matching the predicate."),
+        }
+    }
+    #[doc(hidden)]
+    async fn last_that_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Self::Item {
+        match self.last_or_null_that_async(predicate).await {
+            Some(v) => v,
+            None => panic_kt("NoSuchElementException", "List contains no element matching the predicate."),
+        }
+    }
+    #[doc(hidden)]
+    async fn first_or_null_that_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        for v in self.kt_iter() {
+            if predicate(v.clone()).await {
+                return Some(v);
+            }
+        }
+        None
+    }
+    #[doc(hidden)]
+    async fn last_or_null_that_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        let mut found = None;
+        for v in self.kt_iter() {
+            if predicate(v.clone()).await {
+                found = Some(v);
+            }
+        }
+        found
+    }
+    #[doc(hidden)]
+    async fn find_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.first_or_null_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn find_last_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.last_or_null_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn index_of_first_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> i32 {
+        for (i, v) in self.kt_iter().enumerate() {
+            if predicate(v).await {
+                return i as i32;
+            }
+        }
+        -1
+    }
+    #[doc(hidden)]
+    async fn index_of_last_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> i32 {
+        let mut found = -1;
+        for (i, v) in self.kt_iter().enumerate() {
+            if predicate(v).await {
+                found = i as i32;
+            }
+        }
+        found
+    }
+    #[doc(hidden)]
+    async fn for_each_async(&self, mut action: impl AsyncFnMut(Self::Item)) {
+        for v in self.kt_iter() {
+            action(v).await;
+        }
+    }
+    #[doc(hidden)]
+    async fn for_each_indexed_async(&self, mut action: impl AsyncFnMut(i32, Self::Item)) {
+        for (i, v) in self.kt_iter().enumerate() {
+            action(i as i32, v).await;
+        }
+    }
+    #[doc(hidden)]
+    async fn on_each_async(&self, mut action: impl AsyncFnMut(Self::Item)) -> Vec<Self::Item> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            action(v.clone()).await;
+            out.push(v);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn map_async<R>(&self, mut transform: impl AsyncFnMut(Self::Item) -> R) -> Vec<R> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            out.push(transform(v).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn map_indexed_async<R>(&self, mut transform: impl AsyncFnMut(i32, Self::Item) -> R) -> Vec<R> {
+        let mut out = Vec::new();
+        for (i, v) in self.kt_iter().enumerate() {
+            out.push(transform(i as i32, v).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn map_not_null_async<R>(&self, mut transform: impl AsyncFnMut(Self::Item) -> Option<R>) -> Vec<R> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            if let Some(r) = transform(v).await {
+                out.push(r);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn flat_map_async<I: IntoIterator>(&self, mut transform: impl AsyncFnMut(Self::Item) -> I) -> Vec<I::Item> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            out.extend(transform(v).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            if predicate(v.clone()).await {
+                out.push(v);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_not_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            if !predicate(v.clone()).await {
+                out.push(v);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_indexed_async(&self, mut predicate: impl AsyncFnMut(i32, Self::Item) -> bool) -> Vec<Self::Item> {
+        let mut out = Vec::new();
+        for (i, v) in self.kt_iter().enumerate() {
+            if predicate(i as i32, v.clone()).await {
+                out.push(v);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn any_that_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> bool {
+        for v in self.kt_iter() {
+            if predicate(v).await {
+                return true;
+            }
+        }
+        false
+    }
+    #[doc(hidden)]
+    async fn all_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> bool {
+        for v in self.kt_iter() {
+            if !predicate(v).await {
+                return false;
+            }
+        }
+        true
+    }
+    #[doc(hidden)]
+    async fn none_that_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> bool {
+        !self.any_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn count_that_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> i32 {
+        let mut n = 0;
+        for v in self.kt_iter() {
+            if predicate(v).await {
+                n += 1;
+            }
+        }
+        n
+    }
+    #[doc(hidden)]
+    async fn sum_of_async<R: KtSum>(&self, mut selector: impl AsyncFnMut(Self::Item) -> R) -> R {
+        let mut total = R::kt_zero();
+        for v in self.kt_iter() {
+            total = total.kt_add(selector(v).await);
+        }
+        total
+    }
+    #[doc(hidden)]
+    async fn max_of_async<R: PartialOrd>(&self, selector: impl AsyncFnMut(Self::Item) -> R) -> R {
+        match self.max_of_or_null_async(selector).await {
+            Some(r) => r,
+            None => panic_kt("NoSuchElementException", ""),
+        }
+    }
+    #[doc(hidden)]
+    async fn min_of_async<R: PartialOrd>(&self, selector: impl AsyncFnMut(Self::Item) -> R) -> R {
+        match self.min_of_or_null_async(selector).await {
+            Some(r) => r,
+            None => panic_kt("NoSuchElementException", ""),
+        }
+    }
+    #[doc(hidden)]
+    async fn max_of_or_null_async<R: PartialOrd>(&self, mut selector: impl AsyncFnMut(Self::Item) -> R) -> Option<R> {
+        let mut best: Option<R> = None;
+        for v in self.kt_iter() {
+            let k = selector(v).await;
+            best = Some(match best {
+                Some(b) => greater(b, k),
+                None => k,
+            });
+        }
+        best
+    }
+    #[doc(hidden)]
+    async fn min_of_or_null_async<R: PartialOrd>(&self, mut selector: impl AsyncFnMut(Self::Item) -> R) -> Option<R> {
+        let mut best: Option<R> = None;
+        for v in self.kt_iter() {
+            let k = selector(v).await;
+            best = Some(match best {
+                Some(b) => lesser(b, k),
+                None => k,
+            });
+        }
+        best
+    }
+    #[doc(hidden)]
+    async fn max_by_or_null_async<R: PartialOrd>(
+        &self,
+        mut selector: impl AsyncFnMut(Self::Item) -> R,
+    ) -> Option<Self::Item> {
+        let mut best: Option<(Self::Item, R)> = None;
+        for v in self.kt_iter() {
+            let k = selector(v.clone()).await;
+            if best.as_ref().is_none_or(|(_, b)| kt_compare(b, &k) == Ordering::Less) {
+                best = Some((v, k));
+            }
+        }
+        best.map(|(v, _)| v)
+    }
+    #[doc(hidden)]
+    async fn min_by_or_null_async<R: PartialOrd>(
+        &self,
+        mut selector: impl AsyncFnMut(Self::Item) -> R,
+    ) -> Option<Self::Item> {
+        let mut best: Option<(Self::Item, R)> = None;
+        for v in self.kt_iter() {
+            let k = selector(v.clone()).await;
+            if best.as_ref().is_none_or(|(_, b)| kt_compare(&k, b) == Ordering::Less) {
+                best = Some((v, k));
+            }
+        }
+        best.map(|(v, _)| v)
+    }
+    #[doc(hidden)]
+    async fn max_by_async<R: PartialOrd>(&self, selector: impl AsyncFnMut(Self::Item) -> R) -> Self::Item {
+        match self.max_by_or_null_async(selector).await {
+            Some(v) => v,
+            None => panic_kt("NoSuchElementException", ""),
+        }
+    }
+    #[doc(hidden)]
+    async fn min_by_async<R: PartialOrd>(&self, selector: impl AsyncFnMut(Self::Item) -> R) -> Self::Item {
+        match self.min_by_or_null_async(selector).await {
+            Some(v) => v,
+            None => panic_kt("NoSuchElementException", ""),
+        }
+    }
+    #[doc(hidden)]
+    async fn fold_async<R>(&self, initial: R, mut operation: impl AsyncFnMut(R, Self::Item) -> R) -> R {
+        let mut acc = initial;
+        for v in self.kt_iter() {
+            acc = operation(acc, v).await;
+        }
+        acc
+    }
+    #[doc(hidden)]
+    async fn reduce_async(&self, mut operation: impl AsyncFnMut(Self::Item, Self::Item) -> Self::Item) -> Self::Item {
+        let mut all = self.kt_iter();
+        let Some(mut acc) = all.next() else {
+            panic_kt("UnsupportedOperationException", "Empty collection can't be reduced.")
+        };
+        for v in all {
+            acc = operation(acc, v).await;
+        }
+        acc
+    }
+    #[doc(hidden)]
+    async fn distinct_by_async<K: PartialEq>(&self, mut selector: impl AsyncFnMut(Self::Item) -> K) -> Vec<Self::Item> {
+        let mut keys: Vec<K> = Vec::new();
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            let k = selector(v.clone()).await;
+            if !keys.as_slice().contains(&k) {
+                keys.push(k);
+                out.push(v);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn take_while_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            if !predicate(v.clone()).await {
+                break;
+            }
+            out.push(v);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn drop_while_async(&self, mut predicate: impl AsyncFnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        let mut out = Vec::new();
+        let mut dropping = true;
+        for v in self.kt_iter() {
+            if dropping && predicate(v.clone()).await {
+                continue;
+            }
+            dropping = false;
+            out.push(v);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn partition_async(
+        &self,
+        mut predicate: impl AsyncFnMut(Self::Item) -> bool,
+    ) -> (Vec<Self::Item>, Vec<Self::Item>) {
+        let (mut yes, mut no) = (Vec::new(), Vec::new());
+        for v in self.kt_iter() {
+            if predicate(v.clone()).await {
+                yes.push(v);
+            } else {
+                no.push(v);
+            }
+        }
+        (yes, no)
+    }
+    #[doc(hidden)]
+    async fn group_by_async<K: PartialEq>(
+        &self,
+        mut key_selector: impl AsyncFnMut(Self::Item) -> K,
+    ) -> KtMap<K, Vec<Self::Item>> {
+        let mut out: KtMap<K, Vec<Self::Item>> = KtMap::new();
+        for v in self.kt_iter() {
+            let k = key_selector(v.clone()).await;
+            match out.position(&k) {
+                Some(i) => out.entries[i].1.push(v),
+                None => out.entries.push((k, vec![v])),
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn associate_async<K: PartialEq, V>(
+        &self,
+        mut transform: impl AsyncFnMut(Self::Item) -> (K, V),
+    ) -> KtMap<K, V> {
+        let mut out = KtMap::new();
+        for v in self.kt_iter() {
+            let (k, x) = transform(v).await;
+            out.put(k, x);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn associate_by_async<K: PartialEq>(
+        &self,
+        mut key_selector: impl AsyncFnMut(Self::Item) -> K,
+    ) -> KtMap<K, Self::Item> {
+        let mut out = KtMap::new();
+        for v in self.kt_iter() {
+            let k = key_selector(v.clone()).await;
+            out.put(k, v);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn associate_with_async<V>(
+        &self,
+        mut value_selector: impl AsyncFnMut(Self::Item) -> V,
+    ) -> KtMap<Self::Item, V>
+    where
+        Self::Item: PartialEq,
+    {
+        let mut out = KtMap::new();
+        for v in self.kt_iter() {
+            let x = value_selector(v.clone()).await;
+            out.put(v, x);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn if_empty_async(&self, default_value: impl AsyncFnOnce() -> Vec<Self::Item>) -> Vec<Self::Item> {
+        let all: Vec<_> = self.kt_iter().collect();
+        if all.is_empty() { default_value().await } else { all }
+    }
 }
 
 impl<C: KtIterable + ?Sized> KtList for C {}
@@ -1378,6 +1812,7 @@ impl<M: KtMapLike + ?Sized> KtMapLike for &M {
 }
 
 /// Kotlin's `Map` functions over anything [`KtMapLike`]: entries go to lambdas as pairs (`|(k, v)| …`).
+#[allow(async_fn_in_trait)]
 pub trait KtMapExt: KtMapLike {
     /// Kotlin: `size: Int`
     fn size(&self) -> i32 {
@@ -1528,6 +1963,125 @@ pub trait KtMapExt: KtMapLike {
         Self::K: PartialEq,
     {
         self.kt_entries().into_iter().filter(|(k, _)| *k != key).collect()
+    }
+
+    // ---- The suspending twins (see the module's doc): Kotlin's inline functions, their lambdas async closures ----
+
+    #[doc(hidden)]
+    async fn get_or_else_async(&self, key: Self::K, default_value: impl AsyncFnOnce() -> Self::V) -> Self::V
+    where
+        Self::K: PartialEq,
+    {
+        match KtMapExt::get(self, key) {
+            Some(v) => v,
+            None => default_value().await,
+        }
+    }
+    #[doc(hidden)]
+    async fn for_each_async(&self, mut action: impl AsyncFnMut((Self::K, Self::V))) {
+        for e in self.kt_entries() {
+            action(e).await;
+        }
+    }
+    #[doc(hidden)]
+    async fn map_async<R>(&self, mut transform: impl AsyncFnMut((Self::K, Self::V)) -> R) -> Vec<R> {
+        let mut out = Vec::new();
+        for e in self.kt_entries() {
+            out.push(transform(e).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn map_values_async<R>(&self, mut transform: impl AsyncFnMut((Self::K, Self::V)) -> R) -> KtMap<Self::K, R>
+    where
+        Self::K: PartialEq,
+    {
+        let mut out = KtMap::new();
+        for e in self.kt_entries() {
+            let k = e.0.clone();
+            let r = transform(e).await;
+            out.put(k, r);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn map_keys_async<R: PartialEq>(
+        &self,
+        mut transform: impl AsyncFnMut((Self::K, Self::V)) -> R,
+    ) -> KtMap<R, Self::V> {
+        let mut out = KtMap::new();
+        for e in self.kt_entries() {
+            let k = transform(e.clone()).await;
+            out.put(k, e.1);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_async(&self, mut predicate: impl AsyncFnMut((Self::K, Self::V)) -> bool) -> KtMap<Self::K, Self::V>
+    where
+        Self::K: PartialEq,
+    {
+        let mut out = KtMap::new();
+        for e in self.kt_entries() {
+            if predicate(e.clone()).await {
+                out.put(e.0, e.1);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_keys_async(&self, mut predicate: impl AsyncFnMut(Self::K) -> bool) -> KtMap<Self::K, Self::V>
+    where
+        Self::K: PartialEq,
+    {
+        let mut out = KtMap::new();
+        for e in self.kt_entries() {
+            if predicate(e.0.clone()).await {
+                out.put(e.0, e.1);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn filter_values_async(&self, mut predicate: impl AsyncFnMut(Self::V) -> bool) -> KtMap<Self::K, Self::V>
+    where
+        Self::K: PartialEq,
+    {
+        let mut out = KtMap::new();
+        for e in self.kt_entries() {
+            if predicate(e.1.clone()).await {
+                out.put(e.0, e.1);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn any_that_async(&self, mut predicate: impl AsyncFnMut((Self::K, Self::V)) -> bool) -> bool {
+        for e in self.kt_entries() {
+            if predicate(e).await {
+                return true;
+            }
+        }
+        false
+    }
+    #[doc(hidden)]
+    async fn all_async(&self, mut predicate: impl AsyncFnMut((Self::K, Self::V)) -> bool) -> bool {
+        for e in self.kt_entries() {
+            if !predicate(e).await {
+                return false;
+            }
+        }
+        true
+    }
+    #[doc(hidden)]
+    async fn count_that_async(&self, mut predicate: impl AsyncFnMut((Self::K, Self::V)) -> bool) -> i32 {
+        let mut n = 0;
+        for e in self.kt_entries() {
+            if predicate(e).await {
+                n += 1;
+            }
+        }
+        n
     }
 }
 

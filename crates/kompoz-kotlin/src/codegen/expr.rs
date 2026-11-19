@@ -911,7 +911,13 @@ impl Gen<'_, '_> {
                 ty,
             );
         }
+        let awaits = self.awaits;
         let b = self.value(rhs);
+        // (`b` suspends: Kotlin's `?:` is no function, it suspends with the coroutine)
+        if self.in_async && self.awaits > awaits {
+            let at = self.awaited(None, loc);
+            return Out::plain(quote_spanned!(span=> #kt::elvis_async(#a, async || #b) #at), ty);
+        }
         Out::plain(quote_spanned!(span=> #kt::elvis(#a, || #b)), ty)
     }
 
