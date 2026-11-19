@@ -153,6 +153,7 @@ kompoz-runtime/macros fn RoundedCornerShape r crates/kompoz-runtime/tests/macros
 * kompozable Row dddr crates/kompoz-foundation/src/layout/row_column.rs
 kompoz-foundation/lazy kompozable Row20 rr crates/kompoz-foundation/tests/lazy.rs
 kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros.rs
+kompoz/named_forms kompozable RustAnimationForms rr crates/kompoz/tests/named_forms.rs
 kompoz/kotlin kompozable RustBadge rd crates/kompoz/tests/kotlin.rs
 kompoz/named_forms kompozable RustLayoutForms - crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustListForms rr crates/kompoz/tests/named_forms.rs
@@ -237,12 +238,30 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method anchored_draggable_starting_immediately rrddddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
 * fn animate rrddr crates/kompoz-animation/src/suspend.rs
 * method animate_by rrrdddd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
+* method animate_color ddr crates/kompoz-animation/src/transition.rs Transition
+* method animate_color rrrd crates/kompoz-animation/src/infinite_transition.rs InfiniteTransition
+* kompozable animate_color_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
 * method animate_decay rdd crates/kompoz-animation/src/suspend.rs AnimationState
 * method animate_decay rrd crates/kompoz-animation/src/animatable.rs Animatable
+* method animate_dp ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_dp_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_float ddr crates/kompoz-animation/src/transition.rs Transition
+* method animate_float rrrd crates/kompoz-animation/src/infinite_transition.rs InfiniteTransition
+* kompozable animate_float_as_state rdddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_int ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_int_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_int_offset ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_int_offset_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_int_size ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_int_size_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
 * method animate_item ddd crates/kompoz-foundation/src/lazy/list/item_scope.rs Modifier as LazyItemScopeModifiers
 * method animate_move_by rd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method animate_move_to rd crates/kompoz-test/src/input.rs MouseInjectionScope
+* method animate_offset ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_offset_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
 * method animate_pan_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
+* method animate_rect ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_rect_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
 * method animate_rotate_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method animate_scroll_by rd crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
 * method animate_scroll_by rd crates/kompoz-foundation/src/gestures/scrollable_state.rs S as ScrollableStateExtensions
@@ -251,11 +270,17 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method animate_scroll_to_item rd crates/kompoz-foundation/src/lazy/list/state.rs LazyListState
 * method animate_scroll_to_item rd crates/kompoz-foundation/src/lazy/staggeredgrid/state.rs LazyStaggeredGridState
 * method animate_scroll_to_page rdd crates/kompoz-foundation/src/pager/state.rs PagerState
+* method animate_size ddr crates/kompoz-animation/src/transition.rs Transition
+* kompozable animate_size_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
+* method animate_to dd crates/kompoz-animation/src/seekable.rs SeekableTransitionState
 * method animate_to rd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method animate_to rddd crates/kompoz-animation/src/animatable.rs Animatable
 * method animate_to rddd crates/kompoz-animation/src/suspend.rs AnimationState
 * method animate_to_with_decay rrdd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * fn animate_value rrrddr crates/kompoz-animation/src/suspend.rs
+* method animate_value rddr crates/kompoz-animation/src/transition.rs Transition
+* method animate_value rrrrd crates/kompoz-animation/src/infinite_transition.rs InfiniteTransition
+* kompozable animate_value_as_state rrdddd crates/kompoz-animation/src/animate_as_state.rs
 * method animate_zoom_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method append_inline_content rd crates/kompoz-text/src/annotated_string.rs AnnotatedStringBuilder
 * method approach_layout rdr crates/kompoz-ui/src/layout/lookahead.rs Modifier
@@ -295,6 +320,8 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros method copy dddd crates/kompoz-runtime/tests/macros.rs Color
 * method copy_float ddddd crates/kompoz-animation/src/state.rs AnimationState
 * method copy_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* method create_child_transition dr crates/kompoz-animation/src/transition.rs Transition
+* method create_deferred_animation rd crates/kompoz-animation/src/transition.rs Transition
 * method cut_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * kompozable default_decay_animation_spec - crates/kompoz-animation/src/spline_decay.rs
 * method default_min_size dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
@@ -437,9 +464,11 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_cursor_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_default_prefetch_scheduler - crates/kompoz-foundation/src/lazy/layout/prefetch.rs
+* kompozable remember_deferred_transition rd crates/kompoz-animation/src/transition.rs
 * kompozable remember_draggable2d_state r crates/kompoz-foundation/src/gestures/draggable2d.rs
 * kompozable remember_draggable_state r crates/kompoz-foundation/src/gestures/draggable.rs
 * kompozable remember_graphics_layer - crates/kompoz-ui/src/draw/graphics_layer.rs
+* kompozable remember_infinite_transition d crates/kompoz-animation/src/infinite_transition.rs
 * kompozable remember_lazy_grid_item_provider_lambda rr crates/kompoz-foundation/src/lazy/grid/grid.rs
 * kompozable remember_lazy_grid_state dd crates/kompoz-foundation/src/lazy/grid/state.rs
 * kompozable remember_lazy_grid_state_with_cache_window rdd crates/kompoz-foundation/src/lazy/grid/state.rs
@@ -476,6 +505,8 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_text_field_vertical_scroll_state d crates/kompoz-foundation/src/text/text_field_scroll_state.rs
 * kompozable remember_text_measurer d crates/kompoz-ui/src/text.rs
 * kompozable remember_transformable_state r crates/kompoz-foundation/src/gestures/transformable_state.rs
+* kompozable remember_transition rd crates/kompoz-animation/src/transition.rs
+* kompozable remember_transition_of rr crates/kompoz-animation/src/transition.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
 * fn repeatable rrdd crates/kompoz-animation/src/spec.rs
@@ -508,6 +539,7 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 * method scrollable2d rdddd crates/kompoz-foundation/src/gestures/scrollable2d.rs Modifier as Scrollable2DModifiers
 * method scrollable_area rrddddd crates/kompoz-foundation/src/scrollable_area.rs Modifier as ScrollableAreaModifiers
 * method scrollable_area_with_overscroll rrrddddd crates/kompoz-foundation/src/scrollable_area.rs Modifier as ScrollableAreaModifiers
+* method seek_to rd crates/kompoz-animation/src/seekable.rs SeekableTransitionState
 * method selectable rdddr crates/kompoz-foundation/src/selection/selectable.rs Modifier as SelectableModifiers
 * method selectable_indication rrrddr crates/kompoz-foundation/src/selection/selectable.rs Modifier as SelectableModifiers
 * method semantics dr crates/kompoz-ui/src/semantics/modifier.rs Modifier
@@ -550,6 +582,9 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * method update_anchors rd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method update_bounds dd crates/kompoz-animation/src/animatable.rs Animatable
 * method update_target rrd crates/kompoz-animation/src/deferred_target.rs DeferredTargetAnimation
+* kompozable update_transition rd crates/kompoz-animation/src/transition.rs
+* kompozable update_transition_of_state rd crates/kompoz-animation/src/transition.rs
+* kompozable value_as_state rrrrrr crates/kompoz-animation/src/animate_as_state.rs
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method wait_until ddr crates/kompoz-test/src/lib.rs KompozTestRule

@@ -312,10 +312,12 @@ impl Gen<'_, '_> {
                         },
                         None => Ty::Unknown,
                     },
-                    _ => Ty::Unknown,
+                    // (any other call giving a state — `animateFloatAsState(…)`, `transition.animateDp { … }`,
+                    // `rememberInfiniteTransition().animateFloat(…)` —: what the state holds)
+                    _ => state_value_ty(&self.peek_ty(d)),
                 }
             }
-            _ => Ty::Unknown,
+            _ => state_value_ty(&self.peek_ty(d)),
         }
     }
 
@@ -728,7 +730,7 @@ impl Gen<'_, '_> {
                         {
                             self.number(n, e.loc, true).ts
                         } else {
-                            self.value_want(e, Want { str_ok: true, any: None, some: false })
+                            self.value_want(e, Want { str_ok: true, any: None, some: false, shared: None })
                         };
                         quote_spanned!(span=> #s == #v)
                     }
@@ -818,4 +820,20 @@ fn continues(stmts: &[Stmt]) -> bool {
         StmtKind::Expr(e) => in_expr(e),
         _ => false,
     })
+}
+
+/// What a state of type `t` holds (`State<f32>` → `Float`), as a delegate reads it; unknown for anything else.
+fn state_value_ty(t: &Ty) -> Ty {
+    match t {
+        Ty::Named(n, a)
+            if a.len() == 1
+                && matches!(
+                    n.as_str(),
+                    "State" | "MutableState" | "DerivedState" | "UpdatedState" | "AnimationState"
+                ) =>
+        {
+            a[0].clone()
+        }
+        _ => Ty::Unknown,
+    }
 }

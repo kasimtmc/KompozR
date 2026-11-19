@@ -106,7 +106,10 @@ impl Gen<'_, '_> {
         let any = known.and_then(|k| super::expr::AnyWrap::of_rust(&k.output));
         let some =
             any.is_none() && known.is_some_and(|k| super::resolve::plain_type_text(&k.output).starts_with("Option<"));
-        let result = Want { str_ok: false, any, some };
+        // (a result of Kotlin's interface type held as a shared trait object — a transition spec's —: each value made
+        // one, the closure's result type written so its branches' values become it)
+        let shared = known.and_then(|k| super::expr::Shared::of_rust(&k.output)).filter(|_| !info.suspend);
+        let result = Want { str_ok: false, any, some, shared };
         self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len(), result });
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();
@@ -157,10 +160,19 @@ impl Gen<'_, '_> {
             info.inputs.iter().skip(first_input).map(|t| t.trim_start().starts_with("&mut")).collect();
         // (its body's calls are its own: the call it is given to binds no `T` of theirs)
         let outer_type_arg = self.type_arg.take();
-        // (an element the generic callee lends, `&T` — `items(todos) { t -> … }` —: Kotlin's value of it, a clone, which
-        // what the lambda keeps can capture)
-        let lent: Vec<bool> =
-            info.inputs.iter().skip(first_input).map(|t| outer_type_arg.is_some() && is_lent_type_param(t)).collect();
+        let outer_owner_arg = self.owner_arg.take();
+        // (an element the generic callee lends, `&T` — `items(todos) { t -> … }` —, or a value of the type argument of
+        // the generic type whose method takes the lambda, `&S` — `transition.animateFloat { it… }` —: Kotlin's value of
+        // it, a clone, which what the lambda keeps can capture)
+        let lent: Vec<bool> = info
+            .inputs
+            .iter()
+            .skip(first_input)
+            .map(|t| {
+                outer_type_arg.is_some() && is_lent_type_param(t)
+                    || outer_owner_arg.is_some() && lent_type_parameter(t).is_some()
+            })
+            .collect();
         // (the parameters it names: Kotlin's needn't be used — `{ lookaheadCoordinates -> moving.value }`)
         let mut named_params: Vec<proc_macro2::Ident> = Vec::new();
         match &l.params {
@@ -265,6 +277,7 @@ impl Gen<'_, '_> {
         self.in_async = was_async;
         self.receivers.truncate(receivers_before);
         self.type_arg = outer_type_arg;
+        self.owner_arg = outer_owner_arg;
         self.lambdas.pop();
         let frame = self.frames.pop().expect("its frame");
         self.pop_scope();
@@ -308,10 +321,12 @@ impl Gen<'_, '_> {
             } else {
                 quote_spanned!(span=> |#(#params),*| { #inner async move #block })
             }
-        } else if explicit {
-            quote_spanned!(span=> move |#(#params),*| #block)
         } else {
-            quote_spanned!(span=> |#(#params),*| #block)
+            let mv = if explicit { quote!(move) } else { quote!() };
+            match shared.and_then(|_| written_type(&info.output, span)) {
+                Some(output) => quote_spanned!(span=> #mv |#(#params),*| -> #output #block),
+                None => quote_spanned!(span=> #mv |#(#params),*| #block),
+            }
         };
         let closure = if explicit && !captures.is_empty() {
             let l = lets(span);
@@ -344,6 +359,12 @@ impl Gen<'_, '_> {
         }
         if bare == "T"
             && let Some(t) = &self.type_arg
+        {
+            return t.clone();
+        }
+        // (the type argument of the generic type whose method takes the lambda: `&S` of a `Transition<Panel>`)
+        if let Some(t) = &self.owner_arg
+            && lent_type_parameter(text).is_some()
         {
             return t.clone();
         }
@@ -525,6 +546,19 @@ fn is_lent_type_param(text: &str) -> bool {
         None => rest,
     };
     rest == "T"
+}
+
+/// The type parameter a shared reference names (`&S`, `&'a S`: a single capital letter), lent to a lambda.
+fn lent_type_parameter(text: &str) -> Option<&str> {
+    let rest = text.trim().strip_prefix('&')?.trim_start();
+    if rest.starts_with("mut ") {
+        return None;
+    }
+    let rest = match rest.strip_prefix('\'') {
+        Some(r) => r.split_once(' ').map_or("", |(_, t)| t.trim()),
+        None => rest,
+    };
+    (rest.len() == 1 && rest.chars().all(|c| c.is_ascii_uppercase())).then_some(rest)
 }
 
 /// Whether a lambda's body uses `it` (outside lambdas of its own that name their parameters… or take theirs).

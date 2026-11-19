@@ -16,8 +16,8 @@ use crate::lazy::LazyListState;
 use crate::lazy::grid::LazyGridState;
 use crate::scroll::ScrollState;
 use crate::v2::{LazyGridLines, LazyLineContentAdapter, LazyListLines, ScrollableScrollbarAdapter, ScrollbarAdapter};
-use kompoz_animation::{Animatable, AnimationVector4D, tween};
-use kompoz_coroutines::{CoroutineScope, Job, LaunchedEffect, delay_ms, remember_coroutine_scope};
+use kompoz_animation::{AnimationSpec, FastOutSlowInEasing, TweenSpec, animate_color_as_state};
+use kompoz_coroutines::{CoroutineScope, Job, delay_ms, remember_coroutine_scope};
 use kompoz_graphics::{Color, Dp, LayoutDirection, Offset, RoundedCornerShape, Shape};
 use kompoz_runtime::{
     DerivedState, DisposableEffect, KompozitionLocal, MutableState, derived_state_of, kompozable, mutable_state_of,
@@ -331,10 +331,13 @@ fn old_or_new_scrollbar(
                 }) as Rc<dyn MeasurePolicy>
             })
         };
+        let hover_spec: Arc<dyn AnimationSpec<Color>> =
+            Arc::new(TweenSpec::new(style.hover_duration_millis, 0, FastOutSlowInEasing));
         let color = animate_color_as_state(
             if is_highlighted.get() { style.hover_color } else { style.unhover_color },
-            style.hover_duration_millis,
-        );
+            animation_spec = hover_spec,
+        )
+        .value();
         let is_visible = (slider_adapter.thumb_size() as f32) < size as f32;
         let thumb = Modifier
             .background(if is_visible { color } else { Color::Transparent }, style.shape.clone())
@@ -351,24 +354,6 @@ fn old_or_new_scrollbar(
         layout_into(track, measure_policy, false, move || {
             Box(modifier = thumb);
         });
-    })
-}
-
-/// Compose's `animateColorAsState(target, TweenSpec(durationMillis))` (an Animatable of the color animated to each
-/// new target; stage 11 brings animate*AsState itself).
-#[track_caller]
-fn animate_color_as_state(target: Color, duration_millis: i32) -> Color {
-    kompoz_runtime::kompozable_block!({
-        let animatable: Rc<Animatable<Color, AnimationVector4D>> = remember(|| Rc::new(Animatable(target)));
-        let a = animatable.clone();
-        LaunchedEffect(target, async move {
-            let spec: Arc<dyn kompoz_animation::AnimationSpec<Color>> =
-                Arc::new(kompoz_runtime::named_args!(tween(duration_millis = duration_millis)));
-            if a.target_value() != target {
-                a.animate_to(target, spec, a.velocity(), None).await;
-            }
-        });
-        animatable.value()
     })
 }
 

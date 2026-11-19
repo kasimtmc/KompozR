@@ -3,7 +3,11 @@
 //! host's frame clock in a coroutine, along specs ([`spring`], [`tween`], [`snap`], [`keyframes`],
 //! [`keyframes_with_spline`], [`repeatable`], [`infinite_repeatable`]) with [`Easing`]s, on vectors of one to four
 //! floats a [`TwoWayConverter`] makes of a value; flings slowing down along a decay ([`exponential_decay`], Android's
-//! [`spline_based_decay`]); one mutation at a time ([`MutatorMutex`]).
+//! [`spline_based_decay`]); one mutation at a time ([`MutatorMutex`]). On it, what composables animate with: values
+//! animated as they change ([`animate_float_as_state`], … [`animate_color_as_state`]), transitions of a state
+//! ([`update_transition`], [`remember_transition`] of a [`MutableTransitionState`], [`SeekableTransitionState`] or
+//! [`DeferredTransitionState`]; a [`Transition`]'s `animate_float`, … `animate_color`, child transitions), and
+//! animations that never end ([`remember_infinite_transition`]).
 //!
 //! ```no_run
 //! # use kompoz_animation::*;
@@ -29,6 +33,7 @@
 extern crate self as kompoz_animation;
 
 mod animatable;
+mod animate_as_state;
 mod animation;
 mod arc_spline;
 mod color;
@@ -37,18 +42,26 @@ mod decay;
 mod deferred_target;
 mod easing;
 mod float_spec;
+mod infinite_transition;
 mod mono_spline;
 mod mono_spline_keyframes;
 mod mutator;
+mod seekable;
 mod spec;
 mod spline_decay;
 mod spring_simulation;
 mod state;
 mod suspend;
+mod transition;
 mod vector;
 mod vectorized;
 
 pub use animatable::{Animatable, AnimatableArgs, AnimationEndReason, AnimationResult};
+pub use animate_as_state::{
+    animate_color_as_state, animate_dp_as_state, animate_float_as_state, animate_int_as_state,
+    animate_int_offset_as_state, animate_int_size_as_state, animate_offset_as_state, animate_rect_as_state,
+    animate_size_as_state, animate_value_as_state,
+};
 pub use animation::{Animation, DecayAnimation, TargetBasedAnimation, create_animation, float_decay_animation};
 pub use color::ColorVectorConverter;
 pub use converter::{TwoWayConverter, VectorConverter, VisibilityThreshold, visibility_threshold_of};
@@ -66,7 +79,12 @@ pub use easing::{
     LinearOutSlowInEasing, PathEasing, arc_easing,
 };
 pub use float_spec::{FloatAnimationSpec, FloatSpringSpec, FloatTweenSpec};
+pub use infinite_transition::{
+    AnyInfiniteTransitionAnimationState, InfiniteTransition, InfiniteTransitionAnimationState,
+    remember_infinite_transition,
+};
 pub use mutator::{MutatePriority, MutatorMutex};
+pub use seekable::{SeekableTransitionState, SeekingAnimationState};
 pub use spec::{
     AnimationConstants, AnimationSpec, ArcAnimationSpec, DurationBasedAnimationSpec, FiniteAnimationSpec,
     InfiniteRepeatableSpec, KeyframeEntity, KeyframesSpec, KeyframesSpecConfig, KeyframesWithSplineSpec,
@@ -85,6 +103,11 @@ pub use spring_simulation::{
 pub use state::{AnimationScope, AnimationState, AnimationValue, float_animation_state};
 pub use suspend::{
     animate, animate_decay, animate_value, with_infinite_animation_frame_millis, with_infinite_animation_frame_nanos,
+};
+pub use transition::{
+    AnyTransition, AnyTransitionAnimationState, DeferredAnimation, DeferredTransition, DeferredTransitionState,
+    MutableTransitionState, Segment, Transition, TransitionAnimationState, TransitionState,
+    remember_deferred_transition, remember_transition, update_transition, update_transition_of_state,
 };
 pub use vector::{
     AnimationVector, AnimationVector1D, AnimationVector2D, AnimationVector3D, AnimationVector4D, AnimationVectorArgs,

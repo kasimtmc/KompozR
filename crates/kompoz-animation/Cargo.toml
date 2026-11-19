@@ -34,3 +34,15 @@ harness = false
 [[test]]
 name = "clock"
 harness = false
+
+[[test]]
+name = "as_state"
+harness = false
+
+[[test]]
+name = "transition"
+harness = false
+
+[[test]]
+name = "infinite_transition"
+harness = false

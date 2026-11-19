@@ -113,6 +113,11 @@ harness = false
 name = "kotlin_lookahead"
 harness = false
 
+# Transitions, infinite transitions and animate*AsState in Kotlin's syntax.
+[[test]]
+name = "kotlin_transitions"
+harness = false
+
 [[test]]
 name = "named_forms"
 harness = false

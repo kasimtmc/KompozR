@@ -51,6 +51,31 @@ pub(crate) struct Want {
     /// The place is an `Option` (a lambda's result of Kotlin's `T?`: `dragAndDropSource { … }`'s data): a value of a
     /// type known not to be nullable given in `Some`.
     pub some: bool,
+    /// The place holds a shared trait object (a lambda's result of Kotlin's interface type: a transition spec's
+    /// `Arc<dyn FiniteAnimationSpec<T>>`): a value of a type of its own (`tween(…)`, `snap()`) made one, as a
+    /// parameter of that type takes it.
+    pub shared: Option<Shared>,
+}
+
+/// The pointer a shared trait object is held in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shared {
+    Arc,
+    Rc,
+}
+
+impl Shared {
+    /// The pointer of a Rust type's text (`Arc<dyn …>`, `Rc<dyn …>`), if it is a shared trait object.
+    pub(crate) fn of_rust(text: &str) -> Option<Shared> {
+        let t = super::resolve::plain_type_text(text);
+        if t.starts_with("Arc<dyn") {
+            Some(Shared::Arc)
+        } else if t.starts_with("Rc<dyn") {
+            Some(Shared::Rc)
+        } else {
+            None
+        }
+    }
 }
 
 /// A Rust type holding a value of any type, Kotlin's `Any` (a key compared by its value): `LazyKey::new(v)`.
@@ -106,7 +131,7 @@ impl Gen<'_, '_> {
         // (Kotlin's `Any` from an `if`/`when` with branches of their own types — `if (it == 0) null else "satır"` —:
         // each branch made it; a nullable result too — `if (…) content else content.consume { … }` —: each branch
         // in `Some` unless it is nullable already)
-        if want.any.is_some() || want.some {
+        if want.any.is_some() || want.some || want.shared.is_some() {
             match &e.kind {
                 ExprKind::If { condition, then, otherwise: Some(o) } => {
                     return self.if_expr(condition, then, Some(o), Tail::Value(want), e.loc).ts;
@@ -131,6 +156,18 @@ impl Gen<'_, '_> {
             OutKind::RefMut => quote_spanned!(span=> (*#ts).clone()),
             OutKind::StrLit if !want.str_ok || want.any.is_some() => {
                 quote_spanned!(span=> ::std::string::String::from(#ts))
+            }
+            _ => ts,
+        };
+        // (a value of its own type where a shared trait object goes: made one)
+        let ts = match (want.shared, &out.ty) {
+            (Some(ptr), Ty::Named(name, _))
+                if !matches!(name.as_str(), "Arc" | "Rc") && super::resolve::trait_object(name).is_none() =>
+            {
+                match ptr {
+                    Shared::Arc => quote_spanned!(span=> ::std::sync::Arc::new(#ts)),
+                    Shared::Rc => quote_spanned!(span=> ::std::rc::Rc::new(#ts)),
+                }
             }
             _ => ts,
         };
@@ -514,9 +551,11 @@ impl Gen<'_, '_> {
         }
         let (rust, ty, by_value) =
             match recv.ty.owner().and_then(|o| members_of(o, &name.name).find(|i| i.params.is_empty())) {
-                Some(item) => {
-                    (item.rust.to_string(), Ty::from_rust(item.ret), item.receiver == crate::index::Receiver::Value)
-                }
+                Some(item) => (
+                    item.rust.to_string(),
+                    owner_arg_ret(&recv.ty, item.ret),
+                    item.receiver == crate::index::Receiver::Value,
+                ),
                 None => (snake(&name.name), Ty::Unknown, false),
             };
         let r = if by_value && recv.kind == OutKind::Local {
@@ -816,7 +855,7 @@ impl Gen<'_, '_> {
         let ts = match kind {
             OutKind::StrLit | OutKind::IntLit => return o,
             OutKind::Local if !value => o.ts,
-            _ => self.finish(o, Want { str_ok: true, any: None, some: false }, e.loc),
+            _ => self.finish(o, Want { str_ok: true, any: None, some: false, shared: None }, e.loc),
         };
         match wider {
             Some(w) if w != ty && ty.is_number() => {
@@ -1054,7 +1093,7 @@ impl Gen<'_, '_> {
         if let Some(o) = recv.owner()
             && let Some(i) = members_of(o, name).find(|i| call || i.params.is_empty())
         {
-            return Ty::from_rust(i.ret);
+            return owner_arg_ret(recv, i.ret);
         }
         if let Some(f) = self.file.extension(name, recv.owner()) {
             return f.ret.clone();
@@ -1144,6 +1183,14 @@ impl Gen<'_, '_> {
         args: &[Arg],
         trailing: Option<&Lambda>,
     ) -> Ty {
+        // (an overloaded constructor's associated type, `A::Animatable`, is the type of that name: what the call's own
+        // reading of it says)
+        if item.has(crate::index::flags::OVERLOADED)
+            && let Some((_, assoc)) = item.ret.rsplit_once("::")
+            && assoc.chars().next().is_some_and(char::is_uppercase)
+        {
+            return Ty::named(assoc);
+        }
         let ret = Ty::from_rust(item.ret);
         let generics: Vec<&str> = item
             .ret
@@ -1169,7 +1216,26 @@ impl Gen<'_, '_> {
                             .strip_prefix("fn()")
                             .is_some_and(|r| r.trim().strip_prefix("->").map(str::trim) == Some(g))
                 };
-                let Some(k) = item.params.iter().position(gives) else { return ret };
+                let Some(k) = item.params.iter().position(gives) else {
+                    // (a parameter of a generic type of it, `impl Into<TransitionState<S>>`: the type argument of the
+                    // argument given, a `MutableTransitionState<Int>`'s `Int`)
+                    let of_it = format!("<{g}>");
+                    let told = item.params.iter().enumerate().find_map(|(k, p)| {
+                        if !p.ty.replace(' ', "").contains(&of_it) || p.lambda.is_some() {
+                            return None;
+                        }
+                        let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| n.name == p.kotlin));
+                        let by_place = args.iter().filter(|a| a.name.is_none()).nth(k);
+                        match by_name.or(by_place).map(|a| self.peek_ty(&a.value)) {
+                            Some(Ty::Named(_, a)) if a.len() == 1 && a[0] != Ty::Unknown => Some(a[0].clone()),
+                            _ => None,
+                        }
+                    });
+                    return match told {
+                        Some(t) => fill_unknown(ret, &t),
+                        None => ret,
+                    };
+                };
                 let last = k + 1 == item.params.len();
                 let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| n.name == item.params[k].kotlin));
                 let by_place = args.iter().filter(|a| a.name.is_none()).nth(k);
@@ -1272,3 +1338,12 @@ fn number_constant(q: &str, name: &str, span: Span) -> Option<(TokenStream, Ty)>
 }
 
 use crate::pos::Loc;
+
+/// What a member of a generic type of one type argument gives (`State<Float>`'s `value`, a `T`): that argument when
+/// the member gives its type parameter, else its own type.
+fn owner_arg_ret(recv: &Ty, ret: &str) -> Ty {
+    match recv {
+        Ty::Named(_, a) if a.len() == 1 && super::call::is_type_parameter(ret) => a[0].clone(),
+        _ => Ty::from_rust(ret),
+    }
+}

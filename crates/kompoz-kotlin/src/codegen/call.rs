@@ -206,7 +206,7 @@ impl Gen<'_, '_> {
             for (k, a) in args.iter().enumerate() {
                 vals.push(match (a.value, params.get(k)) {
                     (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() => {
-                        self.value_want(e, Want { str_ok: false, any: None, some: false })
+                        self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None })
                     }
                     (ArgValue::Expr(e), Some(to)) if to.is_number() && !a.value.is_lambda() => {
                         let from = self.peek_ty(e);
@@ -335,7 +335,7 @@ impl Gen<'_, '_> {
         for a in args {
             let v = match a.value {
                 ArgValue::Expr(e) if pascal && !a.value.is_lambda() => {
-                    self.value_want(e, Want { str_ok: false, any: None, some: false })
+                    self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None })
                 }
                 _ => self.loose_arg(a),
             };
@@ -541,10 +541,13 @@ impl Gen<'_, '_> {
                     Ty::Named(_, a) if a.len() == 1 => Some((a[0].clone(), recv.ty.clone())),
                     _ => None,
                 };
+                let owner_arg = hint.as_ref().map(|(a, _)| a.clone()).filter(|a| *a != Ty::Unknown);
                 let r = self.finish_recv(recv, kind, loc);
                 let saved = std::mem::replace(&mut self.elem_hint, hint);
+                let saved_owner = std::mem::replace(&mut self.owner_arg, owner_arg);
                 let out = self.emit(&c, Target::Method(r), args, loc, &name.name);
                 self.elem_hint = saved;
+                self.owner_arg = saved_owner;
                 return out;
             }
         }
@@ -733,12 +736,18 @@ impl Gen<'_, '_> {
                         return None;
                     }
                 }
-                // (a type that doesn't fit counts against it: what is known of types is partial)
+                // (a type that doesn't fit counts against it: what is known of types is partial; one that is the
+                // parameter's own type fits best — Kotlin's most specific overload: `rememberTransition` of a
+                // `DeferredTransitionState`)
                 if let ArgValue::Expr(e) = a.value
                     && !takes_any(&p.ty)
-                    && !compatible(&self.peek_ty(e), &p.ty())
                 {
-                    score -= 5;
+                    let ty = self.peek_ty(e);
+                    if !compatible(&ty, &p.ty()) {
+                        score -= 5;
+                    } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y) {
+                        score += 1;
+                    }
                 }
                 if let (Some(l), Some(info)) = (a.value.lambda(), &p.lambda) {
                     let n = l.params.as_ref().map_or(usize::MAX, |ps| ps.len());
@@ -1121,12 +1130,12 @@ impl Gen<'_, '_> {
         // (Kotlin's `Any` — a key, a content type —: the value made the Rust type holding it, in `Some` for an optional
         // one; each branch of an `if`/`when`)
         if let Some(w) = AnyWrap::of_rust(&p.ty) {
-            return self.value_want(e, Want { str_ok: false, any: Some(w), some: false });
+            return self.value_want(e, Want { str_ok: false, any: Some(w), some: false, shared: None });
         }
         let o = self.expr(e);
         let nullable_arg = o.kind == OutKind::Null || o.ty.is_nullable();
         let arg_ty = o.ty.clone();
-        let v = self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false }, e.loc);
+        let v = self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false, shared: None }, e.loc);
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
@@ -1241,10 +1250,12 @@ impl Gen<'_, '_> {
                 let label = self.call_labels.last().cloned();
                 self.lambda_for(l, None, label.as_deref(), false)
             }
-            ArgValue::Sam { expr, .. } => self.value_want(expr, Want { str_ok: true, any: None, some: false }),
+            ArgValue::Sam { expr, .. } => {
+                self.value_want(expr, Want { str_ok: true, any: None, some: false, shared: None })
+            }
             ArgValue::Expr(e) => match &e.kind {
                 ExprKind::Lambda(l) => self.lambda_for(l, None, None, false),
-                _ => self.value_want(e, Want { str_ok: true, any: None, some: false }),
+                _ => self.value_want(e, Want { str_ok: true, any: None, some: false, shared: None }),
             },
         }
     }

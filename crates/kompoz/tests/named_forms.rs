@@ -16,6 +16,12 @@
 //! - C++ 11965 (`lists_pagers_and_carousels_take_compose_arguments`): a grid's `span = { GridItemSpan(maxLineSpan) }`,
 //!   `items(n, span = { … })`, pager states with their count last and by name, `VerticalScrollbar(adapter =,
 //!   modifier =)`. (Its carousel and PullToRefreshBox are Material's, stage 12's; AsyncImage is stage 13's.)
+//! - C++ 7683 (`animations_take_compose_named_arguments`), its animated values (stage 11 WP1):
+//!   `animateFloatAsState(targetValue =, animationSpec =, label =)`, `animateColorAsState(target, spec)` (C++'s duration
+//!   in milliseconds is Compose's `tween(100)`), `updateTransition(targetState =, label =)` and its
+//!   `animateFloat(label =) { }`, `animateDp(label =, transitionSpec = { … isTransitioningTo … }) { }`,
+//!   `rememberInfiniteTransition(label =).animateFloat(initialValue =, targetValue =, animationSpec =)`. (Its
+//!   AnimatedVisibility, AnimatedContent, Crossfade and SharedTransitionLayout parts are WP3's and WP4's.)
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -25,8 +31,9 @@ use kompoz::foundation::lazy::grid::LazyGridItemSpanScope;
 use kompoz::prelude::*;
 use kompoz::test::{KompozTestRule, Text};
 use kompoz::ui::platform::ViewConfiguration;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
     rule.on_node_with_tag_unmerged(tag).get_unclipped_bounds_in_root()
@@ -301,7 +308,77 @@ fn lists_pagers_and_scrollbars_take_compose_arguments() {
     assert_eq!((pages.peek(), by_name.peek(), rust_pages.peek(), rust_by_name.peek()), (4, 1, 4, 1));
 }
 
+// ---- C++ 7683: animated values by name -----------------------------------------------------------------------
+
+kompoz! {
+    @Composable
+    fun AnimationForms(on: Boolean, log: (String) -> Unit) {
+        val scale = animateFloatAsState(targetValue = if (on) 2f else 1f, animationSpec = tween(100, 0, LinearEasing), label = "scale")
+        val tint = animateColorAsState(if (on) Color.White else Color.Black, tween(100))
+        val transition = updateTransition(targetState = on, label = "on")
+        val size = transition.animateFloat(label = "size") { if (it) 40f else 20f }
+        val dp = transition.animateDp(label = "dp", transitionSpec = { if (false isTransitioningTo true) tween(50) else snap() }) {
+            if (it) 10.dp else 0.dp
+        }
+        val pulse = rememberInfiniteTransition(label = "pulse").animateFloat(initialValue = 0f, targetValue = 1f, animationSpec = infiniteRepeatable(tween(100)))
+        log("${scale.value.roundToInt()} ${tint.value.red.roundToInt()} ${size.value.roundToInt()} ${dp.value.value.roundToInt()} ${pulse.value >= 0}")
+    }
+}
+
+#[kompozable]
+fn RustAnimationForms(on: bool, log: Rc<dyn Fn(String)>) {
+    let linear: Arc<dyn AnimationSpec<f32>> = Arc::new(TweenSpec::new(100, 0, LinearEasing));
+    let scale = animate_float_as_state(
+        target_value = if on { 2.0 } else { 1.0 },
+        animation_spec = linear,
+        label = "scale".into(),
+    );
+    let tint = animate_color_as_state(if on { Color::White } else { Color::Black }, Arc::new(named_args!(tween(100))));
+    let transition = update_transition(target_state = on, label = Some("on".into()));
+    let size = transition
+        .animate_float(label = "size".into(), target_value_by_state = |on: &bool| if *on { 40.0 } else { 20.0 });
+    let dp = transition.animate_dp(
+        label = "dp".into(),
+        transition_spec = |segment: &Segment<bool>| -> Arc<dyn FiniteAnimationSpec<Dp>> {
+            if segment.is_transitioning_to(false, true) { Arc::new(named_args!(tween(50))) } else { Arc::new(snap()) }
+        },
+        target_value_by_state = |on: &bool| if *on { 10.dp() } else { 0.dp() },
+    );
+    let pulse = remember_infinite_transition(label = "pulse".into()).animate_float(
+        initial_value = 0.0,
+        target_value = 1.0,
+        animation_spec = infinite_repeatable(TweenSpec::new(100, 0, FastOutSlowInEasing)),
+    );
+    log(format!(
+        "{:.0} {:.0} {:.0} {:.0} {}",
+        scale.value(),
+        tint.value().red(),
+        size.value(),
+        dp.value().0,
+        pulse.value() >= 0.0
+    ));
+}
+
+fn animations_take_compose_named_arguments() {
+    let on = mutable_state_of(false);
+    let (kotlin, rust) = (Rc::new(RefCell::new(Vec::<String>::new())), Rc::new(RefCell::new(Vec::<String>::new())));
+    let (o, k, r) = (on.clone(), kotlin.clone(), rust.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let k = k.clone();
+        AnimationForms(o.get(), move |line| k.borrow_mut().push(line));
+        let r = r.clone();
+        RustAnimationForms(o.get(), Rc::new(move |line| r.borrow_mut().push(line)));
+    }));
+    assert_eq!(kotlin.borrow().last().unwrap(), "1 0 20 0 true");
+    assert_eq!(rust.borrow().last().unwrap(), "1 0 20 0 true");
+    on.set(true);
+    rule.wait_for_idle();
+    assert_eq!(kotlin.borrow().last().unwrap(), "2 1 40 10 true");
+    assert_eq!(rust.borrow().last().unwrap(), "2 1 40 10 true");
+}
+
 tests![
+    animations_take_compose_named_arguments,
     state_forms_take_compose_named_arguments,
     scroll_forms_take_compose_named_arguments,
     layout_forms_take_compose_named_arguments,

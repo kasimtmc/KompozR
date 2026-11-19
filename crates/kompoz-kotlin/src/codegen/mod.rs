@@ -131,6 +131,10 @@ pub(crate) struct Gen<'a, 'd> {
     pub call_labels: Vec<String>,
     /// A kt shim's call being written: its receiver's element type and its own (its lambdas' `it`).
     pub elem_hint: Option<(Ty, Ty)>,
+    /// A method of a generic type of one type argument being written (`transition.animateFloat { … }` of a
+    /// `Transition<Panel>`): its lambdas' parameters of the type's type parameter (`&S`) are that argument, given as
+    /// Kotlin's value of it (a clone).
+    pub owner_arg: Option<Ty>,
     /// A generic call's element type `T`, known from the collection it is given (`items(rows, key = { it.id })`:
     /// `items_list(items: impl LazyListItems<T>, key: Rc<dyn Fn(&T) -> LazyKey>)`): what its lambdas' `T` is, written
     /// out where a closure made a trait object can't take it from where it goes.
@@ -153,6 +157,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             lambdas: Vec::new(),
             call_labels: Vec::new(),
             elem_hint: None,
+            owner_arg: None,
             type_arg: None,
             counter: 0,
         }

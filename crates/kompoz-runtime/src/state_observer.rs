@@ -333,6 +333,13 @@ fn deliver(id: u64, thread: ThreadId) {
     }
 }
 
+impl PartialEq for SnapshotStateObserver {
+    /// The same observer (Compose compares the objects).
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 impl std::fmt::Debug for SnapshotStateObserver {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "SnapshotStateObserver({} callbacks)", self.inner.maps.borrow().len())
