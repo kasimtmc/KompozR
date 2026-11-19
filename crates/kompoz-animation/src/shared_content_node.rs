@@ -311,11 +311,18 @@ fn round(offset: Offset) -> IntOffset {
     IntOffset::new(fast_round_to_int(offset.x), fast_round_to_int(offset.y))
 }
 
-/// Compose's internal SharedBoundsNode: an approach layout, a modifier local's provider (its entry), an observer of
-/// its shared element's visibility; its drawing is [`SharedBoundsDrawNode`]'s, after it in the chain.
+/// Compose's internal SharedBoundsNode: an approach layout, a drawing, a modifier local's provider (its entry), an
+/// observer of its shared element's visibility. As a layout node that draws, it draws in the space of what it wraps
+/// (the content where its approach placed it, at its size): its content drawn in place, or recorded in the entry's
+/// layer for the overlay.
 pub(crate) struct SharedBoundsNode {
     state: Rc<SharedBoundsNodeState>,
     provided_values: ModifierLocalMap,
+    /// What writes the key while debugging, made with the font resolver, density and direction it was then.
+    text_measurer: Option<TextMeasurer>,
+    current_resolver: Option<Rc<dyn FontFamilyResolver>>,
+    current_density: Option<Density>,
+    current_layout_direction: Option<LayoutDirection>,
 }
 
 impl SharedBoundsNode {
@@ -333,6 +340,10 @@ impl SharedBoundsNode {
                 weak_self: weak_self.clone(),
             }),
             provided_values,
+            text_measurer: None,
+            current_resolver: None,
+            current_density: None,
+            current_layout_direction: None,
         }
     }
 
@@ -402,59 +413,7 @@ impl SharedBoundsNode {
     }
 }
 
-/// The drawing of `shared_element`/`shared_bounds` (Compose's SharedBoundsNode's `draw`): a node of its own after
-/// the layout node, so it draws as Compose's draw of a layout node does — in the space of what the layout node wraps
-/// (the content where the approach placed it, at its size), which KompozR's coordinators give to the nodes after a
-/// layout node, not to the layout node itself.
-pub(crate) struct SharedBoundsDrawElement {
-    pub(crate) shared_element_state: Rc<SharedElementEntry>,
-}
-
-impl PartialEq for SharedBoundsDrawElement {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.shared_element_state, &other.shared_element_state)
-    }
-}
-
-impl ModifierNodeElement for SharedBoundsDrawElement {
-    type Node = SharedBoundsDrawNode;
-    fn create(&self) -> SharedBoundsDrawNode {
-        SharedBoundsDrawNode {
-            entry: self.shared_element_state.clone(),
-            handle: None,
-            text_measurer: None,
-            current_resolver: None,
-            current_density: None,
-            current_layout_direction: None,
-        }
-    }
-    fn update(&self, node: &mut SharedBoundsDrawNode) {
-        node.entry = self.shared_element_state.clone();
-    }
-    fn name(&self) -> &'static str {
-        "sharedBounds"
-    }
-}
-
-/// [`SharedBoundsDrawElement`]'s node: the content drawn in place, or recorded in the entry's layer for the overlay.
-pub(crate) struct SharedBoundsDrawNode {
-    entry: Rc<SharedElementEntry>,
-    handle: Option<NodeHandle>,
-    text_measurer: Option<TextMeasurer>,
-    current_resolver: Option<Rc<dyn FontFamilyResolver>>,
-    current_density: Option<Density>,
-    current_layout_direction: Option<LayoutDirection>,
-}
-
-impl ModifierNode for SharedBoundsDrawNode {
-    node_capabilities!(draw);
-
-    fn on_attach(&mut self, cx: &NodeCx) {
-        self.handle = Some(cx.handle());
-    }
-}
-
-impl SharedBoundsDrawNode {
+impl SharedBoundsNode {
     /// Draws the content, with the visual debugging's marks when it is on (Compose's
     /// `drawContentWithOptionalDebug`): into `layer` if given.
     fn draw_content_with_optional_debug(
@@ -463,7 +422,7 @@ impl SharedBoundsDrawNode {
         layer: Option<&GraphicsLayer>,
         bounds: Option<Rect>,
     ) {
-        let handle = self.handle.clone();
+        let handle = self.state.handle();
         let config = if IS_LOOKAHEAD_ANIMATION_VISUAL_DEBUGGING_ENABLED {
             handle.as_ref().map(|h| h.current_value_of(&LocalLookaheadAnimationVisualDebugConfig))
         } else {
@@ -489,19 +448,19 @@ impl SharedBoundsDrawNode {
         bounds: Option<Rect>,
         config: &LookaheadAnimationVisualDebugConfig,
     ) {
-        let Some(handle) = self.handle.clone() else { return };
-        if self.entry.debug_helper.borrow().is_none() {
-            *self.entry.debug_helper.borrow_mut() = Some(Rc::new(LookaheadAnimationVisualDebugHelper::new()));
+        let Some(handle) = self.state.handle() else { return };
+        let entry = self.state.entry();
+        if entry.debug_helper.borrow().is_none() {
+            *entry.debug_helper.borrow_mut() = Some(Rc::new(LookaheadAnimationVisualDebugHelper::new()));
         }
         if self.current_density.is_none() {
             self.current_density = Some(handle.density());
             self.current_layout_direction = Some(handle.layout_direction());
         }
         let stroke_weight = scope.density().to_px(Dp(2.5));
-        let target_data = self.entry.shared_element().state().target_data();
+        let target_data = entry.shared_element().state().target_data();
         self.update_text_measurer(handle.current_value_of(&LocalFontFamilyResolver));
-        let helper = self.entry.debug_helper.borrow().clone().expect("the helper made above");
-        let entry = self.entry.clone();
+        let helper = entry.debug_helper.borrow().clone().expect("the helper made above");
         let shared_element = entry.shared_element();
         let animation_color = handle.current_value_of(&LocalLookaheadAnimationVisualDebugColor);
         let text_measurer = self.text_measurer.as_ref();
@@ -606,7 +565,7 @@ fn layer_size(scope: &ContentDrawScope) -> IntSize {
 }
 
 impl ModifierNode for SharedBoundsNode {
-    node_capabilities!(layout, approach_layout, modifier_local, observer);
+    node_capabilities!(layout, approach_layout, draw, modifier_local, observer);
 
     fn on_attach(&mut self, cx: &NodeCx) {
         *self.state.handle.borrow_mut() = Some(cx.handle());
@@ -720,9 +679,9 @@ impl ApproachLayoutModifierNode for SharedBoundsNode {
     }
 }
 
-impl DrawModifierNode for SharedBoundsDrawNode {
+impl DrawModifierNode for SharedBoundsNode {
     fn draw(&mut self, scope: &mut ContentDrawScope) {
-        let entry = self.entry.clone();
+        let entry = self.state.entry();
         let bounds = entry.shared_element().state().current_bounds();
         if !entry.should_render_in_overlay() {
             *entry.clip_path_in_overlay.borrow_mut() = None;
@@ -737,7 +696,7 @@ impl DrawModifierNode for SharedBoundsDrawNode {
         });
         *entry.clip_path_in_overlay.borrow_mut() = clip_path;
         if entry.layer().is_none() {
-            let platform = self.handle.as_ref().map(|h| h.current_value_of(&LocalPlatform));
+            let platform = self.state.handle().map(|h| h.current_value_of(&LocalPlatform));
             entry.replace_layer(Some(GraphicsLayer::new(platform)));
         }
         let layer = entry.layer().expect("Error: shared element does not have a layer for rendering in the overlay.");

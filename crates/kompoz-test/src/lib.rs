@@ -98,6 +98,13 @@ impl MainClock<'_> {
     pub fn advance_time_by_frame(&self) {
         self.rule.advance_frame();
     }
+
+    /// Runs what is due at the current time, the clock not moving (Compose's `runCurrent`, its test scheduler's
+    /// `mainClock.scheduler.runCurrent()`): the coroutines launched or resumed since (launched by the test: queued
+    /// on the dispatcher, as Kotlin's `launch` dispatches them), what they change composed and laid out.
+    pub fn run_current(&self) {
+        self.rule.run_current();
+    }
 }
 
 #[named]

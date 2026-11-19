@@ -734,6 +734,10 @@ fn flows_produce_on_demand_and_operators_shape_them() {
         .launch_in(&scope);
     let o = out.clone();
     empty_flow::<i32>().on_each(move |v| o.borrow_mut().push(*v)).launch_in(&scope);
+    // (`launchIn` is a dispatched `launch`, as Kotlin's: nothing ran yet; they run when the dispatcher next runs what
+    // is ready)
+    assert!(out.borrow().is_empty() && scope.active_jobs() == 2);
+    rule.dispatcher.run_ready();
     assert!(*out.borrow() == [1, 10, 2, 20, 3, 30] && scope.active_jobs() == 0);
     // A collector that suspends holds the producer back: it emits the next when this one is taken.
     let log = new_log();
@@ -1437,6 +1441,8 @@ fn run_woken_by_resumes_what_it_wakes_before_returning() {
             push(&l, format!("c {v}"));
         }
     });
+    // (launched dispatched: they wait for their signals once the dispatcher has run them)
+    d.run_ready();
     // Woken before: it waits for the dispatcher's next run; what the call wakes (and what that wakes) runs in it.
     a.fire(1);
     let r = d.run_woken_by(|| {
@@ -1470,8 +1476,11 @@ fn run_woken_by_from_inside_a_coroutine_keeps_its_own_wake() {
             push(&l, format!("other {v}"));
         }
     });
+    // (dispatched: waiting for its signal once run)
+    d.run_ready();
     let (l, o, dd) = (log.clone(), other.clone(), d.clone());
-    scope.launch(async move {
+    // (started at once, in the test: its first step resumes the other in place)
+    named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
         let mut yielded = false;
         std::future::poll_fn(|cx| {
             if yielded {
@@ -1484,7 +1493,7 @@ fn run_woken_by_from_inside_a_coroutine_keeps_its_own_wake() {
         })
         .await;
         push(&l, "self resumed");
-    });
+    }));
     assert!(*log.borrow() == ["other 7"]);
     d.run_ready();
     assert!(*log.borrow() == ["other 7", "self resumed"]);
@@ -1536,6 +1545,7 @@ fn coroutine_contexts_reach_the_block_and_what_it_launches_in_its_scopes() {
     let seen = Rc::new(RefCell::new(None));
     let s = seen.clone();
     own.launch(async move { *s.borrow_mut() = current_coroutine_context().get::<Tag>() });
+    rule.dispatcher.run_ready(); // (dispatched)
     assert_eq!(*seen.borrow(), Some(Tag("own")));
     let both = CoroutineContext::of(Tag("x")).plus_element(7i32) + CoroutineContext::of(Tag("y"));
     assert_eq!((both.get::<Tag>(), both.get::<i32>()), (Some(Tag("y")), Some(7)));
@@ -1566,6 +1576,7 @@ fn a_cancelled_coroutine_scope_cancels_who_awaits_it() {
         cancel_current::<()>().await;
         l.borrow_mut().push("after".to_string());
     });
+    rule.dispatcher.run_ready(); // (dispatched)
     assert_eq!(*log.borrow(), ["before"]);
     assert!(job.is_cancelled());
     // Through nested scopes and a timeout, out to the launched coroutine.
@@ -1659,6 +1670,147 @@ fn await_frame_end_resumes_after_the_frames_work() {
     assert!(!dispatcher.has_frame_waiters());
 }
 
+/// What the log holds, emptied.
+fn taken(log: &Log) -> Vec<String> {
+    std::mem::take(&mut *log.borrow_mut())
+}
+
+// ---- Kotlin's CoroutineStart, a scope's completion, a frame's two halves -------------------------------------------
+
+fn launch_starts_as_kotlins_coroutine_start_says() {
+    let d = Dispatcher::new();
+    let scope = CoroutineScope::new(&d);
+    let log = new_log();
+    // DEFAULT: dispatched — queued, it runs when the dispatcher next runs what is ready, in launch order.
+    let l = log.clone();
+    let first = scope.launch(async move { push(&l, "default") });
+    // UNDISPATCHED: at once, up to its first suspension, then dispatched as usual.
+    let (l, signal) = (log.clone(), Signal::default());
+    let s = signal.clone();
+    named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
+        push(&l, "undispatched");
+        let v = s.wait().await;
+        push(&l, format!("resumed {v}"));
+    }));
+    // LAZY: nothing until started; not active meanwhile.
+    let l = log.clone();
+    let lazy = named_args!(scope.launch(start = CoroutineStart::LAZY, async move { push(&l, "lazy") }));
+    assert_eq!(*log.borrow(), ["undispatched"]);
+    assert!(first.is_active() && !lazy.is_active() && !lazy.is_completed() && !lazy.is_cancelled());
+    signal.fire(1);
+    assert!(lazy.start() && !lazy.start()); // (true only for the call that started it)
+    d.run_ready();
+    assert_eq!(taken(&log), ["undispatched", "default", "resumed 1", "lazy"]);
+    // A DEFAULT one cancelled before it ran never runs; an ATOMIC one runs, cancelled, up to its first suspension.
+    let l = log.clone();
+    let never = scope.launch(async move { push(&l, "never") });
+    let l = log.clone();
+    let atomic = named_args!(scope.launch(start = CoroutineStart::ATOMIC, async move {
+        push(&l, "atomic");
+        delay_ms(10).await;
+        push(&l, "after its suspension");
+    }));
+    never.cancel();
+    atomic.cancel();
+    assert!(never.is_completed() && !atomic.is_completed());
+    d.run_ready();
+    assert_eq!(taken(&log), ["atomic"]);
+    assert!(atomic.is_cancelled() && atomic.is_completed());
+    // A LAZY one cancelled before it started never runs; join and await start one.
+    let l = log.clone();
+    let lazy = named_args!(scope.launch(start = CoroutineStart::LAZY, async move { push(&l, "cancelled lazy") }));
+    lazy.cancel();
+    assert!(lazy.is_completed() && !lazy.start());
+    let l = log.clone();
+    let joined = named_args!(scope.launch(start = CoroutineStart::LAZY, async move { push(&l, "joined") }));
+    let deferred = named_args!(scope.r#async(start = CoroutineStart::LAZY, async { 7 }));
+    let l = log.clone();
+    scope.launch(async move {
+        joined.join().await;
+        let v = deferred.await.unwrap();
+        push(&l, format!("awaited {v}"));
+    });
+    d.run_ready();
+    assert_eq!(taken(&log), ["joined", "awaited 7"]);
+    // In a cancelled scope: DEFAULT never runs; UNDISPATCHED runs, cancelled, up to its first suspension.
+    scope.cancel();
+    let l = log.clone();
+    let gone = scope.launch(async move { push(&l, "in a cancelled scope") });
+    let l = log.clone();
+    named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
+        push(&l, "undispatched, cancelled");
+        delay_ms(10).await;
+        push(&l, "never after");
+    }));
+    d.run_ready();
+    assert!(gone.is_cancelled() && gone.is_completed());
+    assert_eq!(taken(&log), ["undispatched, cancelled"]);
+}
+
+fn a_scope_tells_its_completion_unless_disposed() {
+    // Kotlin's `coroutineContext[Job]?.invokeOnCompletion { … }` on a scope's job: told once the scope is cancelled
+    // and its coroutines are done; at once if it is already; not if disposed (Compose's emitWithFallback: a
+    // launched emit that never ran is tried at the scope's end).
+    let d = Dispatcher::new();
+    let scope = CoroutineScope::new(&d);
+    let log = new_log();
+    let l = log.clone();
+    let handler = scope.invoke_on_completion(move || push(&l, "fallback"));
+    let l = log.clone();
+    scope.launch(async move {
+        push(&l, "emitted");
+        handler.dispose();
+    });
+    let l = log.clone();
+    let kept = scope.invoke_on_completion(move || push(&l, "end"));
+    d.run_ready();
+    assert_eq!(taken(&log), ["emitted"]);
+    // Cancelled before the launched one ran: it never runs, the handler not disposed is told.
+    let l = log.clone();
+    let handler = scope.invoke_on_completion(move || push(&l, "fallback"));
+    let l = log.clone();
+    scope.launch(async move {
+        push(&l, "emitted");
+        handler.dispose();
+    });
+    scope.cancel();
+    assert_eq!(taken(&log), ["end", "fallback"]);
+    let _ = kept;
+    let l = log.clone();
+    scope.invoke_on_completion(move || push(&l, "at once"));
+    assert_eq!(taken(&log), ["at once"]);
+}
+
+fn a_frame_runs_its_callbacks_then_its_continuations() {
+    // Compose's frame: the awaiters' `onFrame` run in the frame (BroadcastFrameClock.sendFrame), what they do after
+    // is dispatched: it runs after the frame's composition and layout — before the coroutines the frame launched.
+    let d = Dispatcher::new();
+    let scope = CoroutineScope::new(&d);
+    let log = new_log();
+    let l = log.clone();
+    scope.launch(async move {
+        let t = with_frame_nanos(|t| {
+            push(&l, format!("on frame {}", t / MS));
+            t
+        })
+        .await;
+        push(&l, format!("after the frame {}", t / MS));
+        let t = await_frame().await;
+        push(&l, format!("awaited {}", t / MS));
+    });
+    d.run_ready();
+    d.send_frame(16 * MS);
+    assert_eq!(taken(&log), ["on frame 16"]);
+    // (the frame's composition launches a coroutine: it runs after the frame's continuations)
+    let l = log.clone();
+    scope.launch(async move { push(&l, "launched in the frame") });
+    assert!(d.has_ready());
+    d.run_frame_end();
+    assert_eq!(taken(&log), ["after the frame 16", "launched in the frame"]);
+    d.run(32 * MS);
+    assert_eq!(taken(&log), ["awaited 32"]);
+}
+
 tests!(
     launched_effect_ticks_and_is_cancelled_on_leave,
     coroutines_give_back_values_and_work_in_the_background,
@@ -1697,4 +1849,7 @@ tests!(
     snapshot_flow_follows_a_derived_state_made_in_the_composition,
     catch_cancellation_gives_the_cancellation_to_the_block_that_catches_it,
     await_frame_end_resumes_after_the_frames_work,
+    launch_starts_as_kotlins_coroutine_start_says,
+    a_scope_tells_its_completion_unless_disposed,
+    a_frame_runs_its_callbacks_then_its_continuations,
 );

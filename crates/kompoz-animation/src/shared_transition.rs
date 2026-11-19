@@ -21,7 +21,7 @@ use crate::lookahead_debug::{
     LookaheadAnimationVisualDebugHelper,
 };
 use crate::render_in_overlay::RenderInTransitionOverlayNodeElement;
-use crate::shared_content_node::{SharedBoundsDrawElement, SharedBoundsNodeElement};
+use crate::shared_content_node::SharedBoundsNodeElement;
 use crate::shared_element::{EntryObserver, SharedElement, SharedElementEntry};
 use crate::skip_to_lookahead_size::{ScaleToBounds, SkipToLookaheadSizeElement, content_scale_modifier};
 use crate::transition::{DeferredAnimation, MutableTransitionState, Transition, remember_transition};
@@ -741,10 +741,8 @@ impl SharedTransitionScopeImpl {
         self.z_order_changed();
         if shared_element.all_entries().is_empty() {
             let scope = self.weak_self.clone();
+            // (dispatched: it runs after this composition's changes, so an entry of the key they add keeps it)
             self.coroutine_scope.launch(async move {
-                // (Kotlin's `launch` is dispatched: after this composition's changes, an entry of the key added by
-                // them keeps it)
-                kompoz_coroutines::r#yield().await;
                 if shared_element.all_entries().is_empty()
                     && let Some(scope) = scope.upgrade()
                 {
@@ -1228,9 +1226,7 @@ impl SharedTransitionScope {
                 render_in_overlay_during_transition,
             )
         });
-        modifier
-            .then_element(SharedBoundsNodeElement { shared_element_state: entry.clone() })
-            .then_element(SharedBoundsDrawElement { shared_element_state: entry })
+        modifier.then_element(SharedBoundsNodeElement { shared_element_state: entry })
     }
 }
 

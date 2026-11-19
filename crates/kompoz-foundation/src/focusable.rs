@@ -4,8 +4,9 @@
 //! searched as one group: arrow keys stay in it first; from outside it is one target).
 
 use crate::focused_bounds::notify_focused_bounds_observers;
-use crate::interaction::{FocusInteraction, MutableInteractionSource};
-use kompoz_runtime::named;
+use crate::interaction::{FocusInteraction, IntoInteraction, MutableInteractionSource};
+use kompoz_coroutines::CoroutineStart;
+use kompoz_runtime::{named, named_args};
 use kompoz_ui::focus::{FocusChangeCallback, FocusState, FocusTargetNode, Focusability, bring_into_view};
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates, LocalPinnableContainer, PinnedHandle};
 use kompoz_ui::modifier::{DelegatedNode, ObserverModifierNode, TraversableNode};
@@ -134,7 +135,7 @@ impl FocusableShared {
             if let Some(cx) = handle.as_ref().and_then(NodeHandle::cx)
                 && let Some(scope) = handle.as_ref().and_then(NodeHandle::coroutine_scope)
             {
-                scope.launch(bring_into_view(&cx, None));
+                named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, coroutine = bring_into_view(&cx, None)));
             }
             let container = self.retrieve_pinnable_container();
             *self.pinned_handle.borrow_mut() = container.map(|c| c.pin());
@@ -183,12 +184,22 @@ impl FocusableShared {
         }
     }
 
-    /// Emits in its coroutine scope while it is attached, else at once (Compose's `emitWithFallback`).
+    /// Emits in its coroutine scope while it is attached, else at once (Compose's `emitWithFallback`): called from
+    /// its detach, the scope is cancelled before the launched emit runs, so the scope's end tries the emit unless
+    /// the coroutine got to it.
     fn emit_with_fallback(&self, source: &MutableInteractionSource, interaction: impl crate::interaction::Interaction) {
         match self.handle().and_then(|h| h.coroutine_scope()) {
             Some(scope) => {
+                let interaction = interaction.into_interaction();
+                let (fallback, late) = (source.clone(), interaction.clone());
+                let handler = scope.invoke_on_completion(move || {
+                    fallback.try_emit(late);
+                });
                 let source = source.clone();
-                scope.launch(async move { source.emit(interaction).await });
+                scope.launch(async move {
+                    source.emit(interaction).await;
+                    handler.dispose();
+                });
             }
             None => {
                 source.try_emit(interaction);

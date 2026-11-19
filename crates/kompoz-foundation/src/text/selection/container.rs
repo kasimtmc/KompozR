@@ -279,21 +279,22 @@ pub(crate) fn remember_animated_magnifier_position(target_calculation: impl Fn()
     LaunchedEffect((), async move {
         coroutine_scope(move |animation_scope| async move {
             snapshot_flow(move || target.get())
-                .collect(move |target_value: Offset| {
-                    let a = a.clone();
-                    let current = a.peek();
-                    if current.is_specified() && target_value.is_specified() && current.y != target_value.y {
-                        let spec: Arc<dyn AnimationSpec<Offset>> = Arc::new(spring(
-                            Spring::DampingRatioNoBouncy,
-                            Spring::StiffnessMedium,
-                            Some(OffsetDisplacementThreshold),
-                        ));
-                        animation_scope.launch(async move {
-                            kompoz_runtime::named_args!(a.animate_to(target_value, spec)).await;
-                        });
-                    } else {
-                        // (no suspension: done as it is launched, in the collector's order)
-                        animation_scope.launch(async move { a.snap_to(target_value).await });
+                .collect_async(move |target_value: Offset| {
+                    let (a, animation_scope) = (a.clone(), animation_scope.clone());
+                    async move {
+                        let current = a.peek();
+                        if current.is_specified() && target_value.is_specified() && current.y != target_value.y {
+                            let spec: Arc<dyn AnimationSpec<Offset>> = Arc::new(spring(
+                                Spring::DampingRatioNoBouncy,
+                                Spring::StiffnessMedium,
+                                Some(OffsetDisplacementThreshold),
+                            ));
+                            animation_scope.launch(async move {
+                                kompoz_runtime::named_args!(a.animate_to(target_value, spec)).await;
+                            });
+                        } else {
+                            a.snap_to(target_value).await;
+                        }
                     }
                 })
                 .await;

@@ -8,8 +8,9 @@ use super::bring_into_view_spec::{BringIntoViewSpec, LocalBringIntoViewSpec};
 use super::scrollable::ScrollingLogic;
 use crate::relocation::BringIntoViewResponder;
 use kompoz_animation::{AnimationSpec, AnimationVector, AnimationVector1D, VectorConverter, VectorizedAnimationSpec};
-use kompoz_coroutines::{await_frame_end, current_coroutine_context, current_job, with_frame_nanos};
+use kompoz_coroutines::{CoroutineStart, await_frame_end, current_coroutine_context, current_job, with_frame_nanos};
 use kompoz_graphics::{IntOffset, IntSize, Offset, Rect, Size};
+use kompoz_runtime::named_args;
 use kompoz_ui::MotionDurationScale;
 use kompoz_ui::focus::BringIntoViewFuture;
 use kompoz_ui::input::NestedScrollSource;
@@ -165,7 +166,7 @@ impl ContentInViewCore {
         let Some(scope) = self.handle.borrow().as_ref().and_then(|h| h.coroutine_scope()) else { return };
         let animation_state = Rc::new(UpdatableAnimationState::new(&*bring_into_view_spec.scroll_animation_spec()));
         let me = self.rc();
-        scope.launch(async move {
+        let animation = async move {
             let animation_job = current_job();
             /// Compose's `finally`: the requests not satisfied are cancelled.
             struct Finally(Rc<ContentInViewCore>);
@@ -249,7 +250,9 @@ impl ContentInViewCore {
                 .await;
             // Done (or needing no animation): what is left (too big to satisfy) completes.
             me.bring_into_view_requests.resume_and_remove_all();
-        });
+        };
+        // (Compose: `coroutineScope.launch(start = CoroutineStart.UNDISPATCHED)`)
+        named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, coroutine = animation));
     }
 
     /// The scroll the requests (or the tracked focused child) need now (Compose's `calculateScrollDelta`).

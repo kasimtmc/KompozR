@@ -183,6 +183,35 @@ fn launched_effect_is_a_coroutine() {
     rule.on_node_with_text("tik 3").assert_exists();
 }
 
+// Kotlin's launch and async as written: dispatched by default, `start = CoroutineStart.UNDISPATCHED` at once,
+// `LAZY` when started; a LaunchedEffect's coroutine itself dispatched (after the frame that composed it).
+kompoz! {
+    @Composable
+    fun Starts(log: (String) -> Unit) {
+        val scope = rememberCoroutineScope()
+        LaunchedEffect(Unit) {
+            log("effect")
+            scope.launch { log("default") }
+            scope.launch(start = CoroutineStart.UNDISPATCHED) { log("undispatched") }
+            val later = scope.launch(start = CoroutineStart.LAZY) { log("lazy") }
+            val seven = scope.async(start = CoroutineStart.LAZY) { 7 }
+            log("launched ${later.isActive}")
+            later.start()
+            log("async ${seven.await()}")
+        }
+    }
+}
+
+fn launch_takes_kotlins_coroutine_start() {
+    let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let l = log.clone();
+    let _rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let l = l.clone();
+        Starts(move |s: String| l.borrow_mut().push(s));
+    }));
+    assert_eq!(*log.borrow(), ["effect", "undispatched", "launched false", "default", "lazy", "async 7"]);
+}
+
 // Receiver lambdas: a Canvas's DrawScope, a graphics layer's scope, semantics, pointer input; a Layout's measure
 // policy and placement; an extension function of Modifier; a Rust composable and function called from Kotlin.
 kompoz! {
@@ -463,6 +492,7 @@ fn rusts_lexer_takes_these() {
 }
 
 tests![
+    launch_takes_kotlins_coroutine_start,
     empty_composes,
     a_file_composes,
     text_from_the_source,

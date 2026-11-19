@@ -162,3 +162,8 @@ harness = false
 [[test]]
 name = "kotlin_shared"
 harness = false
+
+# The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
+[[test]]
+name = "kotlin_animations_all"
+harness = false

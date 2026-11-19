@@ -8,9 +8,9 @@ use crate::text::long_press_text_drag_observer::Handle;
 use crate::text::selection::container::{OffsetDisplacementThreshold, unspecified_safe_offset_vector_converter};
 use crate::text::selection::visible_bounds;
 use kompoz_animation::{Animatable, AnimationSpec, AnimationVector2D, Spring, spring};
-use kompoz_coroutines::{Job, coroutine_scope, snapshot_flow};
+use kompoz_coroutines::{CoroutineStart, Job, coroutine_scope, snapshot_flow};
 use kompoz_graphics::{Density, DpSize, IntSize, Offset, Rect, Size};
-use kompoz_runtime::{MutableState, mutable_state_of};
+use kompoz_runtime::{MutableState, mutable_state_of, named_args};
 use kompoz_ui::modifier::DelegatedNode;
 use kompoz_ui::{ModifierNode, ModifierNodeElement, NodeCx, NodeHandle};
 use std::cell::{Cell, RefCell};
@@ -85,7 +85,12 @@ impl Shared {
         if !self.visible.get() {
             if self.animatable.peek().is_specified() {
                 let a = self.animatable.clone();
-                scope.launch(async move { a.snap_to(Offset::Unspecified).await });
+                named_args!(
+                    scope.launch(
+                        start = CoroutineStart::UNDISPATCHED,
+                        async move { a.snap_to(Offset::Unspecified).await }
+                    )
+                );
             }
             return;
         }
@@ -94,22 +99,24 @@ impl Shared {
             coroutine_scope(move |animation_scope| async move {
                 let (target, a) = (shared.clone(), shared.animatable.clone());
                 snapshot_flow(move || target.target())
-                    .collect(move |target_value: Offset| {
-                        let a = a.clone();
-                        let current = a.peek();
-                        // Along a line it follows the finger; between lines a spring eases it (a new one launched
-                        // from the running one, keeping its velocity).
-                        if current.is_specified() && target_value.is_specified() && current.y != target_value.y {
-                            let spec: Arc<dyn AnimationSpec<Offset>> = Arc::new(kompoz_runtime::named_args!(spring(
-                                Spring::DampingRatioNoBouncy,
-                                Spring::StiffnessMedium,
-                                Some(OffsetDisplacementThreshold),
-                            )));
-                            animation_scope.launch(async move {
-                                kompoz_runtime::named_args!(a.animate_to(target_value, spec)).await;
-                            });
-                        } else {
-                            animation_scope.launch(async move { a.snap_to(target_value).await });
+                    .collect_async(move |target_value: Offset| {
+                        let (a, animation_scope) = (a.clone(), animation_scope.clone());
+                        async move {
+                            let current = a.peek();
+                            // Along a line it follows the finger; between lines a spring eases it (a new one
+                            // launched from the running one, keeping its velocity).
+                            if current.is_specified() && target_value.is_specified() && current.y != target_value.y {
+                                let spec: Arc<dyn AnimationSpec<Offset>> = Arc::new(named_args!(spring(
+                                    Spring::DampingRatioNoBouncy,
+                                    Spring::StiffnessMedium,
+                                    Some(OffsetDisplacementThreshold),
+                                )));
+                                animation_scope.launch(async move {
+                                    named_args!(a.animate_to(target_value, spec)).await;
+                                });
+                            } else {
+                                a.snap_to(target_value).await;
+                            }
                         }
                     })
                     .await;

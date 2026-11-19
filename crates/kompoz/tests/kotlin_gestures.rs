@@ -148,6 +148,11 @@ fn a_drag_and_drop_source_from_a_kt_file() {
     let rule = KompozTestRule::new(kompozable_lambda!(move || Fruit("armut".to_string(), target.clone())));
     // The mouse drags it past the slop onto the target.
     let h = rule.host();
+    // (the mouse comes over it first, an event of its own: Compose for desktop's matcher-taking detectors launch their
+    // coroutines (plain `launch`, dispatched) from the first event their pointer input sees, so a press that is that
+    // first event comes before they wait for it — as it would in Compose)
+    h.pointer_move(Offset::new(40.0, 20.0), -1, 0);
+    rule.main_clock().run_current();
     h.pointer_down(Offset::new(40.0, 20.0), -1, 0, PointerType::Mouse);
     for i in 1..=8 {
         rule.advance_frame();

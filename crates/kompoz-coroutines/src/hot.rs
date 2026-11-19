@@ -7,9 +7,10 @@
 //! [`SharingStarted`] says: `Eagerly`, `Lazily`, or `WhileSubscribed`, collecting it only while someone collects
 //! what it is shared as (and a while after the last one left: a configuration change doesn't restart it).
 
-use crate::executor::{CoroutineScope, Job};
+use crate::executor::{CoroutineScope, CoroutineStart, Job};
 use crate::flow::{BoxFuture, Flow, FlowChildren, flow, race};
 use crate::time::delay;
+use kompoz_runtime::named_args;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -103,7 +104,13 @@ fn share<T: 'static>(
     subscriptions: Arc<Subscriptions>,
 ) -> Job {
     let sink = std::rc::Rc::new(sink);
-    scope.launch(async move {
+    // (Kotlin's `launchSharing`: `start = if (started == SharingStarted.Eagerly) CoroutineStart.DEFAULT else
+    // CoroutineStart.UNDISPATCHED` — a lazily started one waits for subscribers from the start)
+    let start = match started {
+        SharingStarted::Eagerly => CoroutineStart::DEFAULT,
+        _ => CoroutineStart::UNDISPATCHED,
+    };
+    let sharing = async move {
         let collect = move || {
             let sink = sink.clone();
             up.collect(move |v| sink(v))
@@ -117,7 +124,8 @@ fn share<T: 'static>(
             SharingStarted::WhileSubscribed { stop_timeout } => loop {
                 subscriptions.wait_for(|n| n > 0).await;
                 let running = FlowChildren::new();
-                running.launch(collect());
+                // (kotlinx's `collectLatest` of the sharing command: `transformLatest`, UNDISPATCHED)
+                running.launch(CoroutineStart::UNDISPATCHED, collect());
                 loop {
                     subscriptions.wait_for(|n| n == 0).await;
                     race(delay(stop_timeout), subscriptions.wait_for(|n| n > 0)).await;
@@ -128,7 +136,8 @@ fn share<T: 'static>(
                 drop(running);
             },
         }
-    })
+    };
+    named_args!(scope.launch(start = start, coroutine = sharing))
 }
 
 /// What a flow's operators take, for a hot flow's values too (through its `as_flow`).

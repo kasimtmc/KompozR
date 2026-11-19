@@ -15,9 +15,9 @@ use crate::gestures::{
 use crate::text::context_menu::{TextContextMenuComponent, TextContextMenuData, TextContextMenuItems};
 use crate::text::long_press_text_drag_observer::{Handle, TextDragObserver};
 use crate::text::modifiers::DefaultMouseSelectionObserver;
-use kompoz_coroutines::CoroutineScope;
+use kompoz_coroutines::{CoroutineScope, CoroutineStart};
 use kompoz_graphics::{IntSize, Offset, Rect, Size};
-use kompoz_runtime::{MutableState, mutable_state_of, mutable_state_of_with_policy, never_equal_policy};
+use kompoz_runtime::{MutableState, mutable_state_of, mutable_state_of_with_policy, named_args, never_equal_policy};
 use kompoz_text::{AnnotatedString, AnnotatedStringBuilder, TextRange};
 use kompoz_ui::focus::{FocusRequester, FocusState};
 use kompoz_ui::input::{Key, KeyEvent, KeyEventType, KeyModifiers, PointerEventPass, PointerInputScope};
@@ -1078,7 +1078,7 @@ impl SelectionManager {
         let scope = self.coroutine_scope.borrow().clone();
         if let Some(scope) = scope {
             let request = requester.bring_into_view_rect(Some(rect));
-            scope.launch(request);
+            named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, coroutine = request));
         }
     }
 

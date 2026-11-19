@@ -216,7 +216,7 @@ kompoz-foundation/tooltip kompozable Tagged rrrr crates/kompoz-foundation/tests/
 kompoz-runtime/macros kompozable Tagged rdd crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/windows kompozable Tappable rrrr crates/kompoz-ui/tests/windows.rs
 kompoz-ui/focus kompozable Target rrrr crates/kompoz-ui/tests/focus.rs
-* kompozable Text rdd crates/kompoz-test/src/text.rs
+* kompozable Text rddd crates/kompoz-test/src/text.rs
 kompoz-coroutines/coroutines kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-foundation/selection kompozable Text rdd crates/kompoz-foundation/tests/selection.rs
 kompoz-runtime/macros kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
@@ -321,6 +321,7 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method approach_layout rdr crates/kompoz-ui/src/layout/lookahead.rs Modifier
 * method area rdddd crates/kompoz-foundation/src/layout/grid.rs GridConfigurationScope
 * method aspect_ratio rd crates/kompoz-foundation/src/layout/aspect_ratio.rs Modifier as AspectRatioModifiers
+* method async dr crates/kompoz-coroutines/src/executor.rs CoroutineScope
 * method background rd crates/kompoz-foundation/src/background.rs Modifier as BackgroundModifiers
 kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs Modifier
 * method background_brush rdd crates/kompoz-foundation/src/background.rs Modifier as BackgroundModifiers
@@ -436,6 +437,8 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method items_list rdddr crates/kompoz-foundation/src/lazy/grid/dsl.rs LazyGridScope
 * method items_list rdddr crates/kompoz-foundation/src/lazy/staggeredgrid/dsl.rs LazyStaggeredGridScope
 * method items_list rddr crates/kompoz-foundation/src/lazy/list/dsl.rs LazyListScope
+* method launch dr crates/kompoz-coroutines/src/executor.rs CoroutineScope
+* method launch dr crates/kompoz-ui/src/platform_text_input.rs PlatformTextInputSessionScope
 * method layout rrddr crates/kompoz-ui/src/layout/measure.rs MeasureScope
 * method layout_with_ruler_provider rrrrdr crates/kompoz-ui/src/layout/measure.rs MeasureScope
 * fn lazy_grid_prefetch_strategy d crates/kompoz-foundation/src/lazy/grid/prefetch_strategy.rs

@@ -6,8 +6,9 @@
 
 use crate::text::core_text_field::{LegacyTextFieldState, ObservedCell};
 use crate::text::selection::text_field_selection_manager::TextFieldSelectionManager;
-use kompoz_coroutines::Job;
+use kompoz_coroutines::{CoroutineStart, Job};
 use kompoz_graphics::{Matrix, Offset, Rect};
+use kompoz_runtime::named_args;
 use kompoz_text::input::{EditCommand, OffsetMapping, TextFieldValue};
 use kompoz_text::{TextLayoutResult, TextRange};
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates};
@@ -341,7 +342,9 @@ impl LegacyPlatformTextInputNode for NodeShared {
         }
         let session_node = self.session_node.borrow().clone()?;
         let session = establish_text_input_session(&*session_node.borrow(), &session_node.cx(), block);
-        Some(cx.coroutine_scope().launch(async move { match session.await {} }))
+        Some(named_args!(
+            cx.coroutine_scope().launch(start = CoroutineStart::UNDISPATCHED, async move { match session.await {} })
+        ))
     }
 }
 

@@ -85,6 +85,8 @@ fn an_interrupting_animation_starts_from_the_value_and_velocity() {
             Box::new(move |a| st.borrow_mut().push((a.peek(), a.velocity())));
         named_args!(a.animate_to(0.0, a.default_spring_spec(), a.velocity(), Some(block))).await;
     });
+    // (launched from the test: dispatched, as Kotlin's `launch`; it runs when the clock runs what is current)
+    rule.main_clock().run_current();
     // (the new one's first frame is the old one's last frame: at once, where it was, as fast)
     let first = started.borrow()[0];
     assert_eq!(first.0, value);
@@ -223,15 +225,19 @@ fn stop_and_snap_to_cancel_the_running_animation() {
     let at = a.peek();
     let b = a.clone();
     scope.launch(async move { b.stop().await });
+    // (launched from the test: dispatched, as Kotlin's `launch`; it runs when the clock runs what is current)
+    rule.main_clock().run_current();
     assert!(!a.is_running() && a.velocity() == 0.0 && a.peek() == at);
     // (its coroutine goes where it awaits once it runs again, as Kotlin's resumes with the exception)
     rule.advance_frame();
     assert!(cancelled.get());
     rule.advance_time_by(100);
     assert_eq!(a.peek(), at);
-    // snap_to: at once.
+    // snap_to: done in its coroutine's first step (no frame).
     let b = a.clone();
     scope.launch(async move { b.snap_to(42.0).await });
+    // (launched from the test: dispatched, as Kotlin's `launch`; it runs when the clock runs what is current)
+    rule.main_clock().run_current();
     assert_eq!((a.peek(), a.target_value()), (42.0, 42.0));
 }
 
@@ -294,6 +300,8 @@ fn a_mutator_mutex_runs_one_mutation_at_a_time() {
         })
         .await;
     });
+    // (launched from the test: dispatched, as Kotlin's `launch`; it runs when the clock runs what is current)
+    rule.main_clock().run_current();
     assert!(!mutex.try_mutate(|| panic!("ran while locked")));
     rule.advance_time_by(200);
     assert!(mutex.try_mutate(|| {}));
@@ -328,6 +336,7 @@ fn a_mutator_mutex_runs_one_mutation_at_a_time() {
         let v = m.mutate_with(20, |x: i32| async move { x + 1 }).await;
         o.set(v);
     });
+    rule.main_clock().run_current(); // (dispatched)
     assert_eq!(out.get(), 21);
 }
 
@@ -453,6 +462,8 @@ fn a_motion_duration_scale_stretches_animations() {
         })
         .await;
     }));
+    // (launched from the test: dispatched, as Kotlin's `launch`; it runs when the clock runs what is current)
+    rule.main_clock().run_current();
     assert_eq!(seen.get(), 3.0);
 }
 

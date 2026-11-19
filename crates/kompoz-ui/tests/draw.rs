@@ -3160,7 +3160,125 @@ fn drawn_texts_are_the_texts_drawn() {
     assert!(c.text_order == "ttts" && near(c.shadow_blurs[0], 2.0));
 }
 
+// ---- A layout node that draws --------------------------------------------------------------------------------------
+
+/// A node both layout and draw: it lays what it wraps out 20 px narrower and shorter and places it at (10, 20) (or
+/// through a layer of alpha 0.5); it draws a rect of its draw scope's size, then its content; it notes the sizes its
+/// draw scope had and how often it was told its size changed.
+#[derive(PartialEq)]
+struct Framed {
+    layered: bool,
+    seen: Rc<RefCell<Vec<Size>>>,
+    told: Rc<Cell<i32>>,
+}
+
+struct FramedNode {
+    layered: bool,
+    seen: Rc<RefCell<Vec<Size>>>,
+    told: Rc<Cell<i32>>,
+}
+
+impl ModifierNodeElement for Framed {
+    type Node = FramedNode;
+    fn create(&self) -> FramedNode {
+        FramedNode { layered: self.layered, seen: self.seen.clone(), told: self.told.clone() }
+    }
+    fn update(&self, node: &mut FramedNode) {
+        node.layered = self.layered;
+    }
+}
+
+impl ModifierNode for FramedNode {
+    node_capabilities!(layout, draw);
+}
+
+impl kompoz_ui::layout::LayoutModifierNode for FramedNode {
+    fn measure(
+        &mut self,
+        scope: &kompoz_ui::layout::MeasureScope,
+        measurable: &dyn kompoz_ui::layout::Measurable,
+        constraints: Constraints,
+    ) -> kompoz_ui::layout::MeasureResult {
+        let placeable = measurable.measure(constraints.offset(-20, -20));
+        let layered = self.layered;
+        scope.layout(placeable.width() + 20, placeable.height() + 20, move |p| {
+            if layered {
+                p.place_with_layer(&placeable, 10, 20, |l: &mut GraphicsLayerScope| l.alpha = 0.5);
+            } else {
+                p.place(&placeable, 10, 20);
+            }
+        })
+    }
+}
+
+impl DrawModifierNode for FramedNode {
+    fn draw(&mut self, scope: &mut ContentDrawScope) {
+        let size = scope.size();
+        self.seen.borrow_mut().push(size);
+        scope.draw_rect_with(RED, Offset::Zero, size, 1.0, Fill, None, DefaultBlendMode);
+        scope.draw_content();
+    }
+    fn on_measure_result_changed(&mut self) {
+        self.told.set(self.told.get() + 1);
+    }
+}
+
+fn a_layout_node_draws_in_the_space_of_what_it_wraps() {
+    // Compose's rule (NodeKind.includeSelfInTraversal: only OnRemeasured and OnPlaced are a layout node's own
+    // coordinator's): a node that is both layout and draw is drawn by the coordinator it wraps — at that one's
+    // position, at its size, through its layer — and its drawContent draws what that one holds. A draw node before it
+    // draws in the layout node's space (its whole size); one after it in the wrapped one's, as it does. Its
+    // onMeasureResultChanged follows the wrapped coordinator's size.
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let told = Rc::new(Cell::new(0));
+    let (wide, layered) = (mutable_state_of(50), mutable_state_of(false));
+    let (s, t, w, l) = (seen.clone(), told.clone(), wide.clone(), layered.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let framed = Framed { layered: l.get(), seen: s.clone(), told: t.clone() };
+        let width = w.get();
+        Box(modifier = Modifier
+            .draw_behind(|d| {
+                let size = d.size();
+                d.draw_rect_with(BLUE, Offset::Zero, size, 1.0, Fill, None, DefaultBlendMode)
+            })
+            .then_element(framed)
+            .draw_behind(|d| {
+                let size = d.size();
+                d.draw_rect_with(GREEN, Offset::Zero, size, 1.0, Fill, None, DefaultBlendMode)
+            })
+            .size_wh((width as f32).dp(), 30.dp())
+            .background(Color::Black));
+    }));
+    let c = rule.draw();
+    assert_eq!(c.rect_colors, [BLUE, RED, GREEN, Color::Black]);
+    // (the layout node is 70 by 50; what it wraps 50 by 30 at (10, 20))
+    assert!(same_rect(c.rects[0], 0.0, 0.0, 70.0, 50.0));
+    assert!(same_rect(c.rects[1], 10.0, 20.0, 50.0, 30.0));
+    assert!(same_rect(c.rects[2], 10.0, 20.0, 50.0, 30.0));
+    assert!(same_rect(c.rects[3], 10.0, 20.0, 50.0, 30.0));
+    assert_eq!(*seen.borrow().last().unwrap(), sz(50.0, 30.0));
+    let before = told.get();
+    assert!(before >= 1);
+    // What it wraps grows: it is told, and draws at the new size.
+    wide.set(80);
+    rule.wait_for_idle();
+    let c = rule.draw();
+    assert!(told.get() > before);
+    assert!(same_rect(c.rects[0], 0.0, 0.0, 100.0, 50.0) && same_rect(c.rects[1], 10.0, 20.0, 80.0, 30.0));
+    assert_eq!(*seen.borrow().last().unwrap(), sz(80.0, 30.0));
+    // Placed through a layer: its drawing is in that layer (drawn at half alpha), the one before it isn't.
+    layered.set(true);
+    rule.wait_for_idle();
+    let c = rule.draw();
+    assert_eq!(c.rect_colors, [BLUE, RED, GREEN, Color::Black]);
+    assert!(same_rect(c.rects[1], 10.0, 20.0, 80.0, 30.0));
+    assert!(c.layer_alphas.contains(&0.5), "{:?}", c.layer_alphas);
+    let d = &c.rect_depths;
+    assert!(d[1] == d[0] + 1 && d[2] == d[1] && d[3] == d[1], "{d:?}");
+}
+
 tests!(
+    a_layout_node_draws_in_the_space_of_what_it_wraps,
     graphics_layer_stretch_draws_through_a_stretched_layer,
     canvas_and_draw_modifiers_draw_in_local_coordinates,
     canvas_takes_compose_named_arguments,

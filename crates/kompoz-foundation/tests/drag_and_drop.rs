@@ -410,6 +410,11 @@ fn a_drag_leaving_the_window_goes_to_the_platform() {
         IntSize::new(400, 800),
     );
     let h = rule.host();
+    // (the mouse comes over it first, an event of its own: Compose for desktop's matcher-taking detectors launch their
+    // coroutines (plain `launch`, dispatched) from the first event their pointer input sees, so a press that is that
+    // first event comes before they wait for it — as it would in Compose)
+    h.pointer_move(at(40.0, 20.0), -1, 0);
+    rule.main_clock().run_current();
     // Within the app, Ctrl held: copied.
     h.pointer_down(at(40.0, 20.0), -1, 0, PointerType::Mouse);
     move_to(&rule, at(40.0, 20.0), at(100.0, 100.0), 0);

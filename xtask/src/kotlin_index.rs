@@ -1618,7 +1618,8 @@ fn from_bounds(
 /// `&mut SemanticsPropertyReceiver`, a builder, `FocusProperties`, a DSL's config (`&mut KeyframesSpecConfig<T>`), an
 /// `&Animatable` (its `animateTo` block); `&mut SemanticsConfiguration`, which is Compose's
 /// SemanticsPropertyReceiver; `&mut TextFieldBuffer`, a text field state's `edit` and its transformations' block; a
-/// transition's `&Segment<S>`, its animations' `transitionSpec`), as Kotlin's `T.() -> R` is.
+/// transition's `&Segment<S>`, its animations' `transitionSpec`; a `&Density`, Compose's `Density.() -> R` blocks:
+/// `offset { }`, a magnifier's centers, a marquee's spacing), as Kotlin's `T.() -> R` is.
 fn receiver_of(first: &Type) -> String {
     let inner = match first {
         Type::Reference(r) => &*r.elem,
@@ -1646,7 +1647,7 @@ fn receiver_of(first: &Type) -> String {
     let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform", "Config"].iter().any(|s| name.ends_with(s))
         || matches!(
             name.as_str(),
-            "Path" | "Placeable" | "SemanticsConfiguration" | "Animatable" | "TextFieldBuffer" | "Segment"
+            "Path" | "Placeable" | "SemanticsConfiguration" | "Animatable" | "TextFieldBuffer" | "Segment" | "Density"
         );
     if scope { name } else { String::new() }
 }

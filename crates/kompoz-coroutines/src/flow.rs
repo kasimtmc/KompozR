@@ -23,7 +23,7 @@
 //! Everything runs on the UI thread, in the collecting coroutine; cancelling it stops the producer too (its
 //! future is dropped, running its destructors).
 
-use crate::executor::{CoroutineScope, Dispatcher, Job};
+use crate::executor::{CoroutineScope, CoroutineStart, Dispatcher, Job};
 use crate::time::delay;
 use std::cell::RefCell;
 use std::future::Future;
@@ -152,8 +152,10 @@ impl FlowChildren {
     pub(crate) fn new() -> FlowChildren {
         FlowChildren(CoroutineScope::new(&Dispatcher::current()))
     }
-    pub(crate) fn launch(&self, f: impl Future<Output = ()> + 'static) -> Job {
-        self.0.launch(f)
+    /// Launches `f` as `start` says (kotlinx's operators: `produce`'s and `launch`'s defaults, `ATOMIC` for a
+    /// channel flow's producer, `UNDISPATCHED` for `transformLatest`'s block).
+    pub(crate) fn launch(&self, start: CoroutineStart, f: impl Future<Output = ()> + 'static) -> Job {
+        Job(self.0.0.launch(Box::pin(f), false, false, start))
     }
 }
 
@@ -298,7 +300,7 @@ impl<T: 'static> Flow<T> {
                 let dispatcher = Dispatcher::current();
                 let source = FlowChildren::new();
                 let (s, sig, d) = (shared.clone(), signal.clone(), dispatcher.clone());
-                source.launch(async move {
+                source.launch(CoroutineStart::DEFAULT, async move {
                     let (s2, sig2) = (s.clone(), sig.clone());
                     up.collect(move |v| {
                         let mut sh = s2.borrow_mut();
@@ -360,7 +362,7 @@ impl<T: 'static> Flow<T> {
                 let signal = Signal::default();
                 let source = FlowChildren::new();
                 let (s, sig) = (shared.clone(), signal.clone());
-                source.launch(async move {
+                source.launch(CoroutineStart::ATOMIC, async move {
                     let (s2, sig2) = (s.clone(), sig.clone());
                     up.collect(move |v| {
                         let inner_flow = transform(v);
@@ -375,16 +377,21 @@ impl<T: 'static> Flow<T> {
                         drop(old); // the one before cancelled
                         let (s3, sig3) = (s2.clone(), sig2.clone());
                         let (s4, sig4) = (s2.clone(), sig2.clone());
-                        scope.launch(async move {
-                            inner_flow
-                                .collect(move |item| {
-                                    s3.borrow_mut().items.push(item);
-                                    sig3.raise();
-                                })
-                                .await;
-                            s4.borrow_mut().inner_done = true;
-                            sig4.raise();
-                        });
+                        scope.0.launch(
+                            Box::pin(async move {
+                                inner_flow
+                                    .collect(move |item| {
+                                        s3.borrow_mut().items.push(item);
+                                        sig3.raise();
+                                    })
+                                    .await;
+                                s4.borrow_mut().inner_done = true;
+                                sig4.raise();
+                            }),
+                            false,
+                            false,
+                            CoroutineStart::UNDISPATCHED,
+                        );
                     })
                     .await;
                     s.borrow_mut().done = true;
@@ -460,7 +467,7 @@ pub fn combine<A: Clone + 'static, B: Clone + 'static, R: 'static>(
             let signal = Signal::default();
             let sources = FlowChildren::new();
             let (s, sig) = (shared.clone(), signal.clone());
-            sources.launch(async move {
+            sources.launch(CoroutineStart::DEFAULT, async move {
                 let (s2, sig2) = (s.clone(), sig.clone());
                 a.collect(move |v| {
                     let mut sh = s2.borrow_mut();
@@ -473,7 +480,7 @@ pub fn combine<A: Clone + 'static, B: Clone + 'static, R: 'static>(
                 sig.raise();
             });
             let (s, sig) = (shared.clone(), signal.clone());
-            sources.launch(async move {
+            sources.launch(CoroutineStart::DEFAULT, async move {
                 let (s2, sig2) = (s.clone(), sig.clone());
                 b.collect(move |v| {
                     let mut sh = s2.borrow_mut();

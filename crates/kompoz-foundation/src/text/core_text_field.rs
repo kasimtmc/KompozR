@@ -35,10 +35,10 @@ use crate::text::keyboard_actions::{KeyboardActionRunner, KeyboardActions};
 use crate::text::modifiers::text_annotated_string::OnTextLayout;
 use crate::text::selection::OffsetProvider;
 use crate::text::selection::{LocalTextSelectionColors, SimpleLayout};
-use kompoz_coroutines::{LaunchedEffect, remember_coroutine_scope, snapshot_flow};
+use kompoz_coroutines::{CoroutineStart, LaunchedEffect, remember_coroutine_scope, snapshot_flow};
 use kompoz_graphics::{Brush, Color, Constraints, Density, Dp, Offset, Rect};
 use kompoz_runtime::{
-    DisposableEffect, MutableState, mutable_state_of, on_dispose, remember, remember_keyed,
+    DisposableEffect, MutableState, mutable_state_of, named_args, on_dispose, remember, remember_keyed,
     remember_saveable_keyed_with, without_read_observation,
 };
 use kompoz_text::input::{EditProcessor, OffsetMapping, TextFieldValue, VisualTransformation};
@@ -1209,13 +1209,13 @@ fn TextFieldCursorHandle(manager: Rc<TextFieldSelectionManager>) {
                         async move {
                             kompoz_coroutines::coroutine_scope(move |cs| async move {
                                 let (s1, s2) = (scope.clone(), scope);
-                                cs.launch(async move {
+                                named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
                                     crate::text::detect_down_and_drag_gestures_with_observer(s1, observer).await
-                                });
-                                cs.launch(async move {
+                                }));
+                                named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
                                     use crate::gestures::PointerInputScopeGestures;
                                     s2.detect_tap_gestures().on_tap(move |_| tap_manager.show_selection_toolbar()).await
-                                });
+                                }));
                             })
                             .await
                         }

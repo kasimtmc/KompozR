@@ -8,8 +8,9 @@ use super::{PointerEvent, PointerEventPass, PointerInputChange, PointerInputModi
 use crate::modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle};
 use crate::node_capabilities;
 use crate::platform::{LocalViewConfiguration, ViewConfiguration};
-use kompoz_coroutines::{Delay, Dispatcher, Job, delay_ms};
+use kompoz_coroutines::{CoroutineStart, Delay, Dispatcher, Job, delay_ms};
 use kompoz_graphics::{Density, IntSize, Size};
+use kompoz_runtime::named_args;
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::fmt;
@@ -132,7 +133,8 @@ impl Shared {
         let handler = self.handler.borrow().clone();
         let block = handler(PointerInputScope(self.clone()));
         // (set before it runs: what it does at once may ask for it)
-        let job = scope.launch(block);
+        // (Compose: `start = CoroutineStart.UNDISPATCHED` required so handler doesn't miss first event)
+        let job = named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, coroutine = block));
         *self.job.borrow_mut() = Some(job);
     }
 

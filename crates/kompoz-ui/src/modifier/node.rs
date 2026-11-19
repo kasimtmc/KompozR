@@ -52,6 +52,12 @@ impl NodeKind {
     pub const fn is_in(self, set: u32) -> bool {
         set & self.0 != 0
     }
+    /// Whether a coordinator visits its own layout modifier node for these kinds (Compose's
+    /// `NodeKind.includeSelfInTraversal`): only for `OnRemeasured` and `OnPlaced`. A layout modifier node's other
+    /// kinds (its drawing, its pointer input, …) are visited by the coordinator it wraps, in that one's space.
+    pub const fn include_self_in_traversal(self) -> bool {
+        self.0 & (NodeKind::OnRemeasured.0 | NodeKind::OnPlaced.0) != 0
+    }
 }
 
 /// The kinds of a node, from the capabilities it has (Compose's `calculateNodeKindSetFrom`).

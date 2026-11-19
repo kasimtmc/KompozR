@@ -356,8 +356,10 @@ fn predictive_back_handler_follows_the_gesture() {
     host.back_cancelled();
     rule.wait_for_idle();
     assert_eq!(taken(&log), ["0.3L", "end"]);
-    // A gesture while the run before is still closing: that one is cancelled.
+    // A gesture while the run before is still closing: that one is cancelled. (Its coroutine is launched
+    // dispatched, as androidx's OnBackInstance launches it: run what is current, so it is closing.)
     assert!(escape(&rule));
+    rule.main_clock().run_current();
     host.back_started(BackEventCompat::default());
     host.back_progressed(back(0.4, SwipeEdge::Left));
     rule.wait_for_idle();

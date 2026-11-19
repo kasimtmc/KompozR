@@ -325,12 +325,38 @@ impl NodeCoordinator {
         }
     }
 
-    /// Tells its draw nodes its size changed.
+    /// Tells its draw nodes its size changed (Compose's `visitNodes(Nodes.Draw) { it.onMeasureResultChanged() }`):
+    /// the layout node of the coordinator wrapping it too, which draws in its space — told once its `measure`, under
+    /// way as it measures this one, has returned.
     pub(crate) fn on_draw_size_changed(&self) {
-        self.visit_nodes(NodeKind::Draw, &mut |cell| {
-            if let Some(d) = cell.node.borrow_mut().as_draw() {
-                d.on_measure_result_changed();
+        self.visit_nodes(NodeKind::Draw, &mut |cell| match cell.node.try_borrow_mut() {
+            Ok(mut node) => {
+                if let Some(d) = node.as_draw() {
+                    d.on_measure_result_changed();
+                }
             }
+            Err(_) => DRAW_SIZE_CHANGED_LATER.with(|l| l.borrow_mut().push(cell.clone())),
         });
+    }
+}
+
+thread_local! {
+    /// Draw nodes told of a size change while they were measuring (a layout node drawing in the space of what it
+    /// wraps, which its own `measure` measures): told once it returns ([`tell_draw_size_changed_later`]).
+    static DRAW_SIZE_CHANGED_LATER: std::cell::RefCell<Vec<NodeRc>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Tells the draw nodes that were busy measuring when their size changed, those no longer busy.
+pub(crate) fn tell_draw_size_changed_later() {
+    let waiting = DRAW_SIZE_CHANGED_LATER.with(|l| std::mem::take(&mut *l.borrow_mut()));
+    for cell in waiting {
+        match cell.node.try_borrow_mut() {
+            Ok(mut node) => {
+                if let Some(d) = node.as_draw() {
+                    d.on_measure_result_changed();
+                }
+            }
+            Err(_) => DRAW_SIZE_CHANGED_LATER.with(|l| l.borrow_mut().push(cell.clone())),
+        }
     }
 }

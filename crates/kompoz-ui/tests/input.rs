@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use kompoz_coroutines::{CoroutineScope, coroutine_scope, delay_ms};
+use kompoz_coroutines::{CoroutineScope, CoroutineStart, coroutine_scope, delay_ms};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_runtime::*;
@@ -334,7 +334,9 @@ fn awaiting_blocks_resume_in_place_so_the_next_handler_sees_what_they_consumed()
                 coroutine_scope(move |cs: CoroutineScope| async move {
                     for label in ["eski", "yeni"] {
                         let (s, log) = (s.clone(), log.clone());
-                        cs.launch(async move {
+                        // (UNDISPATCHED, as Compose's own detectors launch theirs: waiting before the first event
+                        // is dispatched, not after)
+                        named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
                             s.await_pointer_event_scope(|s| async move {
                                 loop {
                                     let e = s.await_pointer_event_with(PointerEventPass::Initial).await;
@@ -347,7 +349,7 @@ fn awaiting_blocks_resume_in_place_so_the_next_handler_sees_what_they_consumed()
                                 }
                             })
                             .await
-                        });
+                        }));
                     }
                 })
                 .await
@@ -1153,6 +1155,7 @@ fn nested_scroll_connections_pre_outer_first_post_inner_first_and_flings_suspend
     CoroutineScope::new(rule.host().dispatcher()).launch(async move {
         d.dispatch_post_fling(Velocity::Zero, Velocity::new(0.0, 50.0)).await;
     });
+    rule.main_clock().run_current(); // (launched from the test: dispatched)
     assert_eq!(taken(&log), ["B.postFling 0 50", "A.postFling 0 50"]);
     assert!(!dispatcher.coroutine_scope().is_active());
 }

@@ -143,6 +143,9 @@ fn scrollbars_on_drag_and_menus_from_a_kt_file() {
     assert!(near(thumb_in(&rule, "dikey").expect("a thumb").height(), 40.0));
     let below = Offset::new(bar.center().x, bar.bottom - 3.0);
     rule.host().pointer_down(below, -1, 0, PointerType::Mouse);
+    // (the press launches the track's scrolling, dispatched as Compose for desktop's TrackPressScroller launches it:
+    // it runs before the release comes, which cancels it — a release in the same turn would cancel it unstarted)
+    rule.main_clock().run_current();
     rule.host().pointer_up(below, -1, 0);
     rule.wait_for_idle();
     rule.on_node_with_text("kaydırma: 200").assert_exists();
@@ -151,6 +154,11 @@ fn scrollbars_on_drag_and_menus_from_a_kt_file() {
     // onDrag with the mouse's secondary button: its moves summed, ended by its release.
     let drag = bounds(&rule, "sürükle");
     let start = drag.center();
+    // (the mouse comes over it first, an event of its own: Compose for desktop's matcher-taking detectors launch their
+    // coroutines (plain `launch`, dispatched) from the first event their pointer input sees, so a press that is that
+    // first event comes before they wait for it — as it would in Compose)
+    rule.host().pointer_move(start, -1, 0);
+    rule.main_clock().run_current();
     rule.host().mouse_button(start, -1, PointerButton::Secondary, true);
     for dx in [10.0, 20.0, 40.0] {
         rule.advance_frame();

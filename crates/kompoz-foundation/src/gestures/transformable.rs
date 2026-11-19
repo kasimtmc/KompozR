@@ -11,9 +11,9 @@ use super::tap::await_first_down;
 use super::transform::calculate_centroid;
 use super::transformable_state::{TransformScope, TransformableState};
 use kompoz_animation::MutatePriority;
-use kompoz_coroutines::{Channel, catch_cancellation, coroutine_scope};
+use kompoz_coroutines::{Channel, CoroutineStart, catch_cancellation, coroutine_scope};
 use kompoz_graphics::{IntSize, Offset};
-use kompoz_runtime::named;
+use kompoz_runtime::{named, named_args};
 use kompoz_ui::input::{
     AwaitPointerEventScope, PointerEvent, PointerEventPass, PointerEventType, PointerInputModifierNode,
     PointerInputScope, PointerType, SuspendingPointerInputModifierNode,
@@ -183,7 +183,7 @@ async fn pointer_input(scope: PointerInputScope, core: Weak<TransformableCore>) 
     drop(c);
     coroutine_scope(move |cs| async move {
         let (receiving, receiving_core) = (channel.clone(), core.clone());
-        cs.launch(async move {
+        named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
             loop {
                 let first = match receiving.receive().await {
                     Some(TransformEvent::TransformStarted) => TransformEvent::TransformStarted,
@@ -227,7 +227,7 @@ async fn pointer_input(scope: PointerInputScope, core: Weak<TransformableCore>) 
                 })
                 .await;
             }
-        });
+        }));
         await_each_gesture(&scope, move |s| {
             let (core, channel) = (core.clone(), channel.clone());
             async move {

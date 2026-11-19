@@ -15,7 +15,7 @@ use crate::clipboard::ClipEntry;
 use crate::modifier::{ModifierNode, NodeCx};
 use crate::platform::{ImeAction, ImeOptions};
 use crate::text_input::{ContentReceiver, EditCommand, LocalTextInputService, TextInputService, TextInputSession};
-use kompoz_coroutines::{CoroutineScope, Job, coroutine_scope, current_job, snapshot_flow};
+use kompoz_coroutines::{CoroutineScope, CoroutineStart, Job, coroutine_scope, current_job, snapshot_flow};
 use kompoz_graphics::{Offset, Rect};
 use kompoz_runtime::{KompozitionLocal, KompozitionLocalProvider, MutableState, mutable_state_of, remember_keyed};
 use kompoz_text::input::TextFieldValue;
@@ -186,10 +186,20 @@ impl PlatformTextInputSessionScope {
     pub fn coroutine_scope(&self) -> &CoroutineScope {
         &self.scope
     }
+}
 
-    /// Launches `coroutine` in the session's scope.
-    pub fn launch(&self, coroutine: impl Future<Output = ()> + 'static) -> Job {
-        self.scope.launch(coroutine)
+#[kompoz_runtime::named]
+impl PlatformTextInputSessionScope {
+    /// Launches `coroutine` in the session's scope, as `start` says (the scope is a Kotlin CoroutineScope:
+    /// [`CoroutineScope::launch`]).
+    ///
+    /// Kotlin: `launch(start: CoroutineStart = CoroutineStart.DEFAULT, block: suspend CoroutineScope.() -> Unit): Job`
+    pub fn launch(
+        &self,
+        #[default(CoroutineStart::DEFAULT)] start: CoroutineStart,
+        coroutine: impl Future<Output = ()> + 'static,
+    ) -> Job {
+        kompoz_runtime::named_args!(self.scope.launch(start = start, coroutine = coroutine))
     }
 }
 

@@ -1,15 +1,17 @@
 //! The dispatcher that runs coroutines on the UI thread, and what it runs: launched coroutines (jobs) in scopes.
 //!
-//! A coroutine is a future. The dispatcher polls it on the UI thread: at once when it is launched (it runs until
-//! it first waits), then whenever it is woken — by a timer or a frame the host drives ([`Dispatcher::run`]), or
-//! from any thread (a background result, a flow's value, a channel's element). Cancelling one drops its future
-//! where it waits, running its destructors.
+//! A coroutine is a future. The dispatcher polls it on the UI thread: when it is launched as its
+//! [`CoroutineStart`] says (by default dispatched: queued, polled when the dispatcher next runs what is ready, as
+//! Kotlin's `launch`), then whenever it is woken — by a timer or a frame the host drives ([`Dispatcher::send_frame`],
+//! [`Dispatcher::run_frame_end`]), or from any thread (a background result, a flow's value, a channel's element).
+//! Cancelling one drops its future where it waits, running its destructors.
 //!
 //! Failures are panics: one ending a coroutine is caught there and goes where Kotlin's exception would — to a
 //! structured scope (`coroutine_scope`), which cancels the rest and hands it to who awaits the scope; to who
 //! awaits an `async`'s `Deferred`; or, with nobody to take it, reported (not fatal).
 
 use crate::context::{CoroutineContext, push_context};
+use kompoz_runtime::named;
 use parking_lot::Mutex;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -189,8 +191,21 @@ impl Dispatcher {
         }
     }
 
-    /// A frame at `now`: the timers due fire, the coroutines waiting for a frame get it, and everything woken runs.
+    /// A whole frame at `now` with nothing between its two halves: [`send_frame`](Self::send_frame), then
+    /// [`run_frame_end`](Self::run_frame_end).
     pub fn run(&self, now: i64) {
+        self.send_frame(now);
+        self.run_frame_end();
+    }
+
+    /// The first half of a frame at `now`, before its composition and layout: the timers due fire and what is ready
+    /// runs; then each coroutine awaiting the frame runs its frame callback (`with_frame_nanos`' `on_frame`) — and
+    /// only that: what it does after is dispatched, queued to run at [`run_frame_end`](Self::run_frame_end), as are
+    /// the coroutines its callback wakes and those the composition launches. This is Compose's frame: the
+    /// Recomposer's `BroadcastFrameClock.sendFrame` calls the awaiters' `onFrame` in the frame, their continuations
+    /// are resumed through their dispatcher (AndroidUiDispatcher, or the test's FrameDeferringContinuationInterceptor)
+    /// after the frame's composition and layout.
+    pub fn send_frame(&self, now: i64) {
         self.run_timers(now);
         let now = self.0.now.get();
         let waiters = std::mem::take(&mut *self.0.frames.borrow_mut());
@@ -200,12 +215,19 @@ impl Dispatcher {
                 w.waker.wake();
             }
         }
-        self.run_ready();
+        // (the awaiters just woken, each polled once: it runs its callback, wakes itself again and waits)
+        let woken = std::mem::take(&mut *self.0.queue.ready.lock());
+        for (index, generation) in woken {
+            self.0.poll(index, generation);
+        }
     }
 
     /// Time moved to `now` without a frame (a test clock advanced between frames): the timers due fire and everything
     /// woken runs; the coroutines waiting for a frame keep waiting.
     pub fn run_timers(&self, now: i64) {
+        // (what was dispatched before runs at the time it was dispatched, as a test scheduler runs the tasks due
+        // now before it moves the time)
+        self.run_ready();
         self.advance_to(now);
         let now = self.0.now.get();
         let mut due: Vec<Timer> = Vec::new();
@@ -242,7 +264,8 @@ impl Dispatcher {
     }
 
     /// The end of a frame (the host calls it once the frame's composition and layout are done): the coroutines
-    /// awaiting it ([`await_frame_end`](crate::await_frame_end)) get it, and everything woken runs.
+    /// awaiting it ([`await_frame_end`](crate::await_frame_end)) get it, and everything woken runs — the frame's
+    /// continuations first, then the coroutines launched meanwhile (the composition's effects), in that order.
     pub fn run_frame_end(&self) {
         let now = self.0.now.get();
         let waiters = std::mem::take(&mut *self.0.frame_ends.borrow_mut());
@@ -270,8 +293,8 @@ impl Dispatcher {
 
     /// Runs `f`, then polls the coroutines it woke before returning — and those they wake in turn, until none is
     /// left — as Compose resumes the continuation awaiting a pointer event in place, while the event is dispatched,
-    /// so the next handler sees what it consumed. Coroutines woken before `f` (from this thread or another) wait for
-    /// the next `run` or `run_ready`, as before.
+    /// so the next handler sees what it consumed. Coroutines woken before `f` (from this thread or another), and
+    /// those launched meanwhile (dispatched, not started yet), wait for the next `run` or `run_ready`.
     pub fn run_woken_by<R>(&self, f: impl FnOnce() -> R) -> R {
         let earlier = std::mem::take(&mut *self.0.queue.ready.lock());
         /// Puts the earlier ones back in front of what is left, however this ends (a panic in `f` included).
@@ -295,8 +318,10 @@ impl Dispatcher {
                 break;
             }
             for (index, generation) in woken {
-                if self.0.is_polling(index, generation) {
-                    // Being polled further up (this runs from inside a coroutine): its wake stays for later.
+                if self.0.is_polling(index, generation) || !self.0.has_started(index, generation) {
+                    // Being polled further up (this runs from inside a coroutine): its wake stays for later. Or
+                    // launched meanwhile and not started yet: dispatched, it starts when the dispatcher next runs
+                    // what is ready (only what `f` resumes goes on in place).
                     busy.push((index, generation));
                 } else {
                     self.0.poll(index, generation);
@@ -366,6 +391,14 @@ impl Inner {
     }
 
     /// Whether that task is being polled now (taken out of its slot further up the stack).
+    /// Whether that task has been polled once (a dispatched launch waits for its first turn).
+    fn has_started(&self, index: u32, generation: u32) -> bool {
+        let slots = self.slots.borrow();
+        slots
+            .get(index as usize)
+            .is_some_and(|s| s.generation == generation && s.job.as_ref().is_some_and(|j| j.started.get()))
+    }
+
     fn is_polling(&self, index: u32, generation: u32) -> bool {
         let slots = self.slots.borrow();
         slots.get(index as usize).is_some_and(|s| {
@@ -388,13 +421,16 @@ impl Inner {
             let (Some(task), Some(job)) = (slot.task.take(), slot.job.clone()) else { return }; // (being polled)
             (task, job)
         };
-        if job.done.get() || job.cancelled.get() {
+        // (one started ATOMIC or UNDISPATCHED runs up to its first suspension, cancelled or not)
+        let unstoppable = job.unstoppable.replace(false);
+        if job.done.get() || (job.cancelled.get() && !unstoppable) {
             return;
         }
         let waker = self.waker(index, generation);
         let mut cx = Context::from_waker(&waker);
         CURRENT.with(|c| c.borrow_mut().push((self.clone(), job.clone())));
         job.running.set(true);
+        job.started.set(true);
         let result = {
             let _pop = PopCurrent;
             let _context = push_context(job.context.clone());
@@ -466,6 +502,13 @@ pub(crate) struct JobState {
     running: Cell<bool>,
     cancelled: Cell<bool>,
     pub(crate) done: Cell<bool>,
+    /// Launched `LAZY` and not started yet (Kotlin's "new" state): it starts on `start`, `join` or `await`.
+    lazy: Cell<bool>,
+    /// Polled at least once.
+    started: Cell<bool>,
+    /// Launched `ATOMIC` or `UNDISPATCHED` and not polled yet: it runs up to its first suspension even if it is
+    /// cancelled first.
+    unstoppable: Cell<bool>,
     /// An async's: what it fails with goes to who awaits it.
     deferred: bool,
     /// A scope's own block: what it fails with fails the scope, a supervisor's too.
@@ -486,6 +529,9 @@ impl JobState {
             running: Cell::new(false),
             cancelled: Cell::new(false),
             done: Cell::new(false),
+            lazy: Cell::new(false),
+            started: Cell::new(false),
+            unstoppable: Cell::new(false),
             deferred,
             body,
             failure: RefCell::new(None),
@@ -501,7 +547,27 @@ impl JobState {
         if self.running.get() {
             return; // cancelled from inside: dropped once it waits
         }
+        if self.unstoppable.get() {
+            return; // (ATOMIC, UNDISPATCHED: it runs up to its first suspension, then goes)
+        }
         self.complete();
+    }
+
+    /// Dispatched: queued on its dispatcher, polled when it next runs what is ready.
+    fn dispatch(&self) {
+        if let (Some((i, g)), Some(d)) = (self.task.get(), self.dispatcher.upgrade()) {
+            d.waker(i, g).wake();
+        }
+    }
+
+    /// Starts it if it was launched `LAZY` and isn't started yet (Kotlin's `Job.start()`): dispatched, as Kotlin's
+    /// lazy coroutine is once started. Whether this call started it.
+    fn start(&self) -> bool {
+        if !self.lazy.replace(false) || self.done.get() {
+            return false;
+        }
+        self.dispatch();
+        true
     }
 
     fn fail(self: &Rc<Self>, failure: Failure) {
@@ -550,6 +616,9 @@ pub(crate) struct ScopeState {
     cancelling: Cell<bool>,
     /// What its coroutines run with.
     context: CoroutineContext,
+    /// Told once it is cancelled and its last coroutine is done (Kotlin's job's `invokeOnCompletion`), unless
+    /// disposed first.
+    on_completion: RefCell<Vec<(Rc<Cell<bool>>, Box<dyn FnOnce()>)>>,
 }
 
 impl ScopeState {
@@ -569,6 +638,7 @@ impl ScopeState {
             failure: RefCell::new(None),
             when_empty: RefCell::new(None),
             cancelling: Cell::new(false),
+            on_completion: RefCell::new(Vec::new()),
         })
     }
 
@@ -603,7 +673,20 @@ impl ScopeState {
             if let Some(w) = w {
                 w.wake();
             }
+            if self.cancelled.get() {
+                let handlers = std::mem::take(&mut *self.on_completion.borrow_mut());
+                for (disposed, handler) in handlers {
+                    if !disposed.get() {
+                        handler();
+                    }
+                }
+            }
         }
+    }
+
+    /// Whether it is cancelled and its coroutines are done (Kotlin's job completed).
+    fn is_completed(&self) -> bool {
+        self.cancelled.get() && !self.cancelling.get() && self.jobs.borrow().is_empty()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -618,24 +701,37 @@ impl ScopeState {
         self.failure.borrow_mut().take()
     }
 
-    /// Starts `future` here (nothing if it's cancelled): it runs until it first waits.
+    /// Launches `future` here as `start` says (Kotlin's `launch(start = …)`): `DEFAULT` queued on the dispatcher,
+    /// `UNDISPATCHED` run at once up to its first suspension, `ATOMIC` queued and run up to its first suspension
+    /// even if cancelled before, `LAZY` started on `start`/`join`/`await`. In a cancelled scope, a `DEFAULT` or `LAZY`
+    /// one is cancelled at once and never runs; an `ATOMIC` or `UNDISPATCHED` one runs, cancelled, up to its first
+    /// suspension (Kotlin's: they start "even if the coroutine was already cancelled").
     pub(crate) fn launch(
         self: &Rc<Self>,
         future: Pin<Box<dyn Future<Output = ()>>>,
         deferred: bool,
         body: bool,
+        start: CoroutineStart,
     ) -> Rc<JobState> {
         let d = self.dispatcher.upgrade().expect("kompoz: a scope whose dispatcher is gone");
         let job = JobState::new(&d, self, deferred, body);
+        let unstoppable = matches!(start, CoroutineStart::ATOMIC | CoroutineStart::UNDISPATCHED);
         if self.cancelled.get() {
             job.cancelled.set(true);
-            job.done.set(true);
-            return job;
+            if !unstoppable {
+                job.done.set(true);
+                return job;
+            }
         }
         let (i, g) = d.insert(future, job.clone());
         job.task.set(Some((i, g)));
+        job.unstoppable.set(unstoppable);
         self.jobs.borrow_mut().push(job.clone());
-        d.poll(i, g);
+        match start {
+            CoroutineStart::DEFAULT | CoroutineStart::ATOMIC => job.dispatch(),
+            CoroutineStart::UNDISPATCHED => d.poll(i, g),
+            CoroutineStart::LAZY => job.lazy.set(true),
+        }
         job
     }
 }
@@ -667,26 +763,6 @@ impl CoroutineScope {
         self.0.context.clone()
     }
 
-    /// Starts `coroutine`; it runs at once until it first waits.
-    pub fn launch(&self, coroutine: impl Future<Output = ()> + 'static) -> Job {
-        Job(self.0.launch(Box::pin(coroutine), false, false))
-    }
-
-    /// Starts `coroutine` for the value it gives (Kotlin's `async`): await the [`Deferred`] for it.
-    pub fn r#async<T: 'static>(&self, coroutine: impl Future<Output = T> + 'static) -> Deferred<T> {
-        let value: Rc<RefCell<Option<T>>> = Rc::new(RefCell::new(None));
-        let slot = value.clone();
-        let job = self.0.launch(
-            Box::pin(async move {
-                let v = coroutine.await;
-                *slot.borrow_mut() = Some(v);
-            }),
-            true,
-            false,
-        );
-        Deferred { job: Job(job), value }
-    }
-
     /// Cancels everything launched here; nothing launched afterwards runs.
     pub fn cancel(&self) {
         self.0.cancel(None);
@@ -694,6 +770,20 @@ impl CoroutineScope {
 
     pub fn is_active(&self) -> bool {
         !self.0.cancelled.get()
+    }
+
+    /// Calls `handler` once the scope is cancelled and its coroutines are done (Kotlin's
+    /// `coroutineContext[Job]?.invokeOnCompletion { … }` on a scope's job), at once if that is so already; dispose
+    /// the handle to take it back.
+    pub fn invoke_on_completion(&self, handler: impl FnOnce() + 'static) -> DisposableHandle {
+        let disposed = Rc::new(Cell::new(false));
+        if self.0.is_completed() {
+            handler();
+            disposed.set(true);
+        } else {
+            self.0.on_completion.borrow_mut().push((disposed.clone(), Box::new(handler)));
+        }
+        DisposableHandle(disposed)
     }
 
     /// How many of its coroutines are running.
@@ -704,6 +794,76 @@ impl CoroutineScope {
     pub fn dispatcher(&self) -> Dispatcher {
         Dispatcher(self.0.dispatcher.upgrade().expect("kompoz: a scope whose dispatcher is gone"))
     }
+}
+
+#[named]
+impl CoroutineScope {
+    /// Launches `coroutine` here (Kotlin's `launch`), as `start` says: by default dispatched — queued on the
+    /// dispatcher, it starts when the dispatcher next runs what is ready (after the frame's composition and layout,
+    /// for one the composition launches; once the event being handled is done, for one an event handler launches);
+    /// see [`CoroutineStart`] for the others.
+    ///
+    /// Kotlin: `launch(start: CoroutineStart = CoroutineStart.DEFAULT, block: suspend CoroutineScope.() -> Unit): Job`
+    pub fn launch(
+        &self,
+        #[default(CoroutineStart::DEFAULT)] start: CoroutineStart,
+        coroutine: impl Future<Output = ()> + 'static,
+    ) -> Job {
+        Job(self.0.launch(Box::pin(coroutine), false, false, start))
+    }
+
+    /// Launches `coroutine` for the value it gives (Kotlin's `async`), as `start` says (as [`launch`](Self::launch)):
+    /// await the [`Deferred`] for it.
+    ///
+    /// Kotlin: `async(start: CoroutineStart = CoroutineStart.DEFAULT, block: suspend CoroutineScope.() -> T): Deferred<T>`
+    pub fn r#async<T: 'static>(
+        &self,
+        #[default(CoroutineStart::DEFAULT)] start: CoroutineStart,
+        coroutine: impl Future<Output = T> + 'static,
+    ) -> Deferred<T> {
+        let value: Rc<RefCell<Option<T>>> = Rc::new(RefCell::new(None));
+        let slot = value.clone();
+        let job = self.0.launch(
+            Box::pin(async move {
+                let v = coroutine.await;
+                *slot.borrow_mut() = Some(v);
+            }),
+            true,
+            false,
+            start,
+        );
+        Deferred { job: Job(job), value }
+    }
+}
+
+/// What takes a handler back (Kotlin's DisposableHandle): [`CoroutineScope::invoke_on_completion`]'s.
+#[derive(Clone)]
+pub struct DisposableHandle(Rc<Cell<bool>>);
+
+impl DisposableHandle {
+    /// The handler won't be called (Kotlin's `dispose()`).
+    pub fn dispose(&self) {
+        self.0.set(true);
+    }
+}
+
+/// How a coroutine is launched (Kotlin's CoroutineStart): [`CoroutineScope::launch`]'s and `async`'s `start`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
+pub enum CoroutineStart {
+    /// Dispatched: queued on its dispatcher, it starts when the dispatcher next runs what is ready; cancelled before
+    /// that, it never runs.
+    #[default]
+    DEFAULT,
+    /// Started only when asked: [`Job::start`], [`Job::join`] or awaiting its [`Deferred`] (then dispatched);
+    /// cancelled before, it never runs.
+    LAZY,
+    /// Dispatched as `DEFAULT`, but not cancellable before it starts: it runs up to its first suspension even if
+    /// cancelled meanwhile.
+    ATOMIC,
+    /// Run at once, in the caller, up to its first suspension (even if already cancelled); dispatched as usual
+    /// once resumed from there.
+    UNDISPATCHED,
 }
 
 /// A launched coroutine (Kotlin's Job): cancel it, ask how it is, or await [`join`](Job::join) for it to end.
@@ -720,9 +880,13 @@ impl Job {
     pub fn cancel(&self) {
         self.0.cancel();
     }
-    /// Running: not completed nor cancelled.
+    /// Starts it if it was launched `LAZY` and not started yet (Kotlin's `start()`): whether this call started it.
+    pub fn start(&self) -> bool {
+        self.0.start()
+    }
+    /// Running: started (not a `LAZY` one waiting to), not completed nor cancelled.
     pub fn is_active(&self) -> bool {
-        !self.0.done.get() && !self.0.cancelled.get()
+        !self.0.done.get() && !self.0.cancelled.get() && !self.0.lazy.get()
     }
     /// Ended, however (cancelled too).
     pub fn is_completed(&self) -> bool {
@@ -731,10 +895,15 @@ impl Job {
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.get()
     }
-    /// Waits until it ends (completed, failed or cancelled).
+    /// Waits until it ends (completed, failed or cancelled); a `LAZY` one not started yet is started first.
     pub fn join(&self) -> impl Future<Output = ()> + 'static {
         let job = self.0.clone();
+        let mut started = false;
         std::future::poll_fn(move |cx| {
+            if !started {
+                started = true;
+                job.start();
+            }
             if job.done.get() {
                 Poll::Ready(())
             } else {
@@ -773,6 +942,24 @@ impl<T> Deferred<T> {
     pub fn job(&self) -> &Job {
         &self.job
     }
+    /// Starts it if it was launched `LAZY` and not started yet (Kotlin's `start()`): whether this call started it.
+    pub fn start(&self) -> bool {
+        self.job.start()
+    }
+}
+
+impl<T: 'static> Deferred<T> {
+    /// Its value, once it is there (Kotlin's `await()`; a `LAZY` one is started): a failure panics again here; a
+    /// cancelled one cancels the awaiting coroutine (Kotlin's CancellationException). `.await` on the `Deferred`
+    /// itself gives `Err(Cancelled)` instead.
+    ///
+    /// Kotlin: `await(): T`
+    pub async fn r#await(self) -> T {
+        match std::future::IntoFuture::into_future(self).await {
+            Ok(value) => value,
+            Err(Cancelled) => cancel_current().await,
+        }
+    }
 }
 
 impl<T: 'static> std::future::IntoFuture for Deferred<T> {
@@ -808,9 +995,7 @@ pub async fn cancel_current<T>() -> T {
 }
 
 /// Lets what else is ready run first (Kotlin's `yield()`): the coroutine goes on when its dispatcher next runs what
-/// is ready, after what runs now is done — what Kotlin's `launch` does before a coroutine's first step (it is
-/// dispatched), which a coroutine launched here (started at once, up to its first suspension) gets by starting with
-/// it. A coroutine cancelled meanwhile goes no further.
+/// is ready, after what is queued before it. A coroutine cancelled meanwhile goes no further.
 ///
 /// Kotlin: `yield()`
 pub async fn r#yield() {

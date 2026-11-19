@@ -44,11 +44,15 @@ impl Modifier {
     /// states it reads place the layout again when they change, without measuring or composing it (what an
     /// animated or scrolled offset wants). The x goes towards the end. What it wraps is placed through a
     /// graphics layer, as Compose's.
+    ///
+    /// Kotlin: `offset(offset: Density.() -> IntOffset)`
     fn offset_px(self, offset: impl Fn(&Density) -> IntOffset + 'static) -> Modifier {
         self.then_element(OffsetPxElement { offset: Rc::new(offset), rtl_aware: true })
     }
 
     /// The same, x to the right whatever the layout direction (Compose's `absoluteOffset { }`).
+    ///
+    /// Kotlin: `absoluteOffset(offset: Density.() -> IntOffset)`
     fn absolute_offset_px(self, offset: impl Fn(&Density) -> IntOffset + 'static) -> Modifier {
         self.then_element(OffsetPxElement { offset: Rc::new(offset), rtl_aware: false })
     }

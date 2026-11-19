@@ -1,7 +1,7 @@
 //! Structured concurrency inside a coroutine: `coroutine_scope`, `supervisor_scope`, `with_timeout`.
 
 use crate::context::current_coroutine_context;
-use crate::executor::{CoroutineScope, Failure, ScopeState, cancel_current, current};
+use crate::executor::{CoroutineScope, CoroutineStart, Failure, ScopeState, cancel_current, current};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
@@ -57,6 +57,7 @@ async fn run_scope<T: 'static, Fut: Future<Output = T> + 'static>(
     let value: Rc<RefCell<Option<T>>> = Rc::new(RefCell::new(None));
     let slot = value.clone();
     let body = block(CoroutineScope(scope.clone()));
+    // (the block runs in place, in the caller's turn, as Kotlin's `coroutineScope` runs it)
     scope.launch(
         Box::pin(async move {
             let v = body.await;
@@ -64,6 +65,7 @@ async fn run_scope<T: 'static, Fut: Future<Output = T> + 'static>(
         }),
         false,
         true,
+        CoroutineStart::UNDISPATCHED,
     );
     std::future::poll_fn(|cx| {
         if scope.is_empty() {

@@ -19,7 +19,7 @@ use crate::focusable::{FocusableNode, FocusableShared, apply_focusable_semantics
 use crate::gesture_node::{GestureConnection, GestureNode, GestureState, has_waiting_parent};
 use crate::gestures::is_changed_to_down;
 use crate::indication::{Indication, IndicationModifiers, IndicationNode, LocalIndication};
-use crate::interaction::{HoverInteraction, Interaction, MutableInteractionSource, PressInteraction};
+use crate::interaction::{HoverInteraction, Interaction, IntoInteraction, MutableInteractionSource, PressInteraction};
 use kompoz_coroutines::{CoroutineScope, Job, delay_ms};
 use kompoz_graphics::{IntSize, Offset, Size};
 use kompoz_runtime::named;
@@ -662,6 +662,28 @@ impl ClickableCore {
         }
     }
 
+    /// The same for the end of a press (Compose's `handlePressInteractionCancel`): called from its detach, the scope
+    /// is cancelled before the launched emit runs, so the scope's end tries the emit unless the coroutine got to it.
+    fn emit_with_fallback(&self, source: &MutableInteractionSource, interaction: impl Interaction) {
+        match self.scope().filter(CoroutineScope::is_active) {
+            Some(scope) => {
+                let interaction = interaction.into_interaction();
+                let (fallback, late) = (source.clone(), interaction.clone());
+                let handler = scope.invoke_on_completion(move || {
+                    fallback.try_emit(late);
+                });
+                let source = source.clone();
+                scope.launch(async move {
+                    source.emit(interaction).await;
+                    handler.dispose();
+                });
+            }
+            None => {
+                source.try_emit(interaction);
+            }
+        }
+    }
+
     fn should_lazily_create_indication(&self) -> bool {
         self.user_provided_interaction_source.borrow().is_none()
     }
@@ -1287,7 +1309,7 @@ impl ClickableCore {
             Some(job) if job.is_active() => job.cancel(),
             _ => {
                 if let Some(press) = self.press_interaction.get() {
-                    self.emit(&source, PressInteraction::Cancel::new(press));
+                    self.emit_with_fallback(&source, PressInteraction::Cancel::new(press));
                 }
             }
         }

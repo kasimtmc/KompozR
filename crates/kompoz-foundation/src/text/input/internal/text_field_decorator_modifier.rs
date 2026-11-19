@@ -24,9 +24,9 @@ use crate::text::input::{InputTransformation, KeyboardActionHandler};
 use crate::text::key_mapping::KeyCommand;
 use crate::text::keyboard_options::KeyboardOptions;
 use crate::text::long_press_text_drag_observer::Handle;
-use kompoz_coroutines::{Job, snapshot_flow};
+use kompoz_coroutines::{CoroutineStart, Job, snapshot_flow};
 use kompoz_graphics::{IntSize, Offset};
-use kompoz_runtime::{MutableState, mutable_state_of};
+use kompoz_runtime::{MutableState, mutable_state_of, named_args};
 use kompoz_text::{AnnotatedString, TextRange};
 use kompoz_ui::draganddrop::{DragAndDropEvent, DragAndDropNode, DragAndDropTarget, DragAndDropTargetModifierNode};
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode};
@@ -261,7 +261,9 @@ impl DecoratorShared {
         if let Some(old) = self.input_session_job.borrow_mut().take() {
             old.cancel();
         }
-        let job = cx.coroutine_scope().launch(async move { match session.await {} });
+        let job = named_args!(
+            cx.coroutine_scope().launch(start = CoroutineStart::UNDISPATCHED, async move { match session.await {} })
+        );
         *self.input_session_job.borrow_mut() = Some(job);
     }
 
@@ -441,12 +443,16 @@ impl TextFieldDecoratorModifierNode {
                     let (a, b, c) = (selection_state.clone(), selection_state.clone(), selection_state);
                     let (s1, s2, s3) = (scope.clone(), scope.clone(), scope);
                     let focus_for_selection = request_focus.clone();
-                    cs.launch(async move { a.detect_touch_mode(s1).await });
-                    cs.launch(async move {
+                    named_args!(
+                        cs.launch(start = CoroutineStart::UNDISPATCHED, async move { a.detect_touch_mode(s1).await })
+                    );
+                    named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
                         b.detect_text_field_tap_gestures(s2, Some(interaction_source), request_focus, show_keyboard)
                             .await
-                    });
-                    cs.launch(async move { c.text_field_selection_gestures(s3, focus_for_selection).await });
+                    }));
+                    named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
+                        c.text_field_selection_gestures(s3, focus_for_selection).await
+                    }));
                 })
                 .await;
             })

@@ -20,7 +20,7 @@ use kompoz_animation::{
     MutatePriority, MutatorMutex, animate, exponential_decay, float_animation_state, generate_decay_animation_spec,
     tween,
 };
-use kompoz_coroutines::{Job, catch_cancellation, snapshot_flow};
+use kompoz_coroutines::{CoroutineStart, Job, catch_cancellation, snapshot_flow};
 use kompoz_graphics::{Density, Dp, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::{
@@ -699,10 +699,10 @@ async fn restartable<I: PartialEq + Clone + 'static>(
                         previous.join().await;
                     }
                     let s = scope.clone();
-                    let job = scope.launch(async move {
+                    let job = named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
                         block(latest_inputs).await;
                         s.cancel();
-                    });
+                    }));
                     *previous_drag.borrow_mut() = Some(job);
                 }
             })

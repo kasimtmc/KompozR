@@ -19,10 +19,11 @@
 //!   when the callee has a `#[memoized]` parameter and the arguments fill its parameters (its closure gets its
 //!   identity: `LocalX.provides_computed(|s| …)`), the callee known from the API index (`known`) or the body's own
 //!   items (`color.copy(0.5)`, `top_app_bar_colors(red)`). A function's name counts only on a path of modules (`f(…)`, `module::f(…)`), not a
-//!   type's (`Type::f(…)`). A raw name keeps a call as written (`x.r#copy(1)`, `r#Font(a, b)`), and so do the
+//!   type's (`Type::f(…)`). A raw name keeps a call as written (`x.r#copy(1)`, `r#Font(a, b)`; not a keyword's,
+//!   `scope.r#async(start = …, …)`, which Rust can't write otherwise), and so do the
 //!   names `#[kompozable(plain(copy, …))]` lists: methods of other types with the name of an indexed one;
-//! - positional arguments fill the parameters in order, except a last unnamed closure, which goes to the last
-//!   parameter (Kotlin's trailing lambda);
+//! - positional arguments fill the parameters in order, except a last unnamed closure or async block, which goes to
+//!   the last parameter (Kotlin's trailing lambda);
 //! - a closure or async block passed to a rewritten call is made `move` and captures clones of the locals it uses
 //!   (they must be `Clone`: states and `Rc`s share what they hold), as Kotlin's lambdas share what they capture;
 //!   so does a `move` one passed to any call inside another closure (`on_click = || scope.launch(async move { … })`:
@@ -347,9 +348,10 @@ fn make_move(e: &mut Expr) {
     }
 }
 
-/// Whether a name is written raw (`r#copy`): a call of it is left as written.
+/// Whether a name is written raw (`r#copy`): a call of it is left as written. Not a keyword's (`r#async`, Kotlin's
+/// `async`): Rust can't write that one otherwise, so it says nothing about the call.
 fn is_raw(i: &Ident) -> bool {
-    i.to_string().starts_with("r#")
+    i.to_string().strip_prefix("r#").is_some_and(|name| !KEYWORDS.contains(&name))
 }
 
 /// A function's path as the index's names count on it: a name, or one in a module (`kompoz_graphics::Font`), not
@@ -758,7 +760,8 @@ fn respanned(tokens: Ts, span: proc_macro2::Span) -> Ts {
 /// A closure, or one wrapped with its captures.
 fn last_is_closure(e: &Expr) -> bool {
     match e {
-        Expr::Closure(_) => true,
+        // (an async block: a trailing suspend lambda, `scope.launch(start = …, async move { … })`)
+        Expr::Closure(_) | Expr::Async(_) => true,
         Expr::Block(b) => matches!(b.block.stmts.last(), Some(Stmt::Expr(Expr::Closure(_), None))),
         _ => false,
     }

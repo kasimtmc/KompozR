@@ -7,14 +7,15 @@ use crate::decay::{DecayAnimationSpec, FloatDecayAnimationSpec, generate_decay_a
 use crate::spec::{AnimationConstants, AnimationSpec, spring};
 use crate::state::{AnimationScope, AnimationState, AnimationValue};
 use crate::vector::{AnimationVector, AnimationVector1D};
-use kompoz_coroutines::{await_frame, current_coroutine_context, with_frame_nanos};
+use kompoz_coroutines::{current_coroutine_context, with_frame_nanos};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::named;
 use kompoz_ui::{InfiniteAnimationPolicy, MotionDurationScale};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::task::Poll;
 
 /// Compose's AnimationDebugDurationScale: frame times are divided by it (1).
 const AnimationDebugDurationScale: i64 = 1;
@@ -26,9 +27,27 @@ pub async fn with_infinite_animation_frame_nanos<R>(on_frame: impl FnOnce(i64) -
     match current_coroutine_context().get::<InfiniteAnimationPolicy>() {
         None => with_frame_nanos(on_frame).await,
         Some(policy) => {
-            // (the frame's time through the policy, the callback after it: as Compose's runs it in the frame)
-            let time = policy.on_infinite_operation(await_frame()).await;
-            on_frame(time)
+            // (the frame awaited through the policy; the callback run in the frame, as soon as the frame's time is
+            // in: Compose's `policy.onInfiniteOperation { withFrameNanos(onFrame) }`)
+            let frame_time: Rc<Cell<Option<i64>>> = Rc::default();
+            let in_frame = frame_time.clone();
+            let mut operation = std::pin::pin!(policy.on_infinite_operation(with_frame_nanos(move |time| {
+                in_frame.set(Some(time));
+                time
+            })));
+            let mut on_frame = Some(on_frame);
+            let mut result = None;
+            std::future::poll_fn(move |cx| {
+                let polled = operation.as_mut().poll(cx);
+                if let Some(time) = frame_time.take() {
+                    result = on_frame.take().map(|f| f(time));
+                }
+                match polled {
+                    Poll::Ready(_) => Poll::Ready(result.take().expect("the frame's callback ran with its time")),
+                    Poll::Pending => Poll::Pending,
+                }
+            })
+            .await
         }
     }
 }

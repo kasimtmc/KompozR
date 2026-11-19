@@ -1376,7 +1376,51 @@ fn a_sensitive_field_marks_the_content_sensitive() {
     assert!(!rule.host().sensitive_content());
 }
 
+/// Compose's TextFieldCoreModifierNode is a layout node that draws: it places the text it wraps at minus its scroll
+/// and draws the text, the cursor and the selection in that text's space, so they move with the scroll (a layout
+/// node draws in the space of what it wraps). A single line field too narrow for its text, the cursor at its end:
+/// scrolled, the text is drawn that far to the left, its end in view.
+fn a_scrolled_text_field_draws_its_text_where_it_scrolled() {
+    let state = TextFieldState::new("");
+    let s = state.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        Box(
+            modifier = Modifier.padding(20.dp()),
+            content = {
+                let s = s.clone();
+                move || {
+                    BasicTextField(
+                        s.clone(),
+                        modifier = Modifier.width(60.dp()).test_tag("dar"),
+                        text_style = style16(),
+                        line_limits = TextFieldLineLimits::SingleLine,
+                    );
+                }
+            },
+        );
+    }));
+    let _p = platform(&rule);
+    rule.on_node_with_tag("dar").perform_click();
+    rule.wait_for_idle();
+    state.set_text_and_place_cursor_at_end("ab");
+    rule.wait_for_idle();
+    let field = bounds(&rule, "dar");
+    let c = rule.draw();
+    let i = c.texts.iter().position(|t| t == "ab").expect("the text drawn");
+    assert!(near(c.baselines[i].x, field.left, 0.5), "{:?} {field:?}", c.baselines);
+    state.set_text_and_place_cursor_at_end("abcdefghijklmnopqrstuvwxyz");
+    rule.wait_for_idle();
+    let c = rule.draw();
+    let i = c.texts.iter().position(|t| t == "abcdefghijklmnopqrstuvwxyz").expect("the text drawn");
+    let scrolled = field.left - c.baselines[i].x;
+    assert!(scrolled > 100.0, "{:?} {field:?}", c.baselines);
+    // (its end, where the cursor is, in view: the text's width less the scroll is about the field's)
+    let width = c.text_draws[i].size.width;
+    assert!(near(width - scrolled, field.width(), 3.0), "{width} {scrolled} {field:?}");
+}
+
 tests!(
+    a_scrolled_text_field_draws_its_text_where_it_scrolled,
     basic_text_field_types_and_draws_its_cursor,
     basic_text_field_is_just_the_text,
     text_field_submit,

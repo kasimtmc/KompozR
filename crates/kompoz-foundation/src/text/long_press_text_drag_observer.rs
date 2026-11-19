@@ -2,8 +2,9 @@
 
 use crate::gestures::{AwaitPointerEventScopeGestures, PointerInputScopeGestures};
 use crate::text::selection::SelectionAdjustment;
-use kompoz_coroutines::coroutine_scope;
+use kompoz_coroutines::{CoroutineStart, coroutine_scope};
 use kompoz_graphics::Offset;
+use kompoz_runtime::named_args;
 use kompoz_ui::input::{PointerEventPass, PointerInputScope};
 use std::rc::Rc;
 
@@ -36,8 +37,12 @@ pub trait TextDragObserver {
 pub async fn detect_down_and_drag_gestures_with_observer(scope: PointerInputScope, observer: Rc<dyn TextDragObserver>) {
     coroutine_scope(move |cs| async move {
         let (pre_drag_scope, pre_drag_observer) = (scope.clone(), observer.clone());
-        cs.launch(async move { detect_pre_drag_gestures_with_observer(pre_drag_scope, pre_drag_observer).await });
-        cs.launch(async move { detect_drag_gestures_with_observer(scope, observer).await });
+        named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
+            detect_pre_drag_gestures_with_observer(pre_drag_scope, pre_drag_observer).await
+        }));
+        named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
+            detect_drag_gestures_with_observer(scope, observer).await
+        }));
     })
     .await
 }

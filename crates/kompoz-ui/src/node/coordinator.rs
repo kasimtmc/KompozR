@@ -159,17 +159,46 @@ impl NodeCoordinator {
         self.nodes.borrow().clone()
     }
 
-    /// Calls `f` on its nodes of `kind` (delegates included), head first (Compose's `visitNodes`).
+    /// The chain nodes it visits for a kind, head first (Compose's `visitNodes(mask, includeTail)`): with
+    /// `include_tail`, its own nodes and its own layout modifier node last; without, the layout modifier node of the
+    /// coordinator wrapping it (none for the outer one, which starts at the chain's head), then its own nodes but its
+    /// layout modifier node. A node that is a layout node and of another kind (draw, pointer input, semantics …)
+    /// is visited by the coordinator it wraps, in that one's space; only `OnRemeasured` and `OnPlaced` are its own
+    /// coordinator's (Compose's `NodeKind.includeSelfInTraversal`).
+    pub(crate) fn traversal_nodes(&self, include_tail: bool) -> Vec<NodeRc> {
+        if include_tail {
+            return self.nodes();
+        }
+        let mut nodes = Vec::new();
+        let Some(layout_node) = self.layout_node() else { return nodes };
+        let outer = std::ptr::eq(Rc::as_ptr(&layout_node.outer_coordinator()), self);
+        if !outer && let Some(entry) = self.wrapped_by().and_then(|w| w.entry()) {
+            nodes.push(entry);
+        }
+        let mut own = self.nodes();
+        if !self.is_inner() {
+            own.pop();
+        }
+        nodes.extend(own);
+        nodes
+    }
+
+    /// Calls `f` on its nodes of `kind` (delegates included), head first (Compose's `visitNodes(type)`: see
+    /// [`traversal_nodes`](Self::traversal_nodes)).
     pub(crate) fn visit_nodes(&self, kind: NodeKind, f: &mut dyn FnMut(&NodeRc)) {
-        for node in self.nodes() {
+        for node in self.traversal_nodes(kind.include_self_in_traversal()) {
             if node.is_kind(kind) {
                 dispatch_for_kind(&node, kind, f);
             }
         }
     }
 
+    /// Whether it visits a node of `kind` (Compose's `hasNode`).
     pub(crate) fn has_node(&self, kind: NodeKind) -> bool {
-        self.nodes.borrow().iter().any(|n| n.is_kind(kind))
+        if kind.include_self_in_traversal() {
+            return self.nodes.borrow().iter().any(|n| n.is_kind(kind));
+        }
+        self.traversal_nodes(false).iter().any(|n| n.is_kind(kind))
     }
 
     pub(crate) fn layout_node(&self) -> Option<Rc<LayoutNode>> {
@@ -359,13 +388,17 @@ impl NodeCoordinator {
                 let wrapped = self.wrapped().expect("a layout modifier coordinator wraps another");
                 let cell = self.layout_cell().unwrap();
                 let mut node = cell.node.borrow_mut();
-                match node.as_approach_layout() {
+                let result = match node.as_approach_layout() {
                     Some(approach) => self.approach_measure(approach, scope, &wrapped, constraints),
                     None => {
                         let layout = node.as_layout().expect("a layout coordinator's node is a layout node");
                         layout.measure(&scope, &*wrapped, constraints)
                     }
-                }
+                };
+                drop(node);
+                // (a layout node that draws, told the size of what it wraps changed while it measured it)
+                crate::draw::tell_draw_size_changed_later();
+                result
             }
         };
         self.set_measure_result(result);

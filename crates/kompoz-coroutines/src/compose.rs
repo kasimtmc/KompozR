@@ -38,7 +38,9 @@ pub fn current_effect_coroutine_context() -> CoroutineContext {
 }
 
 /// Runs `effect` when it enters the composition and again whenever `keys` change (several: a tuple), cancelling
-/// the run before; cancelled when it leaves.
+/// the run before; cancelled when it leaves. Launched as Compose launches it (`scope.launch(block = task)` in the
+/// composition's effect context, dispatched): it starts once the frame that composed it is done composing and laying
+/// out, and what it sets before it first suspends shows in the next frame.
 ///
 /// ```no_run
 /// # use kompoz_coroutines::*;

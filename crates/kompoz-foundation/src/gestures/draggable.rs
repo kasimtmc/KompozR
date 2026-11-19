@@ -16,7 +16,7 @@ use crate::gesture_node::{
 };
 use crate::interaction::{DragInteraction, MutableInteractionSource};
 use kompoz_animation::{MutatePriority, MutatorMutex};
-use kompoz_coroutines::{Channel, CoroutineScope, catch_cancellation};
+use kompoz_coroutines::{Channel, CoroutineScope, CoroutineStart, catch_cancellation};
 use kompoz_graphics::{IntSize, Offset};
 use kompoz_runtime::{kompozable, named, named_args, remember, remember_updated_state};
 use kompoz_ui::input::{
@@ -353,7 +353,12 @@ impl DragGestureOwner for DraggableCore {
         let Some(on_drag_started) = self.on_drag_started.borrow().clone() else { return };
         let Some(scope) = self.drag.scope() else { return };
         let s = scope.clone();
-        scope.launch(async move { on_drag_started(s, started_position).await });
+        named_args!(
+            scope.launch(
+                start = CoroutineStart::UNDISPATCHED,
+                async move { on_drag_started(s, started_position).await }
+            )
+        );
     }
 
     fn on_drag_stopped(&self, event: DragStopped) {
@@ -363,7 +368,9 @@ impl DragGestureOwner for DraggableCore {
         let v = if self.reverse_direction.get() { event.velocity * -1.0 } else { event.velocity };
         let velocity = if orientation == Orientation::Vertical { v.y } else { v.x };
         let s = scope.clone();
-        scope.launch(async move { on_drag_stopped(s, velocity).await });
+        named_args!(
+            scope.launch(start = CoroutineStart::UNDISPATCHED, async move { on_drag_stopped(s, velocity).await })
+        );
     }
 
     fn start_drag_immediately(&self) -> bool {

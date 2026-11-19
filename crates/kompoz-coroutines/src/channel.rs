@@ -435,19 +435,20 @@ pub fn produce<T: Send + 'static, Fut: Future<Output = ()> + 'static>(
 ) -> Channel<T> {
     let channel = Channel::new(capacity, BufferOverflow::Suspend);
     let fut = producer(channel.clone());
-    let ch = channel.clone();
-    scope.launch(async move {
-        struct Finish<T: Send + 'static>(Channel<T>, bool);
-        impl<T: Send + 'static> Drop for Finish<T> {
-            fn drop(&mut self) {
-                if self.1 {
-                    self.0.close();
-                } else {
-                    self.0.cancel();
-                }
+    struct Finish<T: Send + 'static>(Channel<T>, bool);
+    impl<T: Send + 'static> Drop for Finish<T> {
+        fn drop(&mut self) {
+            if self.1 {
+                self.0.close();
+            } else {
+                self.0.cancel();
             }
         }
-        let mut finish = Finish(ch, false);
+    }
+    // (made outside the coroutine: cancelled before it was dispatched, the channel is cancelled too)
+    let finish = Finish(channel.clone(), false);
+    scope.launch(async move {
+        let mut finish = finish;
         fut.await;
         finish.1 = true;
     });

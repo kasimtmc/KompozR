@@ -136,14 +136,12 @@ impl SharedElement {
         self.state_machine.check_for_and_defer_state_updates(self, has_visible_content);
     }
 
-    /// Starts the momentum of a fling the transition starts with (Compose's `updateExitVelocity`): at once, so it
-    /// takes the next frame as its start (the shared element's animation starts the frame after the next
-    /// composition; two frames late would show).
+    /// Starts the momentum of a fling the transition starts with (Compose's `updateExitVelocity`): launched
+    /// (dispatched), it takes the next frame as its start, as the shared element's animation does.
     pub(crate) fn update_exit_velocity(self: &Rc<Self>, velocity: Velocity) {
         let this = self.clone();
+        // (dispatched, as Kotlin's `launch`; its spec finalized at the first frame)
         self.scope().coroutine_scope.launch(async move {
-            // (Kotlin's `launch`, dispatched; its spec finalized at the first frame)
-            kompoz_coroutines::r#yield().await;
             named_args!(this.momentum_animation.animate_to(
                 Offset::Zero,
                 animation_spec = default_momentum_spring(),
@@ -169,7 +167,6 @@ impl SharedElement {
                     Arc::new(SpringSpec::new(s.damping_ratio, s.stiffness, Some(Offset::VisibilityThreshold)));
                 let momentum = self.momentum_animation.clone();
                 self.scope().coroutine_scope.launch(async move {
-                    kompoz_coroutines::r#yield().await; // (Kotlin's `launch`, dispatched)
                     named_args!(momentum.animate_to(Offset::Zero, animation_spec = spring)).await;
                 });
             }

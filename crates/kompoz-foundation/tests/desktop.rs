@@ -659,6 +659,11 @@ fn on_drag_follows_the_matched_pointer() {
         ));
     }));
     let slop = kompoz_ui::platform::ViewConfiguration::default().touch_slop;
+    // (the mouse comes over it first, an event of its own: Compose for desktop's matcher-taking detectors launch their
+    // coroutines (plain `launch`, dispatched) from the first event their pointer input sees, so a press that is that
+    // first event comes before they wait for it — as it would in Compose)
+    rule.host().pointer_move(at(20.0, 50.0), -1, 0);
+    rule.main_clock().run_current();
     rule.host().pointer_down(at(20.0, 50.0), -1, 0, PointerType::Mouse);
     for x in [30.0, 60.0] {
         rule.advance_frame();

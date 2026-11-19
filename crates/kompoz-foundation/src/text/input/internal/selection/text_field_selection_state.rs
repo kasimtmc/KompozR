@@ -19,10 +19,12 @@ use crate::text::selection::{
     MouseSelectionObserver, SelectionAdjustment, SelectionLayout, await_selection_gestures,
     get_selection_handle_coordinates, get_text_field_selection_layout, is_mouse_or_touch_pad, visible_bounds,
 };
-use kompoz_coroutines::{coroutine_scope, snapshot_flow};
+use kompoz_coroutines::{CoroutineStart, coroutine_scope, snapshot_flow};
 use kompoz_graphics::LayoutDirection;
 use kompoz_graphics::{Density, Dp, Offset, Rect};
-use kompoz_runtime::{DerivedState, MutableState, derived_state_of, mutable_state_of, without_read_observation};
+use kompoz_runtime::{
+    DerivedState, MutableState, derived_state_of, mutable_state_of, named_args, without_read_observation,
+};
 use kompoz_text::{AnnotatedString, ResolvedTextDirection, TextLayoutResult, TextRange};
 use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::input::{PointerEventPass, PointerInputScope};
@@ -404,9 +406,11 @@ impl TextFieldSelectionState {
         coroutine_scope(move |cs| async move {
             let (a, b, c) = (self.clone(), self.clone(), self.clone());
             let (s1, s2, s3) = (scope.clone(), scope.clone(), scope);
-            cs.launch(async move { a.detect_touch_mode(s1).await });
-            cs.launch(async move { b.detect_cursor_handle_drag_gestures(s2).await });
-            cs.launch(async move {
+            named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move { a.detect_touch_mode(s1).await }));
+            named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
+                b.detect_cursor_handle_drag_gestures(s2).await
+            }));
+            named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
                 let weak = Rc::downgrade(&c);
                 drop(c);
                 s3.detect_tap_gestures()
@@ -421,7 +425,7 @@ impl TextFieldSelectionState {
                         }
                     })
                     .await
-            });
+            }));
         })
         .await;
     }
@@ -432,8 +436,8 @@ impl TextFieldSelectionState {
         coroutine_scope(move |cs| async move {
             let (a, b, c) = (self.clone(), self.clone(), self.clone());
             let (s1, s2, s3) = (scope.clone(), scope.clone(), scope);
-            cs.launch(async move { a.detect_touch_mode(s1).await });
-            cs.launch(async move {
+            named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move { a.detect_touch_mode(s1).await }));
+            named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
                 struct Clear(Weak<TextFieldSelectionState>);
                 impl Drop for Clear {
                     fn drop(&mut self) {
@@ -464,8 +468,10 @@ impl TextFieldSelectionState {
                     })),
                 )
                 .await;
-            });
-            cs.launch(async move { c.detect_selection_handle_drag_gestures(s3, is_start_handle).await });
+            }));
+            named_args!(cs.launch(start = CoroutineStart::UNDISPATCHED, async move {
+                c.detect_selection_handle_drag_gestures(s3, is_start_handle).await
+            }));
         })
         .await;
     }

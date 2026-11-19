@@ -313,19 +313,7 @@ fn any_pointer_input(cell: &NodeRc, f: &dyn Fn(&dyn PointerInputModifierNode) ->
 /// coordinator's layout node (a node both layout and pointer input hit tests in what it measured), then those
 /// before its own.
 fn pointer_nodes(c: &Rc<NodeCoordinator>) -> Vec<NodeRc> {
-    let mut nodes = Vec::new();
-    let Some(layout_node) = c.layout_node() else { return nodes };
-    if !Rc::ptr_eq(&layout_node.outer_coordinator(), c)
-        && let Some(entry) = c.wrapped_by().and_then(|w| w.entry())
-    {
-        nodes.push(entry);
-    }
-    let mut own = c.nodes();
-    if !c.is_inner() {
-        own.pop();
-    }
-    nodes.extend(own);
-    nodes
+    c.traversal_nodes(NodeKind::PointerInput.include_self_in_traversal())
 }
 
 /// The index of the next pointer input node from `from` (Compose's `nextUntil(PointerInput, Layout)`).

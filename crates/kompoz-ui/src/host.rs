@@ -493,9 +493,10 @@ impl KompozHost {
 
     // ---- Frames ----
 
-    /// A frame at `time_nanos` (C++'s `frame`): posted tasks, then the dispatcher (due timers, then frame waiters),
-    /// then up to four passes of {applied changes told to their readers → recompose → measure and layout → global
-    /// position callbacks} while a pass wrote state. Whether a redraw is due.
+    /// A frame at `time_nanos` (C++'s `frame`, Compose's): posted tasks, then the dispatcher (due timers, then the
+    /// frame waiters' callbacks), then up to four passes of {applied changes told to their readers → recompose →
+    /// measure and layout → global position callbacks} while a pass wrote state, then the coroutines the frame
+    /// resumed and those it launched. Whether a redraw is due.
     pub fn frame(&self, time_nanos: i64) -> bool {
         self.pass(time_nanos, true)
     }
@@ -515,7 +516,8 @@ impl KompozHost {
         }
         if frame {
             self.frame_time.set(time_nanos);
-            self.dispatcher.run(time_nanos);
+            // (the frame callbacks run now; the coroutines go on after the layout, at `run_frame_end`)
+            self.dispatcher.send_frame(time_nanos);
         } else {
             self.dispatcher.run_timers(time_nanos);
         }
@@ -566,7 +568,8 @@ impl KompozHost {
             }
         }
         // (the coroutines continuing after the frame — Compose's frame continuations, dispatched after its
-        // composition and layout — see where it laid things out; what they write is the next frame's)
+        // composition and layout — and those the composition launched (LaunchedEffect's, dispatched) see where it
+        // laid things out; what they write is the next frame's)
         if frame {
             self.dispatcher.run_frame_end();
         }

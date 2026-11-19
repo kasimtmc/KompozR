@@ -26,12 +26,12 @@ use crate::spec::{AnimationConstants, AnimationSpec, FiniteAnimationSpec, Spring
 use crate::state::AnimationValue;
 use crate::suspend::duration_scale;
 use crate::vector::{AnimationVector, AnimationVector4D};
-use kompoz_coroutines::with_frame_nanos;
+use kompoz_coroutines::{CoroutineStart, with_frame_nanos};
 use kompoz_graphics::{Color, Dp, IntOffset, IntSize, Offset, Rect, Size};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::{
     DerivedState, DisposableEffect, MutableState, State, StateSource, derived_state_of, group, kompozable,
-    kompozable_block, mutable_state_of, named, on_dispose, remember_keyed, without_read_observation,
+    kompozable_block, mutable_state_of, named, named_args, on_dispose, remember_keyed, without_read_observation,
 };
 use std::any::Any;
 use std::cell::{Cell, OnceCell, RefCell};
@@ -757,7 +757,7 @@ impl<S: AnimationValue> Transition<S> {
                         kompozable_block!({
                             DisposableEffect((coroutine_scope, this.clone()), move || {
                                 // (it runs at once until its first frame: the state is set up in this frame)
-                                scope.launch(async move {
+                                named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
                                     let duration_scale = duration_scale();
                                     loop {
                                         let t = transition.clone();
@@ -772,7 +772,7 @@ impl<S: AnimationValue> Transition<S> {
                                         })
                                         .await;
                                     }
-                                });
+                                }));
                                 on_dispose(|| {})
                             });
                         });

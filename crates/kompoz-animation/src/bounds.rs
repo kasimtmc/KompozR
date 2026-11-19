@@ -10,7 +10,7 @@ use crate::lookahead_debug::{
 };
 use crate::{Animatable, AnimationSpec, AnimationVector4D, FiniteAnimationSpec, Spring, VectorConverter};
 use crate::{VisibilityThreshold, spring};
-use kompoz_coroutines::CoroutineScope;
+use kompoz_coroutines::{CoroutineScope, CoroutineStart};
 use kompoz_graphics::{Dp, IntSize, LayoutDirection, Offset, Rect, Size};
 use kompoz_runtime::{MutableState, mutable_state_of, named, named_args};
 use kompoz_text::{FontFamilyResolver, TextMeasurer};
@@ -525,9 +525,9 @@ impl BoundsTransformDeferredAnimation {
                 // (started at once, so the approach checks know it runs)
                 let spec: Arc<dyn AnimationSpec<Rect>> = spec;
                 let running = anim.clone();
-                coroutine_scope.launch(async move {
+                named_args!(coroutine_scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
                     named_args!(running.animate_to(target, animation_spec = spec)).await;
-                });
+                }));
             }
             return anim.value();
         }

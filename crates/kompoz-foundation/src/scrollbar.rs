@@ -17,11 +17,11 @@ use crate::lazy::grid::LazyGridState;
 use crate::scroll::ScrollState;
 use crate::v2::{LazyGridLines, LazyLineContentAdapter, LazyListLines, ScrollableScrollbarAdapter, ScrollbarAdapter};
 use kompoz_animation::{AnimationSpec, FastOutSlowInEasing, TweenSpec, animate_color_as_state};
-use kompoz_coroutines::{CoroutineScope, Job, delay_ms, remember_coroutine_scope};
+use kompoz_coroutines::{CoroutineScope, CoroutineStart, Job, delay_ms, remember_coroutine_scope};
 use kompoz_graphics::{Color, Dp, LayoutDirection, Offset, RoundedCornerShape, Shape};
 use kompoz_runtime::{
     DerivedState, DisposableEffect, KompozitionLocal, MutableState, derived_state_of, kompozable, mutable_state_of,
-    on_dispose, remember, remember_keyed,
+    named_args, on_dispose, remember, remember_keyed,
 };
 use kompoz_ui::Modifier;
 use kompoz_ui::input::PointerInputScope;
@@ -446,7 +446,7 @@ impl SliderAdapter {
             return;
         }
         let me = self.clone();
-        self.coroutine_scope.launch(async move {
+        named_args!(self.coroutine_scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
             /// Lets the next delta start a new run however this one ends.
             struct Done(Rc<SliderAdapter>);
             impl Drop for Done {
@@ -469,7 +469,7 @@ impl SliderAdapter {
                 me.set_position(new_position).await;
                 me.unscrolled_drag_distance.set(me.unscrolled_drag_distance.get() + drag_delta - slider_delta);
             }
-        });
+        }));
     }
 }
 

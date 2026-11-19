@@ -11,8 +11,9 @@ use crate::gestures::{Orientation, ScrollableStateExtensions};
 use crate::scroll::ScrollState;
 use crate::text::input::TextHighlightType;
 use crate::text::selection::LocalTextSelectionColors;
-use kompoz_coroutines::{Job, snapshot_flow};
+use kompoz_coroutines::{CoroutineStart, Job, snapshot_flow};
 use kompoz_graphics::{Brush, Color, Constraints, Density, LayoutDirection, Rect};
+use kompoz_runtime::named_args;
 use kompoz_text::{TextLayoutResult, TextRange};
 use kompoz_ui::draw::{ContentDrawScope, DefaultBlendMode, DrawModifierNode, DrawStyle};
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates, LayoutModifierNode, Measurable};
@@ -171,7 +172,10 @@ impl CoreShared {
                     if is_window_focused.abs() == 1
                         && let Some(animation) = blinker.cursor_animation.borrow().clone()
                     {
-                        *latest.borrow_mut() = Some(scope.launch(animation.snap_to_visible_and_animate()));
+                        *latest.borrow_mut() = Some(named_args!(scope.launch(
+                            start = CoroutineStart::UNDISPATCHED,
+                            coroutine = animation.snap_to_visible_and_animate()
+                        )));
                     }
                 })
                 .await;
@@ -263,7 +267,7 @@ impl CoreShared {
             Followed { selection: Some(current), cursor_rect, text_layout_size, container_size };
         let Some(scope) = s.handle().and_then(|h| h.coroutine_scope()) else { return };
         let requester = layout_state.bring_into_view_requester().clone();
-        scope.launch(async move {
+        named_args!(scope.launch(start = CoroutineStart::UNDISPATCHED, async move {
             let target_scroll = round_to_next(offset_difference);
             let scrolled = scroll_state.scroll_by(target_scroll).await;
             if should_bring_into_view {
@@ -283,7 +287,7 @@ impl CoreShared {
                 };
                 requester.bring_into_view_rect(Some(rect)).await;
             }
-        });
+        }));
     }
 
     fn stop_cursor_job(&self) {
@@ -359,7 +363,7 @@ impl TextFieldCoreModifierNode {
                 scope.draw_path_with(&path, brush.clone(), 0.2, DrawStyle::Fill, None, DefaultBlendMode);
             } else {
                 let color = if style.color.is_specified() { style.color } else { Color::Black };
-                let faded = kompoz_runtime::named_args!(color.copy(alpha = color.alpha() * 0.2));
+                let faded = named_args!(color.copy(alpha = color.alpha() * 0.2));
                 scope.draw_path_with(&path, faded, 1.0, DrawStyle::Fill, None, DefaultBlendMode);
             }
         } else {

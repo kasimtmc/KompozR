@@ -296,11 +296,8 @@ impl Gen<'_, '_> {
         // (one run in place in a coroutine — Kotlin's inline function's — suspends with it when its body does)
         let in_place = was_async && !suspend && !info.stored;
         let awaits_before = self.awaits;
-        let tail = if known.is_some_and(|k| k.unit_output()) || (known.is_some() && info.kind == LambdaKind::Future) {
-            Tail::Unit
-        } else {
-            Tail::Value(result)
-        };
+        // (a suspend lambda's value too: `async { 7 }` gives 7, `launch { }` nothing)
+        let tail = if known.is_some_and(|k| k.unit_output()) { Tail::Unit } else { Tail::Value(result) };
         let body = self.stmts(&l.body.stmts, tail);
         if let Some((used, one)) = implicit_it {
             let t = typed(first_input);
