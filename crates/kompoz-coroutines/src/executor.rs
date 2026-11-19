@@ -191,6 +191,21 @@ impl Dispatcher {
 
     /// A frame at `now`: the timers due fire, the coroutines waiting for a frame get it, and everything woken runs.
     pub fn run(&self, now: i64) {
+        self.run_timers(now);
+        let now = self.0.now.get();
+        let waiters = std::mem::take(&mut *self.0.frames.borrow_mut());
+        for w in waiters {
+            if job_alive(&w.job) {
+                w.time.set(Some(now));
+                w.waker.wake();
+            }
+        }
+        self.run_ready();
+    }
+
+    /// Time moved to `now` without a frame (a test clock advanced between frames): the timers due fire and everything
+    /// woken runs; the coroutines waiting for a frame keep waiting.
+    pub fn run_timers(&self, now: i64) {
         self.advance_to(now);
         let now = self.0.now.get();
         let mut due: Vec<Timer> = Vec::new();
@@ -222,14 +237,6 @@ impl Dispatcher {
                 TimerAction::Call(f) => f(),
             }
             self.run_ready();
-        }
-        self.run_ready();
-        let waiters = std::mem::take(&mut *self.0.frames.borrow_mut());
-        for w in waiters {
-            if job_alive(&w.job) {
-                w.time.set(Some(now));
-                w.waker.wake();
-            }
         }
         self.run_ready();
     }

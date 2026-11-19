@@ -24,6 +24,9 @@ impl DepthSortedSet {
     fn remove(&mut self, node: &LayoutNode) -> bool {
         self.nodes.remove(&(node.depth(), node.id)).is_some()
     }
+    fn contains(&self, node: &LayoutNode) -> bool {
+        self.nodes.contains_key(&(node.depth(), node.id))
+    }
     fn pop(&mut self) -> Option<Rc<LayoutNode>> {
         while let Some((_, w)) = self.nodes.pop_first() {
             if let Some(n) = w.upgrade() {
@@ -37,14 +40,106 @@ impl DepthSortedSet {
     }
 }
 
+/// What a node is scheduled for (Compose's Invalidation).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Invalidation {
+    LookaheadMeasurement,
+    LookaheadPlacement,
+    Measurement,
+    Placement,
+}
+
+/// The nodes waiting to be measured or placed, by pass (Compose's DepthSortedSetsForDifferentPasses): those to
+/// measure in lookahead (and the nodes outside lookahead scopes to measure), those to place in lookahead (and those
+/// outside to place), then those of lookahead scopes that only their approach measures or places. Without a
+/// lookahead scope in the tree, the approach set stays empty.
+#[derive(Default)]
+struct RelayoutNodes {
+    lookahead_and_ancestor_measure: DepthSortedSet,
+    lookahead_and_ancestor_place: DepthSortedSet,
+    approach: DepthSortedSet,
+}
+
+impl RelayoutNodes {
+    fn add(&mut self, node: &Rc<LayoutNode>, invalidation: Invalidation) {
+        let in_scope = node.lookahead_root.borrow().is_some();
+        match invalidation {
+            Invalidation::LookaheadMeasurement => {
+                self.lookahead_and_ancestor_measure.add(node);
+                self.approach.add(node);
+            }
+            Invalidation::LookaheadPlacement => {
+                self.lookahead_and_ancestor_place.add(node);
+                self.approach.add(node);
+            }
+            Invalidation::Measurement if in_scope => self.approach.add(node),
+            Invalidation::Measurement => self.lookahead_and_ancestor_measure.add(node),
+            Invalidation::Placement if in_scope => self.approach.add(node),
+            Invalidation::Placement => self.lookahead_and_ancestor_place.add(node),
+        }
+    }
+
+    fn remove(&mut self, node: &LayoutNode) -> bool {
+        let a = self.lookahead_and_ancestor_measure.remove(node);
+        let b = self.lookahead_and_ancestor_place.remove(node);
+        self.approach.remove(node) || a || b
+    }
+
+    /// Whether `node` waits in the sets of the pass `affects_lookahead` says (Compose's `contains(node,
+    /// affectsLookahead)`).
+    fn contains_for(&self, node: &LayoutNode, affects_lookahead: bool) -> bool {
+        let ancestor = node.lookahead_root.borrow().is_none();
+        let in_lookahead_and_ancestors =
+            self.lookahead_and_ancestor_measure.contains(node) || self.lookahead_and_ancestor_place.contains(node);
+        if affects_lookahead {
+            !ancestor && in_lookahead_and_ancestors
+        } else {
+            (ancestor && in_lookahead_and_ancestors) || self.approach.contains(node)
+        }
+    }
+
+    /// The next node, with whether the pass affects its lookahead and whether it is to be placed (not only
+    /// measured): the measure set first, then the place set, then the approach set (Compose's `popEach`).
+    fn pop(&mut self) -> Option<(Rc<LayoutNode>, bool, bool)> {
+        if let Some(n) = self.lookahead_and_ancestor_measure.pop() {
+            let affects = n.lookahead_root.borrow().is_some();
+            return Some((n, affects, false));
+        }
+        if let Some(n) = self.lookahead_and_ancestor_place.pop() {
+            let affects = n.lookahead_root.borrow().is_some();
+            return Some((n, affects, true));
+        }
+        self.approach.pop().map(|n| (n, false, true))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.lookahead_and_ancestor_measure.is_empty()
+            && self.approach.is_empty()
+            && self.lookahead_and_ancestor_place.is_empty()
+    }
+}
+
 /// A node's place as the layout check writes it down: where its outer and inner coordinators are in the root,
-/// whether it is placed, its z-index.
+/// whether it is placed, its z-index; in a lookahead scope, its lookahead size and position and whether it is placed
+/// in lookahead.
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct LaidOut {
     pub(crate) bounds: Rect,
     pub(crate) content: Rect,
     pub(crate) placed: bool,
     pub(crate) z_index: f32,
+    pub(crate) lookahead: Option<LookaheadLaidOut>,
+}
+
+/// A node's lookahead layout as the layout check writes it down: its outer coordinator's lookahead size and position
+/// in its lookahead root, its inner one's, whether it is placed in lookahead.
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct LookaheadLaidOut {
+    pub(crate) size: kompoz_graphics::IntSize,
+    pub(crate) position: Offset,
+    pub(crate) content_size: kompoz_graphics::IntSize,
+    pub(crate) content_position: Offset,
+    pub(crate) placed: bool,
 }
 
 /// The owner of a layout tree: what its nodes ask of their host.
@@ -52,10 +147,10 @@ pub(crate) struct Owner {
     root: RefCell<Option<Rc<LayoutNode>>>,
     snapshot_observer: Rc<SnapshotObserver>,
     dispatcher: Dispatcher,
-    measure_set: RefCell<DepthSortedSet>,
-    place_set: RefCell<DepthSortedSet>,
+    relayout_nodes: RefCell<RelayoutNodes>,
     on_positioned: RefCell<Vec<Weak<LayoutNode>>>,
-    postponed: RefCell<Vec<(Weak<LayoutNode>, bool)>>,
+    /// Requests made while their nodes were busy, made again after: the node, whether in lookahead, forced.
+    postponed: RefCell<Vec<(Weak<LayoutNode>, bool, bool)>>,
     root_constraints: Cell<Option<Constraints>>,
     during_measure_layout: Cell<bool>,
     during_full_pass: Cell<bool>,
@@ -85,6 +180,8 @@ pub(crate) struct Owner {
     pub(crate) semantics_pending: RefCell<Vec<(Weak<LayoutNode>, Option<crate::semantics::SemanticsConfiguration>)>>,
     /// The host's autofill (Compose's `Owner.autofillManager`).
     autofill: RefCell<Option<Rc<crate::autofill::HostAutofillManager>>>,
+    /// What the nodes' coroutines run with (Compose's `Owner.coroutineContext`: the composition's effect context).
+    effect_coroutine_context: RefCell<kompoz_coroutines::CoroutineContext>,
 }
 
 impl Owner {
@@ -120,8 +217,7 @@ impl Owner {
             root: RefCell::new(None),
             snapshot_observer: SnapshotObserver::new(),
             dispatcher,
-            measure_set: RefCell::new(DepthSortedSet::default()),
-            place_set: RefCell::new(DepthSortedSet::default()),
+            relayout_nodes: RefCell::new(RelayoutNodes::default()),
             on_positioned: RefCell::new(Vec::new()),
             postponed: RefCell::new(Vec::new()),
             root_constraints: Cell::new(None),
@@ -144,7 +240,17 @@ impl Owner {
             semantics_listeners: RefCell::new(Vec::new()),
             semantics_pending: RefCell::new(Vec::new()),
             autofill: RefCell::new(None),
+            effect_coroutine_context: RefCell::new(kompoz_coroutines::CoroutineContext::new()),
         })
+    }
+
+    /// What the nodes' coroutines run with (Compose's `Owner.coroutineContext`).
+    pub(crate) fn effect_coroutine_context(&self) -> kompoz_coroutines::CoroutineContext {
+        self.effect_coroutine_context.borrow().clone()
+    }
+
+    pub(crate) fn set_effect_coroutine_context(&self, context: kompoz_coroutines::CoroutineContext) {
+        *self.effect_coroutine_context.borrow_mut() = context;
     }
 
     /// Makes `root` its tree's root and attaches it.
@@ -222,8 +328,7 @@ impl Owner {
             self.unregister_popup(node);
         }
         self.semantics_pending.borrow_mut().retain(|(w, _)| !std::ptr::eq(w.as_ptr(), node));
-        self.measure_set.borrow_mut().remove(node);
-        self.place_set.borrow_mut().remove(node);
+        self.relayout_nodes.borrow_mut().remove(node);
         self.on_positioned.borrow_mut().retain(|w| !std::ptr::eq(w.as_ptr(), node));
         self.frame_rates.borrow_mut().retain(|(id, _)| *id != node.id);
         if let Some(autofill) = self.autofill() {
@@ -281,9 +386,23 @@ impl Owner {
         assert!(!self.during_measure_layout.get(), "kompoz: updateRootConstraints called while measuring");
         self.root_constraints.set(Some(constraints));
         if let Some(root) = self.root() {
+            let in_scope = root.lookahead_root.borrow().is_some();
+            if in_scope {
+                root.mark_lookahead_measure_pending();
+            }
             root.mark_measure_pending();
-            self.measure_set.borrow_mut().add(&root);
+            let invalidation = if in_scope { Invalidation::LookaheadMeasurement } else { Invalidation::Measurement };
+            self.relayout_nodes.borrow_mut().add(&root, invalidation);
         }
+    }
+
+    /// The scope the root is placed in (Compose's Owner `placementScope`, OuterPlacementScope).
+    pub(crate) fn root_placement_scope(&self) -> crate::layout::PlacementScope {
+        let (width, direction) = match self.root() {
+            Some(r) => (r.measured_size.get().width, r.layout_direction()),
+            None => (0, kompoz_graphics::LayoutDirection::Ltr),
+        };
+        crate::layout::PlacementScope::new(width, direction)
     }
 
     /// The constraints the root is measured with (the window's), once set.
@@ -293,19 +412,53 @@ impl Owner {
 
     /// Whether nodes wait to be measured or placed.
     pub(crate) fn has_pending_measure_or_layout(&self) -> bool {
-        !self.measure_set.borrow().is_empty() || !self.place_set.borrow().is_empty()
+        !self.relayout_nodes.borrow().is_empty()
     }
 
     pub(crate) fn has_pending_on_positioned_callbacks(&self) -> bool {
         !self.on_positioned.borrow().is_empty()
     }
 
+    /// Compose's `requestLookaheadRemeasure`: measured again in lookahead, then in the main pass. Whether a layout
+    /// pass is wanted for it. Only for a node in a lookahead scope.
+    pub(crate) fn request_lookahead_remeasure(&self, node: &Rc<LayoutNode>, force: bool) -> bool {
+        assert!(
+            node.lookahead_root.borrow().is_some(),
+            "kompoz: Error: requestLookaheadRemeasure cannot be called on a node outside LookaheadScope"
+        );
+        match node.layout_state.get() {
+            LayoutState::LookaheadMeasuring => false,
+            LayoutState::Measuring | LayoutState::LookaheadLayingOut | LayoutState::LayingOut => {
+                self.postponed.borrow_mut().push((Rc::downgrade(node), true, force));
+                false
+            }
+            LayoutState::Idle => {
+                if node.lookahead_measure_pending.get() && !force {
+                    return false;
+                }
+                node.mark_lookahead_measure_pending();
+                node.mark_measure_pending();
+                let parent = node.parent();
+                if (node.is_placed_in_lookahead() == Some(true) || can_affect_parent_in_lookahead(node))
+                    && parent.as_ref().is_none_or(|p| !p.lookahead_measure_pending.get())
+                {
+                    self.relayout_nodes.borrow_mut().add(node, Invalidation::LookaheadMeasurement);
+                } else if (node.is_placed() || can_affect_placed_parent(node))
+                    && parent.as_ref().is_none_or(|p| !p.measure_pending.get())
+                {
+                    self.relayout_nodes.borrow_mut().add(node, Invalidation::Measurement);
+                }
+                !self.during_full_pass.get()
+            }
+        }
+    }
+
     /// Compose's `requestRemeasure`: whether a layout pass is wanted for it.
     pub(crate) fn request_remeasure(&self, node: &Rc<LayoutNode>, force: bool) -> bool {
         match node.layout_state.get() {
-            LayoutState::Measuring => false,
-            LayoutState::LayingOut => {
-                self.postponed.borrow_mut().push((Rc::downgrade(node), force));
+            LayoutState::Measuring | LayoutState::LookaheadMeasuring => false,
+            LayoutState::LayingOut | LayoutState::LookaheadLayingOut => {
+                self.postponed.borrow_mut().push((Rc::downgrade(node), false, force));
                 false
             }
             LayoutState::Idle => {
@@ -315,7 +468,7 @@ impl Owner {
                 node.mark_measure_pending();
                 if node.is_placed() || can_affect_placed_parent(node) {
                     if node.parent().is_none_or(|p| !p.measure_pending.get()) {
-                        self.measure_set.borrow_mut().add(node);
+                        self.relayout_nodes.borrow_mut().add(node, Invalidation::Measurement);
                     }
                     !self.during_full_pass.get()
                 } else {
@@ -325,10 +478,40 @@ impl Owner {
         }
     }
 
+    /// Compose's `requestLookaheadRelayout`: placed again in lookahead, then in the main pass.
+    pub(crate) fn request_lookahead_relayout(&self, node: &Rc<LayoutNode>, force: bool) -> bool {
+        match node.layout_state.get() {
+            LayoutState::LookaheadMeasuring | LayoutState::LookaheadLayingOut => false,
+            LayoutState::Measuring | LayoutState::LayingOut | LayoutState::Idle => {
+                if (node.lookahead_measure_pending.get() || node.lookahead_layout_pending.get()) && !force {
+                    return false;
+                }
+                node.mark_lookahead_layout_pending();
+                node.mark_layout_pending();
+                let parent = node.parent();
+                if node.is_placed_in_lookahead() == Some(true)
+                    && parent
+                        .as_ref()
+                        .is_none_or(|p| !p.lookahead_measure_pending.get() && !p.lookahead_layout_pending.get())
+                {
+                    self.relayout_nodes.borrow_mut().add(node, Invalidation::LookaheadPlacement);
+                } else if node.is_placed()
+                    && parent.as_ref().is_none_or(|p| !p.layout_pending.get() && !p.measure_pending.get())
+                {
+                    self.relayout_nodes.borrow_mut().add(node, Invalidation::Placement);
+                }
+                !self.during_full_pass.get()
+            }
+        }
+    }
+
     /// Compose's `requestRelayout`.
     pub(crate) fn request_relayout(&self, node: &Rc<LayoutNode>, force: bool) -> bool {
         match node.layout_state.get() {
-            LayoutState::Measuring | LayoutState::LayingOut => false,
+            LayoutState::Measuring
+            | LayoutState::LookaheadMeasuring
+            | LayoutState::LookaheadLayingOut
+            | LayoutState::LayingOut => false,
             LayoutState::Idle => {
                 let parent = node.parent();
                 let parent_is_placed = parent.as_ref().is_none_or(|p| p.is_placed());
@@ -343,7 +526,7 @@ impl Owner {
                 node.mark_layout_pending();
                 if node.is_placed_by_parent.get() && parent_is_placed {
                     if parent.as_ref().is_none_or(|p| !p.layout_pending.get() && !p.measure_pending.get()) {
-                        self.place_set.borrow_mut().add(node);
+                        self.relayout_nodes.borrow_mut().add(node, Invalidation::Placement);
                     }
                     !self.during_full_pass.get()
                 } else {
@@ -373,31 +556,27 @@ impl Owner {
         self.during_full_pass.set(true);
         let mut root_resized = false;
         'passes: loop {
-            let (node, relayout) = {
-                let next = self.measure_set.borrow_mut().pop();
-                match next {
-                    Some(n) => (n, false),
-                    None => match { self.place_set.borrow_mut().pop() } {
-                        Some(n) => (n, true),
-                        None => {
-                            // The main tree laid out: the popups against it, then what that set off.
-                            if self.has_popups() {
-                                self.layout_popups();
-                                if !self.measure_set.borrow().is_empty() || !self.place_set.borrow().is_empty() {
-                                    continue 'passes;
-                                }
-                            }
-                            break;
-                        }
-                    },
+            let next = self.relayout_nodes.borrow_mut().pop();
+            let Some((node, affects_lookahead, relayout)) = next else {
+                // The main tree laid out: the popups against it, then what that set off.
+                if self.has_popups() {
+                    self.layout_popups();
+                    if !self.relayout_nodes.borrow().is_empty() {
+                        continue 'passes;
+                    }
                 }
+                break;
             };
             let size_changed = if relayout {
-                self.remeasure_and_relayout_if_needed(&node)
+                self.remeasure_and_relayout_if_needed(&node, affects_lookahead)
             } else {
-                let changed = self.remeasure_if_needed(&node);
+                let changed = self.remeasure_if_needed(&node, affects_lookahead);
+                // (what measuring it in lookahead left to place, in lookahead and in the main pass)
+                if node.lookahead_layout_pending.get() {
+                    self.relayout_nodes.borrow_mut().add(&node, Invalidation::LookaheadPlacement);
+                }
                 if node.layout_pending.get() {
-                    self.place_set.borrow_mut().add(&node);
+                    self.relayout_nodes.borrow_mut().add(&node, Invalidation::Placement);
                 }
                 changed
             };
@@ -421,7 +600,15 @@ impl Owner {
         let root = self.root();
         assert!(root.is_none_or(|r| !Rc::ptr_eq(&r, node)), "kompoz: measure_and_layout_node is not for the root");
         let nested = self.during_measure_layout.replace(true);
-        self.place_set.borrow_mut().remove(node);
+        self.relayout_nodes.borrow_mut().remove(node);
+        // (in a lookahead scope, in lookahead first: Compose's `measureAndLayout(layoutNode, constraints)`)
+        let lookahead_size_changed = self.do_lookahead_remeasure(node, Some(constraints));
+        if (lookahead_size_changed || node.lookahead_layout_pending.get())
+            && node.is_placed_in_lookahead() == Some(true)
+        {
+            node.lookahead_replace();
+        }
+        self.ensure_subtree_lookahead_replaced(node);
         self.do_remeasure(node, Some(constraints));
         if node.layout_pending.get() && node.is_placed() {
             node.replace();
@@ -431,11 +618,27 @@ impl Owner {
         self.during_measure_layout.set(nested);
     }
 
+    /// The children of `node` placed in lookahead and waiting for it are placed again in lookahead (Compose's
+    /// `ensureSubtreeLookaheadReplaced`), and so on down.
+    fn ensure_subtree_lookahead_replaced(&self, node: &Rc<LayoutNode>) {
+        for child in node.children() {
+            if child.is_placed_in_lookahead() == Some(true) && !child.is_deactivated() {
+                if self.relayout_nodes.borrow().contains_for(&child, true) {
+                    child.lookahead_replace();
+                }
+                self.ensure_subtree_lookahead_replaced(&child);
+            }
+        }
+    }
+
     fn is_used_in_measure_or_layout(&self, node: &LayoutNode) -> bool {
         node.is_placed()
             || node.is_placed_by_parent.get()
             || can_affect_placed_parent(node)
+            || node.is_placed_in_lookahead() == Some(true)
+            || can_affect_parent_in_lookahead(node)
             || node.alignment_lines_required()
+            || node.lookahead_alignment_lines_required()
     }
 
     fn root_constraints_for(&self, node: &Rc<LayoutNode>) -> Option<Constraints> {
@@ -447,6 +650,27 @@ impl Owner {
         } else {
             None
         }
+    }
+
+    /// Compose's `doLookaheadRemeasure`: measured again in lookahead; a lookahead size change measures (or places)
+    /// its parent again — in lookahead when the parent is in the scope too.
+    fn do_lookahead_remeasure(&self, node: &Rc<LayoutNode>, constraints: Option<Constraints>) -> bool {
+        if node.lookahead_root.borrow().is_none() {
+            return false;
+        }
+        let changed = node.lookahead_remeasure(constraints);
+        if changed && let Some(parent) = node.parent() {
+            if parent.lookahead_root.borrow().is_none() {
+                parent.request_remeasure_with(false, false);
+            } else {
+                match node.measured_by_parent_in_lookahead() {
+                    UsageByParent::InMeasureBlock => parent.request_lookahead_remeasure(false, false),
+                    UsageByParent::InLayoutBlock => parent.request_lookahead_relayout(false),
+                    UsageByParent::NotUsed => {}
+                }
+            }
+        }
+        changed
     }
 
     /// Compose's `doRemeasure`: a size change measures (or places) its parent again.
@@ -471,10 +695,24 @@ impl Owner {
         changed
     }
 
-    fn remeasure_and_relayout_if_needed(&self, node: &Rc<LayoutNode>) -> bool {
+    /// Measures and places `node` again as it needs (Compose's `remeasureAndRelayoutIfNeeded`): in lookahead only, or
+    /// in the main pass only, as `affects_lookahead` says (a measure of the subtree that doesn't affect lookahead
+    /// doesn't leak into it).
+    fn remeasure_and_relayout_if_needed(&self, node: &Rc<LayoutNode>, affects_lookahead: bool) -> bool {
         let mut size_changed = false;
         if self.is_used_in_measure_or_layout(node) {
             let constraints = self.root_constraints_for(node);
+            if affects_lookahead {
+                if node.lookahead_measure_pending.get() {
+                    size_changed = self.do_lookahead_remeasure(node, constraints);
+                }
+                if (size_changed || node.lookahead_layout_pending.get()) && node.is_placed_in_lookahead() == Some(true)
+                {
+                    node.lookahead_replace();
+                }
+                self.drain_postponed();
+                return size_changed;
+            }
             if node.measure_pending.get() {
                 size_changed = self.do_remeasure(node, constraints);
             }
@@ -502,11 +740,17 @@ impl Owner {
         size_changed
     }
 
-    fn remeasure_if_needed(&self, node: &Rc<LayoutNode>) -> bool {
+    /// Measures `node` again if it needs to (Compose's `remeasureIfNeeded`): in lookahead, or in the main pass, as
+    /// `affects_lookahead` says.
+    fn remeasure_if_needed(&self, node: &Rc<LayoutNode>, affects_lookahead: bool) -> bool {
         let mut size_changed = false;
         if self.is_used_in_measure_or_layout(node) {
             let constraints = self.root_constraints_for(node);
-            if node.measure_pending.get() {
+            if affects_lookahead {
+                if node.lookahead_measure_pending.get() {
+                    size_changed = self.do_lookahead_remeasure(node, constraints);
+                }
+            } else if node.measure_pending.get() {
                 size_changed = self.do_remeasure(node, constraints);
             }
             self.drain_postponed();
@@ -516,40 +760,59 @@ impl Owner {
 
     fn drain_postponed(&self) {
         let postponed = std::mem::take(&mut *self.postponed.borrow_mut());
-        for (node, force) in postponed {
+        for (node, lookahead, force) in postponed {
             if let Some(n) = node.upgrade()
                 && n.is_attached()
             {
-                n.request_remeasure_with(force, false);
+                if lookahead {
+                    n.request_lookahead_remeasure(force, false);
+                } else {
+                    n.request_remeasure_with(force, false);
+                }
             }
         }
     }
 
     /// Measures what in `node` waits to be and can change its size, during its parent's measure (Compose's
-    /// `forceMeasureTheSubtree`).
-    pub(crate) fn force_measure_the_subtree(&self, node: &Rc<LayoutNode>) {
+    /// `forceMeasureTheSubtree`): in lookahead, or in the main pass, as `affects_lookahead` says.
+    pub(crate) fn force_measure_the_subtree(&self, node: &Rc<LayoutNode>, affects_lookahead: bool) {
         if !self.during_measure_layout.get() {
             return;
         }
-        self.force_measure_the_subtree_internal(node);
+        self.force_measure_the_subtree_internal(node, affects_lookahead);
     }
 
-    fn force_measure_the_subtree_internal(&self, node: &Rc<LayoutNode>) {
+    fn only_remeasure_if_pending(&self, node: &Rc<LayoutNode>, affects_lookahead: bool) {
+        if measure_pending(node, affects_lookahead) {
+            self.remeasure_if_needed(node, affects_lookahead);
+        }
+    }
+
+    fn force_measure_the_subtree_internal(&self, node: &Rc<LayoutNode>, affects_lookahead: bool) {
         for child in node.children() {
-            let can_affect =
-                child.measured_by_parent.get() == UsageByParent::InMeasureBlock || child.alignment_lines_required();
+            let can_affect = if affects_lookahead {
+                child.measured_by_parent_in_lookahead() == UsageByParent::InMeasureBlock
+                    || child.lookahead_alignment_lines_required()
+            } else {
+                child.measured_by_parent.get() == UsageByParent::InMeasureBlock || child.alignment_lines_required()
+            };
             if can_affect {
-                if child.measure_pending.get() {
-                    self.remeasure_if_needed(&child);
+                // (a lookahead root its parent's measure reaches: its lookahead too, as a measure of it would)
+                if child.is_out_most_lookahead_root() && !affects_lookahead {
+                    if child.lookahead_measure_pending.get() && self.relayout_nodes.borrow().contains_for(&child, true)
+                    {
+                        self.remeasure_if_needed(&child, true);
+                    } else {
+                        self.force_measure_the_subtree(&child, true);
+                    }
                 }
-                if !child.measure_pending.get() {
-                    self.force_measure_the_subtree_internal(&child);
+                self.only_remeasure_if_pending(&child, affects_lookahead);
+                if !measure_pending(&child, affects_lookahead) {
+                    self.force_measure_the_subtree_internal(&child, affects_lookahead);
                 }
             }
         }
-        if node.measure_pending.get() {
-            self.remeasure_if_needed(node);
-        }
+        self.only_remeasure_if_pending(node, affects_lookahead);
     }
 
     /// Tells the global position nodes of what was placed in the pass, shallowest first, and those in them
@@ -601,7 +864,12 @@ impl Owner {
         let before = self.collect_layout();
         self.checking.set(true);
         mark_all_pending(&root);
-        self.measure_set.borrow_mut().add(&root);
+        let invalidation = if root.lookahead_root.borrow().is_some() {
+            Invalidation::LookaheadMeasurement
+        } else {
+            Invalidation::Measurement
+        };
+        self.relayout_nodes.borrow_mut().add(&root, invalidation);
         // (in a snapshot never applied: what the measures write again — a lazy list's layout info — is the check's
         // alone, not a change its readers are told of, which would lay them out again, checked again, for ever)
         let check = kompoz_runtime::Snapshot::take_mutable_snapshot(None, None);
@@ -631,9 +899,23 @@ fn same_laid_out(a: &LaidOut, b: &LaidOut) -> bool {
             && (x.right - y.right).abs() < 0.01
             && (x.bottom - y.bottom).abs() < 0.01
     };
+    let close_offset = |x: Offset, y: Offset| (x.x - y.x).abs() < 0.01 && (x.y - y.y).abs() < 0.01;
+    let same_lookahead = match (&a.lookahead, &b.lookahead) {
+        (None, None) => true,
+        (Some(x), Some(y)) => {
+            x.placed == y.placed
+                && (!x.placed
+                    || (x.size == y.size
+                        && x.content_size == y.content_size
+                        && close_offset(x.position, y.position)
+                        && close_offset(x.content_position, y.content_position)))
+        }
+        _ => false,
+    };
     a.placed == b.placed
         && a.z_index == b.z_index
         && (!a.placed || (close(a.bounds, b.bounds) && close(a.content, b.content)))
+        && same_lookahead
 }
 
 fn collect(node: &Rc<LayoutNode>, out: &mut Vec<(u64, LaidOut)>) {
@@ -646,7 +928,26 @@ fn collect(node: &Rc<LayoutNode>, out: &mut Vec<(u64, LaidOut)>) {
     } else {
         (Rect::Zero, Rect::Zero)
     };
-    out.push((node.id, LaidOut { bounds, content, placed, z_index: node.z_index.get() }));
+    let lookahead = node.lookahead_pass().map(|d| {
+        let placed = d.is_placed() && node.is_attached();
+        let outer = node.outer_coordinator();
+        let (size, position, content_size, content_position) = match outer.lookahead_delegate() {
+            Some(ld) if placed && ld.has_measure_result() => {
+                let root = ld.root_lookahead_delegate().coordinates();
+                let outer = ld.coordinates();
+                let inner = crate::layout::LayoutCoordinates::lookahead_of(node.inner.clone());
+                (
+                    outer.size(),
+                    root.local_position_of(&outer, Offset::Zero),
+                    inner.size(),
+                    root.local_position_of(&inner, Offset::Zero),
+                )
+            }
+            _ => (kompoz_graphics::IntSize::Zero, Offset::Zero, kompoz_graphics::IntSize::Zero, Offset::Zero),
+        };
+        LookaheadLaidOut { size, position, content_size, content_position, placed }
+    });
+    out.push((node.id, LaidOut { bounds, content, placed, z_index: node.z_index.get(), lookahead }));
     for child in node.children() {
         collect(&child, out);
     }
@@ -655,6 +956,10 @@ fn collect(node: &Rc<LayoutNode>, out: &mut Vec<(u64, LaidOut)>) {
 fn mark_all_pending(node: &Rc<LayoutNode>) {
     node.mark_measure_pending();
     node.mark_layout_pending();
+    if node.lookahead_root.borrow().is_some() {
+        node.mark_lookahead_measure_pending();
+        node.mark_lookahead_layout_pending();
+    }
     for child in node.children() {
         mark_all_pending(&child);
     }
@@ -673,6 +978,19 @@ fn dispatch_hierarchy(node: &Rc<LayoutNode>) {
 /// Whether measuring it again may change a placed parent (Compose's `canAffectPlacedParent`).
 fn can_affect_placed_parent(node: &LayoutNode) -> bool {
     node.measure_pending.get() && measured_by_placed_parent(node)
+}
+
+/// Whether measuring it again in lookahead may change its parent's lookahead (Compose's
+/// `canAffectParentInLookahead`).
+fn can_affect_parent_in_lookahead(node: &LayoutNode) -> bool {
+    node.lookahead_measure_pending.get()
+        && (node.measured_by_parent_in_lookahead() != UsageByParent::NotUsed
+            || node.lookahead_alignment_lines_required())
+}
+
+/// Whether it waits to be measured in the pass `affects_lookahead` says.
+fn measure_pending(node: &LayoutNode, affects_lookahead: bool) -> bool {
+    if affects_lookahead { node.lookahead_measure_pending.get() } else { node.measure_pending.get() }
 }
 
 fn measured_by_placed_parent(node: &LayoutNode) -> bool {

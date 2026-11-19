@@ -1,5 +1,6 @@
 //! Layout, as Compose's `androidx.compose.ui.layout`: measuring and placing, measure policies and intrinsics,
-//! alignment lines, rulers and the window insets rulers, layout coordinates, graphics layers' properties, the
+//! alignment lines, rulers and the window insets rulers, layout coordinates, lookahead (`LookaheadScope`, approach
+//! layouts), graphics layers' properties, the
 //! `Layout` composables and ui's layout modifiers (`layout {}`, `layout_id`, `on_size_changed`,
 //! `on_globally_positioned`, `on_placed`, `z_index`, `on_layout_rect_changed`, `on_visibility_changed`,
 //! `on_first_visible`, `layout_bounds`), and pinnable containers.
@@ -8,6 +9,7 @@ mod alignment_line;
 mod composables;
 mod coordinates;
 mod layer;
+mod lookahead;
 mod measure;
 mod modifiers;
 mod pinnable;
@@ -28,6 +30,10 @@ pub use layer::{
     CompositingStrategy, DefaultCameraDistance, GraphicsLayerScope, LayerBlock, LayerOutsets, TransformOrigin,
 };
 pub(crate) use layer::{layer_matrix, mul, rotation};
+pub use lookahead::{
+    ApproachIntrinsicMeasureScope, ApproachLayoutModifierNode, ApproachLayoutModifierNodeImpl, ApproachMeasureBlock,
+    ApproachMeasureScope, LookaheadScope, PlacementApproachInProgress, approach_lookahead_measure,
+};
 pub(crate) use measure::{DefaultIntrinsicMeasurable, MinMax, Side};
 pub use measure::{
     IntrinsicMeasurable, IntrinsicMeasureScope, Measurable, MeasurePolicy, MeasureResult, MeasureScope, PlaceTarget,

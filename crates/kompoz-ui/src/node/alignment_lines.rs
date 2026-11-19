@@ -43,6 +43,31 @@ impl AlignmentLines {
         self.map.borrow().iter().find(|(l, _)| *l == line).map(|(_, v)| *v)
     }
 
+    /// Forgets the last calculation.
+    pub(crate) fn clear(&self) {
+        self.map.borrow_mut().clear();
+    }
+
+    /// `line` at `position`, merged with where another child put it.
+    pub(crate) fn merge(&self, line: AlignmentLine, position: i32) {
+        let mut map = self.map.borrow_mut();
+        match map.iter_mut().find(|(l, _)| *l == line) {
+            Some((_, v)) => *v = line.merge(*v, position),
+            None => map.push((line, position)),
+        }
+    }
+
+    /// The lines given, each replacing one there was.
+    pub(crate) fn put_all(&self, lines: Vec<(AlignmentLine, i32)>) {
+        let mut map = self.map.borrow_mut();
+        for (line, v) in lines {
+            match map.iter_mut().find(|(l, _)| *l == line) {
+                Some((_, value)) => *value = v,
+                None => map.push((line, v)),
+            }
+        }
+    }
+
     pub(crate) fn reset(&self) {
         self.dirty.set(true);
         self.used_during_parent_measurement.set(false);

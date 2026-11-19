@@ -34,6 +34,7 @@ mod arc_spline;
 mod color;
 mod converter;
 mod decay;
+mod deferred_target;
 mod easing;
 mod float_spec;
 mod mono_spline;
@@ -55,6 +56,7 @@ pub use decay::{
     DecayAnimationSpec, FloatDecayAnimationSpec, FloatDecaySpecOf, FloatDecayTarget, FloatExponentialDecaySpec,
     VectorizedDecayAnimationSpec, exponential_decay, generate_decay_animation_spec,
 };
+pub use deferred_target::DeferredTargetAnimation;
 pub use easing::{
     CubicBezierEasing, Ease, EaseIn, EaseInBack, EaseInBounce, EaseInCirc, EaseInCubic, EaseInElastic, EaseInExpo,
     EaseInOut, EaseInOutBack, EaseInOutBounce, EaseInOutCirc, EaseInOutCubic, EaseInOutElastic, EaseInOutExpo,

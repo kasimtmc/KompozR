@@ -1,7 +1,8 @@
 //! The rulers a coordinator provides and who read them (Compose's LookaheadCapablePlaceable ruler handling and its
 //! RulerTrackingMap): values captured as it is placed, worked out again when what the rulers block read changes or
 //! (when it read its coordinates) when it moves; a reader placed again when a value it read changes, or when a
-//! layout nearer to it starts providing that ruler.
+//! layout nearer to it starts providing that ruler. A coordinator in a lookahead scope has the same for its
+//! lookahead side (its lookahead delegate's, read while placing in lookahead): `lookahead` picks the side.
 
 use super::{LayoutNode, NodeCoordinator, ReaderScope};
 use crate::layout::{IsRulerProvided, LayoutCoordinates, MeasureResult, Ruler, RulerProvider, RulerScope};
@@ -23,7 +24,7 @@ enum Access {
     New,
 }
 
-/// A coordinator's rulers: their values, who read which, and what provides them.
+/// A coordinator's rulers (or its lookahead delegate's): their values, who read which, and what provides them.
 #[derive(Default)]
 pub(crate) struct CoordinatorRulers {
     values: RefCell<Vec<(Ruler, f32, Access)>>,
@@ -80,59 +81,105 @@ impl CoordinatorRulers {
     }
 }
 
-/// Each of `nodes` placed again (Compose's `notifyRulerValueChange`).
-fn relayout(nodes: Vec<Weak<LayoutNode>>) {
+/// Each of `nodes` placed again, in lookahead for a lookahead side's readers (Compose's
+/// `notifyRulerValueChange`).
+fn relayout(nodes: Vec<Weak<LayoutNode>>, lookahead: bool) {
     for node in nodes.into_iter().filter_map(|n| n.upgrade()) {
-        node.request_relayout();
+        if lookahead {
+            node.request_lookahead_relayout(false);
+        } else {
+            node.request_relayout();
+        }
     }
 }
 
 impl NodeCoordinator {
-    /// Its rulers' state, made when first needed.
-    fn rulers(&self) -> Rc<CoordinatorRulers> {
-        if let Some(r) = self.rulers.borrow().as_ref() {
-            return r.clone();
+    /// The slot of its rulers' state on one side.
+    fn rulers_slot<R>(&self, lookahead: bool, f: impl FnOnce(&RefCell<Option<Rc<CoordinatorRulers>>>) -> R) -> R {
+        if lookahead {
+            let delegate = self.lookahead_delegate().expect("kompoz: lookahead rulers without lookahead");
+            f(&delegate.rulers)
+        } else {
+            f(&self.rulers)
         }
-        let r = Rc::new(CoordinatorRulers::default());
-        *self.rulers.borrow_mut() = Some(r.clone());
-        r
     }
 
-    fn rulers_if_any(&self) -> Option<Rc<CoordinatorRulers>> {
-        self.rulers.borrow().clone()
+    /// Its rulers' state on one side, made when first needed.
+    fn rulers(&self, lookahead: bool) -> Rc<CoordinatorRulers> {
+        self.rulers_slot(lookahead, |slot| {
+            if let Some(r) = slot.borrow().as_ref() {
+                return r.clone();
+            }
+            let r = Rc::new(CoordinatorRulers::default());
+            *slot.borrow_mut() = Some(r.clone());
+            r
+        })
     }
 
-    pub(crate) fn provide_ruler_value(&self, ruler: Ruler, value: f32) {
-        self.rulers().set(ruler, value);
+    fn rulers_if_any(&self, lookahead: bool) -> Option<Rc<CoordinatorRulers>> {
+        if lookahead && self.lookahead_delegate().is_none() {
+            return None;
+        }
+        self.rulers_slot(lookahead, |slot| slot.borrow().clone())
     }
 
-    pub(crate) fn provide_relative_ruler_value(&self, ruler: Ruler, value: f32) {
+    /// The coordinator providing to this side's parent (Compose's LookaheadCapablePlaceable `parent`): the one
+    /// wrapping it (with a lookahead delegate on the lookahead side).
+    fn ruler_parent(&self, lookahead: bool) -> Option<Rc<NodeCoordinator>> {
+        let parent = self.wrapped_by()?;
+        if lookahead && parent.lookahead_delegate().is_none() {
+            return None;
+        }
+        Some(parent)
+    }
+
+    fn side_coordinates(&self, lookahead: bool) -> LayoutCoordinates {
+        if lookahead { LayoutCoordinates::lookahead_of(self.rc()) } else { LayoutCoordinates::of(self.rc()) }
+    }
+
+    fn side_placing_for_alignment(&self, lookahead: bool) -> bool {
+        if lookahead {
+            self.lookahead_delegate().is_some_and(|d| d.placing_for_alignment.get())
+        } else {
+            self.placing_for_alignment.get()
+        }
+    }
+
+    pub(crate) fn provide_ruler_value(&self, ruler: Ruler, value: f32, lookahead: bool) {
+        self.rulers(lookahead).set(ruler, value);
+    }
+
+    pub(crate) fn provide_relative_ruler_value(&self, ruler: Ruler, value: f32, lookahead: bool) {
         let ltr = self.layout_node().is_none_or(|n| n.layout_direction() == LayoutDirection::Ltr);
-        let value = if ltr { value } else { self.measured_size.get().width as f32 - value };
-        self.rulers().set(ruler, value);
+        let width = match self.lookahead_delegate() {
+            Some(d) if lookahead => d.width(),
+            _ => self.measured_size.get().width,
+        };
+        let value = if ltr { value } else { width as f32 - value };
+        self.rulers(lookahead).set(ruler, value);
     }
 
     /// Where it is in the window, rounded, and its size (what a ruler provider reading its coordinates depends on).
-    fn position_and_size(&self) -> (IntOffset, kompoz_graphics::IntSize) {
-        let coordinates = LayoutCoordinates::of(self.rc());
+    fn position_and_size(&self, lookahead: bool) -> (IntOffset, kompoz_graphics::IntSize) {
+        let coordinates = self.side_coordinates(lookahead);
         (coordinates.position_in_window().round(), coordinates.size())
     }
 
     /// `ruler`'s value where this places, else `default` (Compose's `findRulerValue`): from itself up, the first
     /// coordinator holding a value for it, or a provider that may provide it (run now, observed), mapped into this
     /// one; the reader is noted where it was found (at the root when nothing provides it).
-    pub(crate) fn find_ruler_value(&self, ruler: &Ruler, default: f32) -> f32 {
-        if self.placing_for_alignment.get() {
+    pub(crate) fn find_ruler_value(&self, ruler: &Ruler, default: f32, lookahead: bool) -> f32 {
+        if self.side_placing_for_alignment(lookahead) {
             return default;
         }
         let Some(reader) = self.layout_node() else { return default };
-        let this = self.rc();
-        let mut p = this.clone();
+        let this = self.side_coordinates(lookahead);
+        let mut p = self.rc();
         loop {
-            let rulers = p.rulers_if_any();
+            let rulers = p.rulers_if_any(lookahead);
             if let Some(value) = rulers.as_ref().and_then(|r| r.value(ruler)) {
-                p.add_ruler_reader(&reader, ruler);
-                return ruler.calculate_coordinate(value, &p, &this);
+                p.add_ruler_reader(&reader, ruler, lookahead);
+                return ruler.calculate_coordinate(value, &p.side_coordinates(lookahead), &this);
             }
             if let Some(rulers) = &rulers {
                 let provider = rulers.provider.borrow().clone();
@@ -140,17 +187,17 @@ impl NodeCoordinator {
                 if let (Some(provider), Some(provided)) = (provider, provided)
                     && provided(ruler)
                 {
-                    p.provide_single_ruler(rulers, &provider, ruler);
-                    p.add_ruler_reader(&reader, ruler);
+                    p.provide_single_ruler(rulers, &provider, ruler, lookahead);
+                    p.add_ruler_reader(&reader, ruler, lookahead);
                     if let Some(value) = rulers.value(ruler) {
-                        return ruler.calculate_coordinate(value, &p, &this);
+                        return ruler.calculate_coordinate(value, &p.side_coordinates(lookahead), &this);
                     }
                 }
             }
-            match p.wrapped_by() {
+            match p.ruler_parent(lookahead) {
                 Some(parent) => p = parent,
                 None => {
-                    p.add_ruler_reader(&reader, ruler);
+                    p.add_ruler_reader(&reader, ruler, lookahead);
                     return default;
                 }
             }
@@ -159,7 +206,13 @@ impl NodeCoordinator {
 
     /// Runs the provider for `ruler`, what it reads observed (a change drops the value and places its readers
     /// again: Compose's `onCommitAffectingSingleRuler`).
-    fn provide_single_ruler(&self, rulers: &Rc<CoordinatorRulers>, provider: &RulerProvider, ruler: &Ruler) {
+    fn provide_single_ruler(
+        &self,
+        rulers: &Rc<CoordinatorRulers>,
+        provider: &RulerProvider,
+        ruler: &Ruler,
+        lookahead: bool,
+    ) {
         let state = {
             let mut scopes = rulers.scopes.borrow_mut();
             match scopes.iter().find(|(r, _)| r == ruler) {
@@ -175,7 +228,7 @@ impl NodeCoordinator {
         let this = self.rc();
         let density = self.layout_node().map(|n| n.density()).unwrap_or_default();
         let run = || {
-            let scope = RulerScope { coordinator: &this, state: &state, density };
+            let scope = RulerScope { coordinator: &this, state: &state, density, lookahead };
             provider(&scope, ruler);
         };
         match self.layout_node().and_then(|n| n.owner()) {
@@ -190,7 +243,7 @@ impl NodeCoordinator {
                             let which = ruler.clone();
                             let s = observer.scope(move || {
                                 if let Some(c) = weak.upgrade().filter(|c| c.is_attached()) {
-                                    c.reset_single_ruler_read(&which);
+                                    c.reset_single_ruler_read(&which, lookahead);
                                 }
                             });
                             single.push((ruler.clone(), s.clone()));
@@ -205,8 +258,8 @@ impl NodeCoordinator {
     }
 
     /// Notes that `reader` read `ruler` from here.
-    fn add_ruler_reader(&self, reader: &Rc<LayoutNode>, ruler: &Ruler) {
-        let rulers = self.rulers();
+    fn add_ruler_reader(&self, reader: &Rc<LayoutNode>, ruler: &Ruler, lookahead: bool) {
+        let rulers = self.rulers(lookahead);
         let mut readers = rulers.readers.borrow_mut();
         for (_, set) in readers.iter_mut() {
             set.retain(|n| n.upgrade().is_some_and(|n| n.is_attached()));
@@ -225,13 +278,13 @@ impl NodeCoordinator {
 
     /// The nearest coordinator from here up providing `ruler`, else the root (Compose's
     /// `findAncestorRulerDefiner`).
-    fn find_ancestor_ruler_definer(&self, ruler: &Ruler) -> Rc<NodeCoordinator> {
+    fn find_ancestor_ruler_definer(&self, ruler: &Ruler, lookahead: bool) -> Rc<NodeCoordinator> {
         let mut p = self.rc();
         loop {
-            if p.rulers_if_any().is_some_and(|r| r.contains(ruler)) {
+            if p.rulers_if_any(lookahead).is_some_and(|r| r.contains(ruler)) {
                 return p;
             }
-            match p.wrapped_by() {
+            match p.ruler_parent(lookahead) {
                 Some(parent) => p = parent,
                 None => return p,
             }
@@ -240,26 +293,26 @@ impl NodeCoordinator {
 
     /// What read `ruler` from the coordinator that provided it to what this places placed again: this provides
     /// it now (Compose's `invalidateChildrenOfDefiningRuler`).
-    fn invalidate_children_of_defining_ruler(&self, ruler: &Ruler) {
-        let definer = self.find_ancestor_ruler_definer(ruler);
-        let readers = definer.rulers_if_any().map(|r| r.take_readers(ruler)).unwrap_or_default();
-        relayout(readers);
+    fn invalidate_children_of_defining_ruler(&self, ruler: &Ruler, lookahead: bool) {
+        let definer = self.find_ancestor_ruler_definer(ruler, lookahead);
+        let readers = definer.rulers_if_any(lookahead).map(|r| r.take_readers(ruler)).unwrap_or_default();
+        relayout(readers, lookahead);
     }
 
     /// Captures the rulers its measure result provides, if they have to be (Compose's `captureRulersIfNeeded`, as
     /// it is placed): another block or provider, or one that read its coordinates now that it moved.
-    pub(crate) fn capture_rulers_if_needed(&self, result: Option<&MeasureResult>) {
-        if self.placing_for_alignment.get() {
+    pub(crate) fn capture_rulers_if_needed(&self, result: Option<&MeasureResult>, lookahead: bool) {
+        if self.side_placing_for_alignment(lookahead) {
             return;
         }
         let Some(result) = result else {
-            self.reset_provided_rulers();
+            self.reset_provided_rulers(lookahead);
             return;
         };
-        if result.rulers.is_none() && result.ruler_provider.is_none() && self.rulers_if_any().is_none() {
+        if result.rulers.is_none() && result.ruler_provider.is_none() && self.rulers_if_any(lookahead).is_none() {
             return;
         }
-        let rulers = self.rulers();
+        let rulers = self.rulers(lookahead);
         *rulers.result.borrow_mut() = Some(result.clone());
         if let Some((provided, provider)) = &result.ruler_provider {
             let same = rulers.provider.borrow().as_ref().is_some_and(|p| Rc::ptr_eq(p, provider))
@@ -268,20 +321,14 @@ impl NodeCoordinator {
                 *rulers.provider.borrow_mut() = Some(provider.clone());
                 *rulers.provided.borrow_mut() = Some(provided.clone());
                 *rulers.lambda.borrow_mut() = None;
-                self.reset_provided_rulers();
+                self.reset_provided_rulers(lookahead);
                 return;
             }
-            let accessed: Vec<(Ruler, Rc<RulerScopeState>)> = rulers
-                .scopes
-                .borrow()
-                .iter()
-                .filter(|(_, s)| s.coordinates_accessed.get())
-                .map(|(r, s)| (r.clone(), s.clone()))
-                .collect();
-            if accessed.is_empty() {
+            let accessed = rulers.scopes.borrow().iter().any(|(_, s)| s.coordinates_accessed.get());
+            if !accessed {
                 return;
             }
-            let (position, size) = self.position_and_size();
+            let (position, size) = self.position_and_size(lookahead);
             for (ruler, state) in rulers.scopes.borrow().iter() {
                 let reevaluate = state.coordinates_accessed.get()
                     && (state.size.get() != size || state.position.get() != Some(position));
@@ -290,14 +337,14 @@ impl NodeCoordinator {
                 state.coordinates_accessed.set(false);
                 if reevaluate {
                     rulers.remove(ruler);
-                    relayout(rulers.take_readers(ruler));
+                    relayout(rulers.take_readers(ruler), lookahead);
                 }
             }
             return;
         }
         let Some(lambda) = result.rulers.clone() else {
             // Nothing provided any more: what read a value placed again.
-            self.reset_provided_rulers();
+            self.reset_provided_rulers(lookahead);
             *rulers.lambda.borrow_mut() = None;
             *rulers.provider.borrow_mut() = None;
             *rulers.provided.borrow_mut() = None;
@@ -310,12 +357,12 @@ impl NodeCoordinator {
         let mut recapture = !rulers.lambda.borrow().as_ref().is_some_and(|l| Rc::ptr_eq(l, &lambda));
         let mut at = (None, kompoz_graphics::IntSize::Zero);
         if !recapture && rulers.scope.coordinates_accessed.get() {
-            let (position, size) = self.position_and_size();
+            let (position, size) = self.position_and_size(lookahead);
             at = (Some(position), size);
             recapture = Some(position) != rulers.scope.position.get() || size != rulers.scope.size.get();
         }
         if recapture {
-            self.capture_rulers(&rulers, &lambda, at.0, at.1);
+            self.capture_rulers(&rulers, &lambda, at.0, at.1, lookahead);
             *rulers.lambda.borrow_mut() = Some(lambda);
         }
     }
@@ -328,6 +375,7 @@ impl NodeCoordinator {
         lambda: &RulersBlock,
         position: Option<IntOffset>,
         size: kompoz_graphics::IntSize,
+        lookahead: bool,
     ) {
         if rulers.capturing.replace(true) {
             return;
@@ -341,7 +389,7 @@ impl NodeCoordinator {
             rulers.scope.coordinates_accessed.set(false);
             rulers.scope.position.set(position);
             rulers.scope.size.set(size);
-            let scope = RulerScope { coordinator: &this, state: &rulers.scope, density };
+            let scope = RulerScope { coordinator: &this, state: &rulers.scope, density, lookahead };
             lambda(&scope);
         };
         match self.layout_node().and_then(|n| n.owner()) {
@@ -352,7 +400,7 @@ impl NodeCoordinator {
                     let weak = Rc::downgrade(&this);
                     let s = observer.scope(move || {
                         if let Some(c) = weak.upgrade().filter(|c| c.is_attached()) {
-                            c.on_commit_affecting_rulers();
+                            c.on_commit_affecting_rulers(lookahead);
                         }
                     });
                     *rulers.reads.borrow_mut() = Some(s.clone());
@@ -384,47 +432,47 @@ impl NodeCoordinator {
         for ruler in &changed {
             nodes.extend(rulers.take_readers(ruler));
         }
-        let parent = self.wrapped_by();
+        let parent = self.ruler_parent(lookahead);
         for ruler in &new {
             match &parent {
-                Some(p) => p.invalidate_children_of_defining_ruler(ruler),
-                None => self.invalidate_children_of_defining_ruler(ruler),
+                Some(p) => p.invalidate_children_of_defining_ruler(ruler, lookahead),
+                None => self.invalidate_children_of_defining_ruler(ruler, lookahead),
             }
         }
-        relayout(nodes);
+        relayout(nodes, lookahead);
     }
 
     /// What the rulers block read changed (Compose's `onCommitAffectingRuler`): captured again from the last measure
     /// result.
-    fn on_commit_affecting_rulers(&self) {
-        let Some(rulers) = self.rulers_if_any() else { return };
+    fn on_commit_affecting_rulers(&self, lookahead: bool) {
+        let Some(rulers) = self.rulers_if_any(lookahead) else { return };
         let Some(result) = rulers.result.borrow().clone() else { return };
         if result.ruler_provider.is_some() {
-            self.reset_provided_rulers();
+            self.reset_provided_rulers(lookahead);
         } else if let Some(lambda) = result.rulers.clone() {
-            self.capture_rulers(&rulers, &lambda, None, kompoz_graphics::IntSize::Zero);
+            self.capture_rulers(&rulers, &lambda, None, kompoz_graphics::IntSize::Zero, lookahead);
             *rulers.lambda.borrow_mut() = Some(lambda);
         } else {
             *rulers.lambda.borrow_mut() = None;
-            self.reset_provided_rulers();
+            self.reset_provided_rulers(lookahead);
         }
     }
 
     /// What the provider read for `ruler` changed: its value dropped, its readers placed again (Compose's
     /// `resetSingleRulerRead`).
-    fn reset_single_ruler_read(&self, ruler: &Ruler) {
-        let Some(rulers) = self.rulers_if_any() else { return };
+    fn reset_single_ruler_read(&self, ruler: &Ruler, lookahead: bool) {
+        let Some(rulers) = self.rulers_if_any(lookahead) else { return };
         rulers.remove(ruler);
-        relayout(rulers.take_readers(ruler));
+        relayout(rulers.take_readers(ruler), lookahead);
     }
 
     /// Every value dropped, every reader placed again (Compose's `resetProvidedRulers`).
-    pub(crate) fn reset_provided_rulers(&self) {
-        let Some(rulers) = self.rulers_if_any() else { return };
+    pub(crate) fn reset_provided_rulers(&self, lookahead: bool) {
+        let Some(rulers) = self.rulers_if_any(lookahead) else { return };
         rulers.values.borrow_mut().clear();
         let readers = std::mem::take(&mut *rulers.readers.borrow_mut());
         for (_, nodes) in readers {
-            relayout(nodes);
+            relayout(nodes, lookahead);
         }
     }
 }

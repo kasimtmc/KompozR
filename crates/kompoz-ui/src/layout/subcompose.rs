@@ -546,6 +546,14 @@ pub(crate) struct LayoutNodeSubcompositionsState {
     reusable_slot_ids: RefCell<SlotIdsSet>,
     reusable_count: Cell<usize>,
     precomposed_count: Cell<usize>,
+    /// In a lookahead scope, how many slots the approach measure asked for so far (Compose's `currentApproachIndex`).
+    current_approach_index: Cell<usize>,
+    /// The slots the approach pass precomposed, which it disposes of once neither pass needs them (Compose's
+    /// `approachPrecomposeSlotHandleMap`).
+    approach_precompose_slot_handle_map: RefCell<Vec<(SlotKey, PrecomposedSlotHandle)>>,
+    /// The ids of the slots the approach pass needs, in the order it asked for them; none past
+    /// `current_approach_index` (Compose's `slotIdsOfCompositionsNeededInApproach`).
+    slot_ids_of_compositions_needed_in_approach: RefCell<Vec<Option<SlotKey>>>,
 }
 
 /// What asking a subcomposing layout for an intrinsic size panics with (Compose's `NoIntrinsicsMessage`).
@@ -570,6 +578,9 @@ impl LayoutNodeSubcompositionsState {
             reusable_slot_ids: RefCell::new(SlotIdsSet::default()),
             reusable_count: Cell::new(0),
             precomposed_count: Cell::new(0),
+            current_approach_index: Cell::new(0),
+            approach_precompose_slot_handle_map: RefCell::new(Vec::new()),
+            slot_ids_of_compositions_needed_in_approach: RefCell::new(Vec::new()),
         })
     }
 
@@ -583,7 +594,7 @@ impl LayoutNodeSubcompositionsState {
         if !same {
             *self.slot_reuse_policy.borrow_mut() = policy;
             self.mark_active_nodes_as_reused(false);
-            self.root().invalidate_measurements();
+            self.root().request_remeasure(false);
         }
     }
 
@@ -615,13 +626,19 @@ impl LayoutNodeSubcompositionsState {
 
     /// Composes `slot_id`'s `content` while measuring (Compose's `subcompose`): the slot used before, a
     /// precomposed one, one kept for reuse, or a new one; moved to its place among the active slots. Its layouts,
-    /// to measure.
+    /// to measure (in lookahead, their lookahead pass delegates).
     fn subcompose(&self, slot_id: SlotKey, content: Rc<dyn Fn()>) -> Vec<Rc<dyn Measurable>> {
         self.make_sure_state_is_consistent();
         let root = self.root();
         let layout_state = root.layout_state.get();
         assert!(
-            layout_state == LayoutState::Measuring || layout_state == LayoutState::LayingOut,
+            matches!(
+                layout_state,
+                LayoutState::Measuring
+                    | LayoutState::LayingOut
+                    | LayoutState::LookaheadMeasuring
+                    | LayoutState::LookaheadLayingOut
+            ),
             "kompoz: subcompose can only be used inside the measure or layout blocks"
         );
         let existing = self.slot_id_to_node.borrow().get(&slot_id).cloned();
@@ -658,7 +675,118 @@ impl LayoutNodeSubcompositionsState {
         }
         self.current_index.set(current + 1);
         self.subcompose_slot(&slot, false, content);
-        slot.nodes().into_iter().map(|n| n as Rc<dyn Measurable>).collect()
+        if layout_state == LayoutState::Measuring || layout_state == LayoutState::LayingOut {
+            slot.nodes().into_iter().map(|n| n as Rc<dyn Measurable>).collect()
+        } else {
+            slot.nodes().into_iter().map(|n| n.lookahead_pass_delegate() as Rc<dyn Measurable>).collect()
+        }
+    }
+
+    /// The approach measure's `subcompose` (Compose's ApproachMeasureScopeImpl `subcompose`): the layouts the lookahead
+    /// pass composed for `slot_id`, or, the lookahead not having asked for it, the slot composed for the approach.
+    fn subcompose_in_approach(&self, slot_id: SlotKey, content: Rc<dyn Fn()>) -> Vec<Rc<dyn Measurable>> {
+        let node_in_slot = self.slot_id_to_node.borrow().get(&slot_id).cloned();
+        if let Some(slot) = node_in_slot {
+            let index = self.folded.borrow().iter().position(|s| Rc::ptr_eq(s, &slot));
+            if index.is_some_and(|i| i < self.current_index.get()) {
+                return slot.nodes().into_iter().map(|n| n as Rc<dyn Measurable>).collect();
+            }
+        }
+        self.approach_subcompose(slot_id, content)
+    }
+
+    /// A slot the approach needs but the lookahead didn't compose (Compose's `approachSubcompose`): precomposed for
+    /// the approach (or one the lookahead composed and no longer needs taken over), its layouts measured and placed
+    /// in lookahead by their own approach (they missed their parent's lookahead).
+    fn approach_subcompose(&self, slot_id: SlotKey, content: Rc<dyn Fn()>) -> Vec<Rc<dyn Measurable>> {
+        let index = self.current_approach_index.get();
+        {
+            let mut needed = self.slot_ids_of_compositions_needed_in_approach.borrow_mut();
+            assert!(
+                needed.len() >= index,
+                "Error: currentApproachIndex cannot be greater than the size of theapproachComposedSlotIds list."
+            );
+            if needed.len() == index {
+                needed.push(Some(slot_id.clone()));
+            } else {
+                needed[index] = Some(slot_id.clone());
+            }
+        }
+        self.current_approach_index.set(index + 1);
+        let node_for_slot = self.slot_id_to_node.borrow().get(&slot_id).cloned();
+        let precomposed = self.precompose_map.borrow().contains_key(&slot_id);
+        if !precomposed && node_for_slot.is_none() {
+            // Not composed in lookahead nor precomposed: precomposed for the approach, which disposes of it once
+            // it needs it no longer.
+            let handle = self.precompose(slot_id.clone(), content);
+            self.approach_precompose_slot_handle_map.borrow_mut().push((slot_id.clone(), handle));
+        } else {
+            if let (false, Some(slot)) = (precomposed, &node_for_slot) {
+                // Composed in lookahead, not needed there any more: the approach takes it over (moved to the
+                // precomposed ones at the end), to dispose of it once it needs it no longer.
+                let index = self.folded.borrow().iter().position(|s| Rc::ptr_eq(s, slot)).unwrap();
+                let len = self.folded.borrow().len();
+                self.move_slots(index, len - 1, 1);
+                self.precomposed_count.set(self.precomposed_count.get() + 1);
+                self.slot_id_to_node.borrow_mut().remove(&slot_id);
+                self.precompose_map.borrow_mut().insert(slot_id.clone(), slot.clone());
+                let handle = self.create_precomposed_slot_handle(slot_id.clone());
+                self.approach_precompose_slot_handle_map.borrow_mut().push((slot_id.clone(), handle));
+                if self.root().is_attached() {
+                    self.make_sure_state_is_consistent();
+                }
+            }
+            let slot = self.precompose_map.borrow().get(&slot_id).cloned();
+            if let Some(slot) = slot {
+                if slot.force_recompose.get() {
+                    self.subcompose_slot(&slot, false, content);
+                }
+                if slot.paused.borrow().is_some() {
+                    self.apply_paused_precomposition(&slot, true);
+                }
+            }
+        }
+        let slot = self.precompose_map.borrow().get(&slot_id).cloned();
+        match slot {
+            Some(slot) => slot
+                .nodes()
+                .into_iter()
+                .map(|n| {
+                    // (Compose's `markDetachedFromParentLookaheadPass`)
+                    n.detached_from_parent_lookahead_pass.set(true);
+                    n as Rc<dyn Measurable>
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// The slots the approach owns and no pass needs any more disposed of (Compose's
+    /// `disposeUnusedSlotsInApproach`).
+    fn dispose_unused_slots_in_approach(&self) {
+        let entries = std::mem::take(&mut *self.approach_precompose_slot_handle_map.borrow_mut());
+        let mut kept = Vec::new();
+        for (slot_id, handle) in entries {
+            let position = self
+                .slot_ids_of_compositions_needed_in_approach
+                .borrow()
+                .iter()
+                .position(|s| s.as_ref() == Some(&slot_id));
+            match position {
+                Some(i) if i < self.current_approach_index.get() => kept.push((slot_id, handle)),
+                _ => {
+                    if let Some(i) = position {
+                        self.slot_ids_of_compositions_needed_in_approach.borrow_mut()[i] = None;
+                    }
+                    if self.precompose_map.borrow().contains_key(&slot_id) {
+                        handle.dispose();
+                    }
+                }
+            }
+        }
+        let mut map = self.approach_precompose_slot_handle_map.borrow_mut();
+        kept.append(&mut map);
+        *map = kept;
     }
 
     /// Composes a slot if its content changed, it has invalidations or is to be composed again (Compose's
@@ -932,6 +1060,8 @@ impl LayoutNodeSubcompositionsState {
         if self.slot_id_to_node.borrow().contains_key(&slot_id) {
             return;
         }
+        // (the approach yields what it precomposed of the slot to whoever precomposes it now)
+        self.approach_precompose_slot_handle_map.borrow_mut().retain(|(id, _)| *id != slot_id);
         let existing = self.precompose_map.borrow().get(&slot_id).cloned();
         let slot = match existing {
             Some(slot) => slot,
@@ -1006,6 +1136,10 @@ impl LayoutNodeSubcompositionsState {
             self.move_slots(item_index, reusable_start, 1);
             self.dispose_or_reuse_starting_from_index(reusable_start);
         }
+        // (a slot the approach still needs, disposed of by another: the approach measures again to compose it)
+        if self.slot_ids_of_compositions_needed_in_approach.borrow().iter().any(|s| s.as_ref() == Some(slot_id)) {
+            self.root().request_remeasure(true);
+        }
     }
 
     fn create_precomposed_slot_handle(&self, slot_id: SlotKey) -> PrecomposedSlotHandle {
@@ -1033,8 +1167,13 @@ impl LayoutNodeSubcompositionsState {
                 slot.force_recompose.set(true);
             }
             let root = self.root();
-            if !root.measure_pending.get() {
-                root.invalidate_measurements();
+            if root.lookahead_root.borrow().is_some() {
+                // (in a lookahead scope its lookahead composes the slots again)
+                if !root.lookahead_measure_pending.get() {
+                    root.request_lookahead_remeasure(false, true);
+                }
+            } else if !root.measure_pending.get() {
+                root.request_remeasure(false);
             }
         }
     }
@@ -1063,6 +1202,9 @@ impl LayoutNodeSubcompositionsState {
 fn reset_layout_state(slot: &Slot) {
     for node in slot.nodes() {
         node.measured_by_parent.set(UsageByParent::NotUsed);
+        if let Some(d) = node.lookahead_pass() {
+            d.measured_by_parent.set(UsageByParent::NotUsed);
+        }
     }
 }
 
@@ -1079,6 +1221,8 @@ pub type SubcomposeMeasureBlock = dyn Fn(&SubcomposeMeasureScope, Constraints) -
 pub struct SubcomposeMeasureScope {
     scope: MeasureScope,
     state: Rc<LayoutNodeSubcompositionsState>,
+    /// The approach measure's (Compose's ApproachMeasureScopeImpl): in a lookahead scope, the main pass.
+    approach: bool,
 }
 
 impl std::ops::Deref for SubcomposeMeasureScope {
@@ -1099,7 +1243,15 @@ impl SubcomposeMeasureScope {
         slot_id: K,
         content: impl Fn() + 'static,
     ) -> Vec<Rc<dyn Measurable>> {
-        self.state.subcompose(SlotKey::new(slot_id), Rc::new(content))
+        self.subcompose_key(SlotKey::new(slot_id), Rc::new(content))
+    }
+
+    fn subcompose_key(&self, slot_id: SlotKey, content: Rc<dyn Fn()>) -> Vec<Rc<dyn Measurable>> {
+        if self.approach {
+            self.state.subcompose_in_approach(slot_id, content)
+        } else {
+            self.state.subcompose(slot_id, content)
+        }
     }
 
     /// [`subcompose`](Self::subcompose) with content kept by its instance: the same `Rc` is the same content, not
@@ -1110,7 +1262,7 @@ impl SubcomposeMeasureScope {
         slot_id: K,
         content: Rc<dyn Fn()>,
     ) -> Vec<Rc<dyn Measurable>> {
-        self.state.subcompose(SlotKey::new(slot_id), content)
+        self.subcompose_key(SlotKey::new(slot_id), content)
     }
 
     /// The measure scope it is.
@@ -1128,17 +1280,37 @@ struct SubcomposeMeasurePolicy {
 impl MeasurePolicy for SubcomposeMeasurePolicy {
     fn measure(&self, scope: &MeasureScope, _: &[&dyn Measurable], constraints: Constraints) -> MeasureResult {
         let state = self.state.upgrade().expect("kompoz: a subcomposing layout's state is gone");
+        let in_lookahead_scope = state.root().lookahead_root.borrow().is_some();
+        let weak = self.state.clone();
+        if !scope.is_looking_ahead() && in_lookahead_scope {
+            // The approach: the slots the lookahead composed, and those only the approach needs.
+            state.current_approach_index.set(0);
+            let sub = SubcomposeMeasureScope { scope: scope.clone(), state: state.clone(), approach: true };
+            let result = (self.block)(&sub, constraints);
+            let index_after_measure = state.current_approach_index.get();
+            let placed = result.clone();
+            return result.with_placement(Rc::new(move |p: &PlacementScope| {
+                let Some(state) = weak.upgrade() else { return };
+                state.current_approach_index.set(index_after_measure);
+                placed.place_children(p);
+                state.dispose_unused_slots_in_approach();
+                state.dispose_or_reuse_starting_from_index(state.current_index.get());
+            }));
+        }
+        // The lookahead, or the main pass out of a lookahead scope.
         state.current_index.set(0);
-        let sub = SubcomposeMeasureScope { scope: scope.clone(), state: state.clone() };
+        let sub = SubcomposeMeasureScope { scope: scope.clone(), state: state.clone(), approach: false };
         let result = (self.block)(&sub, constraints);
         let index_after_measure = state.current_index.get();
         let placed = result.clone();
-        let weak = self.state.clone();
         result.with_placement(Rc::new(move |p: &PlacementScope| {
             let Some(state) = weak.upgrade() else { return };
             state.current_index.set(index_after_measure);
             placed.place_children(p);
-            state.dispose_or_reuse_starting_from_index(state.current_index.get());
+            // (in a lookahead scope the approach's placement disposes, once it had the chance to take slots over)
+            if state.root().lookahead_root.borrow().is_none() {
+                state.dispose_or_reuse_starting_from_index(state.current_index.get());
+            }
         }))
     }
 

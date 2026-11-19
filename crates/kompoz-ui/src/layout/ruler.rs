@@ -144,10 +144,10 @@ impl Ruler {
     pub(crate) fn calculate_coordinate(
         &self,
         coordinate: f32,
-        source: &Rc<NodeCoordinator>,
-        target: &Rc<NodeCoordinator>,
+        source: &LayoutCoordinates,
+        target: &LayoutCoordinates,
     ) -> f32 {
-        let size = source.measured_size.get();
+        let size = source.size();
         match self {
             Ruler::Vertical(_) => target.local_position_of(source, Offset::new(coordinate, size.height as f32 / 2.0)).x,
             Ruler::Horizontal(_) => {
@@ -264,6 +264,9 @@ pub struct RulerScope<'a> {
     pub(crate) coordinator: &'a Rc<NodeCoordinator>,
     pub(crate) state: &'a RulerScopeState,
     pub(crate) density: Density,
+    /// Providing the coordinator's lookahead rulers (its lookahead delegate's: Compose's LookaheadDelegate as the
+    /// LookaheadCapablePlaceable providing).
+    pub(crate) lookahead: bool,
 }
 
 impl RulerScope<'_> {
@@ -271,7 +274,11 @@ impl RulerScope<'_> {
     /// values out again whenever it moves or is resized.
     pub fn coordinates(&self) -> LayoutCoordinates {
         self.state.coordinates_accessed.set(true);
-        let coordinates = LayoutCoordinates::of(self.coordinator.clone());
+        let coordinates = if self.lookahead {
+            LayoutCoordinates::lookahead_of(self.coordinator.clone())
+        } else {
+            LayoutCoordinates::of(self.coordinator.clone())
+        };
         if self.state.position.get().is_none() {
             self.state.position.set(Some(coordinates.position_in_window().round()));
             self.state.size.set(coordinates.size());
@@ -283,13 +290,13 @@ impl RulerScope<'_> {
     /// `ruler` at `value` (px from the layout's left for a vertical one, its top for a horizontal one): Compose's
     /// `Ruler.provides`.
     pub fn provides(&self, ruler: impl Into<Ruler>, value: f32) {
-        self.coordinator.provide_ruler_value(ruler.into(), value);
+        self.coordinator.provide_ruler_value(ruler.into(), value, self.lookahead);
     }
 
     /// A vertical ruler at `value` from the start: from the left left to right, from the right right to left
     /// (Compose's `providesRelative`).
     pub fn provides_relative(&self, ruler: &VerticalRuler, value: f32) {
-        self.coordinator.provide_relative_ruler_value(ruler.into(), value);
+        self.coordinator.provide_relative_ruler_value(ruler.into(), value, self.lookahead);
     }
 }
 

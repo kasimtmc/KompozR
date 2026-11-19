@@ -4,10 +4,12 @@
 //! result and maybe a layer; the chain's other nodes belong to the coordinator after them, which is where they
 //! draw, hit test and report coordinates.
 
+use super::lookahead::{LookaheadDelegate, LookaheadPassDelegate};
 use super::{LayoutNode, ReaderScope};
 use crate::layout::{
-    AlignmentLine, GraphicsLayerScope, IntrinsicMeasurable, IntrinsicMeasureScope, LayerBlock, LayoutCoordinates,
-    Measurable, MeasureResult, MeasureScope, PlaceTarget, Placeable, PlacementScope,
+    AlignmentLine, ApproachLayoutModifierNode, ApproachMeasureScope, GraphicsLayerScope, IntrinsicMeasurable,
+    IntrinsicMeasureScope, LayerBlock, LayoutCoordinates, Measurable, MeasureResult, MeasureScope, MinMax, PlaceTarget,
+    Placeable, PlacementScope, Side,
 };
 use crate::modifier::{NodeKind, NodeRc, dispatch_for_kind};
 use crate::unit::Constraints;
@@ -54,7 +56,24 @@ pub struct NodeCoordinator {
     released: Cell<bool>,
     /// The rulers it provides and who read them (made when first needed).
     pub(crate) rulers: RefCell<Option<Rc<super::rulers::CoordinatorRulers>>>,
-    this: Weak<NodeCoordinator>,
+    /// Its lookahead side, while its layout node is in a lookahead scope (Compose's `lookaheadDelegate`).
+    lookahead: RefCell<Option<Rc<LookaheadDelegate>>>,
+    /// Placed under a motion frame of reference (Compose's `isPlacedUnderMotionFrameOfReference`): what
+    /// `local_position_of(…, include_motion_frame_of_reference = false)` leaves its offset out of.
+    pub(crate) placed_under_motion_frame_of_reference: Cell<bool>,
+    /// Its placement scope's `with_motion_frame_of_reference_placement` flag.
+    pub(crate) motion_frame_placement: Rc<Cell<bool>>,
+    /// Placed where its lookahead delegate is, whatever its placement block says (Compose's
+    /// `forcePlaceWithLookaheadOffset`: the approach of the approach node wrapping it is complete).
+    pub(crate) force_place_with_lookahead_offset: Cell<bool>,
+    /// Measured with its lookahead constraints, whatever it is given (Compose's
+    /// `forceMeasureWithLookaheadConstraints`: the measurement approach wrapping it is complete).
+    pub(crate) force_measure_with_lookahead_constraints: Cell<bool>,
+    /// A layout modifier coordinator's constraints in lookahead (Compose's `lookaheadConstraints`).
+    pub(crate) lookahead_constraints: Cell<Option<Constraints>>,
+    /// An approach node's: whether its last approach measure was needed (Compose's `approachMeasureRequired`).
+    pub(crate) approach_measure_required: Cell<bool>,
+    pub(crate) this: Weak<NodeCoordinator>,
 }
 
 impl NodeCoordinator {
@@ -76,6 +95,13 @@ impl NodeCoordinator {
             shallow_placing: Cell::new(false),
             released: Cell::new(false),
             rulers: RefCell::new(None),
+            lookahead: RefCell::new(None),
+            placed_under_motion_frame_of_reference: Cell::new(false),
+            motion_frame_placement: Rc::new(Cell::new(false)),
+            force_place_with_lookahead_offset: Cell::new(false),
+            force_measure_with_lookahead_constraints: Cell::new(false),
+            lookahead_constraints: Cell::new(None),
+            approach_measure_required: Cell::new(false),
             this: this.clone(),
         })
     }
@@ -192,7 +218,12 @@ impl NodeCoordinator {
     }
 
     pub(crate) fn measure_scope(&self) -> MeasureScope {
-        MeasureScope::for_node(&self.node())
+        MeasureScope::for_node(&self.node(), false)
+    }
+
+    /// The scope its lookahead delegate measures in (`is_looking_ahead`).
+    pub(crate) fn lookahead_measure_scope(&self) -> MeasureScope {
+        MeasureScope::for_node(&self.node(), true)
     }
 
     /// The scope its measure result's placement block places in (Compose's `placementScope`).
@@ -203,14 +234,114 @@ impl NodeCoordinator {
             parent_layout_direction: n.layout_direction(),
             density: n.density(),
             coordinator: Some(self.rc()),
+            lookahead: false,
+            motion_frame_of_reference: self.motion_frame_placement.clone(),
+        }
+    }
+
+    /// The scope its lookahead delegate's measure result places in (Compose's LookaheadDelegate `placementScope`).
+    pub(crate) fn lookahead_placement_scope(&self) -> PlacementScope {
+        let n = self.node();
+        let delegate = self.lookahead_delegate().expect("kompoz: a lookahead placement scope without lookahead");
+        PlacementScope {
+            parent_width: delegate.measured_size().width,
+            parent_layout_direction: n.layout_direction(),
+            density: n.density(),
+            coordinator: Some(self.rc()),
+            lookahead: true,
+            motion_frame_of_reference: delegate.motion_frame_placement.clone(),
+        }
+    }
+
+    // ---- Lookahead ----
+
+    /// Its lookahead side, if its layout node is in a lookahead scope.
+    pub(crate) fn lookahead_delegate(&self) -> Option<Rc<LookaheadDelegate>> {
+        self.lookahead.borrow().clone()
+    }
+
+    /// Gives it a lookahead side (Compose's `ensureLookaheadDelegateCreated`): its node is in a lookahead scope.
+    pub(crate) fn ensure_lookahead_delegate(&self) {
+        if self.lookahead.borrow().is_none() {
+            *self.lookahead.borrow_mut() = Some(LookaheadDelegate::new(self));
+        }
+    }
+
+    /// Its lookahead side dropped: its node left the lookahead scope it was in (what read its lookahead rulers
+    /// placed again).
+    pub(crate) fn clear_lookahead_delegate(&self) {
+        if self.lookahead.borrow().is_some() {
+            self.reset_provided_rulers(true);
+            self.lookahead.borrow_mut().take();
+        }
+    }
+
+    /// Its measure result in lookahead (Compose's lookahead `measure` of LayoutModifierNodeCoordinator's and
+    /// InnerNodeCoordinator's delegates): a layout modifier's `measure` (an approach node's plain one) with what it
+    /// wraps in lookahead, or the measure policy with the children's lookahead pass delegates.
+    pub(crate) fn measure_result_in_lookahead(&self, constraints: Constraints) -> MeasureResult {
+        let scope = self.lookahead_measure_scope();
+        match &self.kind {
+            CoordinatorKind::Inner => {
+                let n = self.node();
+                let children: Vec<Rc<LookaheadPassDelegate>> =
+                    n.children().iter().map(|c| c.lookahead_pass_delegate()).collect();
+                for c in &children {
+                    c.measured_by_parent.set(super::UsageByParent::NotUsed);
+                }
+                let refs: Vec<&dyn Measurable> = children.iter().map(|c| &**c as &dyn Measurable).collect();
+                let policy = n.measure_policy();
+                policy.measure(&scope, &refs, constraints)
+            }
+            CoordinatorKind::Modifier { .. } => {
+                self.lookahead_constraints.set(Some(constraints));
+                let wrapped = self.wrapped().and_then(|w| w.lookahead_delegate());
+                let wrapped = wrapped.expect("kompoz: a layout modifier coordinator wraps another in lookahead");
+                let cell = self.layout_cell().unwrap();
+                let mut node = cell.node.borrow_mut();
+                let layout = node.as_layout().expect("a layout coordinator's node is a layout node");
+                layout.measure(&scope, &*wrapped, constraints)
+            }
+        }
+    }
+
+    /// An intrinsic size of it in lookahead (Compose's LookaheadDelegate intrinsics): a layout modifier's own with
+    /// what it wraps in lookahead, or the measure policy's with the children's lookahead pass delegates.
+    pub(crate) fn lookahead_intrinsic(&self, min_max: MinMax, side: Side, size: i32) -> i32 {
+        match &self.kind {
+            CoordinatorKind::Inner => self.node().lookahead_policy_intrinsic(min_max, side, size),
+            CoordinatorKind::Modifier { .. } => {
+                let scope = self.lookahead_measure_scope();
+                let wrapped = self.wrapped().and_then(|w| w.lookahead_delegate());
+                let wrapped = wrapped.expect("kompoz: a layout modifier coordinator wraps another in lookahead");
+                let cell = self.layout_cell().unwrap();
+                let mut node = cell.node.borrow_mut();
+                let layout = node.as_layout().expect("a layout coordinator's node is a layout node");
+                modifier_intrinsic(layout, &scope, &*wrapped, min_max, side, size)
+            }
         }
     }
 
     // ---- Measuring ----
 
-    /// Measures: the layout modifier with what it wraps, or the measure policy with the children (Compose's
-    /// `measure` of LayoutModifierNodeCoordinator and InnerNodeCoordinator).
+    /// Measures: the layout modifier with what it wraps (an approach node by its approach, in the approach pass), or
+    /// the measure policy with the children (Compose's `measure` of LayoutModifierNodeCoordinator and
+    /// InnerNodeCoordinator). With its lookahead constraints instead of `constraints` when the measurement approach
+    /// wrapping it is complete.
     pub(crate) fn perform_measure(&self, constraints: Constraints) {
+        let constraints = if self.force_measure_with_lookahead_constraints.get() {
+            match &self.kind {
+                CoordinatorKind::Inner => self
+                    .lookahead_delegate()
+                    .expect("kompoz: forced lookahead constraints without lookahead")
+                    .constraints(),
+                CoordinatorKind::Modifier { .. } => {
+                    self.lookahead_constraints.get().expect("Lookahead constraints cannot be null in approach pass.")
+                }
+            }
+        } else {
+            constraints
+        };
         self.measurement_constraints.set(constraints);
         let scope = self.measure_scope();
         let result = match &self.kind {
@@ -228,12 +359,48 @@ impl NodeCoordinator {
                 let wrapped = self.wrapped().expect("a layout modifier coordinator wraps another");
                 let cell = self.layout_cell().unwrap();
                 let mut node = cell.node.borrow_mut();
-                let layout = node.as_layout().expect("a layout coordinator's node is a layout node");
-                layout.measure(&scope, &*wrapped, constraints)
+                match node.as_approach_layout() {
+                    Some(approach) => self.approach_measure(approach, scope, &wrapped, constraints),
+                    None => {
+                        let layout = node.as_layout().expect("a layout coordinator's node is a layout node");
+                        layout.measure(&scope, &*wrapped, constraints)
+                    }
+                }
             }
         };
         self.set_measure_result(result);
         self.on_measured();
+    }
+
+    /// An approach node's measure in the approach pass (Compose's LayoutModifierNodeCoordinator `measure` with an
+    /// approach measure scope): what it wraps measured with the lookahead constraints once its measurement approach
+    /// is complete (and the constraints the same as in lookahead), and then its lookahead size kept.
+    fn approach_measure(
+        &self,
+        approach: &mut dyn ApproachLayoutModifierNode,
+        scope: MeasureScope,
+        wrapped: &Rc<NodeCoordinator>,
+        constraints: Constraints,
+    ) -> MeasureResult {
+        let lookahead = self.lookahead_delegate().expect("kompoz: an approach node outside of a lookahead");
+        let lookahead_size = lookahead.measure_result().map_or(IntSize::Zero, |r| IntSize::new(r.width, r.height));
+        let required = approach.is_measurement_approach_in_progress(lookahead_size)
+            || Some(constraints) != self.lookahead_constraints.get();
+        self.approach_measure_required.set(required);
+        if !required {
+            wrapped.force_measure_with_lookahead_constraints.set(true);
+        }
+        let approach_scope = ApproachMeasureScope::new(scope, self.rc());
+        let result = approach.approach_measure(&approach_scope, &**wrapped, constraints);
+        wrapped.force_measure_with_lookahead_constraints.set(false);
+        let reached = result.width == lookahead.width() && result.height == lookahead.height();
+        let wrapped_at_lookahead =
+            wrapped.lookahead_delegate().is_some_and(|d| wrapped.measured_size.get() == d.size());
+        if !required && wrapped_at_lookahead && !reached {
+            result.with_size(lookahead.width(), lookahead.height())
+        } else {
+            result
+        }
     }
 
     /// Compose's `measureResult` setter: a new size resizes its layer or redraws its parent; new lines tell the
@@ -296,54 +463,39 @@ impl NodeCoordinator {
     }
 
     pub(crate) fn min_intrinsic_width(&self, height: i32) -> i32 {
-        self.intrinsic(
-            height,
-            |n, scope, m, h| n.min_intrinsic_width(scope, m, h),
-            |n, h| n.node_min_intrinsic_width(h),
-        )
+        self.intrinsic(MinMax::Min, Side::Width, height)
     }
     pub(crate) fn max_intrinsic_width(&self, height: i32) -> i32 {
-        self.intrinsic(
-            height,
-            |n, scope, m, h| n.max_intrinsic_width(scope, m, h),
-            |n, h| n.node_max_intrinsic_width(h),
-        )
+        self.intrinsic(MinMax::Max, Side::Width, height)
     }
     pub(crate) fn min_intrinsic_height(&self, width: i32) -> i32 {
-        self.intrinsic(
-            width,
-            |n, scope, m, w| n.min_intrinsic_height(scope, m, w),
-            |n, w| n.node_min_intrinsic_height(w),
-        )
+        self.intrinsic(MinMax::Min, Side::Height, width)
     }
     pub(crate) fn max_intrinsic_height(&self, width: i32) -> i32 {
-        self.intrinsic(
-            width,
-            |n, scope, m, w| n.max_intrinsic_height(scope, m, w),
-            |n, w| n.node_max_intrinsic_height(w),
-        )
+        self.intrinsic(MinMax::Max, Side::Height, width)
     }
 
-    fn intrinsic(
-        &self,
-        size: i32,
-        modifier: impl FnOnce(
-            &mut dyn crate::layout::LayoutModifierNode,
-            &IntrinsicMeasureScope,
-            &dyn IntrinsicMeasurable,
-            i32,
-        ) -> i32,
-        inner: impl FnOnce(&LayoutNode, i32) -> i32,
-    ) -> i32 {
+    /// An intrinsic size of it: its node's (measure policy and children), or its layout modifier's with what it
+    /// wraps — an approach node's approach intrinsics (Compose's LayoutModifierNodeCoordinator intrinsics).
+    fn intrinsic(&self, min_max: MinMax, side: Side, size: i32) -> i32 {
         match &self.kind {
-            CoordinatorKind::Inner => inner(&self.node(), size),
+            CoordinatorKind::Inner => self.node().policy_intrinsic(min_max, side, size),
             CoordinatorKind::Modifier { .. } => {
                 let scope = self.measure_scope();
                 let wrapped = self.wrapped().expect("a layout modifier coordinator wraps another");
                 let cell = self.layout_cell().unwrap();
                 let mut node = cell.node.borrow_mut();
+                if let Some(approach) = node.as_approach_layout() {
+                    let s = ApproachMeasureScope::new(scope, self.rc());
+                    return match (min_max, side) {
+                        (MinMax::Min, Side::Width) => approach.min_approach_intrinsic_width(&s, &*wrapped, size),
+                        (MinMax::Max, Side::Width) => approach.max_approach_intrinsic_width(&s, &*wrapped, size),
+                        (MinMax::Min, Side::Height) => approach.min_approach_intrinsic_height(&s, &*wrapped, size),
+                        (MinMax::Max, Side::Height) => approach.max_approach_intrinsic_height(&s, &*wrapped, size),
+                    };
+                }
                 let layout = node.as_layout().expect("a layout coordinator's node is a layout node");
-                modifier(layout, &scope, &*wrapped, size)
+                modifier_intrinsic(layout, &scope, &*wrapped, min_max, side, size)
             }
         }
     }
@@ -354,6 +506,11 @@ impl NodeCoordinator {
     /// layout modifier's nodes are told and its placement block places what it wraps; the inner one tells its
     /// layout node it was placed, which places the children.
     pub(crate) fn place_at(&self, position: IntOffset, z_index: f32, layer: Option<LayerBlock>) {
+        // (where its lookahead delegate is, once the placement approach wrapping it is complete)
+        let position = match self.lookahead_delegate() {
+            Some(d) if self.force_place_with_lookahead_offset.get() => d.position.get(),
+            _ => position,
+        };
         self.place_self(position, z_index, layer);
         if self.shallow_placing.get() {
             return;
@@ -363,13 +520,38 @@ impl NodeCoordinator {
             CoordinatorKind::Modifier { .. } => {
                 self.on_placed();
                 let wrapped = self.wrapped().expect("a layout modifier coordinator wraps another");
+                if let Some(complete) = self.approach_placement_complete(&wrapped) {
+                    wrapped.force_place_with_lookahead_offset.set(complete);
+                }
                 let was = wrapped.placing_for_alignment.replace(self.placing_for_alignment.get());
                 if let Some(result) = self.measure_result() {
                     result.place_children(&self.placement_scope());
                 }
                 wrapped.placing_for_alignment.set(was);
+                wrapped.force_place_with_lookahead_offset.set(false);
             }
         }
+    }
+
+    /// An approach node's: whether its approach is complete as it places (Compose's LayoutModifierNodeCoordinator
+    /// `onAfterPlaceAt`): its placement approach done, its measure approach not needed, it and what it wraps at
+    /// their lookahead sizes — what it wraps is then placed where it is in lookahead. None for another node.
+    fn approach_placement_complete(&self, wrapped: &Rc<NodeCoordinator>) -> Option<bool> {
+        let cell = self.layout_cell()?;
+        let lookahead = self.lookahead_delegate()?;
+        let in_progress = {
+            let mut node = cell.node.borrow_mut();
+            let approach = node.as_approach_layout()?;
+            approach.is_placement_approach_in_progress(&self.placement_scope(), &lookahead.coordinates())
+        };
+        let wrapped_at_lookahead =
+            wrapped.lookahead_delegate().is_some_and(|d| wrapped.measured_size.get() == d.size());
+        Some(
+            !in_progress
+                && !self.approach_measure_required.get()
+                && self.measured_size.get() == lookahead.size()
+                && wrapped_at_lookahead,
+        )
     }
 
     /// Places it again where it was, through the layer it had (Compose's `replace`).
@@ -407,7 +589,26 @@ impl NodeCoordinator {
         self.z_index.set(z_index);
         if !self.placing_for_alignment.get() {
             let result = self.measure_result();
-            self.capture_rulers_if_needed(result.as_ref());
+            self.capture_rulers_if_needed(result.as_ref(), false);
+        }
+    }
+
+    /// Placed under a motion frame of reference or not (Compose's LookaheadCapablePlaceable
+    /// `updatePlacedUnderMotionFrameOfReference`): a coordinator inside its node always; its node's outer one only
+    /// when its parent places it (a node placed again on its own keeps what its parent's placement said).
+    pub(crate) fn update_placed_under_motion_frame_of_reference(&self, new: bool) {
+        let node = self.layout_node();
+        let parent_node = self.wrapped_by().and_then(|w| w.layout_node());
+        let same = match (&parent_node, &node) {
+            (Some(p), Some(n)) => Rc::ptr_eq(p, n),
+            _ => false,
+        };
+        if same
+            || parent_node.is_some_and(|p| {
+                matches!(p.layout_state.get(), super::LayoutState::LayingOut | super::LayoutState::LookaheadLayingOut)
+            })
+        {
+            self.placed_under_motion_frame_of_reference.set(new);
         }
     }
 
@@ -447,7 +648,8 @@ impl NodeCoordinator {
     /// Its layout modifier node left the chain (Compose's `onRelease`).
     pub(crate) fn on_release(&self) {
         self.released.set(true);
-        self.reset_provided_rulers();
+        self.reset_provided_rulers(false);
+        self.reset_provided_rulers(true);
         self.invalidate_parent_layer();
         self.release_layer();
         if self.position.get() != IntOffset::Zero
@@ -602,15 +804,38 @@ impl NodeCoordinator {
 
     /// A point of its in the coordinator wrapping it: through its layer, then moved by its position.
     pub(crate) fn to_parent_position(&self, position: Offset) -> Offset {
+        self.to_parent_position_with(position, true)
+    }
+
+    /// The same, its position left out when it was placed under a motion frame of reference and
+    /// `include_motion_frame_of_reference` is false (Compose's `toParentPosition`).
+    pub(crate) fn to_parent_position_with(&self, position: Offset, include_motion_frame_of_reference: bool) -> Offset {
         let mapped = match self.layer.borrow().as_ref() {
             Some(l) => l.matrix.map(position),
             None => position,
         };
-        mapped + self.position.get().to_offset()
+        if !include_motion_frame_of_reference && self.placed_under_motion_frame_of_reference.get() {
+            mapped
+        } else {
+            mapped + self.position.get().to_offset()
+        }
     }
 
     pub(crate) fn parent_to_local_position(&self, position: Offset) -> Offset {
-        let relative = position - self.position.get().to_offset();
+        self.parent_to_local_position_with(position, true)
+    }
+
+    /// Compose's `fromParentPosition`.
+    pub(crate) fn parent_to_local_position_with(
+        &self,
+        position: Offset,
+        include_motion_frame_of_reference: bool,
+    ) -> Offset {
+        let relative = if !include_motion_frame_of_reference && self.placed_under_motion_frame_of_reference.get() {
+            position
+        } else {
+            position - self.position.get().to_offset()
+        };
         match self.layer.borrow().as_ref() {
             Some(l) => l.inverse.map(relative),
             None => relative,
@@ -661,26 +886,37 @@ impl NodeCoordinator {
     }
 
     pub(crate) fn local_position_of(&self, source: &Rc<NodeCoordinator>, relative: Offset) -> Offset {
+        self.local_position_of_with(source, relative, true)
+    }
+
+    /// A point of `source`'s in it (Compose's NodeCoordinator `localPositionOf` of a coordinator), the offsets of
+    /// what was placed under a motion frame of reference left out unless `include_motion_frame_of_reference`.
+    pub(crate) fn local_position_of_with(
+        &self,
+        source: &Rc<NodeCoordinator>,
+        relative: Offset,
+        include_motion_frame_of_reference: bool,
+    ) -> Offset {
         source.on_coordinates_used();
         let common = self.find_common_ancestor(source);
         let mut position = relative;
         let mut coordinator = source.clone();
         while !Rc::ptr_eq(&coordinator, &common) {
-            position = coordinator.to_parent_position(position);
+            position = coordinator.to_parent_position_with(position, include_motion_frame_of_reference);
             coordinator = coordinator.wrapped_by().expect("coordinators of one tree");
         }
-        self.ancestor_to_local(&common, position)
+        self.ancestor_to_local(&common, position, include_motion_frame_of_reference)
     }
 
-    fn ancestor_to_local(&self, ancestor: &Rc<NodeCoordinator>, offset: Offset) -> Offset {
+    fn ancestor_to_local(&self, ancestor: &Rc<NodeCoordinator>, offset: Offset, include: bool) -> Offset {
         if std::ptr::eq(self, &**ancestor) {
             return offset;
         }
         match self.wrapped_by() {
             Some(w) if !Rc::ptr_eq(&w, ancestor) => {
-                self.parent_to_local_position(w.ancestor_to_local(ancestor, offset))
+                self.parent_to_local_position_with(w.ancestor_to_local(ancestor, offset, include), include)
             }
-            _ => self.parent_to_local_position(offset),
+            _ => self.parent_to_local_position_with(offset, include),
         }
     }
 
@@ -847,6 +1083,15 @@ impl NodeCoordinator {
     }
 
     fn calculate_alignment_line(&self, line: AlignmentLine) -> i32 {
+        // (in a lookahead scope, the lines as the lookahead worked them out: Compose's main coordinators read their
+        // lookahead delegates')
+        if let Some(lookahead) = self.lookahead_delegate() {
+            return if self.is_inner() {
+                lookahead.calculate_alignment_line(line)
+            } else {
+                lookahead.cached_alignment_line(line)
+            };
+        }
         match &self.kind {
             CoordinatorKind::Inner => {
                 let n = self.node();
@@ -942,5 +1187,25 @@ impl PlaceTarget for NodeCoordinator {
     }
     fn parent_data(&self) -> Option<Rc<dyn Any>> {
         NodeCoordinator::parent_data(self)
+    }
+    fn update_placed_under_motion_frame_of_reference(&self, new: bool) {
+        NodeCoordinator::update_placed_under_motion_frame_of_reference(self, new);
+    }
+}
+
+/// A layout modifier's intrinsic size of `side`, from its four intrinsics functions.
+fn modifier_intrinsic(
+    layout: &mut dyn crate::layout::LayoutModifierNode,
+    scope: &IntrinsicMeasureScope,
+    measurable: &dyn IntrinsicMeasurable,
+    min_max: MinMax,
+    side: Side,
+    size: i32,
+) -> i32 {
+    match (min_max, side) {
+        (MinMax::Min, Side::Width) => layout.min_intrinsic_width(scope, measurable, size),
+        (MinMax::Max, Side::Width) => layout.max_intrinsic_width(scope, measurable, size),
+        (MinMax::Min, Side::Height) => layout.min_intrinsic_height(scope, measurable, size),
+        (MinMax::Max, Side::Height) => layout.max_intrinsic_height(scope, measurable, size),
     }
 }

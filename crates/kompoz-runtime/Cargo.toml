@@ -27,3 +27,7 @@ harness = false
 [[test]]
 name = "subcomposition"
 harness = false
+
+[[test]]
+name = "state_observer"
+harness = false

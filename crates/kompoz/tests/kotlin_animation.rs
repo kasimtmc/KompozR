@@ -178,14 +178,16 @@ fn animate_gives_values_and_velocities() {
 
 fn an_infinite_repeat_goes_on() {
     let ticks: Rc<RefCell<Vec<f32>>> = Rc::default();
-    let go = mutable_state_of(false);
+    let go = mutable_state_of(true);
     let (t, g) = (ticks.clone(), go.clone());
-    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+    // (Compose's way: the clock's auto advance off before composing — while it is on, the rule's
+    // InfiniteAnimationPolicy cancels infinite animations, which would never let it be idle)
+    let rule = KompozTestRule::empty();
+    rule.main_clock().set_auto_advance(false);
+    rule.set_content(kompozable_lambda!(move || {
         let t = t.clone();
         Forever(g.value(), move |v| t.borrow_mut().push(v));
     }));
-    // (started after the rule is idle: an infinite animation never lets it be)
-    go.set(true);
     rule.advance_time_by(1500);
     let ticks = ticks.borrow();
     // Round and round: up to 360, then from 0 again.

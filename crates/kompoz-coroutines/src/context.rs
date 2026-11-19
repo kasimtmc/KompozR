@@ -67,6 +67,14 @@ impl CoroutineContext {
     }
 }
 
+/// The same context (Kotlin compares contexts element by element; here one context is equal to its clones, which
+/// share its elements).
+impl PartialEq for CoroutineContext {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.elements, &other.elements)
+    }
+}
+
 impl std::ops::Add for CoroutineContext {
     type Output = CoroutineContext;
     fn add(self, other: CoroutineContext) -> CoroutineContext {

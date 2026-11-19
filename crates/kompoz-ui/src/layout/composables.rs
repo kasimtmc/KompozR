@@ -212,37 +212,129 @@ fn emit_virtual(content: Rc<dyn Fn()>) {
     emit(VirtualLayoutNode::new, |_: &VirtualLayoutNode| {}, move || content());
 }
 
-/// A virtual layout node (Compose's `LayoutNode(isVirtual = true)`): no layout of its own, its layouts are its
-/// parent's children in its place; its parent's multi-content policy measures them as one list.
+/// What a virtual node holds: a layout, or another virtual node (whose layouts are its, in its place).
+#[derive(Clone)]
+pub(crate) enum VirtualChild {
+    Layout(Rc<LayoutNode>),
+    Virtual(Rc<VirtualLayoutNode>),
+}
+
+/// A virtual layout node (Compose's `LayoutNode(isVirtual = true)`): no layout of its own, its layouts (those of the
+/// virtual nodes in it too) are its parent's children in its place; its parent's multi-content policy measures them
+/// as one list. A `LookaheadScope`'s is a virtual lookahead root (Compose's `isVirtualLookaheadRoot`): the layouts in
+/// it are in its lookahead scope.
 pub(crate) struct VirtualLayoutNode {
-    nodes: RefCell<Vec<Rc<LayoutNode>>>,
+    this: Weak<VirtualLayoutNode>,
+    children: RefCell<Vec<VirtualChild>>,
+    /// The layout node its layouts are children of.
     parent: RefCell<Weak<LayoutNode>>,
+    /// The virtual node it was emitted in, if any.
+    virtual_parent: RefCell<Weak<VirtualLayoutNode>>,
+    /// A `LookaheadScope`'s: its scope (it is a virtual lookahead root).
+    pub(crate) lookahead_scope: RefCell<Option<Rc<super::lookahead::LookaheadScopeImpl>>>,
 }
 
 impl VirtualLayoutNode {
-    fn new() -> Rc<VirtualLayoutNode> {
-        Rc::new(VirtualLayoutNode { nodes: RefCell::new(Vec::new()), parent: RefCell::new(Weak::new()) })
+    pub(crate) fn new() -> Rc<VirtualLayoutNode> {
+        Rc::new_cyclic(|this| VirtualLayoutNode {
+            this: this.clone(),
+            children: RefCell::new(Vec::new()),
+            parent: RefCell::new(Weak::new()),
+            virtual_parent: RefCell::new(Weak::new()),
+            lookahead_scope: RefCell::new(None),
+        })
     }
 
-    /// The layouts it holds, in order.
+    /// The layouts it holds, in order (those of the virtual nodes in it in their places).
     pub(crate) fn nodes(&self) -> Vec<Rc<LayoutNode>> {
-        self.nodes.borrow().clone()
+        let mut out = Vec::new();
+        for c in self.children.borrow().iter() {
+            match c {
+                VirtualChild::Layout(n) => out.push(n.clone()),
+                VirtualChild::Virtual(v) => out.extend(v.nodes()),
+            }
+        }
+        out
     }
 
+    pub(crate) fn weak(&self) -> Weak<VirtualLayoutNode> {
+        self.this.clone()
+    }
+
+    /// The layout node its layouts are children of.
+    pub(crate) fn parent(&self) -> Option<Rc<LayoutNode>> {
+        self.parent.borrow().upgrade()
+    }
+
+    /// Its layouts' parent is `parent` (the virtual nodes in it the same).
     pub(crate) fn set_parent(&self, parent: Weak<LayoutNode>) {
-        *self.parent.borrow_mut() = parent;
+        *self.parent.borrow_mut() = parent.clone();
+        for c in self.children.borrow().iter() {
+            if let VirtualChild::Virtual(v) = c {
+                v.set_parent(parent.clone());
+            }
+        }
+    }
+
+    /// Whether it is a `LookaheadScope`'s (Compose's `isVirtualLookaheadRoot`).
+    pub(crate) fn is_lookahead_root(&self) -> bool {
+        self.lookahead_scope.borrow().is_some()
+    }
+
+    /// The lookahead root of the layouts in it (Compose's virtual node's `lookaheadRoot`): itself as a
+    /// `LookaheadScope`'s, else the one of where it was emitted.
+    pub(crate) fn lookahead_root(&self) -> Option<crate::node::LookaheadRoot> {
+        if self.is_lookahead_root() {
+            return Some(crate::node::LookaheadRoot::Virtual(self.this.clone()));
+        }
+        if let Some(v) = self.virtual_parent.borrow().upgrade() {
+            return v.lookahead_root();
+        }
+        self.parent().and_then(|p| p.lookahead_root.borrow().clone())
     }
 }
 
 impl Node for VirtualLayoutNode {
     fn set_children(&self, children: &[Rc<dyn Node>]) {
-        let nodes = children
+        let new: Vec<VirtualChild> = children
             .iter()
-            .map(|c| (c.clone() as Rc<dyn Any>).downcast::<LayoutNode>().expect("kompoz: a node of another kind"))
+            .map(|c| {
+                let any = c.clone() as Rc<dyn Any>;
+                match any.downcast::<LayoutNode>() {
+                    Ok(n) => VirtualChild::Layout(n),
+                    Err(any) => VirtualChild::Virtual(
+                        any.downcast::<VirtualLayoutNode>().expect("kompoz: a node of another kind"),
+                    ),
+                }
+            })
             .collect();
-        *self.nodes.borrow_mut() = nodes;
-        let parent = self.parent.borrow().upgrade();
-        if let Some(parent) = parent {
+        // (those that left forget it; those that came know it: where they take their lookahead root from)
+        for old in self.children.borrow().iter() {
+            match old {
+                VirtualChild::Layout(n) => {
+                    if n.virtual_parent.borrow().ptr_eq(&self.this) {
+                        *n.virtual_parent.borrow_mut() = Weak::new();
+                    }
+                }
+                VirtualChild::Virtual(v) => {
+                    if v.virtual_parent.borrow().ptr_eq(&self.this) {
+                        *v.virtual_parent.borrow_mut() = Weak::new();
+                    }
+                }
+            }
+        }
+        let parent = self.parent.borrow().clone();
+        for c in &new {
+            match c {
+                VirtualChild::Layout(n) => *n.virtual_parent.borrow_mut() = self.this.clone(),
+                VirtualChild::Virtual(v) => {
+                    *v.virtual_parent.borrow_mut() = self.this.clone();
+                    v.set_parent(parent.clone());
+                }
+            }
+        }
+        *self.children.borrow_mut() = new;
+        if let Some(parent) = parent.upgrade() {
             parent.sync_virtual_children();
         }
     }
@@ -263,6 +355,14 @@ impl MultiContentMeasurePolicyImpl {
 impl MeasurePolicy for MultiContentMeasurePolicyImpl {
     fn measure(&self, scope: &MeasureScope, _: &[&dyn Measurable], constraints: Constraints) -> MeasureResult {
         let groups = Self::groups(scope);
+        if scope.is_looking_ahead() {
+            // (in lookahead, the children's lookahead pass delegates: Compose's `childLookaheadMeasurables`)
+            let delegates: Vec<Vec<Rc<crate::node::LookaheadPassDelegate>>> =
+                groups.iter().map(|g| g.iter().map(|n| n.lookahead_pass_delegate()).collect()).collect();
+            let refs: Vec<Vec<&dyn Measurable>> =
+                delegates.iter().map(|g| g.iter().map(|d| &**d as &dyn Measurable).collect()).collect();
+            return self.policy.measure(scope, &refs, constraints);
+        }
         let refs: Vec<Vec<&dyn Measurable>> =
             groups.iter().map(|g| g.iter().map(|n| &**n as &dyn Measurable).collect()).collect();
         self.policy.measure(scope, &refs, constraints)

@@ -3,18 +3,27 @@
 //! its placement changes, its children's place order kept for drawing, its alignment lines worked out.
 
 use super::alignment_lines::NOT_PLACED;
+use super::lookahead::{LookaheadPassDelegate, LookaheadRoot};
 use super::{LayoutNode, LayoutState, UsageByParent};
-use crate::layout::{AlignmentLine, IntrinsicMeasurable, LayerBlock, Measurable, PlaceTarget, Placeable};
+use crate::layout::{
+    AlignmentLine, IntrinsicMeasurable, LayerBlock, Measurable, MeasurePolicy, MinMax, PlaceTarget, Placeable, Side,
+};
 use crate::unit::Constraints;
 use kompoz_graphics::{IntOffset, IntSize};
 use std::any::Any;
 use std::rc::Rc;
 
 impl LayoutNode {
-    /// Measures it within `constraints` for its parent (Compose's `MeasurePassDelegate.measure`).
+    /// Measures it within `constraints` for its parent (Compose's `MeasurePassDelegate.measure`): a lookahead root
+    /// in lookahead first, then (all) in the main pass.
     fn measure_for_parent(&self, constraints: Constraints) -> Placeable {
         if self.intrinsics_usage_by_parent.get() == UsageByParent::NotUsed {
             self.clear_subtree_intrinsics_usage();
+        }
+        if self.is_out_most_lookahead_root() {
+            let d = self.lookahead_pass_delegate();
+            d.measured_by_parent.set(UsageByParent::NotUsed);
+            d.measure(constraints);
         }
         self.track_measurement_by_parent();
         self.remeasure(constraints);
@@ -33,7 +42,7 @@ impl LayoutNode {
                 let usage = match parent.layout_state.get() {
                     LayoutState::Measuring => UsageByParent::InMeasureBlock,
                     LayoutState::LayingOut => UsageByParent::InLayoutBlock,
-                    LayoutState::Idle => {
+                    _ => {
                         panic!("kompoz: a Measurable can only be measured from its parent's measure or placement block")
                     }
                 };
@@ -67,7 +76,7 @@ impl LayoutNode {
             return changed;
         }
         if let Some(owner) = self.owner() {
-            owner.force_measure_the_subtree(&self.rc());
+            owner.force_measure_the_subtree(&self.rc(), false);
         }
         self.reset_subtree_intrinsics_usage();
         false
@@ -147,32 +156,43 @@ impl LayoutNode {
             let usage = match parent.layout_state.get() {
                 LayoutState::Measuring => UsageByParent::InMeasureBlock,
                 LayoutState::LayingOut => UsageByParent::InLayoutBlock,
-                LayoutState::Idle => parent.intrinsics_usage_by_parent.get(),
+                _ => parent.intrinsics_usage_by_parent.get(),
             };
             self.intrinsics_usage_by_parent.set(usage);
         }
     }
 
     /// The node's own intrinsics, from its measure policy and children (Compose's IntrinsicsPolicy).
-    pub(crate) fn node_min_intrinsic_width(&self, height: i32) -> i32 {
+    pub(crate) fn policy_intrinsic(&self, min_max: MinMax, side: Side, size: i32) -> i32 {
         let children = self.children();
         let refs: Vec<&dyn IntrinsicMeasurable> = children.iter().map(|c| &**c as &dyn IntrinsicMeasurable).collect();
-        self.measure_policy().min_intrinsic_width(&self.inner.measure_scope(), &refs, height)
+        Self::policy_intrinsic_of(&*self.measure_policy(), &self.inner.measure_scope(), &refs, min_max, side, size)
     }
-    pub(crate) fn node_max_intrinsic_width(&self, height: i32) -> i32 {
-        let children = self.children();
+
+    /// The same in lookahead (Compose's IntrinsicsPolicy `min/maxLookaheadIntrinsic…`): with its children's
+    /// lookahead pass delegates. The scope is the main one, as Compose's (its outer coordinator).
+    pub(crate) fn lookahead_policy_intrinsic(&self, min_max: MinMax, side: Side, size: i32) -> i32 {
+        let children: Vec<Rc<LookaheadPassDelegate>> =
+            self.children().iter().map(|c| c.lookahead_pass_delegate()).collect();
         let refs: Vec<&dyn IntrinsicMeasurable> = children.iter().map(|c| &**c as &dyn IntrinsicMeasurable).collect();
-        self.measure_policy().max_intrinsic_width(&self.inner.measure_scope(), &refs, height)
+        let scope = self.outer_coordinator().measure_scope();
+        Self::policy_intrinsic_of(&*self.measure_policy(), &scope, &refs, min_max, side, size)
     }
-    pub(crate) fn node_min_intrinsic_height(&self, width: i32) -> i32 {
-        let children = self.children();
-        let refs: Vec<&dyn IntrinsicMeasurable> = children.iter().map(|c| &**c as &dyn IntrinsicMeasurable).collect();
-        self.measure_policy().min_intrinsic_height(&self.inner.measure_scope(), &refs, width)
-    }
-    pub(crate) fn node_max_intrinsic_height(&self, width: i32) -> i32 {
-        let children = self.children();
-        let refs: Vec<&dyn IntrinsicMeasurable> = children.iter().map(|c| &**c as &dyn IntrinsicMeasurable).collect();
-        self.measure_policy().max_intrinsic_height(&self.inner.measure_scope(), &refs, width)
+
+    fn policy_intrinsic_of(
+        policy: &dyn MeasurePolicy,
+        scope: &crate::layout::IntrinsicMeasureScope,
+        refs: &[&dyn IntrinsicMeasurable],
+        min_max: MinMax,
+        side: Side,
+        size: i32,
+    ) -> i32 {
+        match (min_max, side) {
+            (MinMax::Min, Side::Width) => policy.min_intrinsic_width(scope, refs, size),
+            (MinMax::Max, Side::Width) => policy.max_intrinsic_width(scope, refs, size),
+            (MinMax::Min, Side::Height) => policy.min_intrinsic_height(scope, refs, size),
+            (MinMax::Max, Side::Height) => policy.max_intrinsic_height(scope, refs, size),
+        }
     }
 
     /// Its intrinsics changing measures (or lays out) the nearest parent that used them (Compose's
@@ -218,7 +238,8 @@ impl LayoutNode {
 
     // ---- Placing ----
 
-    /// Placed by its parent (Compose's `placeSelf`).
+    /// Placed by its parent (Compose's `placeSelf`): a node whose lookahead its approach places (a lookahead
+    /// root, or one its parent's lookahead didn't place) placed in lookahead first, then in the main pass.
     fn place_for_parent(&self, position: IntOffset, z_index: f32, layer: Option<LayerBlock>) {
         self.is_placed_by_parent.set(true);
         let same_layer = match (&*self.last_layer_block.borrow(), &layer) {
@@ -226,13 +247,39 @@ impl LayoutNode {
             (Some(a), Some(b)) => Rc::ptr_eq(a, b),
             _ => false,
         };
-        if (position != self.last_position.get() || !same_layer)
+        if (position != self.last_position.get() || !same_layer || self.needs_coordinates_update.get())
             && (self.coordinates_accessed_during_modifier_placement.get()
-                || self.coordinates_accessed_during_placement.get())
+                || self.coordinates_accessed_during_placement.get()
+                || self.needs_coordinates_update.get())
         {
             self.layout_pending.set(true);
+            self.needs_coordinates_update.set(false);
         }
+        self.place_in_lookahead_first(position);
         self.place_outer_coordinator(position, z_index, layer);
+    }
+
+    /// The lookahead placement its approach placement does first (Compose's `placeSelf`, before
+    /// `placeOuterCoordinator`).
+    fn place_in_lookahead_first(&self, position: IntOffset) {
+        let Some(d) = self.lookahead_pass() else { return };
+        d.on_approach_placement();
+        if d.needs_to_be_placed_in_approach() {
+            let scope = match self.outer_coordinator().wrapped_by() {
+                Some(p) => p.placement_scope(),
+                None => match self.owner() {
+                    Some(o) => o.root_placement_scope(),
+                    None => crate::layout::PlacementScope::new(0, self.layout_direction()),
+                },
+            };
+            // (the root of its lookahead tree: no parent resets the place order for it)
+            if let Some(p) = self.parent() {
+                p.next_child_lookahead_place_order.set(0);
+            }
+            d.place_order.set(NOT_PLACED);
+            scope.place(&Placeable::new(d.clone()), position.x, position.y);
+        }
+        assert!(d.placed_once.get(), "kompoz: Error: Placement happened before lookahead.");
     }
 
     /// Compose's `placeOuterCoordinator`: only moved when nothing in it changed; else placed through its
@@ -287,6 +334,7 @@ impl LayoutNode {
 
     /// Placed at the top left, the root's (Compose's `LayoutNode.place`).
     pub(crate) fn place_root(&self) {
+        self.place_in_lookahead_first(IntOffset::Zero);
         self.place_outer_coordinator(IntOffset::Zero, 0.0, None);
     }
 
@@ -342,6 +390,8 @@ impl LayoutNode {
             self.inner.on_placed();
             if self.measure_pending.get() {
                 self.request_remeasure(true);
+            } else if self.lookahead_measure_pending.get() {
+                self.request_lookahead_remeasure(true, true);
             }
             if let Some(owner) = self.owner() {
                 owner.semantics_changed();
@@ -372,12 +422,21 @@ impl LayoutNode {
         }
     }
 
-    fn reschedule_remeasure_or_relayout(&self, child: &LayoutNode) {
+    /// A child scheduled to be measured or placed again while it wasn't placed is scheduled again (requests for nodes
+    /// not placed are dropped: Compose's `rescheduleRemeasureOrRelayout`).
+    pub(crate) fn reschedule_remeasure_or_relayout(&self, child: &LayoutNode) {
         if child.layout_state.get() == LayoutState::Idle {
-            if child.measure_pending.get() {
-                child.request_remeasure(true);
-            } else if child.layout_pending.get() {
-                child.request_relayout_forced(true);
+            if child.lookahead_measure_pending.get() {
+                child.request_lookahead_remeasure(true, true);
+            } else {
+                if child.lookahead_layout_pending.get() {
+                    child.request_lookahead_relayout(true);
+                }
+                if child.measure_pending.get() {
+                    child.request_remeasure(true);
+                } else if child.layout_pending.get() {
+                    child.request_relayout_forced(true);
+                }
             }
         }
     }
@@ -455,6 +514,12 @@ impl LayoutNode {
                 self.on_z_sorted_children_invalidated();
                 self.invalidate_layer();
                 if child.place_order.get() == NOT_PLACED {
+                    // (a child placed in lookahead by its approach isn't placed there either)
+                    if (child.detached_from_parent_lookahead_placement.get() || child.is_out_most_lookahead_root())
+                        && let Some(d) = child.lookahead_pass()
+                    {
+                        d.mark_node_and_subtree_as_not_placed(false);
+                    }
                     child.mark_subtree_as_not_placed();
                 }
             }
@@ -495,10 +560,43 @@ impl LayoutNode {
     // ---- Coordinates read while placing ----
 
     /// Its coordinates were read (Compose's `LayoutNodeLayoutDelegate.onCoordinatesUsed`): read while it places
-    /// its children or its modifiers place, it is placed again when it moves.
+    /// its children or its modifiers place, it is placed again when it moves (in lookahead too, read there).
     pub(crate) fn on_coordinates_used(&self) {
-        if self.layout_state.get() == LayoutState::LayingOut {
+        let state = self.layout_state.get();
+        if state == LayoutState::LayingOut || state == LayoutState::LookaheadLayingOut {
             self.set_coordinates_accessed(!self.laying_out_children.get(), true);
+        }
+        if state == LayoutState::LookaheadLayingOut {
+            let laying_out = self.lookahead_pass().is_some_and(|d| d.laying_out_children.get());
+            self.set_lookahead_coordinates_accessed(laying_out, true);
+        }
+    }
+
+    /// Sets one of the two "lookahead coordinates read while placing" flags, keeping the parent's count of such
+    /// children (Compose's `lookaheadCoordinatesAccessedDuring(Modifier)Placement` setters).
+    pub(crate) fn set_lookahead_coordinates_accessed(&self, during_placement: bool, value: bool) {
+        let before = self.lookahead_coordinates_accessed_during_placement.get()
+            || self.lookahead_coordinates_accessed_during_modifier_placement.get();
+        if during_placement {
+            self.lookahead_coordinates_accessed_during_placement.set(value);
+        } else {
+            self.lookahead_coordinates_accessed_during_modifier_placement.set(value);
+        }
+        let after = self.lookahead_coordinates_accessed_during_placement.get()
+            || self.lookahead_coordinates_accessed_during_modifier_placement.get();
+        if before != after {
+            self.add_children_accessing_lookahead_coordinates(if after { 1 } else { -1 });
+        }
+    }
+
+    fn add_children_accessing_lookahead_coordinates(&self, delta: i32) {
+        let before = self.children_accessing_lookahead_coordinates_during_placement.get();
+        let after = before + delta;
+        self.children_accessing_lookahead_coordinates_during_placement.set(after);
+        if (before == 0) != (after == 0)
+            && let Some(p) = self.parent()
+        {
+            p.add_children_accessing_lookahead_coordinates(if after == 0 { -1 } else { 1 });
         }
     }
 
@@ -542,23 +640,167 @@ impl LayoutNode {
     }
 }
 
+impl LayoutNode {
+    // ---- The lookahead pass (Compose's LayoutNode and LayoutNodeLayoutDelegate lookahead parts) ----
+
+    /// Its lookahead pass, in a lookahead scope.
+    pub(crate) fn lookahead_pass(&self) -> Option<Rc<LookaheadPassDelegate>> {
+        self.lookahead_pass.borrow().clone()
+    }
+
+    /// Its lookahead pass, which a node in a lookahead scope has (its parent measures it in lookahead).
+    pub(crate) fn lookahead_pass_delegate(&self) -> Rc<LookaheadPassDelegate> {
+        self.lookahead_pass().expect("kompoz: a layout node in a lookahead without its lookahead pass delegate")
+    }
+
+    /// Whether it starts a lookahead (Compose's `isOutMostLookaheadRoot`): in a lookahead scope its parent isn't
+    /// in, or composed only in its parent's approach.
+    pub(crate) fn is_out_most_lookahead_root(&self) -> bool {
+        self.lookahead_root.borrow().is_some()
+            && (self.parent().is_none_or(|p| p.lookahead_root.borrow().is_none())
+                || self.detached_from_parent_lookahead_pass.get())
+    }
+
+    /// Whether it was placed in lookahead (Compose's `isPlacedInLookahead`), none outside a lookahead scope.
+    pub(crate) fn is_placed_in_lookahead(&self) -> Option<bool> {
+        self.lookahead_pass().map(|d| d.is_placed())
+    }
+
+    /// Whether it is measured and laid out in a lookahead pass (it is in a lookahead scope, or has an approach node).
+    pub fn is_in_lookahead_scope(&self) -> bool {
+        self.lookahead_root.borrow().is_some()
+    }
+
+    /// The lookahead root it would take from where it was emitted (Compose's `_foldedParent?.lookaheadRoot`): its
+    /// virtual parent's (a `LookaheadScope` is one), else its parent's.
+    pub(crate) fn inherited_lookahead_root(&self) -> Option<LookaheadRoot> {
+        if let Some(v) = self.virtual_parent.borrow().upgrade() {
+            return v.lookahead_root();
+        }
+        self.parent().and_then(|p| p.lookahead_root.borrow().clone())
+    }
+
+    /// Its lookahead root becomes `root` (Compose's `lookaheadRoot` setter): in a scope, it and its coordinators get
+    /// their lookahead sides; out of one, they drop them and what is pending in lookahead. Measured again.
+    pub(crate) fn set_lookahead_root(&self, root: Option<LookaheadRoot>) {
+        if *self.lookahead_root.borrow() == root {
+            return;
+        }
+        let in_scope = root.is_some();
+        *self.lookahead_root.borrow_mut() = root;
+        if in_scope {
+            if self.lookahead_pass.borrow().is_none() {
+                *self.lookahead_pass.borrow_mut() = Some(LookaheadPassDelegate::new(self));
+            }
+            for c in self.coordinators().into_iter().chain(std::iter::once(self.inner.clone())) {
+                c.ensure_lookahead_delegate();
+            }
+        } else {
+            // (Compose's `onRemovedFromLookaheadScope`; the coordinators' sides go too)
+            *self.lookahead_pass.borrow_mut() = None;
+            self.lookahead_layout_pending.set(false);
+            self.lookahead_measure_pending.set(false);
+            for c in self.coordinators().into_iter().chain(std::iter::once(self.inner.clone())) {
+                c.clear_lookahead_delegate();
+            }
+        }
+        self.invalidate_measurements();
+    }
+
+    /// Its lookahead root worked out again from where it is now emitted (it moved between a scope and outside of
+    /// it without leaving the tree), and its subtree's after it.
+    pub(crate) fn refresh_lookahead_root(&self) {
+        let mut root = self.inherited_lookahead_root();
+        if root.is_none() && self.has_kind(crate::modifier::NodeKind::ApproachMeasure) {
+            root = Some(LookaheadRoot::Node(self.this.clone()));
+        }
+        if *self.lookahead_root.borrow() != root {
+            self.set_lookahead_root(root);
+            for child in self.children() {
+                child.refresh_lookahead_root();
+            }
+        }
+    }
+
+    pub(crate) fn mark_lookahead_layout_pending(&self) {
+        self.lookahead_layout_pending.set(true);
+        self.lookahead_layout_pending_for_alignment.set(true);
+    }
+
+    pub(crate) fn mark_lookahead_measure_pending(&self) {
+        self.lookahead_measure_pending.set(true);
+    }
+
+    /// Measures it again in lookahead within `constraints`, or its last lookahead constraints (Compose's
+    /// `lookaheadRemeasure`). Whether its lookahead size changed.
+    pub(crate) fn lookahead_remeasure(&self, constraints: Option<Constraints>) -> bool {
+        let Some(d) = self.lookahead_pass() else { return false };
+        match constraints.or(d.last_constraints()) {
+            Some(c) => d.remeasure(c),
+            None => false,
+        }
+    }
+
+    /// Placed again in lookahead where it was (Compose's `lookaheadReplace`).
+    pub(crate) fn lookahead_replace(&self) {
+        if self.intrinsics_usage_by_parent.get() == UsageByParent::NotUsed {
+            self.clear_subtree_intrinsics_usage();
+        }
+        self.lookahead_pass_delegate().replace();
+    }
+
+    /// How its parent's lookahead measured it (Compose's `measuredByParentInLookahead`).
+    pub(crate) fn measured_by_parent_in_lookahead(&self) -> UsageByParent {
+        self.lookahead_pass().map_or(UsageByParent::NotUsed, |d| d.measured_by_parent.get())
+    }
+
+    /// Whether its lookahead alignment lines are needed.
+    pub(crate) fn lookahead_alignment_lines_required(&self) -> bool {
+        self.lookahead_pass().is_some_and(|d| d.alignment_lines_required())
+    }
+
+    /// Its main pass is placed under a motion frame of reference or not (Compose's MeasurePassDelegate
+    /// `updatePlacedUnderMotionFrameOfReference`): its outer coordinator takes it, and its coordinates are updated.
+    fn update_motion_frame_of_reference(&self, new: bool) {
+        let outer = self.outer_coordinator();
+        if outer.placed_under_motion_frame_of_reference.get() != new {
+            outer.placed_under_motion_frame_of_reference.set(new);
+            self.needs_coordinates_update.set(true);
+        }
+        self.placed_under_motion_frame_of_reference.set(new);
+    }
+}
+
 impl IntrinsicMeasurable for LayoutNode {
     fn parent_data(&self) -> Option<Rc<dyn Any>> {
         LayoutNode::parent_data(self)
     }
+    // (asked from above a lookahead root, its lookahead answers: Compose's MeasurePassDelegate intrinsics)
     fn min_intrinsic_width(&self, height: i32) -> i32 {
+        if self.is_out_most_lookahead_root() {
+            return self.lookahead_pass_delegate().min_intrinsic_width(height);
+        }
         self.on_intrinsics_queried();
         self.outer_coordinator().min_intrinsic_width(height)
     }
     fn max_intrinsic_width(&self, height: i32) -> i32 {
+        if self.is_out_most_lookahead_root() {
+            return self.lookahead_pass_delegate().max_intrinsic_width(height);
+        }
         self.on_intrinsics_queried();
         self.outer_coordinator().max_intrinsic_width(height)
     }
     fn min_intrinsic_height(&self, width: i32) -> i32 {
+        if self.is_out_most_lookahead_root() {
+            return self.lookahead_pass_delegate().min_intrinsic_height(width);
+        }
         self.on_intrinsics_queried();
         self.outer_coordinator().min_intrinsic_height(width)
     }
     fn max_intrinsic_height(&self, width: i32) -> i32 {
+        if self.is_out_most_lookahead_root() {
+            return self.lookahead_pass_delegate().max_intrinsic_height(width);
+        }
         self.on_intrinsics_queried();
         self.outer_coordinator().max_intrinsic_height(width)
     }
@@ -586,7 +828,7 @@ impl PlaceTarget for LayoutNode {
             match p.layout_state.get() {
                 LayoutState::Measuring => self.alignment_lines.used_during_parent_measurement.set(true),
                 LayoutState::LayingOut => self.alignment_lines.used_during_parent_layout.set(true),
-                LayoutState::Idle => {}
+                _ => {}
             }
         }
         self.during_alignment_lines_query.set(true);
@@ -599,5 +841,8 @@ impl PlaceTarget for LayoutNode {
     }
     fn parent_data(&self) -> Option<Rc<dyn Any>> {
         LayoutNode::parent_data(self)
+    }
+    fn update_placed_under_motion_frame_of_reference(&self, new: bool) {
+        self.update_motion_frame_of_reference(new);
     }
 }

@@ -370,6 +370,7 @@ name = "kompoz-animation"
 version = "0.1.0"
 dependencies = [
  "kompoz-coroutines",
+ "kompoz-foundation",
  "kompoz-graphics",
  "kompoz-runtime",
  "kompoz-test",

@@ -4,7 +4,9 @@
 //! back gesture goes to the handler that would take back when it starts: its steps, then its end or its
 //! cancellation.
 
-use kompoz_coroutines::{Channel, CoroutineScope, Flow, LocalDispatcher};
+use kompoz_coroutines::{
+    Channel, CoroutineContext, CoroutineScope, Flow, LocalDispatcher, current_effect_coroutine_context,
+};
 use kompoz_runtime::{DisposableEffect, KompozitionLocal, kompozable, on_dispose, remember};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -272,10 +274,11 @@ struct PredictiveRun {
 }
 
 impl PredictiveRun {
-    fn start(&self, dispatcher: &kompoz_coroutines::Dispatcher, gesture: bool) {
+    fn start(&self, launch_in: &(kompoz_coroutines::Dispatcher, CoroutineContext), gesture: bool) {
         self.cancel();
         let steps = Channel::buffered();
-        let scope = CoroutineScope::new(dispatcher);
+        // (androidx's OnBackInstance launches in the handler's `rememberCoroutineScope`: the effect context)
+        let scope = CoroutineScope::new_with_context(&launch_in.0, launch_in.1.clone());
         let on_back = self.on_back.borrow().clone();
         let flow = steps.receive_as_flow();
         *self.steps.borrow_mut() = Some(steps);
@@ -304,6 +307,7 @@ pub fn PredictiveBackHandler<Fut: Future<Output = ()> + 'static>(
     on_back: impl Fn(Flow<BackEventCompat>) -> Fut + 'static,
 ) {
     let dispatcher = LocalDispatcher.current().expect("kompoz: no dispatcher provided (LocalDispatcher)");
+    let dispatcher = (dispatcher, current_effect_coroutine_context());
     let run = remember(|| {
         Rc::new(PredictiveRun {
             on_back: RefCell::new(Rc::new(|_| Box::pin(async {}))),

@@ -10,8 +10,9 @@
 //!   reference semantics of a class KompozR has as a value — see stage10-followups.md.)
 //! - C++ 8188 (`layout_forms_take_compose_named_arguments`): `Arrangement.spacedBy(space, alignment)`, `spring(…)` of
 //!   a float with its damping and stiffness, `Modifier.onFirstVisible(minDurationMs =) { }`, a list's
-//!   `getOrNull` with a nullable index, `String.repeat`. (Its pane scaffolds are Material's adaptive ones, stage 12's;
-//!   `approachLayout` is stage 11's.)
+//!   `getOrNull` with a nullable index, `String.repeat`, `Modifier.approachLayout(isMeasurementApproachInProgress =,
+//!   approachMeasure =)` by name (its approach measure block Compose's: a `MeasureScope`-style one, its lookahead size
+//!   in scope). (Its pane scaffolds are Material's adaptive ones, stage 12's.)
 //! - C++ 11965 (`lists_pagers_and_carousels_take_compose_arguments`): a grid's `span = { GridItemSpan(maxLineSpan) }`,
 //!   `items(n, span = { … })`, pager states with their count last and by name, `VerticalScrollbar(adapter =,
 //!   modifier =)`. (Its carousel and PullToRefreshBox are Material's, stage 12's; AsyncImage is stage 13's.)
@@ -119,10 +120,15 @@ fn scroll_forms_take_compose_named_arguments() {
 
 thread_local! {
     static SEEN: Cell<i32> = const { Cell::new(0) };
+    static APPROACHED: Cell<i32> = const { Cell::new(0) };
 }
 
 fn see() {
     SEEN.with(|s| s.set(s.get() + 1));
+}
+
+fn approach() {
+    APPROACHED.with(|a| a.set(a.get() + 1));
 }
 
 kompoz! {
@@ -135,6 +141,14 @@ kompoz! {
             Box(modifier = Modifier.size(20.dp))
         }
         Text("${names.getOrNull(picked ?: 0)} ${"ab".repeat(3)}")
+        Box(modifier = Modifier
+                .approachLayout(
+                    isMeasurementApproachInProgress = { approach(); false },
+                    approachMeasure = { measurable, _ ->
+                        val placeable = measurable.measure(Constraints.fixed(lookaheadSize.width, lookaheadSize.height))
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                    })
+                .testTag("etiket")) { Text("etiket") }
     }
 
     fun bouncy(): SpringSpec<Float> = spring(dampingRatio = 0.2f, stiffness = 200f)
@@ -150,6 +164,22 @@ fn RustLayoutForms() {
                 Modifier.size(20.dp()).on_first_visible(min_duration_ms = 0, callback = see).test_tag("rust nokta"));
             Box(modifier = Modifier.size(20.dp()));
         },
+    );
+    Box(
+        modifier = Modifier
+            .approach_layout(
+                is_measurement_approach_in_progress = |_| {
+                    approach();
+                    false
+                },
+                approach_measure = |s: &ApproachMeasureScope, m: &dyn Measurable, _| {
+                    let size = s.lookahead_size();
+                    let p = m.measure(Constraints::fixed(size.width, size.height));
+                    s.layout(p.width(), p.height(), move |pl| pl.place(&p, 0, 0))
+                },
+            )
+            .test_tag("rust etiket"),
+        content = || Text("rust etiket"),
     );
 }
 
@@ -167,6 +197,10 @@ fn layout_forms_take_compose_named_arguments() {
     assert!(near(bounds(&rule, "nokta").left, 76.0) && near(bounds(&rule, "rust nokta").left, 76.0));
     assert_eq!(SEEN.with(Cell::get), 2);
     rule.on_node_with_text("b ababab").assert_exists();
+    // The approach layouts: asked, done at once (their lookahead size, as it is).
+    assert!(APPROACHED.with(Cell::get) > 0);
+    assert!(bounds(&rule, "etiket").width() > 0.0);
+    assert!(near(bounds(&rule, "etiket").height(), bounds(&rule, "rust etiket").height()));
     let spec = bouncy();
     assert!(spec.damping_ratio == 0.2 && spec.stiffness == 200.0);
     let rust: SpringSpec<f32> = named_args!(spring(damping_ratio = 0.2, stiffness = 200.0));

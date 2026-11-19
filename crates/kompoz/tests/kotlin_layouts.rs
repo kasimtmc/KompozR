@@ -88,8 +88,7 @@ fn layouts_as_compose_writes_them() {
 // ---- text_styles_as_compose_writes_them (2947-2960): its marquee by name ---------------------------------------
 
 kompoz! {
-    // (scrolling for ever once `on`: the test rule has no InfiniteAnimationPolicy yet, so it can't wait for idle
-    // with one running — see stage10-followups.md)
+    // (scrolling for ever once `on`)
     @Composable
     fun Marquee(on: MutableState<Boolean>) {
         Column {
@@ -103,10 +102,13 @@ kompoz! {
 }
 
 fn marquee_as_compose_writes_it() {
-    let on = mutable_state_of(false);
+    let on = mutable_state_of(true);
     let o = on.clone();
-    let rule = KompozTestRule::new(kompozable_lambda!(move || Marquee(o.clone())));
-    on.set(true);
+    // (Compose's way: the clock's auto advance off before composing — while it is on, the rule's
+    // InfiniteAnimationPolicy cancels the marquee's infinite animation)
+    let rule = KompozTestRule::empty();
+    rule.main_clock().set_auto_advance(false);
+    rule.set_content(kompozable_lambda!(move || Marquee(o.clone())));
     rule.advance_frame();
     assert_eq!(bounds(&rule, "kayan").width(), 120.0);
     // (scrolling for ever, at 60 dp a second after its 1.2 s wait)

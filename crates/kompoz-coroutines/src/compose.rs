@@ -1,6 +1,7 @@
 //! Coroutines in the composition: `LaunchedEffect`, `remember_coroutine_scope`, `produce_state`,
-//! `collect_as_state`, `snapshot_flow`.
+//! `collect_as_state`, `snapshot_flow`, and the effect context they run in.
 
+use crate::context::CoroutineContext;
 use crate::executor::{CoroutineScope, Dispatcher};
 use crate::flow::{Flow, flow};
 use crate::hot::{AsFlow, StateFlow};
@@ -20,6 +21,20 @@ pub static LocalDispatcher: KompozitionLocal<Option<Dispatcher>> = KompozitionLo
 
 fn dispatcher() -> Dispatcher {
     LocalDispatcher.current().expect("kompoz: no dispatcher provided (LocalDispatcher): the host provides one")
+}
+
+/// What the composition's effects run with (Compose's `Recomposer.effectCoroutineContext`, the composer's
+/// `applyCoroutineContext`): the host gives it at the root (`KompozHost::with_effect_coroutine_context`; a test rule's
+/// has its `InfiniteAnimationPolicy`, an app's window its `MotionDurationScale`), and `LaunchedEffect`,
+/// `remember_coroutine_scope`, `produce_state` and the modifier nodes' coroutine scopes run in it. Subcompositions see
+/// the same. Read it with [`current_effect_coroutine_context`].
+pub static LocalEffectCoroutineContext: KompozitionLocal<CoroutineContext> =
+    KompozitionLocal::new_static(CoroutineContext::new);
+
+/// The coroutine context the composition's effects run with, where this composes (Compose's
+/// `currentComposer.applyCoroutineContext`): see [`LocalEffectCoroutineContext`].
+pub fn current_effect_coroutine_context() -> CoroutineContext {
+    LocalEffectCoroutineContext.current()
 }
 
 /// Runs `effect` when it enters the composition and again whenever `keys` change (several: a tuple), cancelling
@@ -42,8 +57,9 @@ fn dispatcher() -> Dispatcher {
 #[kompozable(inline)]
 pub fn LaunchedEffect<K: PartialEq + 'static>(keys: K, effect: impl Future<Output = ()> + 'static) {
     let d = dispatcher();
+    let context = current_effect_coroutine_context();
     DisposableEffect(keys, move || {
-        let scope = CoroutineScope::new(&d);
+        let scope = CoroutineScope::new_with_context(&d, context);
         scope.launch(effect);
         on_dispose(move || scope.cancel())
     });
@@ -61,11 +77,13 @@ impl RememberObserver for ScopeHolder {
 }
 
 /// A scope bound to the composition: its coroutines are cancelled when the caller leaves it. Launch from event
-/// handlers with it: `scope.launch(async move { … })`.
+/// handlers with it: `scope.launch(async move { … })`. It runs them in the composition's effect context (Compose's
+/// `rememberCoroutineScope`).
 #[track_caller]
 pub fn remember_coroutine_scope() -> CoroutineScope {
     let d = dispatcher();
-    remember_observer(move || ScopeHolder(CoroutineScope::new(&d))).0.clone()
+    let context = current_effect_coroutine_context();
+    remember_observer(move || ScopeHolder(CoroutineScope::new_with_context(&d, context))).0.clone()
 }
 
 /// A state a coroutine produces (restarted when `keys` change): `producer` gets the state and sets it.

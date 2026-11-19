@@ -108,6 +108,11 @@ harness = false
 name = "kotlin_content"
 harness = false
 
+# Lookahead (LookaheadScope, approach layouts, lookahead coordinates) in Kotlin's syntax.
+[[test]]
+name = "kotlin_lookahead"
+harness = false
+
 [[test]]
 name = "named_forms"
 harness = false

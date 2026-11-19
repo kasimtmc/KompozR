@@ -30,6 +30,7 @@ mod saveable;
 mod saved_value;
 mod snapshot;
 mod state;
+mod state_observer;
 
 pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
 pub use composer::{
@@ -69,3 +70,4 @@ pub use state::{
     mutable_int_state_of, mutable_long_state_of, mutable_state_of, mutable_state_of_with_policy, never_equal_policy,
     structural_equality_policy,
 };
+pub use state_observer::{OnChangedExecutor, SnapshotStateObserver};

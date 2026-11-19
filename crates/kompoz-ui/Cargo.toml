@@ -79,3 +79,7 @@ harness = false
 [[test]]
 name = "platform"
 harness = false
+
+[[test]]
+name = "lookahead"
+harness = false

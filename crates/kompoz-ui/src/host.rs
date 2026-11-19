@@ -22,7 +22,7 @@ use crate::strings::{LocalStrings, Strings};
 use crate::text_input::{EditCommand, LocalTextInputService, TextInputService};
 use crate::unit::Constraints;
 use crate::window::Overlays;
-use kompoz_coroutines::{Dispatcher, LocalDispatcher};
+use kompoz_coroutines::{CoroutineContext, Dispatcher, LocalDispatcher, LocalEffectCoroutineContext};
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Density, Dp, IntOffset, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::{
@@ -173,8 +173,19 @@ pub struct KompozHost {
 impl KompozHost {
     /// A host composing `content`, headless until given callbacks; its viewport 0 by 0 until set.
     pub fn new(content: impl Content + 'static) -> KompozHost {
+        KompozHost::with_effect_coroutine_context(content, CoroutineContext::new())
+    }
+
+    /// The same, the composition's effects and the modifier nodes' coroutines running with
+    /// `effect_coroutine_context` (Compose's `Recomposer(effectCoroutineContext)`: a test rule's has its
+    /// `InfiniteAnimationPolicy`, a window's its `MotionDurationScale`).
+    pub fn with_effect_coroutine_context(
+        content: impl Content + 'static,
+        effect_coroutine_context: CoroutineContext,
+    ) -> KompozHost {
         let dispatcher = Dispatcher::new();
         let owner = Owner::new(dispatcher.clone());
+        owner.set_effect_coroutine_context(effect_coroutine_context);
         let root = LayoutNode::new();
         root.set_measure_policy(Rc::new(RootMeasurePolicy { layer: Rc::new(|_| {}) }));
         let system_insets = SystemInsetsHolder::default();
@@ -259,6 +270,7 @@ impl KompozHost {
         let saveable = self.saveable.clone();
         let platform = self.platform.clone();
         let dispatcher = self.dispatcher.clone();
+        let effect_coroutine_context = self.owner.effect_coroutine_context();
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
         let back = BackDispatcherRef(Rc::downgrade(&self.back));
         let font_family_resolver = self.font_family_resolver.clone();
@@ -297,6 +309,7 @@ impl KompozHost {
                 LocalFocusManager.provides(focus_manager.clone()),
                 LocalBackDispatcher.provides(Some(back.clone())),
                 LocalDispatcher.provides(Some(dispatcher.clone())),
+                LocalEffectCoroutineContext.provides(effect_coroutine_context.clone()),
                 LocalIdleWorkQueue.provides(Some(idle_work.clone())),
                 LocalFontFamilyResolver.provides_unequal(resolver),
                 crate::autofill::LocalAutofillManager.provides(autofill.clone()),
@@ -484,12 +497,28 @@ impl KompozHost {
     /// then up to four passes of {applied changes told to their readers → recompose → measure and layout → global
     /// position callbacks} while a pass wrote state. Whether a redraw is due.
     pub fn frame(&self, time_nanos: i64) -> bool {
+        self.pass(time_nanos, true)
+    }
+
+    /// What is due at `time_nanos` run without a frame (a test clock between frames, Compose's test scheduler running
+    /// the tasks due without a frame callback): posted tasks, the coroutine timers due and what they wake, then the
+    /// applied changes told to their readers, composition, measure and layout and the global position callbacks; the
+    /// coroutines awaiting a frame and the scopes asking for one wait for the next frame. Whether a redraw is due.
+    pub fn run_due(&self, time_nanos: i64) -> bool {
+        self.pass(time_nanos, false)
+    }
+
+    fn pass(&self, time_nanos: i64, frame: bool) -> bool {
         let tasks = std::mem::take(&mut *self.handle.posted.lock());
         for task in tasks {
             task();
         }
-        self.frame_time.set(time_nanos);
-        self.dispatcher.run(time_nanos);
+        if frame {
+            self.frame_time.set(time_nanos);
+            self.dispatcher.run(time_nanos);
+        } else {
+            self.dispatcher.run_timers(time_nanos);
+        }
         // (a drag a coroutine started — a long press's — takes its pointer)
         crate::input::drag_and_drop_takes_pointer(self);
         {
@@ -505,7 +534,7 @@ impl KompozHost {
                     composition.invalidate_all();
                     self.root.invalidate_measurement_for_subtree();
                 }
-                if pass == 0 {
+                if pass == 0 && frame {
                     composition.invalidate_frame_scopes(time_nanos);
                 }
                 let recomposed = composition.recompose(time_nanos);
@@ -538,7 +567,9 @@ impl KompozHost {
         }
         // (the coroutines continuing after the frame — Compose's frame continuations, dispatched after its
         // composition and layout — see where it laid things out; what they write is the next frame's)
-        self.dispatcher.run_frame_end();
+        if frame {
+            self.dispatcher.run_frame_end();
+        }
         self.owner.dispatch_semantics_changes();
         if self.owner.take_gesture_exclusion_changed() {
             let rects = self.owner.gesture_exclusion();
@@ -612,6 +643,21 @@ impl KompozHost {
             || self.owner.has_pending_measure_or_layout()
             || self.dispatcher.has_ready()
             || self.dispatcher.has_frame_waiters()
+            || self.focus.has_pending_invalidation()
+            || !self.handle.posted.lock().is_empty()
+            || self.handle.invalid.load(Ordering::Acquire)
+    }
+
+    /// Whether there is work a pass without a frame ([`run_due`](Self::run_due)) does: what `has_pending_work`
+    /// says, the coroutines and scopes waiting for a frame left out.
+    pub fn has_pending_work_without_frame(&self) -> bool {
+        let composition = self.composition.borrow();
+        let composing = composition.as_ref().is_some_and(|c| c.has_invalidations());
+        composing
+            || global_snapshot_changed()
+            || self.owner.snapshot_observer().has_pending()
+            || self.owner.has_pending_measure_or_layout()
+            || self.dispatcher.has_ready()
             || self.focus.has_pending_invalidation()
             || !self.handle.posted.lock().is_empty()
             || self.handle.invalid.load(Ordering::Acquire)
@@ -892,6 +938,12 @@ impl KompozHost {
     }
 
     /// The dispatcher the host runs coroutines on.
+    /// What the composition's effects and the modifier nodes' coroutines run with (Compose's
+    /// `Recomposer.effectCoroutineContext`).
+    pub fn effect_coroutine_context(&self) -> CoroutineContext {
+        self.owner.effect_coroutine_context()
+    }
+
     pub fn dispatcher(&self) -> &Dispatcher {
         &self.dispatcher
     }

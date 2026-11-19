@@ -1,7 +1,9 @@
 //! KompozR's headless UI testing, as Compose's `androidx.compose.ui.test`: a [`KompozTestRule`] composes content in
-//! a host of a fixed viewport, runs its frames on a virtual clock (C++'s 16 ms frames), finds nodes in the semantics
-//! trees of its window and popups ([`SemanticsMatcher`]s, finders), asserts about them and acts on them
-//! ([`SemanticsNodeInteraction`]), and injects touch, mouse and key input.
+//! a host of a fixed viewport, runs its frames on a virtual clock of 16 ms frames ([`MainClock`]: Compose's
+//! MainTestClock, advancing on its own while waiting for idle unless `auto_advance` is off, infinite animations
+//! cancelled while it does), finds nodes in the semantics trees of its window and popups ([`SemanticsMatcher`]s,
+//! finders), asserts about them and acts on them ([`SemanticsNodeInteraction`]), and injects touch, mouse and key
+//! input.
 //!
 //! ```no_run
 //! # use kompoz_test::*;
@@ -33,32 +35,90 @@ pub use recording::{
 };
 pub use text::Text;
 
+use kompoz_coroutines::{CoroutineContext, cancel_current};
 use kompoz_graphics::IntSize;
-use kompoz_runtime::{Content, named};
-use kompoz_ui::KompozHost;
+use kompoz_runtime::{Content, kompozable_lambda, named};
 use kompoz_ui::semantics::SemanticsNode;
+use kompoz_ui::{InfiniteAnimationPolicy, KompozHost};
 use std::cell::Cell;
+use std::rc::Rc;
 
 /// One frame of virtual time (C++'s and Compose's test clock: 16 ms).
 pub const FRAME_NANOS: i64 = 16_000_000;
 
-/// The rule's virtual clock (Compose's MainTestClock).
+/// One frame, in milliseconds (Compose's test clock's `frameDelayMillis`).
+const FRAME_MILLIS: i64 = FRAME_NANOS / 1_000_000;
+
+/// What `wait_until` and `advance_time_until` panic with when their time runs out (Compose's
+/// ComposeTimeoutException).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposeTimeoutException(pub String);
+
+impl std::fmt::Display for ComposeTimeoutException {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ComposeTimeoutException {}
+
+/// Panics with a [`ComposeTimeoutException`] (Kotlin's `throw`), its message written out first (a panic of a value
+/// that isn't text shows none).
+fn timed_out(message: String) -> ! {
+    eprintln!("kompoz: ComposeTimeoutException: {message}");
+    std::panic::panic_any(ComposeTimeoutException(message))
+}
+
+/// The rule's virtual clock (Compose's MainTestClock): frames of 16 ms. While [`auto_advance`](Self::auto_advance)
+/// is on (the default), waiting for idle advances it frame by frame until nothing is left to do, and the rule's
+/// `InfiniteAnimationPolicy` cancels infinite animations (they would never let it be idle); off, it moves only when
+/// the test advances it, and infinite animations run.
 pub struct MainClock<'a> {
     rule: &'a KompozTestRule,
 }
 
 impl MainClock<'_> {
-    /// The virtual time, in milliseconds.
+    /// The virtual time, in milliseconds (Compose's `currentTime`).
     pub fn current_time(&self) -> i64 {
         self.rule.clock.get() / 1_000_000
     }
-    /// Runs frames for `millis` of virtual time (coroutine delays, animations).
-    pub fn advance_time_by(&self, millis: i64) {
-        self.rule.advance_time_by(millis);
+
+    /// Whether waiting for idle advances it (Compose's `autoAdvance`, true by default).
+    pub fn auto_advance(&self) -> bool {
+        self.rule.auto_advance.get()
     }
-    /// Advances by exactly one frame.
+
+    /// Lets waiting for idle advance it, or not (Compose's `autoAdvance =`): off, infinite animations run, and
+    /// waiting for idle runs only what is due at the current time.
+    pub fn set_auto_advance(&self, auto_advance: bool) {
+        self.rule.auto_advance.set(auto_advance);
+    }
+
+    /// Advances by exactly one frame (Compose's `advanceTimeByFrame`).
     pub fn advance_time_by_frame(&self) {
         self.rule.advance_frame();
+    }
+}
+
+#[named]
+impl<'a> MainClock<'a> {
+    /// Advances by `milliseconds` (Compose's `advanceTimeBy`): rounded up to whole frames, each run; with
+    /// `ignore_frame_duration`, exactly by `milliseconds` — the frames due on the way run, then the coroutine timers
+    /// due by its end without a frame.
+    pub fn advance_time_by(&self, milliseconds: i64, #[default(false)] ignore_frame_duration: bool) {
+        self.rule.advance_time_by_millis(milliseconds, ignore_frame_duration);
+    }
+
+    /// Advances frame by frame until `condition` holds (Compose's `advanceTimeUntil`); panics with a
+    /// [`ComposeTimeoutException`] after `timeout_millis` of virtual time.
+    pub fn advance_time_until(&self, #[default(1_000)] timeout_millis: i64, condition: impl Fn() -> bool) {
+        let start = self.current_time();
+        while !condition() {
+            self.rule.advance_frame();
+            if self.current_time() - start > timeout_millis {
+                timed_out(format!("Condition still not satisfied after {timeout_millis} ms"));
+            }
+        }
     }
 }
 
@@ -70,6 +130,8 @@ impl MainClock<'_> {
 pub struct KompozTestRule {
     host: KompozHost,
     clock: Cell<i64>,
+    /// The clock's `auto_advance`, which the rule's infinite animation policy reads too.
+    auto_advance: Rc<Cell<bool>>,
     /// What injected input left (`perform_touch_input`, `perform_mouse_input`).
     injection: std::cell::RefCell<input::InjectionState>,
 }
@@ -83,14 +145,41 @@ impl KompozTestRule {
     /// The same in a viewport of `viewport` px. Text is measured by kompoz-text's fake backend (as the C++ Kompoz's
     /// tests measured it) unless the test installs another resolver (`host().set_font_family_resolver`).
     pub fn with_viewport(content: impl Content + 'static, viewport: IntSize) -> KompozTestRule {
-        let host = KompozHost::new(content);
+        let rule = KompozTestRule::host_with(content, viewport);
+        rule.wait_for_idle_within(0);
+        rule
+    }
+
+    /// A rule with nothing composed yet, in a 400 by 800 viewport (Compose's `createComposeRule()`): its clock can be
+    /// set up first (`main_clock().set_auto_advance(false)`), then [`set_content`](Self::set_content) composes.
+    pub fn empty() -> KompozTestRule {
+        KompozTestRule::empty_with_viewport(IntSize::new(400, 800))
+    }
+
+    /// The same in a viewport of `viewport` px.
+    pub fn empty_with_viewport(viewport: IntSize) -> KompozTestRule {
+        KompozTestRule::host_with(kompozable_lambda!(|| {}), viewport)
+    }
+
+    /// The host composing `content`, its effects running with the rule's infinite animation policy (Compose's test
+    /// rule's: infinite animations cancelled while the clock advances on its own).
+    fn host_with(content: impl Content + 'static, viewport: IntSize) -> KompozTestRule {
+        let auto_advance = Rc::new(Cell::new(true));
+        let a = auto_advance.clone();
+        let policy = InfiniteAnimationPolicy::new(move |operation| {
+            if a.get() {
+                // (Compose: `throw CancellationException("Infinite animations are disabled on tests")`)
+                Box::pin(cancel_current::<()>())
+            } else {
+                operation
+            }
+        });
+        let host = KompozHost::with_effect_coroutine_context(content, CoroutineContext::of(policy));
         host.set_font_family_resolver(kompoz_ui::platform::fake_resolver());
         host.set_viewport_size(viewport);
         host.set_layout_check(true);
         host.set_keep_check(true);
-        let rule = KompozTestRule { host, clock: Cell::new(0), injection: Default::default() };
-        rule.wait_for_idle_within(0);
-        rule
+        KompozTestRule { host, clock: Cell::new(0), auto_advance, injection: Default::default() }
     }
 
     pub fn host(&self) -> &KompozHost {
@@ -118,13 +207,20 @@ impl KompozTestRule {
         MainClock { rule: self }
     }
 
-    /// Runs frames (16 ms of virtual time each) until nothing is pending, coroutine delays due within 2 s included
-    /// (C++'s `waitForIdle`).
+    /// Waits until the host is idle (Compose's `waitForIdle`). With the clock's `auto_advance` on: frames of 16 ms
+    /// run until nothing is pending, the coroutine delays due within 2 s waited for too (C++'s `waitForIdle`; Compose
+    /// doesn't wait for delays); infinite animations are cancelled meanwhile, as the rule's policy says. Off: what is
+    /// due at the current time runs — applied changes, composition, layout, effects and the coroutines they wake —
+    /// the clock left where it is (frames come when the test advances it).
     pub fn wait_for_idle(&self) {
-        self.wait_for_idle_within(2000);
+        if self.auto_advance.get() {
+            self.wait_for_idle_within(2000);
+        } else {
+            self.run_current();
+        }
     }
 
-    /// The same, delays due within `timer_horizon_millis` waited for.
+    /// The same advancing, delays due within `timer_horizon_millis` waited for.
     pub fn wait_for_idle_within(&self, timer_horizon_millis: i64) {
         let horizon = self.clock.get() + timer_horizon_millis * 1_000_000;
         for _ in 0..2000 {
@@ -141,12 +237,46 @@ impl KompozTestRule {
         panic!("kompoz: wait_for_idle: never idle");
     }
 
-    /// Runs frames for `millis` of virtual time.
+    /// Runs what is due at the current time, the clock not moving (Compose's `runCurrent`, and what its layout passes
+    /// do): passes without a frame until nothing they do is left.
+    fn run_current(&self) {
+        for _ in 0..100 {
+            self.host.run_due(self.clock.get());
+            self.check_frame();
+            if !self.host.has_pending_work_without_frame() {
+                return;
+            }
+        }
+        panic!("kompoz: wait_for_idle: never idle at the current time");
+    }
+
+    /// Runs `action` once the host is idle, giving its value (Compose's `runOnIdle`).
+    pub fn run_on_idle<R>(&self, action: impl FnOnce() -> R) -> R {
+        self.wait_for_idle();
+        action()
+    }
+
+    /// Runs frames for `millis` of virtual time, rounded up to whole frames (the clock's `advance_time_by`).
     pub fn advance_time_by(&self, millis: i64) {
-        let mut t = 0;
-        while t < millis {
+        self.advance_time_by_millis(millis, false);
+    }
+
+    fn advance_time_by_millis(&self, millis: i64, ignore_frame_duration: bool) {
+        if !ignore_frame_duration {
+            let mut t = 0;
+            while t < millis {
+                self.advance_frame();
+                t += FRAME_MILLIS;
+            }
+            return;
+        }
+        let target = self.clock.get() + millis * 1_000_000;
+        while self.clock.get() + FRAME_NANOS <= target {
             self.advance_frame();
-            t += 16;
+        }
+        if self.clock.get() < target {
+            self.clock.set(target);
+            self.run_current();
         }
     }
 
@@ -155,6 +285,10 @@ impl KompozTestRule {
     pub fn advance_frame(&self) {
         self.clock.set(self.clock.get() + FRAME_NANOS);
         self.host.frame(self.clock.get());
+        self.check_frame();
+    }
+
+    fn check_frame(&self) {
         let mut mismatches = self.host.take_layout_check_mismatches();
         mismatches.extend(self.host.take_keep_check_mismatches());
         assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
@@ -212,6 +346,31 @@ impl KompozTestRule {
 
 #[named]
 impl KompozTestRule {
+    /// Waits until `condition` holds (Compose's `waitUntil`): frame by frame while the clock's `auto_advance` is on;
+    /// else what is due runs, the clock still, while the work of other threads (real time) goes on. Panics with a
+    /// [`ComposeTimeoutException`] after `timeout_millis` of real time, `condition_description` in its message.
+    pub fn wait_until(
+        &self,
+        #[default(None)] condition_description: Option<&str>,
+        #[default(1_000)] timeout_millis: i64,
+        condition: impl Fn() -> bool,
+    ) {
+        let start = std::time::Instant::now();
+        while !condition() {
+            if self.auto_advance.get() {
+                self.advance_frame();
+            } else {
+                self.run_current();
+            }
+            // (Compose's Thread.sleep(10): what other threads do takes real time)
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            if start.elapsed().as_millis() as i64 > timeout_millis {
+                let what = condition_description.map_or(String::from("Condition"), |d| format!("Condition ({d})"));
+                timed_out(format!("{what} still not satisfied after {timeout_millis} ms"));
+            }
+        }
+    }
+
     /// The one node `matcher` matches (Compose's `onNode(matcher, useUnmergedTree)`).
     pub fn on_node(
         &self,

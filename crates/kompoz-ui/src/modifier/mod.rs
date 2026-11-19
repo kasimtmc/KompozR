@@ -195,6 +195,10 @@ pub trait ModifierNode: Any {
     fn as_layout(&mut self) -> Option<&mut dyn crate::layout::LayoutModifierNode> {
         None
     }
+    /// An approach layout node's (Compose's `Nodes.ApproachMeasure`): its node is a layout node too.
+    fn as_approach_layout(&mut self) -> Option<&mut dyn crate::layout::ApproachLayoutModifierNode> {
+        None
+    }
     fn as_draw(&mut self) -> Option<&mut dyn crate::draw::DrawModifierNode> {
         None
     }
@@ -257,7 +261,7 @@ pub trait ModifierNode: Any {
 /// Writes a [`ModifierNode`]'s capability accessors: `node_capabilities!(layout, draw)` in its impl gives
 /// `as_layout` and `as_draw` returning `Some(self)` (the node implements those traits).
 ///
-/// Names: `layout`, `draw`, `semantics`, `parent_data`, `layout_aware`, `global_position_aware`,
+/// Names: `layout`, `approach_layout` (with `layout`), `draw`, `semantics`, `parent_data`, `layout_aware`, `global_position_aware`,
 /// `unplaced_aware`, `pointer_input`, `indirect_pointer_input`, `key_input`, `soft_keyboard_interception`,
 /// `rotary_input`, `focus_target`, `focus_properties`, `focus_event`, `bring_into_view`, `beyond_bounds_layout`,
 /// `traversable`, `modifier_local`, `observer`.
@@ -267,6 +271,9 @@ macro_rules! node_capabilities {
         $( $crate::node_capabilities!(@one $cap); )*
     };
     (@one layout) => { fn as_layout(&mut self) -> Option<&mut dyn $crate::layout::LayoutModifierNode> { Some(self) } };
+    (@one approach_layout) => {
+        fn as_approach_layout(&mut self) -> Option<&mut dyn $crate::layout::ApproachLayoutModifierNode> { Some(self) }
+    };
     (@one draw) => { fn as_draw(&mut self) -> Option<&mut dyn $crate::draw::DrawModifierNode> { Some(self) } };
     (@one semantics) => {
         fn as_semantics(&mut self) -> Option<&mut dyn $crate::semantics::SemanticsModifierNode> { Some(self) }

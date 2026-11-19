@@ -61,6 +61,7 @@ pub(crate) fn kinds_of(node: &mut dyn ModifierNode) -> u32 {
     }
     let mut k = NodeKind::Any.0;
     k |= bit(node.as_layout().is_some(), NodeKind::Layout);
+    k |= bit(node.as_approach_layout().is_some(), NodeKind::ApproachMeasure);
     k |= bit(node.as_draw().is_some(), NodeKind::Draw);
     k |= bit(node.as_semantics().is_some(), NodeKind::Semantics);
     k |= bit(node.as_pointer_input().is_some(), NodeKind::PointerInput);
@@ -376,7 +377,8 @@ impl NodeCx {
     }
 
     /// A scope for its coroutines: made when first asked for, cancelled when the node is detached (Compose's
-    /// `Modifier.Node.coroutineScope`). Panics on a node that isn't attached.
+    /// `Modifier.Node.coroutineScope`), running them in its host's effect context (Compose's
+    /// `Owner.coroutineContext`). Panics on a node that isn't attached.
     #[track_caller]
     pub fn coroutine_scope(&self) -> CoroutineScope {
         if let Some(s) = self.cell.meta.scope.borrow().as_ref() {
@@ -384,7 +386,7 @@ impl NodeCx {
         }
         assert!(self.is_attached(), "kompoz: coroutine_scope asked of a node that isn't attached");
         let owner = self.cell.layout_node().and_then(|n| n.owner()).expect("kompoz: a node outside of a host");
-        let scope = CoroutineScope::new(&owner.dispatcher());
+        let scope = CoroutineScope::new_with_context(&owner.dispatcher(), owner.effect_coroutine_context());
         *self.cell.meta.scope.borrow_mut() = Some(scope.clone());
         scope
     }

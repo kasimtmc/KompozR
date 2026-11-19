@@ -161,6 +161,8 @@ impl Gen<'_, '_> {
         // what the lambda keeps can capture)
         let lent: Vec<bool> =
             info.inputs.iter().skip(first_input).map(|t| outer_type_arg.is_some() && is_lent_type_param(t)).collect();
+        // (the parameters it names: Kotlin's needn't be used — `{ lookaheadCoordinates -> moving.value }`)
+        let mut named_params: Vec<proc_macro2::Ident> = Vec::new();
         match &l.params {
             Some(ps) => {
                 for (k, p) in ps.iter().enumerate() {
@@ -181,6 +183,7 @@ impl Gen<'_, '_> {
                         Binding::Name(n) => {
                             let rust = snake(&n.name);
                             let i = self.name_ident(&rust, n.loc);
+                            named_params.push(i.clone());
                             self.declare(&n.name, rust, LocalKind::LambdaParam, ty);
                             if mut_refs.get(k) == Some(&true) {
                                 self.mark_mut_ref(&n.name);
@@ -252,12 +255,12 @@ impl Gen<'_, '_> {
             Tail::Value(result)
         };
         let body = self.stmts(&l.body.stmts, tail);
-        // (Kotlin's `this` needn't be used: a receiver the body leaves alone is no unused variable)
-        if let Some(i) = &receiver_ident
-            && !mentions(&body, i)
-            && !mentions(&unpack, i)
-        {
-            unpack.extend(quote_spanned!(span=> let _ = &#i;));
+        // (Kotlin's `this` needn't be used: a receiver the body leaves alone is no unused variable; nor is a parameter
+        // it names and leaves alone)
+        for i in receiver_ident.iter().chain(named_params.iter()) {
+            if !mentions(&body, i) && !mentions(&unpack, i) {
+                unpack.extend(quote_spanned!(span=> let _ = &#i;));
+            }
         }
         self.in_async = was_async;
         self.receivers.truncate(receivers_before);

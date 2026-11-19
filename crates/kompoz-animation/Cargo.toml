@@ -16,6 +16,7 @@ kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-ui = { path = "../kompoz-ui" }
 
 [dev-dependencies]
+kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-test = { path = "../kompoz-test" }
 
 [[test]]
@@ -24,4 +25,12 @@ harness = false
 
 [[test]]
 name = "animatable"
+harness = false
+
+[[test]]
+name = "lookahead"
+harness = false
+
+[[test]]
+name = "clock"
 harness = false

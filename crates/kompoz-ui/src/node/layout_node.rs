@@ -2,6 +2,7 @@
 //! coordinators, its measure policy, and its place in the measure and layout passes.
 
 use super::alignment_lines::{AlignmentLines, NOT_PLACED};
+use super::lookahead::{LookaheadPassDelegate, LookaheadRoot};
 use super::{NodeCoordinator, Owner, ReaderScope};
 use crate::layout::{LayerBlock, MeasurePolicy, VirtualLayoutNode};
 use crate::modifier::chain::NodeChain;
@@ -16,11 +17,16 @@ use std::fmt;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Where a layout node is in the passes (Compose's LayoutState, without lookahead).
+/// Where a layout node is in the passes (Compose's LayoutState): in a lookahead scope, measured and laid out in
+/// lookahead first, then in the main pass (the approach).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum LayoutState {
     Measuring,
+    /// Measured in lookahead.
+    LookaheadMeasuring,
     LayingOut,
+    /// Laid out in lookahead.
+    LookaheadLayingOut,
     Idle,
 }
 
@@ -126,6 +132,35 @@ pub struct LayoutNode {
     pub(crate) virtual_children: RefCell<Option<Vec<Emitted>>>,
     /// How many layouts each of those holds, as of the last sync.
     pub(crate) virtual_group_sizes: RefCell<Vec<usize>>,
+    /// The virtual node it was emitted in, if any (Compose's `_foldedParent` when it is virtual: a multi-content
+    /// layout's content, a `LookaheadScope`).
+    pub(crate) virtual_parent: RefCell<Weak<VirtualLayoutNode>>,
+
+    // The lookahead pass (Compose's LayoutNodeLayoutDelegate lookahead state and LookaheadPassDelegate).
+    /// Its nearest lookahead root, in a lookahead scope (Compose's `lookaheadRoot`).
+    pub(crate) lookahead_root: RefCell<Option<LookaheadRoot>>,
+    /// Its lookahead pass, in a lookahead scope (Compose's `lookaheadPassDelegate`).
+    pub(crate) lookahead_pass: RefCell<Option<Rc<LookaheadPassDelegate>>>,
+    pub(crate) lookahead_measure_pending: Cell<bool>,
+    pub(crate) lookahead_layout_pending: Cell<bool>,
+    pub(crate) lookahead_layout_pending_for_alignment: Cell<bool>,
+    pub(crate) next_child_lookahead_place_order: Cell<i32>,
+    /// Measured and placed in lookahead by its own approach, not its parent's lookahead (Compose's
+    /// `detachedFromParentLookaheadPass`: what a subcomposing layout composes only in its approach).
+    pub(crate) detached_from_parent_lookahead_pass: Cell<bool>,
+    /// Placed in lookahead by its own approach: its parent's lookahead measured it but didn't place it (Compose's
+    /// `detachedFromParentLookaheadPlacement`).
+    pub(crate) detached_from_parent_lookahead_placement: Cell<bool>,
+    pub(crate) lookahead_coordinates_accessed_during_placement: Cell<bool>,
+    pub(crate) lookahead_coordinates_accessed_during_modifier_placement: Cell<bool>,
+    pub(crate) children_accessing_lookahead_coordinates_during_placement: Cell<i32>,
+    pub(crate) measure_lookahead_reads: RefCell<Option<Rc<ReaderScope>>>,
+    pub(crate) layout_lookahead_reads: RefCell<Option<Rc<ReaderScope>>>,
+    pub(crate) layout_modifier_lookahead_reads: RefCell<Option<Rc<ReaderScope>>>,
+    /// Its main pass is placed under a motion frame of reference (Compose's MeasurePassDelegate
+    /// `isPlacedUnderMotionFrameOfReference`), and that changed since it was placed.
+    pub(crate) placed_under_motion_frame_of_reference: Cell<bool>,
+    pub(crate) needs_coordinates_update: Cell<bool>,
 }
 
 /// A measure policy measuring nothing, 0 by 0 (a node's until one is set: Compose's ErrorMeasurePolicy stands in
@@ -213,6 +248,23 @@ impl LayoutNode {
                 is_deactivated: Cell::new(false),
                 virtual_children: RefCell::new(None),
                 virtual_group_sizes: RefCell::new(Vec::new()),
+                virtual_parent: RefCell::new(Weak::new()),
+                lookahead_root: RefCell::new(None),
+                lookahead_pass: RefCell::new(None),
+                lookahead_measure_pending: Cell::new(false),
+                lookahead_layout_pending: Cell::new(false),
+                lookahead_layout_pending_for_alignment: Cell::new(false),
+                next_child_lookahead_place_order: Cell::new(0),
+                detached_from_parent_lookahead_pass: Cell::new(false),
+                detached_from_parent_lookahead_placement: Cell::new(false),
+                lookahead_coordinates_accessed_during_placement: Cell::new(false),
+                lookahead_coordinates_accessed_during_modifier_placement: Cell::new(false),
+                children_accessing_lookahead_coordinates_during_placement: Cell::new(0),
+                measure_lookahead_reads: RefCell::new(None),
+                layout_lookahead_reads: RefCell::new(None),
+                layout_modifier_lookahead_reads: RefCell::new(None),
+                placed_under_motion_frame_of_reference: Cell::new(false),
+                needs_coordinates_update: Cell::new(false),
             }
         })
     }
@@ -498,6 +550,9 @@ impl LayoutNode {
         if parent.is_none() {
             // The root: placed by the host.
             self.is_placed.set(true);
+            if let Some(d) = self.lookahead_pass() {
+                d.on_attached_to_null_parent();
+            }
         }
         *self.outer_coordinator().wrapped_by.borrow_mut() =
             parent.as_ref().map_or_else(Weak::new, |p| Rc::downgrade(&p.inner));
@@ -508,6 +563,13 @@ impl LayoutNode {
             self.apply_modifier(m, false);
         }
         owner.on_attach(self);
+        // Its lookahead root: its parent's (or its scope's, emitted in one), the closest; else itself if it has an
+        // approach node (Compose: movable content with an approach layout moved out of a scope).
+        let mut root = self.inherited_lookahead_root();
+        if root.is_none() && self.has_kind(NodeKind::ApproachMeasure) {
+            root = Some(LookaheadRoot::Node(self.this.clone()));
+        }
+        self.set_lookahead_root(root);
         self.mark_chain_attached();
         for child in self.children() {
             child.attach(owner);
@@ -535,8 +597,14 @@ impl LayoutNode {
             parent.invalidate_layer();
             parent.invalidate_measurements();
             self.measured_by_parent.set(UsageByParent::NotUsed);
+            if let Some(d) = self.lookahead_pass() {
+                d.measured_by_parent.set(UsageByParent::NotUsed);
+            }
         }
         self.alignment_lines.reset();
+        if let Some(d) = self.lookahead_pass() {
+            d.alignment_lines.reset();
+        }
         let mut c = Some(self.outer_coordinator());
         while let Some(x) = c {
             x.release_layer();
@@ -559,6 +627,7 @@ impl LayoutNode {
         self.mark_chain_detached();
         owner.on_detach(self);
         *self.owner.borrow_mut() = Weak::new();
+        self.set_lookahead_root(None);
         self.depth.set(0);
         self.place_order.set(NOT_PLACED);
         self.previous_place_order.set(NOT_PLACED);
@@ -569,6 +638,9 @@ impl LayoutNode {
             &self.layout_modifier_reads,
             &self.draw_reads,
             &self.semantics_reads,
+            &self.measure_lookahead_reads,
+            &self.layout_lookahead_reads,
+            &self.layout_modifier_lookahead_reads,
         ] {
             *scope.borrow_mut() = None;
         }
@@ -627,7 +699,11 @@ impl LayoutNode {
     /// what it took): within its last constraints, its parent told (for the next layout) if its size changed.
     pub fn force_remeasure(&self) {
         let Some(owner) = self.owner() else { return };
-        self.request_remeasure(false);
+        if self.lookahead_root.borrow().is_some() {
+            self.request_lookahead_remeasure(false, true);
+        } else {
+            self.request_remeasure(false);
+        }
         let me = self.rc();
         let is_root = owner.root().is_some_and(|r| Rc::ptr_eq(&r, &me));
         match self.last_constraints.get() {
@@ -640,9 +716,37 @@ impl LayoutNode {
         }
     }
 
-    /// Measured again (Compose's `invalidateMeasurements`).
+    /// Measured again (Compose's `invalidateMeasurements`): in lookahead first, in a lookahead scope.
     pub fn invalidate_measurements(&self) {
-        self.request_remeasure(false);
+        if self.lookahead_root.borrow().is_some() {
+            self.request_lookahead_remeasure(false, true);
+        } else {
+            self.request_remeasure(false);
+        }
+    }
+
+    /// Measured again in lookahead, then in the main pass (Compose's `requestLookaheadRemeasure`); the users of its
+    /// lookahead intrinsics above too, if `invalidate_intrinsics`. Only in a lookahead scope.
+    pub(crate) fn request_lookahead_remeasure(&self, force: bool, invalidate_intrinsics: bool) {
+        assert!(
+            self.lookahead_root.borrow().is_some(),
+            "kompoz: Lookahead measure cannot be requested on a node that is not a part of the LookaheadScope"
+        );
+        let Some(owner) = self.owner() else { return };
+        if self.ignore_remeasure_requests.get() {
+            return;
+        }
+        owner.request_lookahead_remeasure(&self.rc(), force);
+        if invalidate_intrinsics && let Some(d) = self.lookahead_pass() {
+            d.invalidate_intrinsics_parent(force);
+        }
+    }
+
+    /// Placed again in lookahead, then in the main pass (Compose's `requestLookaheadRelayout`).
+    pub(crate) fn request_lookahead_relayout(&self, force: bool) {
+        if let Some(owner) = self.owner() {
+            owner.request_lookahead_relayout(&self.rc(), force);
+        }
     }
 
     /// The measure of everything in it again (Compose's `invalidateMeasurementForSubtree`).
@@ -686,10 +790,23 @@ impl LayoutNode {
     /// `invalidateParentData`).
     pub(crate) fn invalidate_parent_data(&self) {
         self.parent_data_dirty.set(true);
+        if let Some(d) = self.lookahead_pass() {
+            d.invalidate_parent_data();
+        }
         if self.update_parent_data()
             && let Some(p) = self.parent()
         {
             p.request_remeasure(false);
+        }
+        // (Compose's LayoutNodeLayoutDelegate `updateParentData`: the lookahead pass's)
+        if self.lookahead_pass().is_some_and(|d| d.update_parent_data())
+            && let Some(p) = self.parent()
+        {
+            if self.is_out_most_lookahead_root() {
+                p.request_remeasure(false);
+            } else {
+                p.request_lookahead_remeasure(false, true);
+            }
         }
     }
 
@@ -710,7 +827,7 @@ impl LayoutNode {
     }
 
     /// The chain's parent data nodes folded tail to head.
-    fn compute_parent_data(&self) -> Option<Rc<dyn Any>> {
+    pub(crate) fn compute_parent_data(&self) -> Option<Rc<dyn Any>> {
         if !self.has_kind(NodeKind::ParentData) {
             return None;
         }
@@ -816,7 +933,11 @@ impl Node for LayoutNode {
         for c in children {
             let any = c.clone() as Rc<dyn Any>;
             match any.downcast::<LayoutNode>() {
-                Ok(node) => emitted.push(Emitted::Layout(node)),
+                Ok(node) => {
+                    // (emitted directly in it: in no virtual node)
+                    *node.virtual_parent.borrow_mut() = Weak::new();
+                    emitted.push(Emitted::Layout(node))
+                }
                 Err(any) => {
                     let virtual_node = any.downcast::<VirtualLayoutNode>().expect("kompoz: a node of another kind");
                     virtual_node.set_parent(self.this.clone());
@@ -931,6 +1052,10 @@ impl LayoutNode {
         }
         for (i, child) in new.iter().enumerate() {
             let at = self.children.borrow().iter().position(|c| Rc::ptr_eq(c, child));
+            // (one that stays may have moved into a lookahead scope or out of one: Compose detaches it then)
+            if at.is_some() && child.is_attached() {
+                child.refresh_lookahead_root();
+            }
             match at {
                 Some(j) if j == i => {}
                 Some(j) => {

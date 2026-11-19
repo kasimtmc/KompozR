@@ -27,6 +27,7 @@ kompoz-runtime/macros kompozable Clicker rr crates/kompoz-runtime/tests/macros.r
 kompoz-coroutines/coroutines kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/macros kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/runtime kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
+kompoz-runtime/state_observer kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/subcomposition kompozable Column rr crates/kompoz-runtime/tests/common/mod.rs
 * fn Constraints dddd crates/kompoz-graphics/src/constraints.rs
 * kompozable ContextMenuArea rddr crates/kompoz-foundation/src/context_menu.rs
@@ -120,6 +121,7 @@ kompoz-runtime/macros kompozable Local d crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/clickable kompozable LogInteractions rr crates/kompoz-foundation/tests/clickable.rs
 kompoz-foundation/pager kompozable LogInteractions rr crates/kompoz-foundation/tests/pager.rs
 kompoz-foundation/scroll kompozable LogInteractions rr crates/kompoz-foundation/tests/scroll.rs
+* kompozable LookaheadScope r crates/kompoz-ui/src/layout/lookahead.rs
 * kompozable MenuItem rrr crates/kompoz-foundation/src/context_menu.rs
 * kompozable MenuItemContent rrrr crates/kompoz-foundation/src/context_menu.rs
 * kompozable MenuSeparator r crates/kompoz-foundation/src/context_menu.rs
@@ -192,6 +194,7 @@ kompoz-coroutines/coroutines kompozable Text r crates/kompoz-runtime/tests/commo
 kompoz-foundation/selection kompozable Text rdd crates/kompoz-foundation/tests/selection.rs
 kompoz-runtime/macros kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/runtime kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
+kompoz-runtime/state_observer kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 kompoz-runtime/subcomposition kompozable Text r crates/kompoz-runtime/tests/common/mod.rs
 * kompozable TextContextMenuArea rrrr crates/kompoz-foundation/src/text/context_menu_area.rs
 * kompozable TextFieldCursorHandle r crates/kompoz-foundation/src/text/basic_text_field.rs
@@ -224,6 +227,8 @@ kompoz-foundation/selection kompozable WithToolbar rr crates/kompoz-foundation/t
 kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method add_group ddddddddd crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method add_path rddddddddddddd crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method advance_time_by rd crates/kompoz-test/src/lib.rs MainClock
+* method advance_time_until dr crates/kompoz-test/src/lib.rs MainClock
 * method anchored_drag dr crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method anchored_drag_to_target rdr crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method anchored_draggable rrdddd crates/kompoz-foundation/src/gestures/anchored_draggable.rs Modifier as AnchoredDraggableModifiers
@@ -253,6 +258,7 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * fn animate_value rrrddr crates/kompoz-animation/src/suspend.rs
 * method animate_zoom_by rdd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method append_inline_content rd crates/kompoz-text/src/annotated_string.rs AnnotatedStringBuilder
+* method approach_layout rdr crates/kompoz-ui/src/layout/lookahead.rs Modifier
 * method area rdddd crates/kompoz-foundation/src/layout/grid.rs GridConfigurationScope
 * method aspect_ratio rd crates/kompoz-foundation/src/layout/aspect_ratio.rs Modifier as AspectRatioModifiers
 * method background rd crates/kompoz-foundation/src/background.rs Modifier as BackgroundModifiers
@@ -370,6 +376,7 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * fn lazy_layout_cache_window_of_fractions dd crates/kompoz-foundation/src/lazy/layout/cache_window.rs
 * fn lazy_list_prefetch_strategy d crates/kompoz-foundation/src/lazy/list/prefetch_strategy.rs
 * fn lazy_list_snap_layout_info_provider rd crates/kompoz-foundation/src/gestures/snapping/lazy_list.rs
+* method local_lookahead_position_of rdd crates/kompoz-ui/src/layout/coordinates.rs LayoutCoordinates
 * method long_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method long_click dd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method magnifier rddddddd crates/kompoz-foundation/src/magnifier.rs Modifier as MagnifierModifiers
@@ -542,8 +549,10 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * fn tween ddd crates/kompoz-animation/src/spec.rs
 * method update_anchors rd crates/kompoz-foundation/src/gestures/anchored_draggable.rs AnchoredDraggableState
 * method update_bounds dd crates/kompoz-animation/src/animatable.rs Animatable
+* method update_target rrd crates/kompoz-animation/src/deferred_target.rs DeferredTargetAnimation
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
+* method wait_until ddr crates/kompoz-test/src/lib.rs KompozTestRule
 * method weight rd crates/kompoz-foundation/src/layout/scope.rs Modifier as LayoutScopeModifiers
 * method width_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 * method wrap_content_height dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers

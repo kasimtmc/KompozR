@@ -46,10 +46,10 @@ pub use host::{HostHandle, KompozHost};
 pub use idle::{IdleScope, IdleWorkQueue, LocalIdleWorkQueue};
 pub use infinite_animation_policy::InfiniteAnimationPolicy;
 pub use layout::{
-    AlignmentLine, FirstBaseline, IntrinsicMeasurable, IntrinsicMeasureScope, LastBaseline, Layout, LayoutCoordinates,
-    Measurable, MeasurePolicy, MeasureResult, MeasureScope, MultiMeasureLayout, Placeable, PlacementScope,
-    PrecomposedSlotHandle, SubcomposeLayout, SubcomposeLayoutState, SubcomposeMeasureScope, SubcomposeSlotReusePolicy,
-    measure_policy,
+    AlignmentLine, ApproachIntrinsicMeasureScope, ApproachLayoutModifierNode, ApproachMeasureScope, FirstBaseline,
+    IntrinsicMeasurable, IntrinsicMeasureScope, LastBaseline, Layout, LayoutCoordinates, LookaheadScope, Measurable,
+    MeasurePolicy, MeasureResult, MeasureScope, MultiMeasureLayout, Placeable, PlacementScope, PrecomposedSlotHandle,
+    SubcomposeLayout, SubcomposeLayoutState, SubcomposeMeasureScope, SubcomposeSlotReusePolicy, measure_policy,
 };
 pub use modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, NodeKind};
 pub use motion_duration_scale::MotionDurationScale;

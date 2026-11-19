@@ -11,6 +11,7 @@ use crate::unit::Constraints;
 use kompoz_graphics::{Density, IntOffset, IntSize, LayoutDirection};
 use kompoz_runtime::named;
 use std::any::Any;
+use std::cell::Cell;
 use std::fmt;
 use std::rc::{Rc, Weak};
 
@@ -60,6 +61,12 @@ pub trait PlaceTarget {
     fn place_at(&self, position: IntOffset, z_index: f32, layer: Option<LayerBlock>);
     fn parent_data(&self) -> Option<Rc<dyn Any>> {
         None
+    }
+    /// It is placed under a motion frame of reference, or not (Compose's MotionReferencePlacementDelegate
+    /// `updatePlacedUnderMotionFrameOfReference`): what the placement scope placing it says, just before it is
+    /// placed. Nothing for what isn't a layout.
+    fn update_placed_under_motion_frame_of_reference(&self, new: bool) {
+        let _ = new;
     }
 }
 
@@ -122,7 +129,16 @@ impl Placeable {
         IntOffset::new((self.width() - m.width) / 2, (self.height() - m.height) / 2)
     }
 
-    pub(crate) fn place_apparent_to_real_offset(&self, position: IntOffset, z_index: f32, layer: Option<LayerBlock>) {
+    /// Placed by `scope` (Compose's `placeApparentToRealOffset`): tagged with the scope's motion frame of
+    /// reference, then placed at its real top left.
+    pub(crate) fn place_apparent_to_real_offset(
+        &self,
+        scope: &PlacementScope,
+        position: IntOffset,
+        z_index: f32,
+        layer: Option<LayerBlock>,
+    ) {
+        self.target.update_placed_under_motion_frame_of_reference(scope.motion_frame_of_reference.get());
         self.target.place_at(position + self.apparent_to_real_offset(), z_index, layer);
     }
 }
@@ -161,6 +177,8 @@ pub struct MeasureScope {
     /// The layout node it measures (Compose's MeasureScopeWithLayoutNode): a multi-content layout's policy finds
     /// its children's groups through it.
     pub(crate) node: Option<Weak<crate::node::LayoutNode>>,
+    /// Measuring in the lookahead pass (Compose's `isLookingAhead`).
+    pub(crate) looking_ahead: bool,
 }
 
 /// Compose's IntrinsicMeasureScope: the same as a measure scope here.
@@ -168,17 +186,25 @@ pub type IntrinsicMeasureScope = MeasureScope;
 
 impl MeasureScope {
     pub fn new(density: Density, layout_direction: LayoutDirection) -> MeasureScope {
-        MeasureScope { density, layout_direction, intrinsics: false, node: None }
+        MeasureScope { density, layout_direction, intrinsics: false, node: None, looking_ahead: false }
     }
 
-    /// The scope a layout node measures in.
-    pub(crate) fn for_node(node: &crate::node::LayoutNode) -> MeasureScope {
+    /// The scope a layout node measures in, in the lookahead pass or not.
+    pub(crate) fn for_node(node: &crate::node::LayoutNode, looking_ahead: bool) -> MeasureScope {
         MeasureScope {
             density: node.density(),
             layout_direction: node.layout_direction(),
             intrinsics: false,
             node: Some(node.this.clone()),
+            looking_ahead,
         }
+    }
+
+    /// Whether this measures for the lookahead pass (Compose's `IntrinsicMeasureScope.isLookingAhead`): in a
+    /// lookahead scope, layouts are measured in lookahead first (where they are going to be), then in the approach
+    /// (on their way there). False outside of a lookahead scope.
+    pub fn is_looking_ahead(&self) -> bool {
+        self.looking_ahead
     }
     pub fn density(&self) -> Density {
         self.density
@@ -317,6 +343,19 @@ impl MeasureResult {
         MeasureResult { place: placement_block, ..self }
     }
 
+    /// The same result reporting another size (Compose's `object : MeasureResult by result` overriding its size).
+    pub(crate) fn with_size(self, width: i32, height: i32) -> MeasureResult {
+        MeasureResult { width, height, ..self }
+    }
+
+    /// Whether `other` is this very result (its size, lines and placement block the same instances).
+    pub(crate) fn same_result(&self, other: &MeasureResult) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && Rc::ptr_eq(&self.place, &other.place)
+            && Rc::ptr_eq(&self.alignment_lines, &other.alignment_lines)
+    }
+
     pub(crate) fn same_lines(&self, other: &MeasureResult) -> bool {
         Rc::ptr_eq(&self.alignment_lines, &other.alignment_lines) || self.alignment_lines == other.alignment_lines
     }
@@ -329,19 +368,32 @@ impl fmt::Debug for MeasureResult {
 }
 
 /// What a placement block places in (Compose's Placeable.PlacementScope): its parent's width and layout direction,
-/// which `place_relative` mirrors by, and the parent's coordinates.
+/// which `place_relative` mirrors by, and the parent's coordinates (its lookahead coordinates while placing in the
+/// lookahead pass).
 pub struct PlacementScope {
     pub(crate) parent_width: i32,
     pub(crate) parent_layout_direction: LayoutDirection,
     pub(crate) density: Density,
     pub(crate) coordinator: Option<Rc<NodeCoordinator>>,
+    /// The scope of the coordinator's lookahead delegate (placing in the lookahead pass).
+    pub(crate) lookahead: bool,
+    /// Placing under `with_motion_frame_of_reference_placement` (Compose's `motionFrameOfReferencePlacement`, kept by
+    /// what places: its scopes share it).
+    pub(crate) motion_frame_of_reference: Rc<Cell<bool>>,
 }
 
 impl PlacementScope {
     /// A scope of a parent `parent_width` wide laid out `parent_layout_direction` (for placing outside a layout:
     /// tests, a host's root).
     pub fn new(parent_width: i32, parent_layout_direction: LayoutDirection) -> PlacementScope {
-        PlacementScope { parent_width, parent_layout_direction, density: Density::default(), coordinator: None }
+        PlacementScope {
+            parent_width,
+            parent_layout_direction,
+            density: Density::default(),
+            coordinator: None,
+            lookahead: false,
+            motion_frame_of_reference: Rc::new(Cell::new(false)),
+        }
     }
 
     pub fn parent_width(&self) -> i32 {
@@ -361,7 +413,29 @@ impl PlacementScope {
         if let Some(n) = c.layout_node() {
             n.on_coordinates_accessed_in_placement(c);
         }
-        Some(LayoutCoordinates::of(c.clone()))
+        Some(if self.lookahead { LayoutCoordinates::lookahead_of(c.clone()) } else { LayoutCoordinates::of(c.clone()) })
+    }
+
+    /// Whether it places in the lookahead pass (its coordinates are lookahead coordinates then).
+    pub fn is_looking_ahead(&self) -> bool {
+        self.lookahead
+    }
+
+    /// The coordinates of `scope` while this places (Compose's `LookaheadScope` member
+    /// `PlacementScope.lookaheadScopeCoordinates`): its scope's layout's (a `LookaheadScope`'s parent's inner
+    /// coordinates), not lookahead coordinates.
+    pub fn lookahead_scope_coordinates(&self, scope: &dyn super::LookaheadScope) -> LayoutCoordinates {
+        scope.lookahead_scope_coordinates(self)
+    }
+
+    /// Places what `block` places on the same frame of reference as this layout (Compose's
+    /// `withMotionFrameOfReferencePlacement`): their coordinates introduce a motion frame of reference, whose offset
+    /// `local_position_of(…, include_motion_frame_of_reference = false)` leaves out — a scrolling layout's content,
+    /// whose position changes as it scrolls, not as the layout moves, and which lookahead animations shouldn't chase.
+    pub fn with_motion_frame_of_reference_placement(&self, block: impl FnOnce(&PlacementScope)) {
+        self.motion_frame_of_reference.set(true);
+        block(self);
+        self.motion_frame_of_reference.set(false);
     }
 
     /// `ruler`'s value where this places (in the placing layout's coordinates), else `default` (Compose's
@@ -373,7 +447,7 @@ impl PlacementScope {
             return calculate(self, default);
         }
         match &self.coordinator {
-            Some(c) => c.find_ruler_value(&ruler, default),
+            Some(c) => c.find_ruler_value(&ruler, default, self.lookahead),
             None => default,
         }
     }
@@ -391,24 +465,24 @@ impl PlacementScope {
 impl PlacementScope {
     /// Places `placeable` with its top left at (`x`, `y`), whatever the layout direction (Compose's `place`).
     pub fn place(&self, placeable: &Placeable, x: i32, y: i32, #[default(0.0)] z_index: f32) {
-        placeable.place_apparent_to_real_offset(IntOffset::new(x, y), z_index, None);
+        placeable.place_apparent_to_real_offset(self, IntOffset::new(x, y), z_index, None);
     }
 
     /// The same at `position`, with a z-index.
     pub fn place_at(&self, placeable: &Placeable, position: IntOffset, z_index: f32) {
-        placeable.place_apparent_to_real_offset(position, z_index, None);
+        placeable.place_apparent_to_real_offset(self, position, z_index, None);
     }
 
     /// Places it at (`x`, `y`) from the start: mirrored right to left in a right-to-left parent (Compose's
     /// `placeRelative`).
     pub fn place_relative(&self, placeable: &Placeable, x: i32, y: i32, #[default(0.0)] z_index: f32) {
         let at = self.mirrored(placeable, IntOffset::new(x, y));
-        placeable.place_apparent_to_real_offset(at, z_index, None);
+        placeable.place_apparent_to_real_offset(self, at, z_index, None);
     }
 
     pub fn place_relative_at(&self, placeable: &Placeable, position: IntOffset, z_index: f32) {
         let at = self.mirrored(placeable, position);
-        placeable.place_apparent_to_real_offset(at, z_index, None);
+        placeable.place_apparent_to_real_offset(self, at, z_index, None);
     }
 
     /// Places it through a graphics layer that `layer_block` sets up (run again when what it reads changes,
@@ -421,7 +495,7 @@ impl PlacementScope {
         #[default(0.0)] z_index: f32,
         layer_block: impl Fn(&mut GraphicsLayerScope) + 'static,
     ) {
-        placeable.place_apparent_to_real_offset(IntOffset::new(x, y), z_index, Some(Rc::new(layer_block)));
+        placeable.place_apparent_to_real_offset(self, IntOffset::new(x, y), z_index, Some(Rc::new(layer_block)));
     }
 
     /// The same with a layer block kept elsewhere (so placing again with it isn't taken as a new layer).
@@ -432,7 +506,7 @@ impl PlacementScope {
         layer_block: LayerBlock,
         z_index: f32,
     ) {
-        placeable.place_apparent_to_real_offset(position, z_index, Some(layer_block));
+        placeable.place_apparent_to_real_offset(self, position, z_index, Some(layer_block));
     }
 
     /// Places it through `layer` (Compose's `placeWithLayer(x, y, layer)`): drawn with the layer's properties (as
@@ -444,7 +518,7 @@ impl PlacementScope {
         layer: &crate::draw::GraphicsLayer,
         z_index: f32,
     ) {
-        placeable.place_apparent_to_real_offset(position, z_index, Some(layer.placement_block()));
+        placeable.place_apparent_to_real_offset(self, position, z_index, Some(layer.placement_block()));
     }
 
     /// `place_relative` through `layer` (Compose's `placeRelativeWithLayer(position, layer)`).
@@ -456,7 +530,7 @@ impl PlacementScope {
         z_index: f32,
     ) {
         let at = self.mirrored(placeable, position);
-        placeable.place_apparent_to_real_offset(at, z_index, Some(layer.placement_block()));
+        placeable.place_apparent_to_real_offset(self, at, z_index, Some(layer.placement_block()));
     }
 
     /// `place_relative` through a layer (Compose's `placeRelativeWithLayer`).
@@ -469,7 +543,7 @@ impl PlacementScope {
         layer_block: impl Fn(&mut GraphicsLayerScope) + 'static,
     ) {
         let at = self.mirrored(placeable, IntOffset::new(x, y));
-        placeable.place_apparent_to_real_offset(at, z_index, Some(Rc::new(layer_block)));
+        placeable.place_apparent_to_real_offset(self, at, z_index, Some(Rc::new(layer_block)));
     }
 
     /// `place_relative` with a layer block kept elsewhere.
@@ -481,7 +555,7 @@ impl PlacementScope {
         z_index: f32,
     ) {
         let at = self.mirrored(placeable, position);
-        placeable.place_apparent_to_real_offset(at, z_index, Some(layer_block));
+        placeable.place_apparent_to_real_offset(self, at, z_index, Some(layer_block));
     }
 }
 
