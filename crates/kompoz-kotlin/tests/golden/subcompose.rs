@@ -6,6 +6,7 @@ pub fn Underlined(content: impl ::core::ops::Fn() + 'static) {
     SubcomposeLayout(
         modifier = Modifier.test_tag("underlined"),
         measure_policy = |this, constraints| {
+            let __kz_this = ::core::clone::Clone::clone(this);
             let mut main = ::kompoz::runtime::kt::KtList::map(
                 &this.subcompose(::std::string::String::from("main"), content.clone()),
                 |it| it.measure(constraints.copy(min_width = 0, min_height = 0)),
@@ -15,9 +16,9 @@ pub fn Underlined(content: impl ::core::ops::Fn() + 'static) {
             let mut line = ::kompoz::runtime::kt::KtList::map(
                 &this.subcompose(::std::string::String::from("line"), {
                     let width = ::kompoz::runtime::__private::capture(&width);
-                    let this = ::kompoz::runtime::__private::capture(this);
+                    let __kz_this = ::kompoz::runtime::__private::capture(&__kz_this);
                     move || {
-                        Box(modifier = Modifier.size_wh(this.to_dp((width as f32)), 2.dp()));
+                        Box(modifier = Modifier.size_wh(__kz_this.to_dp((width as f32)), 2.dp()));
                     }
                 }),
                 |it| it.measure(constraints),

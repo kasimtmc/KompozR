@@ -173,8 +173,7 @@ impl Gen<'_, '_> {
                 || members_of(&r.ty, &kotlin_setter).any(|i| i.rust == setter && i.params.len() == 1)
         })?;
         let r = r.clone();
-        let label = r.labels.first().cloned();
-        let _ = self.receiver(label.as_deref());
+        let r = self.use_receiver(&r);
         let span = proc_macro2::Span::call_site();
         Some((r, ident(&setter, span)))
     }

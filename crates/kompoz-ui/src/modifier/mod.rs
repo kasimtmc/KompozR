@@ -143,10 +143,13 @@ impl<E: ModifierNodeElement> AnyElement for E {
         NodeCell::new_rc(self.create())
     }
     fn update_node(&self, node: &NodeRc) {
-        let mut n = node.node.borrow_mut();
-        let n: &mut dyn Any = &mut *n;
-        let n = n.downcast_mut::<E::Node>().expect("kompoz: a node of another type at an element's place");
-        self.update(n);
+        {
+            let mut n = node.node.borrow_mut();
+            let n: &mut dyn Any = &mut *n;
+            let n = n.downcast_mut::<E::Node>().expect("kompoz: a node of another type at an element's place");
+            self.update(n);
+        }
+        node.refresh_provided_locals();
     }
 }
 

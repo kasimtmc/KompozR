@@ -5,14 +5,6 @@
 //! where they are on it — and [`CustomizedLookaheadAnimationVisualDebugging`] gives its content's animations a color
 //! of their own.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the shared transition parts are SharedTransitionScope's (stage 11 WP4): tested here until then"
-    )
-)]
-
 use crate::converter::VectorConverter;
 use crate::{
     Animatable, Animation, ArcAnimationSpec, ArcMode, FiniteAnimationSpec, LinearEasing, RepeatMode, SnapSpec,

@@ -376,9 +376,8 @@ impl Gen<'_, '_> {
             .rev()
             .find_map(|r| members_of(&r.ty, kotlin).find(|i| accept(i)).map(|i| (r.clone(), i)))?;
         // (a use: captured from a lambda)
-        let labels = found.0.labels.first().cloned();
-        let _ = self.receiver(labels.as_deref());
-        Some(found)
+        let used = self.use_receiver(&found.0);
+        Some((used, found.1))
     }
 
     // ---- Literals ----------------------------------------------------------------------------------------------
@@ -1296,9 +1295,8 @@ impl Gen<'_, '_> {
         let found =
             self.receivers.iter().rev().find_map(|r| extension_member(&r.ty, recv, name, 1).map(|i| (r.clone(), i)))?;
         // (a use: captured from a lambda)
-        let labels = found.0.labels.first().cloned();
-        let _ = self.receiver(labels.as_deref());
-        Some(found)
+        let used = self.use_receiver(&found.0);
+        Some((used, found.1))
     }
 
     /// The type of a member `name` of a value of type `recv` (`call`: a method called).

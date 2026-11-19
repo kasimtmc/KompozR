@@ -271,8 +271,7 @@ impl Gen<'_, '_> {
                 (!items.is_empty() && ty != Ty::Unknown).then(|| (r.clone(), items))
             })
         {
-            let label = r.labels.first().cloned();
-            let _ = self.receiver(label.as_deref());
+            let r = self.use_receiver(&r);
             let ri = proc_macro2::Ident::new(&r.rust, span);
             let ty = Ty::from_rust(&r.ty);
             let recv =
@@ -281,8 +280,7 @@ impl Gen<'_, '_> {
             return self.method_on(recv, None, n, args, loc);
         }
         if let Some((r, items, file)) = found {
-            let label = r.labels.first().cloned();
-            let _ = self.receiver(label.as_deref());
+            let r = self.use_receiver(&r);
             let ri = proc_macro2::Ident::new(&r.rust, span);
             let recv_ts = if r.rust == "self" { quote_spanned!(span=> self.clone()) } else { quote!(#ri) };
             let callee = match (items, file) {
@@ -772,8 +770,7 @@ impl Gen<'_, '_> {
         name: &Ident,
     ) -> Out {
         let span = self.span(loc);
-        let label = r.labels.first().cloned();
-        let _ = self.receiver(label.as_deref());
+        let r = &self.use_receiver(r);
         let first = items[0].params[0].ty;
         let first_param_ref = first.starts_with('&');
         let rv = recv.ts;

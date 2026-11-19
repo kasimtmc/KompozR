@@ -4,14 +4,6 @@
 //! size along the way (`ScaleToBounds`). What `SharedTransitionScope`'s `skipToLookaheadSize()` and its
 //! `ResizeMode.ScaleToBounds` are made of.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "SharedTransitionScope's skipToLookaheadSize and ResizeMode.ScaleToBounds (stage 11 WP4): tested here until then"
-    )
-)]
-
 use kompoz_graphics::{ContentScale, IntSize, ScaleFactor};
 use kompoz_ui::layout::{IntrinsicMeasurable, IntrinsicMeasureScope, LayoutModifierNode, Measurable, MeasureResult};
 use kompoz_ui::layout::{MeasureScope, PlacementScope, TransformOrigin};
@@ -35,6 +27,10 @@ thread_local! {
 }
 
 /// Always enabled (Compose's private `DefaultEnabled`).
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Compose's default of the element's isEnabled, which no caller in 1.12.1 leaves out")
+)]
 pub(crate) fn default_skip_enabled() -> SkipEnabled {
     DEFAULT_ENABLED.with(|e| e.clone())
 }

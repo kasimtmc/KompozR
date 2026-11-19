@@ -162,6 +162,13 @@ pub(crate) fn push_outline_clip(g: &mut dyn GraphicsContext, o: &Outline, bounds
 pub fn draw_layer(g: &mut dyn GraphicsContext, l: &LayerDraw, content: &mut dyn FnMut(&mut dyn GraphicsContext)) {
     let alpha = l.alpha.clamp(0.0, 1.0);
     if alpha <= 0.0 || l.geometry.scale_x == 0.0 || l.geometry.scale_y == 0.0 {
+        // (nothing of it shows, but what is in it is drawn — into nothing kept —, as Compose records a layer's content
+        // whatever its alpha or scale: what draws there for elsewhere — a shared element's layer the overlay of its
+        // scope draws — still gets drawn)
+        let mut sink = super::Picture::new();
+        let outer = super::KEPT_PASS.replace(false);
+        content(&mut sink);
+        super::KEPT_PASS.set(outer);
         return;
     }
     let m = layer_matrix(&l.geometry);

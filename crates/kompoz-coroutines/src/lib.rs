@@ -23,7 +23,7 @@ pub use compose::{
 };
 pub use context::{CoroutineContext, current_coroutine_context, with_context};
 pub use executor::{
-    Cancelled, CoroutineScope, Deferred, Dispatcher, Failure, Job, cancel_current, current_job, run_catching,
+    Cancelled, CoroutineScope, Deferred, Dispatcher, Failure, Job, cancel_current, current_job, run_catching, r#yield,
 };
 pub use flow::{Flow, FlowCollector, combine, empty_flow, flow, flow_of};
 pub use hot::{AsFlow, MutableSharedFlow, MutableStateFlow, SharedFlow, SharingStarted, StateFlow};

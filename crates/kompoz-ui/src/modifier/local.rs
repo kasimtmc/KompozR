@@ -79,11 +79,12 @@ pub trait ModifierLocalModifierNode: ModifierNode {
 impl NodeCx {
     /// `local`'s value as the nearest node above this one provides it — earlier in its chain, then in its
     /// ancestors' — else its default (Compose's `ModifierLocalModifierNode.current`). Not observed: read it again
-    /// when it is needed.
+    /// when it is needed. A provider busy in one of its own callbacks (measuring, while a subcomposition attaches
+    /// nodes below it) gives what it provided when last made, updated, attached or read.
     pub fn modifier_local_current<T: Clone + 'static>(&self, local: &'static ModifierLocal<T>) -> T {
         let mut found = None;
         self.visit_ancestors(NodeKind::Locals, false, &mut |cx| {
-            let value = cx.with_modifier_local(|n| n.provided_values().get(local)).flatten();
+            let value = cx.with_modifier_local(|map| map.get(local)).flatten();
             match value {
                 Some(v) => {
                     found = Some(v);
@@ -95,8 +96,9 @@ impl NodeCx {
         found.unwrap_or_else(|| local.default_value())
     }
 
-    fn with_modifier_local<R>(&self, f: impl FnOnce(&mut dyn ModifierLocalModifierNode) -> R) -> Option<R> {
-        let mut node = self.cell.node.borrow_mut();
-        node.as_modifier_local().map(f)
+    fn with_modifier_local<R>(&self, f: impl FnOnce(&ModifierLocalMap) -> R) -> Option<R> {
+        self.cell.refresh_provided_locals();
+        let map = self.cell.meta.provided_locals.borrow();
+        map.as_ref().map(f)
     }
 }

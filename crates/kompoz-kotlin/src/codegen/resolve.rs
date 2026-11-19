@@ -688,6 +688,10 @@ pub(crate) struct ImplicitReceiver {
     /// A receiver lambda's scope given by shared reference (`&SubcomposeMeasureScope`): a lambda kept inside it
     /// captures a clone of the scope itself (Kotlin's lambda holds the scope object), not the reference.
     pub by_ref: bool,
+    /// Set when a lambda inside the one lending it by reference uses it: the lending lambda then holds a clone of
+    /// the scope, `__kz_this` (what a `#[kompozable]` body's closures capture clones of, as Kotlin's lambdas share
+    /// the scope object), and the lambdas inside use that.
+    pub owned_used: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 /// A lambda being written: the outer locals its body uses (what it captures), in the order first used.
@@ -696,6 +700,8 @@ pub(crate) struct CaptureFrame {
     /// The scope depth its own scopes start at: a local declared below it is outside.
     pub boundary: usize,
     pub used: Vec<String>,
+    /// Whether the lambda is kept by what it is given to (it outlives the lambda around it).
+    pub kept: bool,
 }
 
 /// A file's own function, as its calls see it.

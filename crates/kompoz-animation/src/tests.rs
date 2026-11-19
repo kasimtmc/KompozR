@@ -1,7 +1,7 @@
-//! Unit tests of what SharedTransitionScope (stage 11 WP4) is built on and no public API reaches yet: the
+//! Unit tests of what SharedTransitionScope (stage 11 WP4) is built on, as it is (no public API reaches it so): the
 //! SkipToLookaheadSize node (its `ScaleToBounds` too), the debug helper's shared transition visualizations and the
-//! shared mutable transform state of a deferred phase. One test, its parts in turn, on the one thread made the UI
-//! thread.
+//! shared mutable transform state of a deferred phase, the internal shared bounds of a visibility the caller manages.
+//! One test, its parts in turn, on the one thread made the UI thread.
 
 use crate::lookahead_debug::LookaheadAnimationVisualDebugHelper;
 use crate::skip_to_lookahead_size::{
@@ -218,6 +218,56 @@ fn a_deferred_phases_values_are_handed_over() {
     TEST_TIME_SOURCE.with(|t| *t.borrow_mut() = None);
 }
 
+fn shared_bounds_of_a_visibility_the_caller_manages_draw_both() {
+    // Compose's internal sharedBoundsWithCallerManagedVisibility: both drawn in the moving bounds (the one not shown
+    // too), each its own content.
+    let (red, blue) = (Color::hex(0xC03030), Color::hex(0x3050C0));
+    let first = mutable_state_of(true);
+    let f = first.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let f = f.clone();
+            crate::SharedTransitionLayout(Modifier.fill_max_size(), move |shared: &crate::SharedTransitionScope| {
+                let (f, shared) = (f.clone(), shared.clone());
+                Box(
+                    modifier = Modifier.fill_max_size(),
+                    content = move || {
+                        for (shown, at, side, color) in [(f.get(), 0.0, 40.0, red), (!f.get(), 200.0, 100.0, blue)] {
+                            let state = shared.remember_shared_content_state(kompoz_ui::layout::SlotKey::new("kutu"));
+                            let m = shared.shared_bounds_with_caller_managed_visibility(
+                                Modifier.offset(at.dp(), at.dp()),
+                                state,
+                                shown,
+                                crate::SharedTransitionDefaults::BoundsTransform(),
+                                crate::PlaceholderSize::ContentSize,
+                                true,
+                                0.0,
+                                crate::shared_transition::ParentClip(),
+                            );
+                            Box(modifier = m.size(side.dp()).background(color));
+                        }
+                    },
+                );
+            });
+        }),
+        IntSize::new(400, 800),
+    );
+    rule.wait_for_idle();
+    first.set(false);
+    let mut c = rule.draw();
+    for _ in 0..8 {
+        rule.advance_frame();
+        c = rule.draw();
+    }
+    let drawn = |color| -> Vec<Rect> {
+        c.rects.iter().zip(&c.rect_colors).filter(|(_, x)| **x == color).map(|(r, _)| *r).collect()
+    };
+    let (r, b) = (drawn(red), drawn(blue));
+    assert!(r.len() == 1 && b.len() == 1 && r[0].top_left() == b[0].top_left(), "{r:?} {b:?}");
+    assert!(r[0].left > 5.0 && r[0].left < 195.0 && r[0].width() == b[0].width(), "{r:?} {b:?}");
+    rule.wait_for_idle();
+}
+
 #[test]
 fn what_shared_transitions_are_built_on() {
     set_ui_thread();
@@ -225,4 +275,5 @@ fn what_shared_transitions_are_built_on() {
     scale_to_bounds_scales_the_content_into_the_size_on_the_way();
     the_debug_helper_draws_a_shared_transition();
     a_deferred_phases_values_are_handed_over();
+    shared_bounds_of_a_visibility_the_caller_manages_draw_both();
 }

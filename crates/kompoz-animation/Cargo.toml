@@ -55,3 +55,7 @@ harness = false
 [[test]]
 name = "animated"
 harness = false
+
+[[test]]
+name = "shared"
+harness = false

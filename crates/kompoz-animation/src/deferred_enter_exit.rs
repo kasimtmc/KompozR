@@ -291,21 +291,18 @@ impl SharedMutableTransformState {
     }
 
     /// The scale the block set (1 if none: Compose's `activeScale`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
     pub(crate) fn active_scale(&self) -> f32 {
         let s = &self.inner.transform_scope;
         if s.is_scale_mutated.get() { s.scale.get() } else { 1.0 }
     }
 
     /// The offset the block set (Compose's `activeOffset`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
     pub(crate) fn active_offset(&self) -> IntOffset {
         let s = &self.inner.transform_scope;
         if s.is_offset_mutated.get() { s.offset.get() } else { IntOffset::Zero }
     }
 
     /// The transform origin the block set (Compose's `activeTransformOrigin`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
     pub(crate) fn active_transform_origin(&self) -> TransformOrigin {
         let s = &self.inner.transform_scope;
         if s.is_transform_origin_mutated.get() {
@@ -325,7 +322,6 @@ impl SharedMutableTransformState {
     }
 
     /// The coordinates of the content's enter/exit layout (Compose's `parentLayoutCoordinates`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
     pub(crate) fn parent_layout_coordinates(&self) -> Option<LayoutCoordinates> {
         self.inner.parent_layout_coordinates.borrow().clone()
     }
@@ -350,12 +346,10 @@ impl SharedMutableTransformState {
         self.inner.last_slide.get()
     }
     /// The scale the block itself last set (Compose's `lastManualScale`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
     pub(crate) fn last_manual_scale(&self) -> f32 {
         self.inner.last_manual_scale.get()
     }
     /// The offset the block itself last set (Compose's `lastManualSlide`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
     pub(crate) fn last_manual_slide(&self) -> IntOffset {
         self.inner.last_manual_slide.get()
     }
@@ -370,7 +364,7 @@ impl SharedMutableTransformState {
         (self.has_block() && self.inner.transform_scope.is_scale_mutated.get()) || self.last_scale() != 1.0
     }
     /// Whether the transform origin needs animating (Compose's `transformOriginRequiresAnimation`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "stage 11 WP4's shared transitions read it"))]
+    #[cfg_attr(not(test), expect(dead_code, reason = "Compose 1.12.1 declares it and reads it nowhere"))]
     pub(crate) fn transform_origin_requires_animation(&self) -> bool {
         (self.has_block() && self.inner.transform_scope.is_transform_origin_mutated.get())
             || self.last_transform_origin() != TransformOrigin::Center

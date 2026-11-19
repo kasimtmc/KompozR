@@ -296,18 +296,31 @@ impl<'a, 'd> Gen<'a, 'd> {
         }
     }
 
-    /// The innermost receiver (`this`), or the one labeled `label`; its use from a lambda is a capture.
+    /// The innermost receiver (`this`), or the one labeled `label`; its use from a lambda is a capture (see
+    /// [`use_receiver`](Self::use_receiver)).
     pub fn receiver(&mut self, label: Option<&str>) -> Option<ImplicitReceiver> {
         let r = match label {
             None => self.receivers.last().cloned(),
             Some(l) => self.receivers.iter().rev().find(|r| r.labels.iter().any(|x| x == l)).cloned(),
         }?;
+        Some(self.use_receiver(&r))
+    }
+
+    /// `r` used here: from a lambda inside the one it is the receiver of, a capture; one lent by reference used from
+    /// a lambda kept inside the lending one is the lending lambda's clone of it (see `ImplicitReceiver::owned_used`):
+    /// a reference can't be captured by a lambda kept past the one lending it. What to write for it.
+    pub fn use_receiver(&mut self, r: &ImplicitReceiver) -> ImplicitReceiver {
+        let mut r = r.clone();
+        if r.by_ref && self.frames.iter().any(|f| r.depth < f.boundary && f.kept) {
+            r.owned_used.set(true);
+            r.rust = format!("__kz_{}", r.rust);
+        }
         for f in &mut self.frames {
             if r.depth < f.boundary && !f.used.contains(&r.rust) {
                 f.used.push(r.rust.clone());
             }
         }
-        Some(r)
+        r
     }
 
     // ---- The file ----------------------------------------------------------------------------------------------
@@ -385,6 +398,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         labels: Vec::new(),
                         depth: 0,
                         by_ref: false,
+                        owned_used: Default::default(),
                     });
                 }
                 let t = self.peek_ty(e);
@@ -510,6 +524,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         labels: vec![f.name.name.clone()],
                         depth: 0,
                         by_ref: false,
+                        owned_used: Default::default(),
                     });
                     self.declare("this", "self".into(), LocalKind::Param, self.ty_of(r));
                     self_ty = Some((rust_ty, name));

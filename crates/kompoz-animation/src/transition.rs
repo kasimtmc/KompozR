@@ -393,6 +393,9 @@ pub trait AnyTransition {
     fn calculate_total_duration_nanos(&self) -> i64;
     #[doc(hidden)]
     fn is_at_target(&self) -> bool;
+    /// The transition it is a child of (Compose's library-restricted `parentTransition`).
+    #[doc(hidden)]
+    fn parent(&self) -> Option<Rc<dyn AnyTransition>>;
     #[doc(hidden)]
     fn on_frame(&self, scaled_play_time_nanos: i64, scale_to_end: bool);
     #[doc(hidden)]
@@ -612,6 +615,11 @@ impl<S: AnimationValue> Transition<S> {
     /// Its label (tools show it; a child's is its parent's and its own).
     pub fn label(&self) -> Option<String> {
         self.inner.label.clone()
+    }
+
+    /// Which transition it is: the same for its clones (what a key of it is).
+    pub(crate) fn identity(&self) -> usize {
+        Rc::as_ptr(&self.inner) as *const () as usize
     }
 
     /// The transition this one is a child of (Compose's library-restricted `parentTransition`).
@@ -1039,6 +1047,9 @@ impl<S: AnimationValue> AnyTransition for TransitionInner<S> {
     }
     fn is_at_target(&self) -> bool {
         self.target_state.get() == self.current_state()
+    }
+    fn parent(&self) -> Option<Rc<dyn AnyTransition>> {
+        self.parent_transition.as_ref().and_then(|p| p.upgrade())
     }
     fn on_frame(&self, scaled_play_time_nanos: i64, scale_to_end: bool) {
         TransitionInner::on_frame(self, scaled_play_time_nanos, scale_to_end);

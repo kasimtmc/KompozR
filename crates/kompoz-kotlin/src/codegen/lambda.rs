@@ -101,7 +101,7 @@ impl Gen<'_, '_> {
         // Its scope: parameters, the receiver.
         self.push_scope();
         let boundary = self.scopes.len() - 1;
-        self.frames.push(CaptureFrame { boundary, used: Vec::new() });
+        self.frames.push(CaptureFrame { boundary, used: Vec::new(), kept: info.stored });
         // (a result of Kotlin's `Any` — a key lambda's —: made the Rust type holding it)
         let any = known.and_then(|k| super::expr::AnyWrap::of_rust(&k.output));
         let some =
@@ -115,6 +115,7 @@ impl Gen<'_, '_> {
         let mut params: Vec<TokenStream> = Vec::new();
         let mut unpack = TokenStream::new();
         let mut receiver_ident: Option<proc_macro2::Ident> = None;
+        let mut receiver_owned: Option<std::rc::Rc<std::cell::Cell<bool>>> = None;
         // (a closure made a trait object writes its parameters' types: none comes from where it goes)
         let written_inputs: Vec<Option<TokenStream>> = info
             .inputs
@@ -146,12 +147,15 @@ impl Gen<'_, '_> {
                 let t = t.trim_start();
                 t.starts_with('&') && !t.starts_with("&mut")
             });
+            let owned_used: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
+            receiver_owned = Some(owned_used.clone());
             self.receivers.push(ImplicitReceiver {
                 rust: name,
                 ty: r.clone(),
                 labels: labels.clone(),
                 depth: boundary,
                 by_ref,
+                owned_used,
             });
         }
         let first_input = usize::from(info.receiver.is_some());
@@ -267,6 +271,13 @@ impl Gen<'_, '_> {
             Tail::Value(result)
         };
         let body = self.stmts(&l.body.stmts, tail);
+        // (a scope lent by reference that a lambda inside uses: held as a clone of it, which that lambda captures)
+        if let (Some(i), Some(owned)) = (&receiver_ident, &receiver_owned)
+            && owned.get()
+        {
+            let o = proc_macro2::Ident::new(&format!("__kz_{i}"), span);
+            unpack = quote_spanned!(span=> let #o = ::core::clone::Clone::clone(#i); #unpack);
+        }
         // (Kotlin's `this` needn't be used: a receiver the body leaves alone is no unused variable; nor is a parameter
         // it names and leaves alone)
         for i in receiver_ident.iter().chain(named_params.iter()) {

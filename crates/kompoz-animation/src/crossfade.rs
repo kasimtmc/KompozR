@@ -138,7 +138,7 @@ fn crossfade_impl<S: AnimationValue>(
 
 /// Box's policy without its children's own alignments (Compose's `Box` at the top start; its BoxScope isn't the
 /// content's here): one over the other at the top start, as big as the biggest and at least the min constraints.
-struct CrossfadeBoxPolicy;
+pub(crate) struct CrossfadeBoxPolicy;
 
 impl MeasurePolicy for CrossfadeBoxPolicy {
     fn measure(

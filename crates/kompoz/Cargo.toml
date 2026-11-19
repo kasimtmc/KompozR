@@ -144,3 +144,8 @@ harness = false
 [[test]]
 name = "kotlin_animated"
 harness = false
+
+# Shared elements in Kotlin's syntax (SharedTransitionLayout, sharedElement/sharedBounds, the overlay)
+[[test]]
+name = "kotlin_shared"
+harness = false

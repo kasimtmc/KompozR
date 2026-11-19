@@ -7,7 +7,8 @@
 //! animated as they change ([`animate_float_as_state`], … [`animate_color_as_state`]), transitions of a state
 //! ([`update_transition`], [`remember_transition`] of a [`MutableTransitionState`], [`SeekableTransitionState`] or
 //! [`DeferredTransitionState`]; a [`Transition`]'s `animate_float`, … `animate_color`, child transitions), and
-//! animations that never end ([`remember_infinite_transition`]).
+//! animations that never end ([`remember_infinite_transition`]). Shared elements moving between content going and
+//! content coming ([`SharedTransitionLayout`], its [`SharedTransitionScope`]'s `shared_element` and `shared_bounds`).
 //!
 //! ```no_run
 //! # use kompoz_animation::*;
@@ -39,6 +40,7 @@ mod animated_visibility;
 mod animation;
 mod arc_spline;
 mod bounds;
+mod bounds_animation;
 mod color;
 mod content_size;
 mod converter;
@@ -54,7 +56,12 @@ mod lookahead_debug;
 mod mono_spline;
 mod mono_spline_keyframes;
 mod mutator;
+mod render_in_overlay;
 mod seekable;
+mod shared_content_node;
+mod shared_element;
+mod shared_transition;
+mod shared_transition_state_machine;
 mod skip_to_lookahead_size;
 mod spec;
 mod spline_decay;
@@ -116,6 +123,10 @@ pub use infinite_transition::{
 pub use lookahead_debug::{CustomizedLookaheadAnimationVisualDebugging, LookaheadAnimationVisualDebugging};
 pub use mutator::{MutatePriority, MutatorMutex};
 pub use seekable::{SeekableTransitionState, SeekingAnimationState};
+pub use shared_transition::{
+    OverlayClip, PlaceholderSize, ResizeMode, SharedContentConfig, SharedContentState, SharedTransitionDefaults,
+    SharedTransitionLayout, SharedTransitionScope,
+};
 pub use spec::{
     AnimationConstants, AnimationSpec, ArcAnimationSpec, DurationBasedAnimationSpec, FiniteAnimationSpec,
     InfiniteRepeatableSpec, KeyframeEntity, KeyframesSpec, KeyframesSpecConfig, KeyframesWithSplineSpec,

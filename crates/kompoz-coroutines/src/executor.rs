@@ -807,6 +807,25 @@ pub async fn cancel_current<T>() -> T {
     std::future::pending().await
 }
 
+/// Lets what else is ready run first (Kotlin's `yield()`): the coroutine goes on when its dispatcher next runs what
+/// is ready, after what runs now is done — what Kotlin's `launch` does before a coroutine's first step (it is
+/// dispatched), which a coroutine launched here (started at once, up to its first suspension) gets by starting with
+/// it. A coroutine cancelled meanwhile goes no further.
+///
+/// Kotlin: `yield()`
+pub async fn r#yield() {
+    let mut yielded = false;
+    std::future::poll_fn(move |cx| {
+        if yielded {
+            return Poll::Ready(());
+        }
+        yielded = true;
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    })
+    .await;
+}
+
 /// Runs `future`, giving what it failed with instead of failing (Kotlin's `runCatching`, a `try`/`catch` around
 /// suspending calls): `Err` holds the panic.
 pub async fn run_catching<T>(future: impl Future<Output = T>) -> Result<T, Failure> {

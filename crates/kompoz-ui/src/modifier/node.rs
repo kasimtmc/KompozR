@@ -114,6 +114,9 @@ pub(crate) struct NodeMeta {
     pub(crate) inserted_awaiting_attach: Cell<bool>,
     /// Told when it is detached, before its `on_detach` (Compose's `detachedListener`: a hit path drops it).
     pub(crate) detached_listener: RefCell<Option<Rc<dyn Fn()>>>,
+    /// The modifier locals it provides as last read (made, updated, attached, or read since): what a node below
+    /// reads of it while it is busy in one of its own callbacks (measuring what a subcomposition attaches below it).
+    pub(crate) provided_locals: RefCell<Option<super::ModifierLocalMap>>,
 }
 
 /// A node and what the chain knows of it (opaque outside the crate).
@@ -130,7 +133,7 @@ impl<N: ModifierNode> NodeCell<N> {
     /// A cell for a new node, its kinds worked out.
     pub(crate) fn new_typed(mut node: N) -> Rc<NodeCell<N>> {
         let kinds = kinds_of(&mut node);
-        Rc::new(NodeCell {
+        let cell = Rc::new(NodeCell {
             meta: NodeMeta {
                 kind_set: Cell::new(kinds),
                 self_kind_set: Cell::new(kinds),
@@ -146,13 +149,26 @@ impl<N: ModifierNode> NodeCell<N> {
                 reads: RefCell::new(None),
                 inserted_awaiting_attach: Cell::new(true),
                 detached_listener: RefCell::new(None),
+                provided_locals: RefCell::new(None),
             },
             node: RefCell::new(node),
-        })
+        });
+        cell.refresh_provided_locals();
+        cell
     }
 
     pub(crate) fn new_rc(node: N) -> NodeRc {
         NodeCell::new_typed(node)
+    }
+}
+
+impl<N: ModifierNode + ?Sized> NodeCell<N> {
+    /// Keeps a copy of the modifier locals it provides now, if it isn't busy (see `NodeMeta::provided_locals`).
+    pub(crate) fn refresh_provided_locals(&self) {
+        if let Ok(mut node) = self.node.try_borrow_mut() {
+            let map = node.as_modifier_local().map(|n| n.provided_values().clone());
+            *self.meta.provided_locals.borrow_mut() = map;
+        }
     }
 }
 
@@ -204,6 +220,7 @@ impl NodeCell<dyn ModifierNode> {
         self.meta.attach_run_expected.set(false);
         let cx = NodeCx::new(self);
         self.node.borrow_mut().on_attach(&cx);
+        self.refresh_provided_locals();
         self.meta.detach_run_expected.set(true);
     }
 

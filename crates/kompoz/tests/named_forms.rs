@@ -29,6 +29,9 @@
 //!   / 2 }`: half its height below half way), `AnimatedVisibility(visibleState =, enter =) { }`, `animateEnterExit(exit
 //!   =)` by name, `fadeIn(animationSpec =)`, `fadeOut(targetAlpha =)`, `slideOutVertically(animationSpec =) { }`,
 //!   `scaleOut(targetScale =)`, `spring(dampingRatio =, stiffness =)`.
+//! - C++ 7683's SharedTransitionLayout part (stage 11 WP4): `SharedTransitionLayout(modifier =) { AnimatedContent(
+//!   targetState =) { … Modifier.sharedElement(sharedContentState = rememberSharedContentState(key =),
+//!   animatedVisibilityScope = this@AnimatedContent) } }`.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -527,7 +530,73 @@ fn animated_forms_take_compose_named_arguments() {
     }
 }
 
+// ---- C++ 7683's SharedTransitionLayout part ----------------------------------------------------------------------
+
+kompoz! {
+    @Composable
+    fun SharedForms(on: Boolean) {
+        SharedTransitionLayout(modifier = Modifier.testTag("paylaşım")) {
+            AnimatedContent(targetState = on) { open ->
+                Box(modifier = Modifier.size(if (open) 80.dp else 40.dp).testTag(if (open) "büyük" else "küçük")
+                    .sharedElement(sharedContentState = rememberSharedContentState(key = "foto"), animatedVisibilityScope = this@AnimatedContent))
+            }
+        }
+    }
+}
+
+#[kompozable]
+fn RustSharedForms(on: bool) {
+    SharedTransitionLayout(
+        modifier = Modifier.test_tag("paylaşım (Rust)"),
+        content = move |shared: &SharedTransitionScope| {
+            let shared = shared.clone();
+            AnimatedContent(
+                target_state = on,
+                content = move |scope: &AnimatedContentScope, open: bool| {
+                    let size = if open { 80.dp() } else { 40.dp() };
+                    let tag = if open { "büyük (Rust)" } else { "küçük (Rust)" };
+                    let m = shared.shared_element(
+                        Modifier.size(size).test_tag(tag),
+                        shared_content_state = shared.remember_shared_content_state(key = SlotKey::new("foto")),
+                        animated_visibility_scope = scope,
+                    );
+                    Box(modifier = m);
+                },
+            );
+        },
+    );
+}
+
+fn shared_forms_take_compose_named_arguments() {
+    let on = mutable_state_of(false);
+    let o = on.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let o = o.clone();
+            Column(move || {
+                SharedForms(o.get());
+                RustSharedForms(o.get());
+            });
+        }),
+        IntSize::new(400, 800),
+    );
+    rule.wait_for_idle();
+    for suffix in ["", " (Rust)"] {
+        assert!(rule.on_node_with_tag(&format!("küçük{suffix}")).exists());
+        assert!(rule.on_node_with_tag(&format!("paylaşım{suffix}")).exists());
+        assert!(!rule.on_node_with_tag(&format!("büyük{suffix}")).exists());
+    }
+    on.set(true);
+    rule.wait_for_idle();
+    for suffix in ["", " (Rust)"] {
+        assert!(rule.on_node_with_tag(&format!("büyük{suffix}")).exists());
+        assert!(!rule.on_node_with_tag(&format!("küçük{suffix}")).exists());
+        assert!(near(bounds(&rule, &format!("büyük{suffix}")).width(), 80.0));
+    }
+}
+
 tests![
+    shared_forms_take_compose_named_arguments,
     animated_forms_take_compose_named_arguments,
     animations_take_compose_named_arguments,
     state_forms_take_compose_named_arguments,

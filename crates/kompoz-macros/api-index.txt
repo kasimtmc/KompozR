@@ -24,6 +24,7 @@ kompoz-runtime/macros kompozable Boxed dr crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/scroll kompozable Boxes rrr crates/kompoz-foundation/tests/scroll.rs
 kompoz-runtime/macros kompozable Button rdr crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/semantics kompozable Button rr crates/kompoz-ui/tests/semantics.rs
+kompoz-animation/shared kompozable CallerManaged rrrr crates/kompoz-animation/tests/shared.rs
 * kompozable Canvas rdr crates/kompoz-foundation/src/canvas.rs
 kompoz-foundation/layout kompozable Child r crates/kompoz-foundation/tests/layout.rs
 kompoz-runtime/runtime kompozable CityText r crates/kompoz-runtime/tests/runtime.rs
@@ -177,6 +178,7 @@ kompoz/kotlin kompozable RustBadge rd crates/kompoz/tests/kotlin.rs
 kompoz/named_forms kompozable RustLayoutForms - crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustListForms rr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustScrollForms - crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustSharedForms r crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSliding r crates/kompoz/tests/named_forms.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
@@ -186,6 +188,9 @@ kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/m
 * kompozable SelectionContainerWithState rdr crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable SelectionHandle rrrrdrr crates/kompoz-foundation/src/text/selection/handles.rs
 * kompozable SelectionHandleIcon rrrr crates/kompoz-foundation/src/text/selection/handles.rs
+* method SharedContentConfig d crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
+* kompozable SharedTransitionLayout dr crates/kompoz-animation/src/shared_transition.rs
+* kompozable SharedTransitionScope r crates/kompoz-animation/src/shared_transition.rs
 kompoz-runtime/runtime kompozable Shown r crates/kompoz-runtime/tests/runtime.rs
 * kompozable SideEffect r crates/kompoz-runtime/src/remember.rs
 * kompozable SimpleLayout dr crates/kompoz-foundation/src/text/selection/container.rs
@@ -534,6 +539,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_scrollbar_adapter r crates/kompoz-foundation/src/scrollbar.rs
 * kompozable remember_selection_controller - crates/kompoz-foundation/src/text/basic_text.rs
 * kompozable remember_selection_state - crates/kompoz-foundation/src/text/selection/state.rs
+* method remember_shared_content_state rd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * kompozable remember_snap_fling_behavior r crates/kompoz-foundation/src/gestures/snapping/snap_fling_behavior.rs
 * kompozable remember_snap_fling_behavior_for_grid rd crates/kompoz-foundation/src/gestures/snapping/lazy_grid.rs
 * kompozable remember_snap_fling_behavior_for_list rd crates/kompoz-foundation/src/gestures/snapping/lazy_list.rs
@@ -549,6 +555,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_transition_of rr crates/kompoz-animation/src/transition.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
+* method render_in_shared_transition_scope_overlay rdd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * fn repeatable rrdd crates/kompoz-animation/src/spec.rs
 * method request_focus d crates/kompoz-ui/src/focus/requester.rs FocusRequester
 * method request_focus dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -590,6 +597,9 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 * method set_text_action dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method set_text_substitution_action dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method shadow rdddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
+* method shared_bounds rrrdddddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
+* method shared_element rrrddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
+* method shared_element_with_caller_managed_visibility rrrddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * method show_text_substitution dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * fn shrink_horizontally dddd crates/kompoz-animation/src/enter_exit.rs
 * fn shrink_out dddd crates/kompoz-animation/src/enter_exit.rs
@@ -597,6 +607,8 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 kompoz-runtime/macros method size d crates/kompoz-runtime/tests/macros.rs Modifier as OtherModifiers
 kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modifier as LayoutModifiers
 * method size_in dddd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* method skip_to_lookahead_position rd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
+* method skip_to_lookahead_size rd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * fn slide_in dr crates/kompoz-animation/src/enter_exit.rs
 * fn slide_in_horizontally dd crates/kompoz-animation/src/enter_exit.rs
 * fn slide_in_vertically dd crates/kompoz-animation/src/enter_exit.rs
