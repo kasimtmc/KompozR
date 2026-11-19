@@ -16,6 +16,7 @@ test = ["dep:kompoz-test"]
 
 [dependencies]
 kompoz-animation = { path = "../kompoz-animation" }
+kompoz-animation-graphics = { path = "../kompoz-animation-graphics" }
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
@@ -116,6 +117,11 @@ harness = false
 # Transitions, infinite transitions and animate*AsState in Kotlin's syntax.
 [[test]]
 name = "kotlin_transitions"
+harness = false
+
+# Animated vectors (animation-graphics) in Kotlin's syntax.
+[[test]]
+name = "kotlin_animated_vector"
 harness = false
 
 # Lookahead animations of bounds (animateContentSize, animateBounds, BoundsTransform, the visual debugging) in

@@ -23,6 +23,7 @@
 extern crate self as kompoz;
 
 pub use kompoz_animation as animation;
+pub use kompoz_animation_graphics as animation_graphics;
 pub use kompoz_coroutines as coroutines;
 pub use kompoz_foundation as foundation;
 pub use kompoz_gpu as gpu;
@@ -68,6 +69,12 @@ pub mod prelude {
     pub use kompoz_ui::draw::{
         BitmapPainter, BrushPainter, ColorPainter, Painter, VectorPainter, remember_vector_painter,
         remember_vector_painter_content,
+    };
+    // (animation-graphics': `Image(rememberAnimatedVectorPainter(image, atEnd))`; its modules `res` and `vector`
+    // stay under `kompoz::animation_graphics`)
+    pub use kompoz_animation_graphics::{
+        AnimatedImageVector, NoXmlResources, ResourceReference, XmlResourceError, XmlResources,
+        remember_animated_vector_painter,
     };
 
     pub use kompoz_kotlin_macro::{kompoz, kompoz_file};

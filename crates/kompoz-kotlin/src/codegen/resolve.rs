@@ -114,6 +114,8 @@ impl Ty {
         match self {
             Ty::List(t) | Ty::Set(t) | Ty::Range(t) => (**t).clone(),
             Ty::Named(n, a) if n == "SnapshotStateList" => a.first().cloned().unwrap_or(Ty::Unknown),
+            // (a Rust `Result` is Kotlin's `Result<T>`: what `getOrThrow()` gives)
+            Ty::Named(n, a) if n == "Result" => a.first().cloned().unwrap_or(Ty::Unknown),
             Ty::Map(k, v) => Ty::Pair(k.clone(), v.clone()),
             Ty::String => Ty::Char,
             _ => Ty::Unknown,
@@ -137,6 +139,8 @@ impl Ty {
             }
             // (a state list: Kotlin's MutableList functions are its own, taking `&self`; its reads are a list's)
             Ty::Named(n, _) if n == "SnapshotStateList" => &["KtList", "KtListOfLists", "KtListOfNullable", "KtScope"],
+            // (a Rust `Result`: Kotlin's `Result<T>`, its members the kt shim's)
+            Ty::Named(n, _) if n == "Result" => &["KtResult", "KtScope"],
             Ty::String => &["KtStr", "KtScope"],
             Ty::Nullable(t) if t.is_string() => &["KtNullableStr", "KtScope"],
             Ty::Map(_, _) => &["KtMapExt", "KtScope"],

@@ -4,7 +4,7 @@
 //! [`down_to`], [`step`], [`is_in`]), strings in UTF-16 units ([`KtStr`], [`KtChar`], [`format()`]),
 //! collections ([`list_of`], [`KtList`], [`KtMutableList`], [`KtMap`], [`KtMapExt`]), nullables ([`safe`],
 //! [`elvis`], [`not_null`]), scope functions ([`KtScope`]), numbers and `kotlin.math` ([`KtNumber`], [`KtFloat`]),
-//! [`require`], [`check`], [`error`].
+//! a Rust `Result` as Kotlin's `Result` ([`KtResult`]: `getOrThrow()`, …), [`require`], [`check`], [`error`].
 //!
 //! Kotlin's exceptions are panics whose message is what Kotlin's `toString()` of the exception says
 //! (`IllegalStateException: Check failed.`), at the caller's line (`#[track_caller]`).
@@ -23,6 +23,7 @@ pub mod format;
 pub mod math;
 pub mod null;
 pub mod range;
+pub mod result;
 pub mod string;
 pub mod text;
 
@@ -48,6 +49,7 @@ pub use range::{
     IndexedValue, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to, is_in, range_to, step,
     until,
 };
+pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};
 pub use text::{KtDisplay, KtToString, to_string};
 
@@ -65,6 +67,7 @@ pub mod ext {
     pub use super::delegate::{KtDelegate as _, KtInc as _, KtMutableDelegate as _};
     pub use super::math::{KtFloat as _, KtNumber as _};
     pub use super::null::KtScope as _;
+    pub use super::result::KtResult as _;
     pub use super::string::{KtChar as _, KtNullableStr as _, KtStr as _};
     pub use super::text::KtToString as _;
 }

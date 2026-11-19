@@ -466,6 +466,8 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs DrawScope
 * method release d crates/kompoz-test/src/input.rs MouseInjectionScope
 * kompozable remember_animated_magnifier_position r crates/kompoz-foundation/src/text/selection/container.rs
+* kompozable remember_animated_vector_painter rr crates/kompoz-animation-graphics/src/res/animated_vector_painter.rs
+* kompozable remember_animated_vector_painter_with rrr crates/kompoz-animation-graphics/src/res/animated_vector_painter.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_cursor_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs

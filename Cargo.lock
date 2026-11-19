@@ -351,6 +351,7 @@ version = "0.1.0"
 dependencies = [
  "kompoz",
  "kompoz-animation",
+ "kompoz-animation-graphics",
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-gpu",
@@ -375,6 +376,18 @@ dependencies = [
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",
+ "kompoz-ui",
+]
+
+[[package]]
+name = "kompoz-animation-graphics"
+version = "0.1.0"
+dependencies = [
+ "kompoz-animation",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-runtime",
+ "kompoz-test",
  "kompoz-ui",
 ]
 

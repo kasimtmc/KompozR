@@ -46,6 +46,7 @@ const API_CRATES: &[&str] = &[
     "kompoz-text",
     "kompoz-ui",
     "kompoz-animation",
+    "kompoz-animation-graphics",
     "kompoz-foundation",
     "kompoz-material-ripple",
     "kompoz-test",

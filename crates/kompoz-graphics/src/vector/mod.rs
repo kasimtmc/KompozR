@@ -2,9 +2,9 @@
 //! commands), read from SVG path data by a [`PathParser`] ([`add_path_nodes`]), made by calls ([`PathBuilder`],
 //! [`PathData`]), turned into a [`Path`](crate::Path) ([`to_path`]) and morphed from one list into another
 //! ([`lerp_path_nodes`]); vectors of paths and groups ([`ImageVector`], built by an [`ImageVectorBuilder`]), read
-//! from Android vector drawables ([`ImageVector::from_vector_xml`]), and animated ones ([`AnimatedImageVector`]).
+//! from Android vector drawables ([`ImageVector::from_vector_xml`]). Animated ones are animation-graphics'
+//! (kompoz-animation-graphics' AnimatedImageVector), as Compose's.
 
-mod animated;
 mod builder;
 mod image_vector;
 mod node;
@@ -13,7 +13,6 @@ mod to_path;
 mod vector_xml;
 mod xml;
 
-pub use animated::AnimatedImageVector;
 pub use builder::{PathBuilder, PathData};
 pub use image_vector::{
     DefaultFillType, DefaultGroupName, DefaultPathName, DefaultPivotX, DefaultPivotY, DefaultRotation, DefaultScaleX,

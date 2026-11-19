@@ -136,14 +136,6 @@ impl XmlNode {
         }
         self.children.iter().find_map(|c| c.find(element))
     }
-
-    /// The first element in it (it too) whose `android:name` is `name`.
-    pub(crate) fn named(&self, name: &str) -> Option<&XmlNode> {
-        if self.attribute("name") == name {
-            return Some(self);
-        }
-        self.children.iter().find_map(|c| c.named(name))
-    }
 }
 
 /// The first element of `xml` read whole, its children in it; none if there is none.
@@ -251,9 +243,4 @@ pub(crate) fn xml_color(v: &str) -> Option<Color> {
         return None;
     }
     u32::from_str_radix(&hex, 16).ok().map(Color::from_argb)
-}
-
-/// Attribute `key` of `a` as a color.
-pub(crate) fn xml_color_of(a: &BTreeMap<String, String>, key: &str) -> Option<Color> {
-    a.get(key).and_then(|v| xml_color(v))
 }

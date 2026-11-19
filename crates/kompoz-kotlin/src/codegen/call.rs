@@ -1224,6 +1224,13 @@ impl Gen<'_, '_> {
         if t.starts_with('&') && !t.starts_with("&str") && !t.starts_with("&'static str") {
             return quote_spanned!(span=> &#v);
         }
+        // (a `&str` given a Kotlin `String` value that isn't a literal — a variable, a template's `format!` —: lent,
+        // the `&String` coercing)
+        let literal =
+            matches!(&e.kind, ExprKind::String(s) if s.parts.iter().all(|p| matches!(p, StringPart::Text { .. })));
+        if t == "&str" && arg_ty.non_null() == Ty::String && !literal {
+            return quote_spanned!(span=> &#v);
+        }
         v
     }
 

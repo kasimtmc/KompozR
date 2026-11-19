@@ -1,7 +1,7 @@
 //! Vector path data: PathNode, PathParser (Compose's grammar, its quirks), PathBuilder, toPath and its arcs, and
 //! morphing path data (the C++ Kompoz's tests about them; its parser's leniencies are Compose's quirks here); vector
-//! images: ImageVector and its builder, vector drawables read from XML, animated ones played (the C++ Kompoz's
-//! tests' values; what painters draw of them is stage 5's).
+//! images: ImageVector and its builder, vector drawables read from XML (the C++ Kompoz's tests' values; what
+//! painters draw of them is stage 5's; animated ones are kompoz-animation-graphics', as Compose's).
 
 use kompoz_graphics::*;
 use kompoz_runtime::kompozable_block;
@@ -356,9 +356,6 @@ fn same(a: Color, b: Color) -> bool {
         && near(a.blue(), b.blue(), 0.01)
         && near(a.alpha(), b.alpha(), 0.01)
 }
-fn same_rgb(a: Color, b: Color) -> bool {
-    near(a.red(), b.red(), 0.01) && near(a.green(), b.green(), 0.01) && near(a.blue(), b.blue(), 0.01)
-}
 
 fn with_alpha(c: Color, alpha: f32) -> Color {
     Color::new(c.red(), c.green(), c.blue(), alpha)
@@ -536,7 +533,6 @@ fn vector_drawable_xml_that_cant_be_read_is_skipped() {
         "<animated-vector><target android:name=\"x\"/></animated-vector>",
     ] {
         assert!(ImageVector::from_vector_xml(xml).is_none(), "{xml}");
-        assert!(AnimatedImageVector::from_animated_vector_xml(xml).is_none(), "{xml}");
     }
     // Unclosed inside, numbers and colors that aren't, path data that isn't: read as far as they go.
     let v = ImageVector::from_vector_xml(
@@ -553,6 +549,25 @@ fn vector_drawable_xml_that_cant_be_read_is_skipped() {
     assert!(odd.fill.is_none() && odd.path_data.len() == 2);
     // An unclosed vector: nothing whole.
     assert!(ImageVector::from_vector_xml("<vector><path android:pathData=\"M0,0h1\"/>").is_none());
+}
+
+#[test]
+fn vector_drawable_color_references_resolve_through_what_the_caller_gives() {
+    let xml = r##"<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp"
+        android:viewportWidth="24" android:viewportHeight="24" android:tint="?attr/colorControlNormal">
+        <path android:fillColor="@color/brand" android:strokeColor="@color/missing" android:pathData="M0,0h4v4z"/></vector>"##;
+    let colors = |reference: &str| match reference {
+        "@color/brand" => Some(Color::hex(0x3366CC)),
+        "?attr/colorControlNormal" => Some(Color::hex(0x00FF00)),
+        _ => None,
+    };
+    let v = ImageVector::from_vector_xml_with(xml, &colors).unwrap();
+    let p = v.root()[0].path().unwrap();
+    // Resolved; one that isn't: black, as without them.
+    assert!(p.fill == solid(Color::hex(0x3366CC)) && p.stroke == solid(Color::Black));
+    assert_eq!(v.tint_color(), Color::hex(0x00FF00));
+    let plain = ImageVector::from_vector_xml(xml).unwrap();
+    assert!(plain.root()[0].path().unwrap().fill == solid(Color::Black) && plain.tint_color() == Color::Black);
 }
 
 #[test]
@@ -792,181 +807,6 @@ fn vector_paths_trim() {
     assert!(near(p.trim_path_offset, 0.2, 0.01));
     let r = p.render_path().get_bounds();
     assert!(near(r.left, 1.2, 0.01) && near(r.right, 3.2, 0.01));
-}
-
-const ANIMATED: &str = r##"<?xml version="1.0" encoding="utf-8"?>
-<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt">
-    <aapt:attr name="android:drawable">
-        <vector android:name="root" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-            <group android:name="spin" android:pivotX="12" android:pivotY="12">
-                <path android:name="dot" android:strokeColor="#000000" android:strokeWidth="1" android:pathData="M12,2L12,6"/>
-            </group>
-            <path android:name="bar" android:fillColor="#FF0000" android:pathData="M0,0h4v4h-4z"/>
-            <path android:name="line" android:strokeColor="#000000" android:strokeWidth="1" android:pathData="M0,20h24"/>
-        </vector>
-    </aapt:attr>
-    <target android:name="spin">
-        <aapt:attr name="android:animation">
-            <set>
-                <objectAnimator android:propertyName="rotation" android:valueFrom="90" android:valueTo="180" android:startOffset="100"
-                    android:duration="200" android:interpolator="@android:interpolator/linear"/>
-                <objectAnimator android:propertyName="rotation" android:valueFrom="0" android:valueTo="90" android:duration="100"
-                    android:interpolator="@android:interpolator/linear"/>
-            </set>
-        </aapt:attr>
-    </target>
-    <target android:name="bar">
-        <aapt:attr name="android:animation">
-            <set android:ordering="sequentially">
-                <objectAnimator android:propertyName="fillColor" android:valueFrom="#FF0000" android:valueTo="#0000FF" android:duration="100"
-                    android:interpolator="@android:interpolator/linear"/>
-                <objectAnimator android:propertyName="pathData" android:valueType="pathType" android:valueFrom="M0,0h4v4h-4z"
-                    android:valueTo="M0,0h8v8h-8z" android:duration="100" android:interpolator="@android:anim/linear_interpolator"/>
-            </set>
-        </aapt:attr>
-    </target>
-    <target android:name="line">
-        <aapt:attr name="android:animation">
-            <objectAnimator android:duration="60" android:startOffset="100" android:repeatCount="1" android:repeatMode="reverse"
-                android:interpolator="@android:interpolator/linear">
-                <propertyValuesHolder android:propertyName="trimPathEnd" android:valueFrom="0.8" android:valueTo="0"/>
-                <propertyValuesHolder android:propertyName="strokeWidth" android:valueTo="3"/>
-            </objectAnimator>
-        </aapt:attr>
-    </target>
-    <target android:name="root">
-        <aapt:attr name="android:animation">
-            <objectAnimator android:propertyName="alpha" android:valueFrom="1" android:valueTo="0.5" android:duration="200"
-                android:interpolator="@android:interpolator/accelerate_quad"/>
-        </aapt:attr>
-    </target>
-</animated-vector>"##;
-
-#[test]
-fn animated_vectors_play_their_animations() {
-    let avd = AnimatedImageVector::from_animated_vector_xml(ANIMATED).unwrap();
-    // The group's: its longer animator (together), 100 in and 200 long.
-    assert_eq!(avd.total_duration_millis(), 300);
-    let at = |t: f32| placed(&avd.vector_at(t));
-    let fill = |p: &Placed| p.path.fill.as_ref().unwrap().solid_color().unwrap();
-    // As it starts: the drawable as it is.
-    assert!(avd.vector_at(0.0) == avd.image_vector() && at(0.0).len() == 3);
-    assert!(same_rgb(fill(&at(0.0)[1]), Color::hex(0xFF0000)) && near(at(0.0)[1].bbox().width(), 4.0, 1e-4));
-    // Its group turning (linear): 45° at 50; from 100 its second animator (started later, over the first): 112.5° at
-    // 150.
-    let (dot, later) = (at(50.0)[0].points()[0], at(150.0)[0].points()[0]);
-    assert!(
-        near(dot.x, 19.07, 0.05) && near(dot.y, 4.93, 0.05) && near(later.x, 21.24, 0.05) && near(later.y, 15.83, 0.05)
-    );
-    // One after the other: the color first (halfway at 50, in Oklab as Compose animates it: ColorTest's red to blue
-    // at 0.5; done at 100), then the shape (halfway at 150).
-    assert!(same_rgb(fill(&at(50.0)[1]), Color::hex(0x8C53A2)) && same_rgb(fill(&at(100.0)[1]), Color::hex(0x0000FF)));
-    assert!(near(at(100.0)[1].bbox().width(), 4.0, 0.01) && near(at(150.0)[1].bbox().width(), 6.0, 0.01));
-    assert!(near(at(220.0)[1].bbox().width(), 8.0, 0.01));
-    // From 100, there and back (repeatMode reverse), holding where it ends; before it starts, its own value. A
-    // property without valueFrom starts at its own value.
-    let line = |t: f32| at(t)[2].path.clone();
-    assert!(near(line(99.0).trim_path_end, 1.0, 0.001) && near(line(115.0).trim_path_end, 0.6, 0.001));
-    assert!(near(line(130.0).trim_path_end, 0.4, 0.001) && near(line(130.0).stroke_line_width, 2.0, 0.001));
-    assert!(near(line(175.0).trim_path_end, 0.2, 0.001) && near(line(230.0).trim_path_end, 0.8, 0.001));
-    assert!(near(line(300.0).trim_path_end, 0.8, 0.001) && near(line(300.0).stroke_line_width, 1.0, 0.001));
-    // The vector's alpha, accelerating (t²): a quarter of the way at the halfway mark.
-    assert!(near(at(100.0)[1].path.fill_alpha, 0.875, 0.005) && near(at(200.0)[1].path.fill_alpha, 0.5, 0.005));
-    assert!(AnimatedImageVector::from_animated_vector_xml("<vector/>").is_none());
-    assert!(AnimatedImageVector::from_animated_vector_xml("not xml").is_none());
-    // An arc's flags in between: set while anywhere but 0 (Android interpolates them as numbers).
-    let arcs = AnimatedImageVector::from_animated_vector_xml(
-        r##"<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:aapt="http://schemas.android.com/aapt"><aapt:attr name="android:drawable"><vector android:width="24dp" android:height="24dp"
-        android:viewportWidth="24" android:viewportHeight="24"><path android:name="yay" android:strokeColor="#000" android:pathData="M0,0A5,5 0 0,1 10,0"/>
-        </vector></aapt:attr><target android:name="yay"><aapt:attr name="android:animation"><objectAnimator android:propertyName="pathData"
-        android:valueType="pathType" android:valueFrom="M0,0A5,5 0 0,1 10,0" android:valueTo="M0,0A5,8 0 1,0 10,0" android:duration="100"
-        android:interpolator="@android:interpolator/linear"/></aapt:attr></target></animated-vector>"##,
-    )
-    .unwrap();
-    let arc_at = |t: f32| arcs.vector_at(t).root()[0].path().unwrap().path_data[1];
-    assert_eq!(arc_at(0.0), arc(5.0, 5.0, 0.0, false, true, 10.0, 0.0));
-    assert_eq!(arc_at(50.0), arc(5.0, 6.5, 0.0, true, true, 10.0, 0.0));
-    assert_eq!(arc_at(100.0), arc(5.0, 8.0, 0.0, true, false, 10.0, 0.0));
-    // A vector drawable read the same way, whether in an animated one or not.
-    assert_eq!(ImageVector::from_vector_xml(ANIMATED).unwrap(), avd.image_vector());
-    // The same one; another read of it: another.
-    assert!(avd.clone() == avd && AnimatedImageVector::from_animated_vector_xml(ANIMATED).unwrap() != avd);
-}
-
-/// One `<objectAnimator>` of `attributes` on a path's fillAlpha (0 to 1, 100 long unless they say).
-fn fill_alpha_animated(attributes: &str) -> AnimatedImageVector {
-    AnimatedImageVector::from_animated_vector_xml(&format!(
-        r##"<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:aapt="http://schemas.android.com/aapt"><aapt:attr name="android:drawable"><vector android:width="24dp"
-        android:height="24dp" android:viewportWidth="24" android:viewportHeight="24"><path android:name="p" android:fillColor="#000"
-        android:fillAlpha="0.5" android:pathData="M0,0h1v1z"/></vector></aapt:attr><target android:name="p"><aapt:attr
-        name="android:animation"><objectAnimator android:propertyName="fillAlpha" android:valueFrom="0" android:valueTo="1"
-        {attributes}/></aapt:attr></target></animated-vector>"##
-    ))
-    .unwrap()
-}
-
-/// The fill alpha `avd` has `t` in.
-fn fill_alpha_at(avd: &AnimatedImageVector, t: f32) -> f32 {
-    avd.vector_at(t).root()[0].path().unwrap().fill_alpha
-}
-
-/// x of Compose's CubicBezierEasing's curve solved by halving (to check its roots against).
-fn bezier_at(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
-    let curve =
-        |p1: f64, p2: f64, t: f64| 3.0 * (1.0 - t) * (1.0 - t) * t * p1 + 3.0 * (1.0 - t) * t * t * p2 + t * t * t;
-    let (mut lo, mut hi) = (0.0f64, 1.0f64);
-    for _ in 0..60 {
-        let mid = (lo + hi) / 2.0;
-        if curve(x1 as f64, x2 as f64, mid) < x as f64 {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    curve(y1 as f64, y2 as f64, (lo + hi) / 2.0) as f32
-}
-
-#[test]
-fn animated_vectors_play_androids_interpolators() {
-    // Android's default (no interpolator): accelerate_decelerate, cos((t + 1)π) / 2 + 0.5; 300 long.
-    let default = fill_alpha_animated("");
-    assert_eq!(default.total_duration_millis(), 300);
-    assert!(near(fill_alpha_at(&default, 75.0), 0.146_446_6, 1e-5) && near(fill_alpha_at(&default, 150.0), 0.5, 1e-5));
-    let named = |name: &str, t: f32| {
-        fill_alpha_at(&fill_alpha_animated(&format!(r#"android:duration="100" android:interpolator="{name}""#)), t)
-    };
-    assert!(near(named("@android:anim/accelerate_decelerate_interpolator", 25.0), 0.146_446_6, 1e-5));
-    assert!(near(named("@android:anim/linear_interpolator", 30.0), 0.3, 1e-6));
-    assert!(near(named("@android:anim/accelerate_interpolator", 30.0), 0.09, 1e-6));
-    assert!(near(named("@android:interpolator/decelerate_quad", 30.0), 0.51, 1e-6));
-    assert!(near(named("@android:interpolator/unknown", 25.0), 0.146_446_6, 1e-5));
-    // Compose's cubic easings: the curve's y where its x is the fraction.
-    for (name, (x1, y1, x2, y2)) in [
-        ("@android:interpolator/fast_out_slow_in", (0.4, 0.0, 0.2, 1.0)),
-        ("@android:interpolator/fast_out_linear_in", (0.4, 0.0, 1.0, 1.0)),
-        ("@android:interpolator/linear_out_slow_in", (0.0, 0.0, 0.2, 1.0)),
-    ] {
-        for t in [10.0, 25.0, 50.0, 75.0, 90.0] {
-            assert!(near(named(name, t), bezier_at(x1, y1, x2, y2, t / 100.0), 1e-4), "{name} at {t}");
-        }
-        assert!(named(name, 0.0) == 0.0 && named(name, 100.0) == 1.0);
-    }
-    // Before it starts, its own value; repeated (restarting) as many times again as it says; an infinite repeat
-    // played once; a start offset.
-    let repeated = fill_alpha_animated(
-        r#"android:duration="100" android:startOffset="50" android:repeatCount="2" android:interpolator="@android:interpolator/linear""#,
-    );
-    assert_eq!(repeated.total_duration_millis(), 350);
-    assert!(near(fill_alpha_at(&repeated, 0.0), 0.5, 1e-6) && near(fill_alpha_at(&repeated, 75.0), 0.25, 1e-6));
-    assert!(near(fill_alpha_at(&repeated, 175.0), 0.25, 1e-6) && near(fill_alpha_at(&repeated, 400.0), 1.0, 1e-6));
-    let infinite = fill_alpha_animated(r#"android:duration="100" android:repeatCount="infinite""#);
-    assert_eq!(infinite.total_duration_millis(), 100);
-    assert_eq!(fill_alpha_animated(r#"android:duration="100" android:repeatCount="-1""#).total_duration_millis(), 100);
-    // No duration: at its end at once.
-    let at_once = fill_alpha_animated(r#"android:duration="0""#);
-    assert!(at_once.total_duration_millis() == 0 && near(fill_alpha_at(&at_once, 0.0), 1.0, 1e-6));
 }
 
 #[test]

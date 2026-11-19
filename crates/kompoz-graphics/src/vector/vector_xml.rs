@@ -1,33 +1,40 @@
 //! Android vector drawables read into vectors, as Compose's `ImageVector.vectorResource` (its XmlVectorParser)
-//! reads them, and as an animated vector's values change them.
+//! reads them.
 
 use super::image_vector::{ImageVector, ImageVectorBuilder, VectorGroup, VectorPath};
-use super::node::PathNode;
 use super::parser::add_path_nodes;
-use super::xml::{XmlNode, read_xml_tree, xml_color_of, xml_number};
+use super::xml::{XmlNode, read_xml_tree, xml_color, xml_number};
 use crate::brush::{BlendMode, Brush, SolidColor, TileMode};
 use crate::color::Color;
 use crate::geometry::Offset;
 use crate::path::{PathFillType, StrokeCap, StrokeJoin};
 use crate::unit::Dp;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-/// Animated values of a vector drawable's named elements (by name and attribute), over theirs.
-#[derive(Default)]
-pub(crate) struct VectorValues {
-    pub(crate) numbers: HashMap<(String, String), f32>,
-    pub(crate) colors: HashMap<(String, String), Color>,
-    /// pathData, by name.
-    pub(crate) paths: HashMap<String, Vec<PathNode>>,
+/// What a color reference (`@color/…`, `?attr/…`) is: a caller's resources, else none.
+type ColorReferences<'a> = &'a dyn Fn(&str) -> Option<Color>;
+
+/// Attribute `key` of `a` as a color: `#…` as Android writes it; another value a reference, its color as
+/// `references` gives it, else black.
+fn color_of(a: &BTreeMap<String, String>, key: &str, references: ColorReferences) -> Option<Color> {
+    let v = a.get(key)?;
+    if v.is_empty() || v.starts_with('#') {
+        return xml_color(v);
+    }
+    Some(references(v).unwrap_or(Color::Black))
 }
 
 /// An aapt:attr `<gradient>` (its `<item>`s, else its start, center and end colors) as a brush, in its path's units
 /// (its groups move it with the path when it is drawn); none without colors. A radial one of no radius (Android
 /// refuses it): its first color.
-fn gradient_brush(at: &BTreeMap<String, String>, mut stops: Vec<(f32, Color)>) -> Option<Brush> {
+fn gradient_brush(
+    at: &BTreeMap<String, String>,
+    mut stops: Vec<(f32, Color)>,
+    references: ColorReferences,
+) -> Option<Brush> {
     if stops.is_empty() {
         for (offset, key) in [(0.0, "startColor"), (0.5, "centerColor"), (1.0, "endColor")] {
-            if let Some(c) = xml_color_of(at, key) {
+            if let Some(c) = color_of(at, key, references) {
                 stops.push((offset, c));
             }
         }
@@ -55,33 +62,11 @@ fn gradient_brush(at: &BTreeMap<String, String>, mut stops: Vec<(f32, Color)>) -
 
 /// A `<vector>` element as a vector, read as Compose's XmlVectorParser reads it (and its alpha, fading its paths'
 /// fills and strokes): its groups and clip-paths through the builder, its paths in their paints (gradients from
-/// their aapt:attr children), `values` over its named elements'.
-pub(crate) fn vector_of(vector: &XmlNode, values: &VectorValues) -> ImageVector {
-    let number = |n: &XmlNode, key: &str, fallback: f32| {
-        let name = n.attribute("name");
-        if !name.is_empty()
-            && let Some(v) = values.numbers.get(&(name.to_string(), key.to_string()))
-        {
-            return *v;
-        }
-        xml_number(&n.attributes, key, fallback)
-    };
-    let color = |n: &XmlNode, key: &str| {
-        let name = n.attribute("name");
-        if !name.is_empty()
-            && let Some(c) = values.colors.get(&(name.to_string(), key.to_string()))
-        {
-            return Some(*c);
-        }
-        xml_color_of(&n.attributes, key)
-    };
-    let path_data = |n: &XmlNode| {
-        let name = n.attribute("name");
-        match values.paths.get(name).filter(|_| !name.is_empty()) {
-            Some(animated) => animated.clone(),
-            None => add_path_nodes(n.attribute("pathData")),
-        }
-    };
+/// their aapt:attr children), color references as `references` gives them.
+fn vector_of(vector: &XmlNode, references: ColorReferences) -> ImageVector {
+    let number = |n: &XmlNode, key: &str, fallback: f32| xml_number(&n.attributes, key, fallback);
+    let color = |n: &XmlNode, key: &str| color_of(&n.attributes, key, references);
+    let path_data = |n: &XmlNode| add_path_nodes(n.attribute("pathData"));
     let (vw, vh) = (number(vector, "viewportWidth", 24.0), number(vector, "viewportHeight", 24.0));
     let tint_mode = match vector.attribute("tintMode") {
         "src_over" => BlendMode::SrcOver,
@@ -97,7 +82,7 @@ pub(crate) fn vector_of(vector: &XmlNode, values: &VectorValues) -> ImageVector 
         Dp(number(vector, "height", vh)),
         vw,
         vh,
-        xml_color_of(&vector.attributes, "tint").unwrap_or(Color::Unspecified),
+        color_of(&vector.attributes, "tint", references).unwrap_or(Color::Unspecified),
         tint_mode,
         vector.attribute("autoMirrored") == "true",
     );
@@ -118,10 +103,11 @@ pub(crate) fn vector_of(vector: &XmlNode, values: &VectorValues) -> ImageVector 
                 .iter()
                 .filter(|item| item.name == "item")
                 .filter_map(|item| {
-                    xml_color_of(&item.attributes, "color").map(|c| (xml_number(&item.attributes, "offset", 0.0), c))
+                    color_of(&item.attributes, "color", references)
+                        .map(|c| (xml_number(&item.attributes, "offset", 0.0), c))
                 })
                 .collect();
-            if let Some(brush) = gradient_brush(&gradient.attributes, stops) {
+            if let Some(brush) = gradient_brush(&gradient.attributes, stops, references) {
                 if attr.attribute("name").contains("strokeColor") {
                     p.stroke = Some(brush);
                 } else {
@@ -210,11 +196,19 @@ impl ImageVector {
     /// cap, join, miter limit, fillType, trimPathStart, End and Offset; aapt:attr `<gradient>`s as brushes: linear,
     /// radial, sweep, their items or start, center and end colors, tile mode) and `<clip-path>`s (clipping what
     /// comes after them in their group). Colors are `#RGB`, `#ARGB`, `#RRGGBB` or `#AARRGGBB`; references
-    /// (`@color/…`) aren't resolved (black). The vector's alpha fades its paths' fills and strokes. An
-    /// `<animated-vector>`'s drawable is read as it starts. None if there is no `<vector>`.
+    /// (`@color/…`) aren't resolved (black: [`from_vector_xml_with`](Self::from_vector_xml_with) resolves them).
+    /// The vector's alpha fades its paths' fills and strokes. An `<animated-vector>`'s drawable is read as it
+    /// starts. None if there is no `<vector>`.
     pub fn from_vector_xml(xml: &str) -> Option<ImageVector> {
+        ImageVector::from_vector_xml_with(xml, &|_| None)
+    }
+
+    /// [`from_vector_xml`](Self::from_vector_xml), each color written as a reference (`@color/…`, `?attr/…`, as it
+    /// is written) the color `color_reference` gives it (none: black). What an animated vector's resources resolve
+    /// its drawable's colors with.
+    pub fn from_vector_xml_with(xml: &str, color_reference: &dyn Fn(&str) -> Option<Color>) -> Option<ImageVector> {
         let root = read_xml_tree(xml)?;
         let vector = root.find("vector")?;
-        Some(vector_of(vector, &VectorValues::default()))
+        Some(vector_of(vector, color_reference))
     }
 }
