@@ -170,18 +170,95 @@ impl Ty {
 
     /// A Rust type written as text (the API index's): what the generator needs to know of it.
     pub fn from_rust(text: &str) -> Ty {
-        let mut p = TypeText { s: text.trim(), at: 0 };
+        let mut p = TypeText { s: text.trim(), at: 0, params: Params::Unknown };
+        p.ty()
+    }
+
+    /// A Rust type's text naming type parameters (`R`, `Option<R>`, `KtMap<K, Self::Item>`, `Vec<I::Item>`) with what
+    /// `binds` says they are ([`bind_type_params`]); one it doesn't say is unknown.
+    pub fn from_rust_bound(text: &str, binds: &TypeBinds) -> Ty {
+        let mut p = TypeText { s: text.trim(), at: 0, params: Params::Bound(binds) };
         p.ty()
     }
 }
 
-/// A small reader of Rust types as the index writes them.
-struct TypeText<'a> {
-    s: &'a str,
-    at: usize,
+/// What a generic callee's type parameters are, by name (`R`, `Self`, `Self::Item`, `I`), as inference tells them.
+pub(crate) type TypeBinds = HashMap<String, Ty>;
+
+/// Binds the type parameters a Rust type's text names (`R`, `Option<R>`, `(K, V)`, `Vec<T>`, `Self::V`) to what
+/// `actual` has in their places (Kotlin's inference of a generic call: `map { it.toFloat() }`'s `R` a `Float`); one
+/// bound already keeps what it is.
+pub(crate) fn bind_type_params(pattern: &str, actual: &Ty, binds: &mut TypeBinds) {
+    let mut p = TypeText { s: pattern.trim(), at: 0, params: Params::Marked };
+    let pattern = p.ty();
+    unify(&pattern, actual, binds);
 }
 
-impl TypeText<'_> {
+/// The name a type parameter marked in a pattern has ([`Params::Marked`]).
+fn marked(t: &Ty) -> Option<&str> {
+    match t {
+        Ty::Named(n, a) if a.is_empty() => n.strip_prefix('$'),
+        _ => None,
+    }
+}
+
+fn unify(pattern: &Ty, actual: &Ty, binds: &mut TypeBinds) {
+    if *actual == Ty::Unknown {
+        return;
+    }
+    if let Some(name) = marked(pattern) {
+        let known = binds.get(name).is_some_and(|t| !t.is_vague());
+        if !known {
+            binds.insert(name.to_string(), actual.clone());
+        }
+        return;
+    }
+    match (pattern, actual) {
+        (Ty::Nullable(p), Ty::Nullable(a)) => unify(p, a, binds),
+        // (a `T?` given a `T`: Kotlin's `mapNotNull { it.toFloat() }`, its `R` a `Float`)
+        (Ty::Nullable(p), a) => unify(p, a, binds),
+        (Ty::List(p), Ty::List(a)) | (Ty::Set(p), Ty::Set(a)) | (Ty::Range(p), Ty::Range(a)) => unify(p, a, binds),
+        // (any collection of it: `flatMap`'s `I`, its `I::Item` its element)
+        (Ty::List(p), a @ (Ty::Set(_) | Ty::Range(_))) => unify(p, &a.element(), binds),
+        (Ty::Map(pk, pv), Ty::Map(ak, av)) | (Ty::Pair(pk, pv), Ty::Pair(ak, av)) => {
+            unify(pk, ak, binds);
+            unify(pv, av, binds);
+        }
+        (Ty::Named(pn, pa), Ty::Named(an, aa)) if pn == an && pa.len() == aa.len() => {
+            for (p, a) in pa.iter().zip(aa) {
+                unify(p, a, binds);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// How a reader of Rust types takes the type parameters a text names.
+#[derive(Clone, Copy)]
+enum Params<'b> {
+    /// Unknown (what the index's types are without a call's inference).
+    Unknown,
+    /// Each one marked (`$R`, `$Self::Item`): a pattern [`bind_type_params`] matches with a type.
+    Marked,
+    /// What a call's inference binds them to.
+    Bound(&'b TypeBinds),
+}
+
+/// A small reader of Rust types as the index writes them.
+struct TypeText<'a, 'b> {
+    s: &'a str,
+    at: usize,
+    params: Params<'b>,
+}
+
+/// Whether a type's name (a path's text) is a type parameter of a generic item: `T`, `R`, `Self`, or an associated
+/// type of one (`Self::Item`, `I::Item`).
+fn names_param(w: &str) -> bool {
+    let first = w.split("::").next().unwrap_or("");
+    first == "Self" || (first.len() == 1 && first.chars().all(|c| c.is_ascii_uppercase()))
+}
+
+impl TypeText<'_, '_> {
     fn rest(&self) -> &str {
         &self.s[self.at..]
     }
@@ -312,6 +389,29 @@ impl TypeText<'_> {
         let w = self.word();
         let name = w.rsplit("::").next().unwrap_or("").to_string();
         let args = self.args();
+        if names_param(&w) && args.is_empty() {
+            match self.params {
+                Params::Unknown => {}
+                Params::Marked => return Ty::Named(format!("${w}"), Vec::new()),
+                Params::Bound(binds) => {
+                    if let Some(t) = binds.get(&w) {
+                        return t.clone();
+                    }
+                    // (an associated type of one bound: `I::Item` of a list, `Self::K` of a map)
+                    if let Some((of, assoc)) = w.split_once("::")
+                        && let Some(t) = binds.get(of)
+                    {
+                        return match (assoc, t) {
+                            ("K", Ty::Map(k, _)) => (**k).clone(),
+                            ("V", Ty::Map(_, v)) => (**v).clone(),
+                            ("Item" | "Out", t) => t.element(),
+                            _ => Ty::Unknown,
+                        };
+                    }
+                    return Ty::Unknown;
+                }
+            }
+        }
         // (an associated type of a type parameter or of `Self`: `I::Item`, `Self::K`)
         if let Some((first, _)) = w.split_once("::")
             && (first == "Self" || first.len() == 1)
@@ -381,6 +481,9 @@ pub(crate) struct LInfo {
     pub output: String,
     /// The Rust type of its receiver (its first input), Kotlin's `T.() -> R`.
     pub receiver: Option<String>,
+    /// That receiver's type with its type arguments, where the call tells them (the value a scope function lends:
+    /// `with(anim) { value }`'s `Animatable<Float, …>`).
+    pub receiver_value: Option<Ty>,
     pub suspend: bool,
     /// Its future is boxed (`Pin<Box<dyn Future>>`): it gives `Box::pin(async move { … })`.
     pub boxed: bool,
@@ -398,6 +501,9 @@ pub(crate) struct LInfo {
     /// A lambda of the file's own `inline fun`, run in place: one that suspends needs the function's suspending form
     /// (stage 14's inline functions).
     pub file_inline: bool,
+    /// A block of Compose's run with a snapshot current (`Snapshot.withMutableSnapshot`, `snapshot.enter`,
+    /// `Snapshot.withoutReadObservation`): inline in Kotlin, but it must not suspend ([`snapshot_block`]).
+    pub snapshot_block: bool,
 }
 
 impl LInfo {
@@ -506,6 +612,11 @@ impl Callee {
                 l.twin = true;
             }
         }
+        if snapshot_block(item) {
+            for l in params.iter_mut().filter_map(|p| p.lambda.as_mut()) {
+                l.snapshot_block = true;
+            }
+        }
         Callee {
             rust: item.rust.to_string(),
             params,
@@ -518,6 +629,18 @@ impl Callee {
     }
 }
 
+/// Whether `item` is one of Compose's inline functions running their block with a snapshot current: Kotlin lets the
+/// block suspend, Compose says it must not (`withMutableSnapshot`'s doc: the snapshot is the thread's current one
+/// until the block returns, so the coroutines run while it is suspended would run in it — its changes not applied,
+/// a read-only one's writes failing). No suspending twin: a suspending call in the block is an error saying so.
+fn snapshot_block(item: &Item) -> bool {
+    item.krate == "kompoz_runtime"
+        && matches!(
+            (item.module, item.rust),
+            ("snapshot", "enter" | "with_mutable_snapshot") | ("read", "without_read_observation")
+        )
+}
+
 fn param_of_item(p: &'static index::Param) -> PInfo {
     let ty = p.ty.trim();
     let measure_policy = ty.replace(' ', "") == "implMeasurePolicy";
@@ -527,6 +650,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             inputs: vec!["&MeasureScope".into(), "&[&dyn Measurable]".into(), "Constraints".into()],
             output: "MeasureResult".into(),
             receiver: Some("MeasureScope".into()),
+            receiver_value: None,
             suspend: false,
             boxed: false,
             stored: true,
@@ -534,6 +658,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             typed: false,
             twin: false,
             file_inline: false,
+            snapshot_block: false,
         })
     } else {
         p.lambda.map(|l| LInfo {
@@ -541,6 +666,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             inputs: l.inputs.iter().map(|s| s.to_string()).collect(),
             output: l.output.to_string(),
             receiver: (!l.receiver.is_empty()).then(|| l.receiver.to_string()),
+            receiver_value: None,
             suspend: l.suspend,
             boxed: l.boxed,
             // (a generic parameter's bounds are elsewhere: what a callee takes that way it keeps; so does a
@@ -556,6 +682,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
                 || (ty.starts_with("impl ") && !["Fn(", "FnMut(", "FnOnce(", "Future"].iter().any(|f| ty.contains(f))),
             twin: false,
             file_inline: false,
+            snapshot_block: false,
         })
     };
     PInfo {
@@ -691,6 +818,9 @@ pub(crate) struct Local {
     /// A lambda's parameter given a `&mut` (`state.update { it.add(…) }`: the value to change in place): what takes
     /// it by reference takes it reborrowed, a value of it is a clone of what it points to.
     pub mut_ref: bool,
+    /// Set when it is used ([`Gen::local`](super::Gen::local)): a lambda's implicit `it`, which the lambda takes only
+    /// when its body (or a lambda inside it without an `it` of its own) uses it.
+    pub used: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
 /// An implicit receiver: an extension function's `self`, a receiver lambda's scope parameter.
@@ -700,6 +830,9 @@ pub(crate) struct ImplicitReceiver {
     pub rust: String,
     /// Its Rust type's name (`Modifier`, `DrawScope`).
     pub ty: String,
+    /// Its type with its type arguments where known (`Animatable<Float, AnimationVector1D>` lent by `with`), else
+    /// the type of that name: what its members' `T` is.
+    pub value: Ty,
     /// Its Kotlin label: the extension function's name, the function the lambda is given to, or the lambda's own.
     pub labels: Vec<String>,
     pub depth: usize,

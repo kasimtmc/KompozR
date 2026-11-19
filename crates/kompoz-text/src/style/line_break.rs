@@ -31,6 +31,12 @@ impl LineBreak {
     pub fn take_or_else(self, block: impl FnOnce() -> LineBreak) -> LineBreak {
         if self.is_specified() { self } else { block() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> LineBreak) -> LineBreak {
+        if self.is_specified() { self } else { block().await }
+    }
 }
 
 /// Where a paragraph's lines break (Compose's LineBreak.Strategy): `Simple` fills each line in turn;

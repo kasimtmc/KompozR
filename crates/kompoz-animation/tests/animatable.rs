@@ -297,6 +297,30 @@ fn a_mutator_mutex_runs_one_mutation_at_a_time() {
     assert!(!mutex.try_mutate(|| panic!("ran while locked")));
     rule.advance_time_by(200);
     assert!(mutex.try_mutate(|| {}));
+    // Its suspending twin (Kotlin's inline tryMutate, its lambda suspending in a coroutine): the lock held while the
+    // lambda is suspended; not run while another holds it.
+    let (m, l) = (mutex.clone(), log.clone());
+    log.borrow_mut().clear();
+    scope.launch(async move {
+        let ran = m
+            .try_mutate_async(async || {
+                push(&l, "tried");
+                delay_ms(100).await;
+                push(&l, "done");
+            })
+            .await;
+        push(&l, if ran { "ran" } else { "not run" });
+    });
+    rule.advance_time_by(50);
+    assert!(!mutex.try_mutate(|| panic!("ran while locked")));
+    let (m, l) = (mutex.clone(), log.clone());
+    scope.launch(async move {
+        let ran = m.try_mutate_async(async || panic!("ran while locked")).await;
+        push(&l, if ran { "second ran" } else { "second not run" });
+    });
+    rule.advance_time_by(100);
+    assert_eq!(*log.borrow(), ["tried", "second not run", "done", "ran"]);
+    assert!(mutex.try_mutate(|| {}));
     // mutate_with: the receiver given to the block; the value of the mutation.
     let (m, out) = (mutex.clone(), Rc::new(Cell::new(0)));
     let o = out.clone();

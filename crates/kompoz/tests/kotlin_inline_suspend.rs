@@ -2,7 +2,10 @@
 //! functions (`with(anim) { animateTo(…) }`, `run`, `let`, `apply`, `also`, `takeIf`, `run { }`), `repeat`, a list's
 //! `forEach`/`map`/`filter`/`fold`/`any`, a string's `forEachIndexed`, `getOrPut`, `List(n) { }`, `require`'s message,
 //! in a `suspend fun` too, `return@forEach`/`return@run` from such a lambda; a safe call and `?:` that suspend. The
-//! lambdas really suspend: the coroutine is seen part way. And in a `.kt` file (kompoz_file!).
+//! lambdas really suspend: the coroutine is seen part way. And in a `.kt` file (kompoz_file!). Locals bound to what a
+//! generic callee gives are typed as Kotlin infers them (`val got = anim.let { …; it.value }`, `anim.run { … }`,
+//! `xs.map { … }`, an `Animatable(0f)`'s value); `it` is the nearest lambda's that has one (`xs.forEach {
+//! scope.launch { delay(it.toLong()) } }`).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -119,6 +122,30 @@ kompoz! {
     }
 }
 
+kompoz! {
+    @Composable
+    fun Inferred(go: Boolean, log: (String) -> Unit) {
+        val anim = remember { Animatable(0f) }
+        val scope = rememberCoroutineScope()
+        LaunchedEffect(go) {
+            if (!go) return@LaunchedEffect
+            val got = anim.let {
+                it.animateTo(20f, tween(50, easing = LinearEasing))
+                it.value
+            }
+            val ran = anim.run { targetValue + 1f }
+            val doubled = with(anim) { value * 2 }
+            val floats = listOf(1, 2).map { it * 1.5f }
+            val folded = floats.fold(0f) { acc, x -> acc + x }
+            val most = listOf(3, 1).maxOf { it.toFloat() }
+            val ints = "${got.toInt()} ${ran.toInt()} ${doubled.toInt()}"
+            log("$ints ${floats[1].toInt()} ${folded.toInt()} ${most.toInt()}")
+            listOf(30, 10).forEach { scope.launch { delay(it.toLong()); log("after $it") } }
+            listOf(1).forEach { run { log("run $it") } }
+        }
+    }
+}
+
 kompoz_file!("tests/kt/inline_suspend.kt");
 
 fn width(rule: &KompozTestRule, tag: &str) -> f32 {
@@ -207,7 +234,24 @@ fn inline_functions_suspend_in_a_kt_file() {
     assert_eq!(log.borrow().last().map(String::as_str), Some("n 5 40.0"));
 }
 
+fn generic_results_and_nested_its_are_kotlins() {
+    let log: Rc<RefCell<Vec<String>>> = Rc::default();
+    let go = mutable_state_of(false);
+    let (l, g) = (log.clone(), go.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let l = l.clone();
+        Inferred(g.value(), move |s: String| l.borrow_mut().push(s));
+    }));
+    rule.wait_for_idle();
+    go.set(true);
+    rule.wait_for_idle();
+    // The values typed as Kotlin infers them (their `toInt()` the numbers'); the forEach's `it` in the coroutines it
+    // launches (which take none), each delayed by its element.
+    assert_eq!(*log.borrow(), ["20 21 40 3 4 3", "run 1", "after 10", "after 30"]);
+}
+
 tests![
+    generic_results_and_nested_its_are_kotlins,
     scope_functions_suspend_with_the_coroutine,
     collection_functions_suspend_with_the_coroutine,
     inline_functions_suspend_in_a_kt_file,

@@ -61,7 +61,10 @@ pub fn Steps(step: MutableTransitionState<i32>, seekable: SeekableTransitionStat
         let it = ::core::clone::Clone::clone(it);
         it > 1
     });
-    let y = child.animate_float(|it| if it.clone() { 1_f32 } else { 0_f32 });
+    let y = child.animate_float(|it| {
+        let it = ::core::clone::Clone::clone(it);
+        if it { 1_f32 } else { 0_f32 }
+    });
     Text(::kompoz::runtime::kt::template!(
         ::kompoz::runtime::kt::KtDelegate::get_value(&x),
         " ",

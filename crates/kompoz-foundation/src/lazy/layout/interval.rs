@@ -183,4 +183,16 @@ pub trait LazyLayoutIntervalContent {
         let interval = self.intervals().get(global_index);
         block(global_index - interval.start_index, &interval.value)
     }
+
+    /// [`with_interval`](Self::with_interval) whose `block` suspends (Compose's inline `withInterval`: its lambda,
+    /// run in place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    #[allow(async_fn_in_trait)]
+    async fn with_interval_async<R>(&self, global_index: i32, block: impl AsyncFnOnce(i32, &Self::Interval) -> R) -> R
+    where
+        Self: Sized,
+    {
+        let interval = self.intervals().get(global_index);
+        block(global_index - interval.start_index, &interval.value).await
+    }
 }

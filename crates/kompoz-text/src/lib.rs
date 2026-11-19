@@ -57,7 +57,7 @@ pub mod word_boundary;
 
 pub use annotated_string::{
     AnnotatedString, AnnotatedStringBuilder, Annotation, BuilderAppend, BuilderStyle, INLINE_CONTENT_TAG, Range,
-    build_annotated_string,
+    SuspendingBuilderStyle, build_annotated_string, build_annotated_string_async,
 };
 pub use bidi::{BidiLine, BidiParagraph, BidiRun};
 pub use draw::{Glyph, GlyphColorKind, GlyphRun, GlyphSynthesis, TextDraw, TextRunStyle};

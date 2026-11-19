@@ -735,6 +735,41 @@ impl ImageVectorBuilder {
         self.group_of(group, block)
     }
 
+    /// [`group`](Self::group) whose `block` suspends (Kotlin's inline Builder.group: its lambda, run in place,
+    /// suspends with the coroutine it is called in). A future-giving `fn`, as `#[named]` takes them.
+    #[doc(hidden)]
+    pub fn group_async(
+        &mut self,
+        #[default(DefaultGroupName)] name: &str,
+        #[default(DefaultRotation)] rotate: f32,
+        #[default(DefaultPivotX)] pivot_x: f32,
+        #[default(DefaultPivotY)] pivot_y: f32,
+        #[default(DefaultScaleX)] scale_x: f32,
+        #[default(DefaultScaleY)] scale_y: f32,
+        #[default(DefaultTranslationX)] translation_x: f32,
+        #[default(DefaultTranslationY)] translation_y: f32,
+        #[default(Vec::new())] clip_path_data: Vec<PathNode>,
+        block: impl AsyncFnOnce(&mut ImageVectorBuilder),
+    ) -> impl Future<Output = &mut ImageVectorBuilder> {
+        let group = VectorGroup {
+            name: name.into(),
+            rotation: rotate,
+            pivot_x,
+            pivot_y,
+            scale_x,
+            scale_y,
+            translation_x,
+            translation_y,
+            clip_path_data,
+            children: Vec::new(),
+        };
+        async move {
+            self.add_group_of(group);
+            block(self).await;
+            self.clear_group()
+        }
+    }
+
     /// Compose's Builder.path: a path of what `path_builder` makes, in these paints.
     #[track_caller]
     pub fn path(
@@ -765,5 +800,41 @@ impl ImageVectorBuilder {
             ..VectorPath::default()
         };
         self.path_of(path, path_builder)
+    }
+
+    /// [`path`](Self::path) whose `path_builder` suspends (Kotlin's inline Builder.path: its lambda, run in place,
+    /// suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub fn path_async(
+        &mut self,
+        #[default(DefaultPathName)] name: &str,
+        #[default(None)] fill: Option<Brush>,
+        #[default(1.0)] fill_alpha: f32,
+        #[default(None)] stroke: Option<Brush>,
+        #[default(1.0)] stroke_alpha: f32,
+        #[default(DefaultStrokeLineWidth)] stroke_line_width: f32,
+        #[default(DefaultStrokeLineCap)] stroke_line_cap: StrokeCap,
+        #[default(DefaultStrokeLineJoin)] stroke_line_join: StrokeJoin,
+        #[default(DefaultStrokeLineMiter)] stroke_line_miter: f32,
+        #[default(DefaultFillType)] path_fill_type: PathFillType,
+        path_builder: impl AsyncFnOnce(&mut PathBuilder),
+    ) -> impl Future<Output = &mut ImageVectorBuilder> {
+        let path = VectorPath {
+            name: name.into(),
+            fill,
+            fill_alpha,
+            stroke,
+            stroke_alpha,
+            stroke_line_width,
+            stroke_line_cap,
+            stroke_line_join,
+            stroke_line_miter,
+            path_fill_type,
+            ..VectorPath::default()
+        };
+        async move {
+            let path_data = super::builder::PathData_async(path_builder).await;
+            self.add_path_of(VectorPath { path_data, ..path })
+        }
     }
 }

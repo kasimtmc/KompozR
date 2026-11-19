@@ -246,6 +246,18 @@ impl MutatorMutex {
         did_lock
     }
 
+    /// [`try_mutate`](Self::try_mutate) whose `block` suspends (Compose's inline tryMutate: its lambda, run in place,
+    /// suspends with the coroutine it is called in, the lock held meanwhile).
+    #[doc(hidden)]
+    pub async fn try_mutate_async(&self, block: impl AsyncFnOnce()) -> bool {
+        let did_lock = self.try_lock();
+        if did_lock {
+            let _unlock = LockGuard(self.inner.clone());
+            block().await;
+        }
+        did_lock
+    }
+
     /// Takes the lock if it is free (Compose's tryLock).
     #[doc(hidden)]
     pub fn try_lock(&self) -> bool {

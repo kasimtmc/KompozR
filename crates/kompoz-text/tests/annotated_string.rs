@@ -486,3 +486,89 @@ fn locales_are_bcp47_language_tags() {
     assert_eq!(LocaleList::empty().first_or_current(), Locale::current());
     assert!(!LocaleList::current().is_empty());
 }
+
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
+/// A suspension point: pending once, then ready (as a `delay` would be).
+struct Pending(bool);
+impl std::future::Future for Pending {
+    type Output = ();
+    fn poll(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.0 {
+            std::task::Poll::Ready(())
+        } else {
+            self.0 = true;
+            std::task::Poll::Pending
+        }
+    }
+}
+fn pending() -> Pending {
+    Pending(false)
+}
+
+#[test]
+fn suspending_twins_build_what_their_plain_forms_build() {
+    // buildAnnotatedString, withStyle(SpanStyle) and withLink are Kotlin's inline functions: in a coroutine their
+    // lambdas suspend with it (the Kotlin syntax calls these twins then). What is pushed stays pushed while the
+    // lambda is suspended, popped as it ends; the lambda's value is the call's.
+    let plain = build_annotated_string(|b| {
+        b.append("a");
+        let n = b.with_style(bold(), |b| {
+            b.append("b");
+            b.with_link(LinkAnnotation::url("https://kompoz.dev"), |b| {
+                b.append("c");
+                3
+            })
+        });
+        b.append(n.to_string().as_str());
+    });
+    let twin = block_on(build_annotated_string_async(async |b| {
+        b.append("a");
+        let n = b
+            .with_style_async(bold(), async |b| {
+                pending().await;
+                b.append("b");
+                b.with_link_async(LinkAnnotation::url("https://kompoz.dev"), async |b| {
+                    pending().await;
+                    b.append("c");
+                    3
+                })
+                .await
+            })
+            .await;
+        b.append(n.to_string().as_str());
+    }));
+    assert_eq!(twin.text(), "abc3");
+    assert_eq!(plain, twin);
+}
+
+#[test]
+fn text_styles_take_or_else_suspending() {
+    // takeOrElse is Kotlin's inline function: its lambda (run only where the value is unspecified) may suspend.
+    let twin = |a: TextAlign| {
+        block_on(a.take_or_else_async(async || {
+            pending().await;
+            TextAlign::Center
+        }))
+    };
+    assert_eq!(twin(TextAlign::Unspecified), TextAlign::Unspecified.take_or_else(|| TextAlign::Center));
+    assert_eq!(twin(TextAlign::End), TextAlign::End);
+    let direction = block_on(TextDirection::Unspecified.take_or_else_async(async || TextDirection::Rtl));
+    assert_eq!(direction, TextDirection::Rtl);
+    assert_eq!(block_on(TextDirection::Ltr.take_or_else_async(async || panic!("specified"))), TextDirection::Ltr);
+    assert_eq!(block_on(Hyphens::Unspecified.take_or_else_async(async || Hyphens::Auto)), Hyphens::Auto);
+    assert_eq!(block_on(Hyphens::None.take_or_else_async(async || Hyphens::Auto)), Hyphens::None);
+    let shift = block_on(BaselineShift::Unspecified.take_or_else_async(async || BaselineShift::Superscript));
+    assert_eq!(shift, BaselineShift::Superscript);
+    assert_eq!(block_on(BaselineShift::None.take_or_else_async(async || panic!("specified"))), BaselineShift::None);
+    assert_eq!(block_on(LineBreak::Unspecified.take_or_else_async(async || LineBreak::Heading)), LineBreak::Heading);
+    assert_eq!(block_on(LineBreak::Simple.take_or_else_async(async || LineBreak::Heading)), LineBreak::Simple);
+}

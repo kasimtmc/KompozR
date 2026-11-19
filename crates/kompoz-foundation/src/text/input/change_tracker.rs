@@ -40,6 +40,36 @@ pub trait ChangeList {
             block(self.get_range(i), self.get_original_range(i));
         }
     }
+
+    /// [`for_each_change`](Self::for_each_change) whose `block` suspends (Kotlin's inline forEachChange: its lambda,
+    /// run in place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    #[allow(async_fn_in_trait)]
+    async fn for_each_change_async(&self, mut block: impl AsyncFnMut(TextRange, TextRange))
+    where
+        Self: Sized,
+    {
+        let mut i = 0;
+        while i < self.change_count() {
+            block(self.get_range(i), self.get_original_range(i)).await;
+            i += 1;
+        }
+    }
+
+    /// [`for_each_change_reversed`](Self::for_each_change_reversed) whose `block` suspends (Kotlin's inline
+    /// forEachChangeReversed).
+    #[doc(hidden)]
+    #[allow(async_fn_in_trait)]
+    async fn for_each_change_reversed_async(&self, mut block: impl AsyncFnMut(TextRange, TextRange))
+    where
+        Self: Sized,
+    {
+        let mut i = self.change_count();
+        while i > 0 {
+            i -= 1;
+            block(self.get_range(i), self.get_original_range(i)).await;
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

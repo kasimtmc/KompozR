@@ -23,7 +23,7 @@ pub fn Underlined(content: impl ::core::ops::Fn() + 'static) {
                 }),
                 |it| it.measure(constraints),
             );
-            this.layout(width.clone(), height.clone() + this.round_to_px(2.dp()), {
+            this.layout(width, height + this.round_to_px(2.dp()), {
                 let main = ::kompoz::runtime::__private::capture(&main);
                 let line = ::kompoz::runtime::__private::capture(&line);
                 let height = ::kompoz::runtime::__private::capture(&height);
@@ -32,7 +32,7 @@ pub fn Underlined(content: impl ::core::ops::Fn() + 'static) {
                         this1.place_relative(&it, 0, 0);
                     });
                     ::kompoz::runtime::kt::KtList::for_each(&line, |it| {
-                        this1.place_relative(&it, 0, height.clone());
+                        this1.place_relative(&it, 0, height);
                     });
                 }
             })

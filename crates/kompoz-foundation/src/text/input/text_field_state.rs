@@ -155,6 +155,24 @@ impl TextFieldState {
         self.commit_edit(buffer);
     }
 
+    /// [`edit`](Self::edit) whose `block` suspends (Kotlin's inline `edit`: its lambda, run in place, suspends with
+    /// the coroutine it is called in; the state is being edited meanwhile, so another edit then panics, as in
+    /// Compose).
+    #[doc(hidden)]
+    pub async fn edit_async(&self, block: impl AsyncFnOnce(&mut TextFieldBuffer)) {
+        let mut buffer = self.start_edit();
+        // (Ends the edit however the block ends, a dropped coroutine's too.)
+        struct Finish<'a>(&'a TextFieldState);
+        impl Drop for Finish<'_> {
+            fn drop(&mut self) {
+                self.0.finish_editing();
+            }
+        }
+        let _finish = Finish(self);
+        block(&mut buffer).await;
+        self.commit_edit(buffer);
+    }
+
     fn start_edit(&self) -> TextFieldBuffer {
         let editing = without_read_observation(|| self.0.is_editing.peek());
         assert!(!editing, "TextFieldState does not support concurrent or nested editing.");

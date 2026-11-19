@@ -13,7 +13,7 @@ mod to_path;
 mod vector_xml;
 mod xml;
 
-pub use builder::{PathBuilder, PathData};
+pub use builder::{PathBuilder, PathData, PathData_async};
 pub use image_vector::{
     DefaultFillType, DefaultGroupName, DefaultPathName, DefaultPivotX, DefaultPivotY, DefaultRotation, DefaultScaleX,
     DefaultScaleY, DefaultStrokeLineCap, DefaultStrokeLineJoin, DefaultStrokeLineMiter, DefaultStrokeLineWidth,

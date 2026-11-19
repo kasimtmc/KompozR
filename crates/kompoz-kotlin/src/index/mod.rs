@@ -31,6 +31,9 @@
 //!   a call goes through the trait, `KtStr::split(&s, …)`);
 //! - what a type derefs to ([`DEREFS`]: a `MeasureScope`'s `Density`) is what Kotlin's supertype is: its members are
 //!   the type's too (`dp.roundToPx()` in a measure block);
+//! - a generic type's type parameters ([`GENERICS`]: `Animatable<T, V>`) tell what its members' `T` is of a value's
+//!   type arguments (`value` of an `Animatable<Float, …>` a `Float`); an overload's result is its impl's associated
+//!   type (`type Animatable = Animatable<f32, AnimationVector1D>` for `Animatable(0f)`);
 //! - a trait implemented for the closures of one signature (`impl<F: Fn(&dyn Fn())> TextFieldDecorator for F`) is a
 //!   Kotlin fun interface ([`Kind::FunInterface`]): a parameter of it (`impl T`, `Rc<dyn T>`) takes a lambda, and its
 //!   SAM constructor (`TextFieldDecorator { … }`) is that lambda;
@@ -43,7 +46,7 @@
 #[rustfmt::skip]
 mod generated;
 
-pub use generated::{DEREFS, ITEMS, TYPES};
+pub use generated::{DEREFS, GENERICS, ITEMS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -228,6 +231,11 @@ pub fn rust_type(kotlin: &str) -> Option<&'static str> {
     TYPES.iter().find(|(k, _)| *k == kotlin).map(|(_, r)| *r)
 }
 
+/// A generic type's type parameters, in order (`Animatable` → `["T", "V"]`).
+pub fn generics(owner: &str) -> Option<&'static [&'static str]> {
+    GENERICS.iter().find(|(o, _)| *o == owner).map(|(_, p)| *p)
+}
+
 /// The items of a Rust name, in the index's order (a scan).
 pub fn by_rust(rust: &str) -> impl Iterator<Item = &'static Item> + use<'_> {
     ITEMS.iter().filter(move |i| i.rust == rust)
@@ -288,5 +296,16 @@ mod tests {
         assert!(lookup("println").iter().any(|i| i.rust == "println_empty" && i.params.is_empty()));
         assert!(lookup("add").iter().any(|i| i.rust == "add_at" && i.params.len() == 2));
         assert!(lookup("PaddingValues").iter().any(|i| i.rust == "all"));
+        // (Compose's inline functions with suspending twins; a generic type's parameters; an overload's result)
+        assert!(one("buildAnnotatedString", "").has(flags::ASYNC_TWIN));
+        assert!(one("withStyle", "AnnotatedStringBuilder").has(flags::ASYNC_TWIN));
+        assert!(!one("withAnnotation", "AnnotatedStringBuilder").has(flags::ASYNC_TWIN));
+        assert!(one("translate", "DrawScope").has(flags::ASYNC_TWIN));
+        assert_eq!(generics("Animatable"), Some(&["T", "V"][..]));
+        assert!(
+            lookup("Animatable")
+                .iter()
+                .any(|i| i.kind == Kind::Overload && i.ret == "Animatable<f32, AnimationVector1D>")
+        );
     }
 }

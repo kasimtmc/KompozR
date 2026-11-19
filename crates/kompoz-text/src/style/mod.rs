@@ -40,6 +40,12 @@ impl TextAlign {
     pub fn take_or_else(self, block: impl FnOnce() -> TextAlign) -> TextAlign {
         if self.is_specified() { self } else { block() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> TextAlign) -> TextAlign {
+        if self.is_specified() { self } else { block().await }
+    }
 }
 
 /// Which way a paragraph goes (Compose's TextDirection): `Ltr` or `Rtl` whatever it holds; `Content` by its first
@@ -64,6 +70,12 @@ impl TextDirection {
     /// This, or `block`'s where unspecified (Compose's takeOrElse).
     pub fn take_or_else(self, block: impl FnOnce() -> TextDirection) -> TextDirection {
         if self.is_specified() { self } else { block() }
+    }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> TextDirection) -> TextDirection {
+        if self.is_specified() { self } else { block().await }
     }
 }
 
@@ -158,6 +170,12 @@ impl Hyphens {
     pub fn take_or_else(self, block: impl FnOnce() -> Hyphens) -> Hyphens {
         if self.is_specified() { self } else { block() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> Hyphens) -> Hyphens {
+        if self.is_specified() { self } else { block().await }
+    }
 }
 
 /// What text that doesn't fit does (Compose's TextOverflow): cut at its bounds, its end (start, middle) replaced by
@@ -246,6 +264,12 @@ impl BaselineShift {
     /// This, or `block`'s where unspecified (Compose's takeOrElse).
     pub fn take_or_else(self, block: impl FnOnce() -> BaselineShift) -> BaselineShift {
         if self.is_specified() { self } else { block() }
+    }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> BaselineShift) -> BaselineShift {
+        if self.is_specified() { self } else { block().await }
     }
 }
 

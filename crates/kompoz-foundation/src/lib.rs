@@ -52,6 +52,8 @@ pub mod scroll;
 pub mod scrollable_area;
 pub mod scrollbar;
 pub mod selection;
+#[cfg(test)]
+mod suspending_twins_tests;
 pub mod text;
 pub mod tooltip_area;
 pub mod v2;

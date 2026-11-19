@@ -1,0 +1,43 @@
+error[E0277]: `withStyle(kompoz::prelude::ParagraphStyle)`'s lambda can't suspend: Kotlin's `withStyle(ParagraphStyle)` takes it `crossinline`
+  --> tests/compile-fail/crossinline_style.rs:11:27
+   |
+11 |                 withStyle(ParagraphStyle(textAlign = TextAlign.Center)) {
+   |                 --------- ^^^^^^^^^^^^^^ a suspending call in its lambda: only `withStyle(SpanStyle)`'s may make one
+   |                 |
+   |                 required by a bound introduced by this call
+   |
+   = help: the trait `kompoz::prelude::SuspendingBuilderStyle` is not implemented for `kompoz::prelude::ParagraphStyle`
+help: the trait `kompoz::prelude::SuspendingBuilderStyle` is implemented for `kompoz::prelude::SpanStyle`
+  --> $WORKSPACE/crates/kompoz-text/src/annotated_string.rs
+   |
+   | impl SuspendingBuilderStyle for SpanStyle {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `AnnotatedStringBuilder::with_style_async`
+  --> $WORKSPACE/crates/kompoz-text/src/annotated_string.rs
+   |
+   |     pub async fn with_style_async<R>(
+   |                  ---------------- required by a bound in this associated function
+   |         &mut self,
+   |         style: impl SuspendingBuilderStyle,
+   |                     ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `AnnotatedStringBuilder::with_style_async`
+
+error[E0277]: `withStyle(kompoz::prelude::ParagraphStyle)`'s lambda can't suspend: Kotlin's `withStyle(ParagraphStyle)` takes it `crossinline`
+  --> tests/compile-fail/crossinline_style.rs:11:17
+   |
+11 |                 withStyle(ParagraphStyle(textAlign = TextAlign.Center)) {
+   |                 ^^^^^^^^^ a suspending call in its lambda: only `withStyle(SpanStyle)`'s may make one
+   |
+   = help: the trait `kompoz::prelude::SuspendingBuilderStyle` is not implemented for `kompoz::prelude::ParagraphStyle`
+help: the trait `kompoz::prelude::SuspendingBuilderStyle` is implemented for `kompoz::prelude::SpanStyle`
+  --> $WORKSPACE/crates/kompoz-text/src/annotated_string.rs
+   |
+   | impl SuspendingBuilderStyle for SpanStyle {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `AnnotatedStringBuilder::with_style_async`
+  --> $WORKSPACE/crates/kompoz-text/src/annotated_string.rs
+   |
+   |     pub async fn with_style_async<R>(
+   |                  ---------------- required by a bound in this associated function
+   |         &mut self,
+   |         style: impl SuspendingBuilderStyle,
+   |                     ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `AnnotatedStringBuilder::with_style_async`

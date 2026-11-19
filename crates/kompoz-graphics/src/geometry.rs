@@ -53,6 +53,12 @@ impl Offset {
     pub fn take_or_else(self, other: impl FnOnce() -> Offset) -> Offset {
         if self.is_specified() { self } else { other() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `other` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, other: impl AsyncFnOnce() -> Offset) -> Offset {
+        if self.is_specified() { self } else { other().await }
+    }
     pub fn copy(self, x: Option<f32>, y: Option<f32>) -> Offset {
         Offset { x: x.unwrap_or(self.x), y: y.unwrap_or(self.y) }
     }
@@ -147,6 +153,12 @@ impl Size {
     }
     pub fn take_or_else(self, other: impl FnOnce() -> Size) -> Size {
         if self.is_specified() { self } else { other() }
+    }
+    /// [`take_or_else`](Self::take_or_else) whose `other` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, other: impl AsyncFnOnce() -> Size) -> Size {
+        if self.is_specified() { self } else { other().await }
     }
     pub fn copy(self, width: Option<f32>, height: Option<f32>) -> Size {
         Size { width: width.unwrap_or(self.width), height: height.unwrap_or(self.height) }

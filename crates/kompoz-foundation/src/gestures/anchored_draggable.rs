@@ -115,6 +115,22 @@ pub trait DraggableAnchors<T>: DraggableAnchorsEq + Send + Sync + 'static {
             block(key, self.position_at(i));
         }
     }
+
+    /// [`for_each`](Self::for_each) whose `block` suspends (Compose's `forEach` is an inline extension: its lambda,
+    /// run in place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    #[allow(async_fn_in_trait)]
+    async fn for_each_async(&self, mut block: impl AsyncFnMut(T, f32))
+    where
+        Self: Sized,
+    {
+        for i in 0..self.size() {
+            let key = self
+                .anchor_at(i)
+                .unwrap_or_else(|| panic_kt("IllegalArgumentException", &format!("There was no key at index {i}.")));
+            block(key, self.position_at(i)).await;
+        }
+    }
 }
 
 /// How anchors compare (a blanket impl for every `PartialEq` one).

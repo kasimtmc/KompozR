@@ -26,7 +26,10 @@
 //! that have one (`ASYNC_TWIN`). Kotlin's `crossinline` lambdas (`sortedBy`), and the functions Kotlin doesn't inline
 //! (`removeAll(predicate)`, `joinToString(transform)`, `lazy`), have none: their lambdas can't suspend, as in Kotlin.
 //! A twin's exception is at the shim's line (an `async fn` can't be `#[track_caller]`), as a Kotlin stack trace has
-//! an inline function's own line on top.
+//! an inline function's own line on top. Compose's own inline functions follow the convention in their crates
+//! (`build_annotated_string_async`, `AnnotatedStringBuilder::with_style_async`, `take_or_else_async`,
+//! `TextFieldState::edit_async`, the draw transforms'…); a `#[named]` one's twin is a `fn` giving an `impl Future`
+//! (what `#[named]` takes), with the same defaults, so a call naming its arguments goes through its builder too.
 
 pub mod collections;
 pub mod delegate;

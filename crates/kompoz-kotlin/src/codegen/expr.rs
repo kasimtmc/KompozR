@@ -244,7 +244,7 @@ impl Gen<'_, '_> {
             ExprKind::This { label } => match self.receiver(label.as_ref().map(|l| l.name.as_str())) {
                 Some(r) => {
                     let i = proc_macro2::Ident::new(&r.rust, span);
-                    let ty = Ty::from_rust(&r.ty);
+                    let ty = r.value.clone();
                     // (`self`, or a receiver lent by reference — `this@LookaheadScope` of an `&Rc<dyn LookaheadScope>`
                     // —: a clone where a value is taken, as Kotlin's reference is)
                     let kind =
@@ -332,7 +332,7 @@ impl Gen<'_, '_> {
         if let Some((recv, item)) = self.receiver_member(&n.name, |i| i.params.is_empty()) {
             let r = proc_macro2::Ident::new(&recv.rust, span);
             let m = ident(item.rust, span);
-            return Out::plain(quote_spanned!(span=> #r.#m()), Ty::from_rust(item.ret));
+            return Out::plain(quote_spanned!(span=> #r.#m()), owner_arg_ret(&recv.value, item.ret));
         }
         if let Some(v) = self.file.vals.get(&n.name).cloned() {
             let i = ident(&v.rust, span);
@@ -1031,10 +1031,10 @@ impl Gen<'_, '_> {
                 if let Some(v) = self.file.vals.get(&n.name) {
                     return v.ty.clone();
                 }
-                if let Some(i) =
-                    self.receiver_tys().iter().find_map(|r| members_of(r, &n.name).find(|i| i.params.is_empty()))
-                {
-                    return Ty::from_rust(i.ret);
+                if let Some(t) = self.receiver_values().iter().find_map(|(r, value)| {
+                    members_of(r, &n.name).find(|i| i.params.is_empty()).map(|i| owner_arg_ret(value, i.ret))
+                }) {
+                    return t;
                 }
                 lookup(&n.name)
                     .iter()
@@ -1044,10 +1044,12 @@ impl Gen<'_, '_> {
             }
             ExprKind::This { label } => {
                 let r = match label {
-                    None => self.receiver_tys().into_iter().next(),
-                    Some(l) => self.receivers.iter().rev().find(|r| r.labels.contains(&l.name)).map(|r| r.ty.clone()),
+                    None => self.receiver_values().into_iter().next().map(|r| r.1),
+                    Some(l) => {
+                        self.receivers.iter().rev().find(|r| r.labels.contains(&l.name)).map(|r| r.value.clone())
+                    }
                 };
-                r.map(|r| Ty::from_rust(&r)).unwrap_or(Ty::Unknown)
+                r.unwrap_or(Ty::Unknown)
             }
             ExprKind::Paren(x) | ExprKind::Annotated { expr: x, .. } => self.peek_ty(x),
             ExprKind::Prefix { op: PrefixOp::Not, .. } => Ty::Bool,
@@ -1201,8 +1203,16 @@ impl Gen<'_, '_> {
     /// The Rust types of the implicit receivers, innermost first: those of the lambdas inference looks into, then
     /// those of the lambdas and extension functions being written.
     pub(crate) fn receiver_tys(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.peek_receivers.borrow().iter().rev().cloned().collect();
+        let mut out: Vec<String> = self.peek_receivers.borrow().iter().rev().map(|r| r.0.clone()).collect();
         out.extend(self.receivers.iter().rev().map(|r| r.ty.clone()));
+        out
+    }
+
+    /// The implicit receivers' types with their type arguments where known, in [`receiver_tys`](Self::receiver_tys)'
+    /// order (each with its Rust type's name): what their members' `T` is.
+    pub(crate) fn receiver_values(&self) -> Vec<(String, Ty)> {
+        let mut out: Vec<(String, Ty)> = self.peek_receivers.borrow().iter().rev().cloned().collect();
+        out.extend(self.receivers.iter().rev().map(|r| (r.ty.clone(), r.value.clone())));
         out
     }
 
@@ -1211,6 +1221,27 @@ impl Gen<'_, '_> {
     /// inference as the index's types tell. `lent` is that value's type and the name of the type parameter the
     /// callee lends it as (`Self` for a method of it — its `Self::Item`s its elements —, `T` for `with(x) { }`).
     pub(crate) fn peek_lambda(&self, lambda: &Lambda, info: Option<&index::Lambda>, lent: Option<(&Ty, &str)>) -> Ty {
+        let mut binds = TypeBinds::new();
+        if let Some((ty, name)) = lent {
+            if name == "Self" {
+                binds = lent_binds(ty);
+            } else {
+                binds.insert(name.to_string(), ty.clone());
+            }
+        }
+        self.peek_lambda_bound(lambda, info, &binds, lent.map(|l| l.1))
+    }
+
+    /// [`peek_lambda`](Self::peek_lambda) with the callee's type parameters `binds` tells (its parameters' types
+    /// read with them: `fold(0f) { acc, x -> … }`'s `acc` a `Float`); `lent` names the one a `&mut` of which is
+    /// Kotlin's receiver (`T.() -> R`).
+    fn peek_lambda_bound(
+        &self,
+        lambda: &Lambda,
+        info: Option<&index::Lambda>,
+        binds: &TypeBinds,
+        lent: Option<&str>,
+    ) -> Ty {
         let mut inputs: Vec<Ty> = Vec::new();
         let mut receiver = None;
         if let Some(info) = info {
@@ -1218,26 +1249,22 @@ impl Gen<'_, '_> {
                 let t = t.trim();
                 t.strip_prefix("&mut ").or_else(|| t.strip_prefix('&')).unwrap_or(t).trim().to_string()
             };
-            let lent_ty = |t: &str| match lent {
-                Some((ty, name)) if bare(t) == name => Some(ty.clone()),
-                Some((ty, "Self")) if bare(t) == "Self::Item" => Some(ty.element()),
-                _ => None,
-            };
             let mut rest = info.inputs.iter();
             if !info.receiver.is_empty() {
-                receiver = Some(info.receiver.to_string());
+                receiver = Some((info.receiver.to_string(), Ty::from_rust(info.receiver)));
                 rest.next();
             } else if let Some(first) = info.inputs.first()
                 && first.trim().starts_with("&mut")
-                && let Some((ty, name)) = lent
+                && let Some(name) = lent
                 && bare(first) == name
+                && let Some(ty) = binds.get(name)
             {
                 // (Kotlin's `T.() -> R` of a scope function, the value lent as `&mut Self` / `&mut T`)
-                receiver = ty.owner().map(str::to_string);
+                receiver = ty.owner().map(|o| (o.to_string(), ty.clone()));
                 rest.next();
             }
             for t in rest {
-                inputs.push(lent_ty(t).unwrap_or_else(|| Ty::from_rust(t)));
+                inputs.push(Ty::from_rust_bound(t, binds));
             }
         }
         let mut scope = std::collections::HashMap::new();
@@ -1267,6 +1294,63 @@ impl Gen<'_, '_> {
         }
         self.peek_scopes.borrow_mut().pop();
         t
+    }
+
+    /// What a generic method `item` called on a value of type `recv` gives: its result with its type parameters bound
+    /// by inference — the value's (`Self`, a kt shim's `Self::Item`, a generic type's arguments), then its arguments'
+    /// (`fold`'s `initial: R`), then what its lambdas give (`map`'s `R`, `let`'s).
+    fn method_ret(&self, recv: &Ty, item: &index::Item, args: &[Arg], trailing: Option<&Lambda>) -> Ty {
+        let mut binds = lent_binds(recv);
+        if let Ty::Named(n, a) = recv.through_shared()
+            && let Some(ps) = index::generics(n).filter(|ps| ps.len() == a.len())
+        {
+            for (p, t) in ps.iter().zip(a) {
+                binds.insert(p.to_string(), t.clone());
+            }
+        }
+        // (a kt shim's `T` of a collection: its element)
+        if item.krate == "kompoz_runtime" && item.module.starts_with("kt") && !binds.contains_key("T") {
+            binds.insert("T".to_string(), recv.element());
+        }
+        self.bound_ret(item, binds, args, trailing, Some("Self"))
+    }
+
+    /// What a generic callee `item` gives, its type parameters `binds` tells bound further by its arguments (values
+    /// first: what its lambdas' parameters are may be told by them) and by what its lambdas give, each looked into
+    /// with the parameters bound so far; `lent` names the type parameter a `&mut` of which is a lambda's receiver.
+    fn bound_ret(
+        &self,
+        item: &index::Item,
+        mut binds: TypeBinds,
+        args: &[Arg],
+        trailing: Option<&Lambda>,
+        lent: Option<&str>,
+    ) -> Ty {
+        let n = item.params.len();
+        let given = |k: usize| -> Option<GivenArg<'_>> {
+            let p = &item.params[k];
+            if let Some(a) = args.iter().find(|a| a.name.as_ref().is_some_and(|x| x.name == p.kotlin)) {
+                return Some(GivenArg::of(&a.value));
+            }
+            if let Some(a) = args.iter().filter(|a| a.name.is_none()).nth(k) {
+                return Some(GivenArg::of(&a.value));
+            }
+            trailing.filter(|_| k + 1 == n).map(GivenArg::Lambda)
+        };
+        for (k, p) in item.params.iter().enumerate() {
+            if let (None, Some(GivenArg::Value(e))) = (p.lambda, given(k)) {
+                bind_type_params(p.ty, &self.peek_ty(e), &mut binds);
+            }
+        }
+        for (k, p) in item.params.iter().enumerate() {
+            if let (Some(info), Some(GivenArg::Lambda(l))) = (p.lambda, given(k)) {
+                let gives = self.peek_lambda_bound(l, Some(&info), &binds, lent);
+                if gives != Ty::Unit {
+                    bind_type_params(info.output, &gives, &mut binds);
+                }
+            }
+        }
+        Ty::from_rust_bound(item.ret, &binds)
     }
 
     /// The method `name` a value of type `recv` has, as the index tells: its type's own (or its extension traits',
@@ -1341,8 +1425,12 @@ impl Gen<'_, '_> {
                 if let Some(f) = self.file.function(&n.name) {
                     return f.ret.clone();
                 }
-                if let Some(i) = self.receiver_tys().iter().find_map(|r| members_of(r, &n.name).next()) {
-                    return Ty::from_rust(i.ret);
+                if let Some(t) = self
+                    .receiver_values()
+                    .iter()
+                    .find_map(|(r, value)| members_of(r, &n.name).next().map(|i| owner_arg_ret(value, i.ret)))
+                {
+                    return t;
                 }
                 match n.name.as_str() {
                     "listOf" | "mutableListOf" | "arrayListOf" => {
@@ -1392,21 +1480,14 @@ impl Gen<'_, '_> {
                 }
                 let r = self.peek_ty(receiver).non_null();
                 let mut t = self.member_ty(&r, &name.name, true);
-                // (a method giving what a lambda it is given gives: `x.run { … }`, `x.let { … }`)
-                if let Some(lambda) = trailing.or_else(|| {
-                    args.iter().rev().find_map(|a| match &a.value.kind {
-                        ExprKind::Lambda(l) => Some(l),
-                        _ => None,
-                    })
-                }) && t == Ty::Unknown
-                    && let Some(info) = self.method_of(&r, &name.name).and_then(|i| {
-                        let info = i.params.iter().rev().find_map(|p| p.lambda)?;
-                        (is_type_param_text(i.ret) && info.output.trim() == i.ret.trim()).then_some(info)
-                    })
+                // (a generic method: what its type parameters are told by the value it is called on, its arguments and
+                // what its lambdas give — `x.let { … }`, `x.run { … }`, `xs.map { it.toFloat() }`, `xs.fold(0f) { … }`)
+                if (t == Ty::Unknown || t.is_vague())
+                    && let Some(item) = self.method_of(&r, &name.name)
                 {
-                    let given = self.peek_lambda(lambda, Some(&info), Some((&r, "Self")));
-                    if given != Ty::Unknown && given != Ty::Unit {
-                        t = given;
+                    let bound = self.method_ret(&r, item, args, trailing);
+                    if bound != Ty::Unknown && (t == Ty::Unknown || !bound.is_vague()) {
+                        t = bound;
                     }
                 }
                 if t == Ty::Unknown {
@@ -1436,13 +1517,35 @@ impl Gen<'_, '_> {
         args: &[Arg],
         trailing: Option<&Lambda>,
     ) -> Ty {
-        // (an overloaded constructor's associated type, `A::Animatable`, is the type of that name: what the call's own
-        // reading of it says)
-        if item.has(crate::index::flags::OVERLOADED)
-            && let Some((_, assoc)) = item.ret.rsplit_once("::")
-            && assoc.chars().next().is_some_and(char::is_uppercase)
-        {
-            return Ty::named(assoc);
+        let t = self.generic_ret_of_one(item, type_args, args, trailing);
+        // (one of several type parameters, or one told by a part of an argument's type — `checkNotNull(x)`'s `T` of a
+        // `T?` —: each bound as a method's are)
+        if (t == Ty::Unknown || t.is_vague()) && !item.has(crate::index::flags::OVERLOADED) && type_args.is_empty() {
+            let bound = self.bound_ret(item, TypeBinds::new(), args, trailing, None);
+            if bound != Ty::Unknown && (t == Ty::Unknown || !bound.is_vague()) {
+                return bound;
+            }
+        }
+        t
+    }
+
+    /// [`generic_ret`](Self::generic_ret) of a callee whose result names one type parameter.
+    fn generic_ret_of_one(
+        &self,
+        item: &crate::index::Item,
+        type_args: &[TypeArg],
+        args: &[Arg],
+        trailing: Option<&Lambda>,
+    ) -> Ty {
+        // (an overloaded constructor: what the overload its arguments take gives — `Animatable(0f)` an
+        // `Animatable<Float, AnimationVector1D>`)
+        if item.has(crate::index::flags::OVERLOADED) {
+            let mut given: Vec<(Option<&str>, Ty)> =
+                args.iter().map(|a| (a.name.as_ref().map(|n| n.name.as_str()), self.peek_ty(&a.value))).collect();
+            if trailing.is_some() {
+                given.push((None, Ty::Unknown));
+            }
+            return overload_ret(item, choose_overload(item.kotlin, item, &given), &given);
         }
         let ret = Ty::from_rust(item.ret);
         let generics: Vec<&str> = item
@@ -1511,6 +1614,95 @@ impl Gen<'_, '_> {
         };
         if told == Ty::Unknown { ret } else { fill_unknown(ret, &told) }
     }
+}
+
+/// The overload of `f` (Kotlin's overloads of a constructor taken as one argument, `Color(…)`) that arguments of these
+/// names and types take.
+pub(crate) fn choose_overload(
+    kotlin: &str,
+    f: &index::Item,
+    args: &[(Option<&str>, Ty)],
+) -> Option<&'static index::Item> {
+    let overloads: Vec<&'static index::Item> = lookup(kotlin)
+        .iter()
+        .filter(|i| {
+            i.kind == Kind::Overload && f.params.first().is_some_and(|p| i.via == p.ty.trim_start_matches("impl "))
+        })
+        .collect();
+    let overloads = if overloads.is_empty() {
+        lookup(kotlin).iter().filter(|i| i.kind == Kind::Overload).collect()
+    } else {
+        overloads
+    };
+    let any_float = args.iter().any(|a| a.1.is_float());
+    let long = args.len() == 1 && args[0].1 == Ty::Long;
+    // (`exact`: an argument of a type known is one of the parameter's — a `Float` isn't a `Color`)
+    let takes = |o: &&'static index::Item, exact: bool| {
+        o.params.len() == args.len()
+            && args.iter().zip(o.params).all(|((name, given), p)| {
+                name.is_none_or(|n| n == p.kotlin)
+                    && match Ty::from_rust(p.ty) {
+                        Ty::Float => any_float,
+                        Ty::Int => !any_float,
+                        Ty::Long => long,
+                        // (an offset's `usize`: Kotlin's Int there — `TextRange(0, 3)`)
+                        Ty::OtherInt => !any_float && !long,
+                        Ty::Named(n, _) if exact => *given == Ty::Unknown || given.owner() == Some(n.as_str()),
+                        _ => true,
+                    }
+            })
+    };
+    overloads.iter().find(|o| takes(o, true)).or_else(|| overloads.iter().find(|o| takes(o, false))).copied()
+}
+
+/// What an overloaded constructor `f` gives through `chosen`: that overload's impl's associated type, its type
+/// parameters the ones its arguments tell (`Animatable(Offset.Zero, Offset.VectorConverter)`); an associated type the
+/// index doesn't know (`A::Animatable`) is the type of that name.
+pub(crate) fn overload_ret(f: &index::Item, chosen: Option<&index::Item>, args: &[(Option<&str>, Ty)]) -> Ty {
+    let ret = chosen.map_or(f.ret, |o| o.ret);
+    if let Some((of, assoc)) = ret.rsplit_once("::")
+        && of.len() == 1
+        && assoc.chars().next().is_some_and(char::is_uppercase)
+    {
+        return Ty::named(assoc);
+    }
+    let Some(o) = chosen else { return Ty::from_rust(ret) };
+    let mut binds = TypeBinds::new();
+    for (k, (name, ty)) in args.iter().enumerate() {
+        let at = name.and_then(|n| o.params.iter().position(|p| p.kotlin == n)).unwrap_or(k);
+        if let Some(p) = o.params.get(at) {
+            bind_type_params(p.ty, ty, &mut binds);
+        }
+    }
+    Ty::from_rust_bound(ret, &binds)
+}
+
+/// An argument as inference reads it: a lambda, or a value.
+enum GivenArg<'e> {
+    Lambda(&'e Lambda),
+    Value(&'e Expr),
+}
+
+impl<'e> GivenArg<'e> {
+    fn of(e: &'e Expr) -> GivenArg<'e> {
+        match &e.kind {
+            ExprKind::Lambda(l) => GivenArg::Lambda(l),
+            _ => GivenArg::Value(e),
+        }
+    }
+}
+
+/// What a value of type `ty` lent to a method of it (`Self`) tells of the method's type parameters: `Self`, and a
+/// collection's `Self::Item` (its element), a map's `Self::K` and `Self::V`.
+fn lent_binds(ty: &Ty) -> TypeBinds {
+    let mut binds = TypeBinds::new();
+    binds.insert("Self".to_string(), ty.clone());
+    binds.insert("Self::Item".to_string(), ty.element());
+    if let Ty::Map(k, v) = ty {
+        binds.insert("Self::K".to_string(), (**k).clone());
+        binds.insert("Self::V".to_string(), (**v).clone());
+    }
+    binds
 }
 
 /// `t` with what it leaves unknown made `with`.
@@ -1619,16 +1811,26 @@ fn extension_member(receiver: &str, recv: &Ty, name: &str, params: usize) -> Opt
     })
 }
 
-/// Whether a type's text is a type parameter (`T`, `R`, `U`).
-fn is_type_param_text(t: &str) -> bool {
-    super::call::is_type_parameter(t)
-}
-
-/// What a member of a generic type of one type argument gives (`State<Float>`'s `value`, a `T`): that argument when
-/// the member gives its type parameter, else its own type.
-fn owner_arg_ret(recv: &Ty, ret: &str) -> Ty {
+/// What a member of a value of a generic type gives (`State<Float>`'s `value`, a `T`; `Animatable<Float, …>`'s
+/// `lowerBound`, a `T?`): its type with the type's parameters the value's type arguments ([`index::GENERICS`]); a type
+/// of one type argument whose parameter the index doesn't name: that argument for a bare type parameter.
+pub(crate) fn owner_arg_ret(recv: &Ty, ret: &str) -> Ty {
     match recv.through_shared() {
-        Ty::Named(_, a) if a.len() == 1 && super::call::is_type_parameter(ret) => a[0].clone(),
+        Ty::Named(n, a) if !a.is_empty() => {
+            let bound = match index::generics(n).filter(|ps| ps.len() == a.len()) {
+                Some(ps) => {
+                    let mut binds: TypeBinds = ps.iter().zip(a).map(|(p, t)| (p.to_string(), t.clone())).collect();
+                    binds.insert("Self".to_string(), recv.through_shared().clone());
+                    Ty::from_rust_bound(ret, &binds)
+                }
+                None => Ty::from_rust(ret),
+            };
+            if bound == Ty::Unknown && a.len() == 1 && super::call::is_type_parameter(ret) {
+                a[0].clone()
+            } else {
+                bound
+            }
+        }
         _ => Ty::from_rust(ret),
     }
 }

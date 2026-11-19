@@ -631,6 +631,17 @@ impl BuilderStyle for ParagraphStyle {
     }
 }
 
+/// A style whose [`with_style`](AnnotatedStringBuilder::with_style) block may suspend with the coroutine it is called
+/// in: Kotlin's `withStyle(SpanStyle)` takes its lambda inline, `withStyle(ParagraphStyle)` takes it `crossinline`
+/// (a suspending call in it is Kotlin's error too).
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`withStyle({Self})`'s lambda can't suspend: Kotlin's `withStyle(ParagraphStyle)` takes it `crossinline`",
+    label = "a suspending call in its lambda: only `withStyle(SpanStyle)`'s may make one"
+)]
+pub trait SuspendingBuilderStyle: BuilderStyle {}
+impl SuspendingBuilderStyle for SpanStyle {}
+
 impl AnnotatedStringBuilder {
     pub fn new() -> AnnotatedStringBuilder {
         AnnotatedStringBuilder::default()
@@ -737,7 +748,11 @@ impl AnnotatedStringBuilder {
     }
 
     /// What `block` appends in a span or paragraph style (Compose's withStyle).
-    pub fn with_style<R>(&mut self, style: impl BuilderStyle, block: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn with_style<R>(
+        &mut self,
+        style: impl BuilderStyle,
+        block: impl FnOnce(&mut AnnotatedStringBuilder) -> R,
+    ) -> R {
         let index = self.push_style(style);
         let r = block(self);
         self.pop_to(index);
@@ -748,7 +763,7 @@ impl AnnotatedStringBuilder {
         &mut self,
         tag: impl Into<String>,
         annotation: impl Into<String>,
-        block: impl FnOnce(&mut Self) -> R,
+        block: impl FnOnce(&mut AnnotatedStringBuilder) -> R,
     ) -> R {
         let index = self.push_string_annotation(tag, annotation);
         let r = block(self);
@@ -756,23 +771,58 @@ impl AnnotatedStringBuilder {
         r
     }
     /// What `block` appends read as `annotation` says (Compose's withAnnotation(ttsAnnotation)).
-    pub fn with_tts_annotation<R>(&mut self, annotation: TtsAnnotation, block: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn with_tts_annotation<R>(
+        &mut self,
+        annotation: TtsAnnotation,
+        block: impl FnOnce(&mut AnnotatedStringBuilder) -> R,
+    ) -> R {
         let index = self.push_tts_annotation(annotation);
         let r = block(self);
         self.pop_to(index);
         r
     }
     /// What `block` appends with a URL annotation (Compose's withAnnotation(urlAnnotation)).
-    pub fn with_url_annotation<R>(&mut self, annotation: UrlAnnotation, block: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn with_url_annotation<R>(
+        &mut self,
+        annotation: UrlAnnotation,
+        block: impl FnOnce(&mut AnnotatedStringBuilder) -> R,
+    ) -> R {
         let index = self.push_url_annotation(annotation);
         let r = block(self);
         self.pop_to(index);
         r
     }
     /// What `block` appends a link (Compose's withLink): no look of its own unless its styles give one.
-    pub fn with_link<R>(&mut self, link: LinkAnnotation, block: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn with_link<R>(&mut self, link: LinkAnnotation, block: impl FnOnce(&mut AnnotatedStringBuilder) -> R) -> R {
         let index = self.push_link(link);
         let r = block(self);
+        self.pop_to(index);
+        r
+    }
+
+    /// [`with_style`](Self::with_style) whose `block` suspends (Kotlin's inline `withStyle(SpanStyle)`: its lambda,
+    /// run in place, suspends with the coroutine it is called in; `withStyle(ParagraphStyle)`'s is `crossinline`).
+    #[doc(hidden)]
+    pub async fn with_style_async<R>(
+        &mut self,
+        style: impl SuspendingBuilderStyle,
+        block: impl AsyncFnOnce(&mut AnnotatedStringBuilder) -> R,
+    ) -> R {
+        let index = self.push_style(style);
+        let r = block(self).await;
+        self.pop_to(index);
+        r
+    }
+    /// [`with_link`](Self::with_link) whose `block` suspends (Kotlin's inline withLink). Kotlin's `withAnnotation`s
+    /// take theirs `crossinline`: no suspending form.
+    #[doc(hidden)]
+    pub async fn with_link_async<R>(
+        &mut self,
+        link: LinkAnnotation,
+        block: impl AsyncFnOnce(&mut AnnotatedStringBuilder) -> R,
+    ) -> R {
+        let index = self.push_link(link);
+        let r = block(self).await;
         self.pop_to(index);
         r
     }
@@ -843,5 +893,14 @@ impl From<&str> for AnnotatedStringBuilder {
 pub fn build_annotated_string(build: impl FnOnce(&mut AnnotatedStringBuilder)) -> AnnotatedString {
     let mut b = AnnotatedStringBuilder::new();
     build(&mut b);
+    b.to_annotated_string()
+}
+
+/// [`build_annotated_string`] whose `build` suspends (Kotlin's inline buildAnnotatedString: its lambda, run in place,
+/// suspends with the coroutine it is called in).
+#[doc(hidden)]
+pub async fn build_annotated_string_async(build: impl AsyncFnOnce(&mut AnnotatedStringBuilder)) -> AnnotatedString {
+    let mut b = AnnotatedStringBuilder::new();
+    build(&mut b).await;
     b.to_annotated_string()
 }

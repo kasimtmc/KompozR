@@ -15,13 +15,18 @@
 //!   `draggable`'s `onDragStopped`), whose suspending calls are awaited;
 //! - one run in place in a coroutine whose body suspends (`with(anim) { animateTo(1f) }`, `repeat(3) { delay(10) }`:
 //!   Kotlin's inline lambdas suspend with their caller): an async closure, borrowing as the plain one does, given to
-//!   the callee's suspending twin (`kt::with_async(…, async |this| …).await`, see `kompoz_runtime::kt`); a callee
-//!   without one (Kotlin's `crossinline` lambdas, functions Kotlin doesn't inline) can't take it, an error as in
-//!   Kotlin. `return@label` in it returns from the closure, as in the plain one;
+//!   the callee's suspending twin (`kt::with_async(…, async |this| …).await`, see `kompoz_runtime::kt`; Compose's
+//!   inline functions' too: `buildAnnotatedString`, `withStyle`, `PathData`, the draw transforms…); the twin takes
+//!   each of its lambdas as an async closure, so where one of a call's suspends the others are written as async
+//!   closures too (`withTransform({ translate(1f, 1f) }) { delay(1) }`); a callee without one (Kotlin's
+//!   `crossinline` lambdas, functions Kotlin doesn't inline) can't take it, an error as in Kotlin, and Compose's
+//!   snapshot blocks (`withMutableSnapshot`), which Kotlin inlines but Compose says must not suspend, an error saying
+//!   so. `return@label` in it returns from the closure, as in the plain one;
 //! - `Layout`'s measure policy: through `measure_policy(…)`, which gives Rust its parameters' types.
 //!
-//! Its parameters: as written, or `it` when it takes one and names none. Its body's last expression is its value,
-//! unless the parameter's lambda gives nothing.
+//! Its parameters: as written, or `it` when it takes one and names none (Kotlin's `it` is the nearest lambda's that has
+//! one: a lambda inside taking none leaves the outer one's, which is taken when a use of `it` resolves to it). Its
+//! body's last expression is its value, unless the parameter's lambda gives nothing.
 
 use super::expr::Want;
 use super::names::snake;
@@ -41,6 +46,7 @@ impl Gen<'_, '_> {
             inputs: Vec::new(),
             output: String::new(),
             receiver: None,
+            receiver_value: None,
             suspend: false,
             boxed: false,
             stored: true,
@@ -48,6 +54,7 @@ impl Gen<'_, '_> {
             typed: false,
             twin: false,
             file_inline: false,
+            snapshot_block: false,
         };
         match info {
             Some(i) => self.lambda_for(l, Some(i), call_label, false),
@@ -85,6 +92,7 @@ impl Gen<'_, '_> {
             inputs: Vec::new(),
             output: String::new(),
             receiver: None,
+            receiver_value: None,
             suspend: false,
             boxed: false,
             stored: false,
@@ -92,6 +100,7 @@ impl Gen<'_, '_> {
             typed: false,
             twin,
             file_inline: false,
+            snapshot_block: false,
         };
         self.lambda_with(l, &unknown, None, call_label, transform_wraps, true)
     }
@@ -172,6 +181,7 @@ impl Gen<'_, '_> {
             self.receivers.push(ImplicitReceiver {
                 rust: name,
                 ty: r.clone(),
+                value: info.receiver_value.clone().unwrap_or_else(|| Ty::from_rust(r)),
                 labels: labels.clone(),
                 depth: boundary,
                 by_ref,
@@ -199,6 +209,8 @@ impl Gen<'_, '_> {
             .collect();
         // (the parameters it names: Kotlin's needn't be used — `{ lookaheadCoordinates -> moving.value }`)
         let mut named_params: Vec<proc_macro2::Ident> = Vec::new();
+        // (the implicit `it` declared, and whether the lambda takes one parameter whatever its body does)
+        let mut implicit_it: Option<(std::rc::Rc<std::cell::Cell<bool>>, bool)> = None;
         match &l.params {
             Some(ps) => {
                 for (k, p) in ps.iter().enumerate() {
@@ -252,21 +264,17 @@ impl Gen<'_, '_> {
                 }
             }
             None => {
-                let takes_it = if arity_from_body && known.is_none() { uses_it(&l.body) } else { info.arity() == 1 };
-                if takes_it && uses_it(&l.body) {
+                // (Kotlin's `it`, the nearest lambda's that has one: declared where the lambda takes one parameter, or
+                // one its callee doesn't tell, and taken when a use resolves to it — its body's, or one in a lambda
+                // inside it that takes none, `xs.forEach { scope.launch { delay(it) } }`)
+                let unknown = arity_from_body && known.is_none();
+                if unknown || info.arity() == 1 {
                     let ty = input_tys.first().cloned().unwrap_or(Ty::Unknown);
-                    self.declare("it", "it".into(), LocalKind::LambdaParam, ty);
+                    let used = self.declare_it(ty);
                     if mut_refs.first() == Some(&true) {
                         self.mark_mut_ref("it");
                     }
-                    if lent.first() == Some(&true) {
-                        unpack.extend(quote_spanned!(span=> let it = ::core::clone::Clone::clone(it);));
-                    }
-                    let t = typed(first_input);
-                    params.push(quote_spanned!(span=> it #t));
-                } else if takes_it {
-                    let t = typed(first_input);
-                    params.push(quote_spanned!(span=> _ #t));
+                    implicit_it = Some((used, !unknown));
                 } else {
                     for k in 0..info.arity() {
                         let t = typed(first_input + k);
@@ -294,6 +302,17 @@ impl Gen<'_, '_> {
             Tail::Value(result)
         };
         let body = self.stmts(&l.body.stmts, tail);
+        if let Some((used, one)) = implicit_it {
+            let t = typed(first_input);
+            if used.get() {
+                if lent.first() == Some(&true) {
+                    unpack.extend(quote_spanned!(span=> let it = ::core::clone::Clone::clone(it);));
+                }
+                params.push(quote_spanned!(span=> it #t));
+            } else if one {
+                params.push(quote_spanned!(span=> _ #t));
+            }
+        }
         // (a scope lent by reference that a lambda inside uses: held as a clone of it, which that lambda captures)
         if let (Some(i), Some(owned)) = (&receiver_ident, &receiver_owned)
             && owned.get()
@@ -310,6 +329,12 @@ impl Gen<'_, '_> {
         }
         self.in_async = was_async;
         let suspends = in_place && self.awaits > awaits_before;
+        // (one a twin takes that doesn't suspend: an async closure where another lambda of the call makes it go to the
+        // twin, else the plain closure — recorded by place, for the call to know)
+        let forced = in_place && info.twin && self.force_async.contains(&l.loc);
+        if in_place && info.twin && !suspends {
+            self.plain_twin_lambdas.push(l.loc);
+        }
         if suspend || info.stored {
             // (its suspension points are its own coroutine's, or errors: none of the code around it)
             self.awaits = awaits_before;
@@ -322,6 +347,16 @@ impl Gen<'_, '_> {
                 let (name, at) = self.last_await.clone().unwrap_or_else(|| (String::new(), l.loc));
                 if info.file_inline {
                     self.later(at, "a suspending call in a lambda given to the file's own `inline fun`");
+                } else if info.snapshot_block {
+                    let callee = call_label.map_or_else(|| "its callee".to_string(), |c| format!("`{c}`"));
+                    self.error(
+                        at,
+                        format!(
+                            "`{name}` suspends, in the block {callee} runs with a snapshot current: Compose's snapshot \
+                             blocks must not suspend (the snapshot is the thread's current one until the block \
+                             returns: the coroutines run meanwhile would run in it)"
+                        ),
+                    );
                 } else {
                     let callee = call_label.map_or_else(|| "its callee".to_string(), |c| format!("`{c}`"));
                     self.error(
@@ -381,7 +416,7 @@ impl Gen<'_, '_> {
             } else {
                 quote_spanned!(span=> |#(#params),*| { #inner async move #block })
             }
-        } else if suspends && info.twin {
+        } else if (suspends || forced) && info.twin {
             // (run in place, suspending with the coroutine: borrowing what it uses, as the plain one does)
             quote_spanned!(span=> async |#(#params),*| #block)
         } else {
@@ -624,56 +659,6 @@ fn lent_type_parameter(text: &str) -> Option<&str> {
         None => rest,
     };
     (rest.len() == 1 && rest.chars().all(|c| c.is_ascii_uppercase())).then_some(rest)
-}
-
-/// Whether a lambda's body uses `it` (outside lambdas of its own that name their parameters… or take theirs).
-fn uses_it(b: &Block) -> bool {
-    fn expr(e: &Expr) -> bool {
-        match &e.kind {
-            ExprKind::Name(n) => n.name == "it",
-            ExprKind::Lambda(_) => false,
-            ExprKind::String(s) => s.parts.iter().any(|p| matches!(p, StringPart::Expr { expr: x, .. } if expr(x))),
-            // (a lambda in it has an `it` of its own)
-            ExprKind::Call { callee, args, .. } => expr(callee) || args.iter().any(|a| expr(&a.value)),
-            ExprKind::Member { receiver, .. } => expr(receiver),
-            ExprKind::Index { receiver, indices } => expr(receiver) || indices.iter().any(expr),
-            ExprKind::Prefix { operand, .. } | ExprKind::Postfix { operand, .. } => expr(operand),
-            ExprKind::Binary { lhs, rhs, .. } | ExprKind::Infix { lhs, rhs, .. } => expr(lhs) || expr(rhs),
-            ExprKind::If { condition, then, otherwise } => {
-                expr(condition) || block(then) || otherwise.as_ref().is_some_and(block)
-            }
-            ExprKind::When(w) => {
-                w.subject.as_ref().is_some_and(|s| expr(&s.expr))
-                    || w.branches.iter().any(|b| {
-                        block(&b.body)
-                            || b.conditions.iter().any(|c| match c {
-                                WhenCondition::Expr(x) => expr(x),
-                                WhenCondition::In { range, .. } => expr(range),
-                                WhenCondition::Is { .. } => false,
-                            })
-                    })
-            }
-            ExprKind::Paren(x) | ExprKind::Annotated { expr: x, .. } | ExprKind::Throw(x) => expr(x),
-            ExprKind::Return { value, .. } => value.as_ref().is_some_and(|v| expr(v)),
-            _ => false,
-        }
-    }
-    fn block(b: &Block) -> bool {
-        b.stmts.iter().any(|s| match &s.kind {
-            StmtKind::Expr(e) => expr(e),
-            StmtKind::Assign { target, value, .. } => expr(target) || expr(value),
-            StmtKind::Decl(Decl::Property(p)) => match &p.init {
-                PropertyInit::Value(e) | PropertyInit::Delegate(e) => expr(e),
-                PropertyInit::None => false,
-            },
-            StmtKind::For { iterable, body, .. } => expr(iterable) || block(body),
-            StmtKind::While { condition, body, .. } | StmtKind::DoWhile { body, condition, .. } => {
-                expr(condition) || block(body)
-            }
-            StmtKind::Decl(_) => false,
-        })
-    }
-    block(b)
 }
 
 /// Whether `tokens` name `ident` anywhere (in groups too).

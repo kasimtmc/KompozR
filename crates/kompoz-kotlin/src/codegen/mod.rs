@@ -135,6 +135,12 @@ pub(crate) struct Gen<'a, 'd> {
     /// A lambda given to the call whose arguments are being written suspends (an async closure): the call goes to the
     /// callee's suspending twin, awaited.
     pub inline_async: bool,
+    /// The lambdas (by place) a suspending twin could take written plain, in a coroutine (they didn't suspend): a call
+    /// whose other lambda suspends writes them again as async closures ([`Gen::force_async`]).
+    pub plain_twin_lambdas: Vec<Loc>,
+    /// The lambdas (by place) of a call going to its suspending twin: written as async closures whether they suspend
+    /// or not (the twin takes each of its lambdas as one: `withTransform({ … }) { delay(1) }`).
+    pub force_async: Vec<Loc>,
     pub loops: Vec<LoopCx>,
     pub lambdas: Vec<LambdaCx>,
     /// The names of the calls whose arguments are being written (a lambda's implicit label).
@@ -164,7 +170,7 @@ pub(crate) struct Gen<'a, 'd> {
     pub peek_scopes: std::cell::RefCell<Vec<HashMap<String, Ty>>>,
     /// …and the receivers (Rust type names) of the receiver lambdas it looks into (`with(scope) { … }`,
     /// `providesComputed { … }`), innermost last.
-    pub peek_receivers: std::cell::RefCell<Vec<String>>,
+    pub peek_receivers: std::cell::RefCell<Vec<(String, Ty)>>,
     counter: usize,
 }
 
@@ -182,6 +188,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             awaits: 0,
             last_await: None,
             inline_async: false,
+            plain_twin_lambdas: Vec::new(),
+            force_async: Vec::new(),
             loops: Vec::new(),
             lambdas: Vec::new(),
             call_labels: Vec::new(),
@@ -284,14 +292,27 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// Declares a local (in the innermost scope); its Rust name.
     pub fn declare(&mut self, kotlin: &str, rust: String, kind: LocalKind, ty: Ty) -> String {
         let depth = self.scopes.len() - 1;
-        let local = Local { rust: rust.clone(), kind, ty, depth, kept_closure: false, mut_ref: false };
+        let local = Local { rust: rust.clone(), kind, ty, depth, kept_closure: false, mut_ref: false, used: None };
         self.scopes.last_mut().expect("a scope").insert(kotlin.to_string(), local);
         rust
+    }
+
+    /// Declares a lambda's implicit `it` (in the innermost scope): the flag set when a use resolves to it.
+    pub fn declare_it(&mut self, ty: Ty) -> std::rc::Rc<std::cell::Cell<bool>> {
+        let used: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
+        self.declare("it", "it".into(), LocalKind::LambdaParam, ty);
+        if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut("it")) {
+            l.used = Some(used.clone());
+        }
+        used
     }
 
     /// The local a name is, if it is one; a use of it from inside a lambda is recorded as a capture.
     pub fn local(&mut self, kotlin: &str) -> Option<Local> {
         let found = self.scopes.iter().rev().find_map(|s| s.get(kotlin)).cloned()?;
+        if let Some(u) = &found.used {
+            u.set(true);
+        }
         for f in &mut self.frames {
             if found.depth < f.boundary && !f.used.contains(&found.rust) {
                 f.used.push(found.rust.clone());
@@ -419,6 +440,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                     let ty = owner_name(last_segment(&n));
                     self.receivers.push(ImplicitReceiver {
                         rust: "self".into(),
+                        value: Ty::from_rust(&ty),
                         ty,
                         labels: Vec::new(),
                         depth: 0,
@@ -547,6 +569,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                     self.receivers.push(ImplicitReceiver {
                         rust: "self".into(),
                         ty: name.clone(),
+                        value: self.ty_of(r),
                         labels: vec![f.name.name.clone()],
                         depth: 0,
                         by_ref: false,

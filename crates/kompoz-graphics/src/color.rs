@@ -359,6 +359,12 @@ impl Color {
     pub fn take_or_else(self, block: impl FnOnce() -> Color) -> Color {
         if self.is_specified() { self } else { block() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> Color) -> Color {
+        if self.is_specified() { self } else { block().await }
+    }
 
     /// The color in sRGB, as it is drawn (to an sRGB surface, as Compose's to Android's), 8 bits a channel.
     pub fn in_srgb(self) -> Color {

@@ -32,6 +32,12 @@ impl Dp {
     pub fn take_or_else(self, other: impl FnOnce() -> Dp) -> Dp {
         if self.is_specified() { self } else { other() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `other` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, other: impl AsyncFnOnce() -> Dp) -> Dp {
+        if self.is_specified() { self } else { other().await }
+    }
     pub fn coerce_in(self, min: Dp, max: Dp) -> Dp {
         Dp(self.0.max(min.0).min(max.0))
     }
@@ -159,6 +165,12 @@ impl TextUnit {
     }
     pub fn take_or_else(self, other: impl FnOnce() -> TextUnit) -> TextUnit {
         if self.is_specified() { self } else { other() }
+    }
+    /// [`take_or_else`](Self::take_or_else) whose `other` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, other: impl AsyncFnOnce() -> TextUnit) -> TextUnit {
+        if self.is_specified() { self } else { other().await }
     }
 }
 

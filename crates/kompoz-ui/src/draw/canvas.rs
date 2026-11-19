@@ -318,6 +318,30 @@ impl<'a> Canvas<'a> {
         self.restore_to(depth);
     }
 
+    /// [`with_save`](Self::with_save) whose `block` suspends (Kotlin's inline withSave: its lambda, run in place,
+    /// suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn with_save_async(&mut self, block: impl AsyncFnOnce(&mut Canvas<'a>)) {
+        let depth = self.depth();
+        self.save();
+        block(self).await;
+        self.restore_to(depth);
+    }
+
+    /// [`with_save_layer`](Self::with_save_layer) whose `block` suspends (Kotlin's inline withSaveLayer).
+    #[doc(hidden)]
+    pub async fn with_save_layer_async(
+        &mut self,
+        bounds: Rect,
+        paint: &Paint,
+        block: impl AsyncFnOnce(&mut Canvas<'a>),
+    ) {
+        let depth = self.depth();
+        self.save_layer(bounds, paint);
+        block(self).await;
+        self.restore_to(depth);
+    }
+
     /// Pushes `matrix` (from what is drawn next to this canvas's coordinates) in the context's: from there to this
     /// canvas's, through it, and back.
     fn push(&mut self, matrix: &Matrix) {

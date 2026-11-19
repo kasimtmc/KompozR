@@ -815,6 +815,14 @@ impl<'a> DrawScope<'a> {
         block(&mut canvas);
     }
 
+    /// [`draw_into_canvas`](Self::draw_into_canvas) whose `block` suspends (Kotlin's inline drawIntoCanvas: its
+    /// lambda, run in place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn draw_into_canvas_async(&mut self, block: impl AsyncFnOnce(&mut Canvas<'_>)) {
+        let mut canvas = self.canvas();
+        block(&mut canvas).await;
+    }
+
     /// What it draws with and in (Compose's drawContext).
     pub fn draw_context(&mut self) -> DrawContext<'_, 'a> {
         DrawContext { scope: self }
@@ -864,85 +872,134 @@ impl<'a> AsDrawScope<'a> for ContentDrawScope<'a> {
     }
 }
 
-/// `block` drawn here, what it left saved on the canvas restored after it.
-fn within<'a, S: AsDrawScope<'a>>(s: &mut S, block: impl FnOnce(&mut S)) {
-    let depth = s.draw_scope().canvas_depth();
-    block(s);
-    s.draw_scope().restore_canvas_to(depth);
+/// What entering a transform of a block's drawing changed, for leaving it after the block: each transform is pushed
+/// as the block starts and popped as it ends (what the block left saved on the canvas restored first), the block's
+/// drawing between (plain, or suspending: the transforms' suspending twins).
+enum Entered<'a> {
+    /// Moved: the canvas's depth inside it.
+    Translated(usize),
+    /// A transform pushed (a clip, a matrix): the canvas's depth inside it.
+    Clipped(usize),
+    Transformed(usize),
+    /// An inset scope: what the scope was.
+    Inset {
+        origin: Offset,
+        size: Size,
+        outer: CanvasSlot<'a>,
+    },
 }
 
-pub(crate) fn translate_in<'a, S: AsDrawScope<'a>>(s: &mut S, left: f32, top: f32, block: impl FnOnce(&mut S)) {
-    s.draw_scope().canvas.push_translation(Offset::new(left, top)); // (the content too: draw_content inside it)
-    within(s, block);
-    s.draw_scope().canvas.pop_translation();
+fn enter_translation<'a, S: AsDrawScope<'a>>(s: &mut S, left: f32, top: f32) -> Entered<'a> {
+    let ds = s.draw_scope();
+    ds.canvas.push_translation(Offset::new(left, top)); // (the content too: draw_content inside it)
+    Entered::Translated(ds.canvas_depth())
 }
 
 /// The block in a scope of its own, inset: its origin moved, its size less the insets, a canvas of its own (what it
 /// leaves pushed popped as the block ends).
-fn inset_in<'a, S: AsDrawScope<'a>>(
-    s: &mut S,
-    left: f32,
-    top: f32,
-    right: f32,
-    bottom: f32,
-    block: impl FnOnce(&mut S),
-) {
+fn enter_inset<'a, S: AsDrawScope<'a>>(s: &mut S, left: f32, top: f32, right: f32, bottom: f32) -> Entered<'a> {
     let ds = s.draw_scope();
     let (origin, size) = (ds.origin, ds.size);
     let outer = std::mem::replace(&mut ds.canvas_state, CanvasSlot::Own(None));
     ds.origin = origin + Offset::new(left, top);
     ds.size = Size::new((size.width - left - right).max(0.0), (size.height - top - bottom).max(0.0));
-    block(s);
-    let ds = s.draw_scope();
-    ds.restore_canvas_to(0);
-    ds.canvas_state = outer;
-    ds.origin = origin;
-    ds.size = size;
+    Entered::Inset { origin, size, outer }
 }
 
-fn clip_rect_in<'a, S: AsDrawScope<'a>>(s: &mut S, rect: Rect, op: ClipOp, block: impl FnOnce(&mut S)) {
+fn enter_clip_rect<'a, S: AsDrawScope<'a>>(s: &mut S, rect: Rect, op: ClipOp) -> Entered<'a> {
     let ds = s.draw_scope();
     let r = sorted(rect.translate(ds.origin));
     match op {
         ClipOp::Intersect => ds.canvas.push_clip(r),
         ClipOp::Difference => ds.canvas.push_clip_round_rect(r, CornerRadii::Zero, op),
     }
-    within(s, block);
-    s.draw_scope().canvas.pop_clip();
+    Entered::Clipped(ds.canvas_depth())
 }
 
-fn clip_path_in<'a, S: AsDrawScope<'a>>(s: &mut S, path: &Path, op: ClipOp, block: impl FnOnce(&mut S)) {
+fn enter_clip_path<'a, S: AsDrawScope<'a>>(s: &mut S, path: &Path, op: ClipOp) -> Entered<'a> {
     let ds = s.draw_scope();
     let origin = ds.origin;
     ds.canvas.push_clip_path(path, origin, op);
-    within(s, block);
-    s.draw_scope().canvas.pop_clip();
+    Entered::Clipped(ds.canvas_depth())
+}
+
+/// Through `matrix`, which is in the scope's coordinates (its top left the origin): what the block draws, its content
+/// too, goes through it, not clipped to the area.
+fn enter_transform<'a, S: AsDrawScope<'a>>(s: &mut S, matrix: &Matrix) -> Entered<'a> {
+    let ds = s.draw_scope();
+    let m = around(ds.origin, matrix);
+    ds.canvas.push_transform(&m);
+    Entered::Transformed(ds.canvas_depth())
+}
+
+/// Leaves what [`Entered`] says was entered, after the block.
+fn leave<'a, S: AsDrawScope<'a>>(s: &mut S, entered: Entered<'a>) {
+    let ds = s.draw_scope();
+    match entered {
+        Entered::Translated(depth) => {
+            ds.restore_canvas_to(depth);
+            ds.canvas.pop_translation();
+        }
+        Entered::Clipped(depth) => {
+            ds.restore_canvas_to(depth);
+            ds.canvas.pop_clip();
+        }
+        Entered::Transformed(depth) => {
+            ds.restore_canvas_to(depth);
+            ds.canvas.pop_transform();
+        }
+        Entered::Inset { origin, size, outer } => {
+            ds.restore_canvas_to(0);
+            ds.canvas_state = outer;
+            ds.origin = origin;
+            ds.size = size;
+        }
+    }
+}
+
+pub(crate) fn translate_in<'a, S: AsDrawScope<'a>>(s: &mut S, left: f32, top: f32, block: impl FnOnce(&mut S)) {
+    let e = enter_translation(s, left, top);
+    block(s);
+    leave(s, e);
 }
 
 /// `block` through `matrix`, which is in the scope's coordinates (its top left the origin): what it draws, its
 /// content too, goes through it, not clipped to the area.
 pub(crate) fn transformed_in<'a, S: AsDrawScope<'a>>(s: &mut S, matrix: &Matrix, block: impl FnOnce(&mut S)) {
-    let ds = s.draw_scope();
-    let m = around(ds.origin, matrix);
-    ds.canvas.push_transform(&m);
-    within(s, block);
-    s.draw_scope().canvas.pop_transform();
+    let e = enter_transform(s, matrix);
+    block(s);
+    leave(s, e);
 }
 
-fn rotate_in<'a, S: AsDrawScope<'a>>(s: &mut S, degrees: f32, pivot: Offset, block: impl FnOnce(&mut S)) {
+/// `block` drawn in what `entered` entered, left after it.
+fn entered_in<'a, S: AsDrawScope<'a>>(s: &mut S, entered: Entered<'a>, block: impl FnOnce(&mut S)) {
+    block(s);
+    leave(s, entered);
+}
+
+/// [`entered_in`] whose `block` suspends: what the transforms' suspending twins draw (Kotlin's inline transforms:
+/// their lambdas, run in place, suspend with the coroutine they are called in).
+async fn entered_in_async<'a, S: AsDrawScope<'a>>(s: &mut S, entered: Entered<'a>, block: impl AsyncFnOnce(&mut S)) {
+    block(s).await;
+    leave(s, entered);
+}
+
+/// Turning `degrees` clockwise about `pivot`.
+fn rotation(degrees: f32, pivot: Offset) -> Matrix {
     let mut m = Matrix::new(); // (each step before the one above it)
     m.translate(pivot.x, pivot.y, 0.0);
     m.rotate_z(degrees);
     m.translate(-pivot.x, -pivot.y, 0.0);
-    transformed_in(s, &m, block);
+    m
 }
 
-fn scale_in<'a, S: AsDrawScope<'a>>(s: &mut S, sx: f32, sy: f32, pivot: Offset, block: impl FnOnce(&mut S)) {
+/// Scaling about `pivot`.
+fn scaling(sx: f32, sy: f32, pivot: Offset) -> Matrix {
     let mut m = Matrix::new();
     m.translate(pivot.x, pivot.y, 0.0);
     m.scale(sx, sy, 1.0);
     m.translate(-pivot.x, -pivot.y, 0.0);
-    transformed_in(s, &m, block);
+    m
 }
 
 /// One step of a [`DrawTransform`].
@@ -1042,22 +1099,28 @@ impl DrawTransform {
     }
 }
 
-/// Each step inside the one before (the first outermost), the block innermost.
-fn apply_steps<'a, S: AsDrawScope<'a>, B: FnOnce(&mut S)>(s: &mut S, steps: &[Step], block: &mut Option<B>) {
-    let Some((step, rest)) = steps.split_first() else {
-        if let Some(b) = block.take() {
-            b(s);
-        }
-        return;
-    };
+/// Enters a step of a [`DrawTransform`].
+fn enter_step<'a, S: AsDrawScope<'a>>(s: &mut S, step: &Step) -> Entered<'a> {
     match step {
-        Step::Translate(l, t) => translate_in(s, *l, *t, |s| apply_steps(s, rest, block)),
-        Step::Rotate(d, p) => rotate_in(s, *d, *p, |s| apply_steps(s, rest, block)),
-        Step::Scale(x, y, p) => scale_in(s, *x, *y, *p, |s| apply_steps(s, rest, block)),
-        Step::Transform(m) => transformed_in(s, m, |s| apply_steps(s, rest, block)),
-        Step::Inset(l, t, r, b) => inset_in(s, *l, *t, *r, *b, |s| apply_steps(s, rest, block)),
-        Step::ClipRect(r, op) => clip_rect_in(s, *r, *op, |s| apply_steps(s, rest, block)),
-        Step::ClipPath(p, op) => clip_path_in(s, p, *op, |s| apply_steps(s, rest, block)),
+        Step::Translate(l, t) => enter_translation(s, *l, *t),
+        Step::Rotate(d, p) => enter_transform(s, &rotation(*d, *p)),
+        Step::Scale(x, y, p) => enter_transform(s, &scaling(*x, *y, *p)),
+        Step::Transform(m) => enter_transform(s, m),
+        Step::Inset(l, t, r, b) => enter_inset(s, *l, *t, *r, *b),
+        Step::ClipRect(r, op) => enter_clip_rect(s, *r, *op),
+        Step::ClipPath(p, op) => enter_clip_path(s, p, *op),
+    }
+}
+
+/// The steps `t` says entered, each inside the one before (the first outermost): the block goes innermost, then
+/// [`leave_steps`] leaves them, the last first.
+fn enter_steps<'a, S: AsDrawScope<'a>>(s: &mut S, t: &DrawTransform) -> Vec<Entered<'a>> {
+    t.steps.iter().map(|step| enter_step(s, step)).collect()
+}
+
+fn leave_steps<'a, S: AsDrawScope<'a>>(s: &mut S, entered: Vec<Entered<'a>>) {
+    for e in entered.into_iter().rev() {
+        leave(s, e);
     }
 }
 
@@ -1068,7 +1131,22 @@ fn with_transform_in<'a, S: AsDrawScope<'a>>(
 ) {
     let mut t = DrawTransform { steps: Vec::new(), size: s.draw_scope().size };
     transform(&mut t);
-    apply_steps(s, &t.steps, &mut Some(block));
+    let entered = enter_steps(s, &t);
+    block(s);
+    leave_steps(s, entered);
+}
+
+/// [`with_transform_in`] whose lambdas suspend (Kotlin's inline withTransform takes both inline).
+async fn with_transform_in_async<'a, S: AsDrawScope<'a>>(
+    s: &mut S,
+    transform: impl AsyncFnOnce(&mut DrawTransform),
+    block: impl AsyncFnOnce(&mut S),
+) {
+    let mut t = DrawTransform { steps: Vec::new(), size: s.draw_scope().size };
+    transform(&mut t).await;
+    let entered = enter_steps(s, &t);
+    block(s).await;
+    leave_steps(s, entered);
 }
 
 /// The transforms of a scope, each giving its block the scope itself (a content scope's block can draw the content).
@@ -1094,7 +1172,8 @@ macro_rules! transforms {
             /// `block` in a scope inset by each side (Compose's inset(left, top, right, bottom)): its origin moved,
             /// its size smaller.
             pub fn inset(&mut self, left: f32, top: f32, right: f32, bottom: f32, block: impl FnOnce(&mut $ty<'a>)) {
-                inset_in(self, left, top, right, bottom, block)
+                let e = enter_inset(self, left, top, right, bottom);
+                entered_in(self, e, block)
             }
 
             /// Inset by `horizontal` at the left and the right, `vertical` at the top and the bottom (Compose's
@@ -1105,12 +1184,14 @@ macro_rules! transforms {
                 #[default(0.0)] vertical: f32,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                inset_in(self, horizontal, vertical, horizontal, vertical, block)
+                let e = enter_inset(self, horizontal, vertical, horizontal, vertical);
+                entered_in(self, e, block)
             }
 
             /// Inset by `inset` all round (Compose's inset(inset)).
             pub fn inset_all(&mut self, inset: f32, block: impl FnOnce(&mut $ty<'a>)) {
-                inset_in(self, inset, inset, inset, inset, block)
+                let e = enter_inset(self, inset, inset, inset, inset);
+                entered_in(self, e, block)
             }
 
             /// What `block` draws, only inside the rect from (`left`, `top`) to (`right`, `bottom`) (sorted; the
@@ -1124,7 +1205,8 @@ macro_rules! transforms {
                 #[default(ClipOp::Intersect)] clip_op: ClipOp,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                clip_rect_in(self, Rect::new(left, top, right, bottom), clip_op, block)
+                let e = enter_clip_rect(self, Rect::new(left, top, right, bottom), clip_op);
+                entered_in(self, e, block)
             }
 
             /// [`clip_rect`](Self::clip_rect) with every parameter, for plain code.
@@ -1137,7 +1219,8 @@ macro_rules! transforms {
                 clip_op: ClipOp,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                clip_rect_in(self, Rect::new(left, top, right, bottom), clip_op, block)
+                let e = enter_clip_rect(self, Rect::new(left, top, right, bottom), clip_op);
+                entered_in(self, e, block)
             }
 
             /// What `block` draws, only inside `path` (or outside it: ClipOp::Difference), by its fill type, its
@@ -1148,11 +1231,13 @@ macro_rules! transforms {
                 #[default(ClipOp::Intersect)] clip_op: ClipOp,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                clip_path_in(self, path, clip_op, block)
+                let e = enter_clip_path(self, path, clip_op);
+                entered_in(self, e, block)
             }
 
             pub fn clip_path_with(&mut self, path: &Path, clip_op: ClipOp, block: impl FnOnce(&mut $ty<'a>)) {
-                clip_path_in(self, path, clip_op, block)
+                let e = enter_clip_path(self, path, clip_op);
+                entered_in(self, e, block)
             }
 
             /// What `block` draws turned `degrees` clockwise about `pivot` (the middle by default) (Compose's
@@ -1163,11 +1248,13 @@ macro_rules! transforms {
                 #[default(self.center())] pivot: Offset,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                rotate_in(self, degrees, pivot, block)
+                let e = enter_transform(self, &rotation(degrees, pivot));
+                entered_in(self, e, block)
             }
 
             pub fn rotate_with(&mut self, degrees: f32, pivot: Offset, block: impl FnOnce(&mut $ty<'a>)) {
-                rotate_in(self, degrees, pivot, block)
+                let e = enter_transform(self, &rotation(degrees, pivot));
+                entered_in(self, e, block)
             }
 
             /// The same in radians (Compose's rotateRad).
@@ -1177,11 +1264,13 @@ macro_rules! transforms {
                 #[default(self.center())] pivot: Offset,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                rotate_in(self, radians.to_degrees(), pivot, block)
+                let e = enter_transform(self, &rotation(radians.to_degrees(), pivot));
+                entered_in(self, e, block)
             }
 
             pub fn rotate_rad_with(&mut self, radians: f32, pivot: Offset, block: impl FnOnce(&mut $ty<'a>)) {
-                rotate_in(self, radians.to_degrees(), pivot, block)
+                let e = enter_transform(self, &rotation(radians.to_degrees(), pivot));
+                entered_in(self, e, block)
             }
 
             /// What `block` draws scaled about `pivot` (the middle by default) (Compose's scale(scaleX, scaleY)).
@@ -1192,11 +1281,13 @@ macro_rules! transforms {
                 #[default(self.center())] pivot: Offset,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                scale_in(self, scale_x, scale_y, pivot, block)
+                let e = enter_transform(self, &scaling(scale_x, scale_y, pivot));
+                entered_in(self, e, block)
             }
 
             pub fn scale_with(&mut self, scale_x: f32, scale_y: f32, pivot: Offset, block: impl FnOnce(&mut $ty<'a>)) {
-                scale_in(self, scale_x, scale_y, pivot, block)
+                let e = enter_transform(self, &scaling(scale_x, scale_y, pivot));
+                entered_in(self, e, block)
             }
 
             /// The same both ways (Compose's scale(scale)).
@@ -1206,7 +1297,8 @@ macro_rules! transforms {
                 #[default(self.center())] pivot: Offset,
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
-                scale_in(self, scale, scale, pivot, block)
+                let e = enter_transform(self, &scaling(scale, scale, pivot));
+                entered_in(self, e, block)
             }
 
             /// Several transforms at once (Compose's withTransform): `transform` says them, each inside the one
@@ -1217,6 +1309,155 @@ macro_rules! transforms {
                 block: impl FnOnce(&mut $ty<'a>),
             ) {
                 with_transform_in(self, transform, block)
+            }
+
+            // The suspending twins of Compose's inline transforms (Kotlin's inline functions: their lambdas, run in
+            // place, suspend with the coroutine they are called in): future-giving `fn`s, as `#[named]` takes them.
+            // The `…_with` forms are Rust's: none.
+
+            #[doc(hidden)]
+            pub fn translate_async(
+                &mut self,
+                #[default(0.0)] left: f32,
+                #[default(0.0)] top: f32,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_translation(self, left, top);
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn inset_async(
+                &mut self,
+                left: f32,
+                top: f32,
+                right: f32,
+                bottom: f32,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_inset(self, left, top, right, bottom);
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn inset_hv_async(
+                &mut self,
+                #[default(0.0)] horizontal: f32,
+                #[default(0.0)] vertical: f32,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_inset(self, horizontal, vertical, horizontal, vertical);
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn inset_all_async(
+                &mut self,
+                inset: f32,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_inset(self, inset, inset, inset, inset);
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn clip_rect_async(
+                &mut self,
+                #[default(0.0)] left: f32,
+                #[default(0.0)] top: f32,
+                #[default(self.size().width)] right: f32,
+                #[default(self.size().height)] bottom: f32,
+                #[default(ClipOp::Intersect)] clip_op: ClipOp,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_clip_rect(self, Rect::new(left, top, right, bottom), clip_op);
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn clip_path_async(
+                &mut self,
+                path: &Path,
+                #[default(ClipOp::Intersect)] clip_op: ClipOp,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_clip_path(self, path, clip_op);
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn rotate_async(
+                &mut self,
+                degrees: f32,
+                #[default(self.center())] pivot: Offset,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_transform(self, &rotation(degrees, pivot));
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn rotate_rad_async(
+                &mut self,
+                radians: f32,
+                #[default(self.center())] pivot: Offset,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_transform(self, &rotation(radians.to_degrees(), pivot));
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn scale_async(
+                &mut self,
+                scale_x: f32,
+                scale_y: f32,
+                #[default(self.center())] pivot: Offset,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_transform(self, &scaling(scale_x, scale_y, pivot));
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            #[doc(hidden)]
+            pub fn scale_uniform_async(
+                &mut self,
+                scale: f32,
+                #[default(self.center())] pivot: Offset,
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move {
+                    let e = enter_transform(self, &scaling(scale, scale, pivot));
+                    entered_in_async(self, e, block).await
+                }
+            }
+
+            /// (Kotlin's withTransform takes both lambdas inline: either may suspend)
+            #[doc(hidden)]
+            pub fn with_transform_async(
+                &mut self,
+                transform: impl AsyncFnOnce(&mut DrawTransform),
+                block: impl AsyncFnOnce(&mut $ty<'a>),
+            ) -> impl Future<Output = ()> {
+                async move { with_transform_in_async(self, transform, block).await }
             }
         }
     };

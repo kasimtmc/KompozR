@@ -133,3 +133,12 @@ pub fn PathData(block: impl FnOnce(&mut PathBuilder)) -> Vec<PathNode> {
     block(&mut builder);
     builder.nodes
 }
+
+/// [`PathData`] whose `block` suspends (Kotlin's inline PathData: its lambda, run in place, suspends with the
+/// coroutine it is called in).
+#[doc(hidden)]
+pub async fn PathData_async(block: impl AsyncFnOnce(&mut PathBuilder)) -> Vec<PathNode> {
+    let mut builder = PathBuilder::new();
+    block(&mut builder).await;
+    builder.nodes
+}

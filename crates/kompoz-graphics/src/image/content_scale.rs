@@ -30,6 +30,12 @@ impl ScaleFactor {
     pub fn take_or_else(self, block: impl FnOnce() -> ScaleFactor) -> ScaleFactor {
         if self.is_specified() { self } else { block() }
     }
+    /// [`take_or_else`](Self::take_or_else) whose `block` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, block: impl AsyncFnOnce() -> ScaleFactor) -> ScaleFactor {
+        if self.is_specified() { self } else { block().await }
+    }
 
     /// Another x or y scale, each its own unless given.
     pub fn copy(self, scale_x: Option<f32>, scale_y: Option<f32>) -> ScaleFactor {

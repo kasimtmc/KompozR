@@ -128,3 +128,55 @@ fn projective_transforms_map_as_backends_draw() {
     let dot = Contour { points: vec![Offset::new(1.0, 1.0)], closed: false };
     assert_eq!(p.project_polylines(&[dot]), [Contour { points: vec![Offset::new(7.0, 9.0)], closed: false }]);
 }
+
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
+/// A suspension point: pending once, then ready (as a `delay` would be).
+struct Pending(bool);
+impl std::future::Future for Pending {
+    type Output = ();
+    fn poll(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.0 {
+            std::task::Poll::Ready(())
+        } else {
+            self.0 = true;
+            std::task::Poll::Pending
+        }
+    }
+}
+fn pending() -> Pending {
+    Pending(false)
+}
+
+#[test]
+fn values_take_or_else_suspending() {
+    // takeOrElse is Kotlin's inline function: its lambda, run only where the value is unspecified, may suspend in a
+    // coroutine (the Kotlin syntax calls these twins then).
+    let red = block_on(Color::Unspecified.take_or_else_async(async || {
+        pending().await;
+        Color::Red
+    }));
+    assert_eq!(red, Color::Red);
+    assert_eq!(block_on(Color::Blue.take_or_else_async(async || panic!("specified"))), Color::Blue);
+    let at = Offset::new(1.0, 2.0);
+    assert_eq!(block_on(Offset::Unspecified.take_or_else_async(async || at)), at);
+    assert_eq!(block_on(at.take_or_else_async(async || Offset::Zero)), at);
+    let size = Size::new(3.0, 4.0);
+    assert_eq!(block_on(Size::Unspecified.take_or_else_async(async || size)), size);
+    assert_eq!(block_on(size.take_or_else_async(async || Size::Zero)), size);
+    assert_eq!(block_on(Dp::Unspecified.take_or_else_async(async || Dp(5.0))), Dp(5.0));
+    assert_eq!(block_on(Dp(2.0).take_or_else_async(async || Dp(5.0))), Dp(2.0));
+    assert_eq!(block_on(TextUnit::Unspecified.take_or_else_async(async || 7.sp())), 7.sp());
+    assert_eq!(block_on(3.sp().take_or_else_async(async || 7.sp())), 3.sp());
+    let scale = ScaleFactor::new(2.0, 3.0);
+    assert_eq!(block_on(ScaleFactor::Unspecified.take_or_else_async(async || scale)), scale);
+    assert_eq!(block_on(scale.take_or_else_async(async || ScaleFactor::new(1.0, 1.0))), scale);
+}

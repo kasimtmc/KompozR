@@ -559,7 +559,9 @@ impl Transformer {
             && seg.arguments.is_none()
             && module_path(&p.path)
             && self.known.function_rewritten(&name, args.len(), args.last().is_some_and(last_is_closure));
-        if is_pascal(&name) {
+        // (a PascalCase function's suspending twin, `PathData_async` — what the Kotlin syntax calls where the lambda
+        // of Kotlin's inline function suspends —, is no composable: its async closure is given as it is)
+        if is_pascal(&name) && !name.ends_with("_async") {
             if named || by_builder {
                 if self.known.is_plain_function(&name) { Route::Type } else { Route::Probe { named } }
             } else if self.plain {

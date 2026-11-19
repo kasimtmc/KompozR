@@ -405,6 +405,225 @@ fn paths_take_arcs_and_draw_scopes_clip_to_paths() {
     assert!(same_rect(*c.clips.last().unwrap(), 10.0, 10.0, 20.0, 20.0));
 }
 
+/// Runs a future to its end here (what its suspensions wait for is ready when polled again).
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
+/// A suspension point: pending once, then ready (as a `delay` would be, in a coroutine).
+struct Pending(bool);
+impl std::future::Future for Pending {
+    type Output = ();
+    fn poll(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.0 {
+            std::task::Poll::Ready(())
+        } else {
+            self.0 = true;
+            std::task::Poll::Pending
+        }
+    }
+}
+fn pending() -> Pending {
+    Pending(false)
+}
+
+/// What `draw` draws in a 100 x 80 scope over a picture.
+fn picture_of(draw: impl FnOnce(&mut DrawScope)) -> String {
+    let mut p = Picture::new();
+    {
+        let mut d = DrawScope::new(&mut p, sz(100.0, 80.0), LayoutDirection::Ltr, Density::default());
+        draw(&mut d);
+    }
+    format!("{p:?}")
+}
+
+fn transforms_suspending_twins_draw_as_their_plain_forms() {
+    // Kotlin's inline transforms in a coroutine (their lambdas suspend with it: the `…_async` twins the Kotlin syntax
+    // calls): each pushes and pops what its plain form does around what its block draws, the block suspending
+    // between; withTransform's both lambdas (either may suspend); what a block leaves saved restored as it ends.
+    let mut triangle = Path::new();
+    triangle.move_to(50.0, 20.0);
+    triangle.line_to(80.0, 80.0);
+    triangle.line_to(20.0, 80.0);
+    triangle.close();
+    let steps = |t: &mut DrawTransform| {
+        t.translate_with(10.0, 20.0);
+        t.inset(1.0, 1.0, 1.0, 1.0);
+        let c = t.center();
+        t.rotate_with(45.0, c);
+        t.clip_rect_with(0.0, 0.0, 20.0, 20.0, ClipOp::Intersect);
+    };
+    let plain = picture_of(|d| {
+        d.translate_with(3.0, 4.0, |d| d.draw_rect(RED));
+        d.inset(1.0, 2.0, 3.0, 4.0, |d| d.draw_rect(GREEN));
+        named_args!(d.inset_hv(horizontal = 5.0, vertical = 6.0, block = |d| d.draw_rect(BLUE)));
+        d.inset_all(7.0, |d| d.draw_rect(RED));
+        d.clip_rect_with(1.0, 2.0, 30.0, 40.0, ClipOp::Difference, |d| d.draw_rect(GREEN));
+        d.clip_path(&triangle, |d| d.draw_rect(BLUE));
+        d.rotate(30.0, |d| d.draw_rect(RED));
+        d.rotate_rad_with(1.0, at(5.0, 5.0), |d| d.draw_rect(GREEN));
+        d.scale_with(2.0, 3.0, at(1.0, 1.0), |d| d.draw_rect(BLUE));
+        d.scale_uniform(0.5, |d| d.draw_rect(RED));
+        d.with_transform(steps, |d| d.draw_rect(GREEN));
+        d.with_transform(|t| t.scale_with(2.0, 2.0, Offset::Zero), |d| d.draw_rect(BLUE));
+        d.draw_into_canvas(|c| c.draw_rect(Rect::new(0.0, 0.0, 1.0, 1.0), &Paint()));
+        d.translate_with(1.0, 1.0, |d| {
+            d.canvas().save();
+            Canvas::translate(&mut d.canvas(), 5.0, 5.0);
+            d.rotate(10.0, |d| d.draw_rect(RED));
+        });
+        d.draw_rect(BLUE);
+    });
+    let twins = picture_of(|d| {
+        block_on(async {
+            named_args!(d.translate_async(
+                left = 3.0,
+                top = 4.0,
+                block = async |d| {
+                    pending().await;
+                    d.draw_rect(RED)
+                }
+            ))
+            .await;
+            d.inset_async(1.0, 2.0, 3.0, 4.0, async |d| {
+                pending().await;
+                d.draw_rect(GREEN)
+            })
+            .await;
+            named_args!(d.inset_hv_async(horizontal = 5.0, vertical = 6.0, block = async |d| d.draw_rect(BLUE))).await;
+            d.inset_all_async(7.0, async |d| {
+                pending().await;
+                d.draw_rect(RED)
+            })
+            .await;
+            named_args!(d.clip_rect_async(
+                left = 1.0,
+                top = 2.0,
+                right = 30.0,
+                bottom = 40.0,
+                clip_op = ClipOp::Difference,
+                block = async |d| {
+                    pending().await;
+                    d.draw_rect(GREEN)
+                }
+            ))
+            .await;
+            d.clip_path_async(&triangle, async |d| {
+                pending().await;
+                d.draw_rect(BLUE)
+            })
+            .await;
+            d.rotate_async(30.0, async |d| {
+                pending().await;
+                d.draw_rect(RED)
+            })
+            .await;
+            named_args!(d.rotate_rad_async(
+                radians = 1.0,
+                pivot = at(5.0, 5.0),
+                block = async |d| {
+                    pending().await;
+                    d.draw_rect(GREEN)
+                }
+            ))
+            .await;
+            named_args!(d.scale_async(
+                scale_x = 2.0,
+                scale_y = 3.0,
+                pivot = at(1.0, 1.0),
+                block = async |d| {
+                    pending().await;
+                    d.draw_rect(BLUE)
+                }
+            ))
+            .await;
+            d.scale_uniform_async(0.5, async |d| {
+                pending().await;
+                d.draw_rect(RED)
+            })
+            .await;
+            // (the transform's lambda not suspending, the block's suspending; then the other way round)
+            d.with_transform_async(
+                async |t| steps(t),
+                async |d| {
+                    pending().await;
+                    d.draw_rect(GREEN)
+                },
+            )
+            .await;
+            d.with_transform_async(
+                async |t| {
+                    pending().await;
+                    t.scale_with(2.0, 2.0, Offset::Zero)
+                },
+                async |d| d.draw_rect(BLUE),
+            )
+            .await;
+            d.draw_into_canvas_async(async |c| {
+                pending().await;
+                c.draw_rect(Rect::new(0.0, 0.0, 1.0, 1.0), &Paint())
+            })
+            .await;
+            named_args!(d.translate_async(
+                left = 1.0,
+                top = 1.0,
+                block = async |d| {
+                    d.canvas().save();
+                    Canvas::translate(&mut d.canvas(), 5.0, 5.0);
+                    pending().await;
+                    d.rotate_async(10.0, async |d| {
+                        pending().await;
+                        d.draw_rect(RED)
+                    })
+                    .await;
+                }
+            ))
+            .await;
+            d.draw_rect(BLUE);
+        })
+    });
+    assert_eq!(plain, twins);
+    // A canvas's withSave and withSaveLayer: saved (a layer), restored as the block ends, what it left saved too.
+    let layer = Paint { color: Color::new(0.0, 0.0, 0.0, 0.5), ..Paint::default() };
+    let plain = picture_of(|d| {
+        let mut c = d.canvas();
+        c.with_save(|c| {
+            c.translate(2.0, 3.0);
+            c.save();
+            c.draw_rect(Rect::new(0.0, 0.0, 4.0, 4.0), &Paint());
+        });
+        c.with_save_layer(Rect::new(0.0, 0.0, 10.0, 10.0), &layer, |c| {
+            c.draw_rect(Rect::new(1.0, 1.0, 2.0, 2.0), &Paint())
+        });
+        c.draw_rect(Rect::new(0.0, 0.0, 1.0, 1.0), &Paint());
+    });
+    let twins = picture_of(|d| {
+        let mut c = d.canvas();
+        block_on(async {
+            c.with_save_async(async |c| {
+                c.translate(2.0, 3.0);
+                pending().await;
+                c.save();
+                c.draw_rect(Rect::new(0.0, 0.0, 4.0, 4.0), &Paint());
+            })
+            .await;
+            c.with_save_layer_async(Rect::new(0.0, 0.0, 10.0, 10.0), &layer, async |c| {
+                pending().await;
+                c.draw_rect(Rect::new(1.0, 1.0, 2.0, 2.0), &Paint())
+            })
+            .await;
+        });
+        c.draw_rect(Rect::new(0.0, 0.0, 1.0, 1.0), &Paint());
+    });
+    assert_eq!(plain, twins);
+}
+
 fn translations_move_drawn_content() {
     // C++ 27242 (its display list half is the display list's): the content moves with the scope's translation.
     let by = mutable_state_of(10.0f32);
@@ -2949,6 +3168,7 @@ tests!(
     draw_scope_strokes_sit_on_the_outline,
     draw_scope_rotation_and_text,
     paths_take_arcs_and_draw_scopes_clip_to_paths,
+    transforms_suspending_twins_draw_as_their_plain_forms,
     translations_move_drawn_content,
     canvases_draw_as_composes,
     draw_scopes_know_the_density_and_direction,

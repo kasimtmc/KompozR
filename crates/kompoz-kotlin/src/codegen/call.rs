@@ -445,31 +445,18 @@ impl Gen<'_, '_> {
     /// `Color(…)`: Kotlin's overloads of a constructor taken as one argument, or as a tuple of several.
     fn overloaded(&mut self, kotlin: &str, f: &'static crate::index::Item, args: &[ArgRef], loc: Loc) -> Out {
         let span = self.span(loc);
-        let overloads: Vec<&'static crate::index::Item> = lookup(kotlin)
+        let given: Vec<(Option<&str>, Ty)> = args
             .iter()
-            .filter(|i| i.kind == Kind::Overload && i.via == f.params[0].ty.trim_start_matches("impl "))
+            .map(|a| {
+                let ty = match a.value {
+                    ArgValue::Expr(e) => self.peek_ty(e),
+                    _ => Ty::Unknown,
+                };
+                (a.name.map(|n| n.name.as_str()), ty)
+            })
             .collect();
-        let overloads = if overloads.is_empty() {
-            lookup(kotlin).iter().filter(|i| i.kind == Kind::Overload).collect()
-        } else {
-            overloads
-        };
-        let any_float = args.iter().any(|a| matches!(a.value, ArgValue::Expr(e) if self.peek_ty(e).is_float()));
-        let long = args.len() == 1 && matches!(args[0].value, ArgValue::Expr(e) if self.peek_ty(e) == Ty::Long);
-        let chosen = overloads.iter().find(|o| {
-            o.params.len() == args.len()
-                && args.iter().zip(o.params).all(|(a, p)| {
-                    a.name.is_none_or(|n| n.name == p.kotlin)
-                        && match Ty::from_rust(p.ty) {
-                            Ty::Float => any_float,
-                            Ty::Int => !any_float,
-                            Ty::Long => long,
-                            // (an offset's `usize`: Kotlin's Int there — `TextRange(0, 3)`)
-                            Ty::OtherInt => !any_float && !long,
-                            _ => true,
-                        }
-                })
-        });
+        let chosen = super::expr::choose_overload(kotlin, f, &given);
+        let ret = super::expr::overload_ret(f, chosen, &given);
         let Some(o) = chosen else {
             self.error(loc, format!("no `{kotlin}` takes these arguments"));
             return Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown);
@@ -496,11 +483,6 @@ impl Gen<'_, '_> {
             vals.into_iter().map(|v| v.unwrap_or_else(|| quote_spanned!(span=> ::core::unreachable!()))).collect();
         let name = ident(f.rust, span);
         let arg = if vals.len() == 1 { vals[0].clone() } else { quote_spanned!(span=> (#(#vals),*)) };
-        // (what it gives: its overloads' associated type, `A::Animatable`, is the type of that name)
-        let ret = match f.ret.rsplit_once("::") {
-            Some((_, assoc)) if assoc.chars().next().is_some_and(char::is_uppercase) => Ty::named(assoc),
-            _ => Ty::from_rust(f.ret),
-        };
         Out::plain(quote_spanned!(span=> #name(#arg)), ret)
     }
 
@@ -835,11 +817,40 @@ impl Gen<'_, '_> {
         let m = self.name_ident(&snake(&name.name), name.loc);
         let twin = kt_twin(&name.name);
         let outer_inline = std::mem::replace(&mut self.inline_async, false);
+        let plain_before = self.plain_twin_lambdas.len();
+        let mut vals = self.written_args(args, name, twin.is_some(), span);
+        let suspends = std::mem::replace(&mut self.inline_async, outer_inline);
+        // (the twin takes each of its lambdas as an async closure: written again so, as `emit_bound` does)
+        let lambdas: Vec<Loc> = args.iter().filter_map(|a| a.value.lambda()).map(|l| l.loc).collect();
+        let plain_own = self.plain_twin_lambdas[plain_before..].iter().any(|l| lambdas.contains(l));
+        self.plain_twin_lambdas.truncate(plain_before);
+        if suspends && twin.is_some() && plain_own {
+            let forced = self.force_async.len();
+            self.force_async.extend(lambdas);
+            vals = self.quiet(|me| {
+                let outer = std::mem::replace(&mut me.inline_async, false);
+                let vals = me.written_args(args, name, true, span);
+                me.inline_async = outer;
+                vals
+            });
+            self.force_async.truncate(forced);
+        }
+        if suspends && let Some(t) = twin {
+            let m = ident(&t, self.span(name.loc));
+            let a = self.awaited(None, loc);
+            return Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*) #a), Ty::Unknown);
+        }
+        Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*)), Ty::Unknown)
+    }
+
+    /// The arguments of a call [`as_written`](Self::as_written), its lambdas run in place (`twin`: by a callee with a
+    /// suspending twin).
+    fn written_args(&mut self, args: &[ArgRef], name: &Ident, twin: bool, span: Span) -> Vec<TokenStream> {
         let mut vals = Vec::new();
         for a in args {
             let v = self.with_label(&name.name, |me| match a.value {
                 ArgValue::Lambda(l) | ArgValue::Expr(Expr { kind: ExprKind::Lambda(l), .. }) => {
-                    me.lambda_in_place(l, Some(&name.name), twin.is_some(), false)
+                    me.lambda_in_place(l, Some(&name.name), twin, false)
                 }
                 _ => me.loose_arg(a),
             });
@@ -851,14 +862,7 @@ impl Gen<'_, '_> {
                 None => v,
             });
         }
-        if std::mem::replace(&mut self.inline_async, outer_inline)
-            && let Some(t) = twin
-        {
-            let m = ident(&t, self.span(name.loc));
-            let a = self.awaited(None, loc);
-            return Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*) #a), Ty::Unknown);
-        }
-        Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*)), Ty::Unknown)
+        vals
     }
 
     /// A receiver for a method taking it as `kind`: a clone of a local taken by value.
@@ -1116,73 +1120,26 @@ impl Gen<'_, '_> {
         let call_label = kotlin.to_string();
         // (whether a lambda given to it suspends: told by the lambdas written below)
         let outer_inline = std::mem::replace(&mut self.inline_async, false);
-        // Each argument: its name when named, its value, whether it is a lambda.
-        let mut vals: Vec<(Option<proc_macro2::Ident>, TokenStream, bool)> = Vec::new();
-        if builder && c.builder {
-            for (k, p) in c.params.iter().enumerate() {
-                if m.given[k].is_empty() && p.default == PDefault::None && !p.vararg {
-                    self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
-                }
-            }
-            // In the order written; named ones by their Rust names (a positional one after a named one too: the
-            // builder counts positions among the positional ones).
-            let mut named_any = false;
-            for (written, a) in args.iter().enumerate() {
-                let (at, named, _) = m.order[written.min(m.order.len() - 1)];
-                let p = &c.params[at];
-                if m.given[at].len() > 1 && m.given[at][0].loc != a.loc {
-                    continue;
-                }
-                let v = if m.given[at].len() > 1 {
-                    let all: Vec<&ArgRef> = m.given[at].iter().collect();
-                    self.many_value(&all, p, span)
-                } else {
-                    self.with_label(&call_label, |me| me.arg_value(a, Some(p), transform_wraps))
-                };
-                let lambda = a.value.is_lambda();
-                let last_param = at + 1 == c.params.len();
-                let position_ok = !named && !named_any && at == written && !(lambda && !last_param);
-                let future = lambda && p.lambda.as_ref().is_some_and(|l| l.kind == crate::index::LambdaKind::Future);
-                if position_ok && !future {
-                    vals.push((None, v, lambda));
-                } else {
-                    vals.push((Some(ident(&p.rust, self.span(a.loc))), v, lambda));
-                    named_any = true;
-                }
-            }
-            // (make sure the macro rewrites it: a lowercase call needs a named argument)
-            if !named_any
-                && !pascal_path
-                && let Some(last) = vals.last_mut()
-            {
-                let at = m.order.last().map(|o| o.0).unwrap_or(0);
-                last.0 = Some(ident(&c.params[at].rust, span));
-            }
-        } else {
-            for (k, p) in c.params.iter().enumerate() {
-                if m.given[k].is_empty() {
-                    match &p.default {
-                        PDefault::Kotlin(text) => vals.push((None, self.kotlin_default(text, p, loc), false)),
-                        PDefault::Builder => {}
-                        PDefault::None if p.vararg => vals.push((None, self.many_value(&[], p, span), false)),
-                        PDefault::None => {
-                            self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
-                        }
-                    }
-                    continue;
-                }
-                let v = if m.given[k].len() > 1 || p.vararg || is_keys(p) && m.given[k].len() != 1 {
-                    let all: Vec<&ArgRef> = m.given[k].iter().collect();
-                    self.many_value(&all, p, span)
-                } else {
-                    let a = m.given[k][0];
-                    self.with_label(&call_label, |me| me.arg_value(&a, Some(p), transform_wraps))
-                };
-                vals.push((None, v, m.given[k].iter().any(|a| a.value.is_lambda())));
-            }
-        }
+        let plain_before = self.plain_twin_lambdas.len();
+        let mut vals = self.call_args(c, args, &m, builder, pascal_path, transform_wraps, &call_label, loc, kotlin);
         // (a lambda in it suspends: Kotlin's inline function's, whose suspending twin takes it, awaited)
         let twin = std::mem::replace(&mut self.inline_async, outer_inline);
+        // (the twin takes each of its lambdas as an async closure: one of its own that doesn't suspend too — Kotlin's
+        // `withTransform({ … }) { delay(1) }` —, written again so; what the first writing reported stands)
+        let lambdas: Vec<Loc> = args.iter().filter_map(|a| a.value.lambda()).map(|l| l.loc).collect();
+        let plain_own = self.plain_twin_lambdas[plain_before..].iter().any(|l| lambdas.contains(l));
+        self.plain_twin_lambdas.truncate(plain_before);
+        if twin && plain_own {
+            let forced = self.force_async.len();
+            self.force_async.extend(lambdas);
+            vals = self.quiet(|me| {
+                let outer = std::mem::replace(&mut me.inline_async, false);
+                let vals = me.call_args(c, args, &m, builder, pascal_path, transform_wraps, &call_label, loc, kotlin);
+                me.inline_async = outer;
+                vals
+            });
+            self.force_async.truncate(forced);
+        }
         // A method of a scope taken `&mut` whose arguments read the scope (`drawRect(…, size = Size(size.width, …))`):
         // the arguments first, in order (as Kotlin evaluates them), then the call, which borrows the scope.
         let mut hoisted = TokenStream::new();
@@ -1249,6 +1206,91 @@ impl Gen<'_, '_> {
         let ts = self.identified(ts, loc, keeps_state(c));
         let ret = if c.kompozable && c.ret == Ty::Unknown { Ty::Unit } else { c.ret.clone() };
         Out::plain(ts, ret)
+    }
+
+    /// The arguments of a call of `c` (mapped as `m`), each as its name when named, its value, and whether it is a
+    /// lambda: in the order written through the builder (`builder`), else each parameter's in order, its default
+    /// where the call leaves it out.
+    #[allow(clippy::too_many_arguments)]
+    fn call_args(
+        &mut self,
+        c: &Callee,
+        args: &[ArgRef],
+        m: &Mapping,
+        builder: bool,
+        pascal_path: bool,
+        transform_wraps: bool,
+        call_label: &str,
+        loc: Loc,
+        kotlin: &str,
+    ) -> Vec<(Option<proc_macro2::Ident>, TokenStream, bool)> {
+        // Each argument: its name when named, its value, whether it is a lambda.
+        let mut vals: Vec<(Option<proc_macro2::Ident>, TokenStream, bool)> = Vec::new();
+        let span = self.span(loc);
+        if builder && c.builder {
+            for (k, p) in c.params.iter().enumerate() {
+                if m.given[k].is_empty() && p.default == PDefault::None && !p.vararg {
+                    self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
+                }
+            }
+            // In the order written; named ones by their Rust names (a positional one after a named one too: the
+            // builder counts positions among the positional ones).
+            let mut named_any = false;
+            for (written, a) in args.iter().enumerate() {
+                let (at, named, _) = m.order[written.min(m.order.len() - 1)];
+                let p = &c.params[at];
+                if m.given[at].len() > 1 && m.given[at][0].loc != a.loc {
+                    continue;
+                }
+                let v = if m.given[at].len() > 1 {
+                    let all: Vec<&ArgRef> = m.given[at].iter().collect();
+                    self.many_value(&all, p, span)
+                } else {
+                    self.with_label(call_label, |me| me.arg_value(a, Some(p), transform_wraps))
+                };
+                let lambda = a.value.is_lambda();
+                let last_param = at + 1 == c.params.len();
+                let position_ok = !named && !named_any && at == written && !(lambda && !last_param);
+                let future = lambda && p.lambda.as_ref().is_some_and(|l| l.kind == crate::index::LambdaKind::Future);
+                if position_ok && !future {
+                    vals.push((None, v, lambda));
+                } else {
+                    vals.push((Some(ident(&p.rust, self.span(a.loc))), v, lambda));
+                    named_any = true;
+                }
+            }
+            // (make sure the macro rewrites it: a lowercase call needs a named argument)
+            if !named_any
+                && !pascal_path
+                && let Some(last) = vals.last_mut()
+            {
+                let at = m.order.last().map(|o| o.0).unwrap_or(0);
+                last.0 = Some(ident(&c.params[at].rust, span));
+            }
+        } else {
+            for (k, p) in c.params.iter().enumerate() {
+                if m.given[k].is_empty() {
+                    match &p.default {
+                        PDefault::Kotlin(text) => vals.push((None, self.kotlin_default(text, p, loc), false)),
+                        PDefault::Builder => {}
+                        PDefault::None if p.vararg => vals.push((None, self.many_value(&[], p, span), false)),
+                        PDefault::None => {
+                            self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
+                        }
+                    }
+                    continue;
+                }
+                let v = if m.given[k].len() > 1 || p.vararg || is_keys(p) && m.given[k].len() != 1 {
+                    let all: Vec<&ArgRef> = m.given[k].iter().collect();
+                    self.many_value(&all, p, span)
+                } else {
+                    let a = m.given[k][0];
+                    self.with_label(call_label, |me| me.arg_value(&a, Some(p), transform_wraps))
+                };
+                vals.push((None, v, m.given[k].iter().any(|a| a.value.is_lambda())));
+            }
+        }
+        vals
     }
 
     /// A call of what gives a builder of the rest of its arguments by name (`detectTapGestures(onTap = { … })` →
@@ -1765,6 +1807,7 @@ fn receiver_of_self(c: &mut Callee, ty: &Ty, lent: &str) {
             && l.inputs.first().is_some_and(|i| i.trim() == lent)
         {
             l.receiver = Some(owner.clone());
+            l.receiver_value = Some(ty.clone());
         }
     }
 }

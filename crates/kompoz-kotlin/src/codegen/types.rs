@@ -281,6 +281,7 @@ impl Gen<'_, '_> {
             inputs,
             output,
             receiver,
+            receiver_value: None,
             suspend: f.suspend,
             boxed: false,
             stored,
@@ -288,6 +289,7 @@ impl Gen<'_, '_> {
             typed: false,
             twin: false,
             file_inline: !stored,
+            snapshot_block: false,
         }
     }
 }

@@ -136,6 +136,13 @@ harness = false
 name = "kotlin_inline_suspend"
 harness = false
 
+# Compose's own inline functions (buildAnnotatedString, withStyle, withLink, PathData, ImageVector.Builder's group and
+# path, takeOrElse, TextFieldState.edit, MutatorMutex.tryMutate, Canvas.withSave) whose lambdas suspend with their
+# coroutine, in Kotlin's syntax.
+[[test]]
+name = "kotlin_compose_inline"
+harness = false
+
 # Lookahead animations of bounds (animateContentSize, animateBounds, BoundsTransform, the visual debugging) in
 # Kotlin's syntax.
 [[test]]

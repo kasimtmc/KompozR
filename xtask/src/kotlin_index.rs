@@ -339,12 +339,15 @@ fn param_default(attrs: &[Attribute]) -> Option<String> {
 }
 
 /// The functions among `fns` (one scope's: a module's, a trait's, an impl's) that have a suspending twin, a
-/// `#[doc(hidden)] async fn <name>_async` beside them: Kotlin's inline functions, whose lambdas may suspend with their
-/// caller (the kt shims' convention; see `kompoz_runtime::kt`).
+/// `#[doc(hidden)] async fn <name>_async` beside them (or a `fn` giving an `impl Future`, as a `#[named]` method with
+/// defaults is): Kotlin's inline functions, whose lambdas may suspend with their caller (the kt shims' convention;
+/// see `kompoz_runtime::kt`).
 fn async_twins<'a>(fns: impl Iterator<Item = (&'a [Attribute], &'a Signature)>) -> BTreeSet<String> {
-    fns.filter(|(attrs, sig)| hidden(attrs) && sig.asyncness.is_some())
-        .filter_map(|(_, sig)| unraw(&sig.ident).strip_suffix("_async").map(str::to_string))
-        .collect()
+    fns.filter(|(attrs, sig)| {
+        hidden(attrs) && (sig.asyncness.is_some() || returns_future(&sig.output, &BTreeMap::new(), &BTreeSet::new()))
+    })
+    .filter_map(|(_, sig)| unraw(&sig.ident).strip_suffix("_async").map(str::to_string))
+    .collect()
 }
 
 /// Flags the items of a function that has a suspending twin (`ASYNC_TWIN`).
@@ -758,8 +761,12 @@ struct Scan {
     items: Vec<KItem>,
     /// The types that are futures (`impl Future for Delay`): a function giving one suspends.
     futures: BTreeSet<String>,
-    /// `impl XArgs for (…)`'s, by trait: the overloads of the function taking `impl XArgs`.
-    overloads: BTreeMap<String, Vec<(Type, Option<String>)>>,
+    /// `impl XArgs for (…)`'s, by trait: the overloads of the function taking `impl XArgs`, with the impl's
+    /// associated types (`type Animatable = Animatable<f32, AnimationVector1D>`: what that overload gives).
+    overloads: BTreeMap<String, Vec<(Type, Option<String>, Vec<(String, Type)>)>>,
+    /// The public generic types' type parameters, by name (`Animatable` → `T`, `V`): what a member's `T` is of a
+    /// value's type arguments. A name two types have with other parameters: none.
+    generics: BTreeMap<String, Option<Vec<String>>>,
     /// `impl Deref for X { type Target = Y; }`'s: (X, Y), what X's values have of Y's members.
     derefs: BTreeSet<(String, String)>,
     /// The type aliases of closures (`type Callback = Rc<dyn Fn()>`), by name: a parameter of one takes a lambda
@@ -796,7 +803,7 @@ fn kotlin_index(packages: &[Package]) -> Result<String, String> {
     let mut items = scan.items;
     items.sort();
     items.dedup();
-    Ok(render_kotlin(&items, &scan.derefs, &scan.types))
+    Ok(render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics))
 }
 
 /// Expands, in place, the invocations of a file's own `macro_rules!` that make items from a type's name: a macro of
@@ -913,10 +920,19 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                         scan.derefs.insert((type_name(&imp.self_ty), target));
                     }
                     if trait_name.ends_with("Args") {
-                        scan.overloads
-                            .entry(trait_name.clone())
-                            .or_default()
-                            .push(((*imp.self_ty).clone(), kotlin_doc(&imp.attrs)));
+                        let assoc = imp
+                            .items
+                            .iter()
+                            .filter_map(|i| match i {
+                                syn::ImplItem::Type(t) => Some((t.ident.to_string(), t.ty.clone())),
+                                _ => None,
+                            })
+                            .collect();
+                        scan.overloads.entry(trait_name.clone()).or_default().push((
+                            (*imp.self_ty).clone(),
+                            kotlin_doc(&imp.attrs),
+                            assoc,
+                        ));
                     }
                     // A Kotlin fun interface (`fun interface FlexBoxConfig`): a trait implemented for the closures of
                     // one signature (`impl<F: Fn(&mut FlexBoxConfigScope)> FlexBoxConfig for F`) takes a lambda.
@@ -963,6 +979,26 @@ fn prescan(items: &[Item], scan: &mut Scan) {
             Item::Mod(m) => {
                 if let Some((_, inner)) = &m.content {
                     prescan(inner, scan);
+                }
+            }
+            Item::Struct(syn::ItemStruct { vis, ident, generics, .. })
+            | Item::Enum(syn::ItemEnum { vis, ident, generics, .. })
+            | Item::Trait(syn::ItemTrait { vis, ident, generics, .. })
+                if is_pub(vis) =>
+            {
+                let params: Vec<String> = generics
+                    .params
+                    .iter()
+                    .filter_map(|p| match p {
+                        GenericParam::Type(tp) => Some(tp.ident.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+                if !params.is_empty() {
+                    let entry = scan.generics.entry(ident.to_string()).or_insert_with(|| Some(params.clone()));
+                    if entry.as_ref().is_some_and(|known| *known != params) {
+                        *entry = None;
+                    }
                 }
             }
             _ => {}
@@ -1336,7 +1372,7 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     {
         it.flags.insert("OVERLOADED");
         // (Kotlin's are the ones a doc line names: the others are Rust's conveniences)
-        for (ty, doc) in overloads.iter().filter(|(_, d)| d.is_some()) {
+        for (ty, doc, assoc) in overloads.iter().filter(|(_, d, _)| d.is_some()) {
             let elems: Vec<&Type> = match ty {
                 Type::Tuple(t) => t.elems.iter().collect(),
                 other => vec![other],
@@ -1344,7 +1380,14 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
             let sig = doc.as_deref().and_then(kotlin_sig);
             let mut o = base(cx, sig.as_ref().map_or(kotlin.as_str(), |s| s.name.as_str()), &rust, "Overload", owner);
             o.via = trait_name.clone();
-            o.ret = it.ret.clone();
+            // (what this overload gives: the impl's associated type the function's result names, `A::Animatable`)
+            o.ret = match it.ret.split_once("::") {
+                Some((_, name)) => assoc
+                    .iter()
+                    .find(|(n, _)| n == name.trim())
+                    .map_or_else(|| it.ret.clone(), |(_, t)| text(t.to_token_stream())),
+                None => it.ret.clone(),
+            };
             for (i, t) in elems.iter().enumerate() {
                 let kname = sig.as_ref().and_then(|s| s.params.get(i));
                 let mut p = plain_param(&format!("{i}"), t);
@@ -1610,7 +1653,12 @@ fn receiver_of(first: &Type) -> String {
 
 // ---- generated.rs ----
 
-fn render_kotlin(items: &[KItem], derefs: &BTreeSet<(String, String)>, types: &BTreeSet<(String, String)>) -> String {
+fn render_kotlin(
+    items: &[KItem],
+    derefs: &BTreeSet<(String, String)>,
+    types: &BTreeSet<(String, String)>,
+    generics: &BTreeMap<String, Option<Vec<String>>>,
+) -> String {
     let mut out = String::from(
         "// The API index the Kotlin syntax's generator reads: written by `cargo xtask kotlin-index` from the\n\
          // workspace's sources (don't edit by hand; `--check` in CI). Its types: `super` (index/mod.rs).\n\
@@ -1655,6 +1703,17 @@ fn render_kotlin(items: &[KItem], derefs: &BTreeSet<(String, String)>, types: &B
     out.push_str("pub static TYPES: &[(&str, &str)] = &[\n");
     for (kotlin, rust) in types {
         let _ = writeln!(out, "    ({kotlin:?}, {rust:?}),");
+    }
+    out.push_str(
+        "];\n\n/// The generic types' type parameters, in order (`Animatable` → `T`, `V`): what a member's `T` is of a value's \
+         type arguments.\n",
+    );
+    out.push_str("pub static GENERICS: &[(&str, &[&str])] = &[\n");
+    for (name, params) in generics {
+        if let Some(params) = params {
+            let list = params.iter().map(|p| format!("{p:?}")).collect::<Vec<_>>().join(", ");
+            let _ = writeln!(out, "    ({name:?}, &[{list}]),");
+        }
     }
     out.push_str("];\n");
     out
@@ -1764,7 +1823,22 @@ mod tests {
             impl TextFieldState {
                 pub fn edit(&self, block: impl FnOnce(&mut TextFieldBuffer)) {}
             }
+            #[named]
+            impl DrawScope {
+                pub fn translate(&mut self, #[default(0.0)] left: f32, block: impl FnOnce(&mut DrawScope)) {}
+                #[doc(hidden)]
+                pub fn translate_async(&mut self, #[default(0.0)] left: f32, block: impl AsyncFnOnce(&mut DrawScope))
+                    -> impl Future<Output = ()> { async {} }
+                pub fn rotate(&mut self, degrees: f32, block: impl FnOnce(&mut DrawScope)) {}
+            }
             pub fn LookaheadScope(content: impl Fn(&Rc<dyn LookaheadScope>) + 'static) {}
+            pub struct Animatable<T, V> { value: T, velocity: V }
+            pub struct Holder<'a, T> { held: &'a T }
+            pub struct Plain;
+            pub trait AnimatableArgs { type Animatable; }
+            /// Kotlin: `Animatable(initialValue: Float)`
+            impl AnimatableArgs for f32 { type Animatable = Animatable<f32, AnimationVector1D>; }
+            pub fn Animatable<A: AnimatableArgs>(args: A) -> A::Animatable {}
             "#,
         )
         .unwrap();
@@ -1795,13 +1869,22 @@ mod tests {
         assert!(find("forEach").flags.contains("ASYNC_TWIN") && find("repeat").flags.contains("ASYNC_TWIN"));
         assert!(!find("padStart").flags.contains("ASYNC_TWIN") && !find("mapAsyncLike").flags.contains("ASYNC_TWIN"));
         assert!(scan.items.iter().all(|i| !i.rust.ends_with("_async")));
+        // (a `#[named]` method's twin: a `fn` giving a future, as `#[named]` takes them)
+        let translate = scan.items.iter().find(|i| i.kotlin == "translate" && i.owner == "DrawScope").unwrap();
+        assert!(translate.flags.contains("ASYNC_TWIN") && !find("rotate").flags.contains("ASYNC_TWIN"));
+        // Generic types' type parameters (lifetimes aside); an overload's result its impl's associated type.
+        assert_eq!(scan.generics.get("Animatable"), Some(&Some(vec!["T".to_string(), "V".to_string()])));
+        assert_eq!(scan.generics.get("Holder"), Some(&Some(vec!["T".to_string()])));
+        assert!(!scan.generics.contains_key("Plain"));
+        let animatable = scan.items.iter().find(|i| i.kotlin == "Animatable" && i.kind == "Overload").unwrap();
+        assert_eq!(animatable.ret, "Animatable<f32, AnimationVector1D>");
         let effect = find("LaunchedEffect").params[1].lambda.as_ref().unwrap();
         assert!(effect.suspend && effect.kind == "Future");
         assert_eq!(find("Modifier").kind, "Value");
         assert_eq!(find("Center").owner, "TextAlign");
         assert!(find("height").flags.contains("SETTER"));
         assert!(scan.items.iter().all(|i| i.kotlin != "private"));
-        let overloads: Vec<_> = scan.items.iter().filter(|i| i.kind == "Overload").collect();
+        let overloads: Vec<_> = scan.items.iter().filter(|i| i.kind == "Overload" && i.kotlin == "Color").collect();
         assert_eq!(overloads.len(), 2);
         assert_eq!(overloads[1].params[3].default, Some((true, "1f".to_string())));
         let pad = find("padStart");

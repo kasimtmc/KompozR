@@ -416,6 +416,7 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method grid_item_area rd crates/kompoz-foundation/src/layout/grid.rs Modifier as GridScopeModifiers
 * method grid_item_ranges rrd crates/kompoz-foundation/src/layout/grid.rs Modifier as GridScopeModifiers
 * method group dddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method group_async dddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method height_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 * method horizontal_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method horizontal_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
@@ -487,6 +488,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method pan_by rd crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
 * method paste_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method path ddddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
+* method path_async ddddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method pinch rrrrd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method place rrrd crates/kompoz-ui/src/layout/measure.rs PlacementScope
 * method place_relative rrrd crates/kompoz-ui/src/layout/measure.rs PlacementScope
