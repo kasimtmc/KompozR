@@ -669,6 +669,11 @@ impl Gen<'_, '_> {
     fn index(&mut self, receiver: &Expr, indices: &[Expr], loc: Loc) -> Out {
         let span = self.span(loc);
         let kt = self.kt(span);
+        // (Kotlin's `operator fun get` of an API type taking a key: its `get` — `state[key]` of a StyleState)
+        if keyed_operator(&self.peek_ty(receiver), "get") {
+            let values: Vec<&Expr> = indices.iter().collect();
+            return self.operator_call(receiver, "get", &values, loc);
+        }
         let recv = self.expr(receiver);
         let r = recv.ts;
         let args: Vec<TokenStream> = indices.iter().map(|i| self.value(i)).collect();
@@ -1451,6 +1456,9 @@ impl Gen<'_, '_> {
                     .find(|i| i.params.len() >= n_args && named(i))
                     .or_else(|| free_functions(&n.name).find(named))
                     .or_else(|| free_functions(&n.name).next())
+                    // (a type's constructor: its result, generic or not — `StyleStateKey(false)` a
+                    // `StyleStateKey<Boolean>`)
+                    .or_else(|| constructor_overloads(&n.name).find(|i| i.params.len() == n_args && named(i)))
                     .map(|i| self.generic_ret(i, type_args, args, trailing))
                     .unwrap_or_else(|| if is_pascal(&n.name) { Ty::named(&n.name) } else { Ty::Unknown })
             }
@@ -1833,4 +1841,17 @@ pub(crate) fn owner_arg_ret(recv: &Ty, ret: &str) -> Ty {
         }
         _ => Ty::from_rust(ret),
     }
+}
+
+/// Whether a value of type `ty` has Kotlin's operator `name` (`get`, `set`) as an API method taking a key, not a
+/// position (an integer: a list's, which the kt shims give).
+pub(crate) fn keyed_operator(ty: &Ty, name: &str) -> bool {
+    let Some(owner) = ty.owner() else { return false };
+    members_of(owner, name).any(|i| {
+        i.kind == Kind::Method
+            && i.params.first().is_some_and(|p| {
+                let t = p.ty.trim_start_matches('&').trim();
+                !matches!(t, "usize" | "isize" | "i32" | "i64" | "u32" | "u64" | "Int" | "Long")
+            })
+    })
 }

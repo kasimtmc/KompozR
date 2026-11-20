@@ -23,6 +23,7 @@ mod background;
 pub mod basic_marquee;
 pub mod basic_tooltip;
 mod border;
+mod border_logic;
 mod canvas;
 pub mod clickable;
 pub mod clip_scrollable_container;
@@ -30,6 +31,7 @@ pub mod content;
 pub mod context_menu;
 pub mod draganddrop;
 mod edge_effect;
+mod flags;
 pub mod focusable;
 pub mod focused_bounds;
 pub mod gesture_node;
@@ -52,6 +54,7 @@ pub mod scroll;
 pub mod scrollable_area;
 pub mod scrollbar;
 pub mod selection;
+pub mod style;
 #[cfg(test)]
 mod suspending_twins_tests;
 pub mod text;
@@ -61,6 +64,7 @@ pub mod v2;
 pub use background::BackgroundModifiers;
 pub use border::{BorderModifierNode, BorderModifiers};
 pub use canvas::Canvas;
+pub use flags::ComposeFoundationFlags;
 pub use image::{BitmapImage, Image, VectorImage};
 /// Compose's `androidx.compose.foundation.MutatorMutex` (kompoz-animation's, which Animatable uses too).
 pub use kompoz_animation::{MutatePriority, MutatorMutex};
@@ -146,6 +150,8 @@ pub mod prelude {
         default_scrollbar_style, remember_scrollbar_adapter,
     };
     pub use crate::selection::{SelectableModifiers, SelectionModifiers, ToggleableModifiers};
+    // (Compose's experimental foundation.style)
+    pub use crate::style::*;
     pub use crate::text::input::{
         ChangeList, ExpandPolicy, InputTransformation, KeyboardActionHandler, OutputTransformation, TextFieldBuffer,
         TextFieldLineLimits, TextFieldState, TextFieldTextStyles, TextObfuscationMode, TrackedRange, TransformInput,
@@ -163,7 +169,9 @@ pub mod prelude {
         remember_text_field_scroll_state, remember_text_field_vertical_scroll_state,
     };
     pub use crate::tooltip_area::{BoxWithTooltip, TooltipArea, TooltipPlacement};
-    pub use crate::{BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, Image, VectorImage};
+    pub use crate::{
+        BackgroundModifiers, BitmapImage, BorderModifiers, Canvas, ComposeFoundationFlags, Image, VectorImage,
+    };
     pub use crate::{MutatePriority, MutatorMutex};
     pub use kompoz_ui::layout::SlotKey;
 }

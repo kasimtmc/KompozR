@@ -30,13 +30,15 @@
 //!   `String`, `Iterable`, `Map`, … (a Rust method of the same name on the type comes first in a method call: such
 //!   a call goes through the trait, `KtStr::split(&s, …)`);
 //! - what a type derefs to ([`DEREFS`]: a `MeasureScope`'s `Density`) is what Kotlin's supertype is: its members are
-//!   the type's too (`dp.roundToPx()` in a measure block);
+//!   the type's too (`dp.roundToPx()` in a measure block); a trait's supertraits are its Kotlin supertypes the same
+//!   way (`StyleScope` → `BorderScope`, …; a `Deref<Target = Density>` supertrait → `Density`);
 //! - a generic type's type parameters ([`GENERICS`]: `Animatable<T, V>`) tell what its members' `T` is of a value's
 //!   type arguments (`value` of an `Animatable<Float, …>` a `Float`); an overload's result is its impl's associated
 //!   type (`type Animatable = Animatable<f32, AnimationVector1D>` for `Animatable(0f)`);
 //! - a trait implemented for the closures of one signature (`impl<F: Fn(&dyn Fn())> TextFieldDecorator for F`) is a
-//!   Kotlin fun interface ([`Kind::FunInterface`]): a parameter of it (`impl T`, `Rc<dyn T>`) takes a lambda, and its
-//!   SAM constructor (`TextFieldDecorator { … }`) is that lambda;
+//!   Kotlin fun interface ([`Kind::FunInterface`]): a parameter of it (`impl T`, `Rc<dyn T>`, a Kotlin function's of
+//!   its type) takes a lambda, and its SAM constructor (`TextFieldDecorator { … }`) is that lambda, beside the
+//!   functions of its name taking no lambda (`Style { … }` and `Style(style1, style2)`);
 //! - a type Kotlin names otherwise, a nested object (`Arrangement.Absolute`), says so in a doc line ``Kotlin:
 //!   `Arrangement.Absolute` `` ([`TYPES`]);
 //! - a parameter of a closure's alias (`Callback`) is written out (`Rc<dyn Fn()>`); what a `macro_rules!` of the
@@ -237,13 +239,19 @@ pub fn lookup(kotlin: &str) -> &'static [Item] {
 }
 
 /// The types whose members a value of Rust type `owner` has, in the order Rust's method calls try them: itself,
-/// then what it derefs to, and so on (`MeasureScope` → `Density`).
+/// then what it derefs to, and so on (`MeasureScope` → `Density`); a trait's supertraits, breadth first (Kotlin's
+/// supertypes of an interface: `StyleScope` → `CustomStyleScope`, `StyleStateScope`, … → `Density`, …).
 pub fn deref_chain(owner: &str) -> Vec<&str> {
     let mut chain = vec![owner];
-    while let Some((_, to)) = DEREFS.iter().find(|(from, _)| Some(from) == chain.last())
-        && !chain.contains(to)
-    {
-        chain.push(to);
+    let mut next = 0;
+    while next < chain.len() {
+        let from = chain[next];
+        for (f, to) in DEREFS {
+            if *f == from && !chain.contains(to) {
+                chain.push(to);
+            }
+        }
+        next += 1;
     }
     chain
 }
@@ -345,6 +353,10 @@ mod tests {
         );
         assert_eq!(twin_bounds(one("translate", "DrawScope")).count(), 0);
         assert_eq!(generics("Animatable"), Some(&["T", "V"][..]));
+        // (a trait's supertraits, breadth first: a style scope's members are its scopes', a Density's too)
+        let chain = deref_chain("StyleScope");
+        assert!(["CustomStyleScope", "DrawStyleScope", "BorderScope", "Density"].iter().all(|t| chain.contains(t)));
+        assert!(chain.iter().position(|t| *t == "DrawStyleScope") < chain.iter().position(|t| *t == "BorderScope"));
         assert!(
             lookup("Animatable")
                 .iter()

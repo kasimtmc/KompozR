@@ -154,6 +154,15 @@ impl Gen<'_, '_> {
         self.typed_call(out, callee, type_args, span)
     }
 
+    /// Kotlin's operator `name` (`get`, `set`) of `receiver` called with `values` (`state[key] = value`): the API
+    /// method of that name, as a member call.
+    pub(crate) fn operator_call(&mut self, receiver: &Expr, name: &str, values: &[&Expr], loc: Loc) -> Out {
+        let op = Ident { name: name.to_string(), loc, backticked: false };
+        let args: Vec<ArgRef> =
+            values.iter().map(|e| ArgRef { name: None, value: ArgValue::Expr(e), spread: false, loc: e.loc }).collect();
+        self.member_call(receiver, false, &op, &args, loc)
+    }
+
     /// The lambda of a fun interface's SAM constructor (`TextFieldDecorator { … }`, `KeyboardActionHandler({ … })`):
     /// a call of the interface's name (none of the file's or a local's) with a lambda its only argument.
     fn sam_lambda<'e>(&self, e: &'e Expr) -> Option<&'e Lambda> {
@@ -211,8 +220,18 @@ impl Gen<'_, '_> {
         let span = self.span(loc);
         let nspan = self.span(n.loc);
         let kt = self.kt(span);
-        // A local holding a function.
-        if self.is_local(&n.name) {
+        // A local holding a function. (A local of another type, an implicit receiver having a method of that name, is
+        // Kotlin's member call: `shape(shape)` in a style, the parameter `shape` given to the scope's `shape`.)
+        let member_named =
+            |me: &Self| me.receivers.iter().any(|r| members_of(&r.ty, &n.name).any(|i| i.kind == Kind::Method));
+        let not_invocable = |me: &Self| {
+            me.scopes
+                .iter()
+                .rev()
+                .find_map(|s| s.get(&n.name))
+                .is_some_and(|l| !matches!(l.ty, Ty::Fun(_) | Ty::Unknown) && !l.kept_closure)
+        };
+        if self.is_local(&n.name) && !(not_invocable(self) && member_named(self)) {
             let l = self.local(&n.name).expect("a local");
             let i = ident(&l.rust, nspan);
             let f = if l.kind == LocalKind::Delegated {
@@ -328,17 +347,29 @@ impl Gen<'_, '_> {
                 return self.emit(&c, Target::Path(quote!(#name), c.rust.clone()), args, loc, &n.name);
             }
         }
-        // The index's functions (and overloaded constructors: `Color(…)`).
+        // The index's functions (and overloaded constructors: `Color(…)`); a fun interface's SAM constructor before its
+        // other functions of that name, which take no lambda (`Style { … }` beside `Style(style1, style2)`).
+        let sam =
+            matches!(args, [a] if a.name.is_none() && a.value.lambda().is_some()) && fun_interface(&n.name).is_some();
         let mut items: Vec<&'static crate::index::Item> = free_functions(&n.name).collect();
-        if !items.is_empty() {
-            if items.iter().any(|i| i.has(crate::index::flags::OVERLOADED)) {
-                return self.overloaded(&n.name, items[0], args, loc);
-            }
-            // (Kotlin's other constructors of the type the function is named after: its associated functions of that
-            // Kotlin name — `PaddingValues(all)` is `PaddingValues::all`, `PaddingValues(horizontal = 8.dp)` is
-            // `PaddingValues::hv`)
+        if !items.is_empty() && !sam && items.iter().any(|i| i.has(crate::index::flags::OVERLOADED)) {
+            return self.overloaded(&n.name, items[0], args, loc);
+        }
+        // (Kotlin's constructors of a type: its associated functions of that Kotlin name — `PaddingValues(all)` is
+        // `PaddingValues::all`, `PaddingValues(horizontal = 8.dp)` is `PaddingValues::hv`, `MutableInteractionSource()`
+        // is `MutableInteractionSource::new` —, with the functions named after it, or alone where the arguments fit
+        // one, else as written)
+        let functions = !items.is_empty();
+        if !sam {
             items.extend(constructor_overloads(&n.name));
-            if let Some(c) = self.choose(&items, args, loc) {
+        }
+        let chosen = if functions { None } else { self.choose_quiet(&items, args) };
+        if !items.is_empty() && !sam && (functions || chosen.is_some()) {
+            let c = match chosen {
+                Some(c) => Some(c),
+                None => self.choose(&items, args, loc),
+            };
+            if let Some(c) = c {
                 let item = c.item.expect("an index item");
                 let name = ident(&c.rust, nspan);
                 let path = if item.krate == "kompoz_runtime" && item.module.starts_with("kt") {

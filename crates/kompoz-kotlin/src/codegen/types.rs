@@ -248,6 +248,29 @@ impl Gen<'_, '_> {
                 let t = self.rust_of_ty(t, span);
                 quote_spanned!(span=> #kt::KtProgression<#t>)
             }
+            // (a shared or boxed trait object: `Rc<dyn Style>`, the pointer's path written out)
+            Ty::Named(n, args)
+                if matches!(n.as_str(), "Rc" | "Arc" | "Box")
+                    && matches!(args.as_slice(), [Ty::Named(t, _)] if super::resolve::trait_object(t).is_some()) =>
+            {
+                let inner = match &args[0] {
+                    Ty::Named(t, a) => {
+                        let i = proc_macro2::Ident::new(t, span);
+                        if a.is_empty() || a.contains(&Ty::Unknown) {
+                            quote_spanned!(span=> #i)
+                        } else {
+                            let a = a.iter().map(|t| self.rust_of_ty(t, span));
+                            quote_spanned!(span=> #i<#(#a),*>)
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                match n.as_str() {
+                    "Rc" => quote_spanned!(span=> ::std::rc::Rc<dyn #inner>),
+                    "Arc" => quote_spanned!(span=> ::std::sync::Arc<dyn #inner>),
+                    _ => quote_spanned!(span=> ::std::boxed::Box<dyn #inner>),
+                }
+            }
             Ty::Named(n, args) => {
                 let i = proc_macro2::Ident::new(n, span);
                 if args.is_empty() || args.contains(&Ty::Unknown) {

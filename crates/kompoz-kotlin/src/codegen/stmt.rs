@@ -430,6 +430,16 @@ impl Gen<'_, '_> {
                 let v = combined(self, read, &read_ty);
                 quote_spanned!(span=> { let #o = &#r; #o.#setter(#v); })
             }
+            // (Kotlin's `operator fun set` of an API type taking a key: its `set` — `state[key] = value` of a
+            // MutableStyleState)
+            ExprKind::Index { receiver, indices }
+                if op == AssignOp::Assign && super::expr::keyed_operator(&self.peek_ty(receiver), "set") =>
+            {
+                let mut values: Vec<&Expr> = indices.iter().collect();
+                values.push(value);
+                let call = self.operator_call(receiver, "set", &values, target.loc).ts;
+                quote_spanned!(span=> #call;)
+            }
             ExprKind::Index { receiver, indices } => {
                 let ty = self.peek_ty(receiver);
                 let r = self.expr(receiver).ts;

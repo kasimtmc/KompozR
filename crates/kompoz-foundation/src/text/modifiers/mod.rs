@@ -13,6 +13,7 @@ mod selection_controller;
 mod selection_modifier;
 pub(crate) mod text_annotated_string;
 pub(crate) mod text_string_simple;
+pub(crate) mod text_style_provider;
 
 pub use selection_controller::{SelectionController, StaticTextSelectionParams};
 pub use selection_modifier::{

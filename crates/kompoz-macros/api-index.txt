@@ -558,6 +558,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable remember_transformable_state r crates/kompoz-foundation/src/gestures/transformable_state.rs
 * kompozable remember_transition rd crates/kompoz-animation/src/transition.rs
 * kompozable remember_transition_of rr crates/kompoz-animation/src/transition.rs
+* kompozable remember_updated_style_state rd crates/kompoz-foundation/src/style/state.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
 * method render_in_shared_transition_scope_overlay rdd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
@@ -630,6 +631,7 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
 * method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable_state.rs S as ScrollableStateExtensions
 * method stop_transformation d crates/kompoz-foundation/src/gestures/transformable_state.rs S as TransformableStateExtensions
+* method styleable dr crates/kompoz-foundation/src/style/modifier.rs Modifier as StyleModifiers
 * method stylus_hover_icon rdd crates/kompoz-ui/src/input/hover_icon.rs Modifier
 * method swipe rrd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method swipe_down ddd crates/kompoz-test/src/input.rs TouchInjectionScope

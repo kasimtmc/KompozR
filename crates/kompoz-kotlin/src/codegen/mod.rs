@@ -755,6 +755,15 @@ impl<'a, 'd> Gen<'a, 'd> {
                 let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
                 let rust = self.rust_type(t, pos).to_string();
                 let lambda = t.as_function().filter(|_| !t.nullable).map(|ft| self.lambda_info(ft, !inline));
+                // (a fun interface's value — `style: Style` — takes a lambda as its SAM conversion: the interface's
+                // lambda, kept, its parameters typed for Rust to find the trait's blanket impl)
+                let lambda = lambda.or_else(|| {
+                    let name = t.simple_name().filter(|_| !t.nullable)?;
+                    let fi = resolve::fun_interface_type(&name)?;
+                    let mut info = Callee::from_item(fi).params.remove(0).lambda?;
+                    (info.stored, info.typed) = (true, true);
+                    Some(info)
+                });
                 let option = match (t.nullable, p.default.is_some()) {
                     (false, _) => OptionForm::No,
                     (true, false) => OptionForm::IntoOption,

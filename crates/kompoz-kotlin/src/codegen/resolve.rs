@@ -778,12 +778,20 @@ pub(crate) fn kt_members(kotlin: &str, traits: &[&str]) -> Vec<&'static Item> {
         .collect()
 }
 
-/// The fun interface of a Kotlin name (`TextFieldDecorator`), unless the API has a function of that name, which
-/// its calls call (`OutputTransformation { … }`: `output_transformation`).
+/// The fun interface of a Kotlin name (`TextFieldDecorator`) whose SAM constructor a call with a lambda is, unless
+/// the API has a function of that name taking a lambda, which its calls call (`OutputTransformation { … }`:
+/// `output_transformation`); a function of that name taking other values is Kotlin's other function
+/// (`Style(style1, style2)` beside `Style { … }`).
 pub(crate) fn fun_interface(kotlin: &str) -> Option<&'static Item> {
-    if free_functions(kotlin).next().is_some() {
+    if free_functions(kotlin).any(|f| f.params.len() == 1 && f.params[0].lambda.is_some()) {
         return None;
     }
+    fun_interface_type(kotlin)
+}
+
+/// The fun interface a Kotlin type name is (`Style`, `TextFieldDecorator`): what a value of the type is made of
+/// given a lambda.
+pub(crate) fn fun_interface_type(kotlin: &str) -> Option<&'static Item> {
     lookup(kotlin).iter().find(|i| i.kind == Kind::FunInterface && i.params.first().is_some_and(|p| p.lambda.is_some()))
 }
 

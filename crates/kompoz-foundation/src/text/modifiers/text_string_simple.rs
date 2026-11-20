@@ -7,7 +7,9 @@
 use super::layout_utils::round_to_int;
 use super::min_lines_constrainer::same_resolver;
 use super::paragraph_layout_cache::ParagraphLayoutCache;
+use super::text_style_provider::{StylePhase, inherited_text_style};
 use super::{invalidate_for_translate, text_paint_style, with_color};
+use crate::ComposeFoundationFlags;
 use kompoz_graphics::{ColorProducer, Constraints, Density};
 use kompoz_text::{AnnotatedString, FontFamilyResolver, TextLayoutResult, TextOverflow, TextStyle};
 use kompoz_ui::draw::{ContentDrawScope, DefaultBlendMode, DrawModifierNode};
@@ -64,6 +66,7 @@ impl ModifierNodeElement for TextStringSimpleElement {
             baseline_cache: None,
             text_substitution: None,
             semantics_applied: false,
+            resolved_inherited_style: None,
             handle: None,
         }
     }
@@ -115,16 +118,23 @@ pub(crate) struct TextStringSimpleNode {
     /// Whether its semantics were asked for (Compose's semanticsTextLayoutResult set): a draw change then
     /// changes what they hand out.
     semantics_applied: bool,
+    /// The text style the styles above give it, its own specified properties over them (Compose's
+    /// `resolvedInheritedStyle`, with `ComposeFoundationFlags.isInheritedTextStyleEnabled`).
+    resolved_inherited_style: Option<TextStyle>,
     handle: Option<NodeHandle>,
 }
 
 impl TextStringSimpleNode {
-    /// Its layout cache, made when first needed.
+    /// Its layout cache, made when first needed (in the inherited style, where it is inherited).
     fn layout_cache(&mut self) -> &mut ParagraphLayoutCache {
+        let style = match &self.resolved_inherited_style {
+            Some(inherited) if ComposeFoundationFlags::is_inherited_text_style_enabled() => inherited,
+            _ => &self.style,
+        };
         self.layout_cache.get_or_insert_with(|| {
             ParagraphLayoutCache::new(
                 self.text.clone(),
-                self.style.clone(),
+                style.clone(),
                 self.font_family_resolver.clone(),
                 self.overflow,
                 self.soft_wrap,
@@ -137,10 +147,29 @@ impl TextStringSimpleNode {
     /// The cache of what it shows (its substitution's while it shows one), laying out in `density` (Compose's
     /// getLayoutCacheForMeasure).
     fn layout_cache_for_measure(&mut self, density: Density) -> &mut ParagraphLayoutCache {
+        if ComposeFoundationFlags::is_inherited_text_style_enabled() && self.resolve_inherited_style(StylePhase::Layout)
+        {
+            let style = self.resolved_inherited_style.clone().unwrap_or_else(|| self.style.clone());
+            let (text, resolver) = (self.text.clone(), self.font_family_resolver.clone());
+            let (overflow, soft_wrap, max_lines, min_lines) =
+                (self.overflow, self.soft_wrap, self.max_lines, self.min_lines);
+            self.layout_cache().update(text, style, resolver, overflow, soft_wrap, max_lines, min_lines);
+        }
         self.layout_cache();
         let cache = self.active_layout_cache();
         cache.set_density(Some(density));
         cache
+    }
+
+    /// The inherited text style for `phase` worked out again (Compose's `resolveInheritedStyle`): whether it
+    /// changed (not the first time).
+    fn resolve_inherited_style(&mut self, phase: StylePhase) -> bool {
+        let Some(cx) = self.handle.as_ref().and_then(NodeHandle::cx) else { return false };
+        let previous = self.resolved_inherited_style.take();
+        let new = inherited_text_style(&cx, phase, &self.style);
+        let changed = previous.as_ref().is_some_and(|p| *p != new);
+        self.resolved_inherited_style = Some(new);
+        changed
     }
 
     /// The cache of what it shows: its substitution's while it shows one, else its own (Compose's
@@ -211,6 +240,9 @@ impl TextStringSimpleNode {
     /// not); a text change its semantics, measurement and drawing; a layout change its measurement and drawing; a
     /// draw change its drawing (and its semantics, which hand out its colors, once asked for).
     fn do_invalidations(&mut self, draw_changed: bool, text_changed: bool, layout_changed: bool) {
+        if draw_changed || text_changed || layout_changed {
+            self.resolved_inherited_style = None;
+        }
         if text_changed || layout_changed {
             let (text, style, resolver) = (self.text.clone(), self.style.clone(), self.font_family_resolver.clone());
             let (overflow, soft_wrap, max_lines, min_lines) =
@@ -342,7 +374,13 @@ impl DrawModifierNode for TextStringSimpleNode {
         if self.handle.is_none() {
             return;
         }
-        let paint = text_paint_style(&self.style, self.override_color.as_ref());
+        let style = if ComposeFoundationFlags::is_inherited_text_style_enabled() {
+            self.resolve_inherited_style(StylePhase::Draw);
+            self.resolved_inherited_style.clone().unwrap_or_else(|| self.style.clone())
+        } else {
+            self.style.clone()
+        };
+        let paint = text_paint_style(&style, self.override_color.as_ref());
         let cache = self.active_layout_cache();
         let paragraph = cache.paragraph.clone().expect(
             "kompoz: Internal Error: ParagraphLayoutCache could not provide a Paragraph during the draw phase.",

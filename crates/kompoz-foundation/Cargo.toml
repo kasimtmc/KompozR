@@ -135,3 +135,7 @@ harness = false
 [[test]]
 name = "lookahead"
 harness = false
+
+[[test]]
+name = "style"
+harness = false

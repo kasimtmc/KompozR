@@ -1064,6 +1064,50 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                         *entry = None;
                     }
                 }
+                // (a trait's supertraits are Kotlin's supertypes of the interface it is: their members are its too —
+                // `StyleScope : BorderScope, …`; a `Deref<Target = Density>` one makes it a `Density`)
+                if let Item::Trait(t) = item {
+                    for bound in &t.supertraits {
+                        let TypeParamBound::Trait(tb) = bound else { continue };
+                        let Some(seg) = tb.path.segments.last() else { continue };
+                        let name = seg.ident.to_string();
+                        if name == "Deref" {
+                            if let syn::PathArguments::AngleBracketed(a) = &seg.arguments
+                                && let Some(target) = a.args.iter().find_map(|g| match g {
+                                    syn::GenericArgument::AssocType(at) if at.ident == "Target" => {
+                                        Some(type_name(&at.ty))
+                                    }
+                                    _ => None,
+                                })
+                            {
+                                scan.derefs.insert((ident.to_string(), target));
+                            }
+                        } else if !matches!(
+                            name.as_str(),
+                            "Sized"
+                                | "Any"
+                                | "Send"
+                                | "Sync"
+                                | "Unpin"
+                                | "Clone"
+                                | "Copy"
+                                | "Debug"
+                                | "Display"
+                                | "Default"
+                                | "PartialEq"
+                                | "Eq"
+                                | "PartialOrd"
+                                | "Ord"
+                                | "Hash"
+                                | "AsRef"
+                                | "AsMut"
+                                | "Borrow"
+                                | "Sealed"
+                        ) {
+                            scan.derefs.insert((ident.to_string(), name));
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -2025,6 +2069,9 @@ mod tests {
                 };
             }
             transforms!(DrawScope);
+            pub trait BorderScope { fn border_width(&self, value: Dp); }
+            pub trait CustomScope: std::ops::Deref<Target = Density> + Clone {}
+            pub trait StyleScope: CustomScope + BorderScope + Send {}
             "#,
         )
         .unwrap();
@@ -2033,6 +2080,10 @@ mod tests {
         prescan(&file.items, &mut scan);
         collect(&file.items, &Cx { krate: "k", module: "m", public: true }, &mut scan);
         assert!(scan.derefs.contains(&("MeasureScope".to_string(), "Density".to_string())));
+        // (a trait's supertraits, a `Deref<Target = …>` one's target, not the marker and std ones)
+        let d = |a: &str, b: &str| scan.derefs.contains(&(a.to_string(), b.to_string()));
+        assert!(d("StyleScope", "CustomScope") && d("StyleScope", "BorderScope") && d("CustomScope", "Density"));
+        assert!(!d("StyleScope", "Send") && !d("CustomScope", "Clone") && !d("CustomScope", "Deref"));
         assert!(scan.types.contains(&("Arrangement.Absolute".to_string(), "AbsoluteArrangement".to_string())));
         let find = |k: &str| scan.items.iter().find(|i| i.kotlin == k).unwrap_or_else(|| panic!("no {k}"));
         let clickable = find("clickable");

@@ -757,6 +757,22 @@ impl LayoutNode {
         }
     }
 
+    /// Everything in it drawn again (Compose's `invalidateDrawForSubtree`): its own drawing and those of all the
+    /// layouts inside it, none kept.
+    pub fn invalidate_draw_for_subtree(&self) {
+        fn mark(node: &Rc<LayoutNode>) {
+            node.draw_dirty.set(true);
+            node.keep_check_dirty.set(true);
+            for c in node.children() {
+                mark(&c);
+            }
+        }
+        for c in self.children() {
+            mark(&c);
+        }
+        self.invalidate_draw();
+    }
+
     /// Drawn again: it, and what it is drawn into (its ancestors, for what keeps their drawings). Every ancestor:
     /// a node drawn only into a graphics layer's recording is never kept and stays marked, so one marked already
     /// doesn't mean those above it are.

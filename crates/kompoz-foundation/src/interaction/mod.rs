@@ -123,6 +123,8 @@ pub struct MutableInteractionSource {
 impl MutableInteractionSource {
     /// A source of its own (Compose's `MutableInteractionSource()`): every collector gets what is emitted, none is
     /// replayed to a new one.
+    ///
+    /// Kotlin: `MutableInteractionSource()`
     pub fn new() -> MutableInteractionSource {
         let flow = MutableSharedFlow::new(0);
         let source = InteractionSource { flow: flow.as_shared_flow() };
