@@ -384,6 +384,20 @@ macro_rules! corner_based_shape {
                 CornerBasedShape::$variant(shape)
             }
         }
+
+        /// A corner-based shape is equal to the shape of its kind it holds (Kotlin's subclass equality: a theme's
+        /// `shapes.medium == RoundedCornerShape(12.dp)`).
+        impl PartialEq<$name> for CornerBasedShape {
+            fn eq(&self, other: &$name) -> bool {
+                matches!(self, CornerBasedShape::$variant(s) if s == other)
+            }
+        }
+
+        impl PartialEq<CornerBasedShape> for $name {
+            fn eq(&self, other: &CornerBasedShape) -> bool {
+                *other == *self
+            }
+        }
     };
 }
 

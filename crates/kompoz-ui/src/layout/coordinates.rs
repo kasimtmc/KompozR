@@ -187,6 +187,22 @@ impl LayoutCoordinates {
         in_root + self.coordinator.window_offset()
     }
 
+    /// A point of these in the screen's coordinates (the window's, moved by where the window is on the screen;
+    /// Compose's `localToScreen`).
+    pub fn local_to_screen(&self, relative_to_local: Offset) -> Offset {
+        self.local_to_window(relative_to_local) + self.coordinator.window_position_on_screen()
+    }
+
+    /// A point of the screen's in these coordinates (Compose's `screenToLocal`).
+    pub fn screen_to_local(&self, relative_to_screen: Offset) -> Offset {
+        self.window_to_local(relative_to_screen - self.coordinator.window_position_on_screen())
+    }
+
+    /// Its top left in the screen's coordinates (Compose's `positionOnScreen()`).
+    pub fn position_on_screen(&self) -> Offset {
+        self.local_to_screen(Offset::Zero)
+    }
+
     /// A point of the window's in these coordinates.
     pub fn window_to_local(&self, relative_to_window: Offset) -> Offset {
         if self.lookahead {

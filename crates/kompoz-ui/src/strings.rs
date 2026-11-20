@@ -18,6 +18,10 @@ use kompoz_runtime::KompozitionLocal;
 pub struct Strings {
     /// The language they are in (ISO 639).
     pub language: String,
+    /// The UI's language as the platform named it, in BCP 47's form (`pt-BR`, `de`): what libraries with
+    /// translations of their own pick theirs by (Material's texts, in some 80 languages); KompozR's own are in
+    /// [`language`](Strings::language).
+    pub locale: String,
     // A text field's or a selection's menu and toolbar.
     pub cut: String,
     pub copy: String,
@@ -61,6 +65,7 @@ impl Strings {
         let s = |t: &str| t.to_string();
         Strings {
             language: s("en"),
+            locale: s("en"),
             cut: s("Cut"),
             copy: s("Copy"),
             paste: s("Paste"),
@@ -95,6 +100,7 @@ impl Strings {
         let s = |t: &str| t.to_string();
         Strings {
             language: s("tr"),
+            locale: s("tr"),
             cut: s("Kes"),
             copy: s("Kopyala"),
             paste: s("Yapıştır"),
@@ -124,14 +130,58 @@ impl Strings {
         }
     }
 
-    /// A language as the platform names it ("tr", "tr-TR", "tr_TR.UTF-8"): Turkish's, else English's.
+    /// A language as the platform names it ("tr", "tr-TR", "tr_TR.UTF-8"): Turkish's, else English's, with that
+    /// language as their [`locale`](Strings::locale).
     pub fn for_language(language: &str) -> Strings {
         let b = language.as_bytes();
         let turkish = b.len() >= 2
             && b[0].eq_ignore_ascii_case(&b't')
             && b[1].eq_ignore_ascii_case(&b'r')
             && (b.len() == 2 || !b[2].is_ascii_alphabetic());
-        if turkish { Strings::turkish() } else { Strings::english() }
+        let strings = if turkish { Strings::turkish() } else { Strings::english() };
+        Strings { locale: language_tag(language), ..strings }
+    }
+}
+
+/// A platform's language name ("pt_BR.UTF-8", "de-DE", "sr_RS@latin", "zh-Hant-TW") in BCP 47's form: its language
+/// in lower case, its script and region as BCP 47 writes them ("pt-BR", "zh-Hant-TW"); English's for none (an empty
+/// one, POSIX's "C").
+pub fn language_tag(name: &str) -> String {
+    let name = name.split(['.', '@']).next().unwrap_or("");
+    let mut parts = name.split(['-', '_']).filter(|p| !p.is_empty());
+    let language = match parts.next() {
+        Some(l) if l.chars().all(|c| c.is_ascii_alphabetic()) && l != "C" && !l.eq_ignore_ascii_case("posix") => {
+            l.to_ascii_lowercase()
+        }
+        _ => return "en".to_string(),
+    };
+    let mut tag = language;
+    for part in parts {
+        let alpha = part.chars().all(|c| c.is_ascii_alphabetic());
+        if alpha && part.len() == 4 {
+            // (a script: title case)
+            tag.push('-');
+            tag.push_str(&part[..1].to_ascii_uppercase());
+            tag.push_str(&part[1..].to_ascii_lowercase());
+        } else if (alpha && part.len() == 2) || (part.len() == 3 && part.chars().all(|c| c.is_ascii_digit())) {
+            tag.push('-');
+            tag.push_str(&part.to_ascii_uppercase());
+        } else {
+            break;
+        }
+    }
+    tag
+}
+
+impl Strings {
+    /// Its [`locale`](Strings::locale)'s language (`pt` of `pt-BR`).
+    pub fn locale_language(&self) -> &str {
+        self.locale.split('-').next().unwrap_or("")
+    }
+
+    /// Its [`locale`](Strings::locale)'s region (`BR` of `pt-BR`), or empty.
+    pub fn locale_region(&self) -> &str {
+        self.locale.split('-').skip(1).find(|p| p.len() != 4).unwrap_or("")
     }
 }
 

@@ -12,7 +12,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 use kompoz::ui::input::PointerType;
 
 /// A node's bounds in the root, unclipped (px; the rule's density is 1).

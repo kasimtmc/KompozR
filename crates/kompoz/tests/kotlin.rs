@@ -6,7 +6,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 
 // The Counter in Kotlin's syntax, its button a Kotlin-defined clickable Box (Material's Button is stage 12).
 kompoz! {

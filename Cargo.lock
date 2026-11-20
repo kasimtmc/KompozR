@@ -357,7 +357,9 @@ dependencies = [
  "kompoz-gpu",
  "kompoz-graphics",
  "kompoz-kotlin-macro",
+ "kompoz-material-icons-core",
  "kompoz-material-ripple",
+ "kompoz-material3",
  "kompoz-platform",
  "kompoz-runtime",
  "kompoz-test",
@@ -463,6 +465,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompoz-material-icons-core"
+version = "0.1.0"
+dependencies = [
+ "kompoz-graphics",
+ "kompoz-runtime",
+]
+
+[[package]]
 name = "kompoz-material-ripple"
 version = "0.1.0"
 dependencies = [
@@ -470,8 +480,25 @@ dependencies = [
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-graphics",
+ "kompoz-material3",
  "kompoz-runtime",
  "kompoz-test",
+ "kompoz-ui",
+]
+
+[[package]]
+name = "kompoz-material3"
+version = "0.1.0"
+dependencies = [
+ "kompoz-animation",
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-material-icons-core",
+ "kompoz-material-ripple",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-text",
  "kompoz-ui",
 ]
 
@@ -1193,6 +1220,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "miniz_oxide 0.9.1",
  "proc-macro2",
  "quote",
  "syn 3.0.10",

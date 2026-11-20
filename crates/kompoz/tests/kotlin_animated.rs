@@ -13,7 +13,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 
 fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
     rule.on_node_with_tag(tag).get_unclipped_bounds_in_root()

@@ -9,7 +9,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 use kompoz::ui::media_query::media_query;
 
 /// A node's bounds in the root: x, y, width, height (px; the test rule's density is 1).

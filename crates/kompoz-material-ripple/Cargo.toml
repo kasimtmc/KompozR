@@ -18,6 +18,8 @@ kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-ui = { path = "../kompoz-ui" }
 
 [dev-dependencies]
+# (material3's ripple(), the ripple indication its tests give)
+kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-test = { path = "../kompoz-test" }
 
 [[test]]

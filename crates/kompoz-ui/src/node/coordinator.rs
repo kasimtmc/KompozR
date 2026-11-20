@@ -892,6 +892,11 @@ impl NodeCoordinator {
         self.layout_node().and_then(|n| n.owner()).map_or(Offset::Zero, |o| o.window_offset())
     }
 
+    /// Where the host's window is on the screen.
+    pub(crate) fn window_position_on_screen(&self) -> Offset {
+        self.layout_node().and_then(|n| n.owner()).map_or(Offset::Zero, |o| o.window_position_on_screen())
+    }
+
     /// The size of the host's window (its root's size; a popup's coordinates are the window's too).
     pub(crate) fn window_size(&self) -> kompoz_graphics::IntSize {
         let root = self.layout_node().and_then(|n| n.owner()).and_then(|o| o.root());

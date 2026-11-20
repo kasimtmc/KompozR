@@ -1,15 +1,15 @@
 //! The C++ Kompoz's Kotlin-syntax tests (tests/kompozable_tests.cpp) that stage 9's Kotlin takes, ported: the same
 //! Kotlin (as Compose writes it where the C++ Kompoz's was looser) through `kompoz!` and `kompoz_file!`, the same
-//! behaviour asserted. What they use of later stages (data classes and enums, Material, SubcomposeLayout,
-//! anchored dragging, object expressions) is left out or written as Rust types Kotlin calls, as
-//! tools/stage9-followups.md lists.
+//! behaviour asserted. What they use of later stages (data classes and enums, Material's components, object
+//! expressions) is left out or written as Rust types Kotlin calls, as tools/stage9-followups.md lists; Material's
+//! theme (AppTheme, the inbox's dark surface) is material3's.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text, is_heading};
+use kompoz::test::{KompozTestRule, is_heading};
 use kompoz::ui::semantics::SemanticsProperties;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -96,7 +96,7 @@ fn rust_calls_the_modules_kotlin() {
     rule.on_node_with_text("> çıkartma:3").assert_exists();
 }
 
-// ---- lazy_items_effects_and_locals (Material's theme is stage 12's) -----------------------------------------------
+// ---- lazy_items_effects_and_locals ------------------------------------------------------------------------------
 
 /// A mail of the inbox: no `==`, so a list of it is never compared and its composable isn't skipped.
 #[derive(Clone, KotlinProperties)]
@@ -105,19 +105,19 @@ pub struct Mail {
 }
 
 kompoz! {
-    val LocalInk = compositionLocalOf { Color.Black }
-
     @Kompozable
     fun Inbox(mails: List<Mail>, log: (String) -> Unit) {
         DisposableEffect(mails.size) {
             log("açıldı ${mails.size}")
             onDispose { log("kapandı") }
         }
-        CompositionLocalProvider(LocalInk provides Color.Red) {
-            LazyColumn(modifier = Modifier.height(300.dp)) {
-                item { Text("Gelen kutusu") }
-                itemsIndexed(mails) { index, mail ->
-                    Text("$index: ${mail.from}", modifier = Modifier.testTag("mürekkep $index ${LocalInk.current == Color.Red}"))
+        MaterialTheme(colorScheme = darkColorScheme()) {
+            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface) {
+                CompositionLocalProvider(LocalContentColor provides Color.Red) {
+                    LazyColumn(modifier = Modifier.height(300.dp)) {
+                        item { Text("Gelen kutusu") }
+                        itemsIndexed(mails) { index, mail -> Text("$index: ${mail.from}", color = LocalContentColor.current) }
+                    }
                 }
             }
         }
@@ -138,7 +138,14 @@ fn effects_and_locals() {
     }));
     rule.on_node_with_text("Gelen kutusu").assert_exists();
     rule.on_node_with_text("1: ali").assert_exists();
-    rule.on_node_with_tag("mürekkep 1 true").assert_exists();
+    // (the mails in the content color provided over the dark surface's)
+    let canvas = rule.draw();
+    let mail = canvas.texts.iter().position(|t| t == "1: ali").unwrap();
+    assert_eq!(canvas.colors[mail], Color::Red);
+    assert!(
+        canvas.path_colors.contains(&dark_color_scheme().surface)
+            || canvas.rect_colors.contains(&dark_color_scheme().surface)
+    );
     show.set_value(false);
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["açıldı 2", "kapandı"]);
@@ -234,7 +241,7 @@ fn lambdas_with_receivers() {
     assert!(!drawn.transforms.is_empty() || !drawn.layer_transforms.is_empty(), "the rotations");
 }
 
-// ---- top_level_vals_and_content_by_name (Material's theme is stage 12's) -----------------------------------------
+// ---- top_level_vals_and_content_by_name -------------------------------------------------------------------------
 
 /// Kotlin's `data class Spacing(val small: Dp = 4.dp, val large: Dp = 16.dp)`, Rust's here.
 #[derive(Clone, Debug, PartialEq, KotlinProperties)]
@@ -273,12 +280,19 @@ kompoz! {
     private val Purple = Color(0xFF6650A4)
 
     @Kompozable
+    fun AppTheme(content: @Kompozable () -> Unit) {
+        MaterialTheme(colorScheme = lightColorScheme(), content = content)
+    }
+
+    @Kompozable
     fun Locals() {
-        Column {
-            SpacedTitle("geniş")
-            CompositionLocalProvider(LocalSpacing provides Spacing(2.dp, 8.dp), content = { SpacedTitle("dar") })
-            CompositionLocalProvider(LocalAccount provides Account("Ada")) {
-                Box(modifier = Modifier.background(Purple), content = { Text(LocalAccount.current.name) })
+        AppTheme {
+            Column {
+                SpacedTitle("geniş")
+                CompositionLocalProvider(LocalSpacing provides Spacing(2.dp, 8.dp), content = { SpacedTitle("dar") })
+                CompositionLocalProvider(LocalAccount provides Account("Ada")) {
+                    Box(modifier = Modifier.background(Purple), content = { Text(LocalAccount.current.name) })
+                }
             }
         }
     }
@@ -289,6 +303,10 @@ fn top_level_vals_and_content_by_name() {
     rule.on_node_with_text("geniş 16.0.dp selam !").assert_exists();
     rule.on_node_with_text("dar 8.0.dp selam !").assert_exists();
     rule.on_node_with_text("Ada").assert_exists();
+    // (AppTheme's body large: 16 sp)
+    let canvas = rule.draw();
+    let ada = canvas.texts.iter().position(|t| t == "Ada").unwrap();
+    assert_eq!(canvas.text_styles[ada].font_size, 16.0);
     assert_eq!(Purple.with(|c| *c), Color(0xFF6650A4_i64));
     // (no provider, outside a composition: its default, which throws as Kotlin's error() does)
     let message = common::thrown(|| LocalAccount.current()).unwrap_or_default();

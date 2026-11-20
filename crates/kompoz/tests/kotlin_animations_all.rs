@@ -10,7 +10,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 
 /// (The file's `enum class Panel { Closed, Open }`: enum classes come with stage 14's Kotlin syntax.)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

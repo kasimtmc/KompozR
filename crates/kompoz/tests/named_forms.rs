@@ -39,7 +39,7 @@ mod common;
 
 use kompoz::foundation::lazy::grid::LazyGridItemSpanScope;
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 use kompoz::ui::platform::ViewConfiguration;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

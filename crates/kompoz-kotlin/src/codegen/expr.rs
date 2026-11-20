@@ -480,10 +480,45 @@ impl Gen<'_, '_> {
         }
     }
 
+    /// The path of a Material icon theme `e` names (`Icons.Filled`, `Icons.AutoMirrored.Outlined`, `Icons.Default`):
+    /// `Icons` being none of the file's, its locals' or receivers' names.
+    pub(crate) fn icon_theme(&self, e: &Expr) -> Option<Vec<String>> {
+        const THEMES: [&str; 6] = ["Filled", "Outlined", "Rounded", "Sharp", "TwoTone", "Default"];
+        let ExprKind::Member { receiver, safe: false, name: theme } = &e.kind else { return None };
+        if !THEMES.contains(&theme.name.as_str()) {
+            return None;
+        }
+        let mut path = match &receiver.kind {
+            ExprKind::Name(n) if n.name == "Icons" => vec![n.name.clone()],
+            ExprKind::Member { receiver: icons, safe: false, name: mirrored } if mirrored.name == "AutoMirrored" => {
+                match &icons.kind {
+                    ExprKind::Name(n) if n.name == "Icons" => vec![n.name.clone(), mirrored.name.clone()],
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let icons_is_ours = !self.is_local("Icons")
+            && !self.file.vals.contains_key("Icons")
+            && !self.receivers.iter().any(|r| members_of(&r.ty, "Icons").next().is_some());
+        if !icons_is_ours {
+            return None;
+        }
+        path.push(theme.name.clone());
+        Some(path)
+    }
+
     /// `a.b` read: a type's constant or entry (`Color.Red` → `Color::Red`), an object's member, a value's property
     /// (`size.width` → `size.width()`), a kt shim's (`s.length` → `KtStr::length(&s)`); `a?.b` through `safe!`.
     fn member(&mut self, receiver: &Expr, safe: bool, name: &Ident, loc: Loc) -> Out {
         let span = self.span(loc);
+        // A Material icon (`Icons.Filled.Add`, `Icons.AutoMirrored.Filled.ArrowBack`): the icons crates' function of
+        // its theme's module (`Icons::Filled::Add()`), not an item of the index (thousands of them, and more as
+        // icon sets join `Icons`' themes).
+        if !safe && let Some(theme) = self.icon_theme(receiver) {
+            let path = theme.iter().chain([&name.name]).map(|n| self.name_ident(n, name.loc)).collect::<Vec<_>>();
+            return Out::plain(quote_spanned!(span=> #(#path)::*()), Ty::named("ImageVector"));
+        }
         if let Some(q) = self.qualifier(receiver) {
             return self.qualified(&q, receiver, name, loc);
         }
@@ -1142,6 +1177,9 @@ impl Gen<'_, '_> {
                         "sp" | "em" => return Ty::named("TextUnit"),
                         _ => {}
                     }
+                }
+                if !*safe && self.icon_theme(receiver).is_some() {
+                    return Ty::named("ImageVector");
                 }
                 if let Some(q) = self.qualifier(receiver) {
                     if name.name == "Companion" {

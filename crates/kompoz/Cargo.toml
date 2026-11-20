@@ -22,7 +22,9 @@ kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-kotlin-macro = { path = "../kompoz-kotlin-macro" }
+kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
 kompoz-material-ripple = { path = "../kompoz-material-ripple" }
+kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-platform = { path = "../kompoz-platform" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-test = { path = "../kompoz-test", optional = true }
@@ -166,6 +168,12 @@ harness = false
 # Foundation's styles in Kotlin's syntax (Style { … }, styleable, style states and animations)
 [[test]]
 name = "kotlin_style"
+harness = false
+
+# Material's theme in Kotlin's syntax (theming_as_compose_writes_it; material3's theme, color, type and Surface
+# samples from a .kt file).
+[[test]]
+name = "kotlin_material_theme"
 harness = false
 
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file

@@ -157,6 +157,8 @@ pub(crate) struct Owner {
     needs_draw: Cell<bool>,
     semantics_dirty: Cell<bool>,
     window_offset: Cell<Offset>,
+    /// Where the window is on the screen (its top left), where the platform tells.
+    window_position_on_screen: Cell<Offset>,
     /// Running the layout check: nodes' measure and placement callbacks aren't told.
     pub(crate) checking: Cell<bool>,
     /// How many times a node was measured and placed (the tests read it: C++'s relaidOutCount).
@@ -226,6 +228,7 @@ impl Owner {
             needs_draw: Cell::new(true),
             semantics_dirty: Cell::new(true),
             window_offset: Cell::new(Offset::Zero),
+            window_position_on_screen: Cell::new(Offset::Zero),
             checking: Cell::new(false),
             relaid_out: Cell::new(0),
             end_apply: RefCell::new(Vec::new()),
@@ -309,6 +312,14 @@ impl Owner {
 
     pub(crate) fn set_window_offset(&self, offset: Offset) {
         self.window_offset.set(offset);
+    }
+
+    pub(crate) fn window_position_on_screen(&self) -> Offset {
+        self.window_position_on_screen.get()
+    }
+
+    pub(crate) fn set_window_position_on_screen(&self, position: Offset) {
+        self.window_position_on_screen.set(position);
     }
 
     /// A node came into the tree: a popup's root is one of its overlays.

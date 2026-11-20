@@ -1,8 +1,7 @@
 //! The ripple node, as Compose's material-ripple: ripples spreading from presses and fading once let go, unbounded
 //! ones from the middle, the state layer for hovers and focuses, a source's ripples on another node, inside the
 //! shapes they are drawn in (the C++ Kompoz's ripple tests on Compose's ripple: given through `LocalIndication`, as
-//! the default stays Compose's DefaultDebugIndication; a test indication stands in for material3's `ripple()`,
-//! stage 12's, with its alphas).
+//! the default stays Compose's DefaultDebugIndication; material3's `ripple()`, with its alphas).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -21,44 +20,10 @@ use kompoz_ui::*;
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// material3's `ripple(bounded, radius, color)` (stage 12's) as a test makes it: the ripple node in `color` (black
-/// when unspecified) with material3's alphas (RippleDefaults.RippleAlpha).
-struct TestRipple {
-    bounded: bool,
-    radius: Dp,
-    color: Color,
-}
-
-/// (as Kotlin's value classes compare: `Dp.Unspecified` equal to itself)
-impl PartialEq for TestRipple {
-    fn eq(&self, other: &Self) -> bool {
-        self.bounded == other.bounded
-            && self.radius.0.to_bits() == other.radius.0.to_bits()
-            && (self.color == other.color || self.color.is_unspecified() && other.color.is_unspecified())
-    }
-}
-
-impl Indication for TestRipple {
-    fn as_node_factory(&self) -> Option<&dyn IndicationNodeFactory> {
-        Some(self)
-    }
-}
-
-impl IndicationNodeFactory for TestRipple {
-    fn create(&self, interaction_source: InteractionSource) -> Box<dyn ModifierNode> {
-        let color = if self.color.is_specified() { self.color } else { Color::Black };
-        create_ripple_modifier_node(
-            interaction_source,
-            self.bounded,
-            self.radius,
-            ColorProducer::new(move || color),
-            || RippleAlpha::new(0.16, 0.1, 0.08, 0.1),
-        )
-    }
-}
-
-fn ripple(bounded: bool, radius: Dp, color: Color) -> Rc<dyn Indication> {
-    Rc::new(TestRipple { bounded, radius, color })
+/// material3's `ripple(bounded, radius, color)`: the ripple node in `color` (the content color, black, when
+/// unspecified) at material3's alphas (RippleDefaults.RippleAlpha).
+fn material_ripple(bounded: bool, radius: Dp, color: Color) -> Rc<dyn Indication> {
+    named_args!(kompoz_material3::ripple(bounded = bounded, radius = radius, color = color))
 }
 
 /// An indication that isn't a node factory: nothing shown (the C++ `indication = false` given as a local).
@@ -112,13 +77,17 @@ fn ripple_spreads_from_the_press_and_fades_once_let_go() {
     // counterpart (left out).
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         KompozitionLocalProvider(
-            &[LocalIndication.provides(ripple(true, Dp::Unspecified, Color::Unspecified))],
+            &[LocalIndication.provides(material_ripple(true, Dp::Unspecified, Color::Unspecified))],
             || {
                 Column(|| {
                     Box(Modifier.size_wh(200.dp(), 100.dp()).clickable(|| {}).test_tag("kutu"));
                     Box(Modifier
                         .size(100.dp())
-                        .clickable_indication(None, Some(ripple(false, 30.dp(), Color::Unspecified)), on_click = || {})
+                        .clickable_indication(
+                            None,
+                            Some(material_ripple(false, 30.dp(), Color::Unspecified)),
+                            on_click = || {},
+                        )
                         .test_tag("sınırsız"));
                     // (C++'s LocalIndication provides false: Compose's clickable throws for a LocalIndication that isn't
                     // a node factory, so none given to it)
@@ -209,12 +178,16 @@ fn unbounded_indications_hover_in_a_circle_of_their_radius() {
             Box(Modifier
                 .size(24.dp())
                 .hoverable(s.clone())
-                .indication(&s, Some(ripple(false, 20.dp(), Color::Unspecified)))
+                .indication(&s, Some(material_ripple(false, 20.dp(), Color::Unspecified)))
                 .test_tag("simge"));
             // Unbounded with no radius: to its corners.
             Box(Modifier
                 .size(30.dp())
-                .clickable_indication(None, Some(ripple(false, Dp::Unspecified, Color::Unspecified)), on_click = || {})
+                .clickable_indication(
+                    None,
+                    Some(material_ripple(false, Dp::Unspecified, Color::Unspecified)),
+                    on_click = || {},
+                )
                 .test_tag("geniş"));
         });
     }));
@@ -251,7 +224,7 @@ fn indication_shows_a_sources_ripple_on_another_node() {
                 .test_tag("alan"),
             content_alignment = Alignment::Center,
             content = move || {
-                let red = ripple(true, Dp::Unspecified, Color::new(1.0, 0.0, 0.0, 1.0));
+                let red = material_ripple(true, Dp::Unspecified, Color::new(1.0, 0.0, 0.0, 1.0));
                 Box(Modifier.size(48.dp()).clip(CircleShape).indication(&s, Some(red)).test_tag("simge"));
             },
         );
@@ -312,7 +285,7 @@ fn ripples_keep_to_the_clip_they_are_drawn_in() {
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         let (t, tri, s) = (t.clone(), tri.clone(), s.clone());
         KompozitionLocalProvider(
-            &[LocalIndication.provides(ripple(true, Dp::Unspecified, Color::Unspecified))],
+            &[LocalIndication.provides(material_ripple(true, Dp::Unspecified, Color::Unspecified))],
             move || {
                 let (t, tri, s) = (t.clone(), tri.clone(), s.clone());
                 KompozitionLocalProvider(&[LocalLayoutDirection.provides(LayoutDirection::Rtl)], move || {
@@ -338,7 +311,7 @@ fn ripples_keep_to_the_clip_they_are_drawn_in() {
                                 Some(Rc::new(NoIndication) as Rc<dyn Indication>),
                                 on_click = || {},
                             )
-                            .indication(&s, Some(ripple(true, Dp::Unspecified, Color::Unspecified)))
+                            .indication(&s, Some(material_ripple(true, Dp::Unspecified, Color::Unspecified)))
                             .test_tag("katman"));
                     });
                 });

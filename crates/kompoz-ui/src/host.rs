@@ -275,6 +275,7 @@ impl KompozHost {
         let back = BackDispatcherRef(Rc::downgrade(&self.back));
         let font_family_resolver = self.font_family_resolver.clone();
         let text_toolbar: Rc<dyn TextToolbar> = Rc::new(PlatformTextToolbar::new(platform.clone()));
+        let accessibility_manager: Rc<dyn AccessibilityManager> = Rc::new(DefaultAccessibilityManager);
         let text_input = self.text_input.clone();
         let media = self.media.clone();
         let deep_links = self.deep_links.clone();
@@ -304,6 +305,7 @@ impl KompozHost {
                 LocalDynamicTonalPalette.provides(env.dynamic_palette),
                 LocalWallpaperTonalPalette.provides(env.wallpaper_palette),
                 LocalTextToolbar.provides_unequal(text_toolbar.clone()),
+                LocalAccessibilityManager.provides_unequal(Some(accessibility_manager.clone())),
                 LocalSoftwareKeyboardController.provides(SoftwareKeyboardController::new(text_input.clone())),
                 LocalPlatform.provides(platform.clone()),
                 LocalFocusManager.provides(focus_manager.clone()),
@@ -488,6 +490,14 @@ impl KompozHost {
     /// Where the window's content is on the screen's (what `position_in_window` adds).
     pub fn set_window_offset(&self, offset: Offset) {
         self.owner.set_window_offset(offset);
+        self.owner.dispatch_root_positioned();
+    }
+
+    /// Where the window's top left is on the screen, px (what `local_to_screen` and `position_on_screen` add to a
+    /// point of the window; Compose desktop's window location). A platform that can't tell (Wayland) leaves it at
+    /// zero.
+    pub fn set_window_position_on_screen(&self, position: Offset) {
+        self.owner.set_window_position_on_screen(position);
         self.owner.dispatch_root_positioned();
     }
 

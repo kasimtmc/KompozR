@@ -12,7 +12,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, RecordingCanvas, Text};
+use kompoz::test::{KompozTestRule, RecordingCanvas};
 use kompoz::ui::input::PointerType;
 use kompoz::ui::window::PopupPositionProvider;
 use std::rc::Rc;
@@ -24,32 +24,6 @@ fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
 
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() < 0.5
-}
-
-/// material3's `ripple()` (stage 12's), as a test makes it of the ripple node: black, material3's alphas.
-#[derive(PartialEq)]
-struct TestRipple;
-
-impl Indication for TestRipple {
-    fn as_node_factory(&self) -> Option<&dyn IndicationNodeFactory> {
-        Some(self)
-    }
-}
-
-impl IndicationNodeFactory for TestRipple {
-    fn create(&self, interaction_source: InteractionSource) -> Box<dyn ModifierNode> {
-        create_ripple_modifier_node(
-            interaction_source,
-            true,
-            Dp::Unspecified,
-            ColorProducer::new(|| Color::Black),
-            || RippleAlpha::new(0.16, 0.1, 0.08, 0.1),
-        )
-    }
-}
-
-fn ripple() -> Rc<dyn Indication> {
-    Rc::new(TestRipple)
 }
 
 // ---- layouts_as_compose_writes_them (kompozable_tests.cpp 2124-2145): FlexBox, Grid, FlowRow ------------------

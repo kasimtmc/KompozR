@@ -1,5 +1,6 @@
-//! A test `Text`: foundation's [`BasicText`] in a font size (Material's Text, which takes its style from a theme,
-//! is a later stage's), measured by the host's font family resolver (the test rule's is the
+//! A test `Text`: foundation's [`BasicText`] in a font size, for the tests of the crates below Material
+//! (kompoz-material3's `Text` takes its style from a theme; Kotlin's `Text` is that one, this isn't in the Kotlin
+//! index), measured by the host's font family resolver (the test rule's is the
 //! [`FakeBackend`](kompoz_text::FakeBackend)'s: C++'s FakeTextMeasurer's numbers).
 
 use kompoz_foundation::text::BasicText;

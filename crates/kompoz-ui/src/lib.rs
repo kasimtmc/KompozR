@@ -36,6 +36,7 @@ pub mod strings;
 pub mod text;
 pub mod text_input;
 pub mod unit;
+pub mod util;
 pub mod window;
 
 pub use alignment::{

@@ -1252,6 +1252,36 @@ impl PartialEq for ImeController {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Accessibility
+
+/// What the platform's accessibility settings say (Compose's `androidx.compose.ui.platform.AccessibilityManager`):
+/// how long what times out by itself (a snackbar, a tooltip) stays for a user who needs longer.
+pub trait AccessibilityManager {
+    /// How long something shown for `original_timeout_millis` should stay given what it holds: icons, text,
+    /// controls (Compose's `calculateRecommendedTimeoutMillis`; `Long.MAX_VALUE` stays until dismissed).
+    ///
+    /// Kotlin: `calculateRecommendedTimeoutMillis(originalTimeoutMillis: Long, containsIcons: Boolean = false, containsText: Boolean = false, containsControls: Boolean = false)`
+    fn calculate_recommended_timeout_millis(
+        &self,
+        original_timeout_millis: i64,
+        contains_icons: bool,
+        contains_text: bool,
+        contains_controls: bool,
+    ) -> i64;
+}
+
+/// The desktop's accessibility manager (Compose for desktop's `DefaultAccessibilityManager`): what times out does
+/// so when it was going to.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DefaultAccessibilityManager;
+
+impl AccessibilityManager for DefaultAccessibilityManager {
+    fn calculate_recommended_timeout_millis(&self, original_timeout_millis: i64, _: bool, _: bool, _: bool) -> i64 {
+        original_timeout_millis
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // The locals
 
 /// Pixels per dp and the font scale (Compose's LocalDensity).
@@ -1313,6 +1343,25 @@ pub static LocalDynamicTonalPalette: KompozitionLocal<Option<DynamicTonalPalette
 /// Palettes made from the wallpaper's own colors where the platform reads them (C++'s
 /// `setWallpaperTonalPalette`): what a wallpaper color scheme reads; none where it can't.
 pub static LocalWallpaperTonalPalette: KompozitionLocal<Option<DynamicTonalPalette>> = KompozitionLocal::new(|| None);
+/// The platform's accessibility settings (Compose's LocalAccessibilityManager): the host's
+/// ([`DefaultAccessibilityManager`], as Compose for desktop's owner gives); none outside a host.
+pub static LocalAccessibilityManager: KompozitionLocal<Option<Rc<dyn AccessibilityManager>>> =
+    KompozitionLocal::with_policy(SnapshotMutationPolicy::new(same_accessibility_manager), || None);
+
+fn same_accessibility_manager(
+    a: &Option<Rc<dyn AccessibilityManager>>,
+    b: &Option<Rc<dyn AccessibilityManager>>,
+) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Whether the composition is being inspected (Compose's LocalInspectionMode: a preview, a layout inspector): what
+/// can't run there (a wallpaper read, an animation's clock) does less. False unless provided.
+pub static LocalInspectionMode: KompozitionLocal<bool> = KompozitionLocal::new_static(|| false);
 /// The platform's callbacks, for what calls them directly (images, assets, autofill).
 pub static LocalPlatform: KompozitionLocal<PlatformHandle> = KompozitionLocal::new_static(PlatformHandle::default);
 /// What text resolves its font families with, and shapes and measures through (Compose's

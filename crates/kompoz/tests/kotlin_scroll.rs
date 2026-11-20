@@ -8,7 +8,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 use kompoz::ui::input::PointerType;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

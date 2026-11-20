@@ -28,7 +28,9 @@ pub use kompoz_coroutines as coroutines;
 pub use kompoz_foundation as foundation;
 pub use kompoz_gpu as gpu;
 pub use kompoz_graphics as graphics;
+pub use kompoz_material_icons_core as material_icons_core;
 pub use kompoz_material_ripple as material_ripple;
+pub use kompoz_material3 as material3;
 pub use kompoz_platform as platform;
 pub use kompoz_runtime as runtime;
 /// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
@@ -41,12 +43,67 @@ pub use kompoz_ui as ui;
 pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
 pub use kompoz_runtime::{kompozable, kompozable_block, kompozable_lambda, named, named_args};
 
+/// Material's icons (Compose's `Icons`), a module a theme, a function an icon: `Icons::Filled::Add()`, Kotlin's
+/// `Icons.Filled.Add`. The core icons' (kompoz-material-icons-core); the extended set's join each theme's module here
+/// as it comes (`pub use kompoz_material_icons_extended::Icons::Filled::*;` beside core's).
+#[allow(non_snake_case)]
+pub mod Icons {
+    /// Compose's `Icons.Filled`.
+    pub mod Filled {
+        pub use kompoz_material_icons_core::Icons::Filled::*;
+    }
+    /// Compose's `Icons.Outlined`.
+    pub mod Outlined {
+        pub use kompoz_material_icons_core::Icons::Outlined::*;
+    }
+    /// Compose's `Icons.Rounded`.
+    pub mod Rounded {
+        pub use kompoz_material_icons_core::Icons::Rounded::*;
+    }
+    /// Compose's `Icons.Sharp`.
+    pub mod Sharp {
+        pub use kompoz_material_icons_core::Icons::Sharp::*;
+    }
+    /// Compose's `Icons.TwoTone`.
+    pub mod TwoTone {
+        pub use kompoz_material_icons_core::Icons::TwoTone::*;
+    }
+    /// Compose's `Icons.Default`: the filled ones.
+    pub use Filled as Default;
+
+    /// Compose's `Icons.AutoMirrored`: mirrored right to left.
+    pub mod AutoMirrored {
+        /// Compose's `Icons.AutoMirrored.Filled`.
+        pub mod Filled {
+            pub use kompoz_material_icons_core::Icons::AutoMirrored::Filled::*;
+        }
+        /// Compose's `Icons.AutoMirrored.Outlined`.
+        pub mod Outlined {
+            pub use kompoz_material_icons_core::Icons::AutoMirrored::Outlined::*;
+        }
+        /// Compose's `Icons.AutoMirrored.Rounded`.
+        pub mod Rounded {
+            pub use kompoz_material_icons_core::Icons::AutoMirrored::Rounded::*;
+        }
+        /// Compose's `Icons.AutoMirrored.Sharp`.
+        pub mod Sharp {
+            pub use kompoz_material_icons_core::Icons::AutoMirrored::Sharp::*;
+        }
+        /// Compose's `Icons.AutoMirrored.TwoTone`.
+        pub mod TwoTone {
+            pub use kompoz_material_icons_core::Icons::AutoMirrored::TwoTone::*;
+        }
+        /// Compose's `Icons.AutoMirrored.Default`: the filled ones.
+        pub use Filled as Default;
+    }
+}
+
 /// What an app writes with: the runtime (states, `remember`, effects, locals, the macros), coroutines (effects,
 /// flows), animation (Animatable, specs, easings, decays), graphics (units — `16.dp()` —, colors, geometry, shapes,
 /// brushes, paths, images), text (styles, fonts, annotated strings), the UI core (`Modifier`, `Alignment`, `Layout`,
 /// the host's types, the composition locals, `Role`), foundation (Box, Row, Column, BasicText, the modifiers' traits,
-/// gestures, interactions), the ripple node (material-ripple's), the app entry (`App`), and the Kotlin syntax's
-/// macros.
+/// gestures, interactions), the ripple node (material-ripple's), Material 3 (`MaterialTheme`, `Text`, `Surface`,
+/// `Icon`, …) and its icons (`Icons`), the app entry (`App`), and the Kotlin syntax's macros.
 ///
 /// The crates' roots are taken whole (their modules with them); where two of them use a name, the one an app means
 /// is named here: the modules `draw` and `input` are the UI's (`DrawScope`, pointer input), `shape` and `unit`
@@ -57,9 +114,16 @@ pub mod prelude {
     pub use kompoz_foundation::prelude::*;
     pub use kompoz_graphics::*;
     pub use kompoz_material_ripple::prelude::*;
+    pub use kompoz_material3::prelude::*;
     pub use kompoz_runtime::*;
     pub use kompoz_text::*;
     pub use kompoz_ui::*;
+
+    // (Material's icons, Compose's `Icons`, and building one's own; Material's names win over the lower crates' where
+    // both have one, as in a Compose app's imports)
+    pub use crate::Icons;
+    pub use kompoz_material_icons_core::{MaterialPathBuilder, material_icon};
+    pub use kompoz_material3::{Icon, Surface, Text};
 
     pub use kompoz_graphics::{shape, unit};
     pub use kompoz_ui::{draw, input};
@@ -88,6 +152,9 @@ pub mod prelude {
         LocalSystemTheme, LocalTextToolbar, LocalUriHandler, LocalViewConfiguration, LocalWallpaperTonalPalette,
         LocalWindowInfo,
     };
+    // (the system's theme, Compose's androidx.compose.foundation.isSystemInDarkTheme: what a theme picks its scheme
+    // by)
+    pub use kompoz_ui::platform::is_system_in_dark_theme;
     pub use kompoz_ui::semantics::Role;
     // (a layer's transform origin, Compose's androidx.compose.ui.graphics.TransformOrigin: `scaleIn(transformOrigin =
     // TransformOrigin(0f, 0f))`)

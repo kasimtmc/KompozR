@@ -375,6 +375,26 @@ impl NodeCx {
         self.cell.layout_node().map_or(LayoutDirection::Ltr, |n| n.layout_direction())
     }
 
+    /// Its layout's density, the node being in a layout (Compose's `DelegatableNode.requireDensity()`): panics
+    /// otherwise.
+    #[track_caller]
+    pub fn require_density(&self) -> Density {
+        self.require_layout_node().density()
+    }
+
+    /// Its layout's direction, the node being in a layout (Compose's `DelegatableNode.requireLayoutDirection()`):
+    /// panics otherwise.
+    #[track_caller]
+    pub fn require_layout_direction(&self) -> LayoutDirection {
+        self.require_layout_node().layout_direction()
+    }
+
+    /// The layout node it is in (Compose's `requireLayoutNode()`): panics if it is in none.
+    #[track_caller]
+    pub fn require_layout_node(&self) -> Rc<LayoutNode> {
+        self.cell.layout_node().expect("Cannot obtain node coordinator. Is the Modifier.Node attached?")
+    }
+
     /// The coordinates of the layout it belongs to (its coordinator: the layout node below it in the chain, or
     /// the layout's own).
     pub fn coordinates(&self) -> Option<LayoutCoordinates> {
@@ -855,6 +875,16 @@ impl NodeHandle {
     }
     pub fn layout_direction(&self) -> LayoutDirection {
         self.cx().map_or(LayoutDirection::Ltr, |c| c.layout_direction())
+    }
+    /// [`NodeCx::require_density`]: panics once the node is gone or outside a layout.
+    #[track_caller]
+    pub fn require_density(&self) -> Density {
+        self.cx().expect("Cannot obtain node coordinator. Is the Modifier.Node attached?").require_density()
+    }
+    /// [`NodeCx::require_layout_direction`]: panics once the node is gone or outside a layout.
+    #[track_caller]
+    pub fn require_layout_direction(&self) -> LayoutDirection {
+        self.cx().expect("Cannot obtain node coordinator. Is the Modifier.Node attached?").require_layout_direction()
     }
     pub fn coordinates(&self) -> Option<LayoutCoordinates> {
         self.cx().and_then(|c| c.coordinates())

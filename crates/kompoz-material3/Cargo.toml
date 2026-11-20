@@ -1,0 +1,42 @@
+[package]
+name = "kompoz-material3"
+description = "KompozR's Material 3 (androidx.compose.material3 1.5): the theme — color schemes (dynamic and from the wallpaper too), typography, shapes, motion —, Text, Surface, Icon, the ripple, dividers, scrims, the design tokens and texts in some 80 languages, and the components"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-animation = { path = "../kompoz-animation" }
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-material-ripple = { path = "../kompoz-material-ripple" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
+kompoz-test = { path = "../kompoz-test" }
+
+# The theme: color schemes (baseline, dynamic, wallpaper), MaterialTheme, typography, shapes, motion, the content
+# color, the scrollbar style (the C++ Kompoz's area T, Compose's behaviour).
+[[test]]
+name = "theme"
+harness = false
+
+# Text, ProvideTextStyle, Surface, Icon, Divider, Scrim, Label, the ripple, the minimum interactive size, the
+# internals the components share.
+[[test]]
+name = "components"
+harness = false
+
+# Label and the tooltips' base: the label following its component's interactions, the tooltip position providers,
+# the tooltip scope.
+[[test]]
+name = "label"
+harness = false

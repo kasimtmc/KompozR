@@ -13,7 +13,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 use kompoz::ui::draganddrop::DragAndDropTransferData;
 use kompoz::ui::input::{Key, KeyModifiers};
 use kompoz::ui::platform::PlatformCallbacks;

@@ -50,6 +50,9 @@ const API_CRATES: &[&str] = &[
     "kompoz-animation-graphics",
     "kompoz-foundation",
     "kompoz-material-ripple",
+    "kompoz-material3",
+    // (its icons are the generator's rule, `Icons.<theme>.<name>`, not items: what its `icons!` makes isn't read)
+    "kompoz-material-icons-core",
     "kompoz-test",
 ];
 
@@ -858,10 +861,16 @@ fn kotlin_index(packages: &[Package]) -> Result<String, String> {
         collect(&s.file.items, &cx, &mut scan);
     }
     let mut items = scan.items;
+    items.retain(|i| !NOT_KOTLIN.contains(&(i.krate.as_str(), i.rust.as_str())));
     items.sort();
     items.dedup();
     Ok(render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics))
 }
+
+/// Public items of the API crates that Kotlin doesn't call (by crate and Rust name): what Kotlin's name is another
+/// crate's item. kompoz-test's one-line `Text` (the lower crates' tests' stand-in) is Material's `Text` in Kotlin
+/// (stage 12's D9: Compose's `Text` is material3's, 14 sp outside a `MaterialTheme`).
+const NOT_KOTLIN: &[(&str, &str)] = &[("kompoz_test", "Text")];
 
 /// Expands, in place, the invocations of a file's own `macro_rules!` that make items from a type's name: a macro of
 /// one arm taking `$name:ident` (`transforms!(DrawScope);`, the transforms of each drawing scope). What such a

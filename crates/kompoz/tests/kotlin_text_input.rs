@@ -12,7 +12,7 @@ mod common;
 
 use kompoz::foundation::text::input::internal::{TextFieldEditUndoBehavior, TransformedTextFieldState};
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, Text};
+use kompoz::test::KompozTestRule;
 use std::cell::RefCell;
 use std::rc::Rc;
 

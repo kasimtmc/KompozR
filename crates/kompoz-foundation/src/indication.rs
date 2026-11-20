@@ -165,6 +165,12 @@ impl IndicationNode {
     pub fn create(factory: &dyn IndicationNodeFactory, interaction_source: InteractionSource) -> IndicationNode {
         IndicationNode(factory.create(interaction_source))
     }
+
+    /// A node made already (a design system's node a factory's node delegates to: material3's theme-aware
+    /// ripple delegating to the ripple node).
+    pub fn new(node: Box<dyn ModifierNode>) -> IndicationNode {
+        IndicationNode(node)
+    }
 }
 
 impl ModifierNode for IndicationNode {

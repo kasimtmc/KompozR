@@ -401,6 +401,20 @@ fn strings_and_right_to_left_languages() {
     assert_eq!(Strings::for_language("TR").language, "tr");
     assert_eq!(Strings::for_language("tra").language, "en");
     assert_eq!(Strings::for_language("").copy, "Copy");
+    // (the platform's language kept as a BCP 47 tag, for libraries with translations of their own)
+    assert_eq!(Strings::for_language("pt_BR.UTF-8").locale, "pt-BR");
+    assert_eq!(Strings::for_language("sr_RS@latin").locale, "sr-RS");
+    assert_eq!(Strings::for_language("zh_Hant_TW").locale, "zh-Hant-TW");
+    assert_eq!(
+        (Strings::for_language("zh_Hant_TW").locale_language(), Strings::for_language("zh-Hant-TW").locale_region()),
+        ("zh", "TW")
+    );
+    assert_eq!(
+        (Strings::for_language("de").language.as_str(), Strings::for_language("de").locale.as_str()),
+        ("en", "de")
+    );
+    assert_eq!(Strings::for_language("C").locale, "en");
+    assert_eq!(Strings::for_language("").locale, "en");
     for rtl in ["ar", "fa-IR", "he_IL.UTF-8", "ckb", "UR"] {
         assert!(is_rtl_language(rtl), "{rtl}");
     }
@@ -414,6 +428,58 @@ fn strings_and_right_to_left_languages() {
     rule.wait_for_idle();
     assert_eq!(taken(&log), ["Select all", "Tümünü seç"]);
     assert_eq!(rule.host().strings(), Strings::turkish());
+}
+
+fn accessibility_inspection_and_the_screen() {
+    // Compose's LocalAccessibilityManager (the desktop's: timeouts as they are), LocalInspectionMode (off unless
+    // provided), a layout's position on the screen (the window's position added), a node's required density and
+    // direction.
+    let log = new_log();
+    let l = log.clone();
+    let coordinates: Rc<RefCell<Option<LayoutCoordinates>>> = Rc::default();
+    let c = coordinates.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let manager = kompoz_ui::platform::LocalAccessibilityManager.current();
+        let timeout = manager.map(|m| m.calculate_recommended_timeout_millis(4000, true, true, false));
+        push(&l, format!("{timeout:?} {}", kompoz_ui::platform::LocalInspectionMode.current()));
+        let c = c.clone();
+        Box(modifier = Modifier.offset(10.dp(), 20.dp()).size(5.dp()).on_globally_positioned(move |co| {
+            *c.borrow_mut() = Some(co.clone());
+        }));
+    }));
+    assert_eq!(taken(&log), ["Some(4000) false"]);
+    assert!(kompoz_ui::platform::LocalAccessibilityManager.current().is_none());
+    let at = coordinates.borrow().clone().unwrap();
+    assert_eq!(at.position_on_screen(), Offset::new(10.0, 20.0));
+    rule.host().set_window_position_on_screen(Offset::new(100.0, 50.0));
+    rule.wait_for_idle();
+    assert_eq!(at.position_on_screen(), Offset::new(110.0, 70.0));
+    assert_eq!(at.local_to_screen(Offset::new(1.0, 2.0)), Offset::new(111.0, 72.0));
+    assert_eq!(at.screen_to_local(Offset::new(111.0, 72.0)), Offset::new(1.0, 2.0));
+    // (a node in a layout has its layout's density and direction; one taken out of it has none, and asking panics)
+    #[derive(PartialEq)]
+    struct Asks(Rc<RefCell<Vec<String>>>);
+    struct AskingNode(Rc<RefCell<Vec<String>>>);
+    impl ModifierNodeElement for Asks {
+        type Node = AskingNode;
+        fn create(&self) -> AskingNode {
+            AskingNode(self.0.clone())
+        }
+        fn update(&self, _: &mut AskingNode) {}
+    }
+    impl ModifierNode for AskingNode {
+        fn on_attach(&mut self, cx: &NodeCx) {
+            self.0.borrow_mut().push(format!("{} {:?}", cx.require_density().density, cx.require_layout_direction()));
+        }
+    }
+    let asked: Rc<RefCell<Vec<String>>> = Rc::default();
+    let a = asked.clone();
+    let _rule = KompozTestRule::new(kompozable_lambda!(move || {
+        KompozitionLocalProvider(&[kompoz_ui::platform::LocalLayoutDirection.provides(LayoutDirection::Rtl)], || {
+            Box(modifier = Modifier.then_element(Asks(a.clone())));
+        });
+    }));
+    assert_eq!(*asked.borrow(), ["1 Rtl"]);
 }
 
 fn palettes_reach_their_locals() {
@@ -545,6 +611,7 @@ tests!(
     zooms_and_pinches_are_scale_events,
     drags_from_outside_reach_the_targets_under_them,
     strings_and_right_to_left_languages,
+    accessibility_inspection_and_the_screen,
     palettes_reach_their_locals,
     the_media_scope_follows_the_window_and_the_device,
     idle_work_runs_between_frames_in_order_as_it_fits,

@@ -13,7 +13,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::{KompozTestRule, RecordingCanvas, Text};
+use kompoz::test::{KompozTestRule, RecordingCanvas};
 use kompoz::ui::input::{PointerButton, PointerEventType, PointerKeyboardModifiers, PointerType};
 use kompoz::ui::window::{Popup, PopupPositionProvider, PopupProperties};
 use std::rc::Rc;
