@@ -41,12 +41,16 @@
 //!   `Arrangement.Absolute` `` ([`TYPES`]);
 //! - a parameter of a closure's alias (`Callback`) is written out (`Rc<dyn Fn()>`); what a `macro_rules!` of the
 //!   same file makes of a type's name (`transforms!(DrawScope)`) is read as written out; a `const fn` is flagged
-//!   ([`flags::CONST`]: what it makes can be a `static`).
+//!   ([`flags::CONST`]: what it makes can be a `static`);
+//! - a suspending twin ([`flags::ASYNC_TWIN`]) bounding a parameter by a narrower trait than its function does
+//!   (`with_style_async(style: impl SuspendingBuilderStyle, …)`, `with_style(style: impl BuilderStyle, …)`) takes
+//!   Kotlin's overloads whose lambdas may suspend: the others (the types implementing only the function's trait,
+//!   `ParagraphStyle`) take theirs `crossinline` ([`TWIN_BOUNDS`]).
 
 #[rustfmt::skip]
 mod generated;
 
-pub use generated::{DEREFS, GENERICS, ITEMS, TYPES};
+pub use generated::{DEREFS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -167,6 +171,25 @@ pub enum LambdaKind {
     Future,
 }
 
+/// A parameter a suspending twin ([`flags::ASYNC_TWIN`]) takes fewer types of than its function: Kotlin's overloads
+/// taking the others take their lambda `crossinline`, which can't suspend (`withStyle(ParagraphStyle)`; the twin
+/// `with_style_async(style: impl SuspendingBuilderStyle, …)`, where `with_style` takes `impl BuilderStyle`). The types
+/// are those the API's crates implement the twin's and the function's traits for ([`TWIN_BOUNDS`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TwinBound {
+    /// The function's [`Item::krate`], [`Item::module`], [`Item::owner`] and [`Item::rust`].
+    pub krate: &'static str,
+    pub module: &'static str,
+    pub owner: &'static str,
+    pub rust: &'static str,
+    /// The parameter's Rust name.
+    pub param: &'static str,
+    /// The types the twin takes there (Rust's names): Kotlin's overloads whose lambdas may suspend.
+    pub suspending: &'static [&'static str],
+    /// The types only the function takes there: Kotlin's overloads taking their lambda `crossinline`.
+    pub crossinline: &'static [&'static str],
+}
+
 /// What [`Item::flags`] holds.
 pub mod flags {
     /// `#[kompozable]`.
@@ -229,6 +252,18 @@ pub fn deref_chain(owner: &str) -> Vec<&str> {
 /// `AbsoluteArrangement`).
 pub fn rust_type(kotlin: &str) -> Option<&'static str> {
     TYPES.iter().find(|(k, _)| *k == kotlin).map(|(_, r)| *r)
+}
+
+/// Kotlin's name of a Rust type: what [`TYPES`] says, else the Rust one.
+pub fn kotlin_type(rust: &str) -> &str {
+    TYPES.iter().find(|(_, r)| *r == rust).map_or(rust, |(k, _)| *k)
+}
+
+/// The parameters `item`'s suspending twin takes fewer types of ([`TwinBound`]).
+pub fn twin_bounds(item: &Item) -> impl Iterator<Item = &'static TwinBound> + use<'_> {
+    TWIN_BOUNDS
+        .iter()
+        .filter(move |b| (b.krate, b.module, b.owner, b.rust) == (item.krate, item.module, item.owner, item.rust))
 }
 
 /// A generic type's type parameters, in order (`Animatable` → `["T", "V"]`).
@@ -301,6 +336,14 @@ mod tests {
         assert!(one("withStyle", "AnnotatedStringBuilder").has(flags::ASYNC_TWIN));
         assert!(!one("withAnnotation", "AnnotatedStringBuilder").has(flags::ASYNC_TWIN));
         assert!(one("translate", "DrawScope").has(flags::ASYNC_TWIN));
+        // (`withStyle(ParagraphStyle)` takes its lambda `crossinline`: the twin takes only a span style)
+        let bounds: Vec<_> = twin_bounds(one("withStyle", "AnnotatedStringBuilder")).collect();
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(
+            (bounds[0].param, bounds[0].suspending, bounds[0].crossinline),
+            ("style", &["SpanStyle"][..], &["ParagraphStyle"][..])
+        );
+        assert_eq!(twin_bounds(one("translate", "DrawScope")).count(), 0);
         assert_eq!(generics("Animatable"), Some(&["T", "V"][..]));
         assert!(
             lookup("Animatable")

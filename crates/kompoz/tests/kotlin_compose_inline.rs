@@ -231,7 +231,7 @@ fn compose_inline_functions_suspend_in_a_kt_file() {
     rule.advance_time_by(60);
     assert!(log.borrow().is_empty());
     rule.wait_for_idle();
-    assert_eq!(*log.borrow(), ["linked ab", "size 7.0", "typed 42"]);
+    assert_eq!(*log.borrow(), ["linked abc", "size 7.0", "typed 42"]);
     assert_eq!(state.text(), "42");
 }
 

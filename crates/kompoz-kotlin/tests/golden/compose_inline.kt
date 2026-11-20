@@ -3,9 +3,10 @@
 // `PathData_async`, `group_async` through its builder, `take_or_else_async`, `edit_async`, `try_mutate_async`, the draw
 // transforms'), the call awaited; withTransform takes both lambdas inline: where one suspends, both are async
 // closures. In the composition, withStyle's and withLink's lambdas are the builder's receiver lambdas. Kotlin's
-// `crossinline` lambdas (withAnnotation's) and Compose's snapshot blocks (which must not suspend) can't suspend:
-// errors. (`with(scope)` lends a clone of the value, as it does any; a draw scope has none: in a coroutine it is one of
-// KompozR's own making, so `paint` shows what the transforms' calls are written as.)
+// `crossinline` lambdas (withAnnotation's, withStyle(ParagraphStyle)'s: the generator knows the overload by its
+// argument's type, a plain closure where it doesn't suspend) and Compose's snapshot blocks (which must not suspend)
+// can't suspend: errors. (`with(scope)` lends a clone of the value, as it does any; a draw scope has none: in a
+// coroutine it is one of KompozR's own making, so `paint` shows what the transforms' calls are written as.)
 suspend fun later(n: Int): Int {
     delay(100)
     return n
@@ -30,6 +31,7 @@ fun Built(log: (AnnotatedString) -> Unit) {
                 }
             }
             withStyle(SpanStyle(fontSize = 12.sp)) { append("z") }
+            withStyle(ParagraphStyle(textAlign = TextAlign.Center)) { append("p") }
         }
         log(built)
     }
@@ -118,6 +120,11 @@ fun NotSuspending(log: (Int) -> Unit) {
             withAnnotation("tag", "x") {
                 delay(1)
                 append("a")
+            }
+            val centered = ParagraphStyle(textAlign = TextAlign.Center)
+            withStyle(centered) {
+                append("b")
+                delay(1)
             }
         }
         Snapshot.withMutableSnapshot { delay(1) }

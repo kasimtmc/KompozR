@@ -23,7 +23,7 @@ use super::names::{ident, is_pascal, snake};
 use super::resolve::*;
 use super::{Gen, respan};
 use crate::ast::*;
-use crate::index::{Kind, Receiver};
+use crate::index::{self, Kind, Receiver};
 use crate::pos::Loc;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
@@ -1037,7 +1037,17 @@ impl Gen<'_, '_> {
             }
             _ => c,
         };
-        let bound = self.map_args(c, args).ok().and_then(|m| {
+        let mapped = self.map_args(c, args).ok();
+        // (Kotlin's overload taking its lambdas `crossinline`: they have no suspending twin)
+        let crossinline;
+        let c = match mapped.as_ref().and_then(|m| self.crossinline_overload(c, m, kotlin)) {
+            Some(o) => {
+                crossinline = o;
+                &crossinline
+            }
+            None => c,
+        };
+        let bound = mapped.and_then(|m| {
             self.collection_type_arg(c, &m).map(|t| ("T".to_string(), t)).or_else(|| self.direct_type_arg(c, &m))
         });
         let (name, bound) = match bound {
@@ -1052,6 +1062,48 @@ impl Gen<'_, '_> {
         self.type_param = saved_name;
         self.layout_scope_callee = saved_scope;
         out
+    }
+
+    /// `c` as Kotlin's overload a call is (mapped as `m`) when that one takes its lambdas `crossinline`: an argument's
+    /// type, known, is one only the function takes where its suspending twin takes fewer ([`index::TwinBound`]:
+    /// `withStyle(ParagraphStyle)`, `with_style_async` taking a `SpanStyle`), so its lambdas have no twin, a suspending
+    /// call in one an error saying so, as Kotlin's. (An argument of a type not known goes to the twin: its bound
+    /// tells, rustc's error.)
+    fn crossinline_overload(&self, c: &Callee, m: &Mapping, kotlin: &str) -> Option<Callee> {
+        let item = c.item.filter(|i| i.has(index::flags::ASYNC_TWIN))?;
+        let mut given = Vec::new();
+        let mut suspending = vec![Vec::new()];
+        for b in index::twin_bounds(item) {
+            let k = c.params.iter().position(|p| p.rust == b.param)?;
+            let [ArgRef { value: ArgValue::Expr(e), .. }] = m.given[k].as_slice() else { continue };
+            let ty = self.peek_ty(e);
+            let Some(name) = ty.owner().filter(|n| b.crossinline.contains(n)) else { continue };
+            given.push(index::kotlin_type(name).to_string());
+            // (each overload whose lambda may suspend: the twin's types where the call gives these)
+            suspending = suspending
+                .iter()
+                .flat_map(|s| {
+                    b.suspending.iter().map(move |t| {
+                        let mut s = s.clone();
+                        s.push(index::kotlin_type(t).to_string());
+                        s
+                    })
+                })
+                .collect();
+        }
+        if given.is_empty() {
+            return None;
+        }
+        let overload = Crossinline {
+            overload: format!("{kotlin}({})", given.join(", ")),
+            suspending: suspending.iter().map(|s| format!("{kotlin}({})", s.join(", "))).collect(),
+        };
+        let mut c = c.clone();
+        for l in c.params.iter_mut().filter_map(|p| p.lambda.as_mut()).filter(|l| l.twin) {
+            l.twin = false;
+            l.crossinline = Some(overload.clone());
+        }
+        Some(c)
     }
 
     /// A generic callee's type parameter given as a value (`AnimatedContent(targetState: S, …)`), and the type of the

@@ -8467,3 +8467,8 @@ pub static GENERICS: &[(&str, &[&str])] = &[
     ("VectorizedSpringSpec", &["V"]),
     ("VectorizedTweenSpec", &["V"]),
 ];
+
+/// The parameters suspending twins take fewer types of than their functions: Kotlin's overloads taking the others take their lambda `crossinline`.
+pub static TWIN_BOUNDS: &[TwinBound] = &[
+    TwinBound { krate: "kompoz_text", module: "annotated_string", owner: "AnnotatedStringBuilder", rust: "with_style", param: "style", suspending: &["SpanStyle"], crossinline: &["ParagraphStyle"] },
+];

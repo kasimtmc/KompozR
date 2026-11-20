@@ -290,6 +290,7 @@ impl Gen<'_, '_> {
             twin: false,
             file_inline: !stored,
             snapshot_block: false,
+            crossinline: None,
         }
     }
 }

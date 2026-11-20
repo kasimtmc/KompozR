@@ -24,7 +24,9 @@
 //! (`AsyncFnOnce`/`AsyncFnMut`) and otherwise the same: same parameters in the same order, same evaluation order, same
 //! results. The generator calls it, awaited, where a lambda given to the shim suspends; the API index marks the shims
 //! that have one (`ASYNC_TWIN`). Kotlin's `crossinline` lambdas (`sortedBy`), and the functions Kotlin doesn't inline
-//! (`removeAll(predicate)`, `joinToString(transform)`, `lazy`), have none: their lambdas can't suspend, as in Kotlin.
+//! (`removeAll(predicate)`, `joinToString(transform)`, `lazy`), have none: their lambdas can't suspend, as in Kotlin;
+//! where only some of Kotlin's overloads take theirs `crossinline` (`withStyle(ParagraphStyle)`), the twin bounds the
+//! parameter telling them apart by a narrower trait (`impl SuspendingBuilderStyle`), which the index reads.
 //! A twin's exception is at the shim's line (an `async fn` can't be `#[track_caller]`), as a Kotlin stack trace has
 //! an inline function's own line on top. Compose's own inline functions follow the convention in their crates
 //! (`build_annotated_string_async`, `AnnotatedStringBuilder::with_style_async`, `take_or_else_async`,

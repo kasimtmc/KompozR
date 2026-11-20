@@ -18,7 +18,8 @@
 //!   `Arrangement.Absolute` ``); closures' aliases written out in the parameters of their types (`Callback` →
 //!   `Rc<dyn Fn()>`); the items a file's own `macro_rules!` makes of a type's name (`transforms!(DrawScope)`),
 //!   expanded; the fun interfaces (a trait implemented for the closures of one signature), with the lambda their SAM
-//!   constructor takes.
+//!   constructor takes; the parameters suspending twins bound by a narrower trait than their functions do, with the
+//!   types each trait is implemented for (`TWIN_BOUNDS`: Kotlin's overloads taking their lambda `crossinline`).
 //!
 //! `--check` builds both and fails if what is committed differs (CI).
 
@@ -341,20 +342,69 @@ fn param_default(attrs: &[Attribute]) -> Option<String> {
 /// The functions among `fns` (one scope's: a module's, a trait's, an impl's) that have a suspending twin, a
 /// `#[doc(hidden)] async fn <name>_async` beside them (or a `fn` giving an `impl Future`, as a `#[named]` method with
 /// defaults is): Kotlin's inline functions, whose lambdas may suspend with their caller (the kt shims' convention;
-/// see `kompoz_runtime::kt`).
-fn async_twins<'a>(fns: impl Iterator<Item = (&'a [Attribute], &'a Signature)>) -> BTreeSet<String> {
+/// see `kompoz_runtime::kt`). By the function's name: the twin's signature.
+fn async_twins<'a>(fns: impl Iterator<Item = (&'a [Attribute], &'a Signature)>) -> BTreeMap<String, &'a Signature> {
     fns.filter(|(attrs, sig)| {
         hidden(attrs) && (sig.asyncness.is_some() || returns_future(&sig.output, &BTreeMap::new(), &BTreeSet::new()))
     })
-    .filter_map(|(_, sig)| unraw(&sig.ident).strip_suffix("_async").map(str::to_string))
+    .filter_map(|(_, sig)| unraw(&sig.ident).strip_suffix("_async").map(|name| (name.to_string(), sig)))
     .collect()
 }
 
-/// Flags the items of a function that has a suspending twin (`ASYNC_TWIN`).
-fn mark_twins(items: &mut [KItem], twins: &BTreeSet<String>) {
-    for it in items.iter_mut().filter(|it| twins.contains(&it.rust)) {
+/// Flags the items of the function `sig` when it has a suspending twin (`ASYNC_TWIN`), with what the twin takes
+/// fewer types of ([`twin_bounds`]).
+fn mark_twins(items: &mut [KItem], sig: &Signature, twins: &BTreeMap<String, &Signature>, scan: &Scan) {
+    let Some(twin) = twins.get(&unraw(&sig.ident)) else { return };
+    let bounds = twin_bounds(sig, twin, scan);
+    for it in items.iter_mut() {
         it.flags.insert("ASYNC_TWIN");
+        it.twin_bounds = bounds.clone();
     }
+}
+
+/// The parameters a suspending twin bounds by a narrower trait than its function does (`style: impl
+/// SuspendingBuilderStyle` for `style: impl BuilderStyle`): Kotlin's overloads taking the types only the function
+/// takes take their lambda `crossinline` (`withStyle(ParagraphStyle)`), which can't suspend. Each as its name, the
+/// types the twin takes (its trait's implementors) and those only the function takes (its trait's others): known
+/// where neither trait is implemented generically (a blanket impl's types can't be listed).
+fn twin_bounds(plain: &Signature, twin: &Signature, scan: &Scan) -> Vec<(String, Vec<String>, Vec<String>)> {
+    let typed = |sig: &Signature| -> Vec<(String, Type)> {
+        sig.inputs
+            .iter()
+            .filter_map(|a| match a {
+                FnArg::Typed(pt) => match &*pt.pat {
+                    syn::Pat::Ident(pi) => Some((unraw(&pi.ident), (*pt.ty).clone())),
+                    _ => None,
+                },
+                FnArg::Receiver(_) => None,
+            })
+            .collect()
+    };
+    let (plain_generics, twin_generics) = (bounds_of(&plain.generics), bounds_of(&twin.generics));
+    let trait_of = |ty: &Type, bounds: &BTreeMap<String, Vec<TypeParamBound>>| {
+        impl_trait_name(ty).or_else(|| generic_trait_name(ty, bounds))
+    };
+    let implementors = |name: &str| scan.implementors.get(name).cloned().flatten();
+    let plain_params = typed(plain);
+    let mut out = Vec::new();
+    for (name, ty) in typed(twin) {
+        let Some((_, plain_ty)) = plain_params.iter().find(|(n, _)| *n == name) else { continue };
+        if lambda(plain_ty, &plain_generics, &scan.boxed_futures).is_some() {
+            continue;
+        }
+        let (Some(narrow), Some(wide)) = (trait_of(&ty, &twin_generics), trait_of(plain_ty, &plain_generics)) else {
+            continue;
+        };
+        if narrow == wide {
+            continue;
+        }
+        let (Some(taken), Some(all)) = (implementors(&narrow), implementors(&wide)) else { continue };
+        let crossinline: Vec<String> = all.difference(&taken).cloned().collect();
+        if !crossinline.is_empty() {
+            out.push((name, taken.into_iter().collect(), crossinline));
+        }
+    }
+    out
 }
 
 /// Whether an item is `#[doc(hidden)]`.
@@ -621,6 +671,9 @@ struct KItem {
     params: Vec<KParam>,
     ret: String,
     flags: BTreeSet<&'static str>,
+    /// Its suspending twin's narrower parameters ([`twin_bounds`]): each one's name, the types the twin takes there
+    /// and those only the function takes.
+    twin_bounds: Vec<(String, Vec<String>, Vec<String>)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -778,6 +831,10 @@ struct Scan {
     /// Kotlin's names of types that Rust names otherwise (a doc line ``Kotlin: `Arrangement.Absolute` `` on
     /// `AbsoluteArrangement`): (Kotlin, Rust).
     types: BTreeSet<(String, String)>,
+    /// The types each trait is implemented for, by the trait's name (`impl SuspendingBuilderStyle for SpanStyle`);
+    /// none for one implemented generically (`impl<T: X> Trait for T`, `impl<T> Trait for Vec<T>`), whose types
+    /// can't be listed.
+    implementors: BTreeMap<String, Option<BTreeSet<String>>>,
 }
 
 fn kotlin_index(packages: &[Package]) -> Result<String, String> {
@@ -908,6 +965,13 @@ fn prescan(items: &[Item], scan: &mut Scan) {
             Item::Impl(imp) => {
                 if let Some((path, _)) = &imp.trait_ {
                     let trait_name = path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+                    let types = scan.implementors.entry(trait_name.clone()).or_insert_with(|| Some(BTreeSet::new()));
+                    match (&*imp.self_ty, types.as_mut()) {
+                        (Type::Path(p), Some(types)) if imp.generics.type_params().next().is_none() => {
+                            types.insert(p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default());
+                        }
+                        _ => *types = None,
+                    }
                     if trait_name == "Future" {
                         scan.futures.insert(type_name(&imp.self_ty));
                     }
@@ -1066,7 +1130,7 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
         match item {
             Item::Fn(f) if is_pub(&f.vis) && !hidden(&f.attrs) => {
                 let mut it = function(cx, &f.attrs, &f.sig, "", "", scan);
-                mark_twins(&mut it, &twins);
+                mark_twins(&mut it, &f.sig, &twins, scan);
                 scan.items.extend(it);
             }
             Item::Const(c) if is_pub(&c.vis) && !hidden(&c.attrs) => {
@@ -1125,7 +1189,7 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                         && !hidden(&f.attrs)
                     {
                         let mut it = function(cx, &f.attrs, &f.sig, "", &via, scan);
-                        mark_twins(&mut it, &twins);
+                        mark_twins(&mut it, &f.sig, &twins, scan);
                         scan.items.extend(it);
                     }
                 }
@@ -1161,6 +1225,7 @@ fn base(cx: &Cx, kotlin: &str, rust: &str, kind: &'static str, owner: &str) -> K
         params: Vec::new(),
         ret: String::new(),
         flags,
+        twin_bounds: Vec::new(),
     }
 }
 
@@ -1237,7 +1302,7 @@ fn impl_block(cx: &Cx, imp: &ItemImpl, scan: &mut Scan) {
                     continue;
                 }
                 let mut items = function(cx, &f.attrs, &f.sig, &owner, &via, scan);
-                mark_twins(&mut items, &twins);
+                mark_twins(&mut items, &f.sig, &twins, scan);
                 if named.is_some() {
                     for it in &mut items {
                         it.flags.insert("NAMED");
@@ -1716,6 +1781,31 @@ fn render_kotlin(
             let _ = writeln!(out, "    ({name:?}, &[{list}]),");
         }
     }
+    out.push_str(
+        "];\n\n/// The parameters suspending twins take fewer types of than their functions: Kotlin's overloads taking the \
+         others take their lambda `crossinline`.\n",
+    );
+    out.push_str("pub static TWIN_BOUNDS: &[TwinBound] = &[\n");
+    let bounds: BTreeSet<(&KItem, &(String, Vec<String>, Vec<String>))> =
+        items.iter().flat_map(|it| it.twin_bounds.iter().map(move |b| (it, b))).collect();
+    let mut seen = BTreeSet::new();
+    for (it, (param, taken, crossinline)) in bounds {
+        if !seen.insert((&it.krate, &it.module, &it.owner, &it.rust, param)) {
+            continue;
+        }
+        let list = |l: &[String]| l.iter().map(|t| format!("{t:?}")).collect::<Vec<_>>().join(", ");
+        let _ = writeln!(
+            out,
+            "    TwinBound {{ krate: {:?}, module: {:?}, owner: {:?}, rust: {:?}, param: {param:?}, suspending: &[{}], \
+             crossinline: &[{}] }},",
+            it.krate,
+            it.module,
+            it.owner,
+            it.rust,
+            list(taken),
+            list(crossinline)
+        );
+    }
     out.push_str("];\n");
     out
 }
@@ -1840,6 +1930,23 @@ mod tests {
             /// Kotlin: `Animatable(initialValue: Float)`
             impl AnimatableArgs for f32 { type Animatable = Animatable<f32, AnimationVector1D>; }
             pub fn Animatable<A: AnimatableArgs>(args: A) -> A::Animatable {}
+            pub trait BuilderStyle {}
+            impl BuilderStyle for SpanStyle {}
+            impl BuilderStyle for ParagraphStyle {}
+            #[doc(hidden)]
+            pub trait SuspendingBuilderStyle: BuilderStyle {}
+            impl SuspendingBuilderStyle for SpanStyle {}
+            pub trait Blanket {}
+            impl<T: BuilderStyle> Blanket for T {}
+            impl AnnotatedStringBuilder {
+                pub fn with_style<R>(&mut self, style: impl BuilderStyle, block: impl FnOnce(&mut Self) -> R) -> R {}
+                #[doc(hidden)]
+                pub async fn with_style_async<R>(&mut self, style: impl SuspendingBuilderStyle,
+                    block: impl AsyncFnOnce(&mut Self) -> R) -> R {}
+                pub fn with_blanket<S: BuilderStyle>(&mut self, style: S, block: impl FnOnce(&mut Self)) {}
+                #[doc(hidden)]
+                pub async fn with_blanket_async<S: Blanket>(&mut self, style: S, block: impl AsyncFnOnce(&mut Self)) {}
+            }
             "#,
         )
         .unwrap();
@@ -1873,6 +1980,14 @@ mod tests {
         // (a `#[named]` method's twin: a `fn` giving a future, as `#[named]` takes them)
         let translate = scan.items.iter().find(|i| i.kotlin == "translate" && i.owner == "DrawScope").unwrap();
         assert!(translate.flags.contains("ASYNC_TWIN") && !find("rotate").flags.contains("ASYNC_TWIN"));
+        // A twin taking fewer types of a parameter (Kotlin's other overloads take their lambda `crossinline`): the
+        // types its trait is implemented for, and the function's others; none listed where a trait is implemented
+        // generically.
+        let bounds = ("style".to_string(), vec!["SpanStyle".to_string()], vec!["ParagraphStyle".to_string()]);
+        assert_eq!(find("withStyle").twin_bounds, vec![bounds]);
+        assert!(find("withBlanket").flags.contains("ASYNC_TWIN") && find("withBlanket").twin_bounds.is_empty());
+        assert!(translate.twin_bounds.is_empty());
+        assert_eq!(scan.implementors.get("Blanket"), Some(&None));
         // Generic types' type parameters (lifetimes aside); an overload's result its impl's associated type.
         assert_eq!(scan.generics.get("Animatable"), Some(&Some(vec!["T".to_string(), "V".to_string()])));
         assert_eq!(scan.generics.get("Holder"), Some(&Some(vec!["T".to_string()])));

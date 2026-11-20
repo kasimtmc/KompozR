@@ -34,6 +34,9 @@ pub fn Built(log: impl ::core::ops::Fn(AnnotatedString) + 'static) {
             })
             .await;
             this.with_style(SpanStyle(font_size = 12.sp()), |this1| this1.append(::std::string::String::from("z")));
+            this.with_style(ParagraphStyle(text_align = TextAlign::Center), |this1| {
+                this1.append(::std::string::String::from("p"))
+            });
         })
         .await;
         log(built.clone());
@@ -180,6 +183,7 @@ pub async fn paint(scope: DrawScope, log: impl ::core::ops::Fn(::std::string::St
         log(::std::string::String::from("painted"));
     })
 }
-// error 119:17: `delay` suspends, in a lambda `withAnnotation` doesn't run in the coroutine: Kotlin suspends in a coroutine and in the lambdas an inline function runs in place (`with`, `let`, `apply`, `forEach`, `map`, `repeat`, …; not a `crossinline` one: `sortedBy`'s)
-// error 123:40: `delay` suspends, in the block `withMutableSnapshot` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)
-// error 124:45: `later` suspends, in the block `withoutReadObservation` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)
+// error 121:17: `delay` suspends, in a lambda `withAnnotation` doesn't run in the coroutine: Kotlin suspends in a coroutine and in the lambdas an inline function runs in place (`with`, `let`, `apply`, `forEach`, `map`, `repeat`, …; not a `crossinline` one: `sortedBy`'s)
+// error 127:17: `withStyle(ParagraphStyle)`'s lambda can't suspend: Kotlin's `withStyle(ParagraphStyle)` takes it `crossinline` (`delay` suspends in it; only `withStyle(SpanStyle)`'s may)
+// error 130:40: `delay` suspends, in the block `withMutableSnapshot` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)
+// error 131:45: `later` suspends, in the block `withoutReadObservation` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)

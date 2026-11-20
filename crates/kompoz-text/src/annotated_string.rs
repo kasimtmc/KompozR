@@ -633,7 +633,9 @@ impl BuilderStyle for ParagraphStyle {
 
 /// A style whose [`with_style`](AnnotatedStringBuilder::with_style) block may suspend with the coroutine it is called
 /// in: Kotlin's `withStyle(SpanStyle)` takes its lambda inline, `withStyle(ParagraphStyle)` takes it `crossinline`
-/// (a suspending call in it is Kotlin's error too).
+/// (a suspending call in it is Kotlin's error too). The Kotlin generator knows from it (the API index's `TWIN_BOUNDS`)
+/// which overload a call is, by its argument's type, and says so; its bound is what tells a Rust caller, and a call
+/// whose argument's type the generator doesn't know.
 #[doc(hidden)]
 #[diagnostic::on_unimplemented(
     message = "`withStyle({Self})`'s lambda can't suspend: Kotlin's `withStyle(ParagraphStyle)` takes it `crossinline`",

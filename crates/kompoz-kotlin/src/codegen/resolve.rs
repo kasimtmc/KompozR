@@ -504,6 +504,19 @@ pub(crate) struct LInfo {
     /// A block of Compose's run with a snapshot current (`Snapshot.withMutableSnapshot`, `snapshot.enter`,
     /// `Snapshot.withoutReadObservation`): inline in Kotlin, but it must not suspend ([`snapshot_block`]).
     pub snapshot_block: bool,
+    /// Given to Kotlin's overload of an inline function that takes it `crossinline` (`withStyle(ParagraphStyle)`, its
+    /// argument's type one the suspending twin doesn't take: [`index::TwinBound`]): it can't suspend, an error saying
+    /// so.
+    pub crossinline: Option<Crossinline>,
+}
+
+/// Kotlin's overload of an inline function a call is that takes its lambda `crossinline`, and those that don't.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Crossinline {
+    /// The call's overload, by the types given where the twin takes fewer (`withStyle(ParagraphStyle)`).
+    pub overload: String,
+    /// The overloads whose lambdas may suspend (`withStyle(SpanStyle)`).
+    pub suspending: Vec<String>,
 }
 
 impl LInfo {
@@ -659,6 +672,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             twin: false,
             file_inline: false,
             snapshot_block: false,
+            crossinline: None,
         })
     } else {
         p.lambda.map(|l| LInfo {
@@ -683,6 +697,7 @@ fn param_of_item(p: &'static index::Param) -> PInfo {
             twin: false,
             file_inline: false,
             snapshot_block: false,
+            crossinline: None,
         })
     };
     PInfo {

@@ -19,9 +19,11 @@
 //!   inline functions' too: `buildAnnotatedString`, `withStyle`, `PathData`, the draw transforms…); the twin takes
 //!   each of its lambdas as an async closure, so where one of a call's suspends the others are written as async
 //!   closures too (`withTransform({ translate(1f, 1f) }) { delay(1) }`); a callee without one (Kotlin's
-//!   `crossinline` lambdas, functions Kotlin doesn't inline) can't take it, an error as in Kotlin, and Compose's
-//!   snapshot blocks (`withMutableSnapshot`), which Kotlin inlines but Compose says must not suspend, an error saying
-//!   so. `return@label` in it returns from the closure, as in the plain one;
+//!   `crossinline` lambdas, functions Kotlin doesn't inline) can't take it, an error as in Kotlin; nor can Kotlin's
+//!   overload taking it `crossinline` where the others don't (`withStyle(ParagraphStyle)`, known by its argument's
+//!   type, one the twin doesn't take: `index::TwinBound`), an error saying so; nor Compose's snapshot blocks
+//!   (`withMutableSnapshot`), which Kotlin inlines but Compose says must not suspend, an error saying so.
+//!   `return@label` in it returns from the closure, as in the plain one;
 //! - `Layout`'s measure policy: through `measure_policy(…)`, which gives Rust its parameters' types.
 //!
 //! Its parameters: as written, or `it` when it takes one and names none (Kotlin's `it` is the nearest lambda's that has
@@ -55,6 +57,7 @@ impl Gen<'_, '_> {
             twin: false,
             file_inline: false,
             snapshot_block: false,
+            crossinline: None,
         };
         match info {
             Some(i) => self.lambda_for(l, Some(i), call_label, false),
@@ -101,6 +104,7 @@ impl Gen<'_, '_> {
             twin,
             file_inline: false,
             snapshot_block: false,
+            crossinline: None,
         };
         self.lambda_with(l, &unknown, None, call_label, transform_wraps, true)
     }
@@ -344,6 +348,16 @@ impl Gen<'_, '_> {
                 let (name, at) = self.last_await.clone().unwrap_or_else(|| (String::new(), l.loc));
                 if info.file_inline {
                     self.later(at, "a suspending call in a lambda given to the file's own `inline fun`");
+                } else if let Some(Crossinline { overload, suspending }) = &info.crossinline {
+                    let may: Vec<String> = suspending.iter().map(|s| format!("`{s}`'s")).collect();
+                    self.error(
+                        at,
+                        format!(
+                            "`{overload}`'s lambda can't suspend: Kotlin's `{overload}` takes it `crossinline` \
+                             (`{name}` suspends in it; only {} may)",
+                            may.join(", ")
+                        ),
+                    );
                 } else if info.snapshot_block {
                     let callee = call_label.map_or_else(|| "its callee".to_string(), |c| format!("`{c}`"));
                     self.error(
