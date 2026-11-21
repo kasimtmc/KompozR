@@ -976,7 +976,7 @@ impl Gen<'_, '_> {
                         && !p.ty.contains("Fn<")
                         && !p.ty.trim_start().starts_with("fn(");
                     let value_fits = matches!(a.value, ArgValue::Expr(e)
-                        if fun_interface || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_)));
+                        if fun_interface || lambda_if(e) || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_)));
                     if a.value.is_lambda() || !value_fits {
                         return None;
                     }
@@ -988,7 +988,11 @@ impl Gen<'_, '_> {
                     && !takes_any(&p.ty)
                 {
                     let ty = self.peek_ty(e);
-                    if !compatible(&ty, &p.ty()) {
+                    // (a value of a type of its own to a shared trait object's parameter: the type may implement the
+                    // trait — `rememberVectorPainter(…)`, a VectorPainter, to `Icon(painter: Painter)` —, which the
+                    // index doesn't say; a parameter of the value's own type still fits better)
+                    let may_implement = matches!(ty, Ty::Named(_, _)) && super::expr::Shared::of_rust(&p.ty).is_some();
+                    if !compatible(&ty, &p.ty()) && !may_implement {
                         score -= 5;
                         mismatched = true;
                     } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y) {
@@ -1351,6 +1355,10 @@ impl Gen<'_, '_> {
                 last.0 = Some(ident(&c.params[at].rust, span));
             }
         } else {
+            // (the parameter of the last value written: a lambda there for a parameter before the last is named, as
+            // the macro rewriting the call takes a last unnamed closure for the last parameter — Kotlin's trailing
+            // lambda —: `InputChip(selected, onClick, label = { … })` leaving the rest to their defaults)
+            let mut last_written = None;
             for (k, p) in c.params.iter().enumerate() {
                 if m.given[k].is_empty() {
                     match &p.default {
@@ -1371,6 +1379,15 @@ impl Gen<'_, '_> {
                     self.with_label(call_label, |me| me.arg_value(&a, Some(p), transform_wraps))
                 };
                 vals.push((None, v, m.given[k].iter().any(|a| a.value.is_lambda())));
+                last_written = Some(k);
+            }
+            if transform_wraps
+                && c.builder
+                && let (Some(k), Some(last)) = (last_written, vals.last_mut())
+                && last.2
+                && k + 1 < c.params.len()
+            {
+                last.0 = Some(ident(&c.params[k].rust, span));
             }
         }
         vals
@@ -1528,6 +1545,25 @@ impl Gen<'_, '_> {
             let v = self.number(n, e.loc, true).ts;
             return if neg { quote_spanned!(span=> -#v) } else { v };
         }
+        // (a lambda parameter, a nullable slot's — `leadingIcon = if (selected) { { Icon(…) } } else null` —, given an
+        // `if` whose branches are lambdas or `null`: each branch the argument it is, as a lambda or `null` given
+        // alone would be)
+        if p.lambda.is_some()
+            && let ExprKind::If { condition, then, otherwise: Some(otherwise) } = &e.kind
+            && (lambda_branch(then).is_some() || lambda_branch(otherwise).is_some())
+        {
+            self.push_scope();
+            let c = self.condition(condition);
+            let a = self.branch_arg(then, p, transform_wraps);
+            self.pop_scope();
+            let b = match otherwise.stmts.as_slice() {
+                [Stmt { kind: StmtKind::Expr(inner), .. }] if !otherwise.braced => {
+                    self.value_for_lambda_param(inner, p, transform_wraps)
+                }
+                _ => self.branch_arg(otherwise, p, transform_wraps),
+            };
+            return quote_spanned!(span=> if #c { #a } else { #b });
+        }
         // (Kotlin's `Any` — a key, a content type —: the value made the Rust type holding it, in `Some` for an optional
         // one; each branch of an `if`/`when`)
         if let Some(w) = AnyWrap::of_rust(&p.ty) {
@@ -1643,6 +1679,35 @@ impl Gen<'_, '_> {
         } else {
             v
         }
+    }
+
+    /// A branch of an `if` given to a lambda parameter `p`: its statements, then its last expression as the argument
+    /// (a lambda, `null`, or another `if` of them).
+    fn branch_arg(&mut self, block: &Block, p: &PInfo, transform_wraps: bool) -> TokenStream {
+        let span = self.span(block.loc);
+        let Some((last, before)) = block.stmts.split_last() else {
+            return quote_spanned!(span=> ::core::option::Option::None);
+        };
+        self.push_scope();
+        let mut stmts = TokenStream::new();
+        for s in before {
+            stmts.extend(self.stmt(s));
+        }
+        let v = match &last.kind {
+            StmtKind::Expr(e) => self.value_for_lambda_param(e, p, transform_wraps),
+            _ => {
+                stmts.extend(self.stmt(last));
+                quote_spanned!(span=> ::core::option::Option::None)
+            }
+        };
+        self.pop_scope();
+        quote_spanned!(span=> #stmts #v)
+    }
+
+    /// An expression given to a lambda parameter `p`, as an argument.
+    fn value_for_lambda_param(&mut self, e: &Expr, p: &PInfo, transform_wraps: bool) -> TokenStream {
+        let a = ArgRef { name: None, value: ArgValue::Expr(e), spread: false, loc: e.loc };
+        self.arg_value(&a, Some(p), transform_wraps)
     }
 
     /// An expression's value for a parameter `p` (a default's).
@@ -1978,4 +2043,24 @@ fn owner_has_no(t: &Ty, name: &str) -> bool {
 pub(crate) fn is_type_parameter(ty: &str) -> bool {
     let t = ty.trim();
     t.len() == 1 && t.chars().all(|c| c.is_ascii_uppercase())
+}
+
+/// The lambda a block ends in, if it ends in one (a branch of an `if` given to a lambda parameter).
+fn lambda_branch(block: &Block) -> Option<&Lambda> {
+    match block.stmts.last().map(|s| &s.kind) {
+        Some(StmtKind::Expr(Expr { kind: ExprKind::Lambda(l), .. })) => Some(l),
+        _ => None,
+    }
+}
+
+/// Whether an expression is an `if` with an `else` whose branches end in lambdas (or `null`, or such an `if`): what a
+/// lambda parameter takes as lambdas given alone.
+fn lambda_if(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::If { then, otherwise: Some(otherwise), .. } => {
+            lambda_branch(then).is_some() || lambda_branch(otherwise).is_some()
+        }
+        ExprKind::Paren(inner) => lambda_if(inner),
+        _ => false,
+    }
 }

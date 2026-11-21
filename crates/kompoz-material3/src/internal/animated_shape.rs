@@ -379,3 +379,23 @@ pub(crate) fn remember_animated_shape<S: AnimatedCornerShape>(
 
     remember_animated_shape_of_state(state)
 }
+
+/// `shape` as a [`CornerBasedShape`] if it is one (Kotlin's `shape is CornerBasedShape` and the cast after it): a
+/// rounded or cut corner shape (absolute or not), or a [`CornerBasedShape`] itself — what the components morph
+/// with [`remember_animated_shape`] (their shapes' `isCornerBasedShape`).
+pub(crate) fn as_corner_based_shape(shape: &Arc<dyn Shape>) -> Option<CornerBasedShape> {
+    let any = shape.shape_as_any();
+    if let Some(s) = any.downcast_ref::<CornerBasedShape>() {
+        return Some(s.clone());
+    }
+    if let Some(s) = any.downcast_ref::<RoundedCornerShape>() {
+        return Some(s.clone().into());
+    }
+    if let Some(s) = any.downcast_ref::<kompoz_graphics::CutCornerShape>() {
+        return Some(s.clone().into());
+    }
+    if let Some(s) = any.downcast_ref::<kompoz_graphics::AbsoluteRoundedCornerShape>() {
+        return Some(s.clone().into());
+    }
+    any.downcast_ref::<kompoz_graphics::AbsoluteCutCornerShape>().map(|s| s.clone().into())
+}

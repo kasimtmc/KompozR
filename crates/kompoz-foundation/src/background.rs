@@ -129,6 +129,10 @@ impl ModifierNode for BackgroundNode {
 }
 
 impl SemanticsModifierNode for BackgroundNode {
+    // (its bounds aren't the semantics node's: Compose's `isImportantForBounds = false`)
+    fn is_important_for_bounds(&self) -> bool {
+        false
+    }
     fn apply_semantics(&mut self, config: &mut SemanticsConfiguration) {
         config.set_shape(self.shape.clone());
     }

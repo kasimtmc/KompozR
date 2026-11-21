@@ -8,7 +8,7 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 
-// The Counter in Kotlin's syntax, its button a Kotlin-defined clickable Box (Material's Button is stage 12).
+// The Counter in Kotlin's syntax (the C++'s kompozable_tests.cpp 44-58), its button Material's.
 kompoz! {
     @Kompozable
     fun Counter(start: Int = 0) {
@@ -18,21 +18,14 @@ kompoz! {
             Button({ count++ }) { Text("+") }
         }
     }
-
-    @Composable
-    fun Button(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-        Box(modifier.clickable(onClick = onClick).testTag("button")) {
-            content()
-        }
-    }
 }
 
 fn a_kotlin_counter_counts() {
     let rule = KompozTestRule::new(kompozable_lambda!(|| Counter(3)));
     rule.on_node_with_text("Count: 3").assert_exists();
-    rule.on_node_with_tag("button").perform_click();
+    rule.on_node_with_text("+").perform_click();
     rule.on_node_with_text("Count: 4").assert_exists();
-    rule.on_node_with_tag("button").perform_click();
+    rule.on_node_with_text("+").perform_click();
     rule.on_node_with_text("Count: 5").assert_exists();
 }
 

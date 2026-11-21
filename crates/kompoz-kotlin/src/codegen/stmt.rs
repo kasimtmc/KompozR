@@ -60,7 +60,7 @@ impl Gen<'_, '_> {
         out
     }
 
-    fn stmt(&mut self, s: &Stmt) -> TokenStream {
+    pub(crate) fn stmt(&mut self, s: &Stmt) -> TokenStream {
         let span = self.span(s.loc);
         match &s.kind {
             StmtKind::Decl(Decl::Property(p)) => self.local_property(p),
@@ -680,7 +680,7 @@ impl Gen<'_, '_> {
 
     /// An `if`'s condition: `x != null` conjuncts on locals made `let Some(x) = x.clone()` (narrowing `x` in the
     /// scope the caller opened for the then branch).
-    fn condition(&mut self, c: &Expr) -> TokenStream {
+    pub(crate) fn condition(&mut self, c: &Expr) -> TokenStream {
         let span = self.span(c.loc);
         match &c.kind {
             ExprKind::Binary { op: BinaryOp::And, lhs, rhs } if has_null_check(c) => {

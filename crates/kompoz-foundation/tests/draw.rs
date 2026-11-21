@@ -396,7 +396,92 @@ fn backgrounds_and_borders_tell_their_shape_and_images_are_images() {
     assert!(decorative.get(SemanticsProperties::Role).is_none());
 }
 
+/// Compose's `isImportantForBounds = false` of the background's and the border's semantics nodes: a layout's
+/// semantics bounds are those of its first semantics node that is (here the test tag's, inside a layout modifier
+/// after them), so they follow what that modifier places — moved by a placement-only change too, as it is drawn.
+/// (A background or border before it once gave the bounds of the coordinator around the modifier: the old
+/// position.)
+fn backgrounds_and_borders_are_not_what_semantics_bounds_are_of() {
+    let x = mutable_state_of(0);
+    let measured = Rc::new(Cell::new(0));
+    let (xs, m) = (x.clone(), measured.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let (xs, m) = (xs.clone(), m.clone());
+            Box(modifier = Modifier
+                .size(20.dp())
+                .background(BLUE)
+                .border(1.dp(), BLUE)
+                .layout(move |scope, measurable, constraints| {
+                    m.set(m.get() + 1);
+                    let placeable = measurable.measure(constraints);
+                    let xs = xs.clone();
+                    scope.layout(placeable.width(), placeable.height(), move |p| {
+                        p.place_relative(&placeable, xs.get(), 0)
+                    })
+                })
+                .size(20.dp())
+                .background(RED)
+                .test_tag("yerleşen"));
+        }),
+        IntSize::new(200, 200),
+    );
+    rule.set_layout_check(false);
+    let bounds = || rule.on_node_with_tag("yerleşen").get_unclipped_bounds_in_root();
+    assert!(same_rect(bounds(), 0.0, 0.0, 20.0, 20.0));
+    let measures = measured.get();
+    x.set(30);
+    rule.wait_for_idle();
+    // (placed again, not measured)
+    assert_eq!(measured.get(), measures);
+    let canvas = rule.draw();
+    let drawn = canvas.rects.iter().zip(&canvas.rect_colors).find(|(_, c)| **c == RED).map(|(r, _)| *r);
+    assert!(drawn.is_some_and(|r| same_rect(r, 30.0, 0.0, 20.0, 20.0)), "{drawn:?}");
+    assert!(same_rect(bounds(), 30.0, 0.0, 20.0, 20.0), "{:?}", bounds());
+    let node = rule.on_node_with_tag("yerleşen");
+    assert!(same_rect(node.get_bounds_in_root(), 30.0, 0.0, 20.0, 20.0));
+    assert_eq!(node.position_in_root(), Offset::new(30.0, 0.0));
+    // (the shapes still told: semantics properties of nodes not important for bounds)
+    assert!(node.fetch_semantics_node().config().get(SemanticsProperties::Shape).is_some());
+}
+
+/// Compose's graphics layer modifiers as semantics nodes: not important for bounds, telling the layer's shape only
+/// where it clips (a layer that doesn't may only draw a shape) — before it is placed from its block, then from the
+/// layer, told again when its clip changes.
+fn graphics_layers_tell_their_shape_where_they_clip() {
+    let clip = mutable_state_of(true);
+    let c = clip.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let c = c.clone();
+        Column(move || {
+            let c = c.clone();
+            Box(modifier = Modifier
+                .graphics_layer_block(move |l| {
+                    l.shape = Arc::new(CircleShape);
+                    l.clip = c.get();
+                })
+                .padding(5.dp())
+                .size(20.dp())
+                .test_tag("kesen"));
+            Box(modifier =
+                Modifier.graphics_layer_block(|l| l.shape = Arc::new(CircleShape)).size(20.dp()).test_tag("kesmeyen"));
+        });
+    }));
+    let shape_of =
+        |tag: &str| rule.on_node_with_tag(tag).fetch_semantics_node().config().get(SemanticsProperties::Shape);
+    let circle: &dyn Shape = &CircleShape;
+    assert!(shape_of("kesen").is_some_and(|s| *s == *circle));
+    assert!(shape_of("kesmeyen").is_none());
+    // (its bounds the test tag's, inside the padding: the layer isn't what they are of)
+    assert!(same_rect(rule.on_node_with_tag("kesen").get_unclipped_bounds_in_root(), 5.0, 5.0, 20.0, 20.0));
+    clip.set(false);
+    rule.wait_for_idle();
+    assert!(shape_of("kesen").is_none());
+}
+
 tests!(
+    graphics_layers_tell_their_shape_where_they_clip,
+    backgrounds_and_borders_are_not_what_semantics_bounds_are_of,
     backgrounds_fill_their_shapes_as_composes,
     borders_are_worked_out_for_a_size,
     generic_borders_are_drawn_into_a_bitmap,

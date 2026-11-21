@@ -176,6 +176,12 @@ harness = false
 name = "kotlin_material_theme"
 harness = false
 
+# Material's buttons and containers in Kotlin's syntax (required_arguments_by_name, containers_as_compose_writes_them;
+# material3's button, icon button, FAB, card and chip samples from a .kt file).
+[[test]]
+name = "kotlin_buttons"
+harness = false
+
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
 [[test]]
 name = "kotlin_animations_all"

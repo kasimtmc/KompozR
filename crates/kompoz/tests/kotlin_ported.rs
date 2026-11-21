@@ -192,13 +192,6 @@ kompoz! {
             }) { Text("ekle") }
         }
     }
-
-    @Composable
-    fun Button(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-        Box(modifier.clickable(onClick = onClick)) {
-            content()
-        }
-    }
 }
 
 fn state_forms_as_compose_writes_them() {

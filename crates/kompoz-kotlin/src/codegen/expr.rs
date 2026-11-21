@@ -1502,7 +1502,9 @@ impl Gen<'_, '_> {
             }
             ExprKind::Member { receiver, safe, name } => {
                 if let Some(q) = self.qualifier(receiver) {
-                    if is_value_object(&q) || q == "Modifier" {
+                    // (a Kotlin object whose members are a unit struct's methods too: `IconButtonDefaults.mediumContainerSize(…)`)
+                    let object_member = lookup(&name.name).iter().any(|i| i.kind == Kind::Method && i.owner == q);
+                    if is_value_object(&q) || q == "Modifier" || object_member {
                         let ret = lookup(&name.name)
                             .iter()
                             .find(|i| i.owner == q && i.kind == Kind::Method)

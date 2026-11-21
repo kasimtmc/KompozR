@@ -270,7 +270,79 @@ fn a_closure_policy_capturing_the_same_values_measures_nothing_again() {
     assert_eq!(rule.on_node_with_tag("leaf").get_unclipped_bounds_in_root().width(), 20.0);
 }
 
+/// A test tag before a layout modifier: its semantics bounds are that modifier's coordinator's (Compose's: a
+/// semantics node is on the coordinator of the next layout modifier), so when the modifier lays out to nothing
+/// without measuring what it wraps, the bounds are 0×0 at once, not what it wrapped last measured.
+fn a_tag_before_a_layout_modifier_that_lays_out_to_nothing_has_no_size() {
+    let shown = mutable_state_of(true);
+    let s = shown.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let s = s.clone();
+            Row(move || {
+                let s = s.clone();
+                Box(modifier = Modifier
+                    .test_tag("etiket")
+                    .layout(move |scope, measurable, constraints| {
+                        if s.get() {
+                            let placeable = measurable.measure(constraints);
+                            scope.layout(placeable.width(), placeable.height(), move |p| p.place(&placeable, 0, 0))
+                        } else {
+                            scope.layout(0, 0, |_| {})
+                        }
+                    })
+                    .size(56.dp()));
+                Box(modifier = Modifier.size(10.dp()).test_tag("yan"));
+            });
+        }),
+        IntSize::new(200, 200),
+    );
+    assert_eq!(rule.on_node_with_tag("etiket").get_unclipped_bounds_in_root(), rect(0.0, 0.0, 56.0, 56.0));
+    shown.set(false);
+    rule.wait_for_idle();
+    assert_eq!(rule.on_node_with_tag("yan").get_unclipped_bounds_in_root().left, 0.0);
+    let node = rule.on_node_with_tag("etiket");
+    assert_eq!(node.get_unclipped_bounds_in_root().size(), Size::Zero);
+    assert_eq!(node.fetch_semantics_node().size(), IntSize::Zero);
+    shown.set(true);
+    rule.wait_for_idle();
+    assert_eq!(rule.on_node_with_tag("etiket").get_unclipped_bounds_in_root(), rect(0.0, 0.0, 56.0, 56.0));
+    // A node merging what is below it (a clickable after the modifier: a FAB under animateFloatingActionButton)
+    // has its bounds from the merging semantics node's coordinator (Compose's findSemanticsModifierNodeToGetBounds
+    // prefers it), inside the modifier: as it was last measured, 56 dp, though the layout takes no room — what
+    // Compose reports too.
+    let shown = mutable_state_of(true);
+    let s = shown.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let s = s.clone();
+            Row(move || {
+                let s = s.clone();
+                Box(modifier = Modifier
+                    .test_tag("birleşen")
+                    .layout(move |scope, measurable, constraints| {
+                        if s.get() {
+                            let placeable = measurable.measure(constraints);
+                            scope.layout(placeable.width(), placeable.height(), move |p| p.place(&placeable, 0, 0))
+                        } else {
+                            scope.layout(0, 0, |_| {})
+                        }
+                    })
+                    .clickable(|| {})
+                    .size(56.dp()));
+                Box(modifier = Modifier.size(10.dp()).test_tag("yan"));
+            });
+        }),
+        IntSize::new(200, 200),
+    );
+    shown.set(false);
+    rule.wait_for_idle();
+    assert_eq!(rule.on_node_with_tag("yan").get_unclipped_bounds_in_root().left, 0.0);
+    assert_eq!(rule.on_node_with_tag("birleşen").get_unclipped_bounds_in_root().size(), Size::new(56.0, 56.0));
+}
+
 tests!(
+    a_tag_before_a_layout_modifier_that_lays_out_to_nothing_has_no_size,
     layout_coordinates_tell_their_parent_and_map_between_nodes,
     layout_measures_again_only_what_changed,
     partial_recomposition_keeps_node_order,

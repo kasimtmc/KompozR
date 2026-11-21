@@ -779,12 +779,57 @@ impl LayerBlockNode {
 }
 
 impl ModifierNode for LayerBlockNode {
-    node_capabilities!(layout);
+    node_capabilities!(layout, semantics);
     fn on_attach(&mut self, cx: &NodeCx) {
         self.handle = Some(cx.handle());
     }
     fn should_auto_invalidate(&self) -> bool {
         false
+    }
+}
+
+impl crate::semantics::SemanticsModifierNode for LayerBlockNode {
+    // (its bounds aren't the semantics node's: Compose's `isImportantForBounds = false`)
+    fn is_important_for_bounds(&self) -> bool {
+        false
+    }
+
+    /// The layer's shape where it clips (Compose's `applySemantics` of the graphics layer modifiers: a layer that
+    /// doesn't clip may only draw a shape, not be the element's boundary): the properties its layer was given as
+    /// it was placed, or — before it is placed — its block run on a scope of its own, unobserved (the layer's
+    /// reads are observed where it is placed, a change of its clip or clipping shape telling semantics again).
+    fn apply_semantics(&mut self, config: &mut crate::semantics::SemanticsConfiguration) {
+        let block = self.block.borrow().clone();
+        let coordinator = self.handle.as_ref().and_then(|h| h.cell.upgrade()).and_then(|c| c.coordinator());
+        let placed = coordinator.as_ref().and_then(|c| c.wrapped()).and_then(|w| {
+            w.layer
+                .borrow()
+                .as_ref()
+                .filter(|l| Rc::ptr_eq(&l.block, &block))
+                .map(|l| (l.props.shape.clone(), l.props.clip))
+        });
+        let (shape, clip) = match placed {
+            Some(placed) => placed,
+            None => {
+                let (size, density, direction) = match &coordinator {
+                    Some(c) => {
+                        let node = c.layout_node();
+                        (
+                            c.measured_size.get().to_size(),
+                            node.as_ref().map_or(Density::new(1.0, 1.0), |n| n.density()),
+                            node.as_ref().map_or(LayoutDirection::Ltr, |n| n.layout_direction()),
+                        )
+                    }
+                    None => (Size::Zero, Density::new(1.0, 1.0), LayoutDirection::Ltr),
+                };
+                let mut scope = GraphicsLayerScope::new(size, density, direction);
+                kompoz_runtime::without_read_observation(|| block(&mut scope));
+                (scope.shape, scope.clip)
+            }
+        };
+        if clip {
+            config.set_shape(shape);
+        }
     }
 }
 

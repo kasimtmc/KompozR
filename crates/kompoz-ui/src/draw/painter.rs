@@ -327,11 +327,11 @@ impl Painter for VectorPainter {
     }
 }
 
-/// `vector` as a painter at the composition's density (Compose's rememberVectorPainter(image)): equal vectors make
+/// `image` as a painter at the composition's density (Compose's rememberVectorPainter(image)): equal vectors make
 /// equal painters, so nothing needs keeping.
 #[kompozable]
-pub fn remember_vector_painter(vector: ImageVector) -> VectorPainter {
-    VectorPainter::new(vector, LocalDensity.current())
+pub fn remember_vector_painter(image: ImageVector) -> VectorPainter {
+    VectorPainter::new(image, LocalDensity.current())
 }
 
 /// A bitmap a vector was drawn into: its size (px, as asked), its config.

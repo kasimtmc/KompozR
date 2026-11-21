@@ -267,6 +267,8 @@ mod tests {
         assert!((offset() + 2.2).abs() < 1e-4, "{}", offset());
         rule.wait_for_idle();
         assert_eq!(content_left(), -2.0);
+        // (its semantics bounds where it is drawn: the backgrounds before aren't what they are of)
+        assert_eq!(bounds(&rule, "animated").left, -2.0);
     }
 
     #[test]

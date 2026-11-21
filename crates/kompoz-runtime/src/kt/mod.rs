@@ -38,6 +38,7 @@ pub mod delegate;
 pub mod format;
 pub mod math;
 pub mod null;
+pub mod random;
 pub mod range;
 pub mod result;
 pub mod string;
@@ -65,6 +66,7 @@ pub use math::{
 pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 #[doc(hidden)]
 pub use null::{elvis_async, run_async, safe_async, with_async};
+pub use random::{KtShuffle, Random};
 pub use range::{
     IndexedValue, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to, is_in, range_to, step,
     until,
@@ -87,6 +89,7 @@ pub mod ext {
     pub use super::delegate::{KtDelegate as _, KtInc as _, KtMutableDelegate as _};
     pub use super::math::{KtFloat as _, KtNumber as _};
     pub use super::null::KtScope as _;
+    pub use super::random::KtShuffle as _;
     pub use super::result::KtResult as _;
     pub use super::string::{KtChar as _, KtNullableStr as _, KtStr as _};
     pub use super::text::KtToString as _;

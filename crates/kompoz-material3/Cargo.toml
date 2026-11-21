@@ -40,3 +40,23 @@ harness = false
 [[test]]
 name = "label"
 harness = false
+
+# Buttons and floating action buttons (the C++ Kompoz's area A, Compose's behaviour, M15's samples).
+[[test]]
+name = "buttons"
+harness = false
+
+# Icon buttons and icon toggle buttons (area A, Compose's behaviour, M15's samples).
+[[test]]
+name = "icon_buttons"
+harness = false
+
+# Cards, chips, badges (area A's containers, Compose's behaviour, M15's samples).
+[[test]]
+name = "containers"
+harness = false
+
+# Buttons and containers together, and the Material halves of earlier tests about buttons and clickables.
+[[test]]
+name = "buttons_and_containers"
+harness = false

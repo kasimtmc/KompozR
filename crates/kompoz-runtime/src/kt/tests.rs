@@ -851,3 +851,35 @@ fn suspending_twins_do_what_their_shims_do() {
     );
     block_on(check_async(true, Some(&async || -> String { unreachable!() })));
 }
+
+#[test]
+fn random_of_a_seed_and_shuffle() {
+    // The same seed, the same numbers; `nextInt(until)` within its range (a power of two by its upper bits, else by
+    // rejection); an empty range thrown as Kotlin throws it; a shuffle a permutation, the same for the same seed.
+    let (a, b) = (Random(7), Random(7));
+    let xs: Vec<i32> = (0..20).map(|_| a.next_int()).collect();
+    assert_eq!(xs, (0..20).map(|_| b.next_int()).collect::<Vec<_>>());
+    assert_ne!(xs, (0..20).map(|_| Random(8).next_int()).collect::<Vec<_>>());
+    let r = Random(42);
+    for until in [1, 2, 3, 8, 10, 1000] {
+        for _ in 0..50 {
+            let v = r.next_int_until(until);
+            assert!((0..until).contains(&v), "{v} of {until}");
+        }
+    }
+    assert!((-5..5).contains(&r.next_int_in(-5, 5)));
+    assert_eq!(
+        thrown(|| {
+            Random(1).next_int_until(0);
+        }),
+        "IllegalArgumentException: Random range is empty: [0, 0)."
+    );
+    let mut list: Vec<i32> = (1..=10).collect();
+    list.shuffle(&Random(7));
+    let mut sorted = list.clone();
+    sorted.sort();
+    assert_eq!(sorted, (1..=10).collect::<Vec<_>>());
+    let state = mutable_state_list_of((1..=10).collect::<Vec<i32>>());
+    state.shuffle(&Random(7));
+    assert_eq!(state.to_vec(), list);
+}

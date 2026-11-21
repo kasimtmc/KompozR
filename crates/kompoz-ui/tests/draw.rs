@@ -3277,7 +3277,62 @@ fn a_layout_node_draws_in_the_space_of_what_it_wraps() {
     assert!(d[1] == d[0] + 1 && d[2] == d[1] && d[3] == d[1], "{d:?}");
 }
 
+/// The host's keep check over a vector painter whose layout's ancestor is placed again as it resizes (a Column at
+/// the bottom end of a Box, its Row's other child narrowing frame by frame): the list keeping unchanged nodes records
+/// what drawing them all does, the painter's vector included, every frame. (WP1a's extended FAB samples hit it.)
+fn a_vector_painter_moved_with_a_resizing_ancestor_is_kept_as_drawn() {
+    let wide = mutable_state_of(true);
+    let w = wide.clone();
+    let icon = ImageVectorBuilder::new(24.dp(), 24.dp(), 24.0, 24.0)
+        .add_path_of(square("M0,0h24v24h-24z", Some(SolidColor(Color::hex(0x3050C0))), 1.0))
+        .build();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let painter: Rc<dyn Painter> = Rc::new(remember_vector_painter(icon.clone()));
+            let target: f32 = if w.get() { 120.0 } else { 0.0 };
+            let width = remember(|| mutable_state_of(target));
+            let wd = width.clone();
+            // (a width stepping toward its target a frame at a time: the layout changing size each frame)
+            kompoz_coroutines::LaunchedEffect(target.to_bits(), async move {
+                while (wd.peek() - target).abs() > 0.5 {
+                    kompoz_coroutines::with_frame_millis(|_| ()).await;
+                    let now = wd.peek();
+                    wd.set(now + (target - now).clamp(-20.0, 20.0));
+                }
+            });
+            Box(
+                modifier = Modifier.fill_max_size(),
+                content = move || {
+                    let (painter, width) = (painter.clone(), width.clone());
+                    Column(
+                        modifier = Modifier.align(Alignment::BottomEnd),
+                        content = move || {
+                            let (painter, width) = (painter.clone(), width.clone());
+                            Row(move || {
+                                Box(modifier = Modifier.size(24.dp()).paint(painter.clone()));
+                                Box(modifier = Modifier.width(width.get().dp()).height(24.dp()));
+                            });
+                        },
+                    );
+                },
+            );
+        }),
+        IntSize::new(300, 300),
+    );
+    // (the rule's keep check is on: a mismatch fails the frame)
+    rule.draw();
+    wide.set(false);
+    for _ in 0..10 {
+        rule.advance_frame();
+        rule.draw();
+    }
+    wide.set(true);
+    rule.wait_for_idle();
+    assert_eq!(rule.draw().vectors.len(), 1);
+}
+
 tests!(
+    a_vector_painter_moved_with_a_resizing_ancestor_is_kept_as_drawn,
     a_layout_node_draws_in_the_space_of_what_it_wraps,
     graphics_layer_stretch_draws_through_a_stretched_layer,
     canvas_and_draw_modifiers_draw_in_local_coordinates,

@@ -61,7 +61,7 @@ kompoz! {
                 Text("${MaterialTheme.typography.headlineSmall.fontSize.value.toInt()}", modifier = Modifier.testTag("size"), color = MaterialTheme.colorScheme.primary)
                 if (showFirst) Text("a ${counted()}")
                 Text("b ${counted()}")
-                Text("hide", modifier = Modifier.clickable { showFirst = false })
+                Button(onClick = { showFirst = false }) { Text("hide") }
             }
         }
     }
@@ -79,7 +79,6 @@ fn theming_as_compose_writes_it() {
     assert_eq!(MEDIUM.with(|m| m.borrow().clone()), Some(CornerBasedShape::from(RoundedCornerShape(20.dp()))));
     rule.on_node_with_text("a 1").assert_exists();
     rule.on_node_with_text("b 2").assert_exists();
-    // (the C++'s Button is Material's buttons' work: a clickable text here)
     rule.on_node_with_text("hide").perform_click();
     // The first call gone, the second keeps what it remembered: each call a group of its own, not a slot by order
     // from the same site (which would hand b a's).

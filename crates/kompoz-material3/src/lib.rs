@@ -9,13 +9,20 @@
 
 #![allow(non_upper_case_globals, non_snake_case)]
 
+mod badge;
+mod button;
+mod card;
+mod chip;
 mod color_scheme;
 mod content_color;
 mod divider;
 mod dynamic_color;
 mod flags;
+mod floating_action_button;
 mod horizontal_center_optically;
 mod icon;
+mod icon_button;
+mod icon_button_defaults;
 mod interactive_component_size;
 pub(crate) mod internal;
 mod label;
@@ -32,6 +39,48 @@ mod tonal_palette;
 mod tooltip;
 mod typography;
 
+// (WP1a: buttons — Button, FloatingActionButton)
+pub use button::{
+    Button, ButtonColors, ButtonDefaults, ButtonElevation, ButtonShapes, ButtonWithShapes, ElevatedButton,
+    ElevatedButtonWithShapes, FilledTonalButton, FilledTonalButtonWithShapes, OutlinedButton, OutlinedButtonWithShapes,
+    TextButton, TextButtonWithShapes,
+};
+pub use floating_action_button::{
+    ExtendedFloatingActionButton, FloatingActionButton, FloatingActionButtonDefaults, FloatingActionButtonElevation,
+    FloatingActionButtonModifiers, LargeExtendedFloatingActionButton, LargeFloatingActionButton,
+    MediumExtendedFloatingActionButton, MediumFloatingActionButton, SmallExtendedFloatingActionButton,
+    SmallFloatingActionButton, TextIconExtendedFloatingActionButton, TextIconLargeExtendedFloatingActionButton,
+    TextIconMediumExtendedFloatingActionButton, TextIconSmallExtendedFloatingActionButton,
+};
+// (WP1a: icon buttons — IconButton, IconButtonDefaults)
+pub use icon_button::{
+    FilledIconButton, FilledIconButtonWithShapes, FilledIconToggleButton, FilledIconToggleButtonWithShapes,
+    FilledTonalIconButton, FilledTonalIconButtonWithShapes, FilledTonalIconToggleButton,
+    FilledTonalIconToggleButtonWithShapes, IconButton, IconButtonColors, IconButtonShapes, IconButtonWithShapes,
+    IconToggleButton, IconToggleButtonColors, IconToggleButtonShapes, IconToggleButtonWithShapes, OutlinedIconButton,
+    OutlinedIconButtonWithShapes, OutlinedIconToggleButton, OutlinedIconToggleButtonWithShapes,
+};
+#[allow(deprecated)]
+pub use icon_button::{IconButtonWithoutShape, IconToggleButtonWithoutShape};
+pub use icon_button_defaults::{IconButtonDefaults, IconButtonWidthOption};
+// (WP1a: containers — Card, Chip, Badge)
+pub use badge::{Badge, BadgeDefaults, BadgedBox};
+pub use card::{
+    Card, CardColors, CardDefaults, CardElevation, ClickableCard, ClickableElevatedCard, ClickableOutlinedCard,
+    ElevatedCard, OutlinedCard,
+};
+pub use chip::{
+    AssistChip, AssistChipDefaults, ChipColors, ChipElevation, ElevatedAssistChip, ElevatedFilterChip,
+    ElevatedSuggestionChip, FilterChip, FilterChipDefaults, InputChip, InputChipDefaults, SelectableChipColors,
+    SelectableChipElevation, SuggestionChip, SuggestionChipDefaults,
+};
+#[allow(deprecated)]
+pub use chip::{
+    AssistChipWithChipBorder, AssistChipWithoutArrangement, ChipBorder, ElevatedAssistChipWithChipBorder,
+    ElevatedAssistChipWithoutArrangement, ElevatedFilterChipWithoutArrangement, ElevatedSuggestionChipWithChipBorder,
+    ElevatedSuggestionChipWithoutArrangement, FilterChipWithoutArrangement, InputChipWithoutArrangement,
+    SuggestionChipWithChipBorder, SuggestionChipWithoutArrangement,
+};
 pub use color_scheme::{
     ColorScheme, LocalTonalElevationEnabled, content_color_for, dark_color_scheme, expressive_light_color_scheme,
     light_color_scheme,

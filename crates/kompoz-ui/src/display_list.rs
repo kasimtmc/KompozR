@@ -1519,12 +1519,14 @@ impl DisplayList {
         let r = ranges[index as usize];
         // Its translation: the first command, popped by the last, with nothing asked before or after it — to where it
         // was (a node at its parent's origin has none: a translation enclosing all it drew is then one of its own
-        // modifiers', a padding's, kept as it was).
+        // modifiers', a padding's or a painter's — even one by nothing, as a painter's alignment translates —, kept
+        // as it was).
         let (first, end) = (r.first_command, r.end_command);
         let own = &events[r.first_event as usize + 1..(r.end_event as usize).saturating_sub(1)];
         let enclosing = first < end
             && frame[first as usize].kind == Kind::PushTranslation
             && frame[first as usize].end == end
+            && r.origin.is_some_and(|o| o != Offset::Zero)
             && r.origin == Some(frame[first as usize].p1)
             && own.iter().all(|e| e.at > first && e.at < end);
         let was = if enclosing { frame[first as usize].p1 } else { Offset::Zero };
