@@ -5,9 +5,12 @@
 //!   start, top, end, bottom; one by name) and a ViewConfiguration's millis. (Its `kt::PaddingValues(top =, all =)`
 //!   isn't a Compose overload; its Channel's ChannelResult, `produce`/`consumeEach` and list arithmetic are the
 //!   coroutines' and kt shims' — stage 2 and 9's; Lifecycle's names are stage 13's.)
-//! - C++ 8136 (`scroll_forms_take_compose_named_arguments`): `overscrollEffect = null` (none) on a LazyRow. (Its app
-//!   bars and pull to refresh are Material's, stage 12's; a VelocityTracker's copies sharing samples is Kotlin's
-//!   reference semantics of a class KompozR has as a value — see stage10-followups.md.)
+//! - C++ 8136 (`scroll_forms_take_compose_named_arguments`): `overscrollEffect = null` (none) on a LazyRow; Material's
+//!   `Modifier.pullToRefresh(isRefreshing =, state =, onRefresh =)` by name on a Box of `rememberPullToRefreshState()`
+//!   (stage 12 WP5; its PullToRefreshDefaults.Indicator and the IndicatorBox around a LoadingIndicator come with WP2's
+//!   progress indicators: the Indicator's refreshing spinner is CircularProgressIndicator). (Its app bars are WP4a's;
+//!   a VelocityTracker's copies sharing samples is Kotlin's reference semantics of a class KompozR has as a value — see
+//!   stage10-followups.md.)
 //! - C++ 8188 (`layout_forms_take_compose_named_arguments`): `Arrangement.spacedBy(space, alignment)`, `spring(…)` of
 //!   a float with its damping and stiffness, `Modifier.onFirstVisible(minDurationMs =) { }`, a list's
 //!   `getOrNull` with a nullable index, `String.repeat`, `Modifier.approachLayout(isMeasurementApproachInProgress =,
@@ -106,31 +109,83 @@ fn state_forms_take_compose_named_arguments() {
 
 kompoz! {
     @Composable
-    fun ScrollForms() {
-        LazyRow(modifier = Modifier.height(40.dp).width(100.dp).testTag("satır"), overscrollEffect = null) {
-            items(3) { Box(modifier = Modifier.size(40.dp)) }
+    fun ScrollForms(onRefreshed: () -> Unit) {
+        val state = rememberPullToRefreshState()
+        Column {
+            Box(modifier = Modifier.size(200.dp, 120.dp).pullToRefresh(isRefreshing = false, state = state, onRefresh = { onRefreshed() }).testTag("çekilir")) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) { items(10) { Text("Satır $it", modifier = Modifier.height(50.dp)) } }
+            }
+            LazyRow(modifier = Modifier.height(40.dp).width(100.dp).testTag("satır"), overscrollEffect = null) {
+                items(3) { Box(modifier = Modifier.size(40.dp)) }
+            }
         }
     }
 }
 
 #[kompozable]
-fn RustScrollForms() {
-    LazyRow(
-        modifier = Modifier.height(40.dp()).width(100.dp()).test_tag("rust satır"),
-        overscroll_effect = Some(None),
-        content = |this: &mut LazyListScope| this.items(3, |_| Box(modifier = Modifier.size(40.dp()))),
+fn RustScrollForms(on_refreshed: impl Fn() + 'static) {
+    let state = remember_pull_to_refresh_state();
+    let on_refreshed = Rc::new(on_refreshed);
+    Column(
+        content = || {
+            let on_refreshed = on_refreshed.clone();
+            Box(
+                modifier = Modifier
+                    .size_wh(200.dp(), 120.dp())
+                    .pull_to_refresh(false, state.clone(), on_refresh = move || on_refreshed())
+                    .test_tag("rust çekilir"),
+                content = || {
+                    LazyColumn(
+                        modifier = Modifier.fill_max_size(),
+                        content = |this: &mut LazyListScope| {
+                            this.items(10, |i| Text(format!("Satır {i}"), modifier = Modifier.height(50.dp())))
+                        },
+                    )
+                },
+            );
+            LazyRow(
+                modifier = Modifier.height(40.dp()).width(100.dp()).test_tag("rust satır"),
+                overscroll_effect = Some(None),
+                content = |this: &mut LazyListScope| this.items(3, |_| Box(modifier = Modifier.size(40.dp()))),
+            );
+        },
     );
 }
 
 fn scroll_forms_take_compose_named_arguments() {
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(|| {
-            ScrollForms();
-            RustScrollForms();
-        }),
-        IntSize::new(400, 800),
-    );
+    let refreshed = Rc::new(Cell::new(0));
+    let rule = {
+        let refreshed = refreshed.clone();
+        KompozTestRule::with_viewport(
+            kompozable_lambda!(move || {
+                let (kotlin, rust) = (refreshed.clone(), refreshed.clone());
+                Row(content = move || {
+                    let (kotlin, rust) = (kotlin.clone(), rust.clone());
+                    ScrollForms(move || kotlin.set(kotlin.get() + 1));
+                    RustScrollForms(move || rust.set(rust.get() + 10));
+                });
+            }),
+            IntSize::new(400, 800),
+        )
+    };
     assert!(near(bounds(&rule, "satır").width(), 100.0) && near(bounds(&rule, "rust satır").width(), 100.0));
+    // (the C++'s check: the pulled box is there, nothing refreshed yet)
+    assert!(rule.on_node_with_tag("çekilir").exists() && rule.on_node_with_tag("rust çekilir").exists());
+    assert_eq!(refreshed.get(), 0);
+    // Pulled 300 down slowly on each (292 past the slop: 146, past the 80 dp threshold): each refreshes.
+    for tag in ["çekilir", "rust çekilir"] {
+        let top = bounds(&rule, tag).top_center() + Offset::new(0.0, 10.0);
+        let h = rule.host();
+        h.pointer_down(top, -1, 0, kompoz::ui::input::PointerType::Touch);
+        for i in 1..=30 {
+            rule.advance_frame();
+            h.pointer_move(top + Offset::new(0.0, 10.0 * i as f32), -1, 0);
+        }
+        rule.advance_time_by(200);
+        h.pointer_up(top + Offset::new(0.0, 300.0), -1, 0);
+        rule.wait_for_idle();
+    }
+    assert_eq!(refreshed.get(), 11);
 }
 
 // ---- C++ 8188: spacedBy with an alignment, spring, onFirstVisible, getOrNull, repeat --------------------------

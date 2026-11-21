@@ -711,9 +711,12 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
                 #inner_call
             }
         });
+        // (WP5: a method's `#[allow(…)]`s go on the trait's declarations too: `clippy::too_many_arguments` of a
+        // composable method of many parameters)
+        let allows: Vec<Attribute> = attrs.iter().filter(|a| a.path().is_ident("allow")).cloned().collect();
         if ext.is_some() {
             let docs = attrs.iter().filter(|a| a.path().is_ident("doc"));
-            decls.push(quote!(#(#docs)* fn #name #mgi(#decl_receiver, #(#req),*) #output #mwc;));
+            decls.push(quote!(#(#docs)* #(#allows)* fn #name #mgi(#decl_receiver, #(#req),*) #output #mwc;));
         }
         m.sig.ident = imp_name;
         if pass_ids {
@@ -731,7 +734,7 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
         if ext.is_some() {
             m.vis = Visibility::Inherited;
             let sig = declaration(&m.sig);
-            decls.push(quote!(#[doc(hidden)] #sig;));
+            decls.push(quote!(#[doc(hidden)] #(#allows)* #sig;));
         } else {
             m.vis = parse_quote!(pub);
         }

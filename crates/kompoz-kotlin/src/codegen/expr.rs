@@ -318,7 +318,7 @@ impl Gen<'_, '_> {
             if l.kind == LocalKind::Delegated {
                 return Out::plain(quote_spanned!(span=> #kt::KtDelegate::get_value(&#i)), l.ty);
             }
-            let copied = l.ty.is_copy() || (matches!(l.ty, Ty::Fun(_)) && !l.kept_closure);
+            let copied = l.ty.is_copy() || (matches!(l.ty, Ty::Fun(_)) && !l.kept_closure && !l.shared_closure);
             let kind = if l.mut_ref {
                 OutKind::RefMut
             } else if copied {
@@ -1372,7 +1372,7 @@ impl Gen<'_, '_> {
         let n = item.params.len();
         let given = |k: usize| -> Option<GivenArg<'_>> {
             let p = &item.params[k];
-            if let Some(a) = args.iter().find(|a| a.name.as_ref().is_some_and(|x| x.name == p.kotlin)) {
+            if let Some(a) = args.iter().find(|a| a.name.as_ref().is_some_and(|x| p.answers_to(&x.name))) {
                 return Some(GivenArg::of(&a.value));
             }
             if let Some(a) = args.iter().filter(|a| a.name.is_none()).nth(k) {
@@ -1481,14 +1481,19 @@ impl Gen<'_, '_> {
                         return Ty::List(Box::new(t));
                     }
                     "mutableStateOf" => {
-                        let t = args.first().map(|a| self.peek_ty(&a.value)).unwrap_or(Ty::Unknown);
+                        // (its type argument where written: `mutableStateOf<Animatable<Dp, …>?>(null)`)
+                        let t = match type_args.first() {
+                            Some(crate::ast::TypeArg::Type { ty, .. }) => self.ty_of(ty),
+                            Some(crate::ast::TypeArg::Star(_)) => Ty::Unknown,
+                            None => args.first().map(|a| self.peek_ty(&a.value)).unwrap_or(Ty::Unknown),
+                        };
                         return Ty::Named("MutableState".into(), vec![t]);
                     }
                     _ => {}
                 }
                 let n_args = args.len() + usize::from(trailing.is_some());
                 let named = |i: &&crate::index::Item| {
-                    args.iter().filter_map(|a| a.name.as_ref()).all(|a| i.params.iter().any(|p| p.kotlin == a.name))
+                    args.iter().filter_map(|a| a.name.as_ref()).all(|a| i.params.iter().any(|p| p.answers_to(&a.name)))
                 };
                 free_functions(&n.name)
                     .find(|i| i.params.len() >= n_args && named(i))
@@ -1628,7 +1633,7 @@ impl Gen<'_, '_> {
                         if !p.ty.replace(' ', "").contains(&of_it) || p.lambda.is_some() {
                             return None;
                         }
-                        let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| n.name == p.kotlin));
+                        let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| p.answers_to(&n.name)));
                         let by_place = args.iter().filter(|a| a.name.is_none()).nth(k);
                         match by_name.or(by_place).map(|a| self.peek_ty(&a.value)) {
                             Some(Ty::Named(_, a)) if a.len() == 1 && a[0] != Ty::Unknown => Some(a[0].clone()),
@@ -1641,7 +1646,7 @@ impl Gen<'_, '_> {
                     };
                 };
                 let last = k + 1 == item.params.len();
-                let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| n.name == item.params[k].kotlin));
+                let by_name = args.iter().find(|a| a.name.as_ref().is_some_and(|n| item.params[k].answers_to(&n.name)));
                 let by_place = args.iter().filter(|a| a.name.is_none()).nth(k);
                 // (`with(x) { … }`: its lambda's receiver is `x`'s type)
                 let with_ty = (item.krate == "kompoz_runtime" && item.module.starts_with("kt") && item.rust == "with")
@@ -1688,7 +1693,7 @@ pub(crate) fn choose_overload(
     let takes = |o: &&'static index::Item, exact: bool| {
         o.params.len() == args.len()
             && args.iter().zip(o.params).all(|((name, given), p)| {
-                name.is_none_or(|n| n == p.kotlin)
+                name.is_none_or(|n| p.answers_to(n))
                     && match Ty::from_rust(p.ty) {
                         Ty::Float => any_float,
                         Ty::Int => !any_float,
@@ -1717,7 +1722,7 @@ pub(crate) fn overload_ret(f: &index::Item, chosen: Option<&index::Item>, args: 
     let Some(o) = chosen else { return Ty::from_rust(ret) };
     let mut binds = TypeBinds::new();
     for (k, (name, ty)) in args.iter().enumerate() {
-        let at = name.and_then(|n| o.params.iter().position(|p| p.kotlin == n)).unwrap_or(k);
+        let at = name.and_then(|n| o.params.iter().position(|p| p.answers_to(n))).unwrap_or(k);
         if let Some(p) = o.params.get(at) {
             bind_type_params(p.ty, ty, &mut binds);
         }

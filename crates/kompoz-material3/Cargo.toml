@@ -60,3 +60,37 @@ harness = false
 [[test]]
 name = "buttons_and_containers"
 harness = false
+
+# List items (area S: the classic and Expressive interactive and segmented items, Compose's behaviour, M15's samples).
+[[test]]
+name = "lists"
+harness = false
+
+# Bottom sheets (the C++ Kompoz's sheet tests by name, M15's values; Compose's behaviour; M15's BottomSheetSamples
+# and DragHandleSamples): BottomSheet, ModalBottomSheet, BottomSheetScaffold, SheetState, VerticalDragHandle.
+[[test]]
+name = "sheets"
+harness = false
+
+# Snackbars and plain tooltips (the C++ Kompoz's snackbar and tooltip tests by name, M15's values; Compose's behaviour;
+# M15's SnackbarSamples and TooltipSamples' plain tooltips): Snackbar, SnackbarHost(State), TooltipBox, PlainTooltip.
+[[test]]
+name = "snackbars_tooltips"
+harness = false
+
+# (WP5: tabs) Tabs and tab rows (the C++ Kompoz's tab tests by name, Compose's behaviour, M15's TabSamples).
+[[test]]
+name = "tabs"
+harness = false
+
+# (WP5: dialogs) Alert dialogs and basic alert dialogs (the C++ Kompoz's dialog tests by name, Compose's behaviour,
+# M15's AlertDialogSamples).
+[[test]]
+name = "dialogs"
+harness = false
+
+# (WP5: swipe to dismiss and pull to refresh) The C++ Kompoz's swipe-to-dismiss and pull-to-refresh tests by name
+# (M15's values), Compose's behaviour, M15's SwipeToDismissSamples and PullToRefreshSamples.
+[[test]]
+name = "swipe_pull"
+harness = false

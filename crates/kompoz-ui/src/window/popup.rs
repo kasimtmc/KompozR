@@ -63,7 +63,9 @@ pub fn PopupProperties(
 
 /// Where a popup goes (Compose's PopupPositionProvider): from its anchor's bounds in the window (the layout it is
 /// composed in), the window's size, the layout direction and its own size, its top left in the window, px.
-pub trait PopupPositionProvider {
+/// (`Any`: what Kotlin's `provider is SomeProvider` checks, `(provider as &dyn Any).downcast_ref::<T>()` — WP5:
+/// material3's tooltip caret asks whether its provider is the tooltip's own.)
+pub trait PopupPositionProvider: std::any::Any {
     fn calculate_position(
         &self,
         anchor_bounds: IntRect,

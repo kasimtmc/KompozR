@@ -43,8 +43,10 @@ impl FocusEnterExitScope {
 /// The focus properties of a target (Compose's FocusProperties), as the property nodes above it set them: whether
 /// it can take the focus; where each direction goes from it (a requester's target; `FocusRequester::Default`: the
 /// usual search; `FocusRequester::Cancel`: nowhere); what entering and leaving it does; the rect it is searched
-/// by (none: its bounds).
-#[derive(Clone)]
+/// by (none: its bounds). Its properties are Kotlin's (`canFocus = false` in a `focusProperties { }` block; WP5:
+/// sheets); `onEnter`/`onExit` go through their setters.
+#[derive(Clone, kompoz_runtime::KotlinProperties)]
+#[kotlin(set)]
 pub struct FocusProperties {
     pub can_focus: bool,
     pub next: FocusRequester,
@@ -56,7 +58,9 @@ pub struct FocusProperties {
     /// Left in a left-to-right layout, right in a right-to-left one (over `left`/`right` when set).
     pub start: FocusRequester,
     pub end: FocusRequester,
+    #[kotlin(skip)]
     pub on_enter: Option<FocusEnterExitBlock>,
+    #[kotlin(skip)]
     pub on_exit: Option<FocusEnterExitBlock>,
     pub focus_rect: Option<Rect>,
 }

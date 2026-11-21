@@ -32,7 +32,8 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
-pub(crate) type BoxFuture = Pin<Box<dyn Future<Output = ()>>>;
+/// A flow's collection, a boxed future (`pub`: the Kotlin index's boxed futures, its `collect` suspends; WP5).
+pub type BoxFuture = Pin<Box<dyn Future<Output = ()>>>;
 
 /// What a flow's producer emits to: `emit.emit(value).await` carries on once the collector took the value.
 pub struct FlowCollector<T> {
@@ -180,7 +181,10 @@ impl<T: 'static> Flow<T> {
         }))
     }
 
-    /// The same with a suspending `on_value`: the producer waits until it is done with each value.
+    /// The same with a suspending `on_value`: the producer waits until it is done with each value. Kotlin's
+    /// `collect { … }` (its collector is a suspending function: the Kotlin syntax's `collect` is this one; WP5).
+    ///
+    /// Kotlin: `collect(collector: suspend (T) -> Unit)`
     pub fn collect_async<Fut: Future<Output = ()> + 'static>(
         &self,
         on_value: impl FnMut(T) -> Fut + 'static,

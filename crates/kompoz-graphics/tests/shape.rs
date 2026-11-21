@@ -252,6 +252,21 @@ fn shapes_lerp_as_composes() {
     assert!(same_radii(radii(&outline_of(&*towards, size, LTR)), [15.0; 4]));
 }
 
+#[test]
+fn shared_shapes_equal_shapes_of_a_kind_as_kotlin() {
+    // Kotlin compares a `Shape` with a shape of a kind by `equals` (`shapes.pressedShape == CircleShape`): either way
+    // round, a theme's corner-based shape as the kind it holds, a rectangle as a rectangle.
+    let circle: Arc<dyn Shape> = Arc::new(CircleShape);
+    assert!(circle == CircleShape && CircleShape == circle);
+    assert!(circle != RoundedCornerShape(4.0) && circle != RectangleShape);
+    let theme: Arc<dyn Shape> = Arc::new(CornerBasedShape::from(RoundedCornerShape(12.0)));
+    let held: CornerBasedShape = RoundedCornerShape(12.0).into();
+    assert!(theme == RoundedCornerShape(12.0) && theme == held);
+    assert!(theme != CutCornerShape(12.0));
+    let rectangle: Arc<dyn Shape> = Arc::new(RectangleShape);
+    assert!(rectangle == RectangleShape && RectangleShape == rectangle);
+}
+
 // ---- Rounded polygons, Material's shapes and morphs -------------------------------------------------------------
 
 /// Points along a polygon's cubics, in order round it.

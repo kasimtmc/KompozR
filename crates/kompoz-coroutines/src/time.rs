@@ -10,6 +10,8 @@ use std::time::Duration;
 
 /// `delay(duration).await`: waits that long on the dispatcher's clock (the frames' time): a `Duration`, or
 /// milliseconds as Kotlin's `delay(timeMillis: Long)` takes them (`delay(300)`; none at all for zero or less).
+/// `Long.MAX_VALUE` milliseconds (or a time as long, `Duration::MAX`) waits forever, no timer scheduled, as
+/// kotlinx's delay (WP5: a snackbar of an indefinite duration waits so).
 pub fn delay(duration: impl DelayTime) -> Delay {
     Delay { nanos: duration.nanos(), fired: None }
 }
@@ -65,6 +67,11 @@ impl Future for Delay {
             None => {
                 if self.nanos <= 0 {
                     return Poll::Ready(());
+                }
+                if self.nanos == i64::MAX {
+                    // (kotlinx: `if (timeMillis < Long.MAX_VALUE) scheduleResumeAfterDelay(…)`: forever)
+                    self.fired = Some(Rc::new(Cell::new(false)));
+                    return Poll::Pending;
                 }
                 let (d, job) = current();
                 let fired = Rc::new(Cell::new(false));

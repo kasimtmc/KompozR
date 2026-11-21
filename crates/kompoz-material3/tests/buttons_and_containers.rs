@@ -518,12 +518,13 @@ fn subkompoz_layout_composes_slots_from_what_it_measured() {
 
 fn semantics_tree_merges_buttons_and_performs_actions() {
     // C++'s test's Material Button with an Icon and a Text (its Checkbox: WP2's; its TextField: WP3's; its
-    // AlertDialog: WP5's; kompoz-ui's semantics.rs has the rest): one node to accessibility, a button, its icon's
-    // description and its text read together, clicked by the action.
+    // AlertDialog (WP5) below; kompoz-ui's semantics.rs has the rest): one node to accessibility, a button, its
+    // icon's description and its text read together, clicked by the action.
     let clicks = Rc::new(Cell::new(0));
-    let c = clicks.clone();
+    let dialog = mutable_state_of(false);
+    let (c, d) = (clicks.clone(), dialog.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let c = c.clone();
+        let (c, d) = (c.clone(), d.clone());
         Column(move || {
             let c = c.clone();
             Button(
@@ -533,6 +534,10 @@ fn semantics_tree_merges_buttons_and_performs_actions() {
                     Text("Ekle");
                 },
             );
+            if d.get() {
+                // (Compose's AlertDialog requires its confirm button: none here, as the C++'s had)
+                AlertDialog(|| {}, || {}, title = Some(Rc::new(|| Text("Uyarı")) as Rc<dyn Fn()>));
+            }
         });
     }));
     let tree = rule.host().accessibility_tree();
@@ -540,6 +545,12 @@ fn semantics_tree_merges_buttons_and_performs_actions() {
     assert!(button.label == "Artı Ekle" && button.clickable && button.enabled, "{button:?}");
     assert!(!tree.iter().any(|n| n.label == "Ekle")); // merged into the button
     assert!(rule.host().perform_semantics_action(button.id, SemanticsAction::Click) && clicks.get() == 1);
+    // A dialog on top: the tree is the dialog's (its title), what is under it isn't told.
+    dialog.set(true);
+    rule.wait_for_idle();
+    let modal = rule.host().accessibility_tree();
+    assert!(modal.iter().any(|n| n.label == "Uyarı"), "{modal:?}");
+    assert!(!modal.iter().any(|n| n.role == Some(Role::Button)), "{modal:?}");
 }
 
 fn semantics_merge_clear_and_hide() {

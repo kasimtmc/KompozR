@@ -831,6 +831,9 @@ struct Scan {
     /// The aliases of boxed futures (`type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>`), by name:
     /// their type parameters and their future's output.
     boxed_futures: BTreeMap<String, (Vec<String>, Type)>,
+    /// The aliases of trait objects (`type DynTooltipScope<'a> = dyn TooltipScope + 'a`, WP5): a `#[named(trait …)]`
+    /// impl of one extends every value of the trait, as a blanket impl does (its methods found through the trait).
+    trait_object_aliases: BTreeSet<String>,
     /// Kotlin's names of types that Rust names otherwise (a doc line ``Kotlin: `Arrangement.Absolute` `` on
     /// `AbsoluteArrangement`): (Kotlin, Rust).
     types: BTreeSet<(String, String)>,
@@ -869,8 +872,9 @@ fn kotlin_index(packages: &[Package]) -> Result<String, String> {
 
 /// Public items of the API crates that Kotlin doesn't call (by crate and Rust name): what Kotlin's name is another
 /// crate's item. kompoz-test's one-line `Text` (the lower crates' tests' stand-in) is Material's `Text` in Kotlin
-/// (stage 12's D9: Compose's `Text` is material3's, 14 sp outside a `MaterialTheme`).
-const NOT_KOTLIN: &[(&str, &str)] = &[("kompoz_test", "Text")];
+/// (stage 12's D9: Compose's `Text` is material3's, 14 sp outside a `MaterialTheme`). A flow's plain `collect`
+/// (WP5): Kotlin's `collect` takes a suspending collector, `collect_async` (doc-lined `collect`).
+const NOT_KOTLIN: &[(&str, &str)] = &[("kompoz_test", "Text"), ("kompoz_coroutines", "collect")];
 
 /// Expands, in place, the invocations of a file's own `macro_rules!` that make items from a type's name: a macro of
 /// one arm taking `$name:ident` (`transforms!(DrawScope);`, the transforms of each drawing scope). What such a
@@ -1035,6 +1039,9 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                     .collect();
                 let output = boxed_future_output(&t.ty).expect("a boxed future");
                 scan.boxed_futures.insert(t.ident.to_string(), (params, output));
+            }
+            Item::Type(t) if is_pub(&t.vis) && matches!(&*t.ty, Type::TraitObject(_)) => {
+                scan.trait_object_aliases.insert(t.ident.to_string());
             }
             Item::Type(t) if t.generics.params.is_empty() && is_pub(&t.vis) => {
                 let mut f = FindFn(false);
@@ -1340,7 +1347,8 @@ fn impl_block(cx: &Cx, imp: &ItemImpl, scan: &mut Scan) {
     let via = named.clone().flatten().unwrap_or_default();
     // (a blanket impl, `impl<S: AsRef<str>> S`: of any type)
     let blanket = matches!(&*imp.self_ty, Type::Path(p) if p.path.segments.len() == 1
-        && imp.generics.type_params().any(|g| g.ident == p.path.segments[0].ident));
+        && imp.generics.type_params().any(|g| g.ident == p.path.segments[0].ident))
+        || scan.trait_object_aliases.contains(&type_name(&imp.self_ty));
     let owner = if blanket { String::new() } else { type_name(&imp.self_ty) };
     let twins = async_twins(imp.items.iter().filter_map(|i| match i {
         ImplItem::Fn(f) => Some((f.attrs.as_slice(), &f.sig)),
@@ -1460,7 +1468,11 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
         ReturnType::Default => "()".to_string(),
         ReturnType::Type(_, t) => text(t.to_token_stream()),
     };
-    if sig.asyncness.is_some() || returns_future(&sig.output, &bounds, &scan.futures) {
+    // (WP5: a boxed future's alias too — `LocalFuture<'static, ()>`, `BoxFuture`: `TooltipState.show()`, a flow's
+    // `collect`, suspend)
+    let boxed = matches!(&sig.output, ReturnType::Type(_, t) if matches!(&**t, Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| scan.boxed_futures.contains_key(&s.ident.to_string()))));
+    if sig.asyncness.is_some() || returns_future(&sig.output, &bounds, &scan.futures) || boxed {
         it.flags.insert("SUSPEND");
     }
     if sig.constness.is_some() {
@@ -2058,6 +2070,28 @@ mod tests {
         assert_eq!(overloads[1].params[3].default, Some((true, "1f".to_string())));
         let pad = find("padStart");
         assert_eq!((pad.via.as_str(), pad.params[1].default.clone()), ("KtStr", Some((true, "' '".to_string()))));
+    }
+
+    #[test]
+    fn a_named_trait_impl_of_a_trait_object_alias_extends_the_trait() {
+        // (WP5: `PlainTooltip` is a method of `TooltipScopeComposables`, implemented for `dyn TooltipScope`: found as
+        // the trait's extension, owner empty, as a blanket impl's methods are)
+        let file: syn::File = syn::parse_str(
+            r#"
+            pub trait TooltipScope {}
+            pub type DynTooltipScope<'a> = dyn TooltipScope + 'a;
+            #[named(trait TooltipScopeComposables)]
+            impl<'a> DynTooltipScope<'a> {
+                pub fn PlainTooltip(&self, #[default(Modifier)] modifier: Modifier, content: impl Fn() + 'static) {}
+            }
+            "#,
+        )
+        .unwrap();
+        let mut scan = Scan::default();
+        prescan(&file.items, &mut scan);
+        collect(&file.items, &Cx { krate: "k", module: "m", public: true }, &mut scan);
+        let tooltip = scan.items.iter().find(|i| i.kotlin == "PlainTooltip").unwrap();
+        assert_eq!((tooltip.owner.as_str(), tooltip.via.as_str()), ("", "TooltipScopeComposables"));
     }
 
     #[test]

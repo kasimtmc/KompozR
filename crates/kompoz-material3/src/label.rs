@@ -4,8 +4,7 @@
 
 use crate::internal::basic_tooltip::{BasicTooltipBox, remember_basic_tooltip_state};
 use crate::tooltip::{
-    AnchorBounds, SpacingBetweenTooltipAndAnchor, TooltipAnchorPosition, TooltipDefaults, TooltipScope,
-    TooltipScopeImpl, TooltipState,
+    AnchorBounds, TooltipAnchorPosition, TooltipDefaults, TooltipScope, TooltipScopeImpl, TooltipState,
 };
 use kompoz_animation::{MutableTransitionState, MutatePriority, MutatorMutex};
 use kompoz_coroutines::LaunchedEffect;
@@ -32,10 +31,7 @@ pub fn Label(
 ) {
     let interaction_source = interaction_source.unwrap_or_else(|| remember(MutableInteractionSource::new));
     // Has the same positioning logic as PlainTooltips
-    let position_provider = TooltipDefaults::remember_tooltip_position_provider(
-        TooltipAnchorPosition::Above,
-        SpacingBetweenTooltipAndAnchor,
-    );
+    let position_provider = TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above);
     let state: Rc<dyn TooltipState> = if is_persistent {
         remember(|| Rc::new(LabelStateImpl::new(true, true)) as Rc<dyn TooltipState>)
     } else {

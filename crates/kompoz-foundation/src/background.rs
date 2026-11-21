@@ -22,6 +22,8 @@ impl Modifier {
     }
 
     /// `brush` behind the content, in `shape`, faded by `alpha` (Compose's `background(brush, shape, alpha)`).
+    ///
+    /// Kotlin: `background(brush: Brush, shape: Shape = RectangleShape, alpha: Float = 1.0f)`
     fn background_brush(
         self,
         brush: Brush,

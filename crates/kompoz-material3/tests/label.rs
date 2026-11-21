@@ -186,12 +186,30 @@ fn providers() -> (KompozTestRule, Vec<Rc<dyn PopupPositionProvider>>, i32) {
         kompozable_lambda!(move || {
             let spacing = 4.dp();
             *m.borrow_mut() = vec![
-                TooltipDefaults::remember_tooltip_position_provider(TooltipAnchorPosition::Above, spacing),
-                TooltipDefaults::remember_tooltip_position_provider(TooltipAnchorPosition::Below, spacing),
-                TooltipDefaults::remember_tooltip_position_provider(TooltipAnchorPosition::Left, spacing),
-                TooltipDefaults::remember_tooltip_position_provider(TooltipAnchorPosition::Right, spacing),
-                TooltipDefaults::remember_tooltip_position_provider(TooltipAnchorPosition::Start, spacing),
-                TooltipDefaults::remember_tooltip_position_provider(TooltipAnchorPosition::End, spacing),
+                TooltipDefaults.remember_tooltip_position_provider(
+                    TooltipAnchorPosition::Above,
+                    spacing_between_tooltip_and_anchor = spacing,
+                ),
+                TooltipDefaults.remember_tooltip_position_provider(
+                    TooltipAnchorPosition::Below,
+                    spacing_between_tooltip_and_anchor = spacing,
+                ),
+                TooltipDefaults.remember_tooltip_position_provider(
+                    TooltipAnchorPosition::Left,
+                    spacing_between_tooltip_and_anchor = spacing,
+                ),
+                TooltipDefaults.remember_tooltip_position_provider(
+                    TooltipAnchorPosition::Right,
+                    spacing_between_tooltip_and_anchor = spacing,
+                ),
+                TooltipDefaults.remember_tooltip_position_provider(
+                    TooltipAnchorPosition::Start,
+                    spacing_between_tooltip_and_anchor = spacing,
+                ),
+                TooltipDefaults.remember_tooltip_position_provider(
+                    TooltipAnchorPosition::End,
+                    spacing_between_tooltip_and_anchor = spacing,
+                ),
             ];
         }),
         IntSize::new(400, 800),
@@ -280,7 +298,8 @@ fn the_deprecated_tooltip_position_provider_is_above() {
     let m = made.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         #[allow(deprecated)]
-        let provider = TooltipDefaults::remember_tooltip_position_provider_with_spacing(8.dp());
+        let provider = TooltipDefaults
+            .remember_tooltip_position_provider_with_spacing(spacing_between_tooltip_and_anchor = 8.dp());
         *m.borrow_mut() = Some(provider);
     }));
     rule.wait_for_idle();

@@ -78,3 +78,10 @@ fun comparisons(a: String, b: String, n: Long): Boolean {
 }
 
 fun bits(x: Int): Int = (x and 0xFF) or (x shl 2) xor (x shr 1)
+
+fun unusedLocals(): Int {
+    @Suppress("UNUSED_VARIABLE")
+    val kept = 1
+    @Suppress("unused") var counted = 2
+    return 3
+}

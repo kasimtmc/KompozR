@@ -3331,7 +3331,34 @@ fn a_vector_painter_moved_with_a_resizing_ancestor_is_kept_as_drawn() {
     assert_eq!(rule.draw().vectors.len(), 1);
 }
 
+/// What a coroutine writes as it goes on after a frame (its frame callback done) and a draw reads: drawn with it in
+/// that frame — the keep check's list keeping unchanged nodes too, the write having reached the draw's readers
+/// before the frame is drawn. (WP5's sheets hit it: a fling's end starting an overscroll stretch.)
+fn what_a_frames_continuation_writes_is_drawn_in_that_frame() {
+    let color = mutable_state_of(Color::Red);
+    let go = mutable_state_of(false);
+    let (c, g) = (color.clone(), go.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (c, started) = (c.clone(), g.get());
+        let cc = c.clone();
+        kompoz_coroutines::LaunchedEffect(started, async move {
+            if started {
+                kompoz_coroutines::with_frame_millis(|_| ()).await;
+                cc.set(Color::Blue);
+            }
+        });
+        Canvas(Modifier.size(50.dp()), on_draw = move |d| d.draw_rect(c.get()));
+    }));
+    // (the rule's keep check is on: a mismatch fails the frame)
+    go.set(true);
+    for _ in 0..3 {
+        rule.advance_frame();
+    }
+    assert!(rule.draw().rect_colors.contains(&Color::Blue));
+}
+
 tests!(
+    what_a_frames_continuation_writes_is_drawn_in_that_frame,
     a_vector_painter_moved_with_a_resizing_ancestor_is_kept_as_drawn,
     a_layout_node_draws_in_the_space_of_what_it_wraps,
     graphics_layer_stretch_draws_through_a_stretched_layer,

@@ -1,7 +1,7 @@
 //! Material's buttons and containers in Kotlin's syntax, as a Compose user writes them: the C++ Kompoz's
 //! `required_arguments_by_name` (kompozable_tests.cpp 201-226, its TextButton and Icon; its Checkbox is WP2's, its
-//! TextField WP3's) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges and extended
-//! FAB; its SegmentedListItem is WP5's, its LoadingIndicator WP2's, its BottomAppBar WP4a's) through `kompoz!`, and
+//! TextField WP3's) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges, segmented
+//! list items and extended FAB; its LoadingIndicator WP2's, its BottomAppBar WP4a's) through `kompoz!`, and
 //! material3's samples of buttons, icon buttons, FABs, cards and chips from a `.kt` file (kompoz_file!).
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -40,6 +40,7 @@ kompoz! {
     @Kompozable
     fun Containers() {
         val tasks = remember { mutableStateListOf(1, 2, 3) }
+        var plan by remember { mutableStateOf(0) }
         var open by remember { mutableStateOf(true) }
         Column {
             Row {
@@ -52,6 +53,12 @@ kompoz! {
             Text("sıra: ${tasks.joinToString(",")}")
             BadgedBox(badge = { Badge { Text("8") } }) { Icon(Icons.Filled.Email, contentDescription = "Posta") }
             BadgedBox(badge = { Badge(modifier = Modifier.testTag("nokta")) }) { Icon(Icons.Filled.Notifications, contentDescription = "Bildirim") }
+            for (i in 0 until 2) {
+                // (the C++ gave its headline as `headlineContent = { Text("plan $i") }`: M15's SegmentedListItem takes
+                // it as its `content`, the trailing block)
+                SegmentedListItem(selected = plan == i, onClick = { plan = i }, shapes = ListItemDefaults.segmentedShapes(i, 2),
+                                  supportingContent = { Text(if (plan == i) "seçili" else "") }) { Text("plan $i") }
+            }
             SmallExtendedFloatingActionButton(onClick = { open = !open }, expanded = open, icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                                               text = { Text("Yeni") }, modifier = Modifier.testTag("fab"))
         }
@@ -73,6 +80,8 @@ fn containers_as_compose_writes_them() {
     rule.on_node_with_text("görev 1").assert_does_not_exist();
     rule.on_node_with_text("8").assert_exists();
     rule.on_node_with_tag("nokta").assert_exists();
+    rule.on_node_with_text("plan 1").perform_click();
+    rule.on_node_with_text("seçili").assert_exists();
     let wide = rule.on_node_with_tag("fab").get_unclipped_bounds_in_root();
     rule.on_node_with_tag("fab").perform_click();
     rule.main_clock().advance_time_by(2000);

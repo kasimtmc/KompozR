@@ -35,8 +35,9 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 /// A tooltip box (Compose's internal `BasicTooltipBox`): `tooltip` in a popup placed by `position_provider` while
-/// `state` is visible, above the anchor `content` (in a Box of `modifier`). The popup takes the focus if `focusable`
-/// — or, `has_action`, where an accessibility service needs it or Tab moved into it from the anchor; a press
+/// `state` is visible, above the anchor `content` (in a Box of `modifier`). The popup would take the focus if
+/// `focusable` — or, `has_action`, where an accessibility service needs it or Tab moved into it from the anchor —
+/// but Compose for desktop's fork never makes it focusable (CMP-963); a press
 /// outside or back calls `on_dismiss_request` (none: the state is dismissed). Without `enable_user_input` it shows
 /// only from code.
 #[kompozable]
@@ -138,7 +139,7 @@ fn TooltipPopup(
     state: Rc<dyn TooltipState>,
     on_dismiss_request: Option<Rc<dyn Fn()>>,
     scope: CoroutineScope,
-    focusable: bool,
+    _focusable: bool,
     force_keyboard_focusable: MutableState<bool>,
     content: Rc<dyn Fn()>,
 ) {
@@ -156,7 +157,10 @@ fn TooltipPopup(
             }
             Some(on_dismiss_request) => on_dismiss_request(),
         },
-        properties = PopupProperties { focusable, clipping_enabled: false, ..PopupProperties::default() },
+        // (WP5: tooltips — the lead's assignment: Compose for desktop's fork, CMP's
+        // TODO(https://youtrack.jetbrains.com/issue/CMP-963) Discuss how to support focusable: the popup is never
+        // focusable on desktop, whatever `focusable` says)
+        properties = PopupProperties { focusable: false, clipping_enabled: false, ..PopupProperties::default() },
         content = move || {
             let (description, content) = (tooltip_description.clone(), content.clone());
             Box(
@@ -409,16 +413,17 @@ impl BasicTooltipStateImpl {
     }
 }
 
-/// A `show` waiting until it is cancelled (Compose's `suspendCancellableCoroutine` that is never resumed).
+/// A `show` waiting until it is cancelled (Compose's `suspendCancellableCoroutine` that is never resumed; WP5:
+/// material3's `TooltipStateImpl` waits on one too).
 #[derive(Default)]
-struct Shown {
+pub(crate) struct Shown {
     cancelled: std::cell::Cell<bool>,
     waker: RefCell<Option<Waker>>,
 }
 
 impl Shown {
     /// Compose's `continuation.cancel()`.
-    fn cancel(&self) {
+    pub(crate) fn cancel(&self) {
         self.cancelled.set(true);
         if let Some(w) = self.waker.borrow_mut().take() {
             w.wake();
@@ -427,7 +432,7 @@ impl Shown {
 }
 
 /// Waits until its [`Shown`] is cancelled.
-struct WaitCancelled(Rc<Shown>);
+pub(crate) struct WaitCancelled(pub(crate) Rc<Shown>);
 
 impl Future for WaitCancelled {
     type Output = ();

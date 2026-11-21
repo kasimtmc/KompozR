@@ -181,6 +181,20 @@ impl Gen<'_, '_> {
     // ---- Locals ------------------------------------------------------------------------------------------------
 
     fn local_property(&mut self, p: &Property) -> TokenStream {
+        let decl = self.local_property_decl(p);
+        // Kotlin's `@Suppress("UNUSED_VARIABLE")` (or `"unused"`) on a local: Rust's unused-variable lint is kept quiet
+        // for it too (by a use of it), as Kotlin's compiler is.
+        if let Binding::Name(n) = &p.binding
+            && suppresses_unused(&p.annotations)
+        {
+            let span = self.span(p.loc);
+            let i = self.name_ident(&snake(&n.name), n.loc);
+            return quote_spanned!(span=> #decl let _ = &#i;);
+        }
+        decl
+    }
+
+    fn local_property_decl(&mut self, p: &Property) -> TokenStream {
         let span = self.span(p.loc);
         if p.receiver.is_some() || p.getter.is_some() || p.setter.is_some() {
             let t = self.later(p.loc, "a local property with a receiver, getter or setter");
@@ -285,7 +299,13 @@ impl Gen<'_, '_> {
                     }
                     PropertyInit::Delegate(_) => unreachable!(),
                 };
+                // (WP5: swipe to dismiss — a function value a call gave is an `Rc`: cloned when used as a value)
+                let shared_closure = matches!(ty, Ty::Fun(_))
+                    && matches!(init, PropertyInit::Value(e) if !matches!(e.kind, ExprKind::Lambda(_)));
                 self.declare(&n.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
+                if shared_closure && let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
+                    l.shared_closure = true;
+                }
                 quote_spanned!(span=> let #m #i #annot #value;)
             }
         }
@@ -294,12 +314,18 @@ impl Gen<'_, '_> {
     /// What a delegate's reads give (`remember { mutableStateOf(0) }` → an `Int`).
     pub(crate) fn delegate_ty(&self, d: &Expr) -> Ty {
         match &d.kind {
-            ExprKind::Call { callee, args, trailing_lambda, .. } => {
+            ExprKind::Call { callee, args, trailing_lambda, type_args } => {
                 let name = match &callee.kind {
                     ExprKind::Name(n) => n.name.as_str(),
                     ExprKind::Member { name, .. } => name.name.as_str(),
                     _ => "",
                 };
+                // (a state's type argument where written: `mutableStateOf<Animatable<Dp, …>?>(null)`)
+                if let Some(crate::ast::TypeArg::Type { ty: t, .. }) =
+                    type_args.first().filter(|_| matches!(name, "mutableStateOf" | "mutableStateListOf"))
+                {
+                    return self.ty_of(t);
+                }
                 match name {
                     "mutableStateOf"
                     | "mutableIntStateOf"
@@ -785,6 +811,14 @@ impl Gen<'_, '_> {
         let ts = if prelude.is_empty() { chain } else { quote_spanned!(span=> { #prelude #chain }) };
         Out::plain(ts, ty)
     }
+}
+
+/// Whether the annotations hold `@Suppress("UNUSED_VARIABLE")` or `@Suppress("unused")` (any of its names).
+fn suppresses_unused(annotations: &[Annotation]) -> bool {
+    annotations.iter().filter(|a| a.name.last().name == "Suppress").flat_map(|a| a.args.iter().flatten()).any(|arg| {
+        matches!(&arg.value.kind, ExprKind::String(s)
+            if matches!(s.parts.as_slice(), [StringPart::Text { text, .. }] if text == "UNUSED_VARIABLE" || text == "unused"))
+    })
 }
 
 /// Whether an expression statement is written as a block (no `;` after it).

@@ -148,6 +148,9 @@ pub trait AsFlow<T: 'static> {
     fn collect(&self, on_value: impl FnMut(T) + 'static) -> BoxFuture {
         self.as_flow().collect(on_value)
     }
+    /// [`Flow::collect_async`].
+    ///
+    /// Kotlin: `collect(collector: suspend (T) -> Unit)`
     fn collect_async<Fut: Future<Output = ()> + 'static>(&self, on_value: impl FnMut(T) -> Fut + 'static) -> BoxFuture {
         self.as_flow().collect_async(on_value)
     }

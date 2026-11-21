@@ -101,6 +101,16 @@ fn brush_gradients_interpolate_in_the_painted_area() {
 }
 
 #[test]
+fn a_linear_gradient_of_a_list_is_the_slices() {
+    // (WP5) Kotlin's `Brush.linearGradient(colors: List<Color>, …)`: the slice's gradient.
+    let (red, blue) = (Color::hex(0xFF0000), Color::hex(0x0000FF));
+    assert_eq!(
+        Brush::linear_gradient_of(vec![red, blue], Offset::Zero, Offset::Infinite, CLAMP),
+        Brush::linear_gradient(&[red, blue], Offset::Zero, Offset::Infinite, CLAMP)
+    );
+}
+
+#[test]
 fn brush_geometry_resolves_on_the_area() {
     let (red, blue) = (Color::hex(0xFF0000), Color::hex(0x0000FF));
     let area = xywh(100.0, 50.0, 200.0, 100.0);

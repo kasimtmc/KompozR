@@ -192,23 +192,15 @@ fn animate_content_size_in_a_lookahead_scope_goes_to_the_lookahead_size() {
 }
 
 fn double_measured_children_settle() {
-    // C++'s double_measured_children_settle, its non-Material part: Material's PrimaryTabRow (stage 12) is a stand-in
-    // measuring its tabs twice (each loose, then at an equal share of the width) — one tab a BoxWithConstraints
-    // choosing its text by the width it is given — and an animated size in a row of IntrinsicSize.Min (asked its
-    // intrinsic height, then measured). Ten frames later nothing composes again or waits; a change settles.
+    // C++'s double_measured_children_settle, its non-Material part: an animated size in a row of IntrinsicSize.Min
+    // (asked its intrinsic height, then measured). Ten frames later nothing composes again or waits; a change
+    // settles. (Its Material half, a PrimaryTabRow measuring its tabs twice, is kompoz-material3's tests/tabs.rs
+    // `double_measured_children_settle`.)
     let big = mutable_state_of(false);
     let b = big.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         let b = b.clone();
         Column(move || {
-            TabRowStandIn(|| {
-                BoxWithConstraints(
-                    content = |scope: &BoxWithConstraintsScope| {
-                        Text(if scope.max_width() > 50.dp() { "geniş" } else { "dar" });
-                    },
-                );
-                Text("İki");
-            });
             let b = b.clone();
             Row(
                 modifier = Modifier.height_intrinsic(IntrinsicSize::Min),
@@ -235,33 +227,10 @@ fn double_measured_children_settle() {
     }
     assert_eq!(rule.host().stats().recompositions, before);
     assert!(!rule.host().has_pending_work());
-    rule.on_node_with_text("geniş").assert_exists();
     big.set(true);
     rule.wait_for_idle();
     assert!(near(bounds(&rule, "anim").height(), 80.0, 0.5));
     assert!(!rule.host().has_pending_work());
-}
-
-/// The stand-in for Material's PrimaryTabRow: its tabs measured twice, loose then each an equal share of the width.
-#[kompozable]
-fn TabRowStandIn(tabs: impl Fn() + 'static) {
-    MultiMeasureLayout(
-        modifier = Modifier.fill_max_width(),
-        content = tabs,
-        measure_policy = |scope: &MeasureScope, measurables: &[&dyn Measurable], constraints: Constraints| {
-            let loose = Constraints::new(0, constraints.max_width, 0, constraints.max_height);
-            let tall = measurables.iter().map(|m| m.measure(loose).height()).max().unwrap_or(0);
-            let count = measurables.len().max(1) as i32;
-            let share = constraints.max_width / count;
-            let placeables: Vec<Placeable> =
-                measurables.iter().map(|m| m.measure(Constraints::fixed(share, tall))).collect();
-            scope.layout(constraints.max_width, tall, move |p: &PlacementScope| {
-                for (i, placeable) in placeables.iter().enumerate() {
-                    p.place(placeable, share * i as i32, 0);
-                }
-            })
-        },
-    );
 }
 
 // ---- animate_bounds --------------------------------------------------------------------------------------------

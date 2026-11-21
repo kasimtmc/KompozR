@@ -261,15 +261,17 @@ fn chips_as_compose_1_4() {
 }
 
 fn elevated_chips_cast_a_shadow_and_leading_icon_tabs_sit_side_by_side() {
-    // The chips' part of the C++ test; its leading icon tabs (PrimaryTabRow, LeadingIconTab) wait for WP5's Tab.
+    // The chips and (WP5) the leading icon tabs of a PrimaryTabRow.
     let on = mutable_state_of(false);
     let enabled = mutable_state_of(true);
     let assists = Rc::new(Cell::new(0));
-    let (o, e, a) = (on.clone(), enabled.clone(), assists.clone());
+    let tab = mutable_state_of(0);
+    let (o, e, a, t) = (on.clone(), enabled.clone(), assists.clone(), tab.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
-            let (o, e, a) = (o.clone(), e.clone(), a.clone());
+            let (o, e, a, t) = (o.clone(), e.clone(), a.clone(), t.clone());
             Column(move || {
+                let t = t.clone();
                 let a = a.clone();
                 ElevatedAssistChip(
                     move || a.set(a.get() + 1),
@@ -286,6 +288,30 @@ fn elevated_chips_cast_a_shadow_and_leading_icon_tabs_sit_side_by_side() {
                 );
                 ElevatedSuggestionChip(|| {}, || Text("Öneri"), modifier = Modifier.test_tag("suggestion"));
                 AssistChip(|| {}, || Text("Düz"), modifier = Modifier.test_tag("plain"));
+                PrimaryTabRow(
+                    t.get(),
+                    modifier = Modifier.test_tag("tabs"),
+                    tabs = move || {
+                        for i in 0..2 {
+                            let t2 = t.clone();
+                            LeadingIconTab(
+                                t.get() == i,
+                                move || t2.set(i),
+                                text = move || Text(if i == 0 { "Uçuş" } else { "Otel" }),
+                                icon = move || {
+                                    let (icon, description) = if i == 0 {
+                                        (Icons::Filled::Star(), "uçak")
+                                    } else {
+                                        (Icons::Filled::Home(), "ev")
+                                    };
+                                    VectorIcon(icon, Some(description.into()));
+                                },
+                                modifier = Modifier.test_tag(format!("tab{i}")),
+                                unselected_content_color = Some(MaterialTheme::color_scheme().on_surface_variant),
+                            );
+                        }
+                    },
+                );
             });
         }),
         IntSize::new(400, 800),
@@ -345,6 +371,35 @@ fn elevated_chips_cast_a_shadow_and_leading_icon_tabs_sit_side_by_side() {
     assert!(off.shadows == 0 && off.container == Some(named_args!(cs.on_surface.copy(alpha = 0.12))));
     rule.on_node_with_text("Yol tarifi").perform_click();
     assert_eq!(assists.get(), 1);
+    // Leading icon tabs: 48 tall, the icon 8 dp before the text, both centered in the tab.
+    let t0 = bounds(&rule, "tab0");
+    let icon = named_args!(rule.on_node_with_content_description("uçak", use_unmerged_tree = true))
+        .get_unclipped_bounds_in_root();
+    let text = named_args!(rule.on_node_with_text("Uçuş", use_unmerged_tree = true)).get_unclipped_bounds_in_root();
+    assert!(near(t0.height(), 48.0, 0.01) && near(bounds(&rule, "tabs").height(), 48.0, 0.01), "{t0:?}");
+    assert!(near(text.left, icon.right + 8.0, 0.01), "{icon:?} {text:?}");
+    assert!(near(icon.center().y, t0.center().y, 0.5) && near(text.center().y, t0.center().y, 0.5));
+    // centered at whole px (the half px to the right)
+    assert_eq!(icon.left - t0.left, ((t0.width() - (text.right - icon.left)) / 2.0 + 0.5).floor(), "{t0:?} {icon:?}");
+    // The selected one in primary (the other as asked), its indicator under both.
+    let canvas = rule.draw();
+    for (t, c) in canvas.texts.iter().zip(&canvas.colors) {
+        if t == "Uçuş" {
+            assert_eq!(*c, cs.primary);
+        }
+        if t == "Otel" {
+            assert_eq!(*c, cs.on_surface_variant);
+        }
+    }
+    assert_eq!(canvas.vector_colors.iter().filter(|c| **c == cs.primary).count(), 1);
+    let indicator = canvas.rects.iter().rev().find(|r| near(r.height(), 3.0, 0.01)).copied().expect("the indicator");
+    assert!(
+        // (within a px: the indicator centered at whole px in the tab, the row centered by its arrangement)
+        near(indicator.left, icon.left, 1.0) && near(indicator.width(), text.right - icon.left, 1.0),
+        "{indicator:?} {icon:?} {text:?}"
+    );
+    rule.on_node_with_text("Otel").perform_click();
+    assert_eq!(tab.get(), 1);
 }
 
 fn badges_sit_on_the_top_end_corner() {

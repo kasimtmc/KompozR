@@ -33,6 +33,8 @@ impl Modifier {
     }
 
     /// The border `border` says along `shape` (Compose's `border(border, shape)`).
+    ///
+    /// Kotlin: `border(border: BorderStroke, shape: Shape = RectangleShape)`
     fn border_stroke(
         self,
         border: BorderStroke,

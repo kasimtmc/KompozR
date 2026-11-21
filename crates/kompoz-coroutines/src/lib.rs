@@ -13,6 +13,8 @@ mod executor;
 mod flow;
 mod hot;
 mod scope;
+// (WP5: snackbars — kotlinx.coroutines.sync's Mutex, SnackbarHostState's queue)
+pub mod sync;
 mod time;
 
 pub use background::{Background, background_work_in_flight, run_in_background, with_background};

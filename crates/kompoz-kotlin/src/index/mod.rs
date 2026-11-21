@@ -134,6 +134,20 @@ pub struct Param {
     pub lambda: Option<Lambda>,
 }
 
+impl Param {
+    /// Whether a Kotlin argument named `name` is for it (see [`answers_to`]).
+    pub fn answers_to(&self, name: &str) -> bool {
+        answers_to(self.kotlin, self.ty, name)
+    }
+}
+
+/// Whether a Kotlin argument named `name` is for a parameter of Kotlin name `kotlin` and Rust type `ty`: its own
+/// name, or `color` for a `brush: impl Into<Brush>` — Compose's pairs of overloads taking a `Color` or a `Brush`
+/// (`DrawScope.drawRoundRect(color = …)` and `drawRoundRect(brush = …)`) are one Rust function taking either.
+pub fn answers_to(kotlin: &str, ty: &str, name: &str) -> bool {
+    kotlin == name || (name == "color" && kotlin == "brush" && ty.replace(' ', "").starts_with("implInto<Brush>"))
+}
+
 /// A parameter's default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Default {

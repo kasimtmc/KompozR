@@ -434,6 +434,13 @@ impl Gen<'_, '_> {
             });
         }
         let ty = if is_pascal(&n.name) { Ty::named(&n.name) } else { Ty::Unknown };
+        // (WP5: sheets) A corner shape of four corners, `RoundedCornerShape(0.dp, 24.dp, 24.dp, 0.dp)`: its
+        // four-corner constructor (the function of its name takes one size for all four).
+        const CORNER_SHAPES: [&str; 4] =
+            ["RoundedCornerShape", "CutCornerShape", "AbsoluteRoundedCornerShape", "AbsoluteCutCornerShape"];
+        if CORNER_SHAPES.contains(&n.name.as_str()) && args.len() == 4 && args.iter().all(|a| a.name.is_none()) {
+            return Out::plain(quote_spanned!(span=> #name::new(#(#vals),*)), ty);
+        }
         Out::plain(quote_spanned!(span=> #name(#(#vals),*)), ty)
     }
 
@@ -495,7 +502,7 @@ impl Gen<'_, '_> {
         let mut vals: Vec<Option<TokenStream>> = vec![None; o.params.len()];
         for (k, a) in args.iter().enumerate() {
             let at = match a.name {
-                Some(n) => o.params.iter().position(|p| p.kotlin == n.name).unwrap_or(k),
+                Some(n) => o.params.iter().position(|p| p.answers_to(&n.name)).unwrap_or(k),
                 None => k,
             };
             let p = &o.params[at];
@@ -921,7 +928,10 @@ impl Gen<'_, '_> {
     }
 
     fn choose_quiet(&self, items: &[&'static crate::index::Item], args: &[ArgRef]) -> Option<Callee> {
-        self.choose_among(items, args, false)
+        // (WP5: one whose arguments are all of types that may fit first, as Kotlin's resolution takes only the
+        // applicable overloads — `showSnackbar("…")` isn't `showSnackbar(visuals)` —; else the best of all, what is
+        // known of types being partial)
+        self.choose_among(items, args, true).or_else(|| self.choose_among(items, args, false))
     }
 
     /// The item of `items` the arguments fit best (`strict`: of those none of whose arguments is of a type known not
@@ -975,8 +985,10 @@ impl Gen<'_, '_> {
                         && !p.ty.contains("Fn(")
                         && !p.ty.contains("Fn<")
                         && !p.ty.trim_start().starts_with("fn(");
+                    // (WP5: `null` to a nullable slot — `sheetDragHandle = null`)
                     let value_fits = matches!(a.value, ArgValue::Expr(e)
-                        if fun_interface || lambda_if(e) || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_)));
+                        if fun_interface || lambda_if(e) || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_))
+                            || (matches!(e.kind, ExprKind::Null) && p.ty.trim_start().starts_with("Option<")));
                     if a.value.is_lambda() || !value_fits {
                         return None;
                     }
@@ -992,7 +1004,10 @@ impl Gen<'_, '_> {
                     // trait — `rememberVectorPainter(…)`, a VectorPainter, to `Icon(painter: Painter)` —, which the
                     // index doesn't say; a parameter of the value's own type still fits better)
                     let may_implement = matches!(ty, Ty::Named(_, _)) && super::expr::Shared::of_rust(&p.ty).is_some();
-                    if !compatible(&ty, &p.ty()) && !may_implement {
+                    // (WP5: a string isn't a shared trait object — `showSnackbar(message)` beside
+                    // `showSnackbar(visuals: SnackbarVisuals)`)
+                    let string_to_shared = ty == Ty::String && super::expr::Shared::of_rust(&p.ty).is_some();
+                    if (!compatible(&ty, &p.ty()) || string_to_shared) && !may_implement {
                         score -= 5;
                         mismatched = true;
                     } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y) {
@@ -1023,7 +1038,7 @@ impl Gen<'_, '_> {
             let at = if let Some(name) = a.name {
                 c.params
                     .iter()
-                    .position(|p| p.kotlin == name.name)
+                    .position(|p| p.answers_to(&name.name))
                     .ok_or_else(|| format!("no parameter `{}`", name.name))?
             } else if trailing {
                 n.checked_sub(1).ok_or("no parameter for the lambda")?
@@ -1779,7 +1794,7 @@ fn split_chain<'e>(
     let owner = c.ret.owner();
     for a in args {
         match (a.name, owner) {
-            (Some(n), Some(owner)) if !c.params.iter().any(|p| p.kotlin == n.name) => {
+            (Some(n), Some(owner)) if !c.params.iter().any(|p| p.answers_to(&n.name)) => {
                 let m = members_of(owner, &n.name).find(|i| i.params.len() == 1)?;
                 links.push((*a, m));
             }

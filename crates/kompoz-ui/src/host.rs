@@ -582,6 +582,11 @@ impl KompozHost {
         // laid things out; what they write is the next frame's)
         if frame {
             self.dispatcher.run_frame_end();
+            // (WP5: sheets) What they wrote reaches its readers before the frame is drawn: a draw reading it is
+            // drawn again with it — the frame's drawing reads it either way, as Compose's draw after the frame's
+            // continuations does —; what it composes or lays out again is the next frame's.
+            Snapshot::send_apply_notifications();
+            self.owner.snapshot_observer().process_changes();
         }
         self.owner.dispatch_semantics_changes();
         if self.owner.take_gesture_exclusion_changed() {

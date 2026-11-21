@@ -429,6 +429,10 @@ impl TypeText<'_, '_> {
             "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "isize" | "i128" | "u128" => Ty::OtherInt,
             "String" | "str" => Ty::String,
             "Arc" | "Rc" | "Box" if matches!(args.first(), Some(Ty::String)) => Ty::String,
+            // (WP5: swipe to dismiss — a shared closure is a Kotlin function value: `val threshold =
+            // SwipeToDismissBoxDefaults.positionalThreshold`, an `Rc<dyn Fn(f32) -> f32>`, given on to a lambda
+            // parameter)
+            "Rc" | "Arc" if matches!(args.first(), Some(Ty::Fun(_))) => first(),
             "Option" => Ty::Nullable(Box::new(first())),
             "Vec" | "VecDeque" | "List" | "MutableList" => Ty::List(Box::new(first())),
             "KtSet" | "HashSet" | "BTreeSet" => Ty::Set(Box::new(first())),
@@ -545,6 +549,11 @@ pub(crate) struct PInfo {
 }
 
 impl PInfo {
+    /// Whether a Kotlin argument named `name` is for it (see [`answers_to`](crate::index::answers_to)).
+    pub fn answers_to(&self, name: &str) -> bool {
+        crate::index::answers_to(&self.kotlin, &self.ty, name)
+    }
+
     /// What its type tells of a string literal given to it: `true` when a `&'static str` does (`impl Into<String>`,
     /// `&str`, `impl AsRef<str>`, `impl KtToString`); else a literal is made a `String`, Kotlin's only string type.
     pub fn takes_str(&self) -> bool {
@@ -838,6 +847,9 @@ pub(crate) struct Local {
     pub depth: usize,
     /// A kept closure parameter of a restartable composable (`Rc`-held: cloned when used as a value).
     pub kept_closure: bool,
+    /// (WP5: swipe to dismiss) A function value a call gave (an `Rc<dyn Fn…>`, Kotlin's function value: `val threshold =
+    /// SwipeToDismissBoxDefaults.positionalThreshold`): cloned when used as a value, called in place.
+    pub shared_closure: bool,
     /// A lambda's parameter given a `&mut` (`state.update { it.add(…) }`: the value to change in place): what takes
     /// it by reference takes it reborrowed, a value of it is a clone of what it points to.
     pub mut_ref: bool,

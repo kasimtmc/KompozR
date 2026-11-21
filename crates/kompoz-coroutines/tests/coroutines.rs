@@ -1811,6 +1811,77 @@ fn a_frame_runs_its_callbacks_then_its_continuations() {
     assert_eq!(taken(&log), ["awaited 32"]);
 }
 
+// (WP5: snackbars — kotlinx.coroutines.sync's Mutex)
+/// kotlinx's Mutex: one holder at a time, the waiting coroutines served in the order they came; a coroutine
+/// cancelled while waiting leaves the queue, `with_lock` unlocks however its action ends, owners are checked.
+fn mutexes_hand_themselves_to_coroutines_in_the_order_they_came() {
+    use kompoz_coroutines::sync::{Mutex, MutexOwner};
+    let (rule, scope) = scope_rule();
+    let log = new_log();
+    let mutex = Mutex(false);
+    assert!(!mutex.is_locked());
+    let mut jobs = Vec::new();
+    for name in ["a", "b", "c", "d"] {
+        let l = log.clone();
+        jobs.push(scope.launch(mutex.with_lock(None, move || async move {
+            push(&l, format!("{name} in"));
+            delay_ms(100).await;
+            push(&l, format!("{name} out"));
+        })));
+    }
+    rule.frame();
+    assert!(mutex.is_locked() && *log.borrow() == ["a in"]);
+    jobs[2].cancel(); // c leaves the queue
+    rule.advance_time_by(100);
+    assert!(*log.borrow() == ["a in", "a out", "b in"]);
+    jobs[1].cancel(); // b cancelled holding it: with_lock lets go, d follows
+    rule.frame();
+    assert!(*log.borrow() == ["a in", "a out", "b in", "d in"]);
+    rule.advance_time_by(100);
+    assert!(*log.borrow() == ["a in", "a out", "b in", "d in", "d out"] && !mutex.is_locked());
+    // try_lock, owners, unlock by hand.
+    let owner: MutexOwner = Rc::new("sahip");
+    assert!(mutex.try_lock(Some(owner.clone())) && mutex.holds_lock(&owner) && !mutex.try_lock(None));
+    let again = || mutex.try_lock(Some(owner.clone()));
+    assert!(quietly(|| std::panic::catch_unwind(std::panic::AssertUnwindSafe(again))).is_err());
+    let other: MutexOwner = Rc::new(1);
+    let wrong_owner = || mutex.unlock(Some(other.clone()));
+    assert!(quietly(|| std::panic::catch_unwind(std::panic::AssertUnwindSafe(wrong_owner))).is_err());
+    let (l, m, o) = (log.clone(), mutex.clone(), other.clone());
+    scope.launch(async move {
+        m.lock(Some(o)).await;
+        push(&l, "other");
+    });
+    rule.frame();
+    assert!(log.borrow().last().unwrap() == "d out");
+    mutex.unlock(Some(owner.clone()));
+    rule.frame();
+    assert!(log.borrow().last().unwrap() == "other" && mutex.holds_lock(&other) && !mutex.holds_lock(&owner));
+    mutex.unlock(None);
+    assert!(!mutex.is_locked() && Mutex(true).is_locked() && mutex == mutex.clone() && mutex != Mutex(false));
+    let not_locked = || mutex.unlock(None);
+    assert!(quietly(|| std::panic::catch_unwind(std::panic::AssertUnwindSafe(not_locked))).is_err());
+}
+
+// (WP5: snackbars — an indefinite snackbar's delay)
+/// kotlinx's `delay(Long.MAX_VALUE)` waits forever without a timer (nothing for a test's idling to jump to).
+fn a_delay_of_long_max_value_waits_forever_without_a_timer() {
+    let (rule, scope) = scope_rule();
+    let log = new_log();
+    let l = log.clone();
+    let job = scope.launch(async move {
+        delay(i64::MAX).await;
+        push(&l, "never");
+    });
+    rule.frame();
+    assert!(!rule.dispatcher.has_timers() && job.is_active());
+    rule.wait_for_idle();
+    assert!(log.borrow().is_empty() && job.is_active());
+    job.cancel();
+    rule.frame();
+    assert!(job.is_cancelled());
+}
+
 tests!(
     launched_effect_ticks_and_is_cancelled_on_leave,
     coroutines_give_back_values_and_work_in_the_background,
@@ -1852,4 +1923,6 @@ tests!(
     launch_starts_as_kotlins_coroutine_start_says,
     a_scope_tells_its_completion_unless_disposed,
     a_frame_runs_its_callbacks_then_its_continuations,
+    mutexes_hand_themselves_to_coroutines_in_the_order_they_came,
+    a_delay_of_long_max_value_waits_forever_without_a_timer,
 );

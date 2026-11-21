@@ -292,7 +292,16 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// Declares a local (in the innermost scope); its Rust name.
     pub fn declare(&mut self, kotlin: &str, rust: String, kind: LocalKind, ty: Ty) -> String {
         let depth = self.scopes.len() - 1;
-        let local = Local { rust: rust.clone(), kind, ty, depth, kept_closure: false, mut_ref: false, used: None };
+        let local = Local {
+            rust: rust.clone(),
+            kind,
+            ty,
+            depth,
+            kept_closure: false,
+            shared_closure: false,
+            mut_ref: false,
+            used: None,
+        };
         self.scopes.last_mut().expect("a scope").insert(kotlin.to_string(), local);
         rust
     }
@@ -559,15 +568,17 @@ impl<'a, 'd> Gen<'a, 'd> {
         self.in_async = suspend;
         self.inline_async = false;
 
-        // The receiver of an extension function: `self`.
+        // The receiver of an extension function: `self` (a composable's: its hidden function's first parameter, a
+        // clone of the value it extends).
         let mut self_ty = None;
+        let receiver_rust = if kompozable { "__kz_this" } else { "self" };
         if let Some(r) = &f.receiver {
             match (r.simple_name(), r.nullable, &r.kind) {
                 (Some(n), false, TypeKind::Named(segs)) if segs.iter().all(|s| s.args.is_empty()) => {
                     let rust_ty = self.rust_type(r, types::TypePos::Value);
                     let name = owner_name(last_segment(&n));
                     self.receivers.push(ImplicitReceiver {
-                        rust: "self".into(),
+                        rust: receiver_rust.into(),
                         ty: name.clone(),
                         value: self.ty_of(r),
                         labels: vec![f.name.name.clone()],
@@ -575,7 +586,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         by_ref: false,
                         owned_used: Default::default(),
                     });
-                    self.declare("this", "self".into(), LocalKind::Param, self.ty_of(r));
+                    self.declare("this", receiver_rust.into(), LocalKind::Param, self.ty_of(r));
                     self_ty = Some((rust_ty, name));
                 }
                 _ => {
@@ -673,7 +684,35 @@ impl<'a, 'd> Gen<'a, 'd> {
                 _ => vis.clone(),
             };
             if kompozable {
-                return self.later(f.loc, "a composable extension function");
+                // A composable extension function: a hidden composable of the receiver (a clone of it) and the
+                // parameters, restartable as a composable function is, reached by a method of the receiver's type
+                // (`scope.Name(…)`, what a call with the receiver implicit is written as), its defaults the
+                // method's. The receiver's type must be `Clone` (a scope value: `TabIndicatorScope`).
+                let hidden = proc_macro2::Ident::new(&format!("__kz_ext_{}", f.name.name), span);
+                let names: Vec<proc_macro2::Ident> =
+                    f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc)).collect();
+                let attr = if inline || !unit {
+                    quote_spanned!(span=> #[#rt::kompozable(inline)])
+                } else {
+                    quote_spanned!(span=> #[#rt::kompozable])
+                };
+                let this = proc_macro2::Ident::new(receiver_rust, span);
+                return quote_spanned! {span=>
+                    #allow
+                    #attr
+                    #[doc(hidden)]
+                    #vis #fn_kw #hidden(#this: #self_ty, #(#params),*) #ret #body
+
+                    #allow
+                    #[#rt::named(#trait_vis trait #trait_name)]
+                    impl #self_ty {
+                        #[track_caller]
+                        #fn_kw #name(&self, #(#params),*) #ret {
+                            let __kz_receiver = ::core::clone::Clone::clone(self);
+                            #rt::kompozable_block!({ #hidden(__kz_receiver, #(#names = #names),*) })
+                        }
+                    }
+                };
             }
             return quote_spanned! {span=>
                 #allow

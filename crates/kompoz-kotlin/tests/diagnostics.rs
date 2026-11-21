@@ -140,7 +140,9 @@ fun Animated() {
 ";
     let owners = "(`AnchoredDraggableState`, `Animatable`, `AnimationState`, `DeferredTransitionState` and \
                   `SeekableTransitionState` have one)";
-    let snap_owners = "(`AnchoredDraggableState`, `Animatable` and `SeekableTransitionState` have one)";
+    // (WP5: pull to refresh — PullToRefreshState's `snapTo(targetValue: Float)` too)
+    let snap_owners =
+        "(`AnchoredDraggableState`, `Animatable`, `PullToRefreshState` and `SeekableTransitionState` have one)";
     assert_eq!(
         diagnose(text),
         [

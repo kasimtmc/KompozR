@@ -46,9 +46,11 @@ pub trait Shape: ShapeEq + fmt::Debug + Send + Sync {
     }
 }
 
+/// Shapes are equal by what they are: a [`CornerBasedShape`] as the shape of its kind it holds (Kotlin's
+/// `CornerBasedShape` is the abstract class of those kinds, a theme's `shapes.medium` a `RoundedCornerShape`).
 impl PartialEq for dyn Shape {
     fn eq(&self, other: &dyn Shape) -> bool {
-        self.shape_eq(other.shape_as_any())
+        corner_kind_of(self).shape_eq(corner_kind_of(other).shape_as_any())
     }
 }
 
@@ -476,6 +478,14 @@ macro_rules! each_corner_shape {
     };
 }
 
+/// The shape of its kind a [`CornerBasedShape`] holds, any other shape itself.
+fn corner_kind_of(shape: &dyn Shape) -> &dyn Shape {
+    match shape.shape_as_any().downcast_ref::<CornerBasedShape>() {
+        Some(corner_based) => each_corner_shape!(corner_based, s => s as &dyn Shape),
+        None => shape,
+    }
+}
+
 impl CornerBasedShape {
     pub fn top_start(&self) -> &CornerSize {
         each_corner_shape!(self, s => &s.top_start)
@@ -597,3 +607,37 @@ impl Shape for OutlineShape {
         (self.create)(size, layout_direction, density)
     }
 }
+
+// ---- A shared shape compared with a shape of a kind ------------------------------------------------------------
+
+/// A shared shape (`Arc<dyn Shape>`, what Kotlin types `Shape`) is equal to a shape of a kind as the two shapes are,
+/// either way round (Kotlin's `equals` through the `Shape` interface: `shapes.pressedShape == CircleShape`).
+macro_rules! shared_shape_eq {
+    ($($name:ty),* $(,)?) => {
+        $(
+            impl PartialEq<$name> for Arc<dyn Shape> {
+                fn eq(&self, other: &$name) -> bool {
+                    let other: &dyn Shape = other;
+                    **self == *other
+                }
+            }
+
+            impl PartialEq<Arc<dyn Shape>> for $name {
+                fn eq(&self, other: &Arc<dyn Shape>) -> bool {
+                    *other == *self
+                }
+            }
+        )*
+    };
+}
+
+shared_shape_eq!(
+    RectangleShape,
+    RoundedCornerShape,
+    CutCornerShape,
+    AbsoluteRoundedCornerShape,
+    AbsoluteCutCornerShape,
+    CornerBasedShape,
+    GenericShape,
+    OutlineShape,
+);

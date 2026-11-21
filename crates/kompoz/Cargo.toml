@@ -182,6 +182,13 @@ harness = false
 name = "kotlin_buttons"
 harness = false
 
+# Material's lists, tabs, dialogs, sheets, swipe to dismiss and pull to refresh in Kotlin's syntax (the C++ Kompoz's
+# Settings, KotlinHelpers, AddTextDialog/DialogHost, Navigation's tabs and ScrollForms' pull to refresh; material3's
+# samples of those components from .kt files).
+[[test]]
+name = "kotlin_lists_sheets"
+harness = false
+
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
 [[test]]
 name = "kotlin_animations_all"

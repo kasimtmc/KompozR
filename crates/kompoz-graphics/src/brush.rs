@@ -1357,6 +1357,18 @@ pub fn lerp_brush(start: &Brush, stop: &Brush, fraction: f32) -> Brush {
         .unwrap_or_else(|| if fraction < 0.5 { start.clone() } else { stop.clone() })
 }
 
+// (WP5: Kotlin's Brush.linearGradient(colors) with its defaults, the doc line's)
+impl Brush {
+    /// [`Brush::linear_gradient`] of a list of colors (Compose's `Brush.linearGradient(colors: List<Color>, …)`,
+    /// what the Kotlin syntax calls: Kotlin's defaults, from the top left to the far corner, clamped, come from the
+    /// doc line).
+    ///
+    /// Kotlin: `linearGradient(colors: List<Color>, start: Offset = Offset.Zero, end: Offset = Offset.Infinite, tileMode: TileMode = TileMode.Clamp)`
+    pub fn linear_gradient_of(colors: Vec<Color>, start: Offset, end: Offset, tile_mode: TileMode) -> Brush {
+        Brush::linear_gradient(&colors, start, end, tile_mode)
+    }
+}
+
 // ---- Border strokes --------------------------------------------------------------------------------------------
 
 /// A border's width and paint (Compose's BorderStroke), for a border round a shape.

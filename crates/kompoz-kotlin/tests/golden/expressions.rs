@@ -172,3 +172,15 @@ pub fn bits(x: i32) -> i32 {
     use ::kompoz::runtime::kt::ext::*;
     ::kompoz::runtime::named_args!({ (((x & 0xFF) | (x << 2)) ^ (x >> 1)) })
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn unused_locals() -> i32 {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        let kept = 1;
+        let _ = &kept;
+        let mut counted = 2;
+        let _ = &counted;
+        return 3;
+    })
+}

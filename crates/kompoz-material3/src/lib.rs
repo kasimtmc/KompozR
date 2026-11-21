@@ -9,6 +9,8 @@
 
 #![allow(non_upper_case_globals, non_snake_case)]
 
+// (WP5: dialogs)
+mod alert_dialog;
 mod badge;
 mod button;
 mod card;
@@ -24,15 +26,33 @@ mod icon;
 mod icon_button;
 mod icon_button_defaults;
 mod interactive_component_size;
+// (WP5: sheets)
+mod bottom_sheet_scaffold;
+mod drag_handle;
 pub(crate) mod internal;
 mod label;
+mod modal_bottom_sheet;
+mod sheet_defaults;
+// (WP5: lists)
+mod list_item;
+mod list_item_defaults;
 mod material_theme;
 mod motion_scheme;
 mod precision_pointer;
+// (WP5: pull to refresh — Compose's package androidx.compose.material3.pulltorefresh)
+pub mod pulltorefresh;
 mod ripples;
 mod scrim;
 mod shapes;
+// (WP5: snackbars)
+mod snackbar;
+mod snackbar_host;
 mod surface;
+// (WP5: swipe to dismiss)
+mod swipe_to_dismiss_box;
+// (WP5: tabs)
+mod tab;
+mod tab_row;
 mod text;
 pub(crate) mod tokens;
 mod tonal_palette;
@@ -63,6 +83,13 @@ pub use icon_button::{
 #[allow(deprecated)]
 pub use icon_button::{IconButtonWithoutShape, IconToggleButtonWithoutShape};
 pub use icon_button_defaults::{IconButtonDefaults, IconButtonWidthOption};
+// (WP5: dialogs)
+#[allow(deprecated)]
+pub use alert_dialog::AlertDialogWithContent;
+pub use alert_dialog::{
+    AlertDialog, AlertDialogDefaults, BasicAlertDialog, BasicAlertDialogOverride, BasicAlertDialogOverrideScope,
+    DefaultBasicAlertDialogOverride, LocalBasicAlertDialogOverride,
+};
 // (WP1a: containers — Card, Chip, Badge)
 pub use badge::{Badge, BadgeDefaults, BadgedBox};
 pub use card::{
@@ -112,11 +139,57 @@ pub use ripples::{LocalRippleConfiguration, RippleConfiguration, RippleDefaults,
 pub use scrim::{Scrim, ScrimDefaults};
 pub use shapes::{ShapeDefaults, Shapes};
 pub use surface::{ClickableSurface, LocalAbsoluteTonalElevation, SelectableSurface, Surface, ToggleableSurface};
+// (WP5: swipe to dismiss)
+pub use swipe_to_dismiss_box::{
+    SwipeToDismissBox, SwipeToDismissBoxDefaults, SwipeToDismissBoxState, SwipeToDismissBoxValue,
+    remember_swipe_to_dismiss_box_state,
+};
+#[allow(deprecated)]
+pub use swipe_to_dismiss_box::{remember_swipe_to_dismiss_box_state_confirming, swipe_to_dismiss_box_state_confirming};
+// (WP5: lists)
+pub use list_item::{
+    ClickableListItem, ListItem, SegmentedListItem, SelectableListItem, SelectableSegmentedListItem,
+    ToggleableListItem, ToggleableSegmentedListItem,
+};
+pub use list_item_defaults::{ListItemColors, ListItemDefaults, ListItemElevation, ListItemShapes};
+// (WP5: tabs)
+pub use tab::{LeadingIconTab, Tab, TextIconTab};
+pub use tab_row::{
+    PrimaryScrollableTabRow, PrimaryTabRow, SecondaryScrollableTabRow, SecondaryTabRow, TabIndicatorScope, TabPosition,
+    TabRowDefaults,
+};
+#[allow(deprecated)]
+pub use tab_row::{ScrollableTabRow, TabRow};
+// (WP5: sheets)
+pub use bottom_sheet_scaffold::{
+    BottomSheetScaffold, BottomSheetScaffoldState, remember_bottom_sheet_scaffold_state,
+    remember_standard_bottom_sheet_state,
+};
+pub use drag_handle::{
+    DragHandleColors, DragHandleShapes, DragHandleSizes, VerticalDragHandle, VerticalDragHandleDefaults,
+};
+pub use modal_bottom_sheet::{
+    ModalBottomSheet, ModalBottomSheetDefaults, ModalBottomSheetProperties, remember_modal_bottom_sheet_state,
+};
+pub use sheet_defaults::{BottomSheet, BottomSheetDefaults, SheetState, SheetValue};
 pub use text::{LocalTextStyle, ProvideTextStyle, Text, TextColorProducer};
 pub use tooltip::{TooltipAnchorPosition, TooltipDefaults, TooltipScope, TooltipState};
+// (WP5: snackbars — Snackbar, SnackbarHost, SnackbarHostState)
+pub use snackbar::{DataSnackbar, Snackbar, SnackbarDefaults};
+pub use snackbar_host::{
+    SnackbarData, SnackbarDuration, SnackbarHost, SnackbarHostState, SnackbarResult, SnackbarVisuals,
+};
+// (WP5: tooltips — TooltipBox, PlainTooltip, rememberTooltipState)
+pub use tooltip::{
+    DefaultTooltipCaretShape, DynTooltipScope, TooltipBox, TooltipScopeComposables, remember_tooltip_state,
+};
 pub use typography::{Typography, typography_with_font_family};
 
 /// What an app using Material 3 imports: the theme, the components, the modifier extension traits.
 pub mod prelude {
     pub use crate::*;
+    // (WP5: pull to refresh — what a Compose app imports from androidx.compose.material3.pulltorefresh)
+    pub use crate::pulltorefresh::{
+        PullToRefreshDefaults, PullToRefreshModifiers, PullToRefreshState, remember_pull_to_refresh_state,
+    };
 }
