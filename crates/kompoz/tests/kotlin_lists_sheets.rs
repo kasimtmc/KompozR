@@ -238,10 +238,7 @@ kompoz! {
                     verticalArrangement = Arrangement.SpaceEvenly,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // (the C++ had Material's TextField with `shape = RoundedCornerShape(24.dp)` and transparent
-                    // TextFieldDefaults.colors(…): the text fields are WP3's, in progress — foundation's
-                    // BasicTextField of the same value and style here until WP3 swaps TextField in)
-                    BasicTextField (
+                    TextField (
                         modifier = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(0.8f)
@@ -250,7 +247,18 @@ kompoz! {
                         onValueChange = {
                             content= it
                         },
-                        textStyle = TextStyle(fontSize = textSize(), color = colors.onBackground)
+                        textStyle = TextStyle(fontSize = textSize(), color = colors.onBackground),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            errorContainerColor = Color.Transparent,
+                            focusedPlaceholderColor = Color.Transparent,
+                            unfocusedPlaceholderColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent
+                        )
                     )
                     Row {
                         TextButton(
@@ -352,6 +360,18 @@ fn the_users_add_text_dialog() {
     cancel.on_node_with_text("Vazgeç").perform_click();
     assert_eq!(*saved.borrow(), "-");
     cancel.on_node_with_text("Vazgeç").assert_does_not_exist();
+    // (beyond the C++'s: the field fills the card's column, wider than tall — its own 24 dp corners, no container
+    // color drawn —; typed into, Ekle saves the text)
+    let s = saved.clone();
+    let typed = KompozTestRule::new(kompozable_lambda!(move || {
+        let s = s.clone();
+        DialogHost(move |text: String| *s.borrow_mut() = text);
+    }));
+    let field = typed.on_node(kompoz::test::has_set_text_action()).get_unclipped_bounds_in_root();
+    assert!(field.width() > field.height(), "{field:?}");
+    typed.on_node(kompoz::test::has_set_text_action()).perform_text_input("not");
+    typed.on_node_with_text("Ekle").perform_click();
+    assert_eq!(*saved.borrow(), "not");
 }
 
 kompoz_file!("tests/kt/tabs_dialogs.kt");

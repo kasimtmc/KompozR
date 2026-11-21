@@ -101,6 +101,12 @@ impl TextLayoutResult {
         TextLayoutResult { layout_input, multi_paragraph, size, first_baseline, last_baseline }
     }
 
+    /// Its size (Compose's `size` property: the field read through a getter, as Kotlin reads it).
+    /// Kotlin: `size: IntSize`
+    pub fn size(&self) -> IntSize {
+        self.size
+    }
+
     /// The first line's baseline.
     pub fn first_baseline(&self) -> f32 {
         self.first_baseline

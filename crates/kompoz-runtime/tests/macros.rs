@@ -774,6 +774,118 @@ fn an_option_parameter_takes_what_it_holds() {
     assert_eq!(rule.names(), ["a Some(Button) Some(1)", "b None Some(2)", "c Some(Button) None", "d None Some(1)"]);
 }
 
+#[kompozable]
+fn Iconed(
+    text: &'static str,
+    #[default(None)] icon: Option<Rc<dyn Fn() -> String>>,
+    #[default(None)] border: Option<Option<i32>>,
+) {
+    let icon = icon.map_or("-".to_string(), |f| f());
+    Label(format!("{text} {icon} {border:?}"));
+}
+
+/// A generic composable: its `T` is fixed by what the `Some` holds.
+#[kompozable]
+fn Held<T: Clone + fmt::Debug + 'static>(value: Option<T>) {
+    Label(format!("{value:?}"));
+}
+
+struct Shapes {
+    shape: Option<Rc<dyn fmt::Debug>>,
+}
+
+#[named]
+impl Shapes {
+    fn copy(&self, #[default(self.shape.clone())] shape: Option<Rc<dyn fmt::Debug>>) -> Shapes {
+        Shapes { shape }
+    }
+}
+
+/// An impl's generic parameter, known from the receiver: a `T` that is an `Option` still takes a `Some(x)` for
+/// `Some(Some(x))`.
+struct Slot<T>(Option<T>);
+
+#[named]
+impl<T: Clone + fmt::Debug> Slot<T> {
+    fn refilled(&self, #[default(self.0.clone())] value: Option<T>) -> String {
+        format!("{value:?}")
+    }
+}
+
+#[named]
+fn handled(#[default(None)] on: Option<Rc<dyn Fn() -> i32>>, #[default(0)] base: i32) -> i32 {
+    base + on.map_or(0, |f| f())
+}
+
+#[named]
+fn Handler(#[default(None)] on: Option<Rc<dyn Fn() -> i32>>, #[default(1)] times: i32) -> i32 {
+    times * on.map_or(0, |f| f())
+}
+
+/// A function's own generic parameter, free until an argument names it: `Some(x)` makes it `x`'s type.
+#[named]
+fn shown<T>(#[default(None)] value: Option<T>) -> Option<T> {
+    value
+}
+
+/// What the prelude's variants hold coerces to the type wanted where they go: an argument written `Some(…)` to an
+/// `Option<Rc<dyn Fn()>>` (named, positional, a composable's, a function's, a PascalCase function's through its
+/// type, a method's), a `Some`, `Ok` or `Err` elsewhere in a body; an `Option<Option<T>>` (and an `Option<T>` whose
+/// `T` is an impl's generic parameter) still takes a `Some(x)` for `Some(Some(x))`, a generic `T` is fixed by what
+/// is in the `Some`, and a closure in a `Some(…)` still captures clones.
+fn what_a_some_holds_coerces_to_the_parameters_type() {
+    let rule = Rule::new(kompozable_lambda!(|| {
+        let name = "kalem".to_string();
+        Iconed("a", icon = Some(Rc::new(|| "ikon".to_string())));
+        Iconed("b", Some(Rc::new(move || name.clone())), border = Some(3));
+        Iconed("c", Some(Rc::new(|| "son".to_string())), Some(None));
+        let kept: Option<Rc<dyn Fn() -> String>> = Some(Rc::new(|| "yerel".to_string()));
+        Iconed("d", icon = kept);
+        let ok: Result<Box<dyn fmt::Debug>, Box<dyn fmt::Debug>> =
+            if true { Ok(Box::new(1)) } else { Err(Box::new(2)) };
+        Label(format!("{ok:?}"));
+        Held(Some(3));
+        Held(value = None::<u8>);
+        Held(Some(Some("iç")));
+        let count = Rc::new(Cell::new(5));
+        let a = handled(on = Some(Rc::new(move || count.get())));
+        let b = handled(Some(Rc::new(|| 2)), 10);
+        let c = Handler(on = Some(Rc::new(|| 3)), times = 2);
+        let d = Handler(Some(Rc::new(|| 4)), 3);
+        Label(format!("{a} {b} {c} {d}"));
+        let shapes = Shapes { shape: None };
+        let named = shapes.copy(shape = Some(Rc::new("kare")));
+        let positional = shapes.copy(Some(Rc::new(1)));
+        Label(format!("{:?} {:?}", named.shape, positional.shape));
+        Label(format!("{:?} {:?} {:?}", shown(value = Some(2)), shown(value = "düz"), shown(Some(Some(1)))));
+        let slot = Slot(Some(Some(1)));
+        Label(format!("{} {} {}", slot.refilled(value = Some(2)), slot.refilled(Some(None)), slot.refilled()));
+    }));
+    assert_eq!(
+        rule.names(),
+        [
+            "a ikon None",
+            "b kalem Some(Some(3))",
+            "c son Some(None)",
+            "d yerel None",
+            "Ok(1)",
+            "Some(3)",
+            "None",
+            "Some(Some(\"iç\"))",
+            "5 12 6 12",
+            "Some(\"kare\") Some(1)",
+            "Some(2) Some(\"düz\") Some(Some(1))",
+            "Some(Some(2)) Some(None) Some(Some(1))",
+        ]
+    );
+    // Plain code, through `named_args!`.
+    let shapes = Shapes { shape: None };
+    let square = named_args!(shapes.copy(shape = Some(Rc::new("kare"))));
+    assert_eq!(format!("{:?}", square.shape), "Some(\"kare\")");
+    assert_eq!(named_args!(handled(on = Some(Rc::new(|| 7)))), 7);
+    assert_eq!(named_args!(Handler(Some(Rc::new(|| 2)), times = 4)), 8);
+}
+
 // ---- Identity ------------------------------------------------------------------------------------------------
 
 #[kompozable]
@@ -817,4 +929,5 @@ tests!(
     a_call_can_be_kept_as_written,
     pascal_case_functions_are_functions_everywhere,
     an_option_parameter_takes_what_it_holds,
+    what_a_some_holds_coerces_to_the_parameters_type,
 );

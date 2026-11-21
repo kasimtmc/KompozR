@@ -320,6 +320,8 @@ impl PartialEq for FocusManager {
 
 impl FocusManager {
     /// Takes the focus from where it is (Compose's `clearFocus(force)`).
+    ///
+    /// Kotlin: `clearFocus(force: Boolean = false)`
     pub fn clear_focus(&self, force: bool) {
         if let Some(o) = self.owner.as_ref().and_then(Weak::upgrade) {
             o.clear_focus(force);

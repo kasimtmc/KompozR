@@ -19,6 +19,8 @@ mod color_scheme;
 mod content_color;
 mod divider;
 mod dynamic_color;
+mod exposed_dropdown_menu;
+mod exposed_dropdown_menu_desktop;
 mod flags;
 mod floating_action_button;
 mod horizontal_center_optically;
@@ -37,12 +39,17 @@ mod sheet_defaults;
 mod list_item;
 mod list_item_defaults;
 mod material_theme;
+mod menu;
+mod menu_defaults;
+mod menu_desktop;
 mod motion_scheme;
+mod outlined_text_field;
 mod precision_pointer;
 // (WP5: pull to refresh — Compose's package androidx.compose.material3.pulltorefresh)
 pub mod pulltorefresh;
 mod ripples;
 mod scrim;
+mod secure_text_field;
 mod shapes;
 // (WP5: snackbars)
 mod snackbar;
@@ -54,6 +61,8 @@ mod swipe_to_dismiss_box;
 mod tab;
 mod tab_row;
 mod text;
+mod text_field;
+mod text_field_defaults;
 pub(crate) mod tokens;
 mod tonal_palette;
 mod tooltip;
@@ -123,6 +132,11 @@ pub use dynamic_color::{
     is_dynamic_color_available, is_wallpaper_color_available, wallpaper_dark_color_scheme,
     wallpaper_light_color_scheme,
 };
+#[allow(deprecated)]
+pub use exposed_dropdown_menu::MenuAnchorType;
+pub use exposed_dropdown_menu::{
+    ExposedDropdownMenuAnchorType, ExposedDropdownMenuBox, ExposedDropdownMenuBoxScope, ExposedDropdownMenuDefaults,
+};
 pub use flags::ComposeMaterial3Flags;
 pub use icon::{BitmapIcon, Icon, TintProducerIcon, VectorIcon};
 #[allow(deprecated)]
@@ -133,10 +147,18 @@ pub use interactive_component_size::{
 };
 pub use label::Label;
 pub use material_theme::{LocalUsingExpressiveTheme, MaterialExpressiveTheme, MaterialTheme, MaterialThemeValues};
+pub use menu::{
+    CheckableDropdownMenuItem, DropdownMenuGroup, MenuGroupShapes, MenuItemColors, MenuItemShapes,
+    SelectableDropdownMenuItem, ShapedDropdownMenuItem,
+};
+pub use menu_defaults::MenuDefaults;
+pub use menu_desktop::{DropdownMenu, DropdownMenuItem, DropdownMenuPopup};
 pub use motion_scheme::{AnyTypeAnimationSpec, AnyTypeSpec, MotionScheme, MotionSchemeSpecs};
+pub use outlined_text_field::{OutlinedTextField, StringOutlinedTextField, ValueOutlinedTextField};
 pub use precision_pointer::should_use_precision_pointer_component_sizing;
 pub use ripples::{LocalRippleConfiguration, RippleConfiguration, RippleDefaults, ripple, ripple_color_producer};
 pub use scrim::{Scrim, ScrimDefaults};
+pub use secure_text_field::{OutlinedSecureTextField, SecureTextField};
 pub use shapes::{ShapeDefaults, Shapes};
 pub use surface::{ClickableSurface, LocalAbsoluteTonalElevation, SelectableSurface, Surface, ToggleableSurface};
 // (WP5: swipe to dismiss)
@@ -173,6 +195,11 @@ pub use modal_bottom_sheet::{
 };
 pub use sheet_defaults::{BottomSheet, BottomSheetDefaults, SheetState, SheetValue};
 pub use text::{LocalTextStyle, ProvideTextStyle, Text, TextColorProducer};
+pub use text_field::{IndicatorLineModifiers, StringTextField, TextField, ValueTextField};
+pub use text_field_defaults::{
+    OutlinedTextFieldDefaults, TextFieldColors, TextFieldDefaults, TextFieldLabel, TextFieldLabelPosition,
+    TextFieldLabelScope, TextFieldSlot,
+};
 pub use tooltip::{TooltipAnchorPosition, TooltipDefaults, TooltipScope, TooltipState};
 // (WP5: snackbars — Snackbar, SnackbarHost, SnackbarHostState)
 pub use snackbar::{DataSnackbar, Snackbar, SnackbarDefaults};

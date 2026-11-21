@@ -22,10 +22,11 @@ pub(crate) enum Tail {
 }
 
 impl Tail {
-    fn want(self) -> Want {
+    fn want(self, fun: &super::FnState) -> Want {
         match self {
             Tail::Value(w) => w,
-            _ => Want::default(),
+            Tail::Return => Want { some: fun.nullable_result, ..Want::default() },
+            Tail::Unit => Want::default(),
         }
     }
 }
@@ -52,7 +53,7 @@ impl Gen<'_, '_> {
             let last = k + 1 == stmts.len();
             match (&s.kind, last, tail) {
                 (StmtKind::Expr(e), true, Tail::Value(_) | Tail::Return) if gives_value(e) => {
-                    out.extend(self.value_want(e, tail.want()));
+                    out.extend(self.value_want(e, tail.want(&self.fun)));
                 }
                 _ => out.extend(self.stmt(s)),
             }
@@ -234,8 +235,17 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> #t;)
             }
             (Binding::Name(n), PropertyInit::Delegate(d)) => {
-                let ty = self.delegate_ty(d);
                 let v = self.value(d);
+                // (its declared type what the delegate holds: `var checkedIndex: Int? by remember { mutableStateOf(null)
+                // }`, Rust told it where `null` alone can't)
+                let (ty, v) = match &p.ty {
+                    Some(t) => {
+                        let kt = self.kt(span);
+                        let rt = self.rust_type(t, super::types::TypePos::Value);
+                        (self.ty_of(t), quote_spanned!(span=> #kt::delegate_of::<#rt, _>(#v)))
+                    }
+                    None => (self.delegate_ty(d), v),
+                };
                 let rust = snake(&n.name);
                 let i = self.name_ident(&rust, n.loc);
                 self.declare(&n.name, rust, LocalKind::Delegated, ty);
@@ -272,7 +282,18 @@ impl Gen<'_, '_> {
                                 info.typed = true;
                                 Out::plain(self.lambda(l, Some(&info), None), Ty::Unknown)
                             }
-                            _ => self.expr(e),
+                            _ => {
+                                // (a list of a declared type: its elements told it — `val icons: List<ImageVector?> =
+                                // listOf(null, null)`)
+                                if let Some((Ty::List(inner) | Ty::Set(inner), _)) = &declared
+                                    && super::call::list_of_call(e).is_some()
+                                {
+                                    self.expected_elem = Some((**inner).clone());
+                                }
+                                let o = self.expr(e);
+                                self.expected_elem = None;
+                                o
+                            }
                         };
                         let ty = match &declared {
                             Some((t, _)) => t.clone(),
@@ -371,6 +392,9 @@ impl Gen<'_, '_> {
                 && let Some(n) = int_lit(value)
             {
                 me.number(n, value.loc, true).ts
+            } else if op == AssignOp::Assign && read_ty.is_nullable() {
+                // (a value to a nullable place: in `Some` unless it is nullable itself)
+                me.value_want(value, Want { some: true, ..Want::default() })
             } else {
                 me.value(value)
             };
@@ -509,6 +533,10 @@ impl Gen<'_, '_> {
             || matches!(&iterable.kind, ExprKind::Binary { op: BinaryOp::RangeTo | BinaryOp::RangeUntil, .. });
         let iter = if is_range {
             self.value(iterable)
+        } else if it_ty == Ty::String {
+            // (a text's characters: Kotlin's `for (c in text)` over a CharSequence)
+            let o = self.expr(iterable).ts;
+            quote_spanned!(span=> ::core::primitive::str::chars(&#o).collect::<::std::vec::Vec<char>>())
         } else {
             let o = self.expr(iterable).ts;
             quote_spanned!(span=> #kt::KtIterable::kt_iter(&#o))
@@ -602,7 +630,10 @@ impl Gen<'_, '_> {
                 }
                 match value {
                     Some(v) => {
-                        let want = self.lambdas.last().map(|l| l.result).unwrap_or_default();
+                        let want = match self.lambdas.last() {
+                            Some(l) => l.result,
+                            None => Want { some: self.fun.nullable_result, ..Want::default() },
+                        };
                         let v = self.value_want(v, want);
                         quote_spanned!(span=> return #v)
                     }

@@ -80,7 +80,7 @@ pub use paragraph::{DefaultMaxLines, Paragraph, ParagraphIntrinsics, TextPaint, 
 pub use paragraph_style::{ParagraphStyle, lerp_paragraph_style};
 pub use placeholder::{Placeholder, PlaceholderVerticalAlign};
 pub use platform_style::{EmojiSupportMatch, PlatformParagraphStyle, PlatformSpanStyle, PlatformTextStyle};
-pub use range::{TextRange, TextRangeArgs};
+pub use range::{StringTextRangeExt, TextRange, TextRangeArgs};
 pub use shape::{FakeBackend, FakeFontFamilyResolver, FontBackend, FontMetrics, HarfrustBackend};
 pub use span_style::{SpanStyle, TextForegroundStyle, lerp_span_style};
 pub use style::{

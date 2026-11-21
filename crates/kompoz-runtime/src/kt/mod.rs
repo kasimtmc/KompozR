@@ -56,7 +56,7 @@ pub use collections::{
 #[doc(hidden)]
 pub use collections::{List_async, MutableList_async};
 pub use delegate::{
-    KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, lazy, post_dec, post_inc, pre_dec, pre_inc,
+    KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, delegate_of, lazy, post_dec, post_inc, pre_dec, pre_inc,
 };
 pub use format::format;
 pub use math::{

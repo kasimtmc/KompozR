@@ -365,19 +365,9 @@ fn modal_bottom_sheet_follows_the_back_gesture() {
                             modifier = Modifier.fill_max_width().height(if tall.get() { 600.dp() } else { 200.dp() }),
                             content = move || {
                                 Box(modifier = Modifier.size(40.dp()).focus_requester(&f).focusable());
-                                // (The C++ opened a DropdownMenu here, WP3's: its focusable popup dismissed by back is
-                                // what this checks, so ui's Popup of those properties stands in for it)
-                                if menu.get() {
-                                    let m = menu.clone();
-                                    kompoz_ui::window::Popup(
-                                        on_dismiss_request = move || m.set(false),
-                                        properties = kompoz_ui::window::PopupProperties {
-                                            focusable: true,
-                                            ..Default::default()
-                                        },
-                                        content = || Text("seçenek"),
-                                    );
-                                }
+                                // (a menu in it, as the C++'s: a focusable popup, which back closes first)
+                                let m = menu.clone();
+                                DropdownMenu(menu.get(), move || m.set(false), content = || Text("seçenek"));
                             },
                         );
                     },
@@ -420,9 +410,11 @@ fn modal_bottom_sheet_follows_the_back_gesture() {
     rule.wait_for_idle();
     menu.set(true);
     rule.wait_for_idle();
+    rule.on_node_with_text("seçenek").assert_exists();
     assert!(escape(&rule));
     rule.wait_for_idle();
     assert!(!menu.get() && s.current_value() == SheetValue::Expanded && dismissed.get() == 0);
+    rule.on_node_with_text("seçenek").assert_does_not_exist();
     // Done: it hides as it is, then onDismissRequest.
     host.back_started(back_event(0.0, 0.0));
     host.back_progressed(back_event(60.0, 0.5));

@@ -1027,6 +1027,13 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                     }
                 }
             }
+            // (a crate's own alias of a boxed future — kompoz-coroutines' `BoxFuture`, what `Flow::collect` gives —:
+            // a future, so a function giving one suspends)
+            Item::Type(t)
+                if !is_pub(&t.vis) && t.generics.params.is_empty() && boxed_future_output(&t.ty).is_some() =>
+            {
+                scan.futures.insert(t.ident.to_string());
+            }
             Item::Type(t) if is_pub(&t.vis) && boxed_future_output(&t.ty).is_some() => {
                 let params = t
                     .generics

@@ -400,6 +400,12 @@ pub trait KtStr: AsRef<str> {
     fn is_blank(&self) -> bool {
         self.as_ref().chars().all(is_kt_whitespace)
     }
+    /// Android's core-ktx `CharSequence.isDigitsOnly()` (Compose's samples use it): every character a digit (`true`
+    /// for an empty text, as Android's `TextUtils.isDigitsOnly`).
+    /// Kotlin: `isDigitsOnly(): Boolean`
+    fn is_digits_only(&self) -> bool {
+        self.as_ref().chars().all(|c| decimal_digit(c).is_some())
+    }
     /// Kotlin: `isNotBlank(): Boolean`
     fn is_not_blank(&self) -> bool {
         !self.is_blank()

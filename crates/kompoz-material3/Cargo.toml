@@ -94,3 +94,22 @@ harness = false
 [[test]]
 name = "swipe_pull"
 harness = false
+
+# The text fields: filled, outlined and secure, on both engines — their decoration (label, placeholder, icons,
+# prefix and suffix, supporting text), colors, shapes, the indicator line, the outline's cut, the layouts.
+[[test]]
+name = "text_field"
+harness = false
+
+# The menus: the dropdown menu and its items (standard, and the Expressive checkable, selectable and shaped ones),
+# the Expressive menu's popup and groups, their colors and shapes, the exposed dropdown menu and its anchors.
+[[test]]
+name = "menus"
+harness = false
+
+# The Material halves of the C++ Kompoz's text field tests whose editing halves are foundation's (by name): the
+# decoration's geometry (16 dp in, 56 dp tall, 280 dp wide), line limits, baselines, the theme's selection colors,
+# taps, selections, handles and the magnifier placed from the Material field's inset.
+[[test]]
+name = "text_field_halves"
+harness = false

@@ -1,8 +1,9 @@
 //! Selecting in the state-based text fields (WP2b) — a finger's long press, handles and the toolbar, the mouse's
 //! clicks, drags and shift, the focus coming back, password fields, multi-line and right-to-left fields — and the
 //! text field halves of the C++ Kompoz's selection tests whose SelectionContainer halves are in selection.rs.
-//! Their Material TextField's decoration (16 dp padding, 56 dp height, label) is stage 12's: the fields here are
-//! undecorated BasicTextFields; Compose's behaviour where the C++ differs (said where it matters).
+//! Their Material TextField's decoration (16 dp padding, 56 dp height, label) is stage 12's, by the same names in
+//! kompoz-material3/tests/text_field_halves.rs: the fields here are undecorated BasicTextFields; Compose's
+//! behaviour where the C++ differs (said where it matters).
 //!
 //! The texts are 16 sp in the fake backend: 8 px a character, 20 px lines. Offsets are UTF-8 bytes. Numbers in
 //! px. The cursor doesn't blink here (LocalCursorBlinkEnabled off): idling doesn't run its timers on.
@@ -491,7 +492,8 @@ fn the_mouse_selects_text_by_dragging_clicking_and_shift() {
 
 /// C++ 12272: a field all selected, left for a password field and come back to shows no stale selection (its
 /// selection collapsed to the end as it lost the focus); a password field's Ctrl+C copies nothing. (Single-line
-/// fields: Tab in a multi-line one types a tab, as Compose's; the C++'s OutlinedTextFields' outline is stage 12's.)
+/// fields: Tab in a multi-line one types a tab, as Compose's; the C++'s OutlinedTextFields' outline is stage
+/// 12's: kompoz-material3 text_field_halves.rs.)
 fn refocused_field_shows_no_stale_selection_and_password_is_not_copied() {
     let (value, secret) = (TextFieldState::new("metin"), TextFieldState::new("gizli"));
     let (v, s) = (value.clone(), secret.clone());

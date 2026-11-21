@@ -1,7 +1,7 @@
 // Material's buttons and containers as Compose's samples write them (material3 1.5's ButtonSamples,
 // FloatingActionButtonSamples, IconButtonSamples, CardSamples, ChipSamples, BadgeSamples). The samples composing in a
-// TooltipBox (WP7), a Scaffold (WP4a), a DropdownMenu (WP3) or a NavigationBar (WP4b) come with those packages;
-// ChipGroupReflowSample with icons-extended (its Icons.Filled.Tune: WP9).
+// TooltipBox (WP7), a Scaffold (WP4a) or a NavigationBar (WP4b) come with those packages; ChipGroupReflowSample with
+// icons-extended (its Icons.Filled.Tune: WP9). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
 
 @Composable
 fun ButtonSample() {
@@ -488,6 +488,55 @@ fun SuggestionChipSample() {
 @Composable
 fun ElevatedSuggestionChipSample() {
     ElevatedSuggestionChip(onClick = { /* Do something! */ }, label = { Text("Suggestion Chip") })
+}
+
+// (its Icons.Filled.Tune and Icons.AutoMirrored.Filled.ArrowRight are of the extended icons, WP9's: the core set's
+// Settings and KeyboardArrowRight in their places, as kompoz-material3's tests/containers.rs has them)
+@Composable
+fun ChipGroupSingleLineSample() {
+    var expanded by remember { mutableStateOf(false) }
+    val listSize = 9
+    val chipData = List(listSize) { index -> "Chip $index" }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(modifier = Modifier.horizontalScroll(rememberScrollState()).testTag("ChipGroupSingleLineSample")) {
+            AssistChip(
+                onClick = { expanded = !expanded },
+                label = { Text("Show All") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "Localized Description",
+                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                    )
+                },
+            )
+            /*
+             * When chip lists exceed the available horizontal screen space, one option is to
+             * provide a chip button that opens a menu displaying all chip options. This ensures
+             * all options are accessible while maintaining the position of the content below the
+             * chip list.
+             */
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                repeat(listSize) { index ->
+                    DropdownMenuItem(
+                        text = { Text(chipData[index]) },
+                        onClick = {},
+                        trailingIcon = {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                        },
+                    )
+                }
+            }
+            repeat(listSize) { index ->
+                AssistChip(
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                    onClick = { /* do something*/ },
+                    label = { Text(chipData[index]) },
+                    trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+                )
+            }
+        }
+    }
 }
 
 // IconButtonSamples and the plain FAB samples of FloatingActionButtonSamples, their TooltipBox (WP7) left out (the

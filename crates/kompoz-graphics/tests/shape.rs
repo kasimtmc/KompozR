@@ -206,6 +206,17 @@ fn corner_based_shapes_copy_as_composes() {
     assert!(matches!(any.copy_all(ZeroCornerSize), CornerBasedShape::Cut(_)));
     let size = Size::new(60.0, 40.0);
     assert_eq!(outline_of(&any, size, LTR), outline_of(&CutCornerShape(4.dp()), size, LTR));
+    // Shared, it is the shape it holds (Kotlin's subclass equality: a theme's shape is a rounded one there).
+    let shared = |s: Arc<dyn Shape>| s;
+    assert!(*shared(Arc::new(any.clone())) == *shared(Arc::new(CutCornerShape(4.dp()))));
+    assert!(*shared(Arc::new(CutCornerShape(4.dp()))) == *shared(Arc::new(any.clone())));
+    assert!(*shared(Arc::new(any)) != *shared(Arc::new(RoundedCornerShape(4.dp()))));
+    let rounded: CornerBasedShape = RoundedCornerShape(8.dp()).into();
+    assert!(*shared(Arc::new(rounded.clone())) == *shared(Arc::new(rounded)));
+    assert!(
+        *shared(Arc::new(CornerBasedShape::from(RoundedCornerShape(8.dp()))))
+            == *shared(Arc::new(RoundedCornerShape(8.dp())))
+    );
 }
 
 #[test]

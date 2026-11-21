@@ -18,7 +18,7 @@ use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas, has_content_description, has_role, has_text, is_selected};
 use kompoz_text::TextStyle;
-use kompoz_ui::input::PointerType;
+use kompoz_ui::input::{Key, KeyModifiers, PointerType};
 use kompoz_ui::layout::FirstBaseline;
 use kompoz_ui::platform::LocalLayoutDirection;
 use kompoz_ui::semantics::{Role, SemanticsProperties};
@@ -1714,8 +1714,25 @@ fn ChipGroupSingleLineSample(expanded_seen: MutableState<bool>) {
                     let e = expanded.clone();
                     AssistChip(move || e.set(!e.get()), || Text("Show All"), leading_icon = tune_icon());
                     // When chip lists exceed the available horizontal screen space, one option is to provide a chip button
-                    // that opens a menu displaying all chip options. (Compose's DropdownMenu of the chips here waits for
-                    // WP3's menus.)
+                    // that opens a menu displaying all chip options. This ensures all options are accessible while
+                    // maintaining the position of the content below the chip list.
+                    let e = expanded.clone();
+                    DropdownMenu(
+                        expanded = expanded.get(),
+                        on_dismiss_request = move || e.set(false),
+                        content = || {
+                            for data in chip_data.clone() {
+                                DropdownMenuItem(
+                                    text = move || Text(data.clone()),
+                                    on_click = || {},
+                                    // (Compose's AutoMirrored ArrowRight is of the extended icons, WP9's: the core
+                                    // set's KeyboardArrowRight in its place)
+                                    trailing_icon =
+                                        slot(|| VectorIcon(Icons::AutoMirrored::Filled::KeyboardArrowRight(), None)),
+                                );
+                            }
+                        },
+                    );
                     for data in chip_data.clone() {
                         AssistChip(
                             || { /* do something*/ },
@@ -1854,9 +1871,23 @@ fn chip_samples() {
     let row = bounds(&rule, "ChipGroupSingleLineSample");
     let last = rule.on_node_with_text("Chip 8").get_unclipped_bounds_in_root();
     assert!(last.left > row.right && near(last.center().y, row.center().y, 0.6));
+    assert_eq!(rule.on_all_nodes_with_text("Chip 0").fetch_semantics_nodes().len(), 1);
     rule.on_node_with_text("Show All").perform_click();
     rule.wait_for_idle();
     assert!(expanded.get());
+    // "Show All" opens the menu of all the chips under the row, each with its arrow; Back (Escape) closes it.
+    for i in 0..9 {
+        let items = rule.on_all_nodes_with_text(&format!("Chip {i}")).fetch_semantics_nodes();
+        assert_eq!(items.len(), 2, "Chip {i}");
+    }
+    let item = |i: usize| rule.on_all_nodes_with_text("Chip 0").fetch_semantics_nodes()[i].unclipped_bounds_in_root();
+    let in_menu = if item(0).top > row.bottom { item(0) } else { item(1) };
+    assert!(in_menu.top >= row.bottom && in_menu.left < row.right, "{in_menu:?} {row:?}");
+    rule.host().key_down(Key::Escape, KeyModifiers::None);
+    rule.host().key_up(Key::Escape, KeyModifiers::None);
+    rule.wait_for_idle();
+    assert!(!expanded.get());
+    assert_eq!(rule.on_all_nodes_with_text("Chip 0").fetch_semantics_nodes().len(), 1);
     // The reflowing one: one line, all of them below each other once "Show All chips" is selected.
     let line_tops = |rule: &KompozTestRule| {
         let mut tops: Vec<i32> = ["Blue 0", "Gray 8", "Transparent 9"]

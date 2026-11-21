@@ -313,15 +313,13 @@ fn RustListForms(pages: MutableState<i32>, by_name: MutableState<i32>) {
                 modifier = Modifier.width(300.dp()).height(200.dp()),
                 content = |this: &mut LazyGridScope| {
                     this.item(
-                        span = Some(Rc::new(|s: &LazyGridItemSpanScope| GridItemSpan(s.max_line_span()))
-                            as Rc<dyn Fn(&LazyGridItemSpanScope) -> GridItemSpan>),
+                        span = Some(Rc::new(|s: &LazyGridItemSpanScope| GridItemSpan(s.max_line_span()))),
                         content = || Box(modifier = Modifier.fill_max_width().height(20.dp()).test_tag("rust başlık")),
                     );
                     this.items(
                         3,
                         span =
-                            Some(Rc::new(|_: &LazyGridItemSpanScope, i: i32| GridItemSpan(if i == 0 { 2 } else { 1 }))
-                                as Rc<dyn Fn(&LazyGridItemSpanScope, i32) -> GridItemSpan>),
+                            Some(Rc::new(|_: &LazyGridItemSpanScope, i: i32| GridItemSpan(if i == 0 { 2 } else { 1 }))),
                         item_content = |i| {
                             Box(modifier = Modifier.fill_max_width().height(20.dp()).test_tag(format!("rust hücre{i}")))
                         },

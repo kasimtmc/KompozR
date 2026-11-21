@@ -1,7 +1,7 @@
 //! Material's buttons and containers in Kotlin's syntax, as a Compose user writes them: the C++ Kompoz's
-//! `required_arguments_by_name` (kompozable_tests.cpp 201-226, its TextButton and Icon; its Checkbox is WP2's, its
-//! TextField WP3's) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges, segmented
-//! list items and extended FAB; its LoadingIndicator WP2's, its BottomAppBar WP4a's) through `kompoz!`, and
+//! `required_arguments_by_name` (kompozable_tests.cpp 201-226, its TextButton, TextField and Icon; its Checkbox, and
+//! the Text showing it, are WP2's) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges,
+//! segmented list items and extended FAB; its LoadingIndicator WP2's, its BottomAppBar WP4a's) through `kompoz!`, and
 //! material3's samples of buttons, icon buttons, FABs, cards and chips from a `.kt` file (kompoz_file!).
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -20,6 +20,7 @@ kompoz! {
         var text by remember { mutableStateOf("") }
         Column {
             TextButton(onClick = { text = "basıldı" }) { Text(text = "düğme") }
+            TextField(value = text, onValueChange = { text = it }, modifier = Modifier.testTag("alan"))
             Icon(imageVector = Icons.Filled.Star, contentDescription = "yıldız")
             Text("değer: $text")
         }
@@ -32,6 +33,11 @@ fn required_arguments_by_name() {
     rule.on_node_with_content_description("yıldız").assert_exists();
     rule.on_node_with_text("düğme").perform_click();
     rule.on_node_with_text("değer: basıldı").assert_exists();
+    // Material's TextField of a String value: what is typed goes in at its cursor. The value set from outside (the
+    // button's) keeps the field's selection, at 0 (Compose's legacy BasicTextField: `textFieldValueState.copy(text =
+    // value)`), and the test rule's text input inserts at the cursor: "!basıldı" (the C++ appended: "basıldı!").
+    rule.on_node_with_tag("alan").perform_text_input("!");
+    rule.on_node_with_text("değer: !basıldı").assert_exists();
 }
 
 // ---- containers_as_compose_writes_them (kompozable_tests.cpp 2799-2848) --------------------------------------------
@@ -300,6 +306,30 @@ fn chip_samples() {
     }
 }
 
+/// ChipGroupSingleLineSample: one line of chips scrolled sideways (the last past the screen's edge); "Show All"
+/// opens the DropdownMenu of all the chips under the row, each with its arrow; Escape closes it.
+fn chip_group_single_line_sample() {
+    let rule = themed(kompozable_lambda!(|| ChipGroupSingleLineSample()));
+    let row = rule.on_node_with_tag("ChipGroupSingleLineSample").get_unclipped_bounds_in_root();
+    let last = rule.on_node_with_text("Chip 8").get_unclipped_bounds_in_root();
+    assert!(last.left > row.right, "{last:?} {row:?}");
+    rule.on_all_nodes_with_text("Chip 0").assert_count_equals(1);
+    rule.on_node_with_text("Show All").perform_click();
+    rule.wait_for_idle();
+    assert_eq!(rule.host().overlay_count(), 1);
+    for i in 0..9 {
+        rule.on_all_nodes_with_text(&format!("Chip {i}")).assert_count_equals(2);
+    }
+    let zeros = rule.on_all_nodes_with_text("Chip 0").fetch_semantics_nodes();
+    let in_menu = zeros.iter().map(|n| n.unclipped_bounds_in_root()).find(|b| b.top >= row.bottom - 0.5);
+    assert!(in_menu.is_some_and(|b| b.left < row.right), "{in_menu:?} {row:?}");
+    rule.host().key_down(kompoz::ui::input::Key::Escape, kompoz::ui::input::KeyModifiers::None);
+    rule.host().key_up(kompoz::ui::input::Key::Escape, kompoz::ui::input::KeyModifiers::None);
+    rule.wait_for_idle();
+    assert_eq!(rule.host().overlay_count(), 0);
+    rule.on_all_nodes_with_text("Chip 0").assert_count_equals(1);
+}
+
 fn main() {
     common::run(&[
         ("required_arguments_by_name", required_arguments_by_name),
@@ -310,5 +340,6 @@ fn main() {
         ("fab_samples", fab_samples),
         ("card_samples", card_samples),
         ("chip_samples", chip_samples),
+        ("chip_group_single_line_sample", chip_group_single_line_sample),
     ]);
 }

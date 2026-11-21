@@ -3,17 +3,11 @@
 //! ([`WindowAlignmentMarginPosition`]), and the dropdown menu's position provider
 //! ([`DropdownMenuPositionProvider`]), which tries them in turn until one fits.
 
-use kompoz_graphics::{Density, Dp, DpOffset, IntOffset, IntRect, IntSize, LayoutDirection};
+use crate::menu::{MenuHorizontalMargin, MenuVerticalMargin};
+use kompoz_graphics::{Density, DpOffset, IntOffset, IntRect, IntSize, LayoutDirection};
 use kompoz_ui::alignment::{AbsoluteAlignment, Alignment};
 use kompoz_ui::window::PopupPositionProvider;
 use std::rc::Rc;
-
-/// The space a menu keeps from the top and bottom of the window (Compose's internal `MenuVerticalMargin`, of
-/// Menu.kt).
-pub(crate) const MenuVerticalMargin: Dp = Dp(48.0);
-
-/// The space a menu keeps from the sides of the window (Compose's internal `MenuHorizontalMargin`, of Menu.kt).
-pub(crate) const MenuHorizontalMargin: Dp = Dp(8.0);
 
 /// A menu's positions within a window (Compose's internal `object MenuPosition`): what a [`PopupPositionProvider`]
 /// works out, each way on its own.

@@ -282,9 +282,10 @@ fn text_links_take_the_primary_color() {
             color_scheme = dark_color_scheme(),
             content = move || {
                 let s = s.clone();
-                let on_layout: Rc<dyn Fn(&kompoz_text::TextLayoutResult)> =
-                    Rc::new(move |l| *s.borrow_mut() = Some(l.layout_input.text.clone()));
-                Text(text.clone(), on_text_layout = Some(on_layout));
+                Text(
+                    text.clone(),
+                    on_text_layout = Some(Rc::new(move |l| *s.borrow_mut() = Some(l.layout_input.text.clone()))),
+                );
             },
         );
     }));
@@ -500,11 +501,10 @@ fn scrims_cover_and_dismiss() {
             modifier = Modifier.size(100.dp()),
             content = move || {
                 let d = d.clone();
-                let on_click: Rc<dyn Fn()> = Rc::new(move || d.set(d.get() + 1));
                 Scrim(
                     Some("kapat".into()),
                     modifier = Modifier.test_tag("perde"),
-                    on_click = Some(on_click),
+                    on_click = Some(Rc::new(move || d.set(d.get() + 1))),
                     alpha = Rc::new(|| 2.0),
                     color = Color::Red,
                 );

@@ -151,9 +151,13 @@ fn text_styles_are_a_span_style_and_a_paragraph_style() {
     );
     assert_eq!(style.merge(&TextStyle::Default), style);
     assert_eq!(style.merge(None::<&TextStyle>), style);
-    assert_eq!(style.merge(&bold()).font_weight, Some(FontWeight::Bold));
+    assert_eq!(style.merge(bold()).font_weight, Some(FontWeight::Bold));
     let lh = ParagraphStyle { line_height: 30.sp(), ..ParagraphStyle::Default };
     assert_eq!(style.merge(&lh).line_height, 30.sp());
+    // (given rather than borrowed, as Kotlin passes values: the same)
+    assert_eq!(style.merge(other.clone()), m);
+    assert_eq!(style.merge(lh.clone()).line_height, 30.sp());
+    assert_eq!(style.merge(lh.clone()), style.merge(&lh));
     assert_eq!(&style + &other, m);
     assert_eq!((&style + &bold()).font_weight, Some(FontWeight::Bold));
     // Resolved: every attribute given.

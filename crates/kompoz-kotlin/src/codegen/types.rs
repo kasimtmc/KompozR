@@ -70,7 +70,7 @@ impl Gen<'_, '_> {
                     "Double" => Ty::Double,
                     "Boolean" => Ty::Bool,
                     "Char" => Ty::Char,
-                    "String" => Ty::String,
+                    "String" | "CharSequence" => Ty::String,
                     "Unit" => Ty::Unit,
                     "Short" | "Byte" | "UInt" | "ULong" | "UShort" | "UByte" => Ty::OtherInt,
                     "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" | "Array" => {
@@ -177,7 +177,8 @@ impl Gen<'_, '_> {
             "Boolean" => quote_spanned!(span=> bool),
             "Char" => quote_spanned!(span=> char),
             "Unit" => quote_spanned!(span=> ()),
-            "String" => quote_spanned!(span=> ::std::string::String),
+            // (Kotlin's `CharSequence` too: a text, which KompozR's APIs take and give as `String`s)
+            "String" | "CharSequence" => quote_spanned!(span=> ::std::string::String),
             "Nothing" => quote_spanned!(span=> !),
             "Any" => self.later(loc, "the type `Any`"),
             "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" | "Array" => {

@@ -509,6 +509,14 @@ impl fmt::Display for AnnotatedString {
     }
 }
 
+/// Its text: Compose's AnnotatedString is a `CharSequence`, given where one is taken
+/// (`state.setTextAndPlaceCursorAtEnd(option)` of an annotated option).
+impl From<AnnotatedString> for String {
+    fn from(text: AnnotatedString) -> String {
+        text.text.to_string()
+    }
+}
+
 impl From<&str> for AnnotatedString {
     fn from(text: &str) -> AnnotatedString {
         AnnotatedString::new(text)

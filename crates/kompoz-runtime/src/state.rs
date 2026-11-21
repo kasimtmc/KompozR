@@ -94,7 +94,7 @@ impl<T: Clone + Send + Sync + 'static> MutableState<T> {
     }
 
     /// `val (value, setValue) = state`'s second part (Compose's `component2`): what sets it.
-    pub fn component2(&self) -> impl Fn(T) + 'static {
+    pub fn component2(&self) -> impl Fn(T) + Clone + 'static {
         let state = self.clone();
         move |value| state.set(value)
     }

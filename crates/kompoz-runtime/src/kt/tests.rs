@@ -883,3 +883,47 @@ fn random_of_a_seed_and_shuffle() {
     state.shuffle(&Random(7));
     assert_eq!(state.to_vec(), list);
 }
+
+#[test]
+fn compose_ui_util_list_functions_and_digits_only() {
+    // Compose's `fastForEach` & co. give what the plain functions give.
+    let xs = vec![3, 1, 2];
+    let mut seen = Vec::new();
+    xs.fast_for_each_indexed(|i, v| seen.push((i, v)));
+    assert_eq!(seen, [(0, 3), (1, 1), (2, 2)]);
+    let mut back = Vec::new();
+    xs.fast_for_each_reversed(|v| back.push(v));
+    assert_eq!(back, [2, 1, 3]);
+    let mut all = Vec::new();
+    xs.fast_for_each(|v| all.push(v));
+    assert_eq!(all, xs);
+    assert_eq!(xs.fast_map(|v| v * 2), [6, 2, 4]);
+    assert_eq!(xs.fast_map_indexed(|i, v| i + v), [3, 2, 4]);
+    assert_eq!(xs.fast_map_not_null(|v| (v > 1).then_some(v)), [3, 2]);
+    assert_eq!(xs.fast_filter(|v| v != 1), [3, 2]);
+    assert!(xs.fast_any(|v| v == 2) && !xs.fast_all(|v| v > 1));
+    assert_eq!((xs.fast_first_or_null(|v| v < 3), xs.fast_first(|v| v < 3)), (Some(1), 1));
+    assert_eq!(xs.fast_sum_by(|v| v), 6);
+    assert_eq!((xs.fast_max_by(|v| v), xs.fast_min_by_or_null(|v| v)), (Some(3), Some(1)));
+    assert_eq!(Vec::<i32>::new().fast_max_by(|v| v), None);
+    // Android's `isDigitsOnly`: Unicode's decimal digits, an empty text too.
+    assert!("0123".is_digits_only() && "".is_digits_only() && "٣٤".is_digits_only());
+    assert!(!"12a".is_digits_only() && !"1 2".is_digits_only() && !"½".is_digits_only());
+}
+
+#[test]
+fn delegates_of_a_declared_type_and_a_states_setter() {
+    // `var x: Int? by remember { mutableStateOf(null) }`: the declared type tells what the state holds.
+    let picked = delegate_of::<Option<i32>, _>(mutable_state_of(None));
+    assert_eq!(KtDelegate::get_value(&picked), None);
+    KtMutableDelegate::set_value(&picked, Some(2));
+    assert_eq!(picked.get(), Some(2));
+    // `val (value, setValue) = state`: the setter is a value Kotlin shares (cloned here).
+    let state = mutable_state_of(false);
+    let set = state.component2();
+    let other = set.clone();
+    other(true);
+    assert!(state.component1());
+    set(false);
+    assert!(!state.get());
+}

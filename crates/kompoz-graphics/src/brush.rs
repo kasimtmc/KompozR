@@ -954,6 +954,8 @@ impl Brush {
 
     /// A linear gradient of `colors` spread evenly from `start` to `end` (Compose's Brush.linearGradient; Compose's
     /// defaults: from `Offset::Zero` to `Offset::Infinite`, the far corner, `TileMode::Clamp`).
+    ///
+    /// Kotlin: `linearGradient(colors: List<Color>, start: Offset = Offset.Zero, end: Offset = Offset.Infinite, tileMode: TileMode = TileMode.Clamp)`
     pub fn linear_gradient(colors: &[Color], start: Offset, end: Offset, tile_mode: TileMode) -> Brush {
         Brush::of(BrushKind::LinearGradient(LinearGradient {
             colors: colors.to_vec(),

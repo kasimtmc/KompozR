@@ -743,9 +743,8 @@ fn shapes_defaults_constructors_and_copy() {
         MaterialTheme(
             content = move || {
                 let d = IconButtonDefaults;
-                let cut: Arc<dyn Shape> = Arc::new(CutCornerShape(4.dp()));
-                *s.borrow_mut() =
-                    Some((d.shapes(), d.toggleable_shapes(), named_args!(d.shapes(pressed_shape = Some(cut)))));
+                let cut = named_args!(d.shapes(pressed_shape = Some(Arc::new(CutCornerShape(4.dp())))));
+                *s.borrow_mut() = Some((d.shapes(), d.toggleable_shapes(), cut));
             },
         );
     }));

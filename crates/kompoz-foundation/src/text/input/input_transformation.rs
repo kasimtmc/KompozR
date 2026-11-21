@@ -49,6 +49,14 @@ pub struct InputTransformation {
     kind: Option<Rc<Kind>>,
 }
 
+/// An input transformation from `transform` (Kotlin's SAM constructor `InputTransformation { … }`, a lambda given
+/// where an input transformation goes — `maxLength(10).then { … }`).
+///
+/// Kotlin: `InputTransformation(transform: TextFieldBuffer.() -> Unit)`
+pub fn input_transformation(transform: impl Fn(&mut TextFieldBuffer) + 'static) -> InputTransformation {
+    InputTransformation::new(transform)
+}
+
 /// The companion (Compose's `InputTransformation.Companion`): an input transformation changing nothing, on which
 /// `InputTransformation.max_length(…)`, `.by_value(…)`, `.all_caps(…)` are called.
 pub const InputTransformation: InputTransformation = InputTransformation { kind: None };
@@ -70,6 +78,8 @@ impl InputTransformation {
     }
 
     /// One of the app's own (Kotlin's `object : InputTransformation { … }`).
+    ///
+    /// (The SAM constructor of Kotlin's `fun interface`, `InputTransformation { … }`, is [`input_transformation`].)
     pub fn of(transformation: impl TransformInput + 'static) -> InputTransformation {
         InputTransformation::of_kind(Kind::Custom(Rc::new(transformation)))
     }

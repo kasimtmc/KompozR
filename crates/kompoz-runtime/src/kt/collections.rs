@@ -763,6 +763,66 @@ pub trait KtList: KtIterable {
     fn filter_indexed(&self, mut predicate: impl FnMut(i32, Self::Item) -> bool) -> Vec<Self::Item> {
         self.kt_iter().enumerate().filter(|(i, v)| predicate(*i as i32, v.clone())).map(|(_, v)| v).collect()
     }
+    // (Compose's `androidx.compose.ui.util` list functions — `fastForEach` & co., index loops over a random-access
+    // list: what they give is the plain functions')
+    /// Kotlin: `fastForEach(action: (T) -> Unit)`
+    fn fast_for_each(&self, action: impl FnMut(Self::Item)) {
+        self.for_each(action);
+    }
+    /// Kotlin: `fastForEachIndexed(action: (Int, T) -> Unit)`
+    fn fast_for_each_indexed(&self, action: impl FnMut(i32, Self::Item)) {
+        self.for_each_indexed(action);
+    }
+    /// Kotlin: `fastForEachReversed(action: (T) -> Unit)`
+    fn fast_for_each_reversed(&self, action: impl FnMut(Self::Item)) {
+        self.kt_iter().collect::<Vec<_>>().into_iter().rev().for_each(action);
+    }
+    /// Kotlin: `fastMap(transform: (T) -> R): List<R>`
+    fn fast_map<R>(&self, transform: impl FnMut(Self::Item) -> R) -> Vec<R> {
+        self.map(transform)
+    }
+    /// Kotlin: `fastMapIndexed(transform: (Int, T) -> R): List<R>`
+    fn fast_map_indexed<R>(&self, transform: impl FnMut(i32, Self::Item) -> R) -> Vec<R> {
+        self.map_indexed(transform)
+    }
+    /// Kotlin: `fastMapNotNull(transform: (T) -> R?): List<R>`
+    fn fast_map_not_null<R>(&self, transform: impl FnMut(Self::Item) -> Option<R>) -> Vec<R> {
+        self.map_not_null(transform)
+    }
+    /// Kotlin: `fastFilter(predicate: (T) -> Boolean): List<T>`
+    fn fast_filter(&self, predicate: impl FnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        self.filter(predicate)
+    }
+    /// Kotlin: `fastAny(predicate: (T) -> Boolean): Boolean`
+    fn fast_any(&self, predicate: impl FnMut(Self::Item) -> bool) -> bool {
+        self.any_that(predicate)
+    }
+    /// Kotlin: `fastAll(predicate: (T) -> Boolean): Boolean`
+    fn fast_all(&self, predicate: impl FnMut(Self::Item) -> bool) -> bool {
+        self.all(predicate)
+    }
+    /// Kotlin: `fastFirstOrNull(predicate: (T) -> Boolean): T?`
+    fn fast_first_or_null(&self, predicate: impl FnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.first_or_null_that(predicate)
+    }
+    /// Kotlin: `fastFirst(predicate: (T) -> Boolean): T`
+    #[track_caller]
+    fn fast_first(&self, predicate: impl FnMut(Self::Item) -> bool) -> Self::Item {
+        self.first_that(predicate)
+    }
+    /// Kotlin: `fastSumBy(selector: (T) -> Int): Int`
+    fn fast_sum_by(&self, mut selector: impl FnMut(Self::Item) -> i32) -> i32 {
+        self.kt_iter().fold(0, |sum, v| sum.wrapping_add(selector(v)))
+    }
+    /// Kotlin: `fastMaxBy(selector: (T) -> R): T?`
+    fn fast_max_by<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<Self::Item> {
+        self.max_by_or_null(selector)
+    }
+    /// Kotlin: `fastMinByOrNull(selector: (T) -> R): T?`
+    fn fast_min_by_or_null<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<Self::Item> {
+        self.min_by_or_null(selector)
+    }
+
     /// Kotlin: `withIndex(): Iterable<IndexedValue<T>>`
     fn with_index(&self) -> Vec<IndexedValue<Self::Item>> {
         self.kt_iter().enumerate().map(|(i, value)| IndexedValue { index: i as i32, value }).collect()
@@ -1249,6 +1309,14 @@ pub trait KtList: KtIterable {
         for (i, v) in self.kt_iter().enumerate() {
             action(i as i32, v).await;
         }
+    }
+    #[doc(hidden)]
+    async fn fast_for_each_async(&self, action: impl AsyncFnMut(Self::Item)) {
+        self.for_each_async(action).await;
+    }
+    #[doc(hidden)]
+    async fn fast_for_each_indexed_async(&self, action: impl AsyncFnMut(i32, Self::Item)) {
+        self.for_each_indexed_async(action).await;
     }
     #[doc(hidden)]
     async fn on_each_async(&self, mut action: impl AsyncFnMut(Self::Item)) -> Vec<Self::Item> {

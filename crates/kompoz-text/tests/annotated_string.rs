@@ -572,3 +572,13 @@ fn text_styles_take_or_else_suspending() {
     assert_eq!(block_on(LineBreak::Unspecified.take_or_else_async(async || LineBreak::Heading)), LineBreak::Heading);
     assert_eq!(block_on(LineBreak::Simple.take_or_else_async(async || LineBreak::Heading)), LineBreak::Simple);
 }
+
+#[test]
+fn a_texts_range_and_an_annotated_string_as_a_char_sequence() {
+    // Compose's `CharSequence.substring(range: TextRange)`.
+    assert_eq!("Cupcake, Donut".substring_of_range(TextRange::new(9, 14)), "Donut");
+    assert_eq!(String::from("ab").substring_of_range(TextRange::new(2, 0)), "ab");
+    // An AnnotatedString given where a text goes: its text.
+    let annotated = AnnotatedString::styled("Quince Tart", SpanStyle::default(), None);
+    assert_eq!(String::from(annotated), "Quince Tart");
+}

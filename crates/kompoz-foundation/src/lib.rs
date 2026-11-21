@@ -155,7 +155,7 @@ pub mod prelude {
     pub use crate::text::input::{
         ChangeList, ExpandPolicy, InputTransformation, KeyboardActionHandler, OutputTransformation, TextFieldBuffer,
         TextFieldLineLimits, TextFieldState, TextFieldTextStyles, TextObfuscationMode, TrackedRange, TransformInput,
-        UndoState, output_transformation, remember_text_field_state,
+        UndoState, input_transformation, output_transformation, remember_text_field_state,
     };
     pub use crate::text::selection::{
         DisableSelection, LocalTextSelectionColors, SelectionContainer, SelectionContainerWithSelection,

@@ -179,7 +179,7 @@ tuples!(A1 A2 A3 A4 A5 A6 A7 A8 A9 A10);
 tuples!(A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11);
 
 macro_rules! positional_setters {
-    ($($m:ident $memo:ident)*) => {
+    ($($m:ident $memo:ident $($some:ident)?),*) => {
         #[allow(non_snake_case)]
         impl<F, A> Positional<F, A> {
             $(
@@ -197,6 +197,15 @@ macro_rules! positional_setters {
                     let _ = keys;
                     Positional(self.0, self.1.push(v))
                 }
+                $(
+                    /// An argument written `Some(…)`: as any other here.
+                    pub fn $some<V>(self, v: V) -> Positional<F, A::Out>
+                    where
+                        A: Push<V>,
+                    {
+                        Positional(self.0, self.1.push(v))
+                    }
+                )?
             )*
             #[track_caller]
             pub fn __call(self) -> F::Output
@@ -209,9 +218,13 @@ macro_rules! positional_setters {
     };
 }
 positional_setters!(
-    __arg0 __kz_memo___arg0 __arg1 __kz_memo___arg1 __arg2 __kz_memo___arg2 __arg3 __kz_memo___arg3
-    __arg4 __kz_memo___arg4 __arg5 __kz_memo___arg5 __arg6 __kz_memo___arg6 __arg7 __kz_memo___arg7
-    __arg8 __kz_memo___arg8 __arg9 __kz_memo___arg9 __arg10 __kz_memo___arg10 __arg11 __kz_memo___arg11
+    __arg0 __kz_memo___arg0 __kz_some___arg0, __arg1 __kz_memo___arg1 __kz_some___arg1,
+    __arg2 __kz_memo___arg2 __kz_some___arg2, __arg3 __kz_memo___arg3 __kz_some___arg3,
+    __arg4 __kz_memo___arg4 __kz_some___arg4, __arg5 __kz_memo___arg5 __kz_some___arg5,
+    __arg6 __kz_memo___arg6 __kz_some___arg6, __arg7 __kz_memo___arg7 __kz_some___arg7,
+    __arg8 __kz_memo___arg8 __kz_some___arg8, __arg9 __kz_memo___arg9 __kz_some___arg9,
+    __arg10 __kz_memo___arg10 __kz_some___arg10, __arg11 __kz_memo___arg11 __kz_some___arg11,
+    // (what goes to `__last` is a closure: no `Some(…)` twin)
     __last __kz_memo___last
 );
 

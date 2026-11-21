@@ -193,3 +193,14 @@ harness = false
 [[test]]
 name = "kotlin_animations_all"
 harness = false
+
+# Material's text fields in Kotlin's syntax (kompozable_tests.cpp's TextForms, Phone, AddTextDialog; material3's
+# TextFieldSamples from a .kt file).
+[[test]]
+name = "kotlin_material_fields"
+harness = false
+
+# Material's menus in Kotlin's syntax (material3's MenuSamples and ExposedDropdownMenuSamples from a .kt file).
+[[test]]
+name = "kotlin_menus"
+harness = false

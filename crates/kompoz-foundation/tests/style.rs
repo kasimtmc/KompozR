@@ -53,7 +53,7 @@ fn sizes_paddings_and_borders_lay_out() {
                 s.size(100.dp());
                 s.external_padding(5.dp());
                 s.border_width(2.dp());
-                s.content_padding(10.dp());
+                s.r#content_padding(10.dp()); // (raw: material3's `OutlinedTextFieldDefaults.content_padding` is indexed)
             }),
             content = || Box(modifier = Modifier.fill_max_size().test_tag("içerik")),
         );
@@ -372,7 +372,7 @@ fn a_state_read_changes_what_it_affects_without_composing() {
             modifier = Modifier.styleable_with(None, move |s: &dyn StyleScope| {
                 s.size(40.dp());
                 s.background(c.get());
-                s.content_padding(Dp(p.get()));
+                s.r#content_padding(Dp(p.get()));
             }),
             content = || Box(modifier = Modifier.fill_max_size().test_tag("iç")),
         );

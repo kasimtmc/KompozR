@@ -9,7 +9,9 @@
 //! Each setter has a twin for a memoized closure, `__kz_memo_<setter>(keys, closure)` (see `transform`): where the
 //! parameter keeps its closure (`wants_id`), it turns the keys into the closure's identity (`memo_id`) and hands
 //! it to the function with the arguments; elsewhere it drops them. A parameter of type `Option<T>` is set from
-//! anything `Into<Option<T>>` (`role = Role::Button`, `role = None`), as Kotlin passes a `T` to a `T?`.
+//! anything `Into<Option<T>>` (`role = Role::Button`, `role = None`), as Kotlin passes a `T` to a `T?`; and each
+//! setter has a twin for an argument written `Some(…)`, `__kz_some_<setter>(v)`, taking an `Option<T>` itself, so
+//! that what it holds coerces (`icon = Some(Rc::new(|| …))` for an `Option<Rc<dyn Fn()>>`).
 
 use proc_macro2::{Span, TokenStream as Ts};
 use quote::{format_ident, quote};
@@ -548,7 +550,36 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
                 }
             }
         };
-        let (memo_name, memo_arg) = (memo(name), memo(&arg));
+        // `setter`'s twin for an argument written `Some(…)`: an `Option<T>`'s takes the `Option<T>` itself, so that
+        // what is in it coerces (`Some(Rc::new(|| …))` to an `Option<Rc<dyn Fn()>>`, which `Into` can't tell) and a
+        // free generic `T` is what it holds (`Into` couldn't choose between that and an `Option` of it); but a `T`
+        // that is an `Option` (`Some(x)` given for `Some(Some(x))`) or an impl's generic parameter (which may be
+        // one) is taken as the setter takes it.
+        let coerced = match (p.bounds(), option_of(&set_ty)) {
+            (None, Some(t)) if fresh.is_empty() => {
+                let name = quote!(#t).to_string().replace(' ', "");
+                let impls = generics.iter().any(|g| !g.lifetime && !free_keys.contains(&g.key()) && g.key() == name);
+                option_of(t).is_none() && !impls
+            }
+            _ => false,
+        };
+        let some = |setter: &Ident| {
+            let twin = format_ident!("__kz_some_{}", setter);
+            if coerced {
+                quote! {
+                    pub fn #twin(self, v: #set_ty) -> #ret {
+                        self.#setter(v)
+                    }
+                }
+            } else {
+                quote! {
+                    pub fn #twin #generic(self, v: #value) -> #ret {
+                        self.#setter(v)
+                    }
+                }
+            }
+        };
+        let (memo_name, memo_arg, some_name, some_arg) = (memo(name), memo(&arg), some(name), some(&arg));
         setters.push(quote! {
             pub fn #name #generic(self, v: #value) -> #ret {
                 #builder_name { _g: ::core::marker::PhantomData, #recv_move #ids_move #(#fields),* }
@@ -558,8 +589,11 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             }
             #memo_name
             #memo_arg
+            #some_name
+            #some_arg
         });
         if i == n - 1 {
+            // (no `Some(…)` twin: what goes to `__last` is a closure)
             let memo_last = memo(&last);
             setters.push(quote! {
                 pub fn __last #generic(self, v: #value) -> #ret {

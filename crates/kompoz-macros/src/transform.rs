@@ -10,10 +10,13 @@
 //! ```
 //!
 //! - every call of a PascalCase path goes through `Probe`, which picks the builder of a `#[kompozable]` function
-//!   (its marker) and falls back to a positional call for anything else (`Some(x)`, a tuple struct, a `#[named]`
-//!   function called with the parameters it has without a default); a PascalCase `#[named]` function that isn't a
-//!   composable is reached through its type (`TextStyle::__kz_builder()`) when called with named arguments or more
-//!   positional ones than its parameters without a default, as the API index or the body's own items tell;
+//!   (its marker) and falls back to a positional call for anything else (a tuple struct, a `#[named]` function
+//!   called with the parameters it has without a default) — but the prelude's `Some(…)`, `Ok(…)` and `Err(…)`, kept
+//!   as written so that their argument coerces to the type wanted where they go (an argument written `Some(…)` goes
+//!   to the setter's twin `__kz_some_x`, which takes the parameter's type itself); a PascalCase `#[named]` function
+//!   that isn't a composable is reached through its type (`TextStyle::__kz_builder()`) when called with named
+//!   arguments or more positional ones than its parameters without a default, as the API index or the body's own
+//!   items tell;
 //! - a lowercase path call or a method call is rewritten when an argument is named (`name = value`), or when it
 //!   gives more positional arguments than the callee's parameters without a default (and no more than all), or
 //!   when the callee has a `#[memoized]` parameter and the arguments fill its parameters (its closure gets its
@@ -371,6 +374,35 @@ enum Route {
     Probe { named: bool },
     /// Through its type: `path::__kz_builder()`.
     Type,
+    /// As written, its closures planned as a rewritten call's: the prelude's `Some(…)`, `Ok(…)`, `Err(…)` (no
+    /// composables), so that their argument is coerced to what the place they go to wants (`Some(Rc::new(|| …))`
+    /// for an `Option<Rc<dyn Fn()>>`), as in plain Rust.
+    Variant,
+}
+
+/// Whether `func` is the prelude's `Some`, `Ok` or `Err` (`Option::Some`, `core::option::Option::Some`, …).
+fn prelude_variant(func: &Expr) -> bool {
+    let Expr::Path(p) = func else { return false };
+    if p.qself.is_some() || p.path.segments.iter().any(|s| !s.arguments.is_none()) {
+        return false;
+    }
+    let names: Vec<String> = p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let (prefix, last) = names.split_at(names.len() - 1);
+    match last[0] {
+        "Some" => matches!(prefix, [] | ["Option"] | ["core" | "std", "option", "Option"]),
+        "Ok" | "Err" => matches!(prefix, [] | ["Result"] | ["core" | "std", "result", "Result"]),
+        _ => false,
+    }
+}
+
+/// Whether an argument is written `Some(…)`: given to the setter's twin taking the parameter's type itself, where
+/// it coerces (`__kz_some_x`).
+fn some_call(e: &Expr) -> bool {
+    matches!(e, Expr::Call(c) if c.args.len() == 1 && prelude_variant(&c.func) && {
+        let Expr::Path(p) = &*c.func else { unreachable!() };
+        p.path.segments.last().unwrap().ident == "Some"
+    })
 }
 
 /// What is done with an argument of a call.
@@ -557,6 +589,9 @@ impl Transformer {
             return Route::Keep;
         }
         let named = args.iter().any(|a| named_arg(a).is_some());
+        if !named && !self.plain && prelude_variant(func) {
+            return Route::Variant;
+        }
         let by_builder = !named
             && seg.arguments.is_none()
             && module_path(&p.path)
@@ -675,7 +710,7 @@ impl Transformer {
     }
 
     /// `.name(v)` / `.__argN(v)` / `.__last(v)` for each argument (`.__kz_memo_name(keys, v)`, … for a memoized
-    /// one).
+    /// one; `.__kz_some_name(Some(…))`, … for one written `Some(…)`).
     fn chain(args: &Punctuated<Expr, Token![,]>, keys: &[Option<Ts>]) -> Vec<Ts> {
         let n = args.len();
         let mut out = Vec::new();
@@ -693,6 +728,10 @@ impl Transformer {
                 Some(keys) => {
                     let twin = format_ident!("__kz_memo_{}", setter, span = setter.span());
                     quote_spanned!(a.span()=> .#twin(#keys, #v))
+                }
+                None if some_call(v) => {
+                    let twin = format_ident!("__kz_some_{}", setter, span = setter.span());
+                    quote_spanned!(a.span()=> .#twin(#v))
                 }
                 None => quote_spanned!(a.span()=> .#setter(#v)),
             });
@@ -857,7 +896,7 @@ impl VisitMut for Transformer {
                 let plan = self.plan(&c.args, route != Route::Keep);
                 visit_mut::visit_expr_call_mut(self, c);
                 let keys = self.apply(&mut c.args, plan);
-                if route == Route::Keep {
+                if matches!(route, Route::Keep | Route::Variant) {
                     return;
                 }
                 let Expr::Path(p) = &*c.func else { unreachable!() };

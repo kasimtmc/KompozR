@@ -3,9 +3,9 @@
 //! by a `TextFieldDecorator { innerTextField -> … }`, a BasicSecureTextField hiding its text, and the C++ Kompoz's
 //! fields (kompozable_tests.cpp 2343-2366's) ported onto them — through `kompoz!`; and in a `.kt` file
 //! (kompoz_file!) a `KeyboardActionHandler { … }` moving the focus on, a secure field with an obfuscation character
-//! of its own and a lambda as its decorator, and the phone field of 2862-2893. The C++ composed Material's
-//! TextField/OutlinedTextField: their decoration (container, label, indicator) is stage 12's, so a decorator of the
-//! test's own stands for it. The same behaviour crates/kompoz-foundation/tests/text_field.rs checks in Rust.
+//! of its own and a lambda as its decorator, and the phone field of 2862-2893 — the C++'s fields Material's
+//! OutlinedTextField as it wrote them (kotlin_material_fields.rs has the whole of those Compose sources). The same
+//! behaviour crates/kompoz-foundation/tests/text_field.rs checks in Rust.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -103,39 +103,16 @@ kompoz! {
         )
     }
 
-    // kompozable_tests.cpp 2343-2366's text fields: an email field on one line with its label and supporting text,
-    // a message field of at most four lines with its placeholder. The C++'s OutlinedTextFields are Material's
-    // (stage 12's): BasicTextFields decorated as they are stand for them; its value-and-callback email field is
-    // ported onto a state, the overload WP2b brings.
+    // kompozable_tests.cpp 2343-2366's text fields, Material's OutlinedTextFields as the C++ wrote them: an email
+    // field of a String value on one line with its label and supporting text, a message field of a state of at most
+    // four lines with its placeholder (test tags added to find them).
     @Composable
     fun TextForms() {
-        val email = rememberTextFieldState()
+        var email by remember { mutableStateOf("") }
         val message = rememberTextFieldState()
         Column {
-            BasicTextField(
-                state = email,
-                modifier = Modifier.width(200.dp).testTag("eposta"),
-                lineLimits = TextFieldLineLimits.SingleLine,
-                decorator = TextFieldDecorator { innerTextField ->
-                    Column {
-                        Text("Email")
-                        innerTextField()
-                        Text("Never shared")
-                    }
-                },
-            )
-            BasicTextField(
-                state = message,
-                modifier = Modifier.width(200.dp).testTag("mesaj"),
-                textStyle = TextStyle(fontSize = 16.sp),
-                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
-                decorator = TextFieldDecorator { innerTextField ->
-                    Box {
-                        if (message.text.isEmpty()) Text("Message")
-                        innerTextField()
-                    }
-                },
-            )
+            OutlinedTextField(value = email, onValueChange = { email = it }, singleLine = true, label = { Text("Email") }, supportingText = { Text("Never shared") }, modifier = Modifier.testTag("eposta"))
+            OutlinedTextField(state = message, lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4), placeholder = { Text("Message") }, modifier = Modifier.testTag("mesaj"))
         }
     }
 }
@@ -187,8 +164,8 @@ fn a_secure_field_hides_its_text() {
 }
 
 /// kompozable_tests.cpp 2343-2366 (`text_as_compose_writes_it`)'s fields: their label, supporting text and
-/// placeholder shown; typing hides the placeholder; a single line ignores Enter's newline (shown as a space), the
-/// message grows with its lines up to four.
+/// placeholder shown; the email typed in; the message's placeholder hidden by typing; the message field grows with its
+/// lines up to four (16 dp padding above and below them), its least height (56 dp) holding one.
 fn text_fields_as_compose_writes_them() {
     let rule = KompozTestRule::new(TextForms);
     for text in ["Email", "Never shared", "Message"] {
@@ -197,12 +174,15 @@ fn text_fields_as_compose_writes_them() {
     rule.on_node_with_tag("eposta").perform_text_input("a@b.c");
     assert_eq!(shown(&rule, "eposta"), "a@b.c");
     let one_line = bounds(&rule, "mesaj").height();
-    assert_eq!(one_line, 20.0);
+    assert_eq!(one_line, 56.0);
     rule.on_node_with_tag("mesaj").perform_text_input("1\n2");
-    assert!(!rule.on_node_with_text("Message").exists());
-    assert_eq!(bounds(&rule, "mesaj").height(), 40.0);
+    assert!(!drawn(&rule, "Message"));
+    let two_lines = bounds(&rule, "mesaj").height();
+    let line = (two_lines - 32.0) / 2.0;
+    assert!(two_lines > one_line && line > 10.0, "{one_line} {two_lines}");
     rule.on_node_with_tag("mesaj").perform_text_input("\n3\n4\n5\n6");
-    assert_eq!((shown(&rule, "mesaj"), bounds(&rule, "mesaj").height()), ("1\n2\n3\n4\n5\n6".to_string(), 80.0));
+    assert_eq!(shown(&rule, "mesaj"), "1\n2\n3\n4\n5\n6");
+    assert_eq!(bounds(&rule, "mesaj").height(), 32.0 + 4.0 * line);
 }
 
 kompoz_file!("tests/kt/text_field.kt");
@@ -228,9 +208,9 @@ fn a_keyboard_action_handler_moves_the_focus_on_from_a_kt_file() {
     assert_eq!((inner.left - frame.left, inner.top - frame.top), (4.0, 4.0));
 }
 
-/// kompozable_tests.cpp 2862-2893 (`text_field_transformations_as_compose_writes_them`) on BasicTextField: the
-/// letter typed refused by `InputTransformation.byValue`, the digit by `maxLength(10)`; the output transformation's
-/// separators shown; the focus let go by LocalFocusManager.
+/// kompozable_tests.cpp 2862-2893 (`text_field_transformations_as_compose_writes_them`) on Material's
+/// OutlinedTextField: the letter typed refused by `InputTransformation.byValue`, the digit by `maxLength(10)`; the
+/// output transformation's separators shown; the focus let go by LocalFocusManager (the Button's click).
 fn the_phone_field_from_a_kt_file() {
     let rule = KompozTestRule::new(Phone);
     assert!(rule.on_node_with_text("değer 5551234567 · 12 · ab").exists());

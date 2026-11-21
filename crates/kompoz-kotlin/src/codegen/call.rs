@@ -300,14 +300,14 @@ impl Gen<'_, '_> {
         // A kt shim's member of an implicit receiver (`uppercase()` in an extension of `String`).
         if found.is_none()
             && let Some((r, items)) = self.receivers.iter().rev().find_map(|r| {
-                let ty = Ty::from_rust(&r.ty);
+                let ty = receiver_kotlin_ty(r);
                 let items = kt_members(&n.name, ty.kt_traits());
                 (!items.is_empty() && ty != Ty::Unknown).then(|| (r.clone(), items))
             })
         {
             let r = self.use_receiver(&r);
             let ri = proc_macro2::Ident::new(&r.rust, span);
-            let ty = Ty::from_rust(&r.ty);
+            let ty = receiver_kotlin_ty(&r);
             let recv =
                 Out { ts: quote!(#ri), ty, kind: if r.rust == "self" { OutKind::Local } else { OutKind::Plain } };
             let _ = items;
@@ -562,7 +562,7 @@ impl Gen<'_, '_> {
         if safe {
             let it = self.fresh("it", span);
             let inner_ty = recv.ty.non_null();
-            let value = self.finish(recv, Want::default(), receiver.loc);
+            let value = self.safe_receiver(recv, receiver.loc);
             let inner_recv = Out { ts: quote!(#it), ty: inner_ty, kind: OutKind::Plain };
             let awaits = self.awaits;
             let inner = self.method_on(inner_recv, Some(receiver), name, args, loc);
@@ -614,9 +614,19 @@ impl Gen<'_, '_> {
             return Out::plain(quote_spanned!(span=> #kt::to_string(&#r)), Ty::String);
         }
         let owner = recv.ty.owner().map(str::to_string);
+        // (a Kotlin collection's extensions by the Kotlin type they extend: `fun List<String>.filteredBy`)
+        let ext_owner = owner.clone().or_else(|| {
+            let names: &[&str] = match &recv.ty {
+                Ty::List(_) => &["List", "MutableList", "Collection", "Iterable"],
+                Ty::Set(_) => &["Set", "MutableSet", "Collection", "Iterable"],
+                Ty::Map(..) => &["Map", "MutableMap"],
+                _ => &[],
+            };
+            names.iter().find(|n| self.file.extension(&name.name, Some(n)).is_some()).map(|n| n.to_string())
+        });
         // An extension function of the file.
-        if let Some(f) = self.file.extension(&name.name, owner.as_deref()).cloned()
-            && (owner.is_some() || self.file.extension(&name.name, None).is_some())
+        if let Some(f) = self.file.extension(&name.name, ext_owner.as_deref()).cloned()
+            && (ext_owner.is_some() || self.file.extension(&name.name, None).is_some())
         {
             let r = self.finish_recv(recv, Receiver::Value, loc);
             return self.emit(&f.callee(), Target::Method(r), args, loc, &name.name);
@@ -625,9 +635,18 @@ impl Gen<'_, '_> {
         if let Some(o) = &owner {
             let items: Vec<&'static crate::index::Item> =
                 members_of(o, &name.name).filter(|i| i.kind == Kind::Method).collect();
-            if !items.is_empty()
-                && let Some(c) = self.choose(&items, args, loc)
-            {
+            // (a member the arguments don't fit beside a kt shim's of the name: the shim's — `s.substring(0, 2)`
+            // beside `CharSequence.substring(range: TextRange)`; else the applicable overloads first, as for any call
+            // — `showSnackbar("…")` isn't `showSnackbar(visuals)`)
+            let shims = !kt_members(&name.name, recv.ty.kt_traits()).is_empty();
+            let chosen = if shims {
+                self.choose_among(&items, args, true)
+            } else if !items.is_empty() {
+                self.choose(&items, args, loc)
+            } else {
+                None
+            };
+            if let Some(c) = chosen {
                 let kind = c.item.map_or(Receiver::Ref, |i| i.receiver);
                 let hint = match recv.ty.through_shared() {
                     Ty::Named(_, a) if a.len() == 1 => Some((a[0].clone(), recv.ty.through_shared().clone())),
@@ -989,7 +1008,10 @@ impl Gen<'_, '_> {
                     let value_fits = matches!(a.value, ArgValue::Expr(e)
                         if fun_interface || lambda_if(e) || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_))
                             || (matches!(e.kind, ExprKind::Null) && p.ty.trim_start().starts_with("Option<")));
-                    if a.value.is_lambda() || !value_fits {
+                    // (a lambda to a parameter of a type a SAM constructor makes: `then { … }` taking an
+                    // InputTransformation)
+                    let sam = a.value.is_lambda() && sam_constructor(&p.ty).is_some();
+                    if (a.value.is_lambda() || !value_fits) && !sam {
                         return None;
                     }
                 }
@@ -1346,7 +1368,7 @@ impl Gen<'_, '_> {
                 }
                 let v = if m.given[at].len() > 1 {
                     let all: Vec<&ArgRef> = m.given[at].iter().collect();
-                    self.many_value(&all, p, span)
+                    self.with_label(call_label, |me| me.many_value(&all, p, span))
                 } else {
                     self.with_label(call_label, |me| me.arg_value(a, Some(p), transform_wraps))
                 };
@@ -1388,7 +1410,7 @@ impl Gen<'_, '_> {
                 }
                 let v = if m.given[k].len() > 1 || p.vararg || is_keys(p) && m.given[k].len() != 1 {
                     let all: Vec<&ArgRef> = m.given[k].iter().collect();
-                    self.many_value(&all, p, span)
+                    self.with_label(call_label, |me| me.many_value(&all, p, span))
                 } else {
                     let a = m.given[k][0];
                     self.with_label(call_label, |me| me.arg_value(&a, Some(p), transform_wraps))
@@ -1458,7 +1480,50 @@ impl Gen<'_, '_> {
             return self.keys_tuple(all, span);
         }
         let el = PInfo { ty: element_ty(&p.ty), vararg: false, ..p.clone() };
-        let vals: Vec<TokenStream> = all.iter().map(|a| self.arg_value(a, Some(&el), false)).collect();
+        // (a collection's elements of one type as Kotlin infers it: `listOf(null, Icons.Outlined.Info)` a list of
+        // `ImageVector?`, its value given in `Some`; a list of lists too, and a declared type told — `val icons:
+        // List<List<ImageVector?>> = listOf(listOf(null, null), listOf(a, b))`)
+        let collection = matches!(
+            self.call_labels.last().map(String::as_str),
+            Some("listOf" | "mutableListOf" | "arrayListOf" | "setOf" | "mutableSetOf")
+        );
+        let expected = self.expected_elem.take();
+        if !collection {
+            let vals: Vec<TokenStream> = all.iter().map(|a| self.arg_value(a, Some(&el), false)).collect();
+            return if p.ty.trim_start().starts_with("&[") {
+                quote_spanned!(span=> &[#(#vals),*])
+            } else {
+                quote_spanned!(span=> [#(#vals),*])
+            };
+        }
+        let exprs: Vec<Option<&Expr>> = all
+            .iter()
+            .map(|a| match a.value {
+                ArgValue::Expr(e) => Some(e),
+                _ => None,
+            })
+            .collect();
+        let unified = expected.unwrap_or_else(|| self.elements_ty(exprs.iter().flatten().copied()));
+        let mut vals = Vec::new();
+        for (a, e) in all.iter().zip(&exprs) {
+            if let (Some(e), Ty::List(inner) | Ty::Set(inner)) = (e, &unified)
+                && list_of_call(e).is_some()
+            {
+                self.expected_elem = Some((**inner).clone());
+            }
+            let v = self.arg_value(a, Some(&el), false);
+            self.expected_elem = None;
+            let given = e.map(|e| {
+                if matches!(e.kind, ExprKind::Null) { Ty::Nullable(Box::new(Ty::Unknown)) } else { self.peek_ty(e) }
+            });
+            let v = match given {
+                Some(t) if unified.is_nullable() && !t.is_nullable() && t != Ty::Unknown => {
+                    quote_spanned!(span=> ::core::option::Option::Some(#v))
+                }
+                _ => v,
+            };
+            vals.push(v);
+        }
         if p.ty.trim_start().starts_with("&[") {
             quote_spanned!(span=> &[#(#vals),*])
         } else {
@@ -1493,6 +1558,28 @@ impl Gen<'_, '_> {
             && p.lambda.is_none()
         {
             return self.arg_value(&ArgRef { value: ArgValue::Expr(expr), ..*a }, Some(p), transform_wraps);
+        }
+        // (a lambda to a parameter of a type of Kotlin's `fun interface` that KompozR makes with a SAM constructor
+        // function — `InputTransformation.maxLength(10).then { … }`, `input_transformation(…)` —: Kotlin's SAM
+        // conversion, the lambda given to it)
+        if let Some(l) = a.value.lambda()
+            && p.lambda.is_none()
+            && let Some(f) = sam_constructor(&p.ty)
+        {
+            let label = self.call_labels.last().cloned();
+            // (kept, its parameters typed: the constructor's generic closure tells Rust nothing more)
+            let info = Callee::from_item(f).params.remove(0).lambda.map(|mut i| {
+                (i.stored, i.typed) = (true, true);
+                i
+            });
+            let closure = self.lambda_for(l, info.as_ref(), label.as_deref(), transform_wraps);
+            let name = ident(f.rust, span);
+            let made = quote_spanned!(span=> #name(#closure));
+            return if plain_type_text(&p.ty).starts_with("Option<") {
+                quote_spanned!(span=> ::core::option::Option::Some(#made))
+            } else {
+                made
+            };
         }
         if let Some(l) = a.value.lambda() {
             let label = self.call_labels.last().cloned();
@@ -1560,6 +1647,35 @@ impl Gen<'_, '_> {
             let v = self.number(n, e.loc, true).ts;
             return if neg { quote_spanned!(span=> -#v) } else { v };
         }
+        // (a nullable slot given `x?.let { name -> { … } }`: the value mapped to the lambda it makes, as the slot takes
+        // a lambda given alone — `supportingText = text?.let { t -> { Text(t) } }`)
+        if p.lambda.is_some()
+            && let Some((recv, let_lambda, inner)) = safe_let_lambda(e)
+        {
+            let r = self.value(recv);
+            let elem = self.peek_ty(recv).non_null();
+            let name = match let_lambda.params.as_ref().and_then(|ps| ps.first()) {
+                Some(LambdaParam { binding: Binding::Name(n), .. }) => n.name.clone(),
+                _ => "it".to_string(),
+            };
+            let t = plain_type_text(&p.ty);
+            let owned = p.ty.trim().strip_prefix("Option<").and_then(|r| r.strip_suffix('>'));
+            let ip = PInfo { ty: owned.unwrap_or(p.ty.trim()).to_string(), option: OptionForm::No, ..p.clone() };
+            self.push_scope();
+            let rust = snake(&name);
+            let x = self.name_ident(&rust, let_lambda.loc);
+            self.declare(&name, rust, LocalKind::LambdaParam, elem);
+            let a = ArgRef { name: None, value: ArgValue::Lambda(inner), spread: false, loc: inner.loc };
+            let v = self.arg_value(&a, Some(&ip), transform_wraps);
+            self.pop_scope();
+            let mapped = quote_spanned!(span=> ::core::option::Option::map(#r, |#x| #v));
+            return if t.starts_with("Option<") {
+                mapped
+            } else {
+                self.error(e.loc, format!("`{}` takes a lambda, not `null`: give it one", p.kotlin));
+                mapped
+            };
+        }
         // (a lambda parameter, a nullable slot's — `leadingIcon = if (selected) { { Icon(…) } } else null` —, given an
         // `if` whose branches are lambdas or `null`: each branch the argument it is, as a lambda or `null` given
         // alone would be)
@@ -1591,6 +1707,14 @@ impl Gen<'_, '_> {
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
+        // (Kotlin's `Int` to another of Rust's integer types — a buffer's `usize` index —: converted)
+        let v = if pty == Ty::OtherInt && matches!(arg_ty, Ty::Int | Ty::Long) && plain_path(t) {
+            let ty: TokenStream = respan(t.parse().expect("a type's path"), span);
+            let v = super::cast_operand(v);
+            quote_spanned!(span=> (#v as #ty))
+        } else {
+            v
+        };
         // (a value of another type than the parameter's, which converts from it: Kotlin's subtype, a Rust `From` —
         // a `Stroke` given as a `DrawStyle`; a type converts to itself, so a wrong guess of the argument's type costs
         // nothing)
@@ -1690,6 +1814,7 @@ impl Gen<'_, '_> {
     fn kotlin_number(&self, v: TokenStream, from: &Ty, to: &Ty, span: Span) -> TokenStream {
         if *from == Ty::OtherInt && to.is_number() && *to != Ty::OtherInt {
             let t = self.rust_of_ty(to, span);
+            let v = super::cast_operand(v);
             quote_spanned!(span=> (#v as #t))
         } else {
             v
@@ -1908,6 +2033,15 @@ fn kt_twin(kotlin: &str) -> Option<String> {
         .then(|| format!("{}_async", first.rust))
 }
 
+/// An implicit receiver's type as Kotlin's standard members see it: its value's type when that is a Kotlin
+/// collection (`this` of `fun List<String>.f()`), else its Rust type's.
+fn receiver_kotlin_ty(r: &ImplicitReceiver) -> Ty {
+    match &r.value {
+        v @ (Ty::List(_) | Ty::Set(_) | Ty::Map(..)) => v.clone(),
+        _ => Ty::from_rust(&r.ty),
+    }
+}
+
 /// `path` with its last name `name` (a function's suspending twin: `kt::with` → `kt::with_async`).
 fn renamed_last(path: TokenStream, name: &str) -> TokenStream {
     use proc_macro2::TokenTree;
@@ -2064,6 +2198,61 @@ pub(crate) fn is_type_parameter(ty: &str) -> bool {
 fn lambda_branch(block: &Block) -> Option<&Lambda> {
     match block.stmts.last().map(|s| &s.kind) {
         Some(StmtKind::Expr(Expr { kind: ExprKind::Lambda(l), .. })) => Some(l),
+        Some(StmtKind::Expr(e)) => safe_let_lambda(e).map(|(_, _, inner)| inner),
+        _ => None,
+    }
+}
+
+/// The SAM constructor of a parameter type (`InputTransformation`, in an `Option` or not): a free function of the
+/// type's name taking one lambda and giving the type (`input_transformation`, Kotlin's `InputTransformation { … }`).
+fn sam_constructor(ty: &str) -> Option<&'static crate::index::Item> {
+    let t = plain_type_text(ty);
+    let t = t.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')).unwrap_or(&t).to_string();
+    if !plain_path(&t) {
+        return None;
+    }
+    let name = t.rsplit("::").next()?;
+    free_functions(name).find(|f| {
+        f.params.len() == 1 && f.params[0].lambda.is_some() && plain_type_text(f.ret).rsplit("::").next() == Some(name)
+    })
+}
+
+/// The arguments of `listOf(…)` (or another of Kotlin's collection makers whose elements' type is inferred).
+pub(crate) fn list_of_call(e: &Expr) -> Option<&[Arg]> {
+    let ExprKind::Call { callee, type_args, args, trailing_lambda: None } = &e.kind else { return None };
+    let ExprKind::Name(n) = &callee.kind else { return None };
+    let maker = matches!(n.name.as_str(), "listOf" | "mutableListOf" | "arrayListOf" | "setOf" | "mutableSetOf");
+    (maker && type_args.is_empty()).then_some(args.as_slice())
+}
+
+/// Two elements' types as one (Kotlin's common supertype, as far as lists of values go): nullable if either is,
+/// a list of lists' elements unified.
+pub(crate) fn merge_elements(a: Ty, b: Ty) -> Ty {
+    match (a, b) {
+        (Ty::Unknown, b) => b,
+        (a, Ty::Unknown) => a,
+        (Ty::Nullable(x), Ty::Nullable(y)) => Ty::Nullable(Box::new(merge_elements(*x, *y))),
+        (Ty::Nullable(x), y) | (y, Ty::Nullable(x)) => Ty::Nullable(Box::new(merge_elements(*x, y))),
+        (Ty::List(x), Ty::List(y)) => Ty::List(Box::new(merge_elements(*x, *y))),
+        (Ty::Set(x), Ty::Set(y)) => Ty::Set(Box::new(merge_elements(*x, *y))),
+        (a, _) => a,
+    }
+}
+
+/// `x?.let { name -> { … } }`: a lambda made of a nullable value, or `null` (a nullable slot's argument —
+/// `supportingText = text?.let { t -> { Text(t) } }`): the value, the `let` lambda (its one parameter, named or
+/// `it`) and the lambda it gives.
+fn safe_let_lambda(e: &Expr) -> Option<(&Expr, &Lambda, &Lambda)> {
+    let ExprKind::Call { callee, type_args, args, trailing_lambda: Some(l) } = &e.kind else { return None };
+    let ExprKind::Member { receiver, safe: true, name } = &callee.kind else { return None };
+    if name.name != "let" || !type_args.is_empty() || !args.is_empty() {
+        return None;
+    }
+    if l.params.as_ref().is_some_and(|ps| ps.len() != 1 || !matches!(ps[0].binding, Binding::Name(_))) {
+        return None;
+    }
+    match l.body.stmts.as_slice() {
+        [Stmt { kind: StmtKind::Expr(Expr { kind: ExprKind::Lambda(inner), .. }), .. }] => Some((receiver, l, inner)),
         _ => None,
     }
 }

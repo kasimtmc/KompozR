@@ -82,6 +82,7 @@ pub enum LinkAnnotation {
 
 impl LinkAnnotation {
     /// A URL with no styles or listener of its own (Compose's LinkAnnotation.Url(url)).
+    /// Kotlin: `Url(url: String)`
     pub fn url(url: impl Into<String>) -> LinkAnnotation {
         LinkAnnotation::url_with(url, None, None)
     }
@@ -94,11 +95,12 @@ impl LinkAnnotation {
         LinkAnnotation::Url { url: url.into(), styles, link_interaction_listener }
     }
     /// A tagged stretch whose listener is told of clicks (Compose's LinkAnnotation.Clickable(tag) { … }).
+    /// Kotlin: `Clickable(tag: String, linkInteractionListener: LinkInteractionListener)`
     pub fn clickable(
         tag: impl Into<String>,
-        on_click: impl Fn(&LinkAnnotation) + Send + Sync + 'static,
+        link_interaction_listener: impl Fn(&LinkAnnotation) + Send + Sync + 'static,
     ) -> LinkAnnotation {
-        LinkAnnotation::clickable_with(tag, None, Some(LinkInteractionListener::new(on_click)))
+        LinkAnnotation::clickable_with(tag, None, Some(LinkInteractionListener::new(link_interaction_listener)))
     }
     /// A tagged stretch, its styles and listener given.
     pub fn clickable_with(

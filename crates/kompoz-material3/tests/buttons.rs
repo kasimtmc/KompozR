@@ -502,7 +502,7 @@ fn button_colors_copy_keeps_what_is_unspecified() {
     let shapes = ButtonShapes::new(Arc::new(CircleShape), Arc::new(RoundedCornerShape(8.dp())));
     assert_eq!(shapes, ButtonShapes::new(Arc::new(CircleShape), Arc::new(RoundedCornerShape(8.dp()))));
     assert_eq!(named_args!(shapes.copy(pressed_shape = None)), shapes);
-    let square = named_args!(shapes.copy(shape = Some(Arc::new(RectangleShape) as Arc<dyn Shape>)));
+    let square = named_args!(shapes.copy(shape = Some(Arc::new(RectangleShape))));
     assert!(square != shapes && same(&square.shape, RectangleShape) && *square.pressed_shape == *shapes.pressed_shape);
 }
 
@@ -639,8 +639,7 @@ fn button_defaults_follow_the_tokens() {
                 assert_eq!(ButtonDefaults.shapes_for(Dp(40.0)), ButtonDefaults.shapes());
                 assert!(same(&ButtonDefaults.shapes_for(Dp(56.0)).pressed_shape, shapes.medium.clone()));
                 assert!(same(&ButtonDefaults.shapes_for(Dp(136.0)).pressed_shape, shapes.large.clone()));
-                let square =
-                    named_args!(ButtonDefaults.shapes(shape = Some(Arc::new(RectangleShape) as Arc<dyn Shape>)));
+                let square = named_args!(ButtonDefaults.shapes(shape = Some(Arc::new(RectangleShape))));
                 assert!(same(&square.shape, RectangleShape));
                 assert_eq!(ButtonDefaults.text_style_for(Dp(40.0)), typography.label_large);
                 assert_eq!(ButtonDefaults.text_style_for(Dp(56.0)), typography.title_medium);

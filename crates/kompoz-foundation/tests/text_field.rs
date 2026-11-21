@@ -1,8 +1,9 @@
 //! The state-based text fields — BasicTextField and BasicSecureTextField (WP2b) — and the C++ Kompoz's text field
 //! tests ported onto them: their Material TextField's decoration (container, label, indicator, heights) is stage
-//! 12's, recorded where a test checked it; what remains is the editing — typing, the cursor, taps, the mouse's and
-//! touch's selection, handles, the magnifier, the toolbar, keys, the clipboard, scrolling, line limits, secure
-//! fields, autofill, the input method. Compose's behaviour where the two differ (said where it matters).
+//! 12's (kompoz-material3/tests/text_field_halves.rs, by the same names), recorded where a test checked it; what
+//! remains is the editing — typing, the cursor, taps, the mouse's and touch's selection, handles, the magnifier,
+//! the toolbar, keys, the clipboard, scrolling, line limits, secure fields, autofill, the input method. Compose's
+//! behaviour where the two differ (said where it matters).
 //!
 //! The texts are 16 sp in the fake backend unless said: 8 px a character, 20 px lines. Numbers in px.
 
@@ -391,7 +392,8 @@ fn swiping_over_a_text_field_does_not_focus_it() {
 /// C++ 10781: a decorator puts the inner field where it wants and widens its touch target (a tap on its icon
 /// types into it); line limits: MultiLine(2, 3) is two lines tall empty, three at most; SingleLine one. (C++'s
 /// `minLines`/`maxLines` field is the value-based one, WP2c's; its `singleLine` beside `lineLimits` has no
-/// Compose counterpart; its 280 dp and 56 dp were Material's, stage 12.)
+/// Compose counterpart; its 280 dp and 56 dp were Material's, stage 12's: kompoz-material3
+/// text_field_halves.rs.)
 fn basic_text_fields_take_a_decorator_and_fields_line_limits() {
     let query = TextFieldState::new("");
     let multi = TextFieldState::new("");
@@ -611,7 +613,8 @@ fn tap_places_the_caret_and_password_shows_dots() {
 /// that one shows; deleting, pasting more than one character or leaving the field hides it; copying and cutting
 /// are refused whatever shows; Hidden never shows one, Visible shows the text (still not copied); its own mask
 /// character. (Compose's System mode doesn't reveal on the desktop. The C++'s whole-state input method edits have
-/// no Compose counterpart; its Material containers are stage 12's; its onSubmit is the keyboard action here.)
+/// no Compose counterpart; its Material containers are stage 12's, kompoz-material3 text_field_halves.rs; its
+/// onSubmit is the keyboard action here.)
 fn secure_text_field_shows_the_character_just_typed_for_a_moment() {
     let secret = TextFieldState::new("");
     let other = TextFieldState::new("gizli");
@@ -805,7 +808,8 @@ fn keyboard_actions_run() {
 }
 
 /// C++ 613's BasicTextField part: a field's text lines up with the texts beside it by its first baseline, a
-/// multi-line one by its last. (Its Material fields are stage 12's.)
+/// multi-line one by its last. (Its Material fields are stage 12's: kompoz-material3
+/// text_field_halves.rs.)
 fn text_fields_line_up_by_their_baselines_too() {
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Column(|| {
@@ -1308,7 +1312,8 @@ fn input_transformations_change_or_refuse_what_is_typed() {
                 modifier = Modifier.width(200.dp()).test_tag("ad"),
                 input_transformation = Some(InputTransformation.all_caps(kompoz_text::Locale::new("tr"))),
             );
-            let only_digits = InputTransformation::new(|b: &mut TextFieldBuffer| {
+            // (Kotlin's SAM constructor `InputTransformation { … }`)
+            let only_digits = input_transformation(|b: &mut TextFieldBuffer| {
                 if !b.as_char_sequence().chars().all(|c| c.is_ascii_digit()) {
                     b.revert_all_changes();
                 }

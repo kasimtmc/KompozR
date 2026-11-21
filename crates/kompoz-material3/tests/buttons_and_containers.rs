@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use kompoz_coroutines::LaunchedEffect;
+use kompoz_coroutines::{CoroutineScope, LaunchedEffect};
 use kompoz_foundation::lazy::index_key;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
@@ -252,19 +252,23 @@ fn custom_indication_hears_its_component_and_draws_around_it() {
 }
 
 fn tab_reaches_buttons_and_enter_or_space_clicks_them() {
-    // C++'s test with its Material Buttons (its TextField: WP3's text fields; foundation's clickable.rs has it with
-    // clickable boxes): Tab reaches them, Enter and Space click them, Shift+Tab back; a tap doesn't focus them.
+    // C++'s test with its Material Buttons and the TextField between them (foundation's clickable.rs has it with
+    // clickable boxes): Tab reaches them, Enter and Space click them, the second Tab the field, Shift+Tab back; a tap
+    // focuses neither a button nor a focusable. (In the field, a multi-line one, Tab types a tab, as Compose's: the
+    // focus moves on with Ctrl+Tab, which Compose's focus system takes as Tab; the C++ moved on with Tab.)
     let log = new_log();
-    let l = log.clone();
+    let text = mutable_state_of(String::new());
+    let (l, t) = (log.clone(), text.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let l = l.clone();
+        let (l, t) = (l.clone(), t.clone());
         Column(move || {
-            let (a, b) = (l.clone(), l.clone());
+            let (a, b, t) = (l.clone(), l.clone(), t.clone());
             Button(
                 move || a.borrow_mut().push("bir".into()),
                 modifier = Modifier.test_tag("one"),
                 content = || Text("Bir"),
             );
+            StringTextField(t.get(), move |v| t.set(v), modifier = Modifier.test_tag("field"));
             Button(
                 move || b.borrow_mut().push("iki".into()),
                 modifier = Modifier.test_tag("two"),
@@ -278,6 +282,14 @@ fn tab_reaches_buttons_and_enter_or_space_clicks_them() {
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["bir"]);
     key(&rule, Key::Tab);
+    assert!(focused(&rule, "field"));
+    rule.wait_for_idle();
+    rule.on_node_with_tag("field").assert_is_focused();
+    assert!(key(&rule, Key::Tab));
+    rule.wait_for_idle();
+    assert!(focused(&rule, "field") && text.peek() == "\t", "{:?}", text.peek());
+    rule.host().key_down(Key::Tab, KeyModifiers::Ctrl);
+    rule.host().key_up(Key::Tab, KeyModifiers::Ctrl);
     assert!(focused(&rule, "two"));
     assert!(key(&rule, Key::Spacebar));
     rule.wait_for_idle();
@@ -286,17 +298,22 @@ fn tab_reaches_buttons_and_enter_or_space_clicks_them() {
     assert!(focused(&rule, "box"));
     shift_key(&rule, Key::Tab);
     assert!(focused(&rule, "two"));
-    // Pointing ends keyboard focus; a tap doesn't focus a button.
+    rule.wait_for_idle();
+    rule.on_node_with_tag("two").assert_is_focused(); // the focused button shows it
+    // Pointing ends keyboard focus; a tap doesn't focus a button or a focusable().
     rule.on_node_with_tag("one").perform_click();
     rule.wait_for_idle();
     assert!(rule.host().focused_node().is_none() && log.borrow().last().map(String::as_str) == Some("bir"));
+    rule.on_node_with_tag("box").perform_click();
+    rule.wait_for_idle();
+    assert!(rule.host().focused_node().is_none());
 }
 
 fn a_focus_request_brings_the_node_into_view() {
-    // C++'s test with its Material Button above (its TextField below: WP3's; a focusable box here, foundation's
-    // scroll.rs has it with a BasicTextField): a focus request far below scrolls it into view, the button's back up.
-    // (A clickable takes the focus only out of touch mode, as Compose's: the keyboard's mode asked for, as a Compose
-    // test does through LocalInputModeManager.)
+    // C++'s test with its Material Button above and its TextField below (foundation's scroll.rs has it with a
+    // focusable box and a BasicTextField): a focus request far below, with no keyboard to make room for, scrolls
+    // the field into view; the button's back up. (A clickable takes the focus only out of touch mode, as Compose's:
+    // the keyboard's mode asked for, as a Compose test does through LocalInputModeManager.)
     let scroll = ScrollState::new(0);
     let (below, above) = (FocusRequester::new(), FocusRequester::new());
     let modes: Rc<RefCell<Option<kompoz_ui::platform::InputModeManager>>> = Rc::new(RefCell::new(None));
@@ -314,7 +331,13 @@ fn a_focus_request_brings_the_node_into_view() {
                         content = || Text("Üst"),
                     );
                     Box(modifier = Modifier.height(1500.dp()));
-                    Box(modifier = Modifier.size(56.dp()).focus_requester(&b).focusable().test_tag("alan"));
+                    StringTextField(
+                        "",
+                        |_| {},
+                        modifier = Modifier.focus_requester(&b).test_tag("alan"),
+                        single_line = true,
+                        keyboard_options = KeyboardOptions(show_keyboard_on_focus = false),
+                    );
                     Box(modifier = Modifier.height(1500.dp()));
                 },
             );
@@ -322,11 +345,12 @@ fn a_focus_request_brings_the_node_into_view() {
         IntSize::new(400, 800),
     );
     rule.run_on_idle(|| modes.borrow().as_ref().unwrap().request_input_mode(kompoz_ui::platform::InputMode::Keyboard));
-    below.request_focus();
+    below.request_focus(); // far below, and no keyboard to make room for: scrolled to anyway
     rule.wait_for_idle();
     let field = bounds(&rule, "alan");
-    assert!(field.top >= 0.0 && near(field.bottom, 800.0, 1.0), "{field:?}");
-    above.request_focus();
+    assert!(focused(&rule, "alan") && field.height() == 56.0, "{field:?}");
+    assert!(field.top >= 0.0 && field.bottom <= 800.5 && near(field.bottom, 800.0, 1.0), "{field:?}"); // at the bottom
+    above.request_focus(); // and back up
     rule.wait_for_idle();
     assert!(
         near(bounds(&rule, "üst").top, 0.0, 0.5) && scroll.value() == 0,
@@ -336,25 +360,47 @@ fn a_focus_request_brings_the_node_into_view() {
     );
 }
 
+/// C++'s `state.scrollTo(value)`: scrolled from code, run until idle.
+fn scroll_to(rule: &KompozTestRule, state: &ScrollState, value: i32) {
+    let s = state.clone();
+    CoroutineScope::new(rule.host().dispatcher()).launch(async move {
+        s.scroll_to(value).await;
+    });
+    rule.wait_for_idle();
+}
+
 fn focus_moved_by_keys_scrolls_into_view_and_so_does_the_keyboard() {
-    // C++'s test's Material Buttons (its TextField and the keyboard part: WP3's; foundation's scroll.rs has it with
-    // focusable boxes and a BasicTextField): Tab brings the focused button into view, Shift+Tab scrolls back up.
+    // C++'s test with its Material Buttons and TextField (foundation's scroll.rs has it with focusable boxes and a
+    // BasicTextField): Tab brings the focused button into view, Shift+Tab scrolls back up; the tapped field a
+    // keyboard comes up over (the scroll's viewport shrinking by its padding) has its cursor kept above it; a window
+    // that gets shorter too; not once scrolled away from it.
     let scroll = ScrollState::new(0);
-    let s = scroll.clone();
+    let text = mutable_state_of(String::new());
+    let (s, t) = (scroll.clone(), text.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
-            Column(
-                modifier = Modifier.fill_max_size().vertical_scroll(&s),
-                content = || {
-                    for i in 0..20 {
-                        Button(
-                            || {},
-                            modifier = Modifier.height(60.dp()).test_tag(format!("b{i}")),
-                            content = move || Text(format!("Düğme {i}")),
+            let (s, t) = (s.clone(), t.clone());
+            MaterialTheme(move || {
+                let t = t.clone();
+                Column(
+                    modifier = Modifier.fill_max_size().ime_padding().vertical_scroll(&s),
+                    content = move || {
+                        for i in 0..20 {
+                            Button(
+                                || {},
+                                modifier = Modifier.height(60.dp()).test_tag(format!("b{i}")),
+                                content = move || Text(format!("Düğme {i}")),
+                            );
+                        }
+                        let t = t.clone();
+                        StringTextField(
+                            t.get(),
+                            move |v| t.set(v),
+                            modifier = Modifier.height(60.dp()).test_tag("field"),
                         );
-                    }
-                },
-            );
+                    },
+                );
+            });
         }),
         IntSize::new(400, 800),
     );
@@ -364,11 +410,40 @@ fn focus_moved_by_keys_scrolls_into_view_and_so_does_the_keyboard() {
     rule.wait_for_idle();
     let b14 = bounds(&rule, "b14");
     assert!(focused(&rule, "b14") && b14.top >= 0.0 && b14.bottom <= 800.0 && scroll.value() > 0, "{b14:?}");
+    // Back up: it scrolls back as far as needed.
     for _ in 0..14 {
         shift_key(&rule, Key::Tab);
     }
     rule.wait_for_idle();
     assert!(focused(&rule, "b0") && near(bounds(&rule, "b0").top, 0.0, 0.5));
+    // A tapped field near the bottom, then the keyboard comes up over it: it scrolls above it.
+    scroll_to(&rule, &scroll, scroll.max_value());
+    let field = bounds(&rule, "field");
+    tap(&rule, field.center());
+    rule.wait_for_idle();
+    assert!(focused(&rule, "field") && bounds(&rule, "field").bottom > 700.0, "{:?}", bounds(&rule, "field"));
+    let insets = kompoz_ui::platform::SystemInsets {
+        ime: kompoz_ui::platform::Insets { left: 0, top: 0, right: 0, bottom: 300 },
+        ..Default::default()
+    };
+    rule.host().set_system_insets(insets);
+    rule.wait_for_idle();
+    // Compose keeps the focused node's focus rect in view: a field over a String (the C++'s) gives none of its
+    // own, so all of it (one over a TextFieldState gives its cursor's: foundation's scroll.rs).
+    let editing = bounds(&rule, "field");
+    assert!(near(editing.bottom, 500.0, 0.5) && editing.height() == 60.0, "{editing:?}");
+    // A window that isn't edge to edge gets shorter instead (the keyboard is no inset there).
+    rule.host().set_system_insets(kompoz_ui::platform::SystemInsets::default());
+    rule.wait_for_idle();
+    scroll_to(&rule, &scroll, scroll.max_value());
+    rule.host().set_viewport_size(IntSize::new(400, 500));
+    rule.wait_for_idle();
+    let editing = bounds(&rule, "field");
+    assert!(editing.bottom <= 500.5 && editing.bottom > 450.0, "{editing:?}");
+    scroll_to(&rule, &scroll, 0); // scrolled away from it, then taller again: it stays where it is
+    rule.host().set_viewport_size(IntSize::new(400, 800));
+    rule.wait_for_idle();
+    assert_eq!(scroll.value(), 0);
 }
 
 fn scrollable_states_hear_the_users_drags() {
@@ -517,34 +592,54 @@ fn subkompoz_layout_composes_slots_from_what_it_measured() {
 }
 
 fn semantics_tree_merges_buttons_and_performs_actions() {
-    // C++'s test's Material Button with an Icon and a Text (its Checkbox: WP2's; its TextField: WP3's; its
-    // AlertDialog (WP5) below; kompoz-ui's semantics.rs has the rest): one node to accessibility, a button, its
-    // icon's description and its text read together, clicked by the action.
+    // C++'s test's heading, Material Button with an Icon and a Text, TextField, scrolled column and AlertDialog (its
+    // Checkbox: WP2's; kompoz-ui's semantics.rs has the rest): one node to accessibility for the button, its icon's
+    // description and its text read together, clicked by the action; the field an editable node with its value,
+    // unfocused until its click focuses it, its id kept; the column scrolled forward by its action; a dialog on top.
     let clicks = Rc::new(Cell::new(0));
+    let scroll = ScrollState::new(0);
     let dialog = mutable_state_of(false);
-    let (c, d) = (clicks.clone(), dialog.clone());
+    let (c, s, d) = (clicks.clone(), scroll.clone(), dialog.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (c, d) = (c.clone(), d.clone());
-        Column(move || {
-            let c = c.clone();
-            Button(
-                move || c.set(c.get() + 1),
-                content = || {
-                    VectorIcon(Icons::Filled::Add(), Some("Artı".into()));
-                    Text("Ekle");
-                },
-            );
-            if d.get() {
-                // (Compose's AlertDialog requires its confirm button: none here, as the C++'s had)
-                AlertDialog(|| {}, || {}, title = Some(Rc::new(|| Text("Uyarı")) as Rc<dyn Fn()>));
-            }
-        });
+        let (c, s, d) = (c.clone(), s.clone(), d.clone());
+        Column(
+            modifier = Modifier.fill_max_size().vertical_scroll(&s),
+            content = move || {
+                let c = c.clone();
+                Text("Başlık", modifier = Modifier.semantics(|p| p.heading()));
+                Button(
+                    move || c.set(c.get() + 1),
+                    content = || {
+                        VectorIcon(Icons::Filled::Add(), Some("Artı".into()));
+                        Text("Ekle");
+                    },
+                );
+                StringTextField("merhaba", |_| {}, placeholder = Some(Rc::new(|| Text("yaz"))));
+                Box(modifier = Modifier.height(2000.dp()));
+                if d.get() {
+                    // (Compose's AlertDialog requires its confirm button: none here, as the C++'s had)
+                    AlertDialog(|| {}, || {}, title = Some(Rc::new(|| Text("Uyarı"))));
+                }
+            },
+        );
     }));
     let tree = rule.host().accessibility_tree();
     let button = tree.iter().find(|n| n.role == Some(Role::Button)).cloned().expect("a button");
+    let field = tree.iter().find(|n| n.editable).cloned().expect("a field");
     assert!(button.label == "Artı Ekle" && button.clickable && button.enabled, "{button:?}");
     assert!(!tree.iter().any(|n| n.label == "Ekle")); // merged into the button
+    assert!(field.value == "merhaba" && !field.focused, "{field:?}");
+    assert!(tree.iter().any(|n| n.heading && n.label == "Başlık"));
+    let list = tree.iter().find(|n| n.scrollable).cloned().expect("the scrolled column");
     assert!(rule.host().perform_semantics_action(button.id, SemanticsAction::Click) && clicks.get() == 1);
+    assert!(rule.host().perform_semantics_action(field.id, SemanticsAction::Click));
+    rule.wait_for_idle();
+    let again = rule.host().accessibility_tree();
+    let f = again.iter().find(|n| n.editable).expect("the field still");
+    assert!(f.focused && f.id == field.id, "{f:?}"); // ids stay
+    assert!(rule.host().perform_semantics_action(list.id, SemanticsAction::ScrollForward));
+    rule.wait_for_idle();
+    assert!(scroll.value() > 100, "{}", scroll.value());
     // A dialog on top: the tree is the dialog's (its title), what is under it isn't told.
     dialog.set(true);
     rule.wait_for_idle();

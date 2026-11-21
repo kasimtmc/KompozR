@@ -174,6 +174,9 @@ impl TextStyle {
             TextStyleMerge::Paragraph(o) => {
                 TextStyle::new(&self.to_span_style(), &self.to_paragraph_style().merge(Some(o)))
             }
+            TextStyleMerge::OwnedText(o) => self.merge(&o),
+            TextStyleMerge::OwnedSpan(o) => self.merge(&o),
+            TextStyleMerge::OwnedParagraph(o) => self.merge(&o),
         }
     }
 
@@ -202,11 +205,31 @@ impl TextStyle {
     }
 }
 
-/// What a text style merges ([`TextStyle::merge`]): another text style, a span style, a paragraph style.
+/// What a text style merges ([`TextStyle::merge`]): another text style, a span style, a paragraph style — borrowed,
+/// or given (Kotlin's values: `style.merge(TextStyle(color = c))`).
 pub enum TextStyleMerge<'a> {
     Text(Option<&'a TextStyle>),
     Span(&'a SpanStyle),
     Paragraph(&'a ParagraphStyle),
+    OwnedText(TextStyle),
+    OwnedSpan(SpanStyle),
+    OwnedParagraph(ParagraphStyle),
+}
+
+impl From<TextStyle> for TextStyleMerge<'_> {
+    fn from(s: TextStyle) -> Self {
+        TextStyleMerge::OwnedText(s)
+    }
+}
+impl From<SpanStyle> for TextStyleMerge<'_> {
+    fn from(s: SpanStyle) -> Self {
+        TextStyleMerge::OwnedSpan(s)
+    }
+}
+impl From<ParagraphStyle> for TextStyleMerge<'_> {
+    fn from(s: ParagraphStyle) -> Self {
+        TextStyleMerge::OwnedParagraph(s)
+    }
 }
 
 impl<'a> From<&'a TextStyle> for TextStyleMerge<'a> {

@@ -18,6 +18,12 @@ pub trait KtDelegate {
     fn get_value(&self) -> Self::Value;
 }
 
+/// `d` as a delegate of `T`'s: a delegated property's declared type (`var checkedIndex: Int? by remember {
+/// mutableStateOf(null) }`) telling what its delegate holds, which Rust can't take from `null` alone.
+pub fn delegate_of<T, D: KtDelegate<Value = T>>(d: D) -> D {
+    d
+}
+
 /// What `var x by d` also writes: `x = v` is `d.set_value(v)` (Kotlin's `setValue` operator).
 #[diagnostic::on_unimplemented(
     message = "`{Self}` can't be a `var` delegate: it can't be set",

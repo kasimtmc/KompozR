@@ -111,6 +111,19 @@ impl TextRange {
     }
 }
 
+/// Compose's `CharSequence.substring(range: TextRange)` (androidx.compose.ui.text) on a text: what `range` covers of
+/// it (`textFieldState.text.substring(selection)`).
+pub trait StringTextRangeExt {
+    /// Kotlin: `substring(range: TextRange): String`
+    fn substring_of_range(&self, range: TextRange) -> String;
+}
+
+impl<S: AsRef<str> + ?Sized> StringTextRangeExt for S {
+    fn substring_of_range(&self, range: TextRange) -> String {
+        range.substring(self.as_ref()).to_string()
+    }
+}
+
 /// `TextRange(start, end)`, as Compose writes it.
 impl fmt::Debug for TextRange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

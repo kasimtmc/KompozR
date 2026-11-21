@@ -7,7 +7,7 @@ pub fn NestedReceivers(log: impl ::core::ops::Fn(::std::string::String) + 'stati
         modifier = Modifier.size(200.dp()).content_receiver({
             let log = ::kompoz::runtime::__private::capture(&log);
             move |content: TransferableContent| {
-                log(::kompoz::runtime::kt::template!("dış ", content.clip_entry().item_count()));
+                log(::kompoz::runtime::kt::template!("dış ", (content.clip_entry().item_count() as i32)));
                 content.consume(|item| item.text().is_some())
             }
         }),
@@ -17,7 +17,7 @@ pub fn NestedReceivers(log: impl ::core::ops::Fn(::std::string::String) + 'stati
                 move |content: TransferableContent| {
                     log(::kompoz::runtime::kt::template!(
                         "iç ",
-                        content.clip_entry().item_count(),
+                        (content.clip_entry().item_count() as i32),
                         " ",
                         content.has_media_type(&MediaType::Image)
                     ));

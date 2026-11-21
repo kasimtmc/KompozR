@@ -185,6 +185,16 @@ impl Gen<'_, '_> {
         }
     }
 
+    /// The receiver of a safe call (`a?.f()`) as a nullable: one of a type known not to be (Kotlin allows `?.` on it —
+    /// a composition local KompozR holds non-null where Compose's is nullable: `LocalSoftwareKeyboardController.current?.hide()`)
+    /// given in `Some`, the call's value still nullable as Kotlin types it.
+    pub(crate) fn safe_receiver(&self, recv: Out, loc: Loc) -> TokenStream {
+        let span = self.span(loc);
+        let known = !recv.ty.is_nullable() && recv.ty != Ty::Unknown && recv.kind != OutKind::Null;
+        let value = self.finish(recv, Want::default(), loc);
+        if known { quote_spanned!(span=> ::core::option::Option::Some(#value)) } else { value }
+    }
+
     /// A value made Kotlin's `Any` as the Rust API holds it (see [`AnyWrap`]): `LazyKey::new(v)`, in `Some` for an
     /// optional place; a nullable value mapped, `null` left `None`; a value of the type already as it is.
     fn any_value(&self, ts: TokenStream, ty: &Ty, kind: OutKind, w: AnyWrap, span: Span) -> TokenStream {
@@ -332,7 +342,12 @@ impl Gen<'_, '_> {
         if let Some((recv, item)) = self.receiver_member(&n.name, |i| i.params.is_empty()) {
             let r = proc_macro2::Ident::new(&recv.rust, span);
             let m = ident(item.rust, span);
-            return Out::plain(quote_spanned!(span=> #r.#m()), owner_arg_ret(&recv.value, item.ret));
+            let ty = owner_arg_ret(&recv.value, item.ret);
+            // (another of Rust's integer types read as Kotlin's `Int`: a buffer's `length` in `edit { … }`)
+            if ty == Ty::OtherInt {
+                return Out::plain(quote_spanned!(span=> (#r.#m() as i32)), Ty::Int);
+            }
+            return Out::plain(quote_spanned!(span=> #r.#m()), ty);
         }
         if let Some(v) = self.file.vals.get(&n.name).cloned() {
             let i = ident(&v.rust, span);
@@ -535,7 +550,7 @@ impl Gen<'_, '_> {
         if safe {
             let it = self.fresh("it", span);
             let inner_ty = recv.ty.non_null();
-            let value = self.finish(recv, Want::default(), receiver.loc);
+            let value = self.safe_receiver(recv, receiver.loc);
             let read = self.property_read(Out::plain(quote!(#it), inner_ty), name, loc);
             let kt = self.kt(span);
             let ts = read.ts;
@@ -609,6 +624,11 @@ impl Gen<'_, '_> {
             recv.ts
         };
         let m = ident(&rust, mspan);
+        // (another of Rust's integer types — a `TextRange`'s `start`, a buffer's `length`, `usize`s — read as Kotlin's
+        // `Int`, which the property is there: its arithmetic and comparisons with Kotlin's numbers as Kotlin's)
+        if ty == Ty::OtherInt {
+            return Out::plain(quote_spanned!(span=> (#r.#m() as i32)), Ty::Int);
+        }
         Out::plain(quote_spanned!(span=> #r.#m()), ty)
     }
 
@@ -812,7 +832,22 @@ impl Gen<'_, '_> {
                     let ts = if eq { quote_spanned!(span=> #v.is_none()) } else { quote_spanned!(span=> #v.is_some()) };
                     return Out::plain(ts, Ty::Bool);
                 }
-                let (a, b) = self.operands(lhs, rhs);
+                let (a, b) = self.typed_operands(lhs, rhs, false);
+                // (a value compared with a nullable one, `index == checkedIndex` of an `Int?`: Kotlin's equality of
+                // the two, the value in `Some`)
+                let some = |o: Out, other: &Ty| {
+                    let (ts, ty) = (o.ts, o.ty);
+                    if !other.is_nullable() || ty.is_nullable() || ty == Ty::Unknown {
+                        return ts;
+                    }
+                    if o.kind == OutKind::StrLit {
+                        quote_spanned!(span=> ::core::option::Option::Some(::std::string::String::from(#ts)))
+                    } else {
+                        quote_spanned!(span=> ::core::option::Option::Some(#ts))
+                    }
+                };
+                let (at, bt) = (a.ty.clone(), b.ty.clone());
+                let (a, b) = (some(a, &bt), some(b, &at));
                 let ts = if eq { quote_spanned!(span=> #a == #b) } else { quote_spanned!(span=> #a != #b) };
                 Out::plain(ts, Ty::Bool)
             }
@@ -930,6 +965,9 @@ impl Gen<'_, '_> {
         match wider {
             Some(w) if w != ty && ty.is_number() => {
                 let t = self.rust_of_ty(w, span);
+                // (the operand parenthesized: `label.size.width / 2` converted whole, as Kotlin's Int division then
+                // widening is)
+                let ts = super::cast_operand(ts);
                 Out::plain(quote_spanned!(span=> (#ts as #t)), w.clone())
             }
             _ => Out { ts, ty: ty_out, kind: OutKind::Plain },
@@ -1213,6 +1251,17 @@ impl Gen<'_, '_> {
 
     /// The type of a block's value (its last expression), the locals it declares before it known as far as their
     /// values tell (`remember { val a = Animatable(0f); a }`).
+    /// The type a collection's elements have together (`listOf(null, x)`'s `X?`): see [`super::call::merge_elements`].
+    pub(crate) fn elements_ty<'e>(&self, elements: impl Iterator<Item = &'e Expr>) -> Ty {
+        elements.fold(Ty::Unknown, |t, e| {
+            let et = match &e.kind {
+                ExprKind::Null => Ty::Nullable(Box::new(Ty::Unknown)),
+                _ => self.peek_ty(e),
+            };
+            super::call::merge_elements(t, et)
+        })
+    }
+
     pub(crate) fn peek_block(&self, b: &Block) -> Ty {
         let Some(Stmt { kind: StmtKind::Expr(e), .. }) = b.stmts.last() else { return Ty::Unit };
         if b.stmts.len() == 1 {
@@ -1437,7 +1486,9 @@ impl Gen<'_, '_> {
         if let Some(o) = recv.owner()
             && let Some(i) = members_of(o, name).find(|i| call || i.params.is_empty())
         {
-            return owner_arg_ret(recv, i.ret);
+            // (a property of another of Rust's integer types is read as Kotlin's `Int`: see `property_read`)
+            let t = owner_arg_ret(recv, i.ret);
+            return if !call && t == Ty::OtherInt { Ty::Int } else { t };
         }
         if let Some(f) = self.file.extension(name, recv.owner()) {
             return f.ret.clone();
@@ -1477,8 +1528,7 @@ impl Gen<'_, '_> {
                 }
                 match n.name.as_str() {
                     "listOf" | "mutableListOf" | "arrayListOf" => {
-                        let t = args.first().map(|a| self.peek_ty(&a.value)).unwrap_or(Ty::Unknown);
-                        return Ty::List(Box::new(t));
+                        return Ty::List(Box::new(self.elements_ty(args.iter().map(|a| &a.value))));
                     }
                     "mutableStateOf" => {
                         // (its type argument where written: `mutableStateOf<Animatable<Dp, …>?>(null)`)

@@ -21,7 +21,7 @@ mod tracked_range;
 mod undo_state;
 
 pub use change_tracker::{ChangeList, ChangeTracker};
-pub use input_transformation::{InputTransformation, TransformInput};
+pub use input_transformation::{InputTransformation, TransformInput, input_transformation};
 pub use keyboard_action_handler::KeyboardActionHandler;
 pub use output_transformation::{OutputTransformation, output_transformation};
 pub use text_field_buffer::{TextFieldBuffer, TextFieldStyle, adjust_text_range, find_common_prefix_and_suffix};

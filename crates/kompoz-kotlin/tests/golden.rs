@@ -77,6 +77,19 @@ fn goldens() {
     assert!(failed.is_empty(), "golden files differ: {failed:?} (UPDATE_GOLDEN=1 writes them)");
 }
 
+/// What a `.kt` file of the workspace becomes, printed (a `.kt` a test's `kompoz_file!` reads: rustc's errors in it
+/// point at the macro's argument, the Rust shows what they are about): `KOTLIN_DUMP=path cargo test -p kompoz-kotlin
+/// --test golden dump -- --ignored --nocapture` (relative to the crate; `kompoz_file!`'s form unless the path ends
+/// with `.snippet.kt`).
+#[test]
+#[ignore]
+fn dump() {
+    let Some(path) = std::env::var_os("KOTLIN_DUMP") else { return };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+    let text = std::fs::read_to_string(&path).expect("the .kt file");
+    println!("{}", generated(&text, !path.to_string_lossy().ends_with(".snippet.kt")));
+}
+
 /// The lines that differ, `-` expected, `+` generated (the first few).
 fn diff(expected: &str, got: &str) -> String {
     let (a, b): (Vec<&str>, Vec<&str>) = (expected.lines().collect(), got.lines().collect());

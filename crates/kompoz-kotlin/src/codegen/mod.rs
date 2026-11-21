@@ -96,6 +96,8 @@ pub fn generate(file: &File, cx: &Context, diags: &mut Diagnostics) -> TokenStre
 pub(crate) struct FnState {
     /// Its body is a `#[kompozable]` one: the macro rewrites its calls and wraps its lambdas.
     pub kompozable: bool,
+    /// Its result is nullable (Kotlin's `T?`): a value it returns of a type known not to be is given in `Some`.
+    pub nullable_result: bool,
 }
 
 /// A loop being written, for `break` and `continue`.
@@ -171,6 +173,9 @@ pub(crate) struct Gen<'a, 'd> {
     /// …and the receivers (Rust type names) of the receiver lambdas it looks into (`with(scope) { … }`,
     /// `providesComputed { … }`), innermost last.
     pub peek_receivers: std::cell::RefCell<Vec<(String, Ty)>>,
+    /// The element type the next `listOf(…)` written is to have (a declared type's, an outer list's: Kotlin's
+    /// inference of a nested list's elements).
+    pub expected_elem: Option<Ty>,
     counter: usize,
 }
 
@@ -201,6 +206,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             layout_scopes: Vec::new(),
             peek_scopes: Default::default(),
             peek_receivers: Default::default(),
+            expected_elem: None,
             counter: 0,
         }
     }
@@ -559,7 +565,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         let info = self.quiet(|g| g.file_fn(f));
         let unit = info.ret == Ty::Unit;
         let restartable = kompozable && !inline && unit && f.result.as_ref().is_none_or(|t| self.ty_of(t) == Ty::Unit);
-        self.fun = FnState { kompozable };
+        self.fun = FnState { kompozable, nullable_result: info.ret.is_nullable() };
         self.scopes = vec![HashMap::new()];
         self.receivers.clear();
         self.frames.clear();
@@ -574,7 +580,12 @@ impl<'a, 'd> Gen<'a, 'd> {
         let receiver_rust = if kompozable { "__kz_this" } else { "self" };
         if let Some(r) = &f.receiver {
             match (r.simple_name(), r.nullable, &r.kind) {
-                (Some(n), false, TypeKind::Named(segs)) if segs.iter().all(|s| s.args.is_empty()) => {
+                // (of a generic type, its arguments given: `List<String>.filteredBy` — a method of an extension trait
+                // implemented for `Vec<String>`; one of its own type parameters is a generic function's, stage 14's)
+                (Some(n), false, TypeKind::Named(segs))
+                    if segs.iter().all(|s| s.args.is_empty())
+                        || (f.type_params.is_empty() && !self.ty_of(r).is_vague()) =>
+                {
                     let rust_ty = self.rust_type(r, types::TypePos::Value);
                     let name = owner_name(last_segment(&n));
                     self.receivers.push(ImplicitReceiver {
@@ -640,7 +651,8 @@ impl<'a, 'd> Gen<'a, 'd> {
                     let s = self.stmt_expr(e);
                     quote!(#s;)
                 } else {
-                    self.value(e)
+                    let want = expr::Want { some: info.ret.is_nullable(), ..Default::default() };
+                    self.value_want(e, want)
                 }
             }
             None => quote!(),
@@ -990,6 +1002,16 @@ pub(crate) fn lifetime(name: &str, span: Span) -> TokenStream {
 }
 
 /// `tokens` with every span made `span`.
+/// An expression an `as` cast is written after: parenthesized when it has a binary operator at its top (`w / 2` —
+/// `as` binds tighter —), else as it is (a name, a call chain, a unary operator's operand).
+pub(crate) fn cast_operand(ts: TokenStream) -> TokenStream {
+    use proc_macro2::TokenTree;
+    let binary = ts.clone().into_iter().enumerate().any(
+        |(k, t)| matches!(&t, TokenTree::Punct(p) if k > 0 && !matches!(p.as_char(), '.' | ':' | '!' | '#' | '\'')),
+    );
+    if binary { quote!((#ts)) } else { ts }
+}
+
 pub(crate) fn respan(tokens: TokenStream, span: Span) -> TokenStream {
     tokens
         .into_iter()
