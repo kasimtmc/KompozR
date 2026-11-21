@@ -21,6 +21,8 @@ kompoz-ui = { path = "../kompoz-ui" }
 
 [dev-dependencies]
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
+# (WP4b: icons)
+kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
 kompoz-test = { path = "../kompoz-test" }
 
 # The theme: color schemes (baseline, dynamic, wallpaper), MaterialTheme, typography, shapes, motion, the content
@@ -112,4 +114,23 @@ harness = false
 # taps, selections, handles and the magnifier placed from the Material field's inset.
 [[test]]
 name = "text_field_halves"
+harness = false
+
+# (WP4b: rail) Navigation rails and wide navigation rails (the C++ Kompoz's rail tests by name, M15's values,
+# Compose's behaviour, M15's NavigationRailSamples).
+[[test]]
+name = "navigation_rail"
+harness = false
+
+# (WP4b: bar) Navigation bars and short navigation bars (the C++ Kompoz's bar tests by name, M15's values,
+# Compose's behaviour, M15's NavigationBarSamples and BadgeSamples' NavigationBarItemWithBadge).
+[[test]]
+name = "navigation_bar"
+harness = false
+
+# (WP4b: drawer) Navigation drawers (the C++ Kompoz's drawer tests by name, M15's values, Compose's behaviour, M15's
+# DrawerSamples): ModalNavigationDrawer, DismissibleNavigationDrawer, PermanentNavigationDrawer, the sheets, DrawerState,
+# NavigationDrawerItem.
+[[test]]
+name = "navigation_drawer"
 harness = false

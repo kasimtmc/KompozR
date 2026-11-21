@@ -1,8 +1,8 @@
 // Material's list items as Compose's samples write them (material3 1.5's ListSamples), and the rest of their API as a
 // Compose user writes it (ListItemDefaults' colors, shapes, elevation, padding, gap and alignment, ListItemColors'
 // properties and state functions, the segmented items). The samples with a RadioButton or a Checkbox in their slots
-// (SingleSelection…, MultiSelection…, ListItemWithModeChangeOnLongClick…) come with those controls (WP2),
-// SegmentedListItemWithExpansionSample with icons-extended too (its Icons.Default.ExpandLess/ExpandMore: WP9).
+// (SingleSelection…, MultiSelection…, ListItemWithModeChangeOnLongClick…) come with those controls (WP2), and so does
+// SegmentedListItemWithExpansionSample's children's trailing Checkbox (the rest of it here).
 
 @Composable
 fun OneLineListItem() {
@@ -108,6 +108,65 @@ fun ClickableListItemWithClickableChildSample() {
             )
 
             HorizontalDivider()
+        }
+    }
+}
+
+// (WP4b: icons) Its children's `trailingContent = { Checkbox(checked = childrenChecked[idx], onCheckedChange = null) }`
+// comes with WP2's Checkbox (paste-ready, the sample as written, in the WP4b notes' icons-pending.kt).
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SegmentedListItemWithExpansionSample() {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val numChildren = 3
+    val itemCount = 1 + if (expanded) numChildren else 0
+    // (Compose's `mutableStateListOf(*Array(numChildren) { false })`: a spread argument comes with stage 14, its three
+    // falses written out until then)
+    val childrenChecked = rememberSaveable { mutableStateListOf(false, false, false) }
+
+    val colors =
+        ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
+    ) {
+        Spacer(Modifier.height(100.dp))
+        SegmentedListItem(
+            onClick = { expanded = !expanded },
+            modifier =
+                Modifier.semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
+            colors = colors,
+            shapes = ListItemDefaults.segmentedShapes(index = 0, count = itemCount),
+            leadingContent = { Icon(Icons.Default.Favorite, contentDescription = null) },
+            trailingContent = {
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                )
+            },
+            content = { Text("Click to expand/collapse") },
+        )
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(MaterialTheme.motionScheme.fastSpatialSpec()),
+            exit = shrinkVertically(MaterialTheme.motionScheme.fastSpatialSpec()),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+                repeat(numChildren) { idx ->
+                    SegmentedListItem(
+                        checked = childrenChecked[idx],
+                        onCheckedChange = { childrenChecked[idx] = it },
+                        colors = colors,
+                        shapes =
+                            ListItemDefaults.segmentedShapes(index = idx + 1, count = itemCount),
+                        leadingContent = {
+                            Icon(Icons.Default.Favorite, contentDescription = null)
+                        },
+                        content = { Text("Child ${idx + 1}") },
+                    )
+                }
+            }
         }
     }
 }

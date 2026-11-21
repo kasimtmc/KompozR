@@ -117,6 +117,43 @@ fn clickable_list_item_samples() {
     rule.on_all_nodes(kompoz::test::has_click_action()).assert_count_equals(9);
 }
 
+// (WP4b: icons) SegmentedListItemWithExpansionSample: its Icons.Default.ExpandLess/ExpandMore the extended set's.
+fn segmented_list_item_with_expansion_sample() {
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(|| MaterialTheme(content = || SegmentedListItemWithExpansionSample())),
+        IntSize::new(400, 900),
+    );
+    let header = || rule.on_node_with_text("Click to expand/collapse");
+    let state =
+        || header().fetch_semantics_node().config().get(kompoz::ui::semantics::SemanticsProperties::StateDescription);
+    let drawn = |icon: ImageVector| rule.draw().vectors.contains(&icon.id());
+    // Collapsed: ExpandMore; under the 100 dp spacer and the 2 dp gap.
+    assert_eq!(state().as_deref(), Some("Collapsed"));
+    assert!(drawn(Icons::Default::ExpandMore()) && !drawn(Icons::Default::ExpandLess()));
+    assert!((header().get_unclipped_bounds_in_root().top - 102.0).abs() < 0.5);
+    rule.on_node_with_text("Child 1").assert_does_not_exist();
+    // Expanded: three children 2 dp apart, ExpandLess; each child checks on its own (the saved state list).
+    header().perform_click();
+    rule.advance_time_by(1000);
+    assert_eq!(state().as_deref(), Some("Expanded"));
+    assert!(drawn(Icons::Default::ExpandLess()) && !drawn(Icons::Default::ExpandMore()));
+    let (one, two) = (
+        rule.on_node_with_text("Child 1").get_unclipped_bounds_in_root(),
+        rule.on_node_with_text("Child 2").get_unclipped_bounds_in_root(),
+    );
+    assert!((two.top - one.bottom - 2.0).abs() < 0.5, "{one:?} {two:?}");
+    rule.on_node_with_text("Child 2").perform_click();
+    rule.on_node_with_text("Child 2").assert_is_on();
+    rule.on_node_with_text("Child 3").assert_is_off();
+    // Collapsed: the children gone once they have shrunk; expanded again, the check kept.
+    header().perform_click();
+    rule.advance_time_by(1000);
+    rule.on_node_with_text("Child 2").assert_does_not_exist();
+    header().perform_click();
+    rule.advance_time_by(1000);
+    rule.on_node_with_text("Child 2").assert_is_on();
+}
+
 fn list_item_forms() {
     let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
     let l = log.clone();
@@ -835,6 +872,8 @@ fn main() {
         ("kotlin_helpers_list_item", kotlin_helpers_list_item),
         ("list_item_samples", list_item_samples),
         ("clickable_list_item_samples", clickable_list_item_samples),
+        // (WP4b: icons)
+        ("segmented_list_item_with_expansion_sample", segmented_list_item_with_expansion_sample),
         ("list_item_forms", list_item_forms),
         // (tabs and dialogs)
         ("tabs_as_compose_writes_them", tabs_as_compose_writes_them),

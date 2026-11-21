@@ -2,10 +2,9 @@
 //! interactions of another, each press (and the release or cancel that ends it) at its position less a delta
 //! worked out as it goes by — a navigation item's indicator ripple, its presses in the indicator's own place.
 //!
-//! Compose's is an `InteractionSource` (an interface: its `interactions` the mapped flow). KompozR's
-//! [`InteractionSource`] is foundation's concrete source of a shared flow, which a flow of one's own can't stand in
-//! for: this gives the mapped flow ([`interactions`](MappedInteractionSource::interactions)), which an indication
-//! taking it reads.
+//! Compose's is an `InteractionSource` (an interface: its `interactions` the mapped flow); here it is one by
+//! [`InteractionSource::from_flow`] ([`source`](MappedInteractionSource::source), or `.into()`), what an indication
+//! is given.
 
 use kompoz_coroutines::Flow;
 use kompoz_foundation::interaction::{Interaction, InteractionSource, PressInteraction};
@@ -17,9 +16,9 @@ use std::sync::Arc;
 
 /// The interactions of `underlying_interaction_source`, its presses moved by less `calculate_delta()` (Compose's
 /// internal `MappedInteractionSource`).
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct MappedInteractionSource {
-    interactions: Flow<Arc<dyn Interaction>>,
+    source: InteractionSource,
 }
 
 impl MappedInteractionSource {
@@ -54,11 +53,22 @@ impl MappedInteractionSource {
                 interaction
             }
         });
-        MappedInteractionSource { interactions }
+        MappedInteractionSource { source: InteractionSource::from_flow(interactions) }
     }
 
     /// The interactions, the presses mapped (Compose's `interactions`).
     pub(crate) fn interactions(&self) -> Flow<Arc<dyn Interaction>> {
-        self.interactions.clone()
+        self.source.interactions()
+    }
+
+    /// The source whose interactions these are (Compose's MappedInteractionSource is an `InteractionSource`).
+    pub(crate) fn source(&self) -> InteractionSource {
+        self.source.clone()
+    }
+}
+
+impl From<MappedInteractionSource> for InteractionSource {
+    fn from(source: MappedInteractionSource) -> InteractionSource {
+        source.source
     }
 }

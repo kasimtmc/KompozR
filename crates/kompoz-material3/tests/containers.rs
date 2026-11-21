@@ -13,7 +13,8 @@ use common::*;
 use kompoz_foundation::interaction::{DragInteraction, MutableInteractionSource, PressInteraction};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
-use kompoz_material_icons_core::Icons;
+// (the extended set's: the core icons and the rest, as Kotlin's one `Icons.Filled` with material-icons-extended)
+use kompoz_material_icons_extended::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas, has_content_description, has_role, has_text, is_selected};
@@ -1688,12 +1689,11 @@ fn ElevatedSuggestionChipSample() {
     ElevatedSuggestionChip(|| { /* Do something! */ }, label = || Text("Elevated Suggestion Chip"));
 }
 
-/// The chips' samples' Show All chips' icon: Compose's `Icons.Filled.Tune` is of the extended icons (WP9's), the core
-/// set's Settings in its place.
+/// The chips' samples' Show All chips' icon: Compose's `Icons.Filled.Tune` (the extended set's).
 fn tune_icon() -> Option<Rc<dyn Fn()>> {
     slot(|| {
         named_args!(VectorIcon(
-            Icons::Filled::Settings(),
+            Icons::Filled::Tune(),
             Some("Show all description".into()),
             modifier = Modifier.size(FilterChipDefaults::IconSize),
         ));
@@ -1725,10 +1725,8 @@ fn ChipGroupSingleLineSample(expanded_seen: MutableState<bool>) {
                                 DropdownMenuItem(
                                     text = move || Text(data.clone()),
                                     on_click = || {},
-                                    // (Compose's AutoMirrored ArrowRight is of the extended icons, WP9's: the core
-                                    // set's KeyboardArrowRight in its place)
                                     trailing_icon =
-                                        slot(|| VectorIcon(Icons::AutoMirrored::Filled::KeyboardArrowRight(), None)),
+                                        slot(|| VectorIcon(Icons::AutoMirrored::Filled::ArrowRight(), None)),
                                 );
                             }
                         },
@@ -1903,6 +1901,15 @@ fn chip_samples() {
     };
     let flow = bounds(&rule, "ChipGroupReflowSample");
     assert!(flow.height() < 60.0, "{flow:?}");
+    // (both groups' Show All chips lead with Tune, 18 dp)
+    let tune = Icons::Filled::Tune().id();
+    assert_eq!(rule.draw().vectors.iter().filter(|v| **v == tune).count(), 2);
+    let tunes = named_args!(
+        rule.on_all_nodes(has_content_description("Show all description", false, false), use_unmerged_tree = true)
+    )
+    .fetch_semantics_nodes();
+    assert_eq!(tunes.len(), 2);
+    assert!(tunes.iter().all(|n| near(n.bounds_in_root().width(), 18.0, 0.01)));
     rule.on_node_with_text("Show All chips").perform_click();
     rule.wait_for_idle();
     let flow = bounds(&rule, "ChipGroupReflowSample");

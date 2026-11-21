@@ -1,0 +1,29 @@
+[package]
+name = "kompoz-material-icons-extended"
+description = "KompozR's extended Material icons (androidx.compose.material:material-icons-extended 1.7.8): the rest of Material's icons, in Icons.Filled, Outlined, Rounded, Sharp, TwoTone and AutoMirrored, each built once when first asked for"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["filled", "outlined", "rounded", "sharp", "two-tone", "auto-mirrored"]
+# A theme's icons (Icons.Filled…); `auto-mirrored` the AutoMirrored ones of the themes chosen. Each is the core
+# set's feature of the same name too: a theme's module has the core set's icons beside the extended set's (as
+# Compose's extended icons are extension properties of core's Icons.Filled …).
+filled = ["kompoz-material-icons-core/filled"]
+outlined = ["kompoz-material-icons-core/outlined"]
+rounded = ["kompoz-material-icons-core/rounded"]
+sharp = ["kompoz-material-icons-core/sharp"]
+two-tone = ["kompoz-material-icons-core/two-tone"]
+auto-mirrored = ["kompoz-material-icons-core/auto-mirrored"]
+
+[dependencies]
+# (Compose's extended icons are built by core's materialIcon/materialPath: its `icons!`, `build_icon`)
+kompoz-material-icons-core = { path = "../kompoz-material-icons-core", default-features = false }
+
+[dev-dependencies]
+kompoz-graphics = { path = "../kompoz-graphics" }

@@ -763,65 +763,6 @@ pub trait KtList: KtIterable {
     fn filter_indexed(&self, mut predicate: impl FnMut(i32, Self::Item) -> bool) -> Vec<Self::Item> {
         self.kt_iter().enumerate().filter(|(i, v)| predicate(*i as i32, v.clone())).map(|(_, v)| v).collect()
     }
-    // (Compose's `androidx.compose.ui.util` list functions — `fastForEach` & co., index loops over a random-access
-    // list: what they give is the plain functions')
-    /// Kotlin: `fastForEach(action: (T) -> Unit)`
-    fn fast_for_each(&self, action: impl FnMut(Self::Item)) {
-        self.for_each(action);
-    }
-    /// Kotlin: `fastForEachIndexed(action: (Int, T) -> Unit)`
-    fn fast_for_each_indexed(&self, action: impl FnMut(i32, Self::Item)) {
-        self.for_each_indexed(action);
-    }
-    /// Kotlin: `fastForEachReversed(action: (T) -> Unit)`
-    fn fast_for_each_reversed(&self, action: impl FnMut(Self::Item)) {
-        self.kt_iter().collect::<Vec<_>>().into_iter().rev().for_each(action);
-    }
-    /// Kotlin: `fastMap(transform: (T) -> R): List<R>`
-    fn fast_map<R>(&self, transform: impl FnMut(Self::Item) -> R) -> Vec<R> {
-        self.map(transform)
-    }
-    /// Kotlin: `fastMapIndexed(transform: (Int, T) -> R): List<R>`
-    fn fast_map_indexed<R>(&self, transform: impl FnMut(i32, Self::Item) -> R) -> Vec<R> {
-        self.map_indexed(transform)
-    }
-    /// Kotlin: `fastMapNotNull(transform: (T) -> R?): List<R>`
-    fn fast_map_not_null<R>(&self, transform: impl FnMut(Self::Item) -> Option<R>) -> Vec<R> {
-        self.map_not_null(transform)
-    }
-    /// Kotlin: `fastFilter(predicate: (T) -> Boolean): List<T>`
-    fn fast_filter(&self, predicate: impl FnMut(Self::Item) -> bool) -> Vec<Self::Item> {
-        self.filter(predicate)
-    }
-    /// Kotlin: `fastAny(predicate: (T) -> Boolean): Boolean`
-    fn fast_any(&self, predicate: impl FnMut(Self::Item) -> bool) -> bool {
-        self.any_that(predicate)
-    }
-    /// Kotlin: `fastAll(predicate: (T) -> Boolean): Boolean`
-    fn fast_all(&self, predicate: impl FnMut(Self::Item) -> bool) -> bool {
-        self.all(predicate)
-    }
-    /// Kotlin: `fastFirstOrNull(predicate: (T) -> Boolean): T?`
-    fn fast_first_or_null(&self, predicate: impl FnMut(Self::Item) -> bool) -> Option<Self::Item> {
-        self.first_or_null_that(predicate)
-    }
-    /// Kotlin: `fastFirst(predicate: (T) -> Boolean): T`
-    #[track_caller]
-    fn fast_first(&self, predicate: impl FnMut(Self::Item) -> bool) -> Self::Item {
-        self.first_that(predicate)
-    }
-    /// Kotlin: `fastSumBy(selector: (T) -> Int): Int`
-    fn fast_sum_by(&self, mut selector: impl FnMut(Self::Item) -> i32) -> i32 {
-        self.kt_iter().fold(0, |sum, v| sum.wrapping_add(selector(v)))
-    }
-    /// Kotlin: `fastMaxBy(selector: (T) -> R): T?`
-    fn fast_max_by<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<Self::Item> {
-        self.max_by_or_null(selector)
-    }
-    /// Kotlin: `fastMinByOrNull(selector: (T) -> R): T?`
-    fn fast_min_by_or_null<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<Self::Item> {
-        self.min_by_or_null(selector)
-    }
 
     /// Kotlin: `withIndex(): Iterable<IndexedValue<T>>`
     fn with_index(&self) -> Vec<IndexedValue<Self::Item>> {
@@ -1229,6 +1170,148 @@ pub trait KtList: KtIterable {
         self.kt_iter().collect()
     }
 
+    // ---- Compose's list helpers (androidx.compose.ui.util's ListUtils.kt, ui-util 1.12.1) ----
+    // Kotlin code of Compose's (its samples among it) calls them on lists; they are Kotlin's own functions by index,
+    // to skip an iterator's allocation on the JVM, with Kotlin's results (`fastMaxBy` gives null for an empty list).
+    // Rust code iterates: they are here for the Kotlin syntax, beside the standard library's.
+
+    /// Kotlin: `fastForEach(action: (T) -> Unit)`
+    fn fast_for_each(&self, action: impl FnMut(Self::Item)) {
+        self.for_each(action);
+    }
+    /// Kotlin: `fastForEachReversed(action: (T) -> Unit)`
+    fn fast_for_each_reversed(&self, action: impl FnMut(Self::Item)) {
+        let all: Vec<_> = self.kt_iter().collect();
+        all.into_iter().rev().for_each(action);
+    }
+    /// Kotlin: `fastForEachIndexed(action: (Int, T) -> Unit)`
+    fn fast_for_each_indexed(&self, action: impl FnMut(i32, Self::Item)) {
+        self.for_each_indexed(action);
+    }
+    /// Kotlin: `fastAll(predicate: (T) -> Boolean): Boolean`
+    fn fast_all(&self, predicate: impl FnMut(Self::Item) -> bool) -> bool {
+        self.all(predicate)
+    }
+    /// Kotlin: `fastAny(predicate: (T) -> Boolean): Boolean`
+    fn fast_any(&self, predicate: impl FnMut(Self::Item) -> bool) -> bool {
+        self.any_that(predicate)
+    }
+    /// Kotlin: `fastFirstOrNull(predicate: (T) -> Boolean): T?`
+    fn fast_first_or_null(&self, predicate: impl FnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.first_or_null_that(predicate)
+    }
+    /// Kotlin: `fastSumBy(selector: (T) -> Int): Int`
+    fn fast_sum_by(&self, selector: impl FnMut(Self::Item) -> i32) -> i32 {
+        self.sum_of(selector)
+    }
+    /// Kotlin: `fastMap(transform: (T) -> R): List<R>`
+    fn fast_map<R>(&self, transform: impl FnMut(Self::Item) -> R) -> Vec<R> {
+        self.map(transform)
+    }
+    /// Kotlin: `fastMaxBy(selector: (T) -> R): T?` (the first of the greatest)
+    fn fast_max_by<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<Self::Item> {
+        self.max_by_or_null(selector)
+    }
+    /// Kotlin: `fastMapTo(destination: C, transform: (T) -> R): C` (the destination given back, its transforms added)
+    fn fast_map_to<'d, R, C: Extend<R>>(
+        &self,
+        destination: &'d mut C,
+        transform: impl FnMut(Self::Item) -> R,
+    ) -> &'d mut C {
+        destination.extend(self.kt_iter().map(transform));
+        destination
+    }
+    /// Kotlin: `fastLastOrNull(predicate: (T) -> Boolean): T?`
+    fn fast_last_or_null(&self, predicate: impl FnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.last_or_null_that(predicate)
+    }
+    /// Kotlin: `fastFilter(predicate: (T) -> Boolean): List<T>`
+    fn fast_filter(&self, predicate: impl FnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        self.filter(predicate)
+    }
+    /// Kotlin: `fastFilteredMap(predicate: (T) -> Boolean, transform: (T) -> R): List<R>`
+    fn fast_filtered_map<R>(
+        &self,
+        mut predicate: impl FnMut(Self::Item) -> bool,
+        mut transform: impl FnMut(Self::Item) -> R,
+    ) -> Vec<R> {
+        self.kt_iter().filter(|v| predicate(v.clone())).map(&mut transform).collect()
+    }
+    /// Kotlin: `fastFold(initial: R, operation: (acc: R, T) -> R): R`
+    fn fast_fold<R>(&self, initial: R, operation: impl FnMut(R, Self::Item) -> R) -> R {
+        self.fold(initial, operation)
+    }
+    /// Kotlin: `fastMapIndexed(transform: (index: Int, T) -> R): List<R>`
+    fn fast_map_indexed<R>(&self, transform: impl FnMut(i32, Self::Item) -> R) -> Vec<R> {
+        self.map_indexed(transform)
+    }
+    /// Kotlin: `fastMapIndexedNotNull(transform: (index: Int, T) -> R?): List<R>`
+    fn fast_map_indexed_not_null<R>(&self, mut transform: impl FnMut(i32, Self::Item) -> Option<R>) -> Vec<R> {
+        self.kt_iter().enumerate().filter_map(|(i, v)| transform(i as i32, v)).collect()
+    }
+    /// Kotlin: `fastMaxOfOrNull(selector: (T) -> R): R?`
+    fn fast_max_of_or_null<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<R> {
+        self.max_of_or_null(selector)
+    }
+    /// Kotlin: `fastMaxOfOrDefault(defaultValue: R, selector: (T) -> R): R`
+    fn fast_max_of_or_default<R: PartialOrd>(&self, default_value: R, selector: impl FnMut(Self::Item) -> R) -> R {
+        self.max_of_or_null(selector).unwrap_or(default_value)
+    }
+    /// Kotlin: `fastZipWithNext(transform: (T, T) -> R): List<R>`
+    fn fast_zip_with_next<R>(&self, mut transform: impl FnMut(Self::Item, Self::Item) -> R) -> Vec<R> {
+        let all: Vec<_> = self.kt_iter().collect();
+        all.windows(2).map(|pair| transform(pair[0].clone(), pair[1].clone())).collect()
+    }
+    /// Kotlin: `fastReduce(operation: (acc: S, T) -> S): S`
+    #[track_caller]
+    fn fast_reduce(&self, operation: impl FnMut(Self::Item, Self::Item) -> Self::Item) -> Self::Item {
+        self.reduce(operation)
+    }
+    /// Kotlin: `fastZip(other: List<R>, transform: (a: T, b: R) -> V): List<V>`
+    fn fast_zip<O: KtIterable + ?Sized, V>(
+        &self,
+        other: &O,
+        mut transform: impl FnMut(Self::Item, O::Item) -> V,
+    ) -> Vec<V> {
+        self.kt_iter().zip(other.kt_iter()).map(|(a, b)| transform(a, b)).collect()
+    }
+    /// Kotlin: `fastMapNotNull(transform: (T) -> R?): List<R>`
+    fn fast_map_not_null<R>(&self, transform: impl FnMut(Self::Item) -> Option<R>) -> Vec<R> {
+        self.map_not_null(transform)
+    }
+    /// Kotlin: `fastJoinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((T) -> CharSequence)? = null): String`
+    fn fast_join_to_string(
+        &self,
+        separator: impl AsRef<str>,
+        prefix: impl AsRef<str>,
+        postfix: impl AsRef<str>,
+        limit: i32,
+        truncated: impl AsRef<str>,
+        transform: Option<&dyn Fn(Self::Item) -> String>,
+    ) -> String
+    where
+        Self::Item: KtToString,
+    {
+        self.join_to_string(separator, prefix, postfix, limit, truncated, transform)
+    }
+    /// Kotlin: `fastDistinctBy(selector: (T) -> K): List<T>`
+    fn fast_distinct_by<K: PartialEq>(&self, selector: impl FnMut(Self::Item) -> K) -> Vec<Self::Item> {
+        self.distinct_by(selector)
+    }
+    /// Kotlin: `fastMinByOrNull(selector: (T) -> R): T?` (the first of the least)
+    fn fast_min_by_or_null<R: PartialOrd>(&self, selector: impl FnMut(Self::Item) -> R) -> Option<Self::Item> {
+        self.min_by_or_null(selector)
+    }
+    /// Kotlin: `fastFlatMap(transform: (T) -> Iterable<R>): List<R>`
+    fn fast_flat_map<I: IntoIterator>(&self, transform: impl FnMut(Self::Item) -> I) -> Vec<I::Item> {
+        self.flat_map(transform)
+    }
+    /// Kotlin: `fastFirst(predicate: (T) -> Boolean): T`
+    #[track_caller]
+    fn fast_first(&self, predicate: impl FnMut(Self::Item) -> bool) -> Self::Item {
+        self.first_that(predicate)
+    }
+
     // ---- The suspending twins (see the module's doc): Kotlin's inline functions, their lambdas async closures ----
 
     #[doc(hidden)]
@@ -1309,14 +1392,6 @@ pub trait KtList: KtIterable {
         for (i, v) in self.kt_iter().enumerate() {
             action(i as i32, v).await;
         }
-    }
-    #[doc(hidden)]
-    async fn fast_for_each_async(&self, action: impl AsyncFnMut(Self::Item)) {
-        self.for_each_async(action).await;
-    }
-    #[doc(hidden)]
-    async fn fast_for_each_indexed_async(&self, action: impl AsyncFnMut(i32, Self::Item)) {
-        self.for_each_indexed_async(action).await;
     }
     #[doc(hidden)]
     async fn on_each_async(&self, mut action: impl AsyncFnMut(Self::Item)) -> Vec<Self::Item> {
@@ -1641,6 +1716,162 @@ pub trait KtList: KtIterable {
         let all: Vec<_> = self.kt_iter().collect();
         if all.is_empty() { default_value().await } else { all }
     }
+
+    // (Compose's list helpers' twins: ui-util's inline functions, `fastJoinToString` not inline)
+    #[doc(hidden)]
+    async fn fast_for_each_async(&self, action: impl AsyncFnMut(Self::Item)) {
+        self.for_each_async(action).await
+    }
+    #[doc(hidden)]
+    async fn fast_for_each_reversed_async(&self, mut action: impl AsyncFnMut(Self::Item)) {
+        let all: Vec<_> = self.kt_iter().collect();
+        for v in all.into_iter().rev() {
+            action(v).await;
+        }
+    }
+    #[doc(hidden)]
+    async fn fast_for_each_indexed_async(&self, action: impl AsyncFnMut(i32, Self::Item)) {
+        self.for_each_indexed_async(action).await
+    }
+    #[doc(hidden)]
+    async fn fast_all_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> bool {
+        self.all_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn fast_any_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> bool {
+        self.any_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn fast_first_or_null_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.first_or_null_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn fast_sum_by_async(&self, selector: impl AsyncFnMut(Self::Item) -> i32) -> i32 {
+        self.sum_of_async(selector).await
+    }
+    #[doc(hidden)]
+    async fn fast_map_async<R>(&self, transform: impl AsyncFnMut(Self::Item) -> R) -> Vec<R> {
+        self.map_async(transform).await
+    }
+    #[doc(hidden)]
+    async fn fast_max_by_async<R: PartialOrd>(&self, selector: impl AsyncFnMut(Self::Item) -> R) -> Option<Self::Item> {
+        self.max_by_or_null_async(selector).await
+    }
+    #[doc(hidden)]
+    async fn fast_map_to_async<'d, R, C: Extend<R>>(
+        &self,
+        destination: &'d mut C,
+        mut transform: impl AsyncFnMut(Self::Item) -> R,
+    ) -> &'d mut C {
+        for v in self.kt_iter() {
+            destination.extend(std::iter::once(transform(v).await));
+        }
+        destination
+    }
+    #[doc(hidden)]
+    async fn fast_last_or_null_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Option<Self::Item> {
+        self.last_or_null_that_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn fast_filter_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Vec<Self::Item> {
+        self.filter_async(predicate).await
+    }
+    #[doc(hidden)]
+    async fn fast_filtered_map_async<R>(
+        &self,
+        mut predicate: impl AsyncFnMut(Self::Item) -> bool,
+        mut transform: impl AsyncFnMut(Self::Item) -> R,
+    ) -> Vec<R> {
+        let mut out = Vec::new();
+        for v in self.kt_iter() {
+            if predicate(v.clone()).await {
+                out.push(transform(v).await);
+            }
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn fast_fold_async<R>(&self, initial: R, operation: impl AsyncFnMut(R, Self::Item) -> R) -> R {
+        self.fold_async(initial, operation).await
+    }
+    #[doc(hidden)]
+    async fn fast_map_indexed_async<R>(&self, transform: impl AsyncFnMut(i32, Self::Item) -> R) -> Vec<R> {
+        self.map_indexed_async(transform).await
+    }
+    #[doc(hidden)]
+    async fn fast_map_indexed_not_null_async<R>(
+        &self,
+        mut transform: impl AsyncFnMut(i32, Self::Item) -> Option<R>,
+    ) -> Vec<R> {
+        let mut out = Vec::new();
+        for (i, v) in self.kt_iter().enumerate() {
+            out.extend(transform(i as i32, v).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn fast_max_of_or_null_async<R: PartialOrd>(&self, selector: impl AsyncFnMut(Self::Item) -> R) -> Option<R> {
+        self.max_of_or_null_async(selector).await
+    }
+    #[doc(hidden)]
+    async fn fast_max_of_or_default_async<R: PartialOrd>(
+        &self,
+        default_value: R,
+        selector: impl AsyncFnMut(Self::Item) -> R,
+    ) -> R {
+        self.max_of_or_null_async(selector).await.unwrap_or(default_value)
+    }
+    #[doc(hidden)]
+    async fn fast_zip_with_next_async<R>(&self, mut transform: impl AsyncFnMut(Self::Item, Self::Item) -> R) -> Vec<R> {
+        let all: Vec<_> = self.kt_iter().collect();
+        let mut out = Vec::new();
+        for pair in all.windows(2) {
+            out.push(transform(pair[0].clone(), pair[1].clone()).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn fast_reduce_async(&self, operation: impl AsyncFnMut(Self::Item, Self::Item) -> Self::Item) -> Self::Item {
+        self.reduce_async(operation).await
+    }
+    #[doc(hidden)]
+    async fn fast_zip_async<O: KtIterable + ?Sized, V>(
+        &self,
+        other: &O,
+        mut transform: impl AsyncFnMut(Self::Item, O::Item) -> V,
+    ) -> Vec<V> {
+        let mut out = Vec::new();
+        for (a, b) in self.kt_iter().zip(other.kt_iter()) {
+            out.push(transform(a, b).await);
+        }
+        out
+    }
+    #[doc(hidden)]
+    async fn fast_map_not_null_async<R>(&self, transform: impl AsyncFnMut(Self::Item) -> Option<R>) -> Vec<R> {
+        self.map_not_null_async(transform).await
+    }
+    #[doc(hidden)]
+    async fn fast_distinct_by_async<K: PartialEq>(
+        &self,
+        selector: impl AsyncFnMut(Self::Item) -> K,
+    ) -> Vec<Self::Item> {
+        self.distinct_by_async(selector).await
+    }
+    #[doc(hidden)]
+    async fn fast_min_by_or_null_async<R: PartialOrd>(
+        &self,
+        selector: impl AsyncFnMut(Self::Item) -> R,
+    ) -> Option<Self::Item> {
+        self.min_by_or_null_async(selector).await
+    }
+    #[doc(hidden)]
+    async fn fast_flat_map_async<I: IntoIterator>(&self, transform: impl AsyncFnMut(Self::Item) -> I) -> Vec<I::Item> {
+        self.flat_map_async(transform).await
+    }
+    #[doc(hidden)]
+    async fn fast_first_async(&self, predicate: impl AsyncFnMut(Self::Item) -> bool) -> Self::Item {
+        self.first_that_async(predicate).await
+    }
 }
 
 impl<C: KtIterable + ?Sized> KtList for C {}
@@ -1657,6 +1888,11 @@ pub trait KtListOfNullable<T>: KtIterable<Item = Option<T>> {
     /// Kotlin: `filterNotNull(): List<T>`
     fn filter_not_null(&self) -> Vec<T> {
         self.kt_iter().flatten().collect()
+    }
+    /// Compose's list helper (androidx.compose.ui.util's ListUtils.kt; see [`KtList`]'s).
+    /// Kotlin: `fastFilterNotNull(): List<T>`
+    fn fast_filter_not_null(&self) -> Vec<T> {
+        self.filter_not_null()
     }
 }
 impl<T, C: KtIterable<Item = Option<T>> + ?Sized> KtListOfNullable<T> for C {}

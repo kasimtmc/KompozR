@@ -92,16 +92,40 @@ impl IntoInteraction for Arc<dyn Interaction> {
 
 /// A stream of [`Interaction`]s to read (Compose's InteractionSource): a component's interactions, as its
 /// indication and its look follow them. Clones are the same source.
+///
+/// Compose's is an interface whose `interactions` any flow can be: a [`MutableInteractionSource`]'s shared flow, or
+/// a flow of one's own ([`from_flow`](InteractionSource::from_flow), what Kotlin's `object : InteractionSource {
+/// override val interactions = … }` makes — Material's navigation items give their indicator ripple a source whose
+/// presses are moved).
 #[derive(Clone, PartialEq)]
 pub struct InteractionSource {
-    flow: SharedFlow<Arc<dyn Interaction>>,
+    interactions: Interactions,
+}
+
+/// Where a source's interactions come from. Equal when the same: a shared flow by its identity, a flow of one's own
+/// by the flow's (Compose's implementations of the interface are compared by identity).
+#[derive(Clone, PartialEq)]
+enum Interactions {
+    Shared(SharedFlow<Arc<dyn Interaction>>),
+    Own(Flow<Arc<dyn Interaction>>),
 }
 
 impl InteractionSource {
+    /// A source whose interactions are `interactions` (Kotlin's `object : InteractionSource { override val
+    /// interactions = … }`): an indication or a `collect_is_…_as_state` given it collects that flow. Clones and
+    /// sources made of the same flow are equal.
+    pub fn from_flow(interactions: Flow<Arc<dyn Interaction>>) -> InteractionSource {
+        InteractionSource { interactions: Interactions::Own(interactions) }
+    }
+
     /// The interactions emitted from now on (Compose's `interactions`): what is emitted while nothing collects it
-    /// is not seen.
+    /// is not seen (a [`MutableInteractionSource`]'s; a source [`from_flow`](InteractionSource::from_flow) gives its
+    /// flow).
     pub fn interactions(&self) -> Flow<Arc<dyn Interaction>> {
-        self.flow.as_flow()
+        match &self.interactions {
+            Interactions::Shared(flow) => flow.as_flow(),
+            Interactions::Own(flow) => flow.clone(),
+        }
     }
 }
 
@@ -127,7 +151,7 @@ impl MutableInteractionSource {
     /// Kotlin: `MutableInteractionSource()`
     pub fn new() -> MutableInteractionSource {
         let flow = MutableSharedFlow::new(0);
-        let source = InteractionSource { flow: flow.as_shared_flow() };
+        let source = InteractionSource { interactions: Interactions::Shared(flow.as_shared_flow()) };
         MutableInteractionSource { flow, source }
     }
 
@@ -169,6 +193,12 @@ impl PartialEq for MutableInteractionSource {
 impl fmt::Debug for MutableInteractionSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "MutableInteractionSource")
+    }
+}
+
+impl From<&InteractionSource> for InteractionSource {
+    fn from(source: &InteractionSource) -> InteractionSource {
+        source.clone()
     }
 }
 

@@ -48,6 +48,9 @@ impl FocusRequester {
     /// What a custom enter or exit that moved the focus itself comes to.
     pub(crate) const Redirect: FocusRequester = FocusRequester { kind: Kind::Redirect };
 
+    /// A requester of its own, attached to nothing yet (Compose's `FocusRequester()`).
+    ///
+    /// Kotlin: `FocusRequester()`
     pub fn new() -> FocusRequester {
         FocusRequester { kind: Kind::Nodes(Rc::new(RequesterNodes::default())) }
     }

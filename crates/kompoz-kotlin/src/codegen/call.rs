@@ -2115,13 +2115,16 @@ fn receiver_of_self(c: &mut Callee, ty: &Ty, lent: &str) {
 /// plain one).
 pub(crate) fn layout_scope_of(c: &Callee) -> Option<&'static str> {
     let item = c.item?;
-    if item.krate != "kompoz_foundation" || !item.owner.is_empty() {
+    if !item.owner.is_empty() {
         return None;
     }
-    match item.rust {
-        "Row" | "FlowRow" => Some("RowScope"),
-        "Column" | "FlowColumn" => Some("ColumnScope"),
-        "Box" | "BoxWithConstraints" => Some("BoxScope"),
+    match (item.krate, item.rust) {
+        ("kompoz_foundation", "Row" | "FlowRow") => Some("RowScope"),
+        ("kompoz_foundation", "Column" | "FlowColumn") => Some("ColumnScope"),
+        ("kompoz_foundation", "Box" | "BoxWithConstraints") => Some("BoxScope"),
+        // (WP4b: bar) Material's components whose `content` is a layout scope's lambda in Kotlin (their Rust closure
+        // takes none): a NavigationBar's `RowScope` (`RowScope.NavigationBarItem` inside).
+        ("kompoz_material3", "NavigationBar") => Some("RowScope"),
         _ => None,
     }
 }

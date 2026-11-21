@@ -41,6 +41,7 @@ impl Modifier {
 
     /// Padding the app applied itself taken as consumed for what is inside (Compose's
     /// `consumeWindowInsets(paddingValues)`): added to what the layouts around consumed.
+    /// Kotlin: `consumeWindowInsets(paddingValues: PaddingValues)`
     fn consume_window_insets_padding_values(self, padding_values: PaddingValues) -> Modifier {
         self.then_element(PaddingValuesConsumingElement { padding_values })
     }

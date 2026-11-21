@@ -29,6 +29,8 @@ pub use kompoz_foundation as foundation;
 pub use kompoz_gpu as gpu;
 pub use kompoz_graphics as graphics;
 pub use kompoz_material_icons_core as material_icons_core;
+// (WP4b: icons)
+pub use kompoz_material_icons_extended as material_icons_extended;
 pub use kompoz_material_ripple as material_ripple;
 pub use kompoz_material3 as material3;
 pub use kompoz_platform as platform;
@@ -44,29 +46,35 @@ pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
 pub use kompoz_runtime::{kompozable, kompozable_block, kompozable_lambda, named, named_args};
 
 /// Material's icons (Compose's `Icons`), a module a theme, a function an icon: `Icons::Filled::Add()`, Kotlin's
-/// `Icons.Filled.Add`. The core icons' (kompoz-material-icons-core); the extended set's join each theme's module here
-/// as it comes (`pub use kompoz_material_icons_extended::Icons::Filled::*;` beside core's).
+/// `Icons.Filled.Add`. The core icons' (kompoz-material-icons-core) and the extended set's
+/// (kompoz-material-icons-extended), each theme's module both sets' functions (as Compose's extended icons are
+/// extension properties of core's `Icons.Filled` …: `Icons.Filled.Add` and `Icons.Filled.Tune` alike).
 #[allow(non_snake_case)]
 pub mod Icons {
     /// Compose's `Icons.Filled`.
     pub mod Filled {
         pub use kompoz_material_icons_core::Icons::Filled::*;
+        pub use kompoz_material_icons_extended::Icons::Filled::*;
     }
     /// Compose's `Icons.Outlined`.
     pub mod Outlined {
         pub use kompoz_material_icons_core::Icons::Outlined::*;
+        pub use kompoz_material_icons_extended::Icons::Outlined::*;
     }
     /// Compose's `Icons.Rounded`.
     pub mod Rounded {
         pub use kompoz_material_icons_core::Icons::Rounded::*;
+        pub use kompoz_material_icons_extended::Icons::Rounded::*;
     }
     /// Compose's `Icons.Sharp`.
     pub mod Sharp {
         pub use kompoz_material_icons_core::Icons::Sharp::*;
+        pub use kompoz_material_icons_extended::Icons::Sharp::*;
     }
     /// Compose's `Icons.TwoTone`.
     pub mod TwoTone {
         pub use kompoz_material_icons_core::Icons::TwoTone::*;
+        pub use kompoz_material_icons_extended::Icons::TwoTone::*;
     }
     /// Compose's `Icons.Default`: the filled ones.
     pub use Filled as Default;
@@ -76,22 +84,27 @@ pub mod Icons {
         /// Compose's `Icons.AutoMirrored.Filled`.
         pub mod Filled {
             pub use kompoz_material_icons_core::Icons::AutoMirrored::Filled::*;
+            pub use kompoz_material_icons_extended::Icons::AutoMirrored::Filled::*;
         }
         /// Compose's `Icons.AutoMirrored.Outlined`.
         pub mod Outlined {
             pub use kompoz_material_icons_core::Icons::AutoMirrored::Outlined::*;
+            pub use kompoz_material_icons_extended::Icons::AutoMirrored::Outlined::*;
         }
         /// Compose's `Icons.AutoMirrored.Rounded`.
         pub mod Rounded {
             pub use kompoz_material_icons_core::Icons::AutoMirrored::Rounded::*;
+            pub use kompoz_material_icons_extended::Icons::AutoMirrored::Rounded::*;
         }
         /// Compose's `Icons.AutoMirrored.Sharp`.
         pub mod Sharp {
             pub use kompoz_material_icons_core::Icons::AutoMirrored::Sharp::*;
+            pub use kompoz_material_icons_extended::Icons::AutoMirrored::Sharp::*;
         }
         /// Compose's `Icons.AutoMirrored.TwoTone`.
         pub mod TwoTone {
             pub use kompoz_material_icons_core::Icons::AutoMirrored::TwoTone::*;
+            pub use kompoz_material_icons_extended::Icons::AutoMirrored::TwoTone::*;
         }
         /// Compose's `Icons.AutoMirrored.Default`: the filled ones.
         pub use Filled as Default;

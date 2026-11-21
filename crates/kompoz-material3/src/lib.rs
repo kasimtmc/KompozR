@@ -44,6 +44,16 @@ mod menu_defaults;
 mod menu_desktop;
 mod motion_scheme;
 mod outlined_text_field;
+// (WP4b: bar)
+mod navigation_bar;
+mod navigation_item;
+mod short_navigation_bar;
+// (WP4b: rail)
+mod navigation_rail;
+mod wide_navigation_rail;
+mod wide_navigation_rail_state;
+// (WP4b: drawer)
+mod navigation_drawer;
 mod precision_pointer;
 // (WP5: pull to refresh — Compose's package androidx.compose.material3.pulltorefresh)
 pub mod pulltorefresh;
@@ -155,6 +165,44 @@ pub use menu_defaults::MenuDefaults;
 pub use menu_desktop::{DropdownMenu, DropdownMenuItem, DropdownMenuPopup};
 pub use motion_scheme::{AnyTypeAnimationSpec, AnyTypeSpec, MotionScheme, MotionSchemeSpecs};
 pub use outlined_text_field::{OutlinedTextField, StringOutlinedTextField, ValueOutlinedTextField};
+// (WP4b: bar — NavigationBar, NavigationItem, ShortNavigationBar)
+pub use navigation_bar::{
+    DefaultNavigationBarOverride, LocalNavigationBarOverride, NavigationBar, NavigationBarDefaults, NavigationBarItem,
+    NavigationBarItemColors, NavigationBarItemDefaults, NavigationBarOverride, NavigationBarOverrideScope,
+};
+pub use navigation_item::{NavigationItemColors, NavigationItemIconPosition};
+pub use short_navigation_bar::{
+    DefaultShortNavigationBarOverride, LocalShortNavigationBarOverride, ShortNavigationBar,
+    ShortNavigationBarArrangement, ShortNavigationBarDefaults, ShortNavigationBarItem, ShortNavigationBarItemDefaults,
+    ShortNavigationBarOverride, ShortNavigationBarOverrideScope,
+};
+// (WP4b: rail — NavigationRail)
+pub use navigation_rail::{
+    DefaultNavigationRailOverride, LocalNavigationRailOverride, NavigationRail, NavigationRailDefaults,
+    NavigationRailItem, NavigationRailItemColors, NavigationRailItemDefaults, NavigationRailOverride,
+    NavigationRailOverrideScope,
+};
+// (WP4b: rail — WideNavigationRailState)
+pub use wide_navigation_rail_state::{
+    WideNavigationRailState, WideNavigationRailValue, remember_wide_navigation_rail_state,
+};
+// (WP4b: rail — WideNavigationRail, ModalWideNavigationRail)
+#[allow(deprecated)]
+pub use wide_navigation_rail::ModalWideNavigationRailDefaults;
+pub use wide_navigation_rail::{
+    DefaultModalWideNavigationRailOverride, DefaultWideNavigationRailOverride, LocalModalWideNavigationRailOverride,
+    LocalWideNavigationRailOverride, ModalWideNavigationRail, ModalWideNavigationRailOverride,
+    ModalWideNavigationRailOverrideScope, ModalWideNavigationRailProperties, WideNavigationRail,
+    WideNavigationRailColors, WideNavigationRailDefaults, WideNavigationRailItem, WideNavigationRailItemDefaults,
+    WideNavigationRailOverride, WideNavigationRailOverrideScope,
+};
+// (WP4b: drawer — NavigationDrawer)
+pub use navigation_drawer::{
+    DismissibleDrawerSheet, DismissibleDrawerSheetWithDrawerState, DismissibleNavigationDrawer, DrawerDefaults,
+    DrawerState, DrawerValue, ModalDrawerSheet, ModalDrawerSheetWithDrawerState, ModalNavigationDrawer,
+    NavigationDrawerItem, NavigationDrawerItemColors, NavigationDrawerItemDefaults, PermanentDrawerSheet,
+    PermanentNavigationDrawer, remember_drawer_state,
+};
 pub use precision_pointer::should_use_precision_pointer_component_sizing;
 pub use ripples::{LocalRippleConfiguration, RippleConfiguration, RippleDefaults, ripple, ripple_color_producer};
 pub use scrim::{Scrim, ScrimDefaults};

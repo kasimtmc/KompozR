@@ -163,8 +163,40 @@ fn surface_samples() {
     assert!(rule.draw().rect_colors.contains(&light_color_scheme().surface_variant));
 }
 
+// ---- (WP4b: icons) the extended icons through the generator's `Icons.<theme>.<name>` rule --------------------------
+
+kompoz! {
+    @Composable
+    fun ExtendedIcons() {
+        Column {
+            Icon(Icons.Outlined.StarBorder, contentDescription = "yıldız")
+            Icon(Icons.AutoMirrored.Filled.MenuOpen, contentDescription = "menü")
+            Icon(imageVector = Icons.Default.Bookmarks, contentDescription = "imler")
+            Icon(Icons.Filled.Add, contentDescription = "ekle")
+            Icon(Icons.Rounded._10k, contentDescription = null)
+        }
+    }
+}
+
+fn extended_icons_come_through_the_icons_rule() {
+    // (Kotlin's one `Icons.Filled` names core's icons and the extended set's alike: the umbrella's merged modules)
+    let rule = KompozTestRule::new(ExtendedIcons);
+    rule.on_node_with_content_description("yıldız").assert_exists();
+    rule.on_node_with_content_description("menü").assert_exists();
+    let ids = [
+        Icons::Outlined::StarBorder().id(),
+        Icons::AutoMirrored::Filled::MenuOpen().id(),
+        Icons::Filled::Bookmarks().id(),
+        Icons::Filled::Add().id(),
+        Icons::Rounded::_10k().id(),
+    ];
+    assert_eq!(rule.draw().vectors, ids);
+}
+
 fn main() {
     common::run(&[
+        // (WP4b: icons)
+        ("extended_icons_come_through_the_icons_rule", extended_icons_come_through_the_icons_rule),
         ("theming_as_compose_writes_it", theming_as_compose_writes_it),
         ("material_theme_sample", material_theme_sample),
         ("material_expressive_theme_sample", material_expressive_theme_sample),

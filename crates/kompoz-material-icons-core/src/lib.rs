@@ -14,10 +14,15 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 use kompoz_graphics::{
-    Color, Dp, ImageVector, ImageVectorBuilder, PathBuilder, PathData, PathFillType, SolidColor, StrokeCap, StrokeJoin,
-    VectorPath, add_path_nodes,
+    Color, Dp, ImageVectorBuilder, PathBuilder, PathData, PathFillType, SolidColor, StrokeCap, StrokeJoin, VectorPath,
+    add_path_nodes,
 };
 use kompoz_runtime::named;
+use std::sync::OnceLock;
+
+#[doc(hidden)]
+// (named here for the icon functions `icons!` makes, in this crate and the extended set's)
+pub use kompoz_graphics::ImageVector;
 
 /// The size of Material's icons, dp, and of their viewport (Compose's `MaterialIconDimension`).
 pub(crate) const MaterialIconDimension: f32 = 24.0;
@@ -102,22 +107,30 @@ pub fn build_icon(name: &str, line: &str) -> ImageVector {
     kompoz_runtime::named_args!(material_icon(name, auto_mirror = auto_mirror, block = block))
 }
 
-/// The icons of a theme: a function an icon, building it from its line of the theme's data once.
+/// An icon built from its data line once, into `cell`, and shared after (Compose's cached `_add`): one function for
+/// all of them, so the 11 000 icons of the extended set don't each make their own `get_or_init`.
+#[doc(hidden)]
+pub fn icon_once(cell: &'static OnceLock<ImageVector>, name: &str, line: &str) -> ImageVector {
+    cell.get_or_init(|| build_icon(name, line)).clone()
+}
+
+/// The icons of a theme: a function an icon, building it from its line of the theme's data once. Exported (hidden)
+/// for kompoz-material-icons-extended, whose themes are made the same way.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! icons {
     ($theme:literal, $data:literal; $( $(#[$attr:meta])* $name:ident $start:literal $end:literal ),* $(,)?) => {
         const DATA: &str = include_str!($data);
         $(
             #[doc = concat!("Compose's `Icons.", $theme, ".", stringify!($name), "`.")]
             $(#[$attr])*
-            pub fn $name() -> ::kompoz_graphics::ImageVector {
-                static ICON: ::std::sync::OnceLock<::kompoz_graphics::ImageVector> = ::std::sync::OnceLock::new();
-                ICON.get_or_init(|| $crate::build_icon(concat!($theme, ".", stringify!($name)), &DATA[$start..$end]))
-                    .clone()
+            pub fn $name() -> $crate::ImageVector {
+                static ICON: ::std::sync::OnceLock<$crate::ImageVector> = ::std::sync::OnceLock::new();
+                $crate::icon_once(&ICON, concat!($theme, ".", stringify!($name)), &DATA[$start..$end])
             }
         )*
     };
 }
-pub(crate) use icons;
 
 /// Material's icons (Compose's `object Icons`): a module a theme, a function an icon.
 #[path = "icons.rs"]

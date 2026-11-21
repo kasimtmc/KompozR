@@ -10,10 +10,12 @@
 mod common;
 
 use common::*;
+use kompoz_animation::{ColumnAnimatedVisibility, expand_vertically, shrink_vertically};
 use kompoz_foundation::interaction::{DragInteraction, FocusInteraction, HoverInteraction, MutableInteractionSource};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
-use kompoz_material_icons_core::Icons;
+// (the extended set's: the core icons and the rest, as Kotlin's one `Icons.Default` with material-icons-extended)
+use kompoz_material_icons_extended::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas, has_role, has_text};
@@ -39,6 +41,7 @@ tests!(
     interactive_list_items_follow_hover_focus_and_drag,
     list_item_samples,
     clickable_list_item_samples,
+    segmented_list_item_with_expansion_sample,
 );
 
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
@@ -938,4 +941,113 @@ fn clickable_list_item_samples() {
     // below it but not into what is above, as Compose's)
     rule.on_all_nodes(kompoz_test::has_click_action().and(has_text("Item", true, false))).assert_count_equals(6);
     rule.on_all_nodes(kompoz_test::has_click_action()).assert_count_equals(9);
+}
+
+#[kompozable]
+fn SegmentedListItemWithExpansionSample() {
+    let expanded = remember_saveable(|| mutable_state_of(false));
+    let num_children = 3;
+    let item_count = 1 + if expanded.get() { num_children } else { 0 };
+    let children_checked = remember_saveable(|| mutable_state_list_of(vec![false; num_children as usize]));
+
+    let colors =
+        named_args!(ListItemDefaults.colors(container_color = MaterialTheme::color_scheme().surface_container));
+
+    Column(
+        modifier = Modifier.fill_max_size(),
+        vertical_arrangement = Arrangement::spaced_by(ListItemDefaults::SegmentedGap),
+        content = || {
+            Spacer(Modifier.height(100.dp()));
+            let (e, e2, e3) = (expanded.clone(), expanded.clone(), expanded.clone());
+            SegmentedListItem(
+                move || e.set(!e.get()),
+                ListItemDefaults.segmented_shapes(0, item_count),
+                modifier = Modifier
+                    .semantics(move |c| c.set_state_description(if e2.get() { "Expanded" } else { "Collapsed" })),
+                colors = colors,
+                leading_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                trailing_content = slot(move || {
+                    VectorIcon(
+                        if e3.get() { Icons::Default::ExpandLess() } else { Icons::Default::ExpandMore() },
+                        None,
+                    );
+                }),
+                content = || Text("Click to expand/collapse"),
+            );
+            let children_checked = children_checked.clone();
+            ColumnAnimatedVisibility(
+                expanded.get(),
+                enter = named_args!(expand_vertically(MaterialTheme::motion_scheme().fast_spatial_spec())),
+                exit = named_args!(shrink_vertically(MaterialTheme::motion_scheme().fast_spatial_spec())),
+                content = move |_| {
+                    let children_checked = children_checked.clone();
+                    Column(
+                        vertical_arrangement = Arrangement::spaced_by(ListItemDefaults::SegmentedGap),
+                        content = move || {
+                            for idx in 0..num_children {
+                                let checks = children_checked.clone();
+                                // (Compose's sample's trailingContent, `Checkbox(checked = childrenChecked[idx],
+                                // onCheckedChange = null)`, comes with WP2's Checkbox: paste-ready in the WP4b notes'
+                                // icons-pending.rs)
+                                ToggleableSegmentedListItem(
+                                    children_checked.get(idx as usize).unwrap(),
+                                    move |it| checks.set(idx as usize, it),
+                                    ListItemDefaults.segmented_shapes(idx + 1, item_count),
+                                    colors = colors,
+                                    leading_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                                    content = move || Text(format!("Child {}", idx + 1)),
+                                );
+                            }
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn segmented_list_item_with_expansion_sample() {
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(|| MaterialTheme(content = || SegmentedListItemWithExpansionSample())),
+        IntSize::new(400, 900),
+    );
+    let header = || rule.on_node_with_text("Click to expand/collapse");
+    let state = || header().fetch_semantics_node().config().get(SemanticsProperties::StateDescription);
+    let drawn = |icon: ImageVector| rule.draw().vectors.contains(&icon.id());
+    // Collapsed: the header alone, under the 100 dp spacer and the 2 dp gap, ExpandMore after it, on the surface
+    // container.
+    assert_eq!(state().as_deref(), Some("Collapsed"));
+    rule.on_node_with_text("Child 1").assert_does_not_exist();
+    let top = header().get_unclipped_bounds_in_root().top;
+    assert!(near(top, 102.0, 0.5), "{top}");
+    assert!(drawn(Icons::Default::ExpandMore()) && !drawn(Icons::Default::ExpandLess()));
+    let canvas = rule.draw();
+    let container = light_color_scheme().surface_container;
+    assert!(canvas.rect_colors.contains(&container) || canvas.path_colors.contains(&container));
+    // Expanded: three children 2 dp apart under it, sliding in; ExpandLess.
+    header().perform_click();
+    rule.advance_time_by(1000);
+    assert_eq!(state().as_deref(), Some("Expanded"));
+    assert!(drawn(Icons::Default::ExpandLess()) && !drawn(Icons::Default::ExpandMore()));
+    let items: Vec<Rect> = ["Click to expand/collapse", "Child 1", "Child 2", "Child 3"]
+        .iter()
+        .map(|t| rule.on_node_with_text(t).get_unclipped_bounds_in_root())
+        .collect();
+    for pair in items.windows(2) {
+        assert!(near(pair[1].top, pair[0].bottom + 2.0, 0.5), "{items:?}");
+    }
+    // (each child checks on its own click; the saved list keeps it)
+    rule.on_node_with_text("Child 2").assert_is_off();
+    rule.on_node_with_text("Child 2").perform_click();
+    rule.on_node_with_text("Child 2").assert_is_on();
+    rule.on_node_with_text("Child 1").assert_is_off();
+    // Collapsed again: the children gone once they have shrunk.
+    header().perform_click();
+    rule.advance_time_by(1000);
+    rule.on_node_with_text("Child 2").assert_does_not_exist();
+    assert_eq!(state().as_deref(), Some("Collapsed"));
+    // (expanded again: the second child still checked)
+    header().perform_click();
+    rule.advance_time_by(1000);
+    rule.on_node_with_text("Child 2").assert_is_on();
 }

@@ -636,3 +636,14 @@ impl<T: Saveable + PartialEq + Clone + Send + Sync + 'static> Saveable for Mutab
         T::restore(saved).map(crate::mutable_state_of)
     }
 }
+
+/// A state list of saveable values is saveable (Compose's `rememberSaveable { mutableStateListOf(…) }`: its
+/// SnapshotStateList is Parcelable on Android, SnapshotStateList.android.kt), its elements written out.
+impl<T: Saveable + Clone + Send + Sync + 'static> Saveable for crate::SnapshotStateList<T> {
+    fn save(&self) -> SavedValue {
+        self.peek_with(|items| SavedValue::list(items.iter().map(T::save)))
+    }
+    fn restore(saved: &SavedValue) -> Option<Self> {
+        Vec::<T>::restore(saved).map(crate::SnapshotStateList::new)
+    }
+}

@@ -1,16 +1,17 @@
 //! `cargo xtask material-icons [--check]`: the material icons (Compose's `androidx.compose.material.icons`, each a
 //! Kotlin file building an `ImageVector` with `materialIcon { materialPath { moveTo(…) … } }`) converted to data
-//! for their crate: `crates/kompoz-material-icons-core/` (material-icons-core 1.7.8's Filled, Outlined, Rounded,
-//! Sharp, TwoTone and AutoMirrored themes). Each theme is a data file (`data/<theme>.txt`: an icon a line, its name
+//! for their crates: `crates/kompoz-material-icons-core/` (material-icons-core 1.7.8's Filled, Outlined, Rounded,
+//! Sharp, TwoTone and AutoMirrored themes) and `crates/kompoz-material-icons-extended/` (material-icons-extended
+//! 1.7.8's, the same themes: the rest of Material's icons). Each theme is a data file (`data/<theme>.txt`: an icon a line, its name
 //! and its paths — fill alpha, stroke alpha, fill type and SVG path data, the builder's calls written as the path
 //! commands they add) and a Rust file (`src/generated/<theme>.rs`) listing the icons with where their line is,
 //! which the crate's `icons!` makes functions of (`Icons::Filled::Add()`), each building its vector once, when first
 //! asked for.
 //!
-//! The extended icons (material-icons-extended, WP9) are the same jar layout: `convert_jar` takes a jar and an output
-//! crate.
+//! Both jars are the same layout: `convert_jar` takes a jar and an output crate; one command converts (or checks)
+//! both.
 //!
-//! It reads the sources jars from Gradle's cache; `--check` converts and compares where the jar is, and says it
+//! It reads the sources jars from Gradle's cache; `--check` converts and compares where a jar is, and says it
 //! skipped where it isn't (CI).
 
 use crate::jar::Jar;
@@ -36,16 +37,26 @@ const THEMES: [(&str, &str, &str); 10] = [
     ("automirrored/twotone/", "AutoMirrored.TwoTone", "auto_mirrored_two_tone"),
 ];
 
+/// The icon libraries: their artifact in Gradle's cache, their name and their crate.
+const LIBRARIES: [(&str, &str, &str); 2] = [
+    ("material-icons-core-android", "material-icons-core", "crates/kompoz-material-icons-core"),
+    ("material-icons-extended-android", "material-icons-extended", "crates/kompoz-material-icons-extended"),
+];
+
 pub fn run(root: &Path, check: bool) -> Result<(), String> {
-    let artifact = "material-icons-core-android";
-    let Some(jar) = Jar::find(GROUP, artifact, VERSION, "-sources.jar") else {
-        if check {
-            println!("material-icons: skipped (no {GROUP}:{artifact}:{VERSION} sources jar in Gradle's cache)");
-            return Ok(());
-        }
-        return Err(format!("no {GROUP}:{artifact}:{VERSION} sources jar in Gradle's cache"));
-    };
-    convert_jar(root, &Jar::open(&jar)?, "crates/kompoz-material-icons-core", "material-icons-core", check)
+    for (artifact, library, out) in LIBRARIES {
+        let Some(jar) = Jar::find(GROUP, artifact, VERSION, "-sources.jar") else {
+            if check {
+                println!(
+                    "material-icons: {library} skipped (no {GROUP}:{artifact}:{VERSION} sources jar in Gradle's cache)"
+                );
+                continue;
+            }
+            return Err(format!("no {GROUP}:{artifact}:{VERSION} sources jar in Gradle's cache"));
+        };
+        convert_jar(root, &Jar::open(&jar)?, out, library, check)?;
+    }
+    Ok(())
 }
 
 /// Converts the icons of `jar` into the crate at `out` (its `data/` and `src/generated/`).
@@ -143,10 +154,10 @@ fn parse_icon(text: &str, theme: &str) -> Result<Icon, String> {
                 "fillAlpha" => fill_alpha = number(v)?,
                 "strokeAlpha" => stroke_alpha = number(v)?,
                 "pathFillType" => {
-                    fill_type = match v {
-                        "PathFillType.EvenOdd" => "E",
-                        "PathFillType.NonZero" => "N",
-                        other => return Err(format!("a fill type {other}")),
+                    fill_type = match fill_type_name(text, v) {
+                        Some("EvenOdd") => "E",
+                        Some("NonZero") => "N",
+                        _ => return Err(format!("a fill type {v}")),
                     }
                 }
                 other => return Err(format!("materialPath's argument {other}")),
@@ -164,6 +175,16 @@ fn parse_icon(text: &str, theme: &str) -> Result<Icon, String> {
         return Err("no paths".into());
     }
     Ok(Icon { name, line, deprecated })
+}
+
+/// The `PathFillType` a `pathFillType = …` names: `PathFillType.EvenOdd`, or `EvenOdd` where the file imports
+/// `androidx.compose.ui.graphics.PathFillType.Companion.EvenOdd` (the extended icons' form).
+fn fill_type_name<'a>(text: &str, value: &'a str) -> Option<&'a str> {
+    if let Some(name) = value.strip_prefix("PathFillType.") {
+        return Some(name);
+    }
+    let import = format!("import androidx.compose.ui.graphics.PathFillType.Companion.{value}\n");
+    text.contains(&import).then_some(value)
 }
 
 /// A path builder's calls as SVG path data.

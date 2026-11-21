@@ -330,8 +330,29 @@ fn chip_group_single_line_sample() {
     rule.on_all_nodes_with_text("Chip 0").assert_count_equals(1);
 }
 
+// (WP4b: icons) ChipGroupReflowSample: its Icons.Filled.Tune the extended set's; its chips through ui-util's
+// `fastForEachIndexed`.
+fn chip_group_reflow_sample() {
+    // (not in `themed`'s scrolling column: the sample scrolls vertically once selected)
+    let rule = KompozTestRule::new(kompozable_lambda!(|| MaterialTheme(content = || ChipGroupReflowSample())));
+    let tune = Icons::Filled::Tune().id();
+    assert_eq!(rule.draw().vectors.iter().filter(|v| **v == tune).count(), 1);
+    // (one line, scrolled sideways: the chips past the edge are there, at its height)
+    let first = rule.on_node_with_text("Blue 0").get_unclipped_bounds_in_root();
+    let last = rule.on_node_with_text("Transparent 9").get_unclipped_bounds_in_root();
+    assert!((first.top - last.top).abs() < 0.5, "{first:?} {last:?}");
+    // (Show All selected: every chip, the lines below each other)
+    rule.on_node_with_text("Show All").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Show All").assert_is_selected();
+    let last = rule.on_node_with_text("Transparent 9").get_unclipped_bounds_in_root();
+    assert!(last.top > first.bottom, "{first:?} {last:?}");
+}
+
 fn main() {
     common::run(&[
+        // (WP4b: icons)
+        ("chip_group_reflow_sample", chip_group_reflow_sample),
         ("required_arguments_by_name", required_arguments_by_name),
         ("containers_as_compose_writes_them", containers_as_compose_writes_them),
         ("button_samples", button_samples),

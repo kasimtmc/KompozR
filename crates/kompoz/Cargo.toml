@@ -23,6 +23,8 @@ kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-kotlin-macro = { path = "../kompoz-kotlin-macro" }
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
+# (WP4b: icons)
+kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
 kompoz-material-ripple = { path = "../kompoz-material-ripple" }
 kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-platform = { path = "../kompoz-platform" }
@@ -187,6 +189,12 @@ harness = false
 # samples of those components from .kt files).
 [[test]]
 name = "kotlin_lists_sheets"
+harness = false
+
+# Material's navigation bars, rails and drawers in Kotlin's syntax (the C++ Kompoz's navigation tests written as a
+# Compose user would; material3's NavigationBar, NavigationRail, Drawer and badge samples from .kt files).
+[[test]]
+name = "kotlin_navigation"
 harness = false
 
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file

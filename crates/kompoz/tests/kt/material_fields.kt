@@ -3,9 +3,8 @@
 // Phone; its AddTextDialog is in kotlin_lists_sheets.rs, beside its Dialog), then the API the samples leave out (the
 // label above, the indicator line, the field's shape and colors). What waits for other packages: the samples'
 // TooltipBox around an IconButton (WP7: the IconButton as it is), the Checkbox showing the placeholder (WP2: a
-// clickable Text in its place), the extended icons Visibility/VisibilityOff (WP9: the core set's Lock/Done in their
-// places). TextFieldWithErrorState's local function `validate` is a lambda here (Kotlin's local functions come with
-// stage 14).
+// clickable Text in its place). TextFieldWithErrorState's local function `validate` is a lambda here (Kotlin's local
+// functions come with stage 14).
 package com.example.materialfields
 
 import androidx.compose.foundation.*
@@ -191,7 +190,7 @@ fun PasswordTextField() {
             val description = if (passwordHidden) "Show password" else "Hide password"
             IconButton(onClick = { passwordHidden = !passwordHidden }) {
                 val visibilityIcon =
-                    if (passwordHidden) Icons.Filled.Lock else Icons.Filled.Done
+                    if (passwordHidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
                 Icon(imageVector = visibilityIcon, contentDescription = description)
             }
         },

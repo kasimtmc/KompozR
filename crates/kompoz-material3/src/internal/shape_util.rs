@@ -67,3 +67,26 @@ impl Morph {
         path
     }
 }
+
+// (WP4b: rail — the navigation items clip their indicator ripples by a shared shape; surface.rs, icon_button.rs and
+// list_item.rs still keep copies of their own, to be moved here)
+/// A shared shape as a shape (what `Modifier.clip` takes by value), equal as the shape is.
+#[derive(Debug)]
+pub(crate) struct ClipShape(pub(crate) std::sync::Arc<dyn kompoz_graphics::Shape>);
+
+impl PartialEq for ClipShape {
+    fn eq(&self, other: &Self) -> bool {
+        *self.0 == *other.0
+    }
+}
+
+impl kompoz_graphics::Shape for ClipShape {
+    fn create_outline(
+        &self,
+        size: kompoz_graphics::Size,
+        layout_direction: kompoz_graphics::LayoutDirection,
+        density: &kompoz_graphics::Density,
+    ) -> kompoz_graphics::Outline {
+        self.0.create_outline(size, layout_direction, density)
+    }
+}

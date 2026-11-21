@@ -1,7 +1,7 @@
 // Material's buttons and containers as Compose's samples write them (material3 1.5's ButtonSamples,
 // FloatingActionButtonSamples, IconButtonSamples, CardSamples, ChipSamples, BadgeSamples). The samples composing in a
-// TooltipBox (WP7), a Scaffold (WP4a) or a NavigationBar (WP4b) come with those packages; ChipGroupReflowSample with
-// icons-extended (its Icons.Filled.Tune: WP9). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
+// TooltipBox (WP7) or a Scaffold (WP4a) come with those packages; NavigationBarItemWithBadge is in navigation_bar.kt
+// (WP4b). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
 
 @Composable
 fun ButtonSample() {
@@ -490,8 +490,7 @@ fun ElevatedSuggestionChipSample() {
     ElevatedSuggestionChip(onClick = { /* Do something! */ }, label = { Text("Suggestion Chip") })
 }
 
-// (its Icons.Filled.Tune and Icons.AutoMirrored.Filled.ArrowRight are of the extended icons, WP9's: the core set's
-// Settings and KeyboardArrowRight in their places, as kompoz-material3's tests/containers.rs has them)
+// (its Icons.Filled.Tune and Icons.AutoMirrored.Filled.ArrowRight the extended set's)
 @Composable
 fun ChipGroupSingleLineSample() {
     var expanded by remember { mutableStateOf(false) }
@@ -504,7 +503,7 @@ fun ChipGroupSingleLineSample() {
                 label = { Text("Show All") },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Filled.Settings,
+                        imageVector = Icons.Filled.Tune,
                         contentDescription = "Localized Description",
                         modifier = Modifier.size(FilterChipDefaults.IconSize),
                     )
@@ -522,7 +521,7 @@ fun ChipGroupSingleLineSample() {
                         text = { Text(chipData[index]) },
                         onClick = {},
                         trailingIcon = {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                            Icon(Icons.AutoMirrored.Filled.ArrowRight, contentDescription = null)
                         },
                     )
                 }
@@ -533,6 +532,80 @@ fun ChipGroupSingleLineSample() {
                     onClick = { /* do something*/ },
                     label = { Text(chipData[index]) },
                     trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
+                )
+            }
+        }
+    }
+}
+
+// (WP4b: icons) Its Icons.Filled.Tune the extended set's.
+@OptIn(ExperimentalLayoutApi::class)
+@Preview
+@Composable
+fun ChipGroupReflowSample() {
+    var selected by remember { mutableStateOf(false) }
+    val colorNames =
+        listOf(
+            "Blue",
+            "Yellow",
+            "Red",
+            "Orange",
+            "Black",
+            "Green",
+            "White",
+            "Magenta",
+            "Gray",
+            "Transparent",
+        )
+    Column {
+        FlowRow(
+            modifier =
+                Modifier.fillMaxWidth(1f)
+                    .wrapContentHeight(align = Alignment.Top)
+                    .then(
+                        if (selected) {
+                            Modifier.verticalScroll(rememberScrollState())
+                        } else {
+                            Modifier.horizontalScroll(rememberScrollState())
+                        }
+                    ),
+            horizontalArrangement = Arrangement.Start,
+            maxLines = if (!selected) 1 else Int.MAX_VALUE,
+        ) {
+            /*
+             * When chip lists exceed the available horizontal screen space, one option is to
+             * provide a leading chip that expands the list into a vertical scrolling list. This
+             * ensures all options are accessible while maintaining the position of the content
+             * below the chip list.
+             */
+            FilterChip(
+                selected = selected,
+                modifier =
+                    Modifier.padding(horizontal = 4.dp)
+                        .align(alignment = Alignment.CenterVertically),
+                onClick = { selected = !selected },
+                label = { Text("Show All") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Tune,
+                        contentDescription = "Localized Description",
+                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                    )
+                },
+            )
+            Box(
+                Modifier.height(FilterChipDefaults.Height)
+                    .align(alignment = Alignment.CenterVertically)
+            ) {
+                VerticalDivider()
+            }
+            colorNames.fastForEachIndexed { index, element ->
+                AssistChip(
+                    modifier =
+                        Modifier.padding(horizontal = 4.dp)
+                            .align(alignment = Alignment.CenterVertically),
+                    onClick = { /* do something*/ },
+                    label = { Text("$element $index") },
                 )
             }
         }

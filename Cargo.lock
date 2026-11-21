@@ -358,6 +358,7 @@ dependencies = [
  "kompoz-graphics",
  "kompoz-kotlin-macro",
  "kompoz-material-icons-core",
+ "kompoz-material-icons-extended",
  "kompoz-material-ripple",
  "kompoz-material3",
  "kompoz-platform",
@@ -473,6 +474,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompoz-material-icons-extended"
+version = "0.1.0"
+dependencies = [
+ "kompoz-graphics",
+ "kompoz-material-icons-core",
+]
+
+[[package]]
 name = "kompoz-material-ripple"
 version = "0.1.0"
 dependencies = [
@@ -495,6 +504,7 @@ dependencies = [
  "kompoz-foundation",
  "kompoz-graphics",
  "kompoz-material-icons-core",
+ "kompoz-material-icons-extended",
  "kompoz-material-ripple",
  "kompoz-runtime",
  "kompoz-test",

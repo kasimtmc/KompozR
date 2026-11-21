@@ -1415,6 +1415,42 @@ fn values_registered_by_key_are_saved_and_given_back_once() {
     assert!(quietly(|| host.register_provider("  ", || None)).is_err());
 }
 
+/// A saved state list (Compose's `rememberSaveable { mutableStateListOf(…) }`, as the M15 sample
+/// SegmentedListItemWithExpansionSample keeps its children's checks).
+#[kompozable]
+fn SavedChecks(handles: Rc<RefCell<Vec<SnapshotStateList<bool>>>>) {
+    let checks = remember_saveable(|| mutable_state_list_of([false, false, false]));
+    handles.borrow_mut().push(checks.clone());
+    Text(format!("checks={:?}", checks.to_vec()));
+}
+
+fn a_state_list_is_saved_and_given_back() {
+    let host = |saved: Option<&SavedValue>, handles: Rc<RefCell<Vec<SnapshotStateList<bool>>>>| {
+        let registry = SaveableStateRegistry::new(saved);
+        let r = registry.clone();
+        (
+            registry,
+            Rule::new(kompozable_lambda!(move || ProvideSaveableStateRegistry(&r, || SavedChecks(handles.clone())))),
+        )
+    };
+    let handles = Rc::new(RefCell::new(Vec::new()));
+    let saved = {
+        let (registry, rule) = host(None, handles.clone());
+        handles.borrow()[0].set(1, true);
+        rule.wait_for_idle();
+        assert!(rule.has("checks=[false, true, false]"), "{:?}", rule.names());
+        registry.save().encode()
+    };
+    let restored = SavedValue::decode(&saved).unwrap();
+    let handles = Rc::new(RefCell::new(Vec::new()));
+    let (_, rule) = host(Some(&restored), handles.clone());
+    assert!(rule.has("checks=[false, true, false]"), "{:?}", rule.names());
+    // (a list of its own again: a change to it recomposes its readers)
+    handles.borrow()[0].set(2, true);
+    rule.wait_for_idle();
+    assert!(rule.has("checks=[false, true, true]"), "{:?}", rule.names());
+}
+
 tests!(
     nodes_are_retained_across_recompositions,
     key_keeps_state_with_its_item,
@@ -1457,4 +1493,5 @@ tests!(
     saved_state_outlives_the_host,
     remember_saveable_starts_again_when_its_inputs_change,
     remember_saveable_with_a_saver_of_its_own,
+    a_state_list_is_saved_and_given_back,
 );

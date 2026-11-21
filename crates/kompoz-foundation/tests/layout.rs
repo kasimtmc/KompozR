@@ -854,6 +854,27 @@ fn padding_values_as_compose() {
         format!("PaddingValues(start={0:?}, top={0:?}, end={0:?}, bottom={0:?})", 1.dp())
     );
     assert!(std::panic::catch_unwind(|| PaddingValues::all((-1).dp())).is_err());
+    // One's own kind (Compose's PaddingValues interface implemented), told apart as Kotlin's `padding is Kind`.
+    struct Growing(std::cell::Cell<f32>);
+    impl CustomPaddingValues for Growing {
+        fn calculate_left_padding(&self, _: LayoutDirection) -> Dp {
+            Dp(self.0.get())
+        }
+        fn calculate_top_padding(&self) -> Dp {
+            Dp(self.0.get())
+        }
+        fn calculate_right_padding(&self, _: LayoutDirection) -> Dp {
+            Dp(0.0)
+        }
+        fn calculate_bottom_padding(&self) -> Dp {
+            Dp(0.0)
+        }
+    }
+    let custom = PaddingValues::custom(Growing(std::cell::Cell::new(1.0)));
+    custom.custom_as::<Growing>().expect("a Growing").0.set(3.0);
+    assert_eq!((custom.calculate_left_padding(Ltr), custom.calculate_top_padding()), (3.dp(), 3.dp()));
+    assert!(PaddingValues::all(1.dp()).custom_as::<Growing>().is_none());
+    assert_eq!(custom, custom.clone()); // (the same one)
     // Named in a body.
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         Box(

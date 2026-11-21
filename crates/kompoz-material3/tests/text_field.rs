@@ -15,7 +15,7 @@ mod common;
 use common::*;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
-use kompoz_material_icons_core::Icons;
+use kompoz_material_icons_extended::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas};
@@ -704,8 +704,7 @@ fn text_fields_take_composable_labels_and_text_forms() {
 
 /// C++ `a_tap_on_a_text_fields_icon_focuses_it`: the leading icon is part of the field — a tap there focuses it,
 /// the caret at the nearer end (the start) —; a clickable trailing icon keeps its click and the field its caret,
-/// a long press on it selects nothing either. (The C++ IconButton's Visibility icon is the extended set's, WP9's:
-/// Favorite stands in.)
+/// a long press on it selects nothing either.
 fn a_tap_on_a_text_fields_icon_focuses_it() {
     let value = mutable_state_of(String::new());
     let eyes = Rc::new(Cell::new(0));
@@ -731,7 +730,7 @@ fn a_tap_on_a_text_fields_icon_focuses_it() {
                                 let e = e.clone();
                                 IconButton(
                                     move || e.set(e.get() + 1),
-                                    content = || VectorIcon(Icons::Filled::Favorite(), Some("göz".to_string())),
+                                    content = || VectorIcon(Icons::Filled::Visibility(), Some("göz".to_string())),
                                 );
                             })),
                         );

@@ -1331,6 +1331,57 @@ fn indication_shows_a_sources_presses_on_another_node() {
     assert!(hovered.len() == 1 && hovered[0].0 == icon && near(hovered[0].1, 0.1));
 }
 
+fn a_source_of_a_flow_of_its_own_is_what_an_indication_and_a_state_follow() {
+    // Compose's InteractionSource is an interface: any flow can be a source's interactions (Material's navigation
+    // items give their indicator ripple one whose presses are moved). Here a source of only the area's presses: the
+    // icon's indication shows the press, not the mouse over the area; the pressed state follows it too.
+    let source = MutableInteractionSource::new();
+    let presses_only = InteractionSource::from_flow(source.interactions().filter(|interaction| {
+        interaction.is::<PressInteraction::Press>()
+            || interaction.is::<PressInteraction::Release>()
+            || interaction.is::<PressInteraction::Cancel>()
+    }));
+    assert!(presses_only == presses_only.clone() && presses_only != *source);
+    let pressed_log = new_log();
+    let (s, p, log) = (source.clone(), presses_only.clone(), pressed_log.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (s, p, log) = (s.clone(), p.clone(), log.clone());
+        Box(
+            modifier = Modifier
+                .size_wh(200.dp(), 100.dp())
+                .clickable_indication(Some(s.clone()), None, on_click = || {})
+                .test_tag("alan"),
+            content_alignment = Alignment::Center,
+            content = move || {
+                let debug: Rc<dyn Indication> = Rc::new(DefaultDebugIndication);
+                push(&log, format!("pressed {}", p.collect_is_pressed_as_state().get()));
+                Box(modifier = Modifier.size(48.dp()).indication(&p, Some(debug)).test_tag("simge"));
+            },
+        );
+    }));
+    let (area, icon) = (
+        rule.on_node_with_tag("alan").get_bounds_in_root(),
+        rule.on_node_with_tag_unmerged("simge").get_bounds_in_root(),
+    );
+    let drawn = || {
+        let canvas = rule.draw();
+        canvas.rects.iter().zip(&canvas.rect_colors).map(|(r, c)| (*r, c.alpha())).collect::<Vec<_>>()
+    };
+    assert_eq!(taken(&pressed_log), ["pressed false"]);
+    move_to(&rule, area.center());
+    rule.wait_for_idle();
+    assert!(drawn().is_empty(), "the hover isn't in the flow");
+    down(&rule, at(area.left + 10.0, area.top + 10.0));
+    rule.wait_for_idle();
+    let pressed = drawn();
+    assert!(pressed.len() == 1 && pressed[0].0 == icon && near(pressed[0].1, 0.3), "{pressed:?}");
+    assert_eq!(taken(&pressed_log), ["pressed true"]);
+    up(&rule, at(area.left + 10.0, area.top + 10.0));
+    rule.wait_for_idle();
+    assert!(drawn().is_empty());
+    assert_eq!(taken(&pressed_log), ["pressed false"]);
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Focus and keys
 
@@ -2043,6 +2094,7 @@ tests!(
     a_clickable_can_leave_out_the_indication,
     custom_indication_hears_its_component_and_draws_around_it,
     indication_shows_a_sources_presses_on_another_node,
+    a_source_of_a_flow_of_its_own_is_what_an_indication_and_a_state_follow,
     tab_reaches_buttons_and_enter_or_space_clicks_them,
     a_clickable_gets_the_keys_a_focused_child_leaves_and_cancels_presses_when_unfocused,
     clickables_tell_accessibility_their_click_role_and_state,

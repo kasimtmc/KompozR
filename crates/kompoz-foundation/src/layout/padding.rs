@@ -9,6 +9,7 @@ use kompoz_ui::{
     Constraints, Measurable, MeasureResult, MeasureScope, Modifier, ModifierNode, ModifierNodeElement,
     node_capabilities,
 };
+use std::any::Any;
 use std::fmt;
 use std::ops::{Add, Sub};
 use std::rc::Rc;
@@ -110,8 +111,9 @@ enum Repr {
 }
 
 /// Padding values of one's own (Compose's `PaddingValues` interface implemented): its sides, worked out when
-/// asked.
-pub trait CustomPaddingValues {
+/// asked. (`Any`: which kind a padding is can be asked, Kotlin's `padding is MyPaddingValues` — see
+/// [`PaddingValues::custom_as`].)
+pub trait CustomPaddingValues: Any {
     fn calculate_left_padding(&self, layout_direction: LayoutDirection) -> Dp;
     fn calculate_top_padding(&self) -> Dp;
     fn calculate_right_padding(&self, layout_direction: LayoutDirection) -> Dp;
@@ -167,6 +169,15 @@ impl PaddingValues {
     /// Padding values `custom` works out.
     pub fn custom(custom: impl CustomPaddingValues + 'static) -> PaddingValues {
         PaddingValues::of(Repr::Custom(Rc::new(custom)))
+    }
+
+    /// The custom padding values of kind `T` this is, if it is one (Kotlin's `padding is T`, the padding then seen
+    /// as a `T`): None for any other padding.
+    pub fn custom_as<T: CustomPaddingValues>(&self) -> Option<&T> {
+        match &self.repr {
+            Repr::Custom(c) => (&**c as &dyn Any).downcast_ref::<T>(),
+            _ => None,
+        }
     }
 
     /// `insets` as padding in `density` (Compose's InsetsPaddingValues: `WindowInsets.as_padding_values`).

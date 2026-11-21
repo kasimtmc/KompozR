@@ -853,6 +853,103 @@ fn suspending_twins_do_what_their_shims_do() {
 }
 
 #[test]
+fn composes_list_helpers_as_ui_util_has_them() {
+    // (androidx.compose.ui.util's ListUtils.kt: Kotlin's own functions by index, with Compose's results)
+    let xs = vec![3, 1, 4, 1, 5];
+    let mut seen = Vec::new();
+    xs.fast_for_each(|x| seen.push(x));
+    xs.fast_for_each_reversed(|x| seen.push(x));
+    xs.fast_for_each_indexed(|i, x| seen.push(i * 10 + x));
+    assert_eq!(seen, [3, 1, 4, 1, 5, 5, 1, 4, 1, 3, 3, 11, 24, 31, 45]);
+    assert!(xs.fast_all(|x| x > 0) && !xs.fast_any(|x| x > 5));
+    assert_eq!((xs.fast_first_or_null(|x| x > 3), xs.fast_last_or_null(|x| x < 2)), (Some(4), Some(1)));
+    assert_eq!(xs.fast_sum_by(|x| x * 2), 28);
+    assert_eq!(xs.fast_map(|x| x + 1), [4, 2, 5, 2, 6]);
+    // (fastMaxBy and fastMinByOrNull: the first of the greatest, the first of the least; null for none)
+    let pairs = vec![(1, 'a'), (3, 'b'), (3, 'c'), (1, 'd')];
+    assert_eq!(pairs.fast_max_by(|p| p.0), Some((3, 'b')));
+    assert_eq!(pairs.fast_min_by_or_null(|p| p.0), Some((1, 'a')));
+    assert_eq!(Vec::<i32>::new().fast_max_by(|x| x), None);
+    let mut out = vec![0];
+    assert_eq!(*xs.fast_map_to(&mut out, |x| x * x), [0, 9, 1, 16, 1, 25]);
+    assert_eq!(xs.fast_filter(|x| x != 1), [3, 4, 5]);
+    assert_eq!(xs.fast_filtered_map(|x| x > 2, |x| x * 100), [300, 400, 500]);
+    assert_eq!(xs.fast_fold(0, |a, x| a * 10 + x), 31415);
+    assert_eq!(xs.fast_map_indexed(|i, x| i + x), [3, 2, 6, 4, 9]);
+    assert_eq!(xs.fast_map_indexed_not_null(|i, x| (i % 2 == 0).then_some(x)), [3, 4, 5]);
+    assert_eq!((xs.fast_max_of_or_null(|x| -x), Vec::<i32>::new().fast_max_of_or_null(|x| x)), (Some(-1), None));
+    assert_eq!((xs.fast_max_of_or_default(0, |x| x), Vec::<i32>::new().fast_max_of_or_default(7, |x| x)), (5, 7));
+    assert_eq!(xs.fast_zip_with_next(|a, b| b - a), [-2, 3, -3, 4]);
+    assert!(vec![1].fast_zip_with_next(|a, b| a + b).is_empty());
+    assert_eq!(xs.fast_reduce(|a, x| a.max(x)), 5);
+    assert_eq!(xs.fast_zip(&["a", "b"], |x, s| format!("{s}{x}")), ["a3", "b1"]);
+    assert_eq!(xs.fast_map_not_null(|x| (x > 3).then_some(x)), [4, 5]);
+    assert_eq!(xs.fast_join_to_string(", ", "[", "]", 3, "...", None), "[3, 1, 4, ...]");
+    assert_eq!(xs.fast_distinct_by(|x| x % 3), [3, 1, 5]);
+    assert_eq!(xs.fast_flat_map(|x| vec![x; (x % 2) as usize]), [3, 1, 1, 5]);
+    assert_eq!(vec![Some(1), None, Some(2)].fast_filter_not_null(), [1, 2]);
+    assert_eq!(xs.fast_first(|x| x > 3), 4);
+    assert_eq!(
+        thrown(|| {
+            xs.fast_first(|x| x > 9);
+        }),
+        "NoSuchElementException: Collection contains no element matching the predicate."
+    );
+    assert_eq!(
+        thrown(|| {
+            Vec::<i32>::new().fast_reduce(|a, x| a + x);
+        }),
+        "UnsupportedOperationException: Empty collection can't be reduced."
+    );
+    // (their suspending twins: the same results, each lambda suspending)
+    block_on(async {
+        let mut seen = Vec::new();
+        xs.fast_for_each_indexed_async(async |i, x| {
+            suspend().await;
+            seen.push(i * 10 + x);
+        })
+        .await;
+        xs.fast_for_each_reversed_async(async |x| {
+            suspend().await;
+            seen.push(x);
+        })
+        .await;
+        assert_eq!(seen, [3, 11, 24, 31, 45, 5, 1, 4, 1, 3]);
+        let doubled = xs
+            .fast_map_async(async |x| {
+                suspend().await;
+                x * 2
+            })
+            .await;
+        assert_eq!(doubled, [6, 2, 8, 2, 10]);
+        let picked = xs
+            .fast_filtered_map_async(
+                async |x| {
+                    suspend().await;
+                    x > 2
+                },
+                async |x| x * 100,
+            )
+            .await;
+        assert_eq!(picked, [300, 400, 500]);
+        let steps = xs
+            .fast_zip_with_next_async(async |a, b| {
+                suspend().await;
+                b - a
+            })
+            .await;
+        assert_eq!(steps, [-2, 3, -3, 4]);
+        assert_eq!(pairs.fast_max_by_async(async |p| p.0).await, Some((3, 'b')));
+        assert_eq!(xs.fast_max_of_or_default_async(0, async |x| x).await, 5);
+        let mut out = Vec::new();
+        assert_eq!(*xs.fast_map_to_async(&mut out, async |x| x + 1).await, [4, 2, 5, 2, 6]);
+        assert_eq!(xs.fast_map_indexed_not_null_async(async |i, x| (i == 2).then_some(x)).await, [4]);
+        assert_eq!(xs.fast_zip_async(&[10, 20], async |x, y| x + y).await, [13, 21]);
+        assert_eq!(xs.fast_first_async(async |x| x > 3).await, 4);
+    });
+}
+
+#[test]
 fn random_of_a_seed_and_shuffle() {
     // The same seed, the same numbers; `nextInt(until)` within its range (a power of two by its upper bits, else by
     // rejection); an empty range thrown as Kotlin throws it; a shuffle a permutation, the same for the same seed.
