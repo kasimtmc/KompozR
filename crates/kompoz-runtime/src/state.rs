@@ -199,6 +199,10 @@ impl<T: Clone + 'static> State<T> {
     pub fn from_source(source: impl StateSource<T>) -> State<T> {
         State { source: std::rc::Rc::new(source) }
     }
+    /// A state reading a source already shared.
+    pub(crate) fn from_shared(source: std::rc::Rc<dyn StateSource<T>>) -> State<T> {
+        State { source }
+    }
     pub fn get(&self) -> T {
         self.with(T::clone)
     }

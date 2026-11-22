@@ -257,8 +257,14 @@ impl Gen<'_, '_> {
                     let ty = r.value.clone();
                     // (`self`, or a receiver lent by reference — `this@LookaheadScope` of an `&Rc<dyn LookaheadScope>`
                     // —: a clone where a value is taken, as Kotlin's reference is)
-                    let kind =
-                        if (r.rust == "self" || r.by_ref) && !ty.is_copy() { OutKind::Local } else { OutKind::Plain };
+                    // (one lent mutably: a `&mut` held, reborrowed where one is taken)
+                    let kind = if r.by_mut {
+                        OutKind::RefMut
+                    } else if (r.rust == "self" || r.by_ref) && !ty.is_copy() {
+                        OutKind::Local
+                    } else {
+                        OutKind::Plain
+                    };
                     Out { ts: quote!(#i), ty, kind }
                 }
                 None => {
@@ -871,6 +877,14 @@ impl Gen<'_, '_> {
                 Out::plain(if op == BinaryOp::In { ts } else { quote_spanned!(span=> !#ts) }, Ty::Bool)
             }
             BinaryOp::Elvis => self.elvis(lhs, rhs, loc),
+            // (a `Float` or `Double` `a..b`: Kotlin's `ClosedFloatingPointRange`, no progression — Rust's
+            // `RangeInclusive`, what the API takes)
+            BinaryOp::RangeTo if self.peek_ty(lhs).is_float() || self.peek_ty(rhs).is_float() => {
+                let (a, b) = self.numeric_operands(lhs, rhs);
+                let ty = Ty::ClosedRange(Box::new(if a.ty.is_float() { a.ty.clone() } else { b.ty.clone() }));
+                let (a, b) = (a.ts, b.ts);
+                Out::plain(quote_spanned!(span=> ::core::ops::RangeInclusive::new(#a, #b)), ty)
+            }
             BinaryOp::RangeTo | BinaryOp::RangeUntil => {
                 let (a, b) = self.numeric_operands(lhs, rhs);
                 let ty = Ty::Range(Box::new(a.ty.clone()));
@@ -1151,12 +1165,18 @@ impl Gen<'_, '_> {
                     let a = self.peek_ty(lhs).non_null();
                     if a == Ty::Unknown { self.peek_ty(rhs) } else { a }
                 }
+                BinaryOp::RangeTo if self.peek_ty(lhs).is_float() || self.peek_ty(rhs).is_float() => {
+                    let a = self.peek_ty(lhs);
+                    Ty::ClosedRange(Box::new(if a.is_float() { a } else { self.peek_ty(rhs) }))
+                }
                 BinaryOp::RangeTo | BinaryOp::RangeUntil => Ty::Range(Box::new(self.peek_ty(lhs))),
                 _ => {
                     let (a, b) = (self.peek_ty(lhs), self.peek_ty(rhs));
                     if *op == BinaryOp::Add && (a.is_string() || b.is_string()) {
                         Ty::String
-                    } else if a == Ty::Unknown || (b.is_float() && !a.is_float()) {
+                    // (an integer and a float: the float; a value of another type and a number, its operator's —
+                    // `size / 2f` a `Size`, `16.dp * 2f` a `Dp`)
+                    } else if a == Ty::Unknown || (b.is_float() && a.is_number() && !a.is_float()) {
                         b
                     } else {
                         a
@@ -1227,8 +1247,13 @@ impl Gen<'_, '_> {
                         if let Some(i) = members_of(&q, &name.name).next() {
                             return Ty::from_rust(i.ret);
                         }
-                        // (a member extension property of a receiver: `LocalX.currentValue`)
+                        // (a member of its type, its type's arguments bound: `LocalDensity.current` is a `Density`; a
+                        // member extension property of a receiver: `LocalX.currentValue`)
                         let value = value_object_ty(&q);
+                        let t = self.member_ty(&value, &name.name, false);
+                        if t != Ty::Unknown {
+                            return t;
+                        }
                         return self.peek_extension_property(&value, &name.name);
                     }
                     return associated(&q, &name.name).first().map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::named(&q));
@@ -1539,6 +1564,10 @@ impl Gen<'_, '_> {
                         };
                         return Ty::Named("MutableState".into(), vec![t]);
                     }
+                    "rememberUpdatedState" => {
+                        let t = args.first().map(|a| self.peek_ty(&a.value)).unwrap_or(Ty::Unknown);
+                        return Ty::Named("State".into(), vec![t]);
+                    }
                     _ => {}
                 }
                 let n_args = args.len() + usize::from(trailing.is_some());
@@ -1817,6 +1846,7 @@ fn fill_unknown(t: Ty, with: &Ty) -> Ty {
         Ty::List(x) => Ty::List(fill(x)),
         Ty::Set(x) => Ty::Set(fill(x)),
         Ty::Range(x) => Ty::Range(fill(x)),
+        Ty::ClosedRange(x) => Ty::ClosedRange(fill(x)),
         Ty::Map(k, v) => Ty::Map(fill(k), fill(v)),
         Ty::Pair(a, b) => Ty::Pair(fill(a), fill(b)),
         Ty::Named(n, args) => Ty::Named(n, args.into_iter().map(|a| fill_unknown(a, with)).collect()),

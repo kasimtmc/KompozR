@@ -351,6 +351,6 @@ pub fn ScrollableState(consume_scroll_delta: impl Fn(f32) -> f32 + 'static) -> D
 /// `rememberScrollableState`).
 #[kompozable]
 pub fn remember_scrollable_state(consume_scroll_delta: impl Fn(f32) -> f32 + 'static) -> DefaultScrollableState {
-    let lambda_state = remember_updated_state::<Rc<dyn Fn(f32) -> f32>>(Rc::new(consume_scroll_delta));
+    let lambda_state = remember_updated_state!(Rc::new(consume_scroll_delta) as Rc<dyn Fn(f32) -> f32>);
     remember(move || ScrollableState(move |delta| (lambda_state.get())(delta)))
 }

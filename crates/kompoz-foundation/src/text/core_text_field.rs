@@ -39,7 +39,7 @@ use kompoz_coroutines::{CoroutineStart, LaunchedEffect, remember_coroutine_scope
 use kompoz_graphics::{Brush, Color, Constraints, Density, Dp, Offset, Rect};
 use kompoz_runtime::{
     DisposableEffect, MutableState, mutable_state_of, named_args, on_dispose, remember, remember_keyed,
-    remember_saveable_keyed_with, without_read_observation,
+    remember_saveable_keyed_with, remember_updated_state, without_read_observation,
 };
 use kompoz_text::input::{EditProcessor, OffsetMapping, TextFieldValue, VisualTransformation};
 use kompoz_text::{AnnotatedString, FontFamilyResolver, TextLayoutResult, TextOverflow, TextRange, TextStyle};
@@ -744,10 +744,7 @@ pub fn core_text_field(args: CoreTextFieldArgs) {
             };
 
             // The keyboard hidden when made disabled or read-only while focused.
-            // (Compose's `rememberUpdatedState`: a snapshot state the flow follows — KompozR's remember_updated_state
-            // holds its value outside the snapshot system)
-            let writeable = remember(|| mutable_state_of(enabled && !read_only));
-            writeable.set(enabled && !read_only);
+            let writeable = remember_updated_state!(enabled && !read_only);
             {
                 let (state, manager, service, ime_options) =
                     (state.clone(), manager.clone(), text_input_service.clone(), ime_options.clone());

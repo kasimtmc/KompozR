@@ -134,3 +134,29 @@ harness = false
 [[test]]
 name = "navigation_drawer"
 harness = false
+
+# The selection controls: Checkbox, TriStateCheckbox, RadioButton, Switch — drawing and animating as Compose's
+# (1.4's values, 1.5's checkbox styling fix), their colors, ripple, room to touch and semantics.
+[[test]]
+name = "controls"
+harness = false
+
+# The sliders: Slider (plain, slots, state), RangeSlider, VerticalSlider, their states and SliderDefaults' thumbs
+# and tracks — taps, drags, steps, keys, RTL, interactions, semantics, drawing (the C++ Kompoz's slider tests by
+# name, M15's behaviour).
+[[test]]
+name = "slider"
+harness = false
+
+# The progress indicators: LinearProgressIndicator, CircularProgressIndicator (determinate, endless, the deprecated
+# value forms), the wavy ones (Expressive), their defaults: drawing, gaps, stop indicators, RTL, animations,
+# semantics (the C++ Kompoz progress tests by name, M15 behaviour).
+[[test]]
+name = "progress"
+harness = false
+
+# The loading indicators (Expressive): LoadingIndicator and ContainedLoadingIndicator, determinate and endless, their
+# defaults: morphs, turns, sizes, colors, semantics (the C++ Kompoz loading indicator tests by name, M15 behaviour).
+[[test]]
+name = "loading_indicator"
+harness = false

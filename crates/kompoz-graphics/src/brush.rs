@@ -1725,6 +1725,7 @@ impl fmt::Debug for ColorFilter {
 impl ColorFilter {
     /// `color` blended onto what is drawn by `blend_mode` (Compose's default: `BlendMode::SrcIn`, its shape in the
     /// color).
+    /// Kotlin: `tint(color: Color, blendMode: BlendMode = BlendMode.SrcIn)`
     pub fn tint(color: Color, blend_mode: BlendMode) -> ColorFilter {
         ColorFilter::BlendMode { color, blend_mode }
     }

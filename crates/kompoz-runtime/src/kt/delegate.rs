@@ -3,7 +3,7 @@
 //! and `x++`/`x--` on one ([`post_inc`]…, through [`KtInc`]).
 
 use super::panic_kt;
-use crate::{DerivedState, MutableState, State, UpdatedState};
+use crate::{DerivedState, MutableState, State};
 use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
@@ -52,12 +52,6 @@ impl<T: Clone + 'static> KtDelegate for State<T> {
     }
 }
 impl<T: Clone + 'static> KtDelegate for DerivedState<T> {
-    type Value = T;
-    fn get_value(&self) -> T {
-        self.get()
-    }
-}
-impl<T: Clone> KtDelegate for UpdatedState<T> {
     type Value = T;
     fn get_value(&self) -> T {
         self.get()

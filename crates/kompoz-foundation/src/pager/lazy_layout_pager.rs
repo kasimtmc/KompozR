@@ -23,15 +23,14 @@ use crate::overscroll::OverscrollEffect;
 use kompoz_coroutines::remember_coroutine_scope;
 use kompoz_graphics::{Dp, LayoutDirection, Offset};
 use kompoz_runtime::{
-    DerivedState, MutableState, derived_state_of_with_policy, kompozable, kompozable_block, mutable_state_of,
-    never_equal_policy, remember, remember_keyed,
+    DerivedState, derived_state_of_with_policy, kompozable, kompozable_block, never_equal_policy, remember_keyed,
+    remember_updated_state,
 };
 use kompoz_ui::input::{NestedScrollConnection, PointerEventPass, PointerInputScope};
 use kompoz_ui::layout::SlotKey;
 use kompoz_ui::platform::LocalLayoutDirection;
 use kompoz_ui::{HorizontalAlignment, Modifier, VerticalAlignment};
 use std::any::Any;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -105,24 +104,6 @@ impl LazyLayoutItemProvider for PagerLazyLayoutItemProvider {
     }
 }
 
-/// The pages' content and key a pager was last composed with, read as a state.
-struct LatestContent {
-    content: RefCell<Option<(Rc<dyn Fn(i32)>, Option<Rc<dyn Fn(i32) -> LazyKey>>)>>,
-    generation: MutableState<u64>,
-}
-
-impl LatestContent {
-    fn set(&self, content: Rc<dyn Fn(i32)>, key: Option<Rc<dyn Fn(i32) -> LazyKey>>) {
-        *self.content.borrow_mut() = Some((content, key));
-        self.generation.set(self.generation.peek().wrapping_add(1));
-    }
-
-    fn get(&self) -> (Rc<dyn Fn(i32)>, Option<Rc<dyn Fn(i32) -> LazyKey>>) {
-        self.generation.get();
-        self.content.borrow().clone().expect("the pager's content")
-    }
-}
-
 /// The pages as the layout reads them (Compose's `rememberPagerItemProviderLambda`): derived from the content, the
 /// key and the page count (run again when they change), and the range of keys around the current page.
 #[kompozable]
@@ -131,14 +112,13 @@ fn remember_pager_item_provider_lambda(
     page_content: Rc<dyn Fn(i32)>,
     key: Option<Rc<dyn Fn(i32) -> LazyKey>>,
 ) -> ItemProviderLambda {
-    let latest_content =
-        remember(|| Rc::new(LatestContent { content: RefCell::new(None), generation: mutable_state_of(0) }));
-    latest_content.set(page_content, key);
+    let latest_content = remember_updated_state!(page_content);
+    let latest_key = remember_updated_state!(key);
     remember_keyed(state.clone(), move || {
         let s = state.clone();
         let interval_content_state: DerivedState<Rc<PagerLayoutIntervalContent>> =
             derived_state_of_with_policy(never_equal_policy(), move || {
-                let (item, key) = latest_content.get();
+                let (item, key) = (latest_content.get(), latest_key.get());
                 let mut intervals = MutableIntervalList::new();
                 intervals.add_interval(s.page_count(), PagerIntervalContent { key, item });
                 Rc::new(PagerLayoutIntervalContent { intervals })

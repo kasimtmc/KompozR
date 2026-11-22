@@ -1,8 +1,6 @@
 // Material's list items as Compose's samples write them (material3 1.5's ListSamples), and the rest of their API as a
 // Compose user writes it (ListItemDefaults' colors, shapes, elevation, padding, gap and alignment, ListItemColors'
-// properties and state functions, the segmented items). The samples with a RadioButton or a Checkbox in their slots
-// (SingleSelection…, MultiSelection…, ListItemWithModeChangeOnLongClick…) come with those controls (WP2), and so does
-// SegmentedListItemWithExpansionSample's children's trailing Checkbox (the rest of it here).
+// properties and state functions, the segmented items).
 
 @Composable
 fun OneLineListItem() {
@@ -112,8 +110,6 @@ fun ClickableListItemWithClickableChildSample() {
     }
 }
 
-// (WP4b: icons) Its children's `trailingContent = { Checkbox(checked = childrenChecked[idx], onCheckedChange = null) }`
-// comes with WP2's Checkbox (paste-ready, the sample as written, in the WP4b notes' icons-pending.kt).
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SegmentedListItemWithExpansionSample() {
@@ -163,10 +159,152 @@ fun SegmentedListItemWithExpansionSample() {
                         leadingContent = {
                             Icon(Icons.Default.Favorite, contentDescription = null)
                         },
+                        trailingContent = {
+                            Checkbox(checked = childrenChecked[idx], onCheckedChange = null)
+                        },
                         content = { Text("Child ${idx + 1}") },
                     )
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SingleSelectionListItemSample() {
+    Column(Modifier.selectableGroup()) {
+        HorizontalDivider()
+
+        var selectedIndex: Int? by rememberSaveable { mutableStateOf(null) }
+        repeat(3) { idx ->
+            val selected = selectedIndex == idx
+            ListItem(
+                selected = selected,
+                onClick = { selectedIndex = if (selected) null else idx },
+                leadingContent = { RadioButton(selected = selected, onClick = null) },
+                trailingContent = { Icon(Icons.Default.Favorite, contentDescription = null) },
+                supportingContent = { Text("Additional info") },
+                content = { Text("Item ${idx + 1}") },
+            )
+
+            HorizontalDivider()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun MultiSelectionListItemSample() {
+    Column {
+        HorizontalDivider()
+
+        repeat(3) { idx ->
+            var checked by rememberSaveable { mutableStateOf(false) }
+            ListItem(
+                checked = checked,
+                onCheckedChange = { checked = it },
+                leadingContent = { Checkbox(checked = checked, onCheckedChange = null) },
+                trailingContent = { Icon(Icons.Default.Favorite, contentDescription = null) },
+                supportingContent = { Text("Additional info") },
+                content = { Text("Item ${idx + 1}") },
+            )
+
+            HorizontalDivider()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun ListItemWithModeChangeOnLongClickSample() {
+    Column {
+        HorizontalDivider()
+
+        var inClickMode by rememberSaveable { mutableStateOf(true) }
+        val counts = rememberSaveable { mutableStateListOf(0, 0, 0) }
+        val checked = rememberSaveable { mutableStateListOf(false, false, false) }
+
+        repeat(3) { idx ->
+            if (inClickMode) {
+                ListItem(
+                    onClick = { counts[idx]++ },
+                    onLongClick = {
+                        checked[idx] = true
+                        inClickMode = false
+                    },
+                    leadingContent = { Icon(Icons.Default.Home, contentDescription = null) },
+                    trailingContent = { Text("${counts[idx]}") },
+                    supportingContent = { Text("Long-click to change interaction mode.") },
+                    content = { Text("Item ${idx + 1}") },
+                )
+            } else {
+                ListItem(
+                    checked = checked[idx],
+                    onCheckedChange = { checked[idx] = it },
+                    onLongClick = {
+                        inClickMode = true
+                        checked.clear()
+                        checked.addAll(listOf(false, false, false))
+                    },
+                    leadingContent = { Checkbox(checked = checked[idx], onCheckedChange = null) },
+                    trailingContent = { Icon(Icons.Default.Favorite, contentDescription = null) },
+                    supportingContent = { Text("Long-click to change interaction mode.") },
+                    content = { Text("Item ${idx + 1}") },
+                )
+            }
+
+            HorizontalDivider()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SingleSelectionSegmentedListItemSample() {
+    val count = 4
+    val colors =
+        ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    Column(
+        modifier = Modifier.selectableGroup(),
+        verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
+    ) {
+        var selectedIndex: Int? by rememberSaveable { mutableStateOf(null) }
+        repeat(count) { idx ->
+            val selected = selectedIndex == idx
+            SegmentedListItem(
+                selected = selected,
+                onClick = { selectedIndex = if (selected) null else idx },
+                colors = colors,
+                shapes = ListItemDefaults.segmentedShapes(index = idx, count = count),
+                leadingContent = { RadioButton(selected = selected, onClick = null) },
+                trailingContent = { Icon(Icons.Default.Favorite, contentDescription = null) },
+                supportingContent = { Text("Additional info") },
+                content = { Text("Item ${idx + 1}") },
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun MultiSelectionSegmentedListItemSample() {
+    val count = 4
+    val colors =
+        ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    Column(verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)) {
+        repeat(count) { idx ->
+            var checked by rememberSaveable { mutableStateOf(false) }
+            SegmentedListItem(
+                checked = checked,
+                onCheckedChange = { checked = it },
+                colors = colors,
+                shapes = ListItemDefaults.segmentedShapes(index = idx, count = count),
+                leadingContent = { Checkbox(checked = checked, onCheckedChange = null) },
+                trailingContent = { Icon(Icons.Default.Favorite, contentDescription = null) },
+                supportingContent = { Text("Additional info") },
+                content = { Text("Item ${idx + 1}") },
+            )
         }
     }
 }

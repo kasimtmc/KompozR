@@ -205,7 +205,7 @@ fn selection_id_saver(registrar: &SelectionRegistrarRef) -> Saver<u64> {
 #[kompozable]
 fn remember_on_text_layout(on_text_layout: Option<OnTextLayout>) -> Option<OnTextLayout> {
     let given = on_text_layout.is_some();
-    let latest = remember_updated_state(on_text_layout);
+    let latest = remember_updated_state!(on_text_layout);
     remember_keyed(given, move || {
         given.then(|| {
             let f: OnTextLayout = Rc::new(move |r: &TextLayoutResult| {
@@ -293,7 +293,7 @@ fn LayoutWithLinksAndInlineContent(
         })
     });
     // The scope told of each layout first, then the text's own callback.
-    let latest = remember_updated_state(on_text_layout);
+    let latest = remember_updated_state!(on_text_layout);
     let scope_identity = text_scope.as_ref().map(|s| Rc::as_ptr(s) as usize);
     let scope = text_scope.clone();
     let on_layout: OnTextLayout = remember_keyed(scope_identity, move || {

@@ -1,7 +1,8 @@
 //! Material's buttons and containers in Kotlin's syntax, as a Compose user writes them: the C++ Kompoz's
-//! `required_arguments_by_name` (kompozable_tests.cpp 201-226, its TextButton, TextField and Icon; its Checkbox, and
-//! the Text showing it, are WP2's) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges,
-//! segmented list items and extended FAB; its LoadingIndicator WP2's, its BottomAppBar WP4a's) through `kompoz!`, and
+//! `required_arguments_by_name` (kompozable_tests.cpp 201-226: all of its NamedHeads, the Checkbox, TextButton,
+//! TextField, Icon and texts) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges,
+//! segmented list items and extended FAB; its LoadingIndicator in kotlin_progress.rs, its BottomAppBar WP4a's) through
+//! `kompoz!`, and
 //! material3's samples of buttons, icon buttons, FABs, cards and chips from a `.kt` file (kompoz_file!).
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -17,11 +18,14 @@ kompoz! {
     // The arguments a composable needs (onClick, value, checked, ...) by their names too.
     @Kompozable
     fun NamedHeads() {
+        var on by remember { mutableStateOf(false) }
         var text by remember { mutableStateOf("") }
         Column {
+            Checkbox(checked = on, onCheckedChange = { on = it }, modifier = Modifier.testTag("kutu"))
             TextButton(onClick = { text = "basıldı" }) { Text(text = "düğme") }
             TextField(value = text, onValueChange = { text = it }, modifier = Modifier.testTag("alan"))
             Icon(imageVector = Icons.Filled.Star, contentDescription = "yıldız")
+            Text(text = if (on) "açık" else "kapalı")
             Text("değer: $text")
         }
     }
@@ -29,6 +33,7 @@ kompoz! {
 
 fn required_arguments_by_name() {
     let rule = KompozTestRule::new(NamedHeads);
+    rule.on_node_with_text("kapalı").assert_exists();
     rule.on_node_with_text("değer: ").assert_exists();
     rule.on_node_with_content_description("yıldız").assert_exists();
     rule.on_node_with_text("düğme").perform_click();
@@ -38,6 +43,10 @@ fn required_arguments_by_name() {
     // value)`), and the test rule's text input inserts at the cursor: "!basıldı" (the C++ appended: "basıldı!").
     rule.on_node_with_tag("alan").perform_text_input("!");
     rule.on_node_with_text("değer: !basıldı").assert_exists();
+    // The Checkbox: a click checks it.
+    rule.on_node_with_tag("kutu").assert_is_off().perform_click();
+    rule.on_node_with_tag("kutu").assert_is_on();
+    rule.on_node_with_text("açık").assert_exists();
 }
 
 // ---- containers_as_compose_writes_them (kompozable_tests.cpp 2799-2848) --------------------------------------------

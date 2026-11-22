@@ -35,8 +35,8 @@ use kompoz_foundation::interaction::{
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{BorderStroke, Color, Dp, IntSize, LayoutDirection, Shape};
 use kompoz_runtime::{
-    KompozitionLocalProvider, KotlinProperties, State, UpdatedState, kompozable, kompozable_block,
-    mutable_state_list_of, named, named_args, remember, remember_updated_state,
+    KompozitionLocalProvider, KotlinProperties, State, kompozable, kompozable_block, mutable_state_list_of, named,
+    named_args, remember, remember_updated_state,
 };
 use kompoz_text::TextStyle;
 use kompoz_ui::semantics::Role;
@@ -2480,9 +2480,9 @@ impl ChipBorder {
     /// The border, `enabled` or not, as state (Compose's internal composable `borderStroke(enabled)`:
     /// `rememberUpdatedState`).
     #[track_caller]
-    pub(crate) fn border_stroke(&self, enabled: bool) -> UpdatedState<Option<BorderStroke>> {
+    pub(crate) fn border_stroke(&self, enabled: bool) -> State<Option<BorderStroke>> {
         let border =
             Some(BorderStroke(self.border_width, if enabled { self.border_color } else { self.disabled_border_color }));
-        kompozable_block!(remember_updated_state(border))
+        kompozable_block!(remember_updated_state!(border))
     }
 }

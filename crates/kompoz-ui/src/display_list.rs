@@ -105,9 +105,15 @@ fn area(r: Rect) -> f32 {
     if empty(r) { 0.0 } else { r.width() * r.height() }
 }
 
-/// Where things moved to are a thousandth of a px off at most (whole px summed in floats).
+/// Where things moved to are a thousandth of a px off at most (whole px summed in floats); a number that isn't
+/// finite is near only the same one (a turn by a NaN progress's angle recorded twice is the same).
 fn near(a: f32, b: f32) -> bool {
-    (a - b).abs() <= 1e-3
+    (a - b).abs() <= 1e-3 || a.to_bits() == b.to_bits()
+}
+
+/// Matrices recorded alike: equal, or the same numbers bit for bit (NaN isn't equal to itself).
+fn same_matrix(a: &Matrix, b: &Matrix) -> bool {
+    a == b || (0..4).all(|row| (0..4).all(|col| a.get(row, col).to_bits() == b.get(row, col).to_bits()))
 }
 
 fn near_offset(a: Offset, b: Offset) -> bool {
@@ -1693,7 +1699,7 @@ impl DisplayList {
             check(a.elevated == b.elevated, "elevation shadow");
             check(a.shaped == b.shaped, "shape shadow");
             check(a.path == b.path, "path");
-            check(a.matrix == b.matrix, "matrix");
+            check(same_matrix(&a.matrix, &b.matrix), "matrix");
             // (A layer's key is its list's too: two lists' differ. It is made from the segments'.)
             check(a.parent == b.parent && a.end == b.end, "nesting");
             if !fields.is_empty() {

@@ -84,6 +84,7 @@ impl Gen<'_, '_> {
                     }
                     "Pair" => Ty::Pair(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown))),
                     "IntRange" => Ty::Range(Box::new(Ty::Int)),
+                    "ClosedFloatingPointRange" | "ClosedRange" => Ty::ClosedRange(Box::new(first())),
                     name => Ty::Named(name.to_string(), args),
                 }
             }
@@ -92,6 +93,7 @@ impl Gen<'_, '_> {
                 ret: self.ty_of(&f.result),
                 receiver: f.receiver.as_ref().and_then(|r| receiver_name(r)),
                 suspend: f.suspend,
+                shared: false,
             })),
             TypeKind::Error => Ty::Unknown,
         };
@@ -208,6 +210,10 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> (#x, #y, #z))
             }
             "IntRange" => quote_spanned!(span=> #kt::KtProgression<i32>),
+            "ClosedFloatingPointRange" | "ClosedRange" => {
+                let t = a(0);
+                quote_spanned!(span=> ::core::ops::RangeInclusive<#t>)
+            }
             // (an interface the API has as a trait: its object shared, as Kotlin's references are — `shape: Shape` is
             // an `Arc<dyn Shape>`, as the API's own shapes are; `AnimationSpec<Float>` an `Arc<dyn AnimationSpec<f32>>`)
             _ if super::resolve::trait_object(name).is_some() => {
@@ -248,6 +254,10 @@ impl Gen<'_, '_> {
             Ty::Range(t) => {
                 let t = self.rust_of_ty(t, span);
                 quote_spanned!(span=> #kt::KtProgression<#t>)
+            }
+            Ty::ClosedRange(t) => {
+                let t = self.rust_of_ty(t, span);
+                quote_spanned!(span=> ::core::ops::RangeInclusive<#t>)
             }
             // (a shared or boxed trait object: `Rc<dyn Style>`, the pointer's path written out)
             Ty::Named(n, args)

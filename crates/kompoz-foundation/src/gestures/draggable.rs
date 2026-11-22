@@ -166,7 +166,7 @@ pub fn DraggableState(on_delta: impl Fn(f32) + 'static) -> DefaultDraggableState
 /// `rememberDraggableState`).
 #[kompozable]
 pub fn remember_draggable_state(on_delta: impl Fn(f32) + 'static) -> DefaultDraggableState {
-    let on_delta_state = remember_updated_state::<Rc<dyn Fn(f32)>>(Rc::new(on_delta));
+    let on_delta_state = remember_updated_state!(Rc::new(on_delta) as Rc<dyn Fn(f32)>);
     remember(move || DraggableState(move |delta| (on_delta_state.get())(delta)))
 }
 

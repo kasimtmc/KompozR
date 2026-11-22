@@ -195,36 +195,120 @@ impl KtFloat for f64 {
     }
 }
 
-macro_rules! unary {
-    ($($(#[$doc:meta])* $name:ident => $f:expr;)*) => {$(
-        $(#[$doc])*
-        pub fn $name<F: KtFloat>(x: F) -> F {
-            let f: fn(f64) -> f64 = $f;
-            F::from_f64(f(x.to_f64()))
-        }
-    )*};
+// (`kotlin.math`'s functions of one Float or Double, written out: the Kotlin index reads functions, not what a
+// macro makes of them)
+/// Kotlin's `sin(x)`.
+/// Kotlin: `sin(x: Float): Float`
+pub fn sin<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::sin(x.to_f64()))
 }
-unary! {
-    sin => f64::sin;
-    cos => f64::cos;
-    tan => f64::tan;
-    asin => f64::asin;
-    acos => f64::acos;
-    atan => f64::atan;
-    sinh => f64::sinh;
-    cosh => f64::cosh;
-    tanh => f64::tanh;
-    sqrt => f64::sqrt;
-    cbrt => f64::cbrt;
-    exp => f64::exp;
-    ln => f64::ln;
-    log10 => f64::log10;
-    log2 => f64::log2;
-    floor => f64::floor;
-    ceil => f64::ceil;
-    truncate => f64::trunc;
-    /// Kotlin's `round(x)`: to the nearest, a half to the even one (Java's `Math.rint`).
-    round => f64::round_ties_even;
+
+/// Kotlin's `cos(x)`.
+/// Kotlin: `cos(x: Float): Float`
+pub fn cos<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::cos(x.to_f64()))
+}
+
+/// Kotlin's `tan(x)`.
+/// Kotlin: `tan(x: Float): Float`
+pub fn tan<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::tan(x.to_f64()))
+}
+
+/// Kotlin's `asin(x)`.
+/// Kotlin: `asin(x: Float): Float`
+pub fn asin<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::asin(x.to_f64()))
+}
+
+/// Kotlin's `acos(x)`.
+/// Kotlin: `acos(x: Float): Float`
+pub fn acos<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::acos(x.to_f64()))
+}
+
+/// Kotlin's `atan(x)`.
+/// Kotlin: `atan(x: Float): Float`
+pub fn atan<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::atan(x.to_f64()))
+}
+
+/// Kotlin's `sinh(x)`.
+/// Kotlin: `sinh(x: Float): Float`
+pub fn sinh<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::sinh(x.to_f64()))
+}
+
+/// Kotlin's `cosh(x)`.
+/// Kotlin: `cosh(x: Float): Float`
+pub fn cosh<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::cosh(x.to_f64()))
+}
+
+/// Kotlin's `tanh(x)`.
+/// Kotlin: `tanh(x: Float): Float`
+pub fn tanh<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::tanh(x.to_f64()))
+}
+
+/// Kotlin's `sqrt(x)`.
+/// Kotlin: `sqrt(x: Float): Float`
+pub fn sqrt<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::sqrt(x.to_f64()))
+}
+
+/// Kotlin's `cbrt(x)`.
+/// Kotlin: `cbrt(x: Float): Float`
+pub fn cbrt<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::cbrt(x.to_f64()))
+}
+
+/// Kotlin's `exp(x)`.
+/// Kotlin: `exp(x: Float): Float`
+pub fn exp<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::exp(x.to_f64()))
+}
+
+/// Kotlin's `ln(x)`.
+/// Kotlin: `ln(x: Float): Float`
+pub fn ln<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::ln(x.to_f64()))
+}
+
+/// Kotlin's `log10(x)`.
+/// Kotlin: `log10(x: Float): Float`
+pub fn log10<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::log10(x.to_f64()))
+}
+
+/// Kotlin's `log2(x)`.
+/// Kotlin: `log2(x: Float): Float`
+pub fn log2<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::log2(x.to_f64()))
+}
+
+/// Kotlin's `floor(x)`.
+/// Kotlin: `floor(x: Float): Float`
+pub fn floor<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::floor(x.to_f64()))
+}
+
+/// Kotlin's `ceil(x)`.
+/// Kotlin: `ceil(x: Float): Float`
+pub fn ceil<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::ceil(x.to_f64()))
+}
+
+/// Kotlin's `truncate(x)`.
+/// Kotlin: `truncate(x: Float): Float`
+pub fn truncate<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::trunc(x.to_f64()))
+}
+
+/// Kotlin's `round(x)`: to the nearest, a half to the even one (Java's `Math.rint`).
+/// Kotlin: `round(x: Float): Float`
+pub fn round<F: KtFloat>(x: F) -> F {
+    F::from_f64(f64::round_ties_even(x.to_f64()))
 }
 
 /// Kotlin's `sign(x)`: -1, 0 or 1 (a NaN's is NaN, a zero keeps its sign).

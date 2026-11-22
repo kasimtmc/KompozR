@@ -25,7 +25,7 @@ use kompoz_animation::FiniteAnimationSpec;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{BorderStroke, Color, Shape};
 use kompoz_runtime::{
-    KompozitionLocalProvider, KotlinProperties, UpdatedState, key, kompozable, kompozable_block, named, remember,
+    KompozitionLocalProvider, KotlinProperties, State, key, kompozable, kompozable_block, named, remember,
     remember_updated_state,
 };
 use kompoz_ui::semantics::Role;
@@ -790,7 +790,7 @@ impl IconToggleButtonColors {
     /// The container's color of the state, as state (Compose's internal composable `containerColor(enabled,
     /// checked)`): disabled, else unchecked or checked.
     #[track_caller]
-    pub(crate) fn container_color_for(&self, enabled: bool, checked: bool) -> UpdatedState<Color> {
+    pub(crate) fn container_color_for(&self, enabled: bool, checked: bool) -> State<Color> {
         let target = if !enabled {
             self.disabled_container_color
         } else if !checked {
@@ -798,13 +798,13 @@ impl IconToggleButtonColors {
         } else {
             self.checked_container_color
         };
-        kompozable_block!(remember_updated_state(target))
+        kompozable_block!(remember_updated_state!(target))
     }
 
     /// The content's color of the state, as state (Compose's internal composable `contentColor(enabled,
     /// checked)`).
     #[track_caller]
-    pub(crate) fn content_color_for(&self, enabled: bool, checked: bool) -> UpdatedState<Color> {
+    pub(crate) fn content_color_for(&self, enabled: bool, checked: bool) -> State<Color> {
         let target = if !enabled {
             self.disabled_content_color
         } else if !checked {
@@ -812,7 +812,7 @@ impl IconToggleButtonColors {
         } else {
             self.checked_content_color
         };
-        kompozable_block!(remember_updated_state(target))
+        kompozable_block!(remember_updated_state!(target))
     }
 }
 

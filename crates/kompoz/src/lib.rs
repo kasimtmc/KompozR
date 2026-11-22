@@ -141,10 +141,11 @@ pub mod prelude {
     pub use kompoz_graphics::{shape, unit};
     pub use kompoz_ui::{draw, input};
 
-    // (Compose's painters and vector content: `Image(rememberVectorPainter(icon))`, `Path(pathData = …)`)
+    // (Compose's painters and vector content: `Image(rememberVectorPainter(icon))`, `Path(pathData = …)`; Compose's
+    // `DefaultAlpha`, a painter's `draw(size)` default)
     pub use kompoz_ui::draw::vector::{Group, Path};
     pub use kompoz_ui::draw::{
-        BitmapPainter, BrushPainter, ColorPainter, Painter, VectorPainter, remember_vector_painter,
+        BitmapPainter, BrushPainter, ColorPainter, DefaultAlpha, Painter, VectorPainter, remember_vector_painter,
         remember_vector_painter_content,
     };
     // (animation-graphics': `Image(rememberAnimatedVectorPainter(image, atEnd))`; its modules `res` and `vector`

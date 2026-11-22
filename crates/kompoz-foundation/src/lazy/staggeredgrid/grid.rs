@@ -23,15 +23,14 @@ use crate::overscroll::OverscrollEffect;
 use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_graphics::{Dp, IntOffset, LayoutDirection};
 use kompoz_runtime::{
-    DerivedState, MutableState, derived_state_of_with_policy, kompozable, kompozable_block, mutable_state_of,
-    never_equal_policy, remember, remember_keyed,
+    DerivedState, derived_state_of_with_policy, kompozable, kompozable_block, never_equal_policy, remember_keyed,
+    remember_updated_state,
 };
 use kompoz_ui::layout::SlotKey;
 use kompoz_ui::platform::{LocalPlatform, PlatformHandle};
 use kompoz_ui::semantics::CollectionInfo;
 use kompoz_ui::{Constraints, MeasureResult, Modifier};
 use std::any::Any;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -97,33 +96,13 @@ impl LazyStaggeredGridItemProvider for LazyStaggeredGridItemProviderImpl {
     }
 }
 
-/// The block a grid was last composed with, read as a state (as the list's `LatestContent`).
-struct LatestContent {
-    content: RefCell<Option<Rc<dyn for<'a> Fn(&'a mut LazyStaggeredGridScope)>>>,
-    generation: MutableState<u64>,
-}
-
-impl LatestContent {
-    fn set(&self, content: Rc<dyn for<'a> Fn(&'a mut LazyStaggeredGridScope)>) {
-        *self.content.borrow_mut() = Some(content);
-        self.generation.set(self.generation.peek().wrapping_add(1));
-    }
-
-    fn get(&self) -> Rc<dyn for<'a> Fn(&'a mut LazyStaggeredGridScope)> {
-        self.generation.get();
-        self.content.borrow().clone().expect("the grid's block")
-    }
-}
-
 /// The grid's items as the layout reads them (Compose's `rememberStaggeredGridItemProviderLambda`).
 #[kompozable]
 fn remember_staggered_grid_item_provider_lambda(
     state: LazyStaggeredGridState,
     content: Rc<dyn for<'a> Fn(&'a mut LazyStaggeredGridScope)>,
 ) -> (ItemProviderLambda, Rc<dyn Fn() -> Rc<dyn LazyStaggeredGridItemProvider>>) {
-    let latest_content =
-        remember(|| Rc::new(LatestContent { content: RefCell::new(None), generation: mutable_state_of(0) }));
-    latest_content.set(content);
+    let latest_content = remember_updated_state!(content);
     remember_keyed(state.clone(), move || {
         let interval_content_state: DerivedState<Rc<LazyStaggeredGridScope>> =
             derived_state_of_with_policy(never_equal_policy(), move || {

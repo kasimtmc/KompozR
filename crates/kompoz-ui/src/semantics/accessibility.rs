@@ -44,7 +44,7 @@ pub struct AccessibilityNode {
     /// On or off (a toggleable's state, or a selectable's selection); none if neither, or indeterminate.
     pub checked: Option<bool>,
     pub range: Option<ProgressBarRangeInfo>,
-    /// `SetProgress` sets its value.
+    /// `SetProgress` sets its value (offered only while it is enabled, as Compose does).
     pub settable: bool,
     pub live_region: Option<LiveRegionMode>,
     /// The labels of its custom actions (`SemanticsAction::CustomAction`'s index is into these).
@@ -113,10 +113,16 @@ impl SemanticsOwner {
         out
     }
 
-    /// Performs `action` on the node with `id` (C++'s `performSemanticsAction`); whether it was done.
+    /// Performs `action` on the node with `id` (C++'s `performSemanticsAction`); whether it was done. A disabled
+    /// node takes none but setting its selection and copying (Compose's accessibility delegate).
     pub fn perform_semantics_action(&self, id: u64, action: SemanticsAction) -> bool {
         let Some(node) = self.find(id, true) else { return false };
         let config = node.config();
+        // Compose's `performActionHelper`: only setting the selection and copying can be done to a disabled node.
+        let can_be_done_disabled = matches!(action, SemanticsAction::SetSelection { .. } | SemanticsAction::CopyText);
+        if config.contains(SemanticsProperties::Disabled) && !can_be_done_disabled {
+            return false;
+        }
         let run0 = |key: SemanticsPropertyKey<AccessibilityAction<ActionFn>>| {
             config.get(key).and_then(|a| a.action).is_some_and(|f| f())
         };
@@ -260,7 +266,9 @@ fn summarize(
         selectable_group: config.contains(SemanticsProperties::SelectableGroup),
         checked,
         range: config.get(SemanticsProperties::ProgressBarRangeInfo),
-        settable: config.get(SemanticsActions::SetProgress).is_some_and(|a| a.action.is_some()),
+        // (Compose offers set-progress only on an enabled node: `addSetProgressAction`)
+        settable: config.get(SemanticsActions::SetProgress).is_some_and(|a| a.action.is_some())
+            && !config.contains(SemanticsProperties::Disabled),
         live_region: config.get(SemanticsProperties::LiveRegion),
         custom_actions: config
             .get(SemanticsActions::CustomActions)

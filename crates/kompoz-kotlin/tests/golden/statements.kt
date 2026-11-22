@@ -76,3 +76,14 @@ fun loopy(xs: List<Int>): Int {
     } while (i < 5)
     return found
 }
+
+// An element's increment as a statement: `counts[i]++` of a state list, `--` of a list's (Kotlin's
+// `a.set(i, a.get(i).inc())`, the index evaluated once).
+@Kompozable
+fun Counts(i: Int) {
+    val counts = remember { mutableStateListOf(0, 0, 0) }
+    val local = mutableListOf(1.5f, 2f)
+    counts[i + 1]++
+    --local[0]
+    Text("${counts[1]} ${local[0]}")
+}

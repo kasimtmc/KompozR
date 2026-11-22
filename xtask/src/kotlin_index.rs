@@ -14,10 +14,10 @@
 //!   receivers (`impl Fn(&mut DrawScope)`) and whether they suspend, and whether it suspends (`async fn`, a
 //!   future returned), is `#[kompozable]` or `#[named]` or a `const fn`, or takes Kotlin's overloads as a tuple
 //!   (`Color(args: impl ColorArgs)`, each overload an `impl ColorArgs for (…)` with its own doc line); what types
-//!   deref to (`DEREFS`), the types Kotlin names otherwise (`TYPES`: a struct's doc line ``Kotlin:
-//!   `Arrangement.Absolute` ``); closures' aliases written out in the parameters of their types (`Callback` →
-//!   `Rc<dyn Fn()>`); the items a file's own `macro_rules!` makes of a type's name (`transforms!(DrawScope)`),
-//!   expanded; the fun interfaces (a trait implemented for the closures of one signature), with the lambda their SAM
+//!   deref to and the interfaces they implement (`DEREFS`), the types Kotlin names otherwise (`TYPES`: a struct's
+//!   doc line ``Kotlin: `Arrangement.Absolute` ``); closures' aliases written out in the parameters of their types
+//!   (`Callback` → `Rc<dyn Fn()>`); the items a file's own `macro_rules!` makes of a type's name
+//!   (`transforms!(DrawScope)`), expanded; the fun interfaces (a trait implemented for the closures of one signature), with the lambda their SAM
 //!   constructor takes; the parameters suspending twins bound by a narrower trait than their functions do, with the
 //!   types each trait is implemented for (`TWIN_BOUNDS`: Kotlin's overloads taking their lambda `crossinline`).
 //!
@@ -841,6 +841,9 @@ struct Scan {
     /// none for one implemented generically (`impl<T: X> Trait for T`, `impl<T> Trait for Vec<T>`), whose types
     /// can't be listed.
     implementors: BTreeMap<String, Option<BTreeSet<String>>>,
+    /// The traits implemented for named types (`impl Painter for VectorPainter`: no type parameters, none on the
+    /// type): (type, trait), Kotlin's subtyping where the trait is an interface ([`interface_supertypes`]).
+    trait_impls: BTreeSet<(String, String)>,
 }
 
 fn kotlin_index(packages: &[Package]) -> Result<String, String> {
@@ -867,7 +870,28 @@ fn kotlin_index(packages: &[Package]) -> Result<String, String> {
     items.retain(|i| !NOT_KOTLIN.contains(&(i.krate.as_str(), i.rust.as_str())));
     items.sort();
     items.dedup();
+    interface_supertypes(&items, &scan.trait_impls, &mut scan.derefs);
     Ok(render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics))
+}
+
+/// Kotlin's subtyping of an interface the API has as a trait: a type implementing it (`impl Painter for
+/// VectorPainter`) has its members (`with(painter) { draw(size) }` on a `VectorPainter`), as it has a supertrait's or
+/// what it derefs to (`DEREFS`). The traits read are those of the API's own methods (Kotlin's interfaces: a trait
+/// declaring methods the index has), implemented for named types ([`Scan::trait_impls`]: a blanket impl's types
+/// can't be listed, a generic one's — `impl X for Arc<dyn Y>` — aren't the type's every value); the kt shims' traits
+/// (`KtStr`: Kotlin's standard types, found by the value's type), the overloads' `…Args` traits (no members) and a
+/// sealing trait (`Sealed`, as for supertraits) aren't.
+fn interface_supertypes(items: &[KItem], impls: &BTreeSet<(String, String)>, derefs: &mut BTreeSet<(String, String)>) {
+    let interfaces: BTreeSet<&str> = items
+        .iter()
+        .filter(|i| i.kind == "Method" && i.owner.is_empty() && !i.via.is_empty())
+        .map(|i| i.via.as_str())
+        .collect();
+    for (ty, t) in impls {
+        if interfaces.contains(t.as_str()) && !t.starts_with("Kt") && !t.ends_with("Args") && t != "Sealed" && ty != t {
+            derefs.insert((ty.clone(), t.clone()));
+        }
+    }
 }
 
 /// Public items of the API crates that Kotlin doesn't call (by crate and Rust name): what Kotlin's name is another
@@ -984,6 +1008,14 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                             types.insert(p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default());
                         }
                         _ => *types = None,
+                    }
+                    if let Type::Path(p) = &*imp.self_ty
+                        && imp.generics.params.is_empty()
+                        && p.qself.is_none()
+                        && let Some(last) = p.path.segments.last()
+                        && last.arguments.is_none()
+                    {
+                        scan.trait_impls.insert((last.ident.to_string(), trait_name.clone()));
                     }
                     if trait_name == "Future" {
                         scan.futures.insert(type_name(&imp.self_ty));
@@ -1473,7 +1505,8 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     }
     it.ret = match &sig.output {
         ReturnType::Default => "()".to_string(),
-        ReturnType::Type(_, t) => text(t.to_token_stream()),
+        // (a closure alias written out, as a parameter's: what a value of it fits)
+        ReturnType::Type(_, t) => text(expand_aliases(t, &scan.aliases).to_token_stream()),
     };
     // (WP5: a boxed future's alias too — `LocalFuture<'static, ()>`, `BoxFuture`: `TooltipState.show()`, a flow's
     // `collect`, suspend)
@@ -2147,5 +2180,35 @@ mod tests {
             (rotate.owner.as_str(), rotate.params[1].lambda.as_ref().unwrap().receiver.as_str()),
             ("DrawScope", "DrawScope")
         );
+    }
+
+    #[test]
+    fn a_type_implementing_an_interface_has_its_members() {
+        // (Kotlin's subtyping: `impl Painter for VectorPainter` makes a VectorPainter's members Painter's — the trait
+        // declares methods —; not a marker trait's, a kt shim's, an overloads' trait's, nor for a generic type)
+        let file: syn::File = syn::parse_str(
+            r#"
+            pub trait Painter { fn draw(&self, scope: &mut DrawScope<'_>, size: Size) {} }
+            pub trait Marker {}
+            pub trait KtStr { fn uppercase(&self) -> String; }
+            pub trait ColorArgs { fn color(self) -> Color; }
+            pub struct VectorPainter;
+            impl Painter for VectorPainter {}
+            impl Marker for VectorPainter {}
+            impl KtStr for String { fn uppercase(&self) -> String { todo!() } }
+            impl ColorArgs for Hex { fn color(self) -> Color { todo!() } }
+            impl Painter for Arc<dyn Painter> {}
+            impl<T> Painter for Wrapped<T> {}
+            "#,
+        )
+        .unwrap();
+        let mut scan = Scan::default();
+        prescan(&file.items, &mut scan);
+        collect(&file.items, &Cx { krate: "k", module: "m", public: true }, &mut scan);
+        interface_supertypes(&scan.items, &scan.trait_impls, &mut scan.derefs);
+        let d = |a: &str, b: &str| scan.derefs.contains(&(a.to_string(), b.to_string()));
+        assert!(d("VectorPainter", "Painter"));
+        assert!(!d("VectorPainter", "Marker") && !d("String", "KtStr") && !d("Hex", "ColorArgs"));
+        assert!(!d("Arc", "Painter") && !d("Wrapped", "Painter"));
     }
 }

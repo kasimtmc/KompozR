@@ -14,7 +14,7 @@ use crate::content_color::LocalContentColor;
 use kompoz_coroutines::Flow;
 use kompoz_foundation::layout::Box;
 use kompoz_runtime::{
-    MutableState, StateSource, UpdatedState, key, kompozable, mutable_state_of, remember, remember_updated_state,
+    MutableState, State, StateSource, key, kompozable, mutable_state_of, remember, remember_updated_state,
 };
 use kompoz_ui::Modifier;
 use kompoz_ui::window::{Dialog, DialogProperties};
@@ -114,7 +114,7 @@ pub(crate) fn PredictiveBackStateHandler(
     on_back: impl Fn() + 'static,
 ) {
     // Safely update the current `onBack` lambda when a new one is provided
-    let current_on_back: UpdatedState<Rc<dyn Fn()>> = remember_updated_state(Rc::new(on_back) as Rc<dyn Fn()>);
+    let current_on_back: State<Rc<dyn Fn()>> = remember_updated_state!(Rc::new(on_back) as Rc<dyn Fn()>);
     // (Compose's `key(state)`: the state is known by its instance, its value's)
     let identity = StateSource::identity(&state.value) as usize;
     key(&identity, || {

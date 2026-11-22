@@ -141,7 +141,7 @@ pub fn Draggable2DState(on_delta: impl Fn(Offset) + 'static) -> DefaultDraggable
 /// `rememberDraggable2DState`).
 #[kompozable]
 pub fn remember_draggable2d_state(on_delta: impl Fn(Offset) + 'static) -> DefaultDraggable2DState {
-    let on_delta_state = remember_updated_state::<Rc<dyn Fn(Offset)>>(Rc::new(on_delta));
+    let on_delta_state = remember_updated_state!(Rc::new(on_delta) as Rc<dyn Fn(Offset)>);
     remember(move || Draggable2DState(move |delta| (on_delta_state.get())(delta)))
 }
 

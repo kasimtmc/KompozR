@@ -369,6 +369,45 @@ impl<C: KtContains<X> + ?Sized, X: ?Sized> KtContains<X> for &C {
     }
 }
 
+/// Kotlin's `ClosedRange<T>` (and `ClosedFloatingPointRange<T>`, what a `Float` or `Double` `a..b` is: no
+/// progression, nothing to count over) as a Rust `RangeInclusive<T>` holds it: its ends, `isEmpty()`,
+/// `contains(value)` (`value in r`).
+pub trait KtClosedRange {
+    type Item;
+    /// Kotlin: `start: T`
+    fn start(&self) -> Self::Item;
+    /// Kotlin: `endInclusive: T`
+    fn end_inclusive(&self) -> Self::Item;
+    /// Whether it holds nothing: its start not at or below its end (a NaN end makes it empty).
+    /// Kotlin: `isEmpty(): Boolean`
+    fn is_empty(&self) -> bool;
+    /// Kotlin: `contains(value: T): Boolean`
+    fn contains(&self, value: Self::Item) -> bool;
+}
+
+impl<T: PartialOrd + Clone> KtClosedRange for std::ops::RangeInclusive<T> {
+    type Item = T;
+    fn start(&self) -> T {
+        std::ops::RangeInclusive::start(self).clone()
+    }
+    fn end_inclusive(&self) -> T {
+        self.end().clone()
+    }
+    fn is_empty(&self) -> bool {
+        // (Kotlin's `!(start <= endInclusive)`)
+        std::ops::RangeInclusive::start(self).partial_cmp(self.end()).is_none_or(|o| o == Ordering::Greater)
+    }
+    fn contains(&self, value: T) -> bool {
+        std::ops::RangeInclusive::start(self) <= &value && value <= *self.end()
+    }
+}
+
+impl<T: PartialOrd> KtContains<T> for std::ops::RangeInclusive<T> {
+    fn kt_contains(&self, value: &T) -> bool {
+        std::ops::RangeInclusive::start(self) <= value && value <= self.end()
+    }
+}
+
 /// Kotlin's `x in c` (`!in` is its negation).
 pub fn is_in<X: ?Sized, C: KtContains<X> + ?Sized>(value: &X, container: &C) -> bool {
     container.kt_contains(value)

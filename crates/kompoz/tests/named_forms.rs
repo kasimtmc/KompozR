@@ -7,8 +7,9 @@
 //!   coroutines' and kt shims' — stage 2 and 9's; Lifecycle's names are stage 13's.)
 //! - C++ 8136 (`scroll_forms_take_compose_named_arguments`): `overscrollEffect = null` (none) on a LazyRow; Material's
 //!   `Modifier.pullToRefresh(isRefreshing =, state =, onRefresh =)` by name on a Box of `rememberPullToRefreshState()`
-//!   (stage 12 WP5; its PullToRefreshDefaults.Indicator and the IndicatorBox around a LoadingIndicator come with WP2's
-//!   progress indicators: the Indicator's refreshing spinner is CircularProgressIndicator). (Its app bars are WP4a's;
+//!   with `PullToRefreshDefaults.Indicator(state =, isRefreshing =, modifier =)` and `PullToRefreshDefaults.IndicatorBox(
+//!   state =, isRefreshing =, modifier =, shape =) { LoadingIndicator(progress =, modifier =) }` in it (stage 12 WP5,
+//!   WP2). (Its app bars are WP4a's;
 //!   a VelocityTracker's copies sharing samples is Kotlin's reference semantics of a class KompozR has as a value — see
 //!   stage10-followups.md.)
 //! - C++ 8188 (`layout_forms_take_compose_named_arguments`): `Arrangement.spacedBy(space, alignment)`, `spring(…)` of
@@ -18,7 +19,8 @@
 //!   in scope). (Its pane scaffolds are Material's adaptive ones, stage 12's.)
 //! - C++ 11965 (`lists_pagers_and_carousels_take_compose_arguments`): a grid's `span = { GridItemSpan(maxLineSpan) }`,
 //!   `items(n, span = { … })`, pager states with their count last and by name, `VerticalScrollbar(adapter =,
-//!   modifier =)`. (Its carousel and PullToRefreshBox are Material's, stage 12's; AsyncImage is stage 13's.)
+//!   modifier =)`, Material's `PullToRefreshBox(isRefreshing =, onRefresh =, modifier =) { }` (stage 12 WP5, WP2). (Its
+//!   carousel is Material's, stage 12's; AsyncImage is stage 13's.)
 //! - C++ 7683 (`animations_take_compose_named_arguments`), its animated values (stage 11 WP1):
 //!   `animateFloatAsState(targetValue =, animationSpec =, label =)`, `animateColorAsState(target, spec)` (C++'s duration
 //!   in milliseconds is Compose's `tween(100)`), `updateTransition(targetState =, label =)` and its
@@ -114,6 +116,10 @@ kompoz! {
         Column {
             Box(modifier = Modifier.size(200.dp, 120.dp).pullToRefresh(isRefreshing = false, state = state, onRefresh = { onRefreshed() }).testTag("çekilir")) {
                 LazyColumn(modifier = Modifier.fillMaxSize()) { items(10) { Text("Satır $it", modifier = Modifier.height(50.dp)) } }
+                PullToRefreshDefaults.Indicator(state = state, isRefreshing = false, modifier = Modifier.align(Alignment.TopCenter))
+                PullToRefreshDefaults.IndicatorBox(state = state, isRefreshing = false, modifier = Modifier.align(Alignment.TopEnd), shape = CircleShape) {
+                    LoadingIndicator(progress = { min(1f, state.distanceFraction) }, modifier = Modifier.size(24.dp))
+                }
             }
             LazyRow(modifier = Modifier.height(40.dp).width(100.dp).testTag("satır"), overscrollEffect = null) {
                 items(3) { Box(modifier = Modifier.size(40.dp)) }
@@ -140,7 +146,26 @@ fn RustScrollForms(on_refreshed: impl Fn() + 'static) {
                         content = |this: &mut LazyListScope| {
                             this.items(10, |i| Text(format!("Satır {i}"), modifier = Modifier.height(50.dp())))
                         },
-                    )
+                    );
+                    PullToRefreshDefaults.Indicator(
+                        state = state.clone(),
+                        is_refreshing = false,
+                        modifier = Modifier.align(Alignment::TopCenter),
+                    );
+                    let progress_state = state.clone();
+                    PullToRefreshDefaults.IndicatorBox(
+                        state = state.clone(),
+                        is_refreshing = false,
+                        modifier = Modifier.align(Alignment::TopEnd),
+                        shape = Arc::new(CircleShape) as Arc<dyn Shape>,
+                        content = move || {
+                            let s = progress_state.clone();
+                            LoadingIndicator(
+                                progress = move || s.distance_fraction().min(1.0),
+                                modifier = Modifier.size(24.dp()),
+                            );
+                        },
+                    );
                 },
             );
             LazyRow(
@@ -172,7 +197,10 @@ fn scroll_forms_take_compose_named_arguments() {
     // (the C++'s check: the pulled box is there, nothing refreshed yet)
     assert!(rule.on_node_with_tag("çekilir").exists() && rule.on_node_with_tag("rust çekilir").exists());
     assert_eq!(refreshed.get(), 0);
-    // Pulled 300 down slowly on each (292 past the slop: 146, past the 80 dp threshold): each refreshes.
+    // (at rest the two loading indicators tell their progress, 0; the arrows nothing)
+    assert_eq!(progresses(&rule), [0.0, 0.0]);
+    // Pulled 300 down slowly on each (292 past the slop: 146, past the 80 dp threshold): each refreshes. Held there,
+    // its arrow and its loading indicator (its progress at most 1) tell the pull.
     for tag in ["çekilir", "rust çekilir"] {
         let top = bounds(&rule, tag).top_center() + Offset::new(0.0, 10.0);
         let h = rule.host();
@@ -181,11 +209,24 @@ fn scroll_forms_take_compose_named_arguments() {
             rule.advance_frame();
             h.pointer_move(top + Offset::new(0.0, 10.0 * i as f32), -1, 0);
         }
+        rule.advance_frame();
+        let held = progresses(&rule);
+        assert!(held.len() == 3 && held.contains(&0.0) && held.contains(&1.0), "{held:?}");
         rule.advance_time_by(200);
         h.pointer_up(top + Offset::new(0.0, 300.0), -1, 0);
         rule.wait_for_idle();
     }
     assert_eq!(refreshed.get(), 11);
+}
+
+/// The determinate progresses told to accessibility (the pull indicators'), in order.
+fn progresses(rule: &KompozTestRule) -> Vec<f32> {
+    use kompoz::ui::semantics::SemanticsProperties;
+    rule.all_nodes(true)
+        .iter()
+        .filter_map(|n| n.config().get(SemanticsProperties::ProgressBarRangeInfo))
+        .map(|p| p.current)
+        .collect()
 }
 
 // ---- C++ 8188: spacedBy with an alignment, spring, onFirstVisible, getOrNull, repeat --------------------------
@@ -300,6 +341,7 @@ kompoz! {
                 Column(modifier = Modifier.verticalScroll(scroll)) { Box(modifier = Modifier.size(10.dp, 500.dp)) }
                 VerticalScrollbar(adapter = rememberScrollbarAdapter(scroll), modifier = Modifier.fillMaxHeight().testTag("çubuk"))
             }
+            PullToRefreshBox(isRefreshing = false, onRefresh = {}, modifier = Modifier.size(50.dp)) { Text("içerik") }
         }
     }
 }
@@ -342,6 +384,12 @@ fn RustListForms(pages: MutableState<i32>, by_name: MutableState<i32>) {
                     );
                 },
             );
+            PullToRefreshBox(
+                is_refreshing = false,
+                on_refresh = || {},
+                modifier = Modifier.size(50.dp()),
+                content = || Text("rust içerik"),
+            );
         },
     );
 }
@@ -367,6 +415,7 @@ fn lists_pagers_and_scrollbars_take_compose_arguments() {
         let (header, wide) = (bounds(&rule, &format!("{prefix}başlık")), bounds(&rule, &format!("{prefix}hücre0")));
         assert!(near(header.width(), 300.0) && near(wide.width(), 200.0), "{prefix}: {header:?} {wide:?}");
         assert!(rule.on_node_with_tag(&format!("{prefix}çubuk")).exists());
+        assert!(rule.on_node_with_text(&format!("{prefix}içerik")).exists());
     }
     assert_eq!((pages.peek(), by_name.peek(), rust_pages.peek(), rust_by_name.peek()), (4, 1, 4, 1));
 }

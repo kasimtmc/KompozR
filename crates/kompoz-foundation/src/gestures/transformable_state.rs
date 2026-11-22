@@ -511,6 +511,6 @@ pub fn TransformableState(on_transformation: impl Fn(Offset, f32, Offset, f32) +
 pub fn remember_transformable_state(
     on_transformation: impl Fn(Offset, f32, Offset, f32) + 'static,
 ) -> DefaultTransformableState {
-    let lambda_state = remember_updated_state::<OnTransformation>(Rc::new(on_transformation));
+    let lambda_state = remember_updated_state!(Rc::new(on_transformation) as OnTransformation);
     remember(move || TransformableState(move |c, z, p, r| (lambda_state.get())(c, z, p, r)))
 }

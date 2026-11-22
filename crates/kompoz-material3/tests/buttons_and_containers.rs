@@ -592,20 +592,22 @@ fn subkompoz_layout_composes_slots_from_what_it_measured() {
 }
 
 fn semantics_tree_merges_buttons_and_performs_actions() {
-    // C++'s test's heading, Material Button with an Icon and a Text, TextField, scrolled column and AlertDialog (its
-    // Checkbox: WP2's; kompoz-ui's semantics.rs has the rest): one node to accessibility for the button, its icon's
-    // description and its text read together, clicked by the action; the field an editable node with its value,
-    // unfocused until its click focuses it, its id kept; the column scrolled forward by its action; a dialog on top.
+    // C++'s test's heading, Material Button with an Icon and a Text, Checkbox, TextField, scrolled column and
+    // AlertDialog (kompoz-ui's semantics.rs has the rest): one node to accessibility for the button, its icon's
+    // description and its text read together, clicked by the action; the checkbox a node of its role, checked, no
+    // label, unchecked by its click action; the field an editable node with its value, unfocused until its click
+    // focuses it, its id kept; the column scrolled forward by its action; a dialog on top.
     let clicks = Rc::new(Cell::new(0));
+    let checked = mutable_state_of(true);
     let scroll = ScrollState::new(0);
     let dialog = mutable_state_of(false);
-    let (c, s, d) = (clicks.clone(), scroll.clone(), dialog.clone());
+    let (c, k, s, d) = (clicks.clone(), checked.clone(), scroll.clone(), dialog.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (c, s, d) = (c.clone(), s.clone(), d.clone());
+        let (c, k, s, d) = (c.clone(), k.clone(), s.clone(), d.clone());
         Column(
             modifier = Modifier.fill_max_size().vertical_scroll(&s),
             content = move || {
-                let c = c.clone();
+                let (c, k) = (c.clone(), k.clone());
                 Text("Başlık", modifier = Modifier.semantics(|p| p.heading()));
                 Button(
                     move || c.set(c.get() + 1),
@@ -614,6 +616,7 @@ fn semantics_tree_merges_buttons_and_performs_actions() {
                         Text("Ekle");
                     },
                 );
+                Checkbox(k.get(), Some(Rc::new(move |v| k.set(v))));
                 StringTextField("merhaba", |_| {}, placeholder = Some(Rc::new(|| Text("yaz"))));
                 Box(modifier = Modifier.height(2000.dp()));
                 if d.get() {
@@ -626,12 +629,17 @@ fn semantics_tree_merges_buttons_and_performs_actions() {
     let tree = rule.host().accessibility_tree();
     let button = tree.iter().find(|n| n.role == Some(Role::Button)).cloned().expect("a button");
     let field = tree.iter().find(|n| n.editable).cloned().expect("a field");
+    let check = tree.iter().find(|n| n.role == Some(Role::Checkbox)).cloned().expect("a checkbox");
     assert!(button.label == "Artı Ekle" && button.clickable && button.enabled, "{button:?}");
     assert!(!tree.iter().any(|n| n.label == "Ekle")); // merged into the button
+    assert!(check.checked == Some(true) && check.label.is_empty(), "{check:?}");
     assert!(field.value == "merhaba" && !field.focused, "{field:?}");
     assert!(tree.iter().any(|n| n.heading && n.label == "Başlık"));
     let list = tree.iter().find(|n| n.scrollable).cloned().expect("the scrolled column");
     assert!(rule.host().perform_semantics_action(button.id, SemanticsAction::Click) && clicks.get() == 1);
+    assert!(rule.host().perform_semantics_action(check.id, SemanticsAction::Click));
+    rule.wait_for_idle();
+    assert!(!checked.peek());
     assert!(rule.host().perform_semantics_action(field.id, SemanticsAction::Click));
     rule.wait_for_idle();
     let again = rule.host().accessibility_tree();
@@ -683,12 +691,18 @@ fn semantics_merge_clear_and_hide() {
 }
 
 fn test_rule_assertions() {
-    // C++'s test's Material Buttons and Icon (its Checkbox: WP2's; kompoz-ui's test_rule.rs has the rest with
-    // semantics boxes): a disabled button has its click action but isn't enabled; an icon has none.
-    let rule = KompozTestRule::new(kompozable_lambda!(|| {
-        Column(|| {
+    // C++'s test's Material Buttons, Checkbox and Icon (kompoz-ui's test_rule.rs has the rest with semantics boxes):
+    // a disabled button has its click action but isn't enabled; the checkbox off, on once clicked, and asserting it
+    // off then fails as Compose's message says; an icon has no click action.
+    let ticked = mutable_state_of(false);
+    let t = ticked.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let t = t.clone();
+        Column(move || {
             Button(|| {}, content = || Text("Tamam"));
             Button(|| {}, enabled = false, content = || Text("Kapalı"));
+            let set = t.clone();
+            Checkbox(t.get(), Some(Rc::new(move |v| set.set(v))), modifier = Modifier.test_tag("box"));
             VectorIcon(Icons::Filled::Info(), Some("Bilgi".into()));
         });
     }));
@@ -699,6 +713,18 @@ fn test_rule_assertions() {
         .assert_text_equals(&["Tamam"]);
     rule.on_node_with_text("Kapalı").assert_has_click_action().assert_is_not_enabled();
     rule.on_node_with_content_description("Bilgi").assert_has_no_click_action();
+    rule.on_node_with_tag("box").assert_is_off();
+    rule.on_node_with_tag("box").perform_click();
+    rule.on_node_with_tag("box").assert_is_on();
+    assert!(ticked.peek());
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        rule.on_node_with_tag("box").assert_is_off();
+    }));
+    std::panic::set_hook(previous);
+    let message = failed.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+    assert!(message.contains("Failed to assert the following: (ToggleableState = 'Off')"), "{message}");
 }
 
 // ---- Buttons and containers together (area A) ----------------------------------------------------------------------

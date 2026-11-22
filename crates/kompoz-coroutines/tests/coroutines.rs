@@ -1328,7 +1328,7 @@ fn remember_updated_state_gives_effects_the_latest_value() {
     let seen = Rc::new(RefCell::new(String::new()));
     let (l, s) = (label.clone(), seen.clone());
     let rule = CoRule::new(kompozable_lambda!(move || {
-        let latest = remember_updated_state(l.get());
+        let latest = remember_updated_state!(l.get());
         let s = s.clone();
         LaunchedEffect(0, async move {
             // key 0: never restarts
@@ -1781,6 +1781,45 @@ fn a_scope_tells_its_completion_unless_disposed() {
     assert_eq!(taken(&log), ["at once"]);
 }
 
+fn a_job_tells_its_completion_unless_disposed() {
+    // Kotlin's `scope.launch { … }.invokeOnCompletion { … }` (material3's ModalBottomSheetSample: the sheet hidden,
+    // then its flag cleared): told once the job ends — completed, or cancelled (at once if it never ran) —; at once
+    // if it has ended already; not if disposed.
+    let d = Dispatcher::new();
+    let scope = CoroutineScope::new(&d);
+    let log = new_log();
+    let l = log.clone();
+    let job = scope.launch(async move {
+        push(&l, "ran");
+        r#yield().await;
+        push(&l, "resumed");
+    });
+    let l = log.clone();
+    job.invoke_on_completion(move || push(&l, "done"));
+    let l = log.clone();
+    job.invoke_on_completion(move || push(&l, "disposed")).dispose();
+    d.run_ready();
+    assert_eq!(taken(&log), ["ran", "resumed", "done"]);
+    let l = log.clone();
+    job.invoke_on_completion(move || push(&l, "at once"));
+    assert_eq!(taken(&log), ["at once"]);
+    // Cancelled before it ran: told when cancelled.
+    let l = log.clone();
+    let never = scope.launch(async move { push(&l, "never") });
+    let l = log.clone();
+    never.invoke_on_completion(move || push(&l, "cancelled"));
+    never.cancel();
+    d.run_ready();
+    assert_eq!(taken(&log), ["cancelled"]);
+    // Launched in a cancelled scope: ended already, told at once.
+    scope.cancel();
+    let l = log.clone();
+    let gone = scope.launch(async move { push(&l, "never") });
+    let l = log.clone();
+    gone.invoke_on_completion(move || push(&l, "gone"));
+    assert_eq!(taken(&log), ["gone"]);
+}
+
 fn a_frame_runs_its_callbacks_then_its_continuations() {
     // Compose's frame: the awaiters' `onFrame` run in the frame (BroadcastFrameClock.sendFrame), what they do after
     // is dispatched: it runs after the frame's composition and layout — before the coroutines the frame launched.
@@ -1922,6 +1961,7 @@ tests!(
     await_frame_end_resumes_after_the_frames_work,
     launch_starts_as_kotlins_coroutine_start_says,
     a_scope_tells_its_completion_unless_disposed,
+    a_job_tells_its_completion_unless_disposed,
     a_frame_runs_its_callbacks_then_its_continuations,
     mutexes_hand_themselves_to_coroutines_in_the_order_they_came,
     a_delay_of_long_max_value_waits_forever_without_a_timer,

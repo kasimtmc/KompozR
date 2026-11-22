@@ -39,6 +39,8 @@ impl Modifier {
     }
 
     /// The same showing `indication` (Compose's `selectable(selected, interactionSource, indication, …)`).
+    ///
+    /// Kotlin: `selectable(selected: Boolean, interactionSource: MutableInteractionSource?, indication: Indication?, enabled: Boolean = true, role: Role? = null, onClick: () -> Unit)`
     fn selectable_indication(
         self,
         selected: bool,

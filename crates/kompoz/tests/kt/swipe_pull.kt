@@ -1,8 +1,6 @@
 // Material's swipe to dismiss and pull to refresh as Compose's samples write them (material3 1.5's
 // SwipeToDismissSamples.kt), and the rest of their API as a Compose app writes it (SwipeForms, PullForms).
-// PullToRefreshSamples.kt's samples all compose a Scaffold with a TopAppBar (WP4a) and PullToRefreshBox /
-// PullToRefreshDefaults.Indicator / LoadingIndicator / LinearProgressIndicator / CircularProgressIndicator (WP2's
-// progress indicators): they come with those packages.
+// PullToRefreshSamples.kt's samples all compose a Scaffold with a TopAppBar (WP4a): they come with that package.
 
 @Preview
 @Sampled
@@ -74,14 +72,17 @@ fun SwipeForms() {
     }
 }
 
-// The pull-to-refresh API by name: Modifier.pullToRefresh with every parameter, an IndicatorBox of content of its
-// own with the defaults' colors and elevation, the remembered state and one made by its function, moved from code.
+// The pull-to-refresh API by name: Modifier.pullToRefresh with every parameter, the default Indicator and an
+// IndicatorBox of content of its own with the defaults' colors and elevation, the remembered state and one made by its
+// function, moved from code; a PullToRefreshBox with every parameter, its indicator the LoadingIndicator.
 @Composable
 fun PullForms() {
     var refreshing by remember { mutableStateOf(false) }
     var refreshes by remember { mutableStateOf(0) }
     val state = rememberPullToRefreshState()
     val other = remember { PullToRefreshState() }
+    var boxRefreshing by remember { mutableStateOf(false) }
+    val boxState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     Column {
         Box(
@@ -97,6 +98,14 @@ fun PullForms() {
             ).testTag("çekilir")
         ) {
             LazyColumn(modifier = Modifier.fillMaxSize()) { items(50) { Text("Satır $it", modifier = Modifier.height(50.dp)) } }
+            PullToRefreshDefaults.Indicator(
+                state = state,
+                isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopStart).testTag("ok"),
+                containerColor = PullToRefreshDefaults.indicatorContainerColor,
+                color = PullToRefreshDefaults.indicatorColor,
+                maxDistance = PullToRefreshDefaults.IndicatorMaxDistance,
+            )
             PullToRefreshDefaults.IndicatorBox(
                 state = state,
                 isRefreshing = refreshing,
@@ -115,5 +124,28 @@ fun PullForms() {
             }
         }) { Text("öbürü") }
         Text("yenileme $refreshes · ${(state.distanceFraction * 100).roundToInt()} · ${(other.distanceFraction * 100).roundToInt()} · ${state.isAnimating}")
+        PullToRefreshBox(
+            isRefreshing = boxRefreshing,
+            onRefresh = { boxRefreshing = true },
+            modifier = Modifier.fillMaxWidth().height(200.dp).testTag("kutu"),
+            state = boxState,
+            contentAlignment = Alignment.TopStart,
+            indicator = {
+                PullToRefreshDefaults.LoadingIndicator(
+                    state = boxState,
+                    isRefreshing = boxRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter).testTag("yükleme"),
+                    containerColor = PullToRefreshDefaults.loadingIndicatorContainerColor,
+                    color = PullToRefreshDefaults.loadingIndicatorColor,
+                    elevation = PullToRefreshDefaults.LoadingIndicatorElevation,
+                    maxDistance = PullToRefreshDefaults.IndicatorMaxDistance,
+                )
+            },
+            enabled = true,
+            threshold = 60.dp,
+        ) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) { items(20) { Text("Öğe $it", modifier = Modifier.height(50.dp)) } }
+        }
+        Text("kutu: $boxRefreshing")
     }
 }

@@ -157,6 +157,29 @@ impl Gen<'_, '_> {
                 let getter = ident(&snake(&name.name), self.span(name.loc));
                 quote_spanned!(span=> { let __kz_o = &#r; __kz_o.#setter(#kt::KtInc::#f(__kz_o.#getter())) })
             }
+            // `a[i]++`: Kotlin's `a.set(i, a.get(i).inc())`, the index evaluated once (a list's, a state list's; a
+            // map's `get` is nullable, its `m[k]++` no Kotlin)
+            ExprKind::Index { receiver, indices }
+                if indices.len() == 1
+                    && !matches!(self.peek_ty(receiver), Ty::Map(..) | Ty::String)
+                    && !super::expr::keyed_operator(&self.peek_ty(receiver), "get") =>
+            {
+                let ty = self.peek_ty(receiver);
+                let r = self.expr(receiver).ts;
+                let index = self.value(&indices[0]);
+                let i = self.fresh("i", span);
+                let v = self.fresh("v", span);
+                let set = match ty {
+                    // (a state list: its own `set`, taking `&self` and a `usize`)
+                    Ty::Named(n, _) if n == "SnapshotStateList" => quote_spanned!(span=> #r.set((#i) as usize, #v)),
+                    _ => quote_spanned!(span=> #kt::KtMutableList::set(&mut #r, #i, #v)),
+                };
+                quote_spanned!(span=> {
+                    let #i = #index;
+                    let #v = #kt::KtInc::#f(#kt::KtList::get(&#r, #i));
+                    #set;
+                })
+            }
             _ => self.later(loc, "`++`/`--` on this"),
         }
     }
@@ -222,11 +245,26 @@ impl Gen<'_, '_> {
                     let ety = match (&ty, k) {
                         (Ty::Pair(a, _), 0) => (**a).clone(),
                         (Ty::Pair(_, b), 1) => (**b).clone(),
+                        // (a state's value and its setter: `val (checked, onCheckedChange) = remember { … }`)
+                        (Ty::Named(n, a), 0) if n == "MutableState" && a.len() == 1 => a[0].clone(),
+                        (Ty::Named(n, a), 1) if n == "MutableState" && a.len() == 1 => Ty::Fun(Box::new(FunTy {
+                            params: vec![a[0].clone()],
+                            ret: Ty::Unit,
+                            receiver: None,
+                            suspend: false,
+                            shared: false,
+                        })),
                         _ => entry.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown),
                     };
                     let m = if mutable { quote_spanned!(span=> mut) } else { quote!() };
                     out.extend(quote_spanned!(span=> let #m #i = #d.#c();));
+                    // (a state's setter is a cloneable closure, not a `Copy` one: cloned when used as a value —
+                    // `onExpandedChange = setExpanded` and `{ setExpanded(false) }` both)
+                    let setter = k == 1 && matches!(&ty, Ty::Named(n, _) if n == "MutableState");
                     self.declare(&entry.name.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ety);
+                    if setter && let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&entry.name.name)) {
+                        l.shared_closure = true;
+                    }
                 }
                 out
             }
@@ -237,8 +275,10 @@ impl Gen<'_, '_> {
             (Binding::Name(n), PropertyInit::Delegate(d)) => {
                 let v = self.value(d);
                 // (its declared type what the delegate holds: `var checkedIndex: Int? by remember { mutableStateOf(null)
-                // }`, Rust told it where `null` alone can't)
-                let (ty, v) = match &p.ty {
+                // }`, Rust told it where `null` alone can't; a declared function type isn't one Rust can name: the
+                // delegate's own)
+                let declared = p.ty.as_ref().filter(|t| !matches!(self.ty_of(t), Ty::Fun(_)));
+                let (ty, v) = match declared {
                     Some(t) => {
                         let kt = self.kt(span);
                         let rt = self.rust_type(t, super::types::TypePos::Value);
@@ -295,9 +335,16 @@ impl Gen<'_, '_> {
                                 o
                             }
                         };
-                        let ty = match &declared {
-                            Some((t, _)) => t.clone(),
-                            None => o.ty.clone(),
+                        // (a shared closure kept under a declared function type is still one: `val t: (Float) ->
+                        // Float = SwipeToDismissBoxDefaults.positionalThreshold`)
+                        let ty = match (&declared, &o.ty) {
+                            (Some((Ty::Fun(d), _)), Ty::Fun(f)) if f.shared => {
+                                let mut d = d.clone();
+                                d.shared = true;
+                                Ty::Fun(d)
+                            }
+                            (Some((t, _)), _) => t.clone(),
+                            (None, _) => o.ty.clone(),
                         };
                         let wrap = matches!(&declared, Some((Ty::Nullable(_), _)))
                             && o.kind != OutKind::Null
@@ -320,9 +367,8 @@ impl Gen<'_, '_> {
                     }
                     PropertyInit::Delegate(_) => unreachable!(),
                 };
-                // (WP5: swipe to dismiss — a function value a call gave is an `Rc`: cloned when used as a value)
-                let shared_closure = matches!(ty, Ty::Fun(_))
-                    && matches!(init, PropertyInit::Value(e) if !matches!(e.kind, ExprKind::Lambda(_)));
+                // (a shared closure an API gave, an `Rc`: cloned when used as a value)
+                let shared_closure = matches!(&ty, Ty::Fun(f) if f.shared);
                 self.declare(&n.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
                 if shared_closure && let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
                     l.shared_closure = true;
@@ -468,6 +514,32 @@ impl Gen<'_, '_> {
                 }
                 let setter = ident(&format!("set_{}", snake(&name.name)), self.span(name.loc));
                 let read_ty = self.peek_ty(target);
+                // (a property of an API type taking a function — `state.onValueChange = { … }`, a nullable callback
+                // `Option<Rc<dyn Fn(f32)>>` —: its setter called as a call is, the lambda made what it takes)
+                let kotlin_setter = format!("set{}{}", name.name[..1].to_uppercase(), &name.name[1..]);
+                let takes_function = self.peek_ty(receiver).owner().is_some_and(|o| {
+                    members_of(o, &kotlin_setter).any(|i| i.params.len() == 1 && i.params[0].lambda.is_some())
+                });
+                if op == AssignOp::Assign && takes_function {
+                    let call = Expr {
+                        kind: ExprKind::Call {
+                            callee: Box::new(Expr {
+                                kind: ExprKind::Member {
+                                    receiver: Box::new(receiver.as_ref().clone()),
+                                    safe: false,
+                                    name: Ident { name: kotlin_setter, backticked: false, loc: name.loc },
+                                },
+                                loc: target.loc,
+                            }),
+                            type_args: Vec::new(),
+                            args: vec![Arg { name: None, spread: false, value: value.clone(), loc: value.loc }],
+                            trailing_lambda: None,
+                        },
+                        loc,
+                    };
+                    let c = self.expr(&call).ts;
+                    return quote_spanned!(span=> #c;);
+                }
                 let recv = self.expr(receiver);
                 if op == AssignOp::Assign {
                     let r = recv.ts;
@@ -914,11 +986,7 @@ fn continues(stmts: &[Stmt]) -> bool {
 fn state_value_ty(t: &Ty) -> Ty {
     match t {
         Ty::Named(n, a)
-            if a.len() == 1
-                && matches!(
-                    n.as_str(),
-                    "State" | "MutableState" | "DerivedState" | "UpdatedState" | "AnimationState"
-                ) =>
+            if a.len() == 1 && matches!(n.as_str(), "State" | "MutableState" | "DerivedState" | "AnimationState") =>
         {
             a[0].clone()
         }

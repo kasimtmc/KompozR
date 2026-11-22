@@ -179,7 +179,7 @@ fn value_as_state<T: AnimationValue, V: AnimationVector>(
 ) -> State<T> {
     let (initial, threshold) = (target_value.clone(), visibility_threshold.clone());
     let animatable = remember(move || Animatable::new(initial, type_converter, threshold, label));
-    let listener = remember_updated_state(finished_listener);
+    let listener = remember_updated_state!(finished_listener);
     let spec = match (&visibility_threshold, animation_spec.as_any().downcast_ref::<SpringSpec<T>>()) {
         (Some(threshold), Some(spring)) if spring.visibility_threshold.as_ref() != Some(threshold) => {
             let s: Arc<dyn AnimationSpec<T>> =
@@ -188,7 +188,7 @@ fn value_as_state<T: AnimationValue, V: AnimationVector>(
         }
         _ => animation_spec,
     };
-    let anim_spec = remember_updated_state(spec);
+    let anim_spec = remember_updated_state!(spec);
     let channel: Channel<T> = remember(Channel::conflated);
     let ch = channel.clone();
     SideEffect(move || {

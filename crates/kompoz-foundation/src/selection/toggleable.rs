@@ -49,6 +49,8 @@ impl Modifier {
     }
 
     /// The same showing `indication` (Compose's `toggleable(value, interactionSource, indication, …)`).
+    ///
+    /// Kotlin: `toggleable(value: Boolean, interactionSource: MutableInteractionSource?, indication: Indication?, enabled: Boolean = true, role: Role? = null, onValueChange: (Boolean) -> Unit)`
     fn toggleable_indication(
         self,
         value: bool,
@@ -105,6 +107,8 @@ impl Modifier {
     }
 
     /// The same showing `indication` (Compose's `triStateToggleable(state, interactionSource, indication, …)`).
+    ///
+    /// Kotlin: `triStateToggleable(state: ToggleableState, interactionSource: MutableInteractionSource?, indication: Indication?, enabled: Boolean = true, role: Role? = null, onClick: () -> Unit)`
     fn tri_state_toggleable_indication(
         self,
         state: ToggleableState,

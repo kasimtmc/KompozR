@@ -437,16 +437,21 @@ impl Density {
     pub fn to_sp(&self, px: f32) -> TextUnit {
         TextUnit::new(px / self.density / self.font_scale, TextUnitType::Sp)
     }
-    /// `dpSize.toSize()`.
+    /// `dpSize.toSize()` (Compose's member extension `DpSize.toSize()` of Density, the size its parameter).
+    /// Kotlin: `toSize(size: DpSize)`
     pub fn size_to_px(&self, size: DpSize) -> Size {
         Size::new(self.to_px(size.width), self.to_px(size.height))
     }
+    /// `size.toDpSize()`.
+    /// Kotlin: `toDpSize(size: Size)`
     pub fn size_to_dp(&self, size: Size) -> DpSize {
         DpSize::new(self.to_dp(size.width), self.to_dp(size.height))
     }
     pub fn offset_to_px(&self, offset: DpOffset) -> Offset {
         Offset::new(self.to_px(offset.x), self.to_px(offset.y))
     }
+    /// `dpRect.toRect()`.
+    /// Kotlin: `toRect(rect: DpRect)`
     pub fn rect_to_px(&self, rect: DpRect) -> Rect {
         Rect::new(self.to_px(rect.left), self.to_px(rect.top), self.to_px(rect.right), self.to_px(rect.bottom))
     }

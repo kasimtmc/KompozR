@@ -91,7 +91,8 @@ impl<'a> DrawScope<'a> {
         color_filter: Option<&ColorFilter>,
         blend_mode: BlendMode,
     ) {
-        if path.is_empty() || alpha <= 0.0 {
+        // (Skia's SkCanvas::onDrawPath: a path of a point that isn't finite draws nothing)
+        if path.is_empty() || !path.is_finite() || alpha <= 0.0 {
             return;
         }
         let b = brush.faded(alpha);
@@ -443,11 +444,7 @@ impl<'a> DrawScope<'a> {
         #[default(None)] color_filter: Option<ColorFilter>,
         #[default(DefaultBlendMode)] blend_mode: BlendMode,
     ) {
-        let r = Rect::from_center(self.origin + center, radius);
-        let brush = brush.into();
-        let stroke = style.path_stroke();
-        let corner = CornerRadius::circular(radius);
-        self.paint_round_rect(r, corner, &brush, alpha, &stroke, color_filter.as_ref(), blend_mode, true);
+        self.draw_circle_with(brush, radius, center, alpha, style, color_filter, blend_mode);
     }
 
     /// The oval in a rect (Compose's drawOval).
@@ -651,6 +648,12 @@ impl<'a> DrawScope<'a> {
         color_filter: Option<ColorFilter>,
         blend_mode: BlendMode,
     ) {
+        // (Skia's drawCircle, Compose's on Android and the desktop: a negative radius is 0, and a filled circle of
+        // no size draws nothing — a radio button's dot shrinking past its ring's half width)
+        let radius = radius.max(0.0);
+        if radius == 0.0 && !style.is_stroke() {
+            return;
+        }
         let r = Rect::from_center(self.origin + center, radius);
         let brush = brush.into();
         let stroke = style.path_stroke();

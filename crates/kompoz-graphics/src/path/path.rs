@@ -207,6 +207,17 @@ impl Path {
         self.commands.is_empty()
     }
 
+    /// Whether all its points are finite (Skia's SkPath::isFinite: a canvas draws nothing of one that isn't).
+    pub fn is_finite(&self) -> bool {
+        let finite = |p: Offset| p.x.is_finite() && p.y.is_finite();
+        self.commands.iter().all(|c| match *c {
+            PathCommand::Move(p) | PathCommand::Line(p) => finite(p),
+            PathCommand::Quadratic(c1, p) | PathCommand::Conic(c1, p, _) => finite(c1) && finite(p),
+            PathCommand::Cubic(c1, c2, p) => finite(c1) && finite(c2) && finite(p),
+            PathCommand::Close => true,
+        })
+    }
+
     /// One contour that turns one way all round (Skia's: lines and points are convex too).
     pub fn is_convex(&self) -> bool {
         curves::convex(&self.commands)

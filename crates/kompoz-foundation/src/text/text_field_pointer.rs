@@ -50,7 +50,7 @@ pub fn tap_press_text_field_modifier(
             }
             let scope: CoroutineScope = remember_coroutine_scope();
             let pressed_interaction: PressedInteraction = remember(|| Rc::new(Cell::new(None)));
-            let on_tap_state = remember_updated_state::<Rc<dyn Fn(Offset)>>(Rc::new(on_tap));
+            let on_tap_state = remember_updated_state!(Rc::new(on_tap) as Rc<dyn Fn(Offset)>);
             {
                 let (pressed, source) = (pressed_interaction.clone(), interaction_source.clone());
                 DisposableEffect(interaction_source.clone(), move || {

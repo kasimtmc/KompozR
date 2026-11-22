@@ -25,15 +25,14 @@ use crate::overscroll::OverscrollEffect;
 use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_graphics::IntOffset;
 use kompoz_runtime::{
-    DerivedState, KompozitionLocalProvider, MutableState, derived_state_of, derived_state_of_with_policy, kompozable,
-    kompozable_block, mutable_state_of, never_equal_policy, remember, remember_keyed, without_read_observation,
+    DerivedState, KompozitionLocalProvider, derived_state_of, derived_state_of_with_policy, kompozable,
+    kompozable_block, never_equal_policy, remember_keyed, remember_updated_state, without_read_observation,
 };
 use kompoz_ui::layout::SlotKey;
 use kompoz_ui::platform::{LocalPlatform, PlatformHandle};
 use kompoz_ui::semantics::CollectionInfo;
 use kompoz_ui::{Constraints, HorizontalAlignment, MeasureResult, Modifier, VerticalAlignment};
 use std::any::Any;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -109,24 +108,6 @@ impl LazyListItemProvider for LazyListItemProviderImpl {
     }
 }
 
-/// The block a list was last composed with, read as a state.
-struct LatestContent {
-    content: RefCell<Option<Rc<dyn for<'a> Fn(&'a mut LazyListScope)>>>,
-    generation: MutableState<u64>,
-}
-
-impl LatestContent {
-    fn set(&self, content: Rc<dyn for<'a> Fn(&'a mut LazyListScope)>) {
-        *self.content.borrow_mut() = Some(content);
-        self.generation.set(self.generation.peek().wrapping_add(1));
-    }
-
-    fn get(&self) -> Rc<dyn for<'a> Fn(&'a mut LazyListScope)> {
-        self.generation.get();
-        self.content.borrow().clone().expect("the list's block")
-    }
-}
-
 /// The list's items as the layout reads them (Compose's `rememberLazyListItemProviderLambda`): derived from the
 /// block (run again when what it reads changes) and the range of keys around the first visible item.
 #[kompozable]
@@ -134,10 +115,7 @@ fn remember_lazy_list_item_provider_lambda(
     state: LazyListState,
     content: Rc<dyn for<'a> Fn(&'a mut LazyListScope)>,
 ) -> (ItemProviderLambda, Rc<dyn Fn() -> Rc<dyn LazyListItemProvider>>) {
-    // (Compose's `rememberUpdatedState(content)`, a state: the derived content reads it, made again when it changes)
-    let latest_content =
-        remember(|| Rc::new(LatestContent { content: RefCell::new(None), generation: mutable_state_of(0) }));
-    latest_content.set(content);
+    let latest_content = remember_updated_state!(content);
     remember_keyed(state.clone(), move || {
         let scope = LazyItemScopeImpl::default();
         let interval_content_state: DerivedState<Rc<LazyListScope>> =

@@ -46,8 +46,9 @@ fn fails(f: impl FnOnce(), message: &str) {
 // Ported from C++
 
 fn test_rule_assertions() {
-    // C++'s test_rule_assertions: semantics boxes for its buttons, checkbox and icon (Material is stage 12's); its
-    // scrolling column a vertical_scroll. Compose's messages.
+    // C++'s test_rule_assertions: semantics boxes for its buttons, checkbox and icon (its Material ones are
+    // kompoz-material3 buttons_and_containers.rs' test of this name); its scrolling column a vertical_scroll.
+    // Compose's messages.
     let ticked = mutable_state_of(false);
     let scroll = ScrollState::new(0);
     let (t, sc) = (ticked.clone(), scroll.clone());

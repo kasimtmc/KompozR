@@ -246,6 +246,6 @@ pub fn Scrollable2DState(consume_scroll_delta: impl Fn(Offset) -> Offset + 'stat
 pub fn remember_scrollable2d_state(
     consume_scroll_delta: impl Fn(Offset) -> Offset + 'static,
 ) -> DefaultScrollable2DState {
-    let lambda_state = remember_updated_state::<Rc<dyn Fn(Offset) -> Offset>>(Rc::new(consume_scroll_delta));
+    let lambda_state = remember_updated_state!(Rc::new(consume_scroll_delta) as Rc<dyn Fn(Offset) -> Offset>);
     remember(move || Scrollable2DState(move |delta| (lambda_state.get())(delta)))
 }

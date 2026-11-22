@@ -627,6 +627,55 @@ fn scroll_actions_page_by_the_viewport() {
     rule.on_node_with_tag("liste").assert(has_scroll_action());
 }
 
+fn disabled_nodes_offer_and_take_no_actions_but_selection_and_copy() {
+    // Compose's accessibility delegate: a disabled node keeps its actions in its configuration, but accessibility
+    // isn't offered set-progress on it and can't perform anything on it but setting a selection and copying.
+    let done = Rc::new(RefCell::new(Vec::<String>::new()));
+    let enabled = mutable_state_of(false);
+    let (d, e) = (done.clone(), enabled.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (d, on) = (d.clone(), e.get());
+        Box(Modifier.size(10.dp()).test_tag("kapalı").semantics(move |c| {
+            if !on {
+                c.disabled();
+            }
+            c.set_progress_bar_range_info(ProgressBarRangeInfo::new(0.5, 0.0..=1.0, 0));
+            let d1 = d.clone();
+            c.set_progress(None, move |v| {
+                d1.borrow_mut().push(format!("ilerleme {v}"));
+                true
+            });
+            let d2 = d.clone();
+            c.on_click(None, move || {
+                d2.borrow_mut().push("tık".to_string());
+                true
+            });
+            let d3 = d.clone();
+            c.copy_text(None, move || {
+                d3.borrow_mut().push("kopya".to_string());
+                true
+            });
+        }));
+    }));
+    let node =
+        || rule.host().accessibility_tree().into_iter().find(|n| n.test_tag.as_deref() == Some("kapalı")).unwrap();
+    let n = node();
+    assert!(!n.enabled && !n.settable && n.range.is_some() && n.clickable);
+    // (still in its configuration)
+    assert!(rule.on_node_with_tag("kapalı").fetch_semantics_node().config().contains(SemanticsActions::SetProgress));
+    assert!(!rule.host().perform_semantics_action(n.id, SemanticsAction::SetProgress(0.2)));
+    assert!(!rule.host().perform_semantics_action(n.id, SemanticsAction::Click));
+    assert!(rule.host().perform_semantics_action(n.id, SemanticsAction::CopyText));
+    assert_eq!(*done.borrow(), ["kopya"]);
+    enabled.set(true);
+    rule.wait_for_idle();
+    let n = node();
+    assert!(n.enabled && n.settable);
+    assert!(rule.host().perform_semantics_action(n.id, SemanticsAction::SetProgress(0.2)));
+    assert!(rule.host().perform_semantics_action(n.id, SemanticsAction::Click));
+    assert_eq!(*done.borrow(), ["kopya", "ilerleme 0.2", "tık"]);
+}
+
 tests!(
     semantics_set_on_a_receiver,
     semantics_merge_clear_and_hide,
@@ -639,4 +688,5 @@ tests!(
     listeners_are_told_of_changes_after_the_frame,
     reading_order_groups_rows_and_follows_traversal_groups,
     scroll_actions_page_by_the_viewport,
+    disabled_nodes_offer_and_take_no_actions_but_selection_and_copy,
 );

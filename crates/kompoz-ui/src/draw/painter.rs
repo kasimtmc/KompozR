@@ -30,9 +30,9 @@ use std::rc::Rc;
 
 /// Something drawn into whatever size it is given (Compose's Painter): its intrinsic size (unspecified: none, as a
 /// color's) sizes `Image` and `Modifier.paint`. A painter that fades itself (`applies_alpha`) or filters its colors
-/// itself (`applies_color_filter`) is given the alpha and the filter; for one that doesn't, [`draw`](dyn
-/// Painter::draw) draws it through a layer of them. Built-in painters are equal when what they draw is; others only
-/// to themselves (`painter_eq`).
+/// itself (`applies_color_filter`) is given the alpha and the filter; for one that doesn't, [`draw`](Painter::draw)
+/// draws it through a layer of them. Built-in painters are equal when what they draw is; others only to themselves
+/// (`painter_eq`).
 pub trait Painter: Any {
     /// Its size where nothing else gives one, px (`Size::Unspecified`: none).
     fn intrinsic_size(&self) -> Size;
@@ -47,30 +47,11 @@ pub trait Painter: Any {
     fn applies_color_filter(&self) -> bool {
         false
     }
-    fn as_any(&self) -> &dyn Any;
-    /// Whether it draws what `other` draws (by default: it is `other`).
-    fn painter_eq(&self, other: &dyn Painter) -> bool {
-        std::ptr::eq(self.as_any() as *const dyn Any as *const (), other.as_any() as *const dyn Any as *const ())
-    }
-}
-
-impl PartialEq for dyn Painter {
-    fn eq(&self, other: &dyn Painter) -> bool {
-        self.painter_eq(other)
-    }
-}
-
-impl fmt::Debug for dyn Painter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Painter(intrinsic_size={:?})", self.intrinsic_size())
-    }
-}
-
-impl dyn Painter {
-    /// Draws it into the top left `size` of `scope` (Compose's Painter.draw): faded by `alpha` and through
-    /// `color_filter`, by itself where it applies them, else through a layer of them; nothing for an alpha of 0 or
-    /// an empty size.
-    pub fn draw(&self, scope: &mut DrawScope<'_>, size: Size, alpha: f32, color_filter: Option<&ColorFilter>) {
+    /// Draws it into the top left `size` of `scope` (Compose's member extension `DrawScope.draw` of Painter, the
+    /// scope its first parameter): faded by `alpha` and through `color_filter`, by itself where it applies them,
+    /// else through a layer of them; nothing for an alpha of 0 or an empty size.
+    /// Kotlin: `draw(size: Size, alpha: Float = DefaultAlpha, colorFilter: ColorFilter? = null)`
+    fn draw(&self, scope: &mut DrawScope<'_>, size: Size, alpha: f32, color_filter: Option<&ColorFilter>) {
         let (right, bottom) = (scope.size.width - size.width, scope.size.height - size.height);
         scope.inset(0.0, 0.0, right, bottom, |s| {
             if !(alpha > 0.0 && size.width > 0.0 && size.height > 0.0) {
@@ -96,6 +77,23 @@ impl dyn Painter {
                 self.on_draw(s, own_alpha, own_filter);
             }
         });
+    }
+    fn as_any(&self) -> &dyn Any;
+    /// Whether it draws what `other` draws (by default: it is `other`).
+    fn painter_eq(&self, other: &dyn Painter) -> bool {
+        std::ptr::eq(self.as_any() as *const dyn Any as *const (), other.as_any() as *const dyn Any as *const ())
+    }
+}
+
+impl PartialEq for dyn Painter {
+    fn eq(&self, other: &dyn Painter) -> bool {
+        self.painter_eq(other)
+    }
+}
+
+impl fmt::Debug for dyn Painter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Painter(intrinsic_size={:?})", self.intrinsic_size())
     }
 }
 

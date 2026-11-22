@@ -14,7 +14,7 @@ use kompoz_graphics::{
     BlendMode, CircleShape, Color, ColorFilter, Dp, ImageVector, PathFillType, SolidColor, StrokeCap, StrokeJoin,
     UnitExt, VectorPath, add_path_nodes,
 };
-use kompoz_runtime::{Content, UpdatedState, key, kompozable, remember_updated_state};
+use kompoz_runtime::{Content, State, key, kompozable, remember_updated_state};
 use kompoz_text::style::line_height_style::{Alignment as LineAlignment, Mode, Trim};
 use kompoz_text::{FontWeight, LineHeightStyle, TextOverflow, TextStyle};
 use kompoz_ui::input::{AwaitPointerEventScope, PointerButton, PointerEvent, PointerEventType, PointerInputScope};
@@ -153,7 +153,7 @@ fn title_small(color: Color) -> TextStyle {
 /// The bar's gestures: a drag moves the window (from where it passed the slop), a double click (the primary
 /// button's, or a finger's) maximizes or restores it, the secondary button's press opens the window manager's menu
 /// there. `act` is read as it is when each comes.
-fn bar_gestures(modifier: Modifier, act: UpdatedState<WindowActions>) -> Modifier {
+fn bar_gestures(modifier: Modifier, act: State<WindowActions>) -> Modifier {
     let (drag, tap, menu) = (act.clone(), act.clone(), act);
     modifier
         .pointer_input(0, move |s: PointerInputScope| {
@@ -241,7 +241,7 @@ fn Bar(bar: TitleBar, title: String, act: WindowActions) {
     let side = Dp(TITLE_BAR_GAP.0 + most as f32 * (TITLE_BAR_BUTTON.0 + TITLE_BAR_GAP.0));
     let gestures = bar_gestures(
         Modifier.layout_id(TITLE_BAR_ID).fill_max_width().height(TITLE_BAR_HEIGHT).background(colors.surface_container),
-        remember_updated_state(act.clone()),
+        remember_updated_state!(act.clone()),
     );
     let color = if focused { colors.on_surface } else { colors.on_surface_variant };
     Box(

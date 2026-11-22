@@ -33,9 +33,10 @@ pub fn Grid(
     layout_into(modifier, grid_measure_policy(config), false, content);
 }
 
-/// A Grid's policy. Compose keeps one policy reading `rememberUpdatedState(config)` as it measures; such a state
-/// isn't observed by a layout here, so the policy is kept by the memoized config's identity instead: the same
-/// closure (the same captures) keeps it, and the Grid isn't measured again; a new one makes a new policy, which
+/// A Grid's policy. Compose keeps one policy reading `rememberUpdatedState(config)` as it measures, measured again
+/// when a config unequal to the last one comes; a closure has no `==` here (an updated state of it would change at
+/// every composition), so the policy is kept by the memoized config's identity, Compose's equality of a lambda: the
+/// same closure (the same captures) keeps it, and the Grid isn't measured again; a new one makes a new policy, which
 /// measures it again (what Compose's state read does).
 #[track_caller]
 fn grid_measure_policy<F: Fn(&mut GridConfigurationScope) + 'static>(config: Memoized<F>) -> Rc<dyn MeasurePolicy> {

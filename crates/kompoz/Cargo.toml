@@ -197,6 +197,19 @@ harness = false
 name = "kotlin_navigation"
 harness = false
 
+# Material's selection controls in Kotlin's syntax (NamedHeads' checkbox; material3's Checkbox, TriStateCheckbox,
+# RadioButton and Switch samples and XDefaults.colors(…) from a .kt file; the sliders: the C++ Expressive source's
+# and material3's SliderSamples).
+[[test]]
+name = "kotlin_controls"
+harness = false
+
+# Material's progress indicators in Kotlin's syntax (the progress lines of the C++ MaterialForms and GraphicsForms;
+# material3's ProgressIndicatorSamples from a .kt file; the deprecated forms and the defaults by name).
+[[test]]
+name = "kotlin_progress"
+harness = false
+
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
 [[test]]
 name = "kotlin_animations_all"

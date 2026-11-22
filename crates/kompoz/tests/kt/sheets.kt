@@ -1,6 +1,6 @@
 // Material's bottom sheets as Compose's samples write them (material3 1.5's BottomSheetSamples.kt and
-// DragHandleSamples.kt). ModalBottomSheetSample composes a Checkbox (WP2) and an OutlinedTextField (WP3),
-// BottomSheetScaffoldNestedScrollSample a TopAppBar with its scroll behavior (WP4a): they come with those packages.
+// DragHandleSamples.kt). BottomSheetScaffoldNestedScrollSample composes a TopAppBar with its scroll behavior (WP4a):
+// it comes with that package.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Sampled
@@ -45,6 +45,93 @@ fun ManualModalBottomSheetSample() {
             sheetState.show()
         } else {
             sheetState.hide()
+        }
+    }
+}
+
+@Preview
+@Sampled
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModalBottomSheetSample() {
+    var openBottomSheet by rememberSaveable { mutableStateOf(false) }
+    var skipPartiallyExpanded by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val bottomSheetState =
+        rememberModalBottomSheetState(skipPartiallyExpanded = skipPartiallyExpanded)
+
+    // App content
+    Column(
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            Modifier.toggleable(
+                value = skipPartiallyExpanded,
+                role = Role.Checkbox,
+                onValueChange = { checked -> skipPartiallyExpanded = checked },
+            )
+        ) {
+            Checkbox(checked = skipPartiallyExpanded, onCheckedChange = null)
+            Spacer(Modifier.width(16.dp))
+            Text("Skip partially expanded State")
+        }
+        Button(
+            onClick = { openBottomSheet = !openBottomSheet },
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        ) {
+            Text(text = "Show Bottom Sheet")
+        }
+    }
+
+    // Sheet content
+    if (openBottomSheet) {
+
+        ModalBottomSheet(
+            onDismissRequest = { openBottomSheet = false },
+            sheetState = bottomSheetState,
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Button(
+                    // Note: If you provide logic outside of onDismissRequest to remove the sheet,
+                    // you must additionally handle intended state cleanup, if any.
+                    onClick = {
+                        scope
+                            .launch { bottomSheetState.hide() }
+                            .invokeOnCompletion {
+                                if (!bottomSheetState.isVisible) {
+                                    openBottomSheet = false
+                                }
+                            }
+                    }
+                ) {
+                    Text("Hide Bottom Sheet")
+                }
+            }
+            var text by remember { mutableStateOf("") }
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.padding(horizontal = 16.dp),
+                label = { Text("Text field") },
+            )
+            LazyColumn {
+                items(25) {
+                    ListItem(
+                        headlineContent = { Text("Item $it") },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.Favorite,
+                                contentDescription = "Localized description",
+                            )
+                        },
+                        colors =
+                            ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                            ),
+                    )
+                }
+            }
         }
     }
 }

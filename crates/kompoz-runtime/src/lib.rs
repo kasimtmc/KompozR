@@ -32,6 +32,7 @@ mod snapshot;
 mod state;
 mod state_observer;
 
+pub use crate::__remember_updated_state as remember_updated_state;
 pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
 pub use composer::{
     Composition, Content, Node, PausableComposition, RecompositionStats, RememberObserver, ReusableComposition,
@@ -51,9 +52,9 @@ pub use local::{
 pub use movable::{MovableContent, MovableContentOf, movable_content_of, movable_content_with_param_of};
 pub use read::{observe_reads, record_read, without_read_observation};
 pub use remember::{
-    DisposableEffect, DisposableEffectResult, Memoized, SideEffect, UpdatedState, current_composite_key_hash, emit,
-    frame_time_nanos, group, in_composition, key, on_dispose, remember, remember_keyed, remember_observer,
-    remember_observer_keyed, remember_updated_state, request_frame, request_frame_at, restartable, scoped,
+    DisposableEffect, DisposableEffectResult, Memoized, SideEffect, current_composite_key_hash, emit, frame_time_nanos,
+    group, in_composition, key, on_dispose, remember, remember_keyed, remember_observer, remember_observer_keyed,
+    request_frame, request_frame_at, restartable, scoped,
 };
 pub use saveable::{
     LocalSaveableStateRegistry, ProvideSaveableStateRegistry, SaveableStateHolder, SaveableStateRegistry,

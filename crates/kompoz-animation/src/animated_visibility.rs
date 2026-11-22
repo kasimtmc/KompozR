@@ -365,7 +365,7 @@ pub(crate) fn animated_enter_exit_impl<S: AnimationValue>(
             // it keeps the exit's ends)
             let active_enter = track_active_enter(&child_transition, enter);
             let active_exit = track_active_exit(&child_transition, exit);
-            let should_dispose_updated = remember_updated_state(should_dispose_block.clone());
+            let should_dispose_updated = remember_updated_state!(should_dispose_block.clone());
             let initial = should_dispose_block(child_transition.current_state(), child_transition.target_state());
             let child = child_transition.clone();
             let should_dispose_after_exit = produce_state(initial, (), move |state| {

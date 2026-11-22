@@ -51,7 +51,7 @@ pub fn LazyLayout(
     #[default(None)] prefetch_state: Option<LazyLayoutPrefetchState>,
     measure_policy: Rc<dyn LazyLayoutMeasurePolicy>,
 ) {
-    let current_item_provider = remember_updated_state(item_provider);
+    let current_item_provider = remember_updated_state!(item_provider);
     LazySaveableStateHolderProvider(move |saveable_state_holder: Rc<LazySaveableStateHolder>| {
         let current_item_provider = current_item_provider.clone();
         let item_content_factory = remember(move || {

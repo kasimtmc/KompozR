@@ -1,9 +1,9 @@
 //! Material's swipe to dismiss and pull to refresh as Compose's material3 (1.5.0-alpha17) has them: the C++
 //! Kompoz's tests by name (kompoz_tests.cpp; M15's behaviour where the C++ differed, said at each), Compose's
 //! behaviour (the state's values, constructors and savers, the directions allowed, the fling, the callback; the
-//! pull's state, its taking and giving back of scrolls, the indicator box, the defaults), and the M15 sample of
-//! SwipeToDismissSamples.kt. (PullToRefreshSamples.kt's samples compose WP4a's Scaffold and TopAppBar and WP2's
-//! progress indicators: they come with those packages.)
+//! pull's state, its taking and giving back of scrolls, the box, the indicators and their box, the defaults), and
+//! the M15 sample of SwipeToDismissSamples.kt. (PullToRefreshSamples.kt's samples compose WP4a's Scaffold and
+//! TopAppBar: they come with that package.)
 
 #![allow(non_snake_case, non_upper_case_globals, deprecated)]
 
@@ -20,6 +20,7 @@ use kompoz_runtime::*;
 use kompoz_test::KompozTestRule;
 use kompoz_ui::input::PointerType;
 use kompoz_ui::platform::LocalLayoutDirection;
+use kompoz_ui::semantics::{ProgressBarRangeInfo, SemanticsProperties};
 use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -35,14 +36,20 @@ tests!(
     swipe_to_dismiss_box_calls_on_dismiss_once_settled,
     swipe_to_dismiss_list_items_sample,
     // (pull to refresh)
+    pull_to_refresh_refreshes_past_the_threshold,
+    pull_to_refresh_goes_back_in_before_the_list_scrolls,
     pull_to_refresh_modifier_slows_past_the_threshold_and_can_be_turned_off,
+    pull_to_refresh_box_can_be_turned_off,
     pull_to_refresh_ignores_pulls_while_its_state_animates,
     pull_to_refresh_lets_an_animation_the_app_starts_win_over_the_finger,
     pull_to_refresh_keeps_a_fling_down_from_the_list,
     pull_to_refresh_starts_where_is_refreshing_says,
     pull_to_refresh_states_animate_snap_and_save_their_fraction,
     pull_to_refresh_takes_a_pull_only_from_the_start_and_by_the_user,
+    pull_to_refresh_indicator_comes_out_from_under_the_top_edge,
     pull_to_refresh_indicator_boxes_come_out_from_under_the_top_edge,
+    pull_to_refresh_loading_indicator_morphs_with_the_pull_and_turns_past_it,
+    pull_to_refresh_box_takes_an_indicator_of_its_own,
     pull_to_refresh_defaults_follow_the_tokens,
 );
 
@@ -544,11 +551,6 @@ fn swipe_to_dismiss_list_items_sample() {
 }
 
 // ---- Pull to refresh ------------------------------------------------------------------------------------------------
-//
-// (The C++'s pull_to_refresh_refreshes_past_the_threshold, pull_to_refresh_goes_back_in_before_the_list_scrolls,
-// pull_to_refresh_box_can_be_turned_off and pull_to_refresh_indicator_comes_out_from_under_the_top_edge compose
-// PullToRefreshBox / PullToRefreshDefaults.Indicator, whose refreshing branch is WP2's CircularProgressIndicator: they
-// come with it. The indicator's arrow is checked by the unit test in src/pulltorefresh.rs.)
 
 /// The touch slop (KompozR's and Compose's 8 dp; the C++'s was 10).
 const Slop: f32 = 8.0;
@@ -608,9 +610,105 @@ fn at(x: f32, y: f32) -> Offset {
     Offset::new(x, y)
 }
 
+/// Whether an endless progress is shown to accessibility (Compose's indeterminate CircularProgressIndicator: M15 gives
+/// the refreshing indicator no "Refreshing" description, the C++'s, but an indeterminate ProgressBarRangeInfo).
+fn endless_progress_shown(rule: &KompozTestRule) -> bool {
+    rule.all_nodes(true)
+        .iter()
+        .any(|n| n.config().get(SemanticsProperties::ProgressBarRangeInfo) == Some(ProgressBarRangeInfo::Indeterminate))
+}
+
+/// A 400 × 800 window of a PullToRefreshBox around the C++ tests' list, refreshing as `refreshing` says, its
+/// remembered state put in `state`, `on_refresh` called on a refresh.
+fn pulled_box(
+    refreshing: MutableState<bool>,
+    list: LazyListState,
+    state: Slot<Rc<dyn PullToRefreshState>>,
+    on_refresh: impl Fn() + 'static,
+) -> KompozTestRule {
+    let on_refresh = Rc::new(on_refresh);
+    KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let s = remember_pull_to_refresh_state();
+            *state.borrow_mut() = Some(s.clone());
+            let (on_refresh, list) = (on_refresh.clone(), list.clone());
+            PullToRefreshBox(
+                refreshing.get(),
+                move || on_refresh(),
+                modifier = Modifier.fill_max_size(),
+                state = s,
+                content = move || Rows(Some(list.clone()), "list".to_string()),
+            );
+        }),
+        IntSize::new(400, 800),
+    )
+}
+
+fn pull_to_refresh_refreshes_past_the_threshold() {
+    let refreshing = mutable_state_of(false);
+    let refreshes = Rc::new(Cell::new(0));
+    let list = LazyListState::new(0, 0);
+    let state = slot::<Rc<dyn PullToRefreshState>>();
+    let rule = {
+        let (r, refreshes) = (refreshing.clone(), refreshes.clone());
+        pulled_box(refreshing.clone(), list.clone(), state.clone(), move || {
+            refreshes.set(refreshes.get() + 1);
+            r.set(true);
+        })
+    };
+    let fraction = || get(&state).distance_fraction();
+    // 100 dp of pull (92 past the slop, the indicator half that: 46 dp): short of 80 dp, it springs back.
+    slow_drag20(&rule, at(200.0, 100.0), at(200.0, 200.0));
+    rule.wait_for_idle();
+    assert!(refreshes.get() == 0 && fraction() == 0.0, "{}", fraction());
+    // 300 dp: past it. One refresh; the indicator waits at the threshold, spinning, until it's done.
+    slow_drag20(&rule, at(200.0, 100.0), at(200.0, 400.0));
+    assert!(refreshes.get() == 1 && refreshing.peek());
+    rule.wait_for_idle();
+    assert!((fraction() - 1.0).abs() < 0.001 && endless_progress_shown(&rule), "{}", fraction());
+    refreshing.set(false);
+    rule.wait_for_idle();
+    assert!(fraction() == 0.0 && !endless_progress_shown(&rule));
+    // Scrolled down, a drag down scrolls the list back instead.
+    slow_drag20(&rule, at(200.0, 600.0), at(200.0, 100.0));
+    rule.wait_for_idle();
+    let index = list.first_visible_item_index();
+    assert!(index > 5, "{index}");
+    slow_drag20(&rule, at(200.0, 200.0), at(200.0, 350.0));
+    rule.wait_for_idle();
+    assert!(list.first_visible_item_index() < index && fraction() == 0.0 && refreshes.get() == 1);
+}
+
+fn pull_to_refresh_goes_back_in_before_the_list_scrolls() {
+    let list = LazyListState::new(0, 0);
+    let state = slot::<Rc<dyn PullToRefreshState>>();
+    let refreshes = Rc::new(Cell::new(0));
+    let rule = {
+        let refreshes = refreshes.clone();
+        pulled_box(mutable_state_of(false), list.clone(), state.clone(), move || refreshes.set(refreshes.get() + 1))
+    };
+    let fraction = || get(&state).distance_fraction();
+    // Down 200 in steps of 10: the slop starts the drag, the indicator takes half of the 192 past it: 96 dp, past the
+    // threshold, so the last 16 slow down (80 + 80 × (t - t² / 4), t = 16 / 80; the C++'s 94.3 with its 10 px slop).
+    pull_to(&rule, at(200.0, 100.0), at(200.0, 300.0));
+    let pulled = pulled_fraction(200.0 - Slop, 80.0) * 80.0;
+    assert!((fraction() * 80.0 - pulled).abs() < 0.1, "{} {pulled}", fraction() * 80.0);
+    assert!((pulled - (80.0 + 80.0 * (0.2 - 0.2 * 0.2 / 4.0))).abs() < 0.01);
+    // Back up 100: the indicator goes in by 50 (what was pulled, 192 - 100, halved), the list stays.
+    let h = rule.host();
+    for i in 1..=10 {
+        rule.advance_frame();
+        h.pointer_move(at(200.0, 300.0 - 10.0 * i as f32), -1, 0);
+    }
+    rule.advance_frame();
+    assert!((fraction() * 80.0 - 46.0).abs() < 0.01, "{}", fraction() * 80.0);
+    assert!(list.first_visible_item_index() == 0 && list.first_visible_item_scroll_offset() == 0);
+    // Short of the threshold: no refresh, even with refreshing left false.
+    let_go(&rule, at(200.0, 200.0));
+    assert!(refreshes.get() == 0 && fraction() == 0.0);
+}
+
 fn pull_to_refresh_modifier_slows_past_the_threshold_and_can_be_turned_off() {
-    // (The C++ drew PullToRefreshDefaults::Indicator beside the list, WP2's CircularProgressIndicator's: its checks
-    // are all the state's, made here without it.)
     let refreshing = mutable_state_of(false);
     let enabled = mutable_state_of(true);
     let refreshes = Rc::new(Cell::new(0));
@@ -624,6 +722,7 @@ fn pull_to_refresh_modifier_slows_past_the_threshold_and_can_be_turned_off() {
             kompozable_lambda!(move || {
                 *scope.borrow_mut() = Some(remember_coroutine_scope());
                 let (refreshing_now, refreshes, refreshing) = (refreshing.get(), refreshes.clone(), refreshing.clone());
+                let indicator_state = state.clone();
                 Box(
                     modifier = Modifier.fill_max_size().pull_to_refresh(
                         refreshing_now,
@@ -635,7 +734,14 @@ fn pull_to_refresh_modifier_slows_past_the_threshold_and_can_be_turned_off() {
                             refreshing.set(true);
                         },
                     ),
-                    content = || Rows(Some(list.clone()), "list".to_string()),
+                    content = || {
+                        Rows(Some(list.clone()), "list".to_string());
+                        PullToRefreshDefaults.Indicator(
+                            indicator_state.clone(),
+                            refreshing_now,
+                            modifier = Modifier.align(Alignment::TopCenter),
+                        );
+                    },
                 );
             }),
             IntSize::new(400, 800),
@@ -940,6 +1046,264 @@ fn pull_to_refresh_indicator_boxes_come_out_from_under_the_top_edge() {
     assert!(!rule.draw().elevation_shadows.is_empty());
 }
 
+fn pull_to_refresh_box_can_be_turned_off() {
+    let state = PullToRefreshState();
+    let refreshes = Rc::new(Cell::new(0));
+    let rule = {
+        let (state, refreshes) = (state.clone(), refreshes.clone());
+        KompozTestRule::with_viewport(
+            kompozable_lambda!(move || {
+                let refreshes = refreshes.clone();
+                PullToRefreshBox(
+                    false,
+                    move || refreshes.set(refreshes.get() + 1),
+                    modifier = Modifier.fill_max_size(),
+                    state = state.clone(),
+                    enabled = false,
+                    content = || Rows(None, "list".to_string()),
+                );
+            }),
+            IntSize::new(400, 800),
+        )
+    };
+    slow_drag20(&rule, at(200.0, 100.0), at(200.0, 300.0));
+    assert_eq!(state.distance_fraction(), 0.0);
+    slow_drag20(&rule, at(200.0, 100.0), at(200.0, 500.0));
+    rule.wait_for_idle();
+    assert!(refreshes.get() == 0 && state.distance_fraction() == 0.0);
+}
+
+fn same_color(a: Color, b: Color) -> bool {
+    (a.red() - b.red()).abs() < 0.003
+        && (a.green() - b.green()).abs() < 0.003
+        && (a.blue() - b.blue()).abs() < 0.003
+        && (a.alpha() - b.alpha()).abs() < 0.003
+}
+
+/// The arcs drawn with a sweep and a color (Compose draws the arrow's arc and arrowhead at any progress: of nothing
+/// at first; the endless spinner's track is transparent).
+fn visible_arcs(canvas: &kompoz_test::RecordingCanvas) -> Vec<kompoz_test::RecordedArc> {
+    canvas.arcs.iter().filter(|a| a.sweep != 0.0 && a.color.alpha() > 0.0).cloned().collect()
+}
+
+/// The paths drawn with an area (the arrowhead, scaled by the progress past 40 %).
+fn visible_paths(canvas: &kompoz_test::RecordingCanvas) -> usize {
+    canvas.paths.iter().filter(|p| p.width() > 0.0 || p.height() > 0.0).count()
+}
+
+/// The determinate progress told to accessibility, if any.
+fn progress_info(rule: &KompozTestRule) -> Option<ProgressBarRangeInfo> {
+    rule.all_nodes(true)
+        .iter()
+        .filter_map(|n| n.config().get(SemanticsProperties::ProgressBarRangeInfo))
+        .find(|p| *p != ProgressBarRangeInfo::Indeterminate)
+}
+
+fn pull_to_refresh_indicator_comes_out_from_under_the_top_edge() {
+    let refreshing = mutable_state_of(false);
+    let state = PullToRefreshState();
+    let scope = slot::<CoroutineScope>();
+    let rule = {
+        let (refreshing, state, scope) = (refreshing.clone(), state.clone(), scope.clone());
+        KompozTestRule::with_viewport(
+            kompozable_lambda!(move || {
+                *scope.borrow_mut() = Some(remember_coroutine_scope());
+                let (state, refreshing) = (state.clone(), refreshing.get());
+                Box(
+                    modifier = Modifier.fill_max_size().padding_sides_with(0.dp(), 50.dp(), 0.dp(), 0.dp()),
+                    content = move || {
+                        PullToRefreshDefaults.Indicator(
+                            state.clone(),
+                            refreshing,
+                            modifier = Modifier.align(Alignment::TopCenter),
+                        );
+                    },
+                );
+            }),
+            IntSize::new(400, 800),
+        )
+    };
+    let snap = |to: f32| {
+        let s = state.clone();
+        launch(&scope, async move { s.snap_to(to).await });
+        rule.wait_for_idle();
+    };
+    let cs = light_color_scheme();
+    // Hidden: no shadow (only the circle's own color), no arc, no progress to accessibility.
+    let hidden = rule.draw();
+    assert!(visible_arcs(&hidden).is_empty() && visible_paths(&hidden) == 0 && !hidden.rect_colors.is_empty());
+    assert!(hidden.rect_colors.iter().all(|c| same_color(*c, cs.surface_container_high)), "{:?}", hidden.rect_colors);
+    assert!(hidden.elevation_shadows.is_empty() && progress_info(&rule).is_none());
+    // A quarter of the way: 20 dp of 80 out (the circle 40 dp tall moves up by 20), clipped at the edge it rests
+    // under, its arc not yet started (the first 40 % shows nothing). (The C++ described it as "Pull to refresh";
+    // M15's arrow tells its progress instead.)
+    snap(0.25);
+    let quarter = rule.draw();
+    assert!(layer_moved_by(&quarter, 20.0 - 40.0), "{:?}", quarter.transforms);
+    assert!(quarter.clips.iter().any(|c| near(c.top, 50.0) && c.left < -1000.0 && c.right > 1000.0));
+    assert!(visible_arcs(&quarter).is_empty());
+    assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.25, 0.0..=1.0, 0)));
+    // Halfway past that, 70 % of the way: an arc of (0.7 - 0.4) × 5/3 × 0.8 of a turn, faint, with its arrowhead, in
+    // onSurfaceVariant.
+    snap(0.7);
+    let pulled = rule.draw();
+    let arcs = visible_arcs(&pulled);
+    assert!(arcs.len() == 1 && visible_paths(&pulled) == 1, "{arcs:?} {:?}", pulled.paths);
+    let a = &arcs[0];
+    assert!((a.sweep - 0.4 * 360.0).abs() < 0.1 && (a.stroke_width - 2.5).abs() < 0.01, "{a:?}");
+    assert!((a.oval.width() - 13.5).abs() < 0.01, "{a:?}");
+    assert!(same_color(a.color, named_args!(cs.on_surface_variant.copy(alpha = 0.3))), "{:?}", a.color);
+    // Its start turns with the pull: (-0.25 + 0.4 × 0.5) / 2 of a turn.
+    assert!((a.start - (-0.025 * 360.0)).abs() < 0.01, "{}", a.start);
+    // Past the threshold it shows in full: the whole arc (0.8 of a turn), turned on by the overshoot: (-0.25 + 0.4
+    // + (0.2 - 0.2² / 4)) / 2. Out, with a shadow.
+    snap(1.2);
+    let past_canvas = rule.draw();
+    let past = visible_arcs(&past_canvas);
+    assert!(past.len() == 1 && same_color(past[0].color, cs.on_surface_variant), "{past:?}");
+    assert!((past[0].sweep - 288.0).abs() < 0.1 && (past[0].start - 0.17 * 360.0).abs() < 0.1, "{past:?}");
+    assert!(!past_canvas.elevation_shadows.is_empty());
+    // Refreshing: a spinner in its place (crossfaded), at the threshold: one arc of the same stroke, no arrowhead, an
+    // endless progress to accessibility (M15: no "Refreshing" description).
+    refreshing.set(true);
+    snap(1.0);
+    rule.advance_time_by(1000);
+    let spinning = rule.draw();
+    let arcs = visible_arcs(&spinning);
+    assert!(arcs.len() == 1 && visible_paths(&spinning) == 0, "{arcs:?} {:?}", spinning.paths);
+    assert!((arcs[0].stroke_width - 2.5).abs() < 0.01 && same_color(arcs[0].color, cs.on_surface_variant));
+    // (the spinner 16 dp: its arc's circle 2.5 dp strokes in, 13.5 across)
+    assert!((arcs[0].oval.width() - 13.5).abs() < 0.01, "{:?}", arcs[0]);
+    assert!(endless_progress_shown(&rule) && progress_info(&rule).is_none());
+    // Done: the arrow again.
+    refreshing.set(false);
+    rule.wait_for_idle();
+    assert!(!endless_progress_shown(&rule) && progress_info(&rule).is_some());
+}
+
+/// The angles (degrees) the drawn transforms turn by.
+fn turns(canvas: &kompoz_test::RecordingCanvas) -> Vec<f32> {
+    canvas.transforms.iter().map(|m| m.values[1].atan2(m.values[0]).to_degrees()).collect()
+}
+
+fn pull_to_refresh_loading_indicator_morphs_with_the_pull_and_turns_past_it() {
+    // PullToRefreshDefaults.LoadingIndicator (Compose's): a 48 dp box of the contained loading indicator's colors,
+    // without a shadow; pulled, the indicator morphing with the fraction; past the threshold the whole of it turning
+    // by (fraction - 1) × 180°; refreshing, the endless one.
+    let refreshing = mutable_state_of(false);
+    let state = PullToRefreshState();
+    let scope = slot::<CoroutineScope>();
+    let rule = {
+        let (refreshing, state, scope) = (refreshing.clone(), state.clone(), scope.clone());
+        KompozTestRule::with_viewport(
+            kompozable_lambda!(move || {
+                *scope.borrow_mut() = Some(remember_coroutine_scope());
+                let (state, refreshing) = (state.clone(), refreshing.get());
+                Box(
+                    modifier = Modifier.fill_max_size().padding_sides_with(0.dp(), 50.dp(), 0.dp(), 0.dp()),
+                    content = move || {
+                        PullToRefreshDefaults.LoadingIndicator(
+                            state.clone(),
+                            refreshing,
+                            modifier = Modifier.align(Alignment::TopCenter).test_tag("yükleme"),
+                        );
+                    },
+                );
+            }),
+            IntSize::new(400, 800),
+        )
+    };
+    let snap = |to: f32| {
+        let s = state.clone();
+        launch(&scope, async move { s.snap_to(to).await });
+        rule.wait_for_idle();
+    };
+    let cs = light_color_scheme();
+    // Hidden: 48 dp, all of it up under the edge.
+    let b = bounds(&rule, "yükleme");
+    assert!(near(b.width(), 48.0) && near(b.height(), 48.0), "{b:?}");
+    let hidden = rule.draw();
+    assert!(layer_moved_by(&hidden, -48.0), "{:?}", hidden.transforms);
+    // Half way: 40 of 80 out, the determinate indicator at 0.5, in its colors; no shadow (LoadingIndicatorElevation).
+    snap(0.5);
+    let half = rule.draw();
+    assert!(layer_moved_by(&half, 40.0 - 48.0), "{:?}", half.transforms);
+    assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.5, 0.0..=1.0, 0)));
+    let drawn = |c: Color| half.rect_colors.contains(&c) || half.path_colors.contains(&c);
+    assert!(drawn(cs.primary_container) && drawn(cs.on_primary_container));
+    assert!(half.elevation_shadows.is_empty());
+    // (the turns drawn: the layer's none, then the indicator's own by its coerced progress, -progress × 180°, and past
+    // the threshold the whole one's by (fraction - 1) × 180°, between them)
+    let turned = |to: f32| {
+        snap(to);
+        turns(&rule.draw()).iter().map(|t| t.round() as i32).collect::<Vec<_>>()
+    };
+    assert_eq!(turns(&half).iter().map(|t| t.round() as i32).collect::<Vec<_>>(), [0, -90]);
+    assert_eq!(turned(1.0), [0, -180]);
+    assert_eq!(turned(1.5), [0, -90, -180]);
+    assert!(layer_moved_by(&rule.draw(), 120.0 - 48.0));
+    // Refreshing: the endless one in its place.
+    refreshing.set(true);
+    snap(1.0);
+    rule.advance_time_by(1000);
+    assert!(endless_progress_shown(&rule) && progress_info(&rule).is_none());
+}
+
+fn pull_to_refresh_box_takes_an_indicator_of_its_own() {
+    // PullToRefreshBox's indicator slot, its content's alignment and threshold: what Compose's PullToRefreshBox passes
+    // on (a LoadingIndicator for the default Indicator, as M15's PullToRefreshWithLoadingIndicatorSample).
+    let refreshing = mutable_state_of(false);
+    let state = PullToRefreshState();
+    let refreshes = Rc::new(Cell::new(0));
+    let rule = {
+        let (refreshing, state, refreshes) = (refreshing.clone(), state.clone(), refreshes.clone());
+        KompozTestRule::with_viewport(
+            kompozable_lambda!(move || {
+                let (r, refreshes, indicator_state) = (refreshing.clone(), refreshes.clone(), state.clone());
+                let refreshing_now = refreshing.get();
+                PullToRefreshBox(
+                    refreshing_now,
+                    move || {
+                        refreshes.set(refreshes.get() + 1);
+                        r.set(true);
+                    },
+                    modifier = Modifier.fill_max_size(),
+                    state = state.clone(),
+                    content_alignment = Alignment::BottomEnd,
+                    indicator = Some(Rc::new(move || {
+                        PullToRefreshDefaults.LoadingIndicator(
+                            indicator_state.clone(),
+                            refreshing_now,
+                            modifier = Modifier.align(Alignment::TopCenter).test_tag("yükleme"),
+                        )
+                    })),
+                    threshold = 50.dp(),
+                    // (a 200 dp column that scrolls: what a pull takes the scrolls of)
+                    content = || {
+                        Column(
+                            modifier =
+                                Modifier.size(200.dp()).vertical_scroll(&remember_scroll_state()).test_tag("içerik"),
+                            content = || Box(modifier = Modifier.size(100.dp())),
+                        );
+                    },
+                );
+            }),
+            IntSize::new(400, 800),
+        )
+    };
+    // The content at the bottom end, the indicator at the top center, the default spinner's arrow nowhere.
+    let content = bounds(&rule, "içerik");
+    assert!(near(content.right, 400.0) && near(content.bottom, 800.0), "{content:?}");
+    assert!(near(bounds(&rule, "yükleme").center().x, 200.0));
+    // 120 down on it (112 past the slop: 56, past 50 dp): a refresh; the loading indicator waits at the threshold.
+    slow_drag20(&rule, at(300.0, 610.0), at(300.0, 730.0));
+    rule.wait_for_idle();
+    assert!(refreshes.get() == 1 && (state.distance_fraction() - 1.0).abs() < 0.001, "{}", state.distance_fraction());
+    assert!(endless_progress_shown(&rule));
+    // (out by its max distance, the default 80 dp whatever the threshold)
+    assert!(layer_moved_by(&rule.draw(), 80.0 - 48.0));
+}
+
 fn pull_to_refresh_defaults_follow_the_tokens() {
     assert_eq!(PullToRefreshDefaults::PositionalThreshold, 80.dp());
     assert_eq!(PullToRefreshDefaults::IndicatorMaxDistance, 80.dp());
@@ -947,23 +1311,36 @@ fn pull_to_refresh_defaults_follow_the_tokens() {
     assert_eq!(PullToRefreshDefaults::LoadingIndicatorElevation, 0.dp()); // (Level0)
     assert!(PullToRefreshDefaults::indicator_shape() == CircleShape);
     assert!(PullToRefreshDefaults::shape() == CircleShape);
-    let colors = slot::<(Color, Color, Color)>();
+    let colors = slot::<[Color; 5]>();
     let rule = {
         let colors = colors.clone();
         KompozTestRule::new(kompozable_lambda!(move || {
             MaterialTheme(
                 color_scheme = dark_color_scheme(),
                 content = || {
-                    *colors.borrow_mut() = Some((
+                    *colors.borrow_mut() = Some([
                         PullToRefreshDefaults::indicator_container_color(),
                         PullToRefreshDefaults::container_color(),
                         PullToRefreshDefaults::indicator_color(),
-                    ));
+                        PullToRefreshDefaults::loading_indicator_container_color(),
+                        PullToRefreshDefaults::loading_indicator_color(),
+                    ]);
                 },
             );
         }))
     };
     rule.wait_for_idle();
     let dark = dark_color_scheme();
-    assert_eq!(get(&colors), (dark.surface_container_high, dark.surface_container_high, dark.on_surface_variant));
+    assert_eq!(
+        get(&colors),
+        [
+            dark.surface_container_high,
+            dark.surface_container_high,
+            dark.on_surface_variant,
+            // (the contained loading indicator's: LoadingIndicatorTokens' ContainedContainerColor and
+            // ContainedActiveColor)
+            dark.primary_container,
+            dark.on_primary_container,
+        ]
+    );
 }

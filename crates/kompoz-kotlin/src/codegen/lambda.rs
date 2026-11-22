@@ -153,7 +153,7 @@ impl Gen<'_, '_> {
         let written_inputs: Vec<Option<TokenStream>> = info
             .inputs
             .iter()
-            .map(|t| if info.typed { written_type(&self.bind_type_arg(t, span), span) } else { None })
+            .map(|t| if info.typed { self.written_type(&self.bind_type_arg(t, span), span) } else { None })
             .collect();
         let typed = |k: usize| -> TokenStream {
             match written_inputs.get(k).cloned().flatten() {
@@ -168,7 +168,7 @@ impl Gen<'_, '_> {
             // (a receiver of the callee's type parameters, `&mut DraggableAnchorsConfig<T>`, written with them
             // inferred: nothing else tells the closure its type)
             let t = match (typed(0).is_empty(), info.inputs.first()) {
-                (true, Some(input)) if names_type_parameter(input) => match written_type(input, span) {
+                (true, Some(input)) if names_type_parameter(input) => match self.written_type(input, span) {
                     Some(t) => quote_spanned!(span=> : #t),
                     None => quote!(),
                 },
@@ -180,6 +180,7 @@ impl Gen<'_, '_> {
                 let t = t.trim_start();
                 t.starts_with('&') && !t.starts_with("&mut")
             });
+            let by_mut = info.inputs.first().is_some_and(|t| t.trim_start().starts_with("&mut"));
             let owned_used: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
             receiver_owned = Some(owned_used.clone());
             self.receivers.push(ImplicitReceiver {
@@ -189,6 +190,7 @@ impl Gen<'_, '_> {
                 labels: labels.clone(),
                 depth: boundary,
                 by_ref,
+                by_mut,
                 owned_used,
             });
         }
@@ -414,7 +416,7 @@ impl Gen<'_, '_> {
         let closure = if suspend && info.boxed {
             // (a trait object giving a boxed future: the closure says so, so the box is made one)
             let inner = lets(span);
-            let output = written_type(&info.output, span).unwrap_or_else(|| quote_spanned!(span=> _));
+            let output = self.written_type(&info.output, span).unwrap_or_else(|| quote_spanned!(span=> _));
             let ret =
                 quote_spanned!(span=> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = #output>>>);
             let mv = if explicit || transform_wraps { quote!(move) } else { quote!() };
@@ -432,7 +434,7 @@ impl Gen<'_, '_> {
             quote_spanned!(span=> async |#(#params),*| #block)
         } else {
             let mv = if explicit { quote!(move) } else { quote!() };
-            match shared.and_then(|_| written_type(&info.output, span)) {
+            match shared.and_then(|_| self.written_type(&info.output, span)) {
                 Some(output) => quote_spanned!(span=> #mv |#(#params),*| -> #output #block),
                 None => quote_spanned!(span=> #mv |#(#params),*| #block),
             }
@@ -516,18 +518,21 @@ fn names_type_parameter(text: &str) -> bool {
         .any(|w| w.len() == 1 && w.chars().all(|c| c.is_ascii_uppercase()))
 }
 
-/// A Rust type of the API index's (its text) as written in generated code, when it names no generic parameter
-/// (`Self::Item`, `T`) or `impl` type: the standard library's names by their paths (`Rc` → `::std::rc::Rc`), the
-/// API's as they are (the prelude has them).
-pub(crate) fn written_type(text: &str, span: Span) -> Option<TokenStream> {
-    let words = || text.split(|c: char| !(c.is_alphanumeric() || c == '_'));
-    if words().any(|w| w == "Self" || w == "impl") {
-        return None;
+impl Gen<'_, '_> {
+    /// A Rust type of the API index's (its text) as written in generated code, when it names no generic parameter
+    /// (`Self::Item`, `T`) or `impl` type: the standard library's names by their paths (`Rc` → `::std::rc::Rc`), the
+    /// UI's drawing scopes by theirs (`DrawScope` → `::kompoz::ui::draw::DrawScope`: the prelude has the module, not
+    /// its names), the API's others as they are (the prelude has them).
+    pub(crate) fn written_type(&self, text: &str, span: Span) -> Option<TokenStream> {
+        let words = || text.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+        if words().any(|w| w == "Self" || w == "impl") {
+            return None;
+        }
+        let tokens = text.parse::<TokenStream>().ok()?;
+        // (the function's type parameters, `T`, left to inference: `Box<dyn FnMut(&Animatable<_, _>)>` still tells
+        // the closure what its parameter is)
+        Some(respan(std_paths(type_params_inferred(tokens), &self.cx.paths.ui), span))
     }
-    let tokens = text.parse::<TokenStream>().ok()?;
-    // (the function's type parameters, `T`, left to inference: `Box<dyn FnMut(&Animatable<_, _>)>` still tells the
-    // closure what its parameter is)
-    Some(respan(std_paths(type_params_inferred(tokens)), span))
 }
 
 /// `tokens` with a type parameter (a single capital letter) written `_`, a named lifetime `'_` and a `for<…>`
@@ -599,8 +604,9 @@ fn type_params_inferred(tokens: TokenStream) -> TokenStream {
     out.into_iter().collect()
 }
 
-/// `tokens` with the standard library's types they name unqualified written by their paths.
-fn std_paths(tokens: TokenStream) -> TokenStream {
+/// `tokens` with the standard library's types they name unqualified written by their paths, and the UI's drawing
+/// scopes (under `ui`).
+fn std_paths(tokens: TokenStream, ui: &TokenStream) -> TokenStream {
     use proc_macro2::{Group, TokenTree};
     let mut out = Vec::new();
     let mut after_path = false;
@@ -617,6 +623,7 @@ fn std_paths(tokens: TokenStream) -> TokenStream {
                     "Option" => Some(quote!(::core::option::Option)),
                     "Vec" => Some(quote!(::std::vec::Vec)),
                     "String" => Some(quote!(::std::string::String)),
+                    "DrawScope" | "ContentDrawScope" => Some(quote!(#ui::draw::#i)),
                     _ => None,
                 };
                 match path {
@@ -626,7 +633,7 @@ fn std_paths(tokens: TokenStream) -> TokenStream {
                 after_path = false;
             }
             TokenTree::Group(g) => {
-                let mut ng = Group::new(g.delimiter(), std_paths(g.stream()));
+                let mut ng = Group::new(g.delimiter(), std_paths(g.stream(), ui));
                 ng.set_span(g.span());
                 out.push(TokenTree::Group(ng));
                 after_path = false;

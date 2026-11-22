@@ -314,6 +314,19 @@ impl Gen<'_, '_> {
             return self.method_on(recv, None, n, args, loc);
         }
         if let Some((r, items, file)) = found {
+            // (Kotlin's member extension of it whose extension receiver is another implicit receiver: Painter's
+            // `DrawScope.draw(size)` in `with(painter) { … }` inside a DrawScope lambda; where no member fits the
+            // arguments as they are)
+            if let Some(items) = &items
+                && self.choose_among(items, args, true).is_none()
+                && let Some((x, rest)) = self.implicit_extension(&r, items, args)
+            {
+                let r = self.use_receiver(&r);
+                let ri = proc_macro2::Ident::new(&r.rust, span);
+                let first = self.extension_receiver_arg(&x, &rest.params[0].ty, span);
+                let rest = Callee { params: rest.params[1..].to_vec(), ..rest };
+                return self.emit(&rest, Target::MethodFirst(quote!(#ri), first), args, loc, &n.name);
+            }
             let r = self.use_receiver(&r);
             let ri = proc_macro2::Ident::new(&r.rust, span);
             let recv_ts = if r.rust == "self" { quote_spanned!(span=> self.clone()) } else { quote!(#ri) };
@@ -447,6 +460,9 @@ impl Gen<'_, '_> {
     /// Calls that are written otherwise than the index says: `remember(k) { … }` (keyed), `x.toString()`.
     fn special_call(&mut self, n: &Ident, args: &[ArgRef], loc: Loc) -> Option<Out> {
         let span = self.span(loc);
+        if n.name == "rememberUpdatedState" {
+            return Some(self.remember_updated_state(n, args, loc));
+        }
         let keyed = match n.name.as_str() {
             "remember" => "rememberKeyed",
             "rememberSaveable" => "rememberSaveableKeyed",
@@ -472,6 +488,25 @@ impl Gen<'_, '_> {
         let ret = lambda.and_then(|a| a.value.lambda()).map(|l| self.peek_block(&l.body)).unwrap_or(Ty::Unknown);
         let ts = self.identified(quote_spanned!(span=> #name(#keys_ts, #init)), loc, true);
         Some(Out::plain(ts, ret))
+    }
+
+    /// `rememberUpdatedState(newValue)`: the runtime's `remember_updated_state!` (a macro: Kotlin's `==` of the
+    /// value — its type's `==`, an `Rc`'s instance, or never — read where the type is known), a `State<T>`.
+    fn remember_updated_state(&mut self, n: &Ident, args: &[ArgRef], loc: Loc) -> Out {
+        let span = self.span(loc);
+        let value = args.iter().find(|a| a.name.is_none_or(|an| an.name == "newValue"));
+        let Some(value) = value.filter(|_| args.len() == 1) else {
+            self.error(loc, format!("`{}` takes one value (`newValue`)", n.name));
+            return Out::plain(quote!(), Ty::Unknown);
+        };
+        let ty = match value.value {
+            ArgValue::Expr(e) => self.peek_ty(e),
+            _ => Ty::Unknown,
+        };
+        let v = self.loose_arg(value);
+        let rt = self.rt().clone();
+        let ts = self.identified(quote_spanned!(span=> #rt::remember_updated_state!(#v)), loc, true);
+        Out::plain(ts, Ty::Named("State".into(), vec![ty]))
     }
 
     /// Keys given as several arguments: one tuple (`LaunchedEffect(a, b)` → `(a, b)`), `Unit` → `()`.
@@ -792,6 +827,51 @@ impl Gen<'_, '_> {
         })
     }
 
+    /// Kotlin's two implicit receivers of a member extension called by its name alone (`draw(size)` in `with(painter)
+    /// { … }` inside a DrawScope lambda: Painter's `fun DrawScope.draw(size, …)`, the dispatch receiver `r`, the
+    /// extension receiver the innermost other implicit receiver of its type): the item of `items` (`r`'s members of
+    /// the name) whose first parameter is the scope an implicit receiver other than `r` is (its type or what it
+    /// derefs to: a `ContentDrawScope` is a `DrawScope`), the arguments fitting the others; with that receiver.
+    fn implicit_extension(
+        &self,
+        r: &ImplicitReceiver,
+        items: &[&'static crate::index::Item],
+        args: &[ArgRef],
+    ) -> Option<(ImplicitReceiver, Callee)> {
+        self.receivers.iter().rev().filter(|x| x.rust != r.rust).find_map(|x| {
+            let chain = crate::index::deref_chain(&x.ty);
+            let mut best: Option<(i32, Callee)> = None;
+            for item in items.iter().filter(|i| {
+                i.params.first().is_some_and(|p| {
+                    p.ty.trim_start().starts_with('&')
+                        && Ty::from_rust(p.ty).owner().is_some_and(|o| chain.contains(&o))
+                })
+            }) {
+                let c = Callee::from_item(item);
+                let rest = Callee { params: c.params[1..].to_vec(), ..c.clone() };
+                let Some((score, mismatched)) = self.fit_detail(&rest, args) else { continue };
+                if !mismatched && best.as_ref().is_none_or(|(s, _)| score > *s) {
+                    best = Some((score, c));
+                }
+            }
+            best.map(|(_, c)| (x.clone(), c))
+        })
+    }
+
+    /// The implicit receiver `x` given as a member extension's extension receiver, a parameter of Rust type `ty`
+    /// (`&mut DrawScope<'_>`, `&Density`): lent again as that takes it.
+    fn extension_receiver_arg(&mut self, x: &ImplicitReceiver, ty: &str, span: Span) -> TokenStream {
+        let x = self.use_receiver(x);
+        let xi = proc_macro2::Ident::new(&x.rust, span);
+        let held = x.by_mut || x.by_ref;
+        match (plain_type_text(ty).starts_with("&mut"), held) {
+            (true, true) => quote_spanned!(span=> &mut *#xi),
+            (true, false) => quote_spanned!(span=> &mut #xi),
+            (false, true) => quote_spanned!(span=> &*#xi),
+            (false, false) => quote_spanned!(span=> &#xi),
+        }
+    }
+
     /// A kt shim's member `c` called on `recv` through its trait.
     fn kt_call(&mut self, recv: Out, c: Callee, args: &[ArgRef], loc: Loc, name: &Ident) -> Out {
         let span = self.span(loc);
@@ -947,9 +1027,10 @@ impl Gen<'_, '_> {
     }
 
     fn choose_quiet(&self, items: &[&'static crate::index::Item], args: &[ArgRef]) -> Option<Callee> {
-        // (WP5: one whose arguments are all of types that may fit first, as Kotlin's resolution takes only the
-        // applicable overloads — `showSnackbar("…")` isn't `showSnackbar(visuals)` —; else the best of all, what is
-        // known of types being partial)
+        // (one whose arguments are all of types that may fit first, however many parameters each has, as Kotlin's
+        // resolution takes only the applicable overloads — `showSnackbar("…")` isn't `showSnackbar(visuals)`,
+        // `SliderDefaults.Track(rangeSliderState)` is the range track, not the deprecated `Track(sliderPositions)` of
+        // fewer parameters —; else the best of all, what is known of types being partial)
         self.choose_among(items, args, true).or_else(|| self.choose_among(items, args, false))
     }
 
@@ -1005,8 +1086,13 @@ impl Gen<'_, '_> {
                         && !p.ty.contains("Fn<")
                         && !p.ty.trim_start().starts_with("fn(");
                     // (WP5: `null` to a nullable slot — `sheetDragHandle = null`)
+                    // (`null` to a nullable function type's parameter: `onClick = null`; a shared closure is a
+                    // function value too — `amplitude = WavyProgressIndicatorDefaults.indicatorAmplitude`, an
+                    // `Rc<dyn Fn(f32) -> f32>`, is a `Ty::Fun` marked shared, passed as it is)
                     let value_fits = matches!(a.value, ArgValue::Expr(e)
-                        if fun_interface || lambda_if(e) || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_))
+                        if fun_interface
+                            || lambda_if(e)
+                            || matches!(self.peek_ty(e), Ty::Unknown | Ty::Fun(_))
                             || (matches!(e.kind, ExprKind::Null) && p.ty.trim_start().starts_with("Option<")));
                     // (a lambda to a parameter of a type a SAM constructor makes: `then { … }` taking an
                     // InputTransformation)
@@ -1266,12 +1352,18 @@ impl Gen<'_, '_> {
         }
         // A method of a scope taken `&mut` whose arguments read the scope (`drawRect(…, size = Size(size.width, …))`):
         // the arguments first, in order (as Kotlin evaluates them), then the call, which borrows the scope.
+        // (and so for a scope lent `&mut` as a member extension's extension receiver: `painter.draw(&mut *scope,
+        // scope.size(), …)`)
         let mut hoisted = TokenStream::new();
         let scope_mut = c.item.is_some_and(|i| i.receiver == Receiver::RefMut);
-        if let Target::Method(r) | Target::MethodFirst(r, _) = &target
-            && scope_mut
-        {
-            let recv = r.to_string();
+        let lent_mut = match &target {
+            Target::Method(r) | Target::MethodFirst(r, _) if scope_mut => Some(r.to_string()),
+            Target::MethodFirst(_, first) if first.to_string().starts_with("& mut") => {
+                first.clone().into_iter().last().map(|t| t.to_string())
+            }
+            _ => None,
+        };
+        if let Some(recv) = lent_mut {
             let reads = |v: &TokenStream| v.clone().into_iter().any(|t| mentions(&t, &recv));
             if vals.iter().any(|(_, v, lambda)| !lambda && reads(v)) {
                 for (_, v, lambda) in vals.iter_mut() {
@@ -1612,7 +1704,7 @@ impl Gen<'_, '_> {
                 // (made the trait object its parameter takes, which a builder's generic setter wouldn't coerce it to)
                 let ty = p.ty.trim();
                 let ty = ty.strip_prefix("Option<").and_then(|t| t.strip_suffix('>')).unwrap_or(ty);
-                let made = match super::lambda::written_type(&self.bind_type_arg(ty, span), span) {
+                let made = match self.written_type(&self.bind_type_arg(ty, span), span) {
                     Some(t) => {
                         let f = self.fresh("f", span);
                         quote_spanned!(span=> { let #f: #t = #made; #f })
@@ -1701,7 +1793,15 @@ impl Gen<'_, '_> {
             return self.value_want(e, Want { str_ok: false, any: Some(w), some: false, shared: None });
         }
         let o = self.expr(e);
+        // (a `&mut` held — a receiver lambda's `this` lent mutably — given to a `&mut` parameter: reborrowed,
+        // `drawStopIndicator(drawScope = this, …)`)
+        if o.kind == OutKind::RefMut && plain_type_text(&p.ty).starts_with("&mut") {
+            let ts = o.ts;
+            return quote_spanned!(span=> &mut *#ts);
+        }
         let nullable_arg = o.kind == OutKind::Null || o.ty.is_nullable();
+        let o_kind = o.kind;
+        let place = (o.kind == OutKind::Local).then(|| o.ts.clone());
         let arg_ty = o.ty.clone();
         let v = self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false, shared: None }, e.loc);
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
@@ -1740,7 +1840,7 @@ impl Gen<'_, '_> {
             {
                 let raw = p.ty.trim();
                 let raw = raw.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')).unwrap_or(raw);
-                match super::lambda::written_type(raw, span) {
+                match self.written_type(raw, span) {
                     Some(ty) => {
                         let f = self.fresh("f", span);
                         quote_spanned!(span=> { let #f: #ty = #v; #f })
@@ -1768,7 +1868,7 @@ impl Gen<'_, '_> {
                 } else {
                     quote_spanned!(span=> ::std::rc::Rc::new(#v))
                 };
-                match super::lambda::written_type(raw, span) {
+                match self.written_type(raw, span) {
                     Some(ty) => {
                         let f = self.fresh("f", span);
                         quote_spanned!(span=> { let #f: #ty = #made; #f })
@@ -1778,6 +1878,36 @@ impl Gen<'_, '_> {
             }
             _ => v,
         };
+        // (a function value, `onCheckedChange = onStateChange` — a state's setter of `val (state, onStateChange) =
+        // remember { … }` —, given to a shared closure's parameter, `Option<Rc<dyn Fn(bool)>>`: `Rc::new` of it, made
+        // the trait object where its type is written)
+        let v = match &arg_ty {
+            // (a shared closure is given as it is: `positionalThreshold = threshold`, an `Rc<dyn Fn(f32) -> f32>`)
+            Ty::Fun(f) if !f.shared && !nullable_arg && target.starts_with("Rc<dynFn") => {
+                let raw = p.ty.trim();
+                let raw = raw.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')).unwrap_or(raw);
+                let made = quote_spanned!(span=> ::std::rc::Rc::new(#v));
+                match self.written_type(raw, span) {
+                    Some(ty) => {
+                        let f = self.fresh("f", span);
+                        quote_spanned!(span=> { let #f: #ty = #made; #f })
+                    }
+                    None => made,
+                }
+            }
+            _ => v,
+        };
+        // (a nullable parameter taking a reference, `colorFilter: Option<&ColorFilter>`: a value lent, a nullable one
+        // as a reference to what it holds; `null` is `None`)
+        if p.option == OptionForm::Option && inner.is_some_and(|i| i.starts_with('&')) && o_kind != OutKind::Null {
+            return if nullable_arg {
+                // (a local lent in place, not a clone of it: a temporary wouldn't outlive the call's hoisted arguments)
+                let v = place.unwrap_or(v);
+                quote_spanned!(span=> ::core::option::Option::as_ref(&#v))
+            } else {
+                quote_spanned!(span=> ::core::option::Option::Some(&#v))
+            };
+        }
         if p.option == OptionForm::Option && !nullable_arg {
             return quote_spanned!(span=> ::core::option::Option::Some(#v));
         }
@@ -2143,6 +2273,7 @@ fn kt_type_name(via: &str) -> &str {
         "KtPair" | "KtComponents" => "Pair",
         "KtComponent3" | "KtTriple" => "Triple",
         "KtResult" => "Result",
+        "KtClosedRange" => "ClosedRange",
         "KtScope" => "Any",
         other => other,
     }

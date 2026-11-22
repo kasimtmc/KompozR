@@ -18,7 +18,7 @@ use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas};
 use kompoz_ui::focus::FocusRequester;
 use kompoz_ui::input::{Key, KeyModifiers, PointerType};
-use kompoz_ui::semantics::SemanticsActions;
+use kompoz_ui::semantics::{Role, SemanticsActions};
 use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -45,6 +45,7 @@ tests!(
     sheets_are_at_most_their_maximum_width,
     vertical_drag_handles_grow_while_pressed,
     manual_modal_bottom_sheet_sample,
+    modal_bottom_sheet_sample,
     simple_bottom_sheet_scaffold_sample,
     vertical_drag_handle_sample,
 );
@@ -1168,8 +1169,8 @@ fn vertical_drag_handles_grow_while_pressed() {
 }
 
 // ---- material3's samples (BottomSheetSamples.kt, DragHandleSamples.kt) --------------------------------------------
-// (ModalBottomSheetSample composes a Checkbox (WP2) and an OutlinedTextField (WP3), BottomSheetScaffoldNestedScrollSample
-// a TopAppBar and its scroll behavior (WP4a): they come with those packages.)
+// (BottomSheetScaffoldNestedScrollSample composes a TopAppBar and its scroll behavior (WP4a): it comes with that
+// package.)
 
 #[kompozable]
 fn ManualModalBottomSheetSample() {
@@ -1247,6 +1248,134 @@ fn manual_modal_bottom_sheet_sample() {
     rule.wait_for_idle();
     rule.on_node_with_text("Item 0").assert_does_not_exist();
     rule.on_node_with_content_description("scrim").assert_does_not_exist();
+}
+
+#[kompozable]
+fn ModalBottomSheetSample() {
+    let open_bottom_sheet = remember_saveable(|| mutable_state_of(false));
+    let skip_partially_expanded = remember_saveable(|| mutable_state_of(false));
+    let scope = remember_coroutine_scope();
+    let bottom_sheet_state = remember_modal_bottom_sheet_state(skip_partially_expanded = skip_partially_expanded.get());
+
+    // App content
+    let (skip, open) = (skip_partially_expanded.clone(), open_bottom_sheet.clone());
+    Column(
+        horizontal_alignment = Alignment::Start,
+        vertical_arrangement = Arrangement::spaced_by(4.dp()),
+        content = move || {
+            let (skip, set_skip, open) = (skip.clone(), skip.clone(), open.clone());
+            Row(
+                modifier = named_args!(Modifier.toggleable(
+                    value = skip.get(),
+                    role = Some(Role::Checkbox),
+                    on_value_change = move |checked| set_skip.set(checked),
+                )),
+                content = move || {
+                    Checkbox(checked = skip.get(), on_checked_change = None);
+                    Spacer(Modifier.width(16.dp()));
+                    Text("Skip partially expanded State");
+                },
+            );
+            Button(
+                on_click = move || open.set(!open.get()),
+                modifier = Modifier.align(Alignment::CenterHorizontally),
+                content = || Text(text = "Show Bottom Sheet"),
+            );
+        },
+    );
+
+    // Sheet content
+    if open_bottom_sheet.get() {
+        let (dismiss, open, state) = (open_bottom_sheet.clone(), open_bottom_sheet.clone(), bottom_sheet_state.clone());
+        ModalBottomSheet(
+            on_dismiss_request = move || dismiss.set(false),
+            sheet_state = Some(bottom_sheet_state),
+            content = move || {
+                let (scope, state, open) = (scope.clone(), state.clone(), open.clone());
+                Row(
+                    modifier = Modifier.fill_max_width(),
+                    horizontal_arrangement = Arrangement::Center,
+                    content = move || {
+                        let (scope, state, open) = (scope.clone(), state.clone(), open.clone());
+                        Button(
+                            // Note: If you provide logic outside of onDismissRequest to remove the sheet,
+                            // you must additionally handle intended state cleanup, if any.
+                            on_click = move || {
+                                let (hidden, shown, open) = (state.clone(), state.clone(), open.clone());
+                                named_args!(scope.launch(async move { hidden.hide().await })).invoke_on_completion(
+                                    move || {
+                                        if !shown.is_visible() {
+                                            open.set(false);
+                                        }
+                                    },
+                                );
+                            },
+                            content = || Text("Hide Bottom Sheet"),
+                        );
+                    },
+                );
+                let text = remember(|| mutable_state_of(String::new()));
+                let t = text.clone();
+                StringOutlinedTextField(
+                    value = text.get(),
+                    on_value_change = move |it| t.set(it),
+                    modifier = named_args!(Modifier.padding_hv(horizontal = 16.dp())),
+                    label = Some(Rc::new(|| Text("Text field")) as Rc<dyn Fn()>),
+                );
+                LazyColumn(
+                    content = |this: &mut LazyListScope| {
+                        this.items(
+                            25,
+                            item_content = |it| {
+                                ListItem(
+                                    headline_content = move || Text(format!("Item {it}")),
+                                    leading_content = Some(Rc::new(|| {
+                                        VectorIcon(
+                                            Icons::Default::Favorite(),
+                                            Some("Localized description".to_string()),
+                                        );
+                                    }) as Rc<dyn Fn()>),
+                                    colors =
+                                        named_args!(ListItemDefaults.colors(
+                                            container_color = MaterialTheme::color_scheme().surface_container_low
+                                        )),
+                                );
+                            },
+                        );
+                    },
+                );
+            },
+        );
+    }
+}
+
+fn modal_bottom_sheet_sample() {
+    // Shown half way up (25 items fill the window); a text field typed into; hidden by its button (the hide awaited,
+    // then the flag cleared: `launch { … }.invokeOnCompletion { … }`, the sheet gone); with the row's Checkbox
+    // checked, it skips the half way state: shown all the way up.
+    let rule = KompozTestRule::new(ModalBottomSheetSample);
+    rule.on_node_with_text("Show Bottom Sheet").perform_click();
+    rule.wait_for_idle();
+    let hide = rule.on_node_with_text("Hide Bottom Sheet").get_unclipped_bounds_in_root();
+    assert!(hide.top > 300.0 && hide.top < 500.0, "{hide:?}");
+    rule.on_node_with_text("Text field").perform_text_input("merhaba");
+    rule.wait_for_idle();
+    rule.on_node_with_text("merhaba").assert_exists();
+    rule.on_node_with_text("Hide Bottom Sheet").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Hide Bottom Sheet").assert_does_not_exist();
+    rule.on_node_with_text("Item 0").assert_does_not_exist();
+    // (the toggleable row, its texts merged into it; its Checkbox drawn checked)
+    rule.on_node_with_text("Skip partially expanded State").assert_is_off().perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Skip partially expanded State").assert_is_on();
+    let checked = light_color_scheme().primary;
+    let canvas = rule.draw();
+    assert!(canvas.path_colors.contains(&checked) || canvas.rect_colors.contains(&checked));
+    rule.on_node_with_text("Show Bottom Sheet").perform_click();
+    rule.wait_for_idle();
+    let hide = rule.on_node_with_text("Hide Bottom Sheet").get_unclipped_bounds_in_root();
+    assert!(hide.top < 100.0, "{hide:?}");
 }
 
 #[kompozable]

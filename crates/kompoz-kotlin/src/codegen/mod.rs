@@ -18,6 +18,7 @@
 //! | parameter of an interface the API has as a trait (`shape: Shape`) | its object shared as the API holds it (`Arc<dyn Shape>`) |
 //! | `val x = e`, `var x = e` | `let x = e;`, `let mut x = e;` (a value read again is cloned: Kotlin shares values) |
 //! | `var x by remember { mutableStateOf(0) }` | `let x = remember(|| mutable_state_of(0));`, reads `KtDelegate::get_value(&x)`, writes `KtMutableDelegate::set_value(&x, v)`, `x++` → `post_inc(&x)` |
+//! | `rememberUpdatedState(v)` | `remember_updated_state!(v)` (a macro: Kotlin's `==` of `v` — its type's `==`, an `Rc`'s instance, or never — read where its type is known), a `State<T>` |
 //! | `"a $b ${c}"` | `kt::template!("a ", b, c)` (Kotlin's `toString()` of each) |
 //! | `1`, `1L`, `1f`, `1.0`, `0xFF`, `16.dp` | `1`, `1_i64`, `1_f32`, `1.0`, `0xFF`, `16.dp()` |
 //! | `a..b`, `a until b`, `a downTo b`, `r step n`, `x in r` | `kt::range_to`, `kt::until`, `kt::down_to`, `kt::step`, `kt::is_in` |
@@ -460,6 +461,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         labels: Vec::new(),
                         depth: 0,
                         by_ref: false,
+                        by_mut: false,
                         owned_used: Default::default(),
                     });
                 }
@@ -595,6 +597,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         labels: vec![f.name.name.clone()],
                         depth: 0,
                         by_ref: false,
+                        by_mut: false,
                         owned_used: Default::default(),
                     });
                     self.declare("this", receiver_rust.into(), LocalKind::Param, self.ty_of(r));

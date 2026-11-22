@@ -205,6 +205,38 @@ fn launch_takes_kotlins_coroutine_start() {
     assert_eq!(*log.borrow(), ["effect", "undispatched", "launched false", "default", "lazy", "async 7"]);
 }
 
+// `rememberUpdatedState` (Compose's doc sample, LandingScreen): an effect started once calls the callback given
+// last; a state read in composition follows the value it is given.
+kompoz! {
+    @Composable
+    fun Landing(onTimeout: () -> Unit, red: Boolean) {
+        val currentOnTimeout by rememberUpdatedState(onTimeout)
+        val color = rememberUpdatedState(newValue = if (red) Color.Red else Color.Blue)
+        LaunchedEffect(true) {
+            delay(300)
+            currentOnTimeout()
+        }
+        Text(if (color.value == Color.Red) "red" else "blue")
+    }
+}
+
+fn remember_updated_state_gives_the_latest_value() {
+    let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let which = mutable_state_of(1);
+    let (l, w) = (log.clone(), which.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (l, w) = (l.clone(), w.get());
+        Landing(move || l.borrow_mut().push(format!("timeout {w}")), w == 2);
+    }));
+    rule.on_node_with_text("blue").assert_exists();
+    rule.advance_time_by(100);
+    which.set(2);
+    rule.wait_for_idle();
+    rule.on_node_with_text("red").assert_exists();
+    rule.advance_time_by(400);
+    assert_eq!(*log.borrow(), ["timeout 2"]);
+}
+
 // Receiver lambdas: a Canvas's DrawScope, a graphics layer's scope, semantics, pointer input; a Layout's measure
 // policy and placement; an extension function of Modifier; a Rust composable and function called from Kotlin.
 kompoz! {
@@ -486,6 +518,7 @@ fn rusts_lexer_takes_these() {
 
 tests![
     launch_takes_kotlins_coroutine_start,
+    remember_updated_state_gives_the_latest_value,
     empty_composes,
     a_file_composes,
     text_from_the_source,

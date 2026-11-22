@@ -238,6 +238,10 @@ impl<T> EqProbe<T> {
     pub fn new() -> Self {
         EqProbe(PhantomData)
     }
+    /// The probe of `value`'s type (where a macro has a value, not its type).
+    pub fn of(_value: &T) -> Self {
+        EqProbe(PhantomData)
+    }
 }
 
 pub trait EqViaPartialEq<T> {
@@ -292,6 +296,8 @@ impl<T: ?Sized> Instance for std::sync::Weak<T> {
         self.ptr_eq(other)
     }
 }
+
+pub use crate::remember::remember_updated_state_with;
 
 /// Whether `a` equals `b` by `eq`; never without one.
 pub fn eq_by<T>(eq: Option<fn(&T, &T) -> bool>, a: &T, b: &T) -> bool {

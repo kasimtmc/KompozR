@@ -2,7 +2,10 @@
 //! too; Compose for desktop's actuals where the platforms differ): the theme — [`MaterialTheme`] and
 //! [`MaterialExpressiveTheme`], color schemes ([`ColorScheme`]: Material's baseline, the system's dynamic colors,
 //! the wallpaper's), the type scale ([`Typography`]), shapes ([`Shapes`]), motion ([`MotionScheme`]) —, [`Text`],
-//! [`Surface`], [`Icon`], the ripple ([`ripple`]), dividers, the scrim, the minimum interactive size, and the
+//! [`Surface`], [`Icon`], the ripple ([`ripple`]), dividers, the scrim, the minimum interactive size, the selection
+//! controls ([`Checkbox`], [`TriStateCheckbox`], [`RadioButton`], [`Switch`]), the sliders ([`Slider`],
+//! [`RangeSlider`], [`VerticalSlider`]), the progress and loading indicators ([`LinearProgressIndicator`],
+//! [`CircularProgressIndicator`], their wavy forms, [`LoadingIndicator`], [`ContainedLoadingIndicator`]), and the
 //! design tokens and texts (in Compose for desktop's 80 or so languages) its components are made of.
 //!
 //! Its modifiers extend `Modifier` through traits: `use kompoz_material3::prelude::*`.
@@ -14,6 +17,7 @@ mod alert_dialog;
 mod badge;
 mod button;
 mod card;
+mod checkbox;
 mod chip;
 mod color_scheme;
 mod content_color;
@@ -38,6 +42,8 @@ mod sheet_defaults;
 // (WP5: lists)
 mod list_item;
 mod list_item_defaults;
+// (WP2: loading indicators)
+mod loading_indicator;
 mod material_theme;
 mod menu;
 mod menu_defaults;
@@ -68,6 +74,10 @@ mod surface;
 // (WP5: swipe to dismiss)
 mod swipe_to_dismiss_box;
 // (WP5: tabs)
+mod progress_indicator;
+mod radio_button;
+mod slider;
+mod switch;
 mod tab;
 mod tab_row;
 mod text;
@@ -77,6 +87,7 @@ pub(crate) mod tokens;
 mod tonal_palette;
 mod tooltip;
 mod typography;
+mod wavy_progress_indicator;
 
 // (WP1a: buttons — Button, FloatingActionButton)
 pub use button::{
@@ -114,6 +125,11 @@ pub use badge::{Badge, BadgeDefaults, BadgedBox};
 pub use card::{
     Card, CardColors, CardDefaults, CardElevation, ClickableCard, ClickableElevatedCard, ClickableOutlinedCard,
     ElevatedCard, OutlinedCard,
+};
+#[allow(deprecated)]
+pub use checkbox::CheckboxColorsWithoutDisabledCheckmark;
+pub use checkbox::{
+    Checkbox, CheckboxColors, CheckboxDefaults, StrokedCheckbox, StrokedTriStateCheckbox, TriStateCheckbox,
 };
 pub use chip::{
     AssistChip, AssistChipDefaults, ChipColors, ChipElevation, ElevatedAssistChip, ElevatedFilterChip,
@@ -204,10 +220,24 @@ pub use navigation_drawer::{
     PermanentNavigationDrawer, remember_drawer_state,
 };
 pub use precision_pointer::should_use_precision_pointer_component_sizing;
+pub use progress_indicator::{
+    CircularProgressIndicator, DrawStopIndicatorLambda, IndeterminateCircularProgressIndicator,
+    IndeterminateLinearProgressIndicator, LinearProgressIndicator, ProgressIndicatorDefaults,
+};
+#[allow(deprecated)]
+pub use progress_indicator::{FloatCircularProgressIndicator, FloatLinearProgressIndicator};
+pub use radio_button::{RadioButton, RadioButtonColors, RadioButtonDefaults};
 pub use ripples::{LocalRippleConfiguration, RippleConfiguration, RippleDefaults, ripple, ripple_color_producer};
 pub use scrim::{Scrim, ScrimDefaults};
 pub use secure_text_field::{OutlinedSecureTextField, SecureTextField};
 pub use shapes::{ShapeDefaults, Shapes};
+#[allow(deprecated)]
+pub use slider::SliderPositions;
+pub use slider::{
+    DrawStopIndicator, DrawTick, RangeSlider, RangeSliderState, Slider, SliderColors, SliderDefaults, SliderState,
+    SlotRangeSlider, SlotSlider, StateRangeSlider, StateSlider, VerticalSlider, remember_range_slider_state,
+    remember_slider_state,
+};
 pub use surface::{ClickableSurface, LocalAbsoluteTonalElevation, SelectableSurface, Surface, ToggleableSurface};
 // (WP5: swipe to dismiss)
 pub use swipe_to_dismiss_box::{
@@ -222,6 +252,10 @@ pub use list_item::{
     ToggleableListItem, ToggleableSegmentedListItem,
 };
 pub use list_item_defaults::{ListItemColors, ListItemDefaults, ListItemElevation, ListItemShapes};
+pub use loading_indicator::{
+    ContainedLoadingIndicator, IndeterminateContainedLoadingIndicator, IndeterminateLoadingIndicator, LoadingIndicator,
+    LoadingIndicatorDefaults,
+};
 // (WP5: tabs)
 pub use tab::{LeadingIconTab, Tab, TextIconTab};
 pub use tab_row::{
@@ -242,6 +276,7 @@ pub use modal_bottom_sheet::{
     ModalBottomSheet, ModalBottomSheetDefaults, ModalBottomSheetProperties, remember_modal_bottom_sheet_state,
 };
 pub use sheet_defaults::{BottomSheet, BottomSheetDefaults, SheetState, SheetValue};
+pub use switch::{Switch, SwitchColors, SwitchDefaults};
 pub use text::{LocalTextStyle, ProvideTextStyle, Text, TextColorProducer};
 pub use text_field::{IndicatorLineModifiers, StringTextField, TextField, ValueTextField};
 pub use text_field_defaults::{
@@ -259,12 +294,17 @@ pub use tooltip::{
     DefaultTooltipCaretShape, DynTooltipScope, TooltipBox, TooltipScopeComposables, remember_tooltip_state,
 };
 pub use typography::{Typography, typography_with_font_family};
+pub use wavy_progress_indicator::{
+    AmplitudeFunction, CircularWavyProgressIndicator, IndeterminateCircularWavyProgressIndicator,
+    IndeterminateLinearWavyProgressIndicator, LinearWavyProgressIndicator, WavyProgressIndicatorDefaults,
+};
 
 /// What an app using Material 3 imports: the theme, the components, the modifier extension traits.
 pub mod prelude {
     pub use crate::*;
     // (WP5: pull to refresh — what a Compose app imports from androidx.compose.material3.pulltorefresh)
     pub use crate::pulltorefresh::{
-        PullToRefreshDefaults, PullToRefreshModifiers, PullToRefreshState, remember_pull_to_refresh_state,
+        PullToRefreshBox, PullToRefreshDefaults, PullToRefreshModifiers, PullToRefreshState,
+        remember_pull_to_refresh_state,
     };
 }

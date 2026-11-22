@@ -1169,11 +1169,11 @@ fn state_maps_recompose_their_readers() {
 
 fn remember_updated_state_gives_effects_the_latest_value() {
     let value = mutable_state_of(1);
-    let latest = Rc::new(RefCell::new(None::<UpdatedState<i32>>));
+    let latest = Rc::new(RefCell::new(None::<State<i32>>));
     let starts = Rc::new(Cell::new(0));
     let (v, l, s) = (value.clone(), latest.clone(), starts.clone());
     let rule = Rule::new(kompozable_lambda!(move || {
-        let updated = remember_updated_state(v.get());
+        let updated = remember_updated_state!(v.get());
         let (l, s) = (l.clone(), s.clone());
         DisposableEffect((), move || {
             // started once, reads the newest value later
@@ -1187,6 +1187,123 @@ fn remember_updated_state_gives_effects_the_latest_value() {
     value.set(3);
     rule.wait_for_idle();
     assert!(starts.get() == 1 && latest.borrow().as_ref().unwrap().get() == 3);
+}
+
+#[kompozable]
+fn UpdatedReader(value: State<i32>, runs: Rc<Cell<u32>>) {
+    runs.set(runs.get() + 1);
+    Text(format!("read {}", value.get()));
+}
+
+/// Compose's `rememberUpdatedState` is a `mutableStateOf` set at every composition: a composition reading it (a
+/// child scope, the scope that set it) and a drawing's or layout's observer (a SnapshotStateObserver) are told when
+/// it is set to an unequal value, not when the composition that sets it runs again with an equal one; equality is
+/// Kotlin's `==` (a callback `Rc` equal only to itself).
+fn remember_updated_state_tells_its_readers_of_unequal_values_only() {
+    let (value, other) = (mutable_state_of(1), mutable_state_of(0));
+    let shared: Rc<dyn Fn() -> i32> = Rc::new(|| 7);
+    let use_shared = mutable_state_of(false);
+    type Kept = (State<i32>, State<Rc<dyn Fn() -> i32>>);
+    let kept = Rc::new(RefCell::new(None::<Kept>));
+    let (reader_runs, writer_runs) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (v, o, u, sh, k, rr, wr) = (
+        value.clone(),
+        other.clone(),
+        use_shared.clone(),
+        shared.clone(),
+        kept.clone(),
+        reader_runs.clone(),
+        writer_runs.clone(),
+    );
+    let rule = Rule::new(kompozable_lambda!(move || {
+        wr.set(wr.get() + 1);
+        o.get(); // (what makes it compose again with an equal value)
+        let updated = remember_updated_state!(v.get());
+        let callback = if u.get() { sh.clone() } else { Rc::new(|| 0) as Rc<dyn Fn() -> i32> };
+        let latest_callback = remember_updated_state!(callback);
+        *k.borrow_mut() = Some((updated.clone(), latest_callback));
+        Text(format!("set {}", updated.get())); // the scope that set it reads it too
+        UpdatedReader(updated, rr.clone());
+    }));
+    let (updated, latest_callback) = kept.borrow().clone().unwrap();
+    // A drawing's reads, observed as a layout's or a drawing's are.
+    let observer = SnapshotStateObserver::new(|deliver| deliver());
+    observer.start();
+    let told = Rc::new(RefCell::new(Vec::<&'static str>::new()));
+    let t = told.clone();
+    let on_changed: Rc<dyn Fn(&&'static str)> = Rc::new(move |scope| t.borrow_mut().push(*scope));
+    let draw = || {
+        observer.observe_reads("value", on_changed.clone(), || updated.get());
+        observer.observe_reads("callback", on_changed.clone(), || latest_callback.get()());
+    };
+    draw();
+    assert!(rule.has("read 1") && rule.has("set 1") && reader_runs.get() == 1);
+
+    // An unequal value: the readers told, the child read again, the scope that set it settled.
+    value.set(2);
+    rule.wait_for_idle();
+    assert!(rule.has("read 2") && rule.has("set 2") && reader_runs.get() == 2);
+    assert!(told.borrow().contains(&"value"));
+    told.borrow_mut().clear();
+    draw();
+
+    // The same value again (the setter composed again): no one told.
+    let writes = writer_runs.get();
+    other.set(1);
+    rule.wait_for_idle();
+    assert!(writer_runs.get() > writes && reader_runs.get() == 2);
+    assert!(!told.borrow().contains(&"value"));
+    // (a new callback instance at each composition: never equal to the last one, as an unequal lambda in Compose)
+    assert!(told.borrow().contains(&"callback"));
+
+    // The same callback instance each time: equal to itself.
+    use_shared.set(true);
+    rule.wait_for_idle();
+    told.borrow_mut().clear();
+    draw();
+    assert_eq!((latest_callback.peek())(), 7);
+    other.set(2);
+    rule.wait_for_idle();
+    assert!(told.borrow().is_empty());
+    observer.stop();
+}
+
+#[kompozable]
+fn ReadsItsCallback(callback: Rc<dyn Fn() -> i32>, tick: MutableState<i32>, runs: Rc<Cell<u32>>) {
+    runs.set(runs.get() + 1);
+    tick.get();
+    let latest = remember_updated_state!(callback);
+    Text(format!("callback {}", latest.get()()));
+}
+
+/// A callback taken as an `Rc` parameter is the same instance when its scope restarts by itself (as a memoized
+/// lambda is in Compose): the updated state stays equal, and the scope reading it where it sets it settles.
+fn an_updated_callback_parameter_stays_equal_as_its_scope_restarts() {
+    let tick = mutable_state_of(0);
+    let runs = Rc::new(Cell::new(0));
+    let (t, r) = (tick.clone(), runs.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        ReadsItsCallback(Rc::new(|| 5), t.clone(), r.clone());
+    }));
+    assert!(rule.has("callback 5") && runs.get() == 1);
+    tick.set(1);
+    rule.wait_for_idle();
+    assert_eq!(runs.get(), 2);
+}
+
+/// A derived state reading an updated state follows it (the state is a dependency it tracks).
+fn derived_state_follows_an_updated_state() {
+    let value = mutable_state_of(1);
+    let v = value.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let updated = remember_updated_state!(v.get() * 10);
+        let doubled = remember(move || derived_state_of(move || updated.get() * 2));
+        Text(format!("doubled {}", doubled.get()));
+    }));
+    assert!(rule.has("doubled 20"));
+    value.set(2);
+    rule.wait_for_idle();
+    assert!(rule.has("doubled 40"));
 }
 
 fn movable_content_keeps_its_state_where_it_moves() {
@@ -1486,6 +1603,9 @@ tests!(
     state_list_recomposes_on_changes,
     state_maps_recompose_their_readers,
     remember_updated_state_gives_effects_the_latest_value,
+    remember_updated_state_tells_its_readers_of_unequal_values_only,
+    an_updated_callback_parameter_stays_equal_as_its_scope_restarts,
+    derived_state_follows_an_updated_state,
     movable_content_keeps_its_state_where_it_moves,
     movable_content_leaves_a_composition_it_isnt_called_in,
     movable_content_called_twice_makes_a_second_instance,

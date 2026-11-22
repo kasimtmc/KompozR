@@ -31,6 +31,9 @@ pub(crate) enum Ty {
     Set(Box<Ty>),
     Map(Box<Ty>, Box<Ty>),
     Range(Box<Ty>),
+    /// Kotlin's `ClosedRange<T>`/`ClosedFloatingPointRange<T>` (a `Float` or `Double` `a..b`): Rust's
+    /// `RangeInclusive<T>`, not a progression.
+    ClosedRange(Box<Ty>),
     Pair(Box<Ty>, Box<Ty>),
     Fun(Box<FunTy>),
     /// Any other type, by its Rust name (`Dp`, `Modifier`, `MutableState`) and arguments.
@@ -38,7 +41,7 @@ pub(crate) enum Ty {
 }
 
 /// A function type: `(A, B) -> R`, `Scope.() -> R`, `suspend () -> R`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct FunTy {
     pub params: Vec<Ty>,
     pub ret: Ty,
@@ -46,6 +49,20 @@ pub(crate) struct FunTy {
     pub receiver: Option<String>,
     /// `suspend (A) -> R`: a call of a value of it is awaited.
     pub suspend: bool,
+    /// A value of it is a shared closure on the Rust side (`Rc<dyn Fn(f32) -> f32>`, what an API gives —
+    /// `SwipeToDismissBoxDefaults.positionalThreshold`, `WavyProgressIndicatorDefaults.indicatorAmplitude` — and a
+    /// `val` keeps): given as it is where a shared closure is taken (not `Rc::new` of it, as a plain function value
+    /// is), cloned when used again. Not part of the Kotlin type (equality ignores it).
+    pub shared: bool,
+}
+
+impl PartialEq for FunTy {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params
+            && self.ret == other.ret
+            && self.receiver == other.receiver
+            && self.suspend == other.suspend
+    }
 }
 
 impl Ty {
@@ -84,7 +101,7 @@ impl Ty {
     pub fn is_vague(&self) -> bool {
         match self {
             Ty::Unknown => true,
-            Ty::List(e) | Ty::Set(e) | Ty::Range(e) | Ty::Nullable(e) => e.is_vague(),
+            Ty::List(e) | Ty::Set(e) | Ty::Range(e) | Ty::ClosedRange(e) | Ty::Nullable(e) => e.is_vague(),
             Ty::Map(k, v) | Ty::Pair(k, v) => k.is_vague() || v.is_vague(),
             Ty::Named(_, args) => args.iter().any(Ty::is_vague),
             Ty::Fun(_) => true,
@@ -114,7 +131,7 @@ impl Ty {
     /// An element of it, when it is a collection or a range.
     pub fn element(&self) -> Ty {
         match self {
-            Ty::List(t) | Ty::Set(t) | Ty::Range(t) => (**t).clone(),
+            Ty::List(t) | Ty::Set(t) | Ty::Range(t) | Ty::ClosedRange(t) => (**t).clone(),
             Ty::Named(n, a) if n == "SnapshotStateList" => a.first().cloned().unwrap_or(Ty::Unknown),
             // (a Rust `Result` is Kotlin's `Result<T>`: what `getOrThrow()` gives)
             Ty::Named(n, a) if n == "Result" => a.first().cloned().unwrap_or(Ty::Unknown),
@@ -164,6 +181,7 @@ impl Ty {
             Ty::Float | Ty::Double => &["KtFloat", "KtNumber", "KtScope"],
             Ty::Int | Ty::Long | Ty::OtherInt => &["KtNumber", "KtScope"],
             Ty::Pair(_, _) => &["KtPair", "KtComponents", "KtComponent3", "KtTriple", "KtScope"],
+            Ty::ClosedRange(_) => &["KtClosedRange", "KtScope"],
             _ => &["KtScope"],
         }
     }
@@ -217,7 +235,10 @@ fn unify(pattern: &Ty, actual: &Ty, binds: &mut TypeBinds) {
         (Ty::Nullable(p), Ty::Nullable(a)) => unify(p, a, binds),
         // (a `T?` given a `T`: Kotlin's `mapNotNull { it.toFloat() }`, its `R` a `Float`)
         (Ty::Nullable(p), a) => unify(p, a, binds),
-        (Ty::List(p), Ty::List(a)) | (Ty::Set(p), Ty::Set(a)) | (Ty::Range(p), Ty::Range(a)) => unify(p, a, binds),
+        (Ty::List(p), Ty::List(a))
+        | (Ty::Set(p), Ty::Set(a))
+        | (Ty::Range(p), Ty::Range(a))
+        | (Ty::ClosedRange(p), Ty::ClosedRange(a)) => unify(p, a, binds),
         // (any collection of it: `flatMap`'s `I`, its `I::Item` its element)
         (Ty::List(p), a @ (Ty::Set(_) | Ty::Range(_))) => unify(p, &a.element(), binds),
         (Ty::Map(pk, pv), Ty::Map(ak, av)) | (Ty::Pair(pk, pv), Ty::Pair(ak, av)) => {
@@ -375,7 +396,7 @@ impl TypeText<'_, '_> {
                     }
                 }
                 let ret = if self.eat("->") { self.ty() } else { Ty::Unit };
-                Ty::Fun(Box::new(FunTy { params, ret, receiver: None, suspend: false }))
+                Ty::Fun(Box::new(FunTy { params, ret, receiver: None, suspend: false, shared: false }))
             } else if w == "Into" {
                 let a = self.args();
                 a.into_iter().next().unwrap_or(Ty::Unknown)
@@ -429,10 +450,16 @@ impl TypeText<'_, '_> {
             "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "isize" | "i128" | "u128" => Ty::OtherInt,
             "String" | "str" => Ty::String,
             "Arc" | "Rc" | "Box" if matches!(args.first(), Some(Ty::String)) => Ty::String,
-            // (WP5: swipe to dismiss — a shared closure is a Kotlin function value: `val threshold =
+            // (a shared closure is a Kotlin function value, one marked shared: `val threshold =
             // SwipeToDismissBoxDefaults.positionalThreshold`, an `Rc<dyn Fn(f32) -> f32>`, given on to a lambda
-            // parameter)
-            "Rc" | "Arc" if matches!(args.first(), Some(Ty::Fun(_))) => first(),
+            // parameter as it is)
+            "Rc" | "Arc" if matches!(args.first(), Some(Ty::Fun(_))) => match first() {
+                Ty::Fun(mut f) => {
+                    f.shared = true;
+                    Ty::Fun(f)
+                }
+                t => t,
+            },
             "Option" => Ty::Nullable(Box::new(first())),
             "Vec" | "VecDeque" | "List" | "MutableList" => Ty::List(Box::new(first())),
             "KtSet" | "HashSet" | "BTreeSet" => Ty::Set(Box::new(first())),
@@ -440,6 +467,7 @@ impl TypeText<'_, '_> {
                 Ty::Map(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown)))
             }
             "KtProgression" => Ty::Range(Box::new(first())),
+            "RangeInclusive" => Ty::ClosedRange(Box::new(first())),
             "" | "Self" | "T" | "R" | "K" | "V" | "F" | "U" => Ty::Unknown,
             _ if name.len() == 1 => Ty::Unknown,
             _ => Ty::Named(name, args),
@@ -848,7 +876,8 @@ pub(crate) struct Local {
     /// A kept closure parameter of a restartable composable (`Rc`-held: cloned when used as a value).
     pub kept_closure: bool,
     /// (WP5: swipe to dismiss) A function value a call gave (an `Rc<dyn Fn…>`, Kotlin's function value: `val threshold =
-    /// SwipeToDismissBoxDefaults.positionalThreshold`): cloned when used as a value, called in place.
+    /// SwipeToDismissBoxDefaults.positionalThreshold`), or a state's destructured setter (`val (x, setX) = remember {
+    /// … }`, a cloneable closure): cloned when used as a value, called in place.
     pub shared_closure: bool,
     /// A lambda's parameter given a `&mut` (`state.update { it.add(…) }`: the value to change in place): what takes
     /// it by reference takes it reborrowed, a value of it is a clone of what it points to.
@@ -874,6 +903,9 @@ pub(crate) struct ImplicitReceiver {
     /// A receiver lambda's scope given by shared reference (`&SubcomposeMeasureScope`): a lambda kept inside it
     /// captures a clone of the scope itself (Kotlin's lambda holds the scope object), not the reference.
     pub by_ref: bool,
+    /// A receiver lambda's scope lent mutably (`&mut DrawScope`): `this` given on is reborrowed (`drawScope = this`
+    /// → `&mut *this`), as a `&mut` local is.
+    pub by_mut: bool,
     /// Set when a lambda inside the one lending it by reference uses it: the lending lambda then holds a clone of
     /// the scope, `__kz_this` (what a `#[kompozable]` body's closures capture clones of, as Kotlin's lambdas share
     /// the scope object), and the lambdas inside use that.
@@ -986,6 +1018,7 @@ mod tests {
         assert_eq!(Ty::from_rust("()"), Ty::Unit);
         assert!(matches!(Ty::from_rust("impl Fn(i32) -> bool + 'static"), Ty::Fun(_)));
         assert_eq!(Ty::from_rust("KtProgression<i32>"), Ty::Range(Box::new(Ty::Int)));
+        assert_eq!(Ty::from_rust("RangeInclusive<f32>"), Ty::ClosedRange(Box::new(Ty::Float)));
     }
 
     #[test]

@@ -14,10 +14,9 @@
 
 use kompoz_graphics::Dp;
 use kompoz_runtime::{
-    DerivedState, KompozitionLocal, MutableState, derived_state_of, kompozable, mutable_state_of, remember,
-    remember_keyed,
+    DerivedState, KompozitionLocal, MutableState, derived_state_of, kompozable, mutable_state_of, remember_keyed,
+    remember_updated_state,
 };
-use std::cell::RefCell;
 use std::rc::Rc;
 
 /// How the window lies on a foldable (Compose's UiMediaScope.Posture): flat (and every other device), across a
@@ -185,15 +184,7 @@ pub fn derived_media_query<T: PartialEq + Clone + 'static>(
     query: impl Fn(&UiMediaScope) -> T + 'static,
 ) -> DerivedState<T> {
     let media = LocalUiMediaScope.current();
-    // (The latest query, as Compose's rememberUpdatedState.)
-    let latest: Rc<RefCell<Option<Rc<dyn Fn(&UiMediaScope) -> T>>>> = remember(|| Rc::new(RefCell::new(None)));
-    let query: Rc<dyn Fn(&UiMediaScope) -> T> = Rc::new(query);
-    *latest.borrow_mut() = Some(query);
+    let updated_query = remember_updated_state!(Rc::new(query) as Rc<dyn Fn(&UiMediaScope) -> T>);
     let identity = Rc::as_ptr(&media.0) as usize;
-    remember_keyed(identity, move || {
-        derived_state_of(move || {
-            let query = latest.borrow().clone().expect("a query");
-            query(&media)
-        })
-    })
+    remember_keyed(identity, move || derived_state_of(move || updated_query.get()(&media)))
 }

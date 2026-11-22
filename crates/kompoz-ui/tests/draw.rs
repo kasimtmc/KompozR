@@ -130,6 +130,87 @@ fn canvas_and_draw_modifiers_draw_in_local_coordinates() {
     assert!(same_rect(c.rects[3], 15.0, 65.0, 10.0, 10.0));
 }
 
+fn circles_of_no_or_a_negative_radius_fill_nothing() {
+    // Skia's drawCircle (Compose's on Android and the desktop): a negative radius is 0; filled, a circle of no size
+    // draws nothing; stroked, it is the stroke's (round) dot. (A radio button's dot is drawn at its radius less the
+    // ring's half width: it vanishes below that.)
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {
+        Canvas(
+            Modifier.size(40.dp()),
+            on_draw = |d| {
+                d.draw_circle(Color::Red, radius = -3.0, center = Offset::new(20.0, 20.0));
+                d.draw_circle(Color::Green, radius = 0.0, center = Offset::new(20.0, 20.0));
+                d.draw_circle(Color::Blue, radius = 4.0, center = Offset::new(20.0, 20.0));
+                d.draw_circle(
+                    Color::Black,
+                    radius = -2.0,
+                    center = Offset::new(20.0, 20.0),
+                    style = DrawStyle::Stroke(Stroke(width = 2.0)),
+                );
+            },
+        );
+    }));
+    let c = rule.draw();
+    assert!(c.rects.len() == 1 && c.rect_colors[0] == Color::Blue && same_rect(c.rects[0], 16.0, 16.0, 8.0, 8.0));
+    assert!(c.strokes.len() == 1 && same_rect(c.strokes[0], 19.0, 19.0, 2.0, 2.0), "{:?}", c.strokes);
+}
+
+fn paths_of_points_not_finite_draw_nothing() {
+    // Skia's SkCanvas::drawPath (Compose's on Android and the desktop): a path with a point that isn't finite (a
+    // progress of NaN drawn as an arc, a line to it) draws nothing, the frame the same each time it is drawn.
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {
+        Canvas(
+            Modifier.size(40.dp()),
+            on_draw = |d| {
+                let mut nan = Path::new();
+                nan.move_to(2.0, 2.0);
+                nan.line_to(f32::NAN, 10.0);
+                d.draw_path(&nan, Color::Red, style = DrawStyle::Stroke(Stroke(width = 2.0)));
+                d.draw_arc(
+                    Color::Green,
+                    270.0,
+                    f32::NAN,
+                    false,
+                    style = DrawStyle::Stroke(Stroke(width = 4.0, cap = StrokeCap::Round)),
+                );
+                d.draw_line(Color::Black, Offset::new(0.0, 5.0), Offset::new(f32::INFINITY, 5.0), stroke_width = 2.0);
+                let mut fine = Path::new();
+                fine.move_to(2.0, 2.0);
+                fine.line_to(30.0, 10.0);
+                d.draw_path(&fine, Color::Blue, style = DrawStyle::Stroke(Stroke(width = 2.0)));
+            },
+        );
+    }));
+    let c = rule.draw();
+    assert!(c.paths.len() == 1 && c.path_colors[0] == Color::Blue, "{:?}", c.paths);
+    assert!(c.arcs.is_empty());
+    let mut point = Path::new();
+    point.move_to(1.0, f32::NEG_INFINITY);
+    assert!(!point.is_finite() && Path::new().is_finite());
+}
+
+fn turns_by_an_angle_not_finite_keep_their_frame() {
+    // A turn by a NaN progress's angle (a loading indicator's `rotate(-progress * 180)`) is recorded the same each
+    // time it is drawn: the frame kept from before is the frame drawn again (NaN isn't equal to itself, its bits
+    // are).
+    let progress = mutable_state_of(0.5f32);
+    let p = progress.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let p = p.clone();
+        Canvas(
+            Modifier.size(40.dp()),
+            on_draw = move |d| {
+                let turn = -p.get() * 180.0;
+                d.rotate_with(turn, d.center(), |d| d.draw_rect(Color::Red, size = Size::new(10.0, 10.0)));
+            },
+        );
+    }));
+    progress.set(f32::NAN);
+    rule.advance_frame();
+    rule.advance_frame();
+    assert_eq!(rule.draw().transforms.len(), 1);
+}
+
 fn canvas_takes_compose_named_arguments() {
     // C++ 7624: Canvas(modifier, contentDescription) { }: the description is what a screen reader says.
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
@@ -2274,6 +2355,32 @@ fn painters_fill_bounded_space_mirror_and_fade() {
     assert!(near(half.width(), 30.0) && faded);
 }
 
+fn a_painter_draws_itself_into_a_draw_scope() {
+    // Compose's `with(painter) { draw(size, alpha, colorFilter) }` in a DrawScope (Painter's member extension
+    // `DrawScope.draw`, here its trait method taking the scope): into the scope's top left `size`, where the scope is
+    // (translated); a vector painter tints and fades itself (no layer), one drawing of its own fades through a layer of
+    // that size; nothing for an alpha of 0.
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {
+        let plus = remember_vector_painter(add_icon());
+        Box(modifier = Modifier.size(60.dp()).test_tag("tuval").draw_behind(move |s| {
+            plus.draw(s, sz(20.0, 20.0), 0.5, Some(&tint(BLUE)));
+            let own = DrawPainter::new(sz(10.0, 10.0), |d| d.draw_rect(RED));
+            s.translate_with(30.0, 0.0, |s| own.draw(s, sz(10.0, 10.0), 0.5, None));
+            let all = s.size();
+            ColorPainter(GREEN).draw(s, all, 0.0, None);
+        }));
+    }));
+    let at = bounds(&rule, "tuval");
+    let c = rule.draw();
+    assert_eq!(c.vectors.len(), 1);
+    assert!(same_rect(c.vector_bounds[0], at.left, at.top, 20.0, 20.0), "{:?}", c.vector_bounds[0]);
+    let v = c.vector_colors[0];
+    assert!(v.blue() == 1.0 && v.red() == 0.0 && near_by(v.alpha(), 0.5, 0.01), "{v:?}");
+    assert_eq!(c.layer_bounds.len(), 1);
+    assert!(same_rect(c.layer_bounds[0], at.left + 30.0, at.top, 10.0, 10.0) && near(c.layer_alphas[0], 0.5));
+    assert!(c.rect_colors.contains(&RED) && !c.rect_colors.contains(&GREEN));
+}
+
 fn a_brush_painter_takes_its_color_filter() {
     // C++ 16830's drawing (the filtered brush itself is kompoz-graphics'): painted, the filtered brush. (A gradient
     // to the far corner: a horizontal one's intrinsic size is 0 high, as Compose's, and an Image of it draws
@@ -3363,6 +3470,9 @@ tests!(
     a_layout_node_draws_in_the_space_of_what_it_wraps,
     graphics_layer_stretch_draws_through_a_stretched_layer,
     canvas_and_draw_modifiers_draw_in_local_coordinates,
+    circles_of_no_or_a_negative_radius_fill_nothing,
+    paths_of_points_not_finite_draw_nothing,
+    turns_by_an_angle_not_finite_keep_their_frame,
     canvas_takes_compose_named_arguments,
     drawing_takes_compose_named_arguments,
     draw_scope_strokes_sit_on_the_outline,
@@ -3399,6 +3509,7 @@ tests!(
     a_changed_shadow_is_a_changed_modifier,
     drop_shadows_take_brushes_alphas_and_blend_modes,
     painters_fill_bounded_space_mirror_and_fade,
+    a_painter_draws_itself_into_a_draw_scope,
     a_brush_painter_takes_its_color_filter,
     images_draw_through_a_color_filter,
     image_sizes_follow_the_aspect_ratio,

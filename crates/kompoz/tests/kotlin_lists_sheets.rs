@@ -142,9 +142,13 @@ fn segmented_list_item_with_expansion_sample() {
         rule.on_node_with_text("Child 2").get_unclipped_bounds_in_root(),
     );
     assert!((two.top - one.bottom - 2.0).abs() < 0.5, "{one:?} {two:?}");
+    assert_eq!(controls_on(&rule), (0, 0));
     rule.on_node_with_text("Child 2").perform_click();
+    rule.advance_time_by(1000);
     rule.on_node_with_text("Child 2").assert_is_on();
     rule.on_node_with_text("Child 3").assert_is_off();
+    // (its trailing Checkbox ticked with it)
+    assert_eq!(controls_on(&rule), (1, 0));
     // Collapsed: the children gone once they have shrunk; expanded again, the check kept.
     header().perform_click();
     rule.advance_time_by(1000);
@@ -152,6 +156,103 @@ fn segmented_list_item_with_expansion_sample() {
     header().perform_click();
     rule.advance_time_by(1000);
     rule.on_node_with_text("Child 2").assert_is_on();
+}
+
+/// How many checked checkboxes (a 20 dp box filled in the primary color) and selected radio buttons (a 10 dp dot in
+/// it) are drawn.
+fn controls_on(rule: &KompozTestRule) -> (usize, usize) {
+    let canvas = rule.draw();
+    let primary = light_color_scheme().primary;
+    let count = |side: f32| {
+        canvas
+            .rects
+            .iter()
+            .zip(&canvas.rect_colors)
+            .filter(|(r, c)| **c == primary && (r.width() - side).abs() < 0.01 && (r.height() - side).abs() < 0.01)
+            .count()
+    };
+    (count(20.0), count(10.0))
+}
+
+/// A click on the `Item n` list item, its controls' animations done.
+fn click_item(rule: &KompozTestRule, n: i32) {
+    rule.on_node_with_text(&format!("Item {n}")).perform_click();
+    rule.advance_time_by(1000);
+}
+
+/// A long click on the `Item n` list item, settled.
+fn long_click_item(rule: &KompozTestRule, n: i32) {
+    rule.on_node_with_text(&format!("Item {n}")).perform_touch_input(|t| named_args!(t.long_click()));
+    rule.advance_time_by(1000);
+}
+
+fn selection_list_item_samples() {
+    use kompoz::test::{has_role, is_selected};
+    use kompoz::ui::semantics::Role;
+    // SingleSelectionListItemSample, SingleSelectionSegmentedListItemSample (a selectable group): one item selected at
+    // a time, its RadioButton with it; a second click unselects it.
+    for (rule, count) in [
+        (themed_tall(kompozable_lambda!(|| SingleSelectionListItemSample())), 3),
+        (themed_tall(kompozable_lambda!(|| SingleSelectionSegmentedListItemSample())), 4),
+    ] {
+        rule.on_all_nodes(has_role(Role::RadioButton)).assert_count_equals(count);
+        rule.on_all_nodes(is_selected()).assert_count_equals(0);
+        click_item(&rule, 2);
+        rule.on_node_with_text("Item 2").assert_is_selected();
+        assert_eq!(controls_on(&rule), (0, 1));
+        click_item(&rule, 3);
+        rule.on_node_with_text("Item 3").assert_is_selected();
+        rule.on_node_with_text("Item 2").assert_is_not_selected();
+        rule.on_all_nodes(is_selected()).assert_count_equals(1);
+        assert_eq!(controls_on(&rule), (0, 1));
+        click_item(&rule, 3);
+        rule.on_all_nodes(is_selected()).assert_count_equals(0);
+        assert_eq!(controls_on(&rule), (0, 0));
+    }
+    // MultiSelectionListItemSample, MultiSelectionSegmentedListItemSample: each item checks on its own, its Checkbox
+    // with it.
+    for (rule, count) in [
+        (themed_tall(kompozable_lambda!(|| MultiSelectionListItemSample())), 3),
+        (themed_tall(kompozable_lambda!(|| MultiSelectionSegmentedListItemSample())), 4),
+    ] {
+        rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(count);
+        click_item(&rule, 1);
+        click_item(&rule, 3);
+        rule.on_node_with_text("Item 1").assert_is_on();
+        rule.on_node_with_text("Item 2").assert_is_off();
+        rule.on_node_with_text("Item 3").assert_is_on();
+        assert_eq!(controls_on(&rule), (2, 0));
+        click_item(&rule, 1);
+        rule.on_node_with_text("Item 1").assert_is_off();
+        assert_eq!(controls_on(&rule), (1, 0));
+    }
+}
+
+fn list_item_with_mode_change_on_long_click_sample() {
+    use kompoz::test::has_role;
+    use kompoz::ui::semantics::Role;
+    let rule = themed_tall(kompozable_lambda!(|| ListItemWithModeChangeOnLongClickSample()));
+    // Click mode: each item counts its clicks (`counts[idx]++`); no checkboxes.
+    click_item(&rule, 1);
+    click_item(&rule, 1);
+    named_args!(rule.on_all_nodes_with_text("2", use_unmerged_tree = true)).assert_count_equals(1);
+    rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(0);
+    // A long click: checkboxes, the long-clicked item checked.
+    long_click_item(&rule, 2);
+    rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(3);
+    rule.on_node_with_text("Item 2").assert_is_on();
+    rule.on_node_with_text("Item 1").assert_is_off();
+    assert_eq!(controls_on(&rule), (1, 0));
+    click_item(&rule, 3);
+    assert_eq!(controls_on(&rule), (2, 0));
+    // A long click again: back to counting, the checks cleared (`checked.clear(); checked.addAll(…)`), the counts kept.
+    long_click_item(&rule, 1);
+    rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(0);
+    assert_eq!(controls_on(&rule), (0, 0));
+    named_args!(rule.on_all_nodes_with_text("2", use_unmerged_tree = true)).assert_count_equals(1);
+    long_click_item(&rule, 3);
+    rule.on_node_with_text("Item 3").assert_is_on();
+    rule.on_node_with_text("Item 2").assert_is_off();
 }
 
 fn list_item_forms() {
@@ -586,6 +687,30 @@ fn bottom_sheet_samples() {
     rule.wait_for_idle();
     rule.on_node_with_text("Item 0").assert_does_not_exist();
 
+    // ModalBottomSheetSample: shown half way up (25 items fill the window), a text field typed into, hidden by its
+    // button (the hide awaited, then the flag cleared: `launch { … }.invokeOnCompletion { … }`); the row's Checkbox
+    // checked, it skips the half way state, shown all the way up.
+    let rule = KompozTestRule::new(ModalBottomSheetSample);
+    rule.on_node_with_text("Show Bottom Sheet").perform_click();
+    rule.wait_for_idle();
+    let hide = rule.on_node_with_text("Hide Bottom Sheet").get_unclipped_bounds_in_root();
+    assert!(hide.top > 300.0 && hide.top < 500.0, "{hide:?}");
+    rule.on_node_with_text("Text field").perform_text_input("merhaba");
+    rule.wait_for_idle();
+    rule.on_node_with_text("merhaba").assert_exists();
+    rule.on_node_with_text("Hide Bottom Sheet").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Hide Bottom Sheet").assert_does_not_exist();
+    rule.on_node_with_text("Item 0").assert_does_not_exist();
+    // (the toggleable row, its texts merged into it)
+    rule.on_node_with_text("Skip partially expanded State").assert_is_off().perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Skip partially expanded State").assert_is_on();
+    rule.on_node_with_text("Show Bottom Sheet").perform_click();
+    rule.wait_for_idle();
+    let hide = rule.on_node_with_text("Hide Bottom Sheet").get_unclipped_bounds_in_root();
+    assert!(hide.top < 100.0, "{hide:?}");
+
     let rule = KompozTestRule::new(SimpleBottomSheetScaffoldSample);
     rule.wait_for_idle();
     let content = rule.on_node_with_text("Scaffold Content").get_unclipped_bounds_in_root();
@@ -611,22 +736,31 @@ fn drag_handle_samples() {
 
 // ==== snackbars and tooltips =========================================================================================
 
-// ---- material_components_take_compose_arguments (kompozable_tests.cpp `MaterialForms`): its snackbar awaited with
-// an action label; its chip and toggleable row (with a Checkbox: WP2's), progress indicator (WP2's) and
-// NavigationSuiteScaffold (WP8's) come with those packages.
+// ---- material_as_compose_writes_it (kompozable_tests.cpp `MaterialForms`): its chip, its toggleable row with a
+// Checkbox, its snackbar awaited with an action label and its progress bar (what the C++ asserted of them; the
+// progress line's 40% is kotlin_progress.rs' `material_forms_progress`); its NavigationSuiteScaffold (WP8's) comes
+// with that package.
 
 kompoz! {
     @Kompozable
     fun MaterialFormsSnackbar(undo: () -> Unit) {
+        var unread by remember { mutableStateOf(false) }
+        var muted by remember { mutableStateOf(false) }
         val snackbars = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
         Column {
+            FilterChip(selected = unread, onClick = { unread = !unread }, label = { Text("Unread") }, modifier = Modifier.testTag("chip"))
+            Row(modifier = Modifier.toggleable(value = muted, onValueChange = { muted = it }, role = Role.Checkbox).testTag("row")) {
+                Checkbox(checked = muted, onCheckedChange = null)
+                Text("Mute")
+            }
             Button(onClick = {
                 scope.launch {
                     if (snackbars.showSnackbar("Deleted", actionLabel = "Undo") == SnackbarResult.ActionPerformed) undo()
                 }
             }) { Text("Delete") }
             SnackbarHost(hostState = snackbars)
+            LinearProgressIndicator(progress = { 0.4f }, modifier = Modifier.testTag("bar"))
         }
     }
 }
@@ -638,6 +772,14 @@ fn material_forms_snackbar() {
         let u = u.clone();
         MaterialFormsSnackbar(move || u.set(u.get() + 1))
     }));
+    rule.on_node_with_tag("chip").assert_is_not_selected().perform_click();
+    rule.on_node_with_tag("chip").assert_is_selected();
+    // (the row toggles its Checkbox, which takes no clicks of its own)
+    rule.on_node_with_tag("row").assert_is_off().perform_click();
+    rule.on_node_with_tag("row").assert_is_on();
+    let checked = light_color_scheme().primary; // (the checked box's fill)
+    assert!(rule.draw().path_colors.contains(&checked) || rule.draw().rect_colors.contains(&checked));
+    rule.on_node_with_tag("bar").assert_exists();
     rule.on_node_with_text("Delete").perform_click();
     rule.on_node_with_text("Deleted").assert_exists();
     rule.on_node_with_text("Undo").perform_click();
@@ -857,12 +999,43 @@ fn pull_forms() {
     h.pointer_up(Offset::new(200.0, 350.0), -1, 0);
     rule.wait_for_idle();
     rule.on_node_with_text("yenileme 1 · 100 · 0 · false").assert_exists();
+    // (the default Indicator spinning: an endless progress)
+    assert!(endless_progress_shown(&rule));
     // Done: hidden again.
     rule.on_node_with_text("bitti").perform_click();
     rule.on_node_with_text("yenileme 1 · 0 · 0 · false").assert_exists();
+    assert!(!endless_progress_shown(&rule));
     // The other state, moved from code.
     rule.on_node_with_text("öbürü").perform_click();
     rule.on_node_with_text("yenileme 1 · 0 · 100 · false").assert_exists();
+    // The PullToRefreshBox: 160 down on it (152 past the slop: 76, past its 60 dp threshold) refreshes it; its
+    // LoadingIndicator (48 dp, at the top center) spins the endless one.
+    rule.on_node_with_text("kutu: false").assert_exists();
+    let top = rule.on_node_with_tag("kutu").get_unclipped_bounds_in_root().top_center() + Offset::new(0.0, 10.0);
+    h.pointer_down(top, -1, 0, kompoz::ui::input::PointerType::Touch);
+    for i in 1..=20 {
+        rule.advance_frame();
+        h.pointer_move(top + Offset::new(0.0, 8.0 * i as f32), -1, 0);
+    }
+    rule.advance_time_by(200);
+    h.pointer_up(top + Offset::new(0.0, 160.0), -1, 0);
+    rule.wait_for_idle();
+    rule.on_node_with_text("kutu: true").assert_exists();
+    let indicator = rule.on_node_with_tag("yükleme").get_unclipped_bounds_in_root();
+    let place = rule.on_node_with_tag("kutu").get_unclipped_bounds_in_root();
+    assert!(
+        (indicator.width() - 48.0).abs() < 0.5 && (indicator.center().x - place.center().x).abs() < 0.5,
+        "{indicator:?}"
+    );
+    assert!(endless_progress_shown(&rule));
+}
+
+/// Whether an endless progress is shown to accessibility (a refreshing indicator's).
+fn endless_progress_shown(rule: &KompozTestRule) -> bool {
+    use kompoz::ui::semantics::{ProgressBarRangeInfo, SemanticsProperties};
+    rule.all_nodes(true)
+        .iter()
+        .any(|n| n.config().get(SemanticsProperties::ProgressBarRangeInfo) == Some(ProgressBarRangeInfo::Indeterminate))
 }
 
 fn main() {
@@ -874,6 +1047,8 @@ fn main() {
         ("clickable_list_item_samples", clickable_list_item_samples),
         // (WP4b: icons)
         ("segmented_list_item_with_expansion_sample", segmented_list_item_with_expansion_sample),
+        ("selection_list_item_samples", selection_list_item_samples),
+        ("list_item_with_mode_change_on_long_click_sample", list_item_with_mode_change_on_long_click_sample),
         ("list_item_forms", list_item_forms),
         // (tabs and dialogs)
         ("tabs_as_compose_writes_them", tabs_as_compose_writes_them),

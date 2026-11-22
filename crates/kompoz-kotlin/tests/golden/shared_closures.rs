@@ -6,5 +6,14 @@ pub fn SharedClosures() {
     let threshold = SwipeToDismissBoxDefaults::positional_threshold();
     let state = remember(|| SwipeToDismissBoxState(SwipeToDismissBoxValue::EndToStart, threshold.clone()));
     let own = remember_swipe_to_dismiss_box_state(positional_threshold = threshold.clone());
-    Text(::kompoz::runtime::kt::template!(threshold(400_f32), " ", state.current_value() == own.current_value()));
+    let typed = SwipeToDismissBoxDefaults::positional_threshold();
+    let third = remember_swipe_to_dismiss_box_state(positional_threshold = typed.clone());
+    let fourth = remember_swipe_to_dismiss_box_state(positional_threshold = typed.clone());
+    Text(::kompoz::runtime::kt::template!(
+        threshold(400_f32),
+        " ",
+        state.current_value() == own.current_value(),
+        " ",
+        third.current_value() == fourth.current_value()
+    ));
 }

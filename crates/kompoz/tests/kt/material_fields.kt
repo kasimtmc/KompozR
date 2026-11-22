@@ -2,8 +2,8 @@
 // writes them — test tags added to find them — and the C++ Kompoz's own Compose code (kompozable_tests.cpp's TextForms,
 // Phone; its AddTextDialog is in kotlin_lists_sheets.rs, beside its Dialog), then the API the samples leave out (the
 // label above, the indicator line, the field's shape and colors). What waits for other packages: the samples'
-// TooltipBox around an IconButton (WP7: the IconButton as it is), the Checkbox showing the placeholder (WP2: a
-// clickable Text in its place). TextFieldWithErrorState's local function `validate` is a lambda here (Kotlin's local
+// TooltipBox around an IconButton (WP7: the IconButton as it is). TextFieldWithErrorState's local function `validate`
+// is a lambda here (Kotlin's local
 // functions come with stage 14).
 package com.example.materialfields
 
@@ -98,7 +98,10 @@ fun TextFieldWithIcons() {
 fun TextFieldWithPlaceholder() {
     var alwaysMinimizeLabel by remember { mutableStateOf(false) }
     Column {
-        Text("Show placeholder even when unfocused", modifier = Modifier.clickable { alwaysMinimizeLabel = !alwaysMinimizeLabel })
+        Row {
+            Checkbox(checked = alwaysMinimizeLabel, onCheckedChange = { alwaysMinimizeLabel = it })
+            Text("Show placeholder even when unfocused")
+        }
         Spacer(Modifier.height(16.dp))
         TextField(
             state = rememberTextFieldState(),
@@ -114,7 +117,10 @@ fun TextFieldWithPlaceholder() {
 fun TextFieldWithPrefixAndSuffix() {
     var alwaysMinimizeLabel by remember { mutableStateOf(false) }
     Column {
-        Text("Show placeholder even when unfocused", modifier = Modifier.clickable { alwaysMinimizeLabel = !alwaysMinimizeLabel })
+        Row {
+            Checkbox(checked = alwaysMinimizeLabel, onCheckedChange = { alwaysMinimizeLabel = it })
+            Text("Show placeholder even when unfocused")
+        }
         Spacer(Modifier.height(16.dp))
         TextField(
             state = rememberTextFieldState(),

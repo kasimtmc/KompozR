@@ -31,7 +31,9 @@
 //!   a call goes through the trait, `KtStr::split(&s, …)`);
 //! - what a type derefs to ([`DEREFS`]: a `MeasureScope`'s `Density`) is what Kotlin's supertype is: its members are
 //!   the type's too (`dp.roundToPx()` in a measure block); a trait's supertraits are its Kotlin supertypes the same
-//!   way (`StyleScope` → `BorderScope`, …; a `Deref<Target = Density>` supertrait → `Density`);
+//!   way (`StyleScope` → `BorderScope`, …; a `Deref<Target = Density>` supertrait → `Density`), and so are the
+//!   interfaces a type implements (`impl Painter for VectorPainter`: a trait declaring methods, implemented for a
+//!   named type), Kotlin's subtyping (`with(painter) { draw(size) }` on a `VectorPainter`);
 //! - a generic type's type parameters ([`GENERICS`]: `Animatable<T, V>`) tell what its members' `T` is of a value's
 //!   type arguments (`value` of an `Animatable<Float, …>` a `Float`); an overload's result is its impl's associated
 //!   type (`type Animatable = Animatable<f32, AnimationVector1D>` for `Animatable(0f)`);

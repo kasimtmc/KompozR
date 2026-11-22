@@ -1,18 +1,20 @@
 //! Material's pull to refresh, as Compose's `androidx.compose.material3.pulltorefresh` package (PullToRefresh.kt):
-//! the modifier that lets a pull down at the start of what scrolls inside ask for a refresh
-//! ([`PullToRefreshModifiers::pull_to_refresh`]), its state ([`PullToRefreshState`],
-//! [`remember_pull_to_refresh_state`]), and the defaults ([`PullToRefreshDefaults`]: the indicator's container,
-//! shapes, colors, threshold and elevations), with the arrow the indicator draws while pulled.
-//!
-//! (WP5: `PullToRefreshBox`, `PullToRefreshDefaults.Indicator` — the refreshing branch draws Material's
-//! indeterminate `CircularProgressIndicator` —, `PullToRefreshDefaults.LoadingIndicator` and the loading indicator's
-//! colors and size — Material's `ContainedLoadingIndicator` and `LoadingIndicatorDefaults` — come with WP2's progress
-//! indicators.)
+//! the container of what scrolls with the gesture and its indicator ([`PullToRefreshBox`]), the modifier that lets a
+//! pull down at the start of what scrolls inside ask for a refresh ([`PullToRefreshModifiers::pull_to_refresh`]), its
+//! state ([`PullToRefreshState`], [`remember_pull_to_refresh_state`]), and the defaults ([`PullToRefreshDefaults`]:
+//! the indicators — the arrow growing with the pull and the spinner, the loading indicator —, their container,
+//! shapes, colors, threshold and elevations).
 
 use crate::internal::float_producer::FloatProducer;
+use crate::loading_indicator::{
+    ContainedLoadingIndicator, IndeterminateContainedLoadingIndicator, LoadingIndicatorDefaults,
+};
 use crate::material_theme::MaterialTheme;
+use crate::progress_indicator::IndeterminateCircularProgressIndicator;
 use crate::tokens::{ElevationTokens, MotionSchemeKeyTokens};
-use kompoz_animation::{Animatable, AnimationSpec, AnimationVector1D, VectorConverter, animate_float_as_state};
+use kompoz_animation::{
+    Animatable, AnimationSpec, AnimationVector1D, Crossfade, VectorConverter, animate_float_as_state,
+};
 use kompoz_foundation::Canvas;
 use kompoz_foundation::gestures::LocalFuture;
 use kompoz_foundation::prelude::*;
@@ -35,6 +37,52 @@ use kompoz_ui::{Alignment, Modifier, ModifierNode, ModifierNodeElement, NodeCx, 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+
+// ---------------------------------------------------------------------------------------------------------------
+// PullToRefreshBox
+
+/// A container for scrollable content adding the pull-to-refresh gesture at its start (Compose's `PullToRefreshBox`):
+/// `content` in a Box of `modifier` and `content_alignment` with [`PullToRefreshModifiers::pull_to_refresh`]
+/// (`is_refreshing`, `state` — by default a remembered one —, `enabled`, `threshold`, `on_refresh`), `indicator` drawn
+/// on top (None: [`PullToRefreshDefaults::Indicator`] of `state` and `is_refreshing` at the top center — Compose's
+/// default lambda, which reads other parameters). Compose's HIDDEN overload without `enabled` and `threshold` isn't
+/// ported (Kotlin can't call it).
+#[kompozable]
+#[allow(clippy::too_many_arguments)]
+pub fn PullToRefreshBox(
+    is_refreshing: bool,
+    on_refresh: impl Fn() + 'static,
+    #[default(Modifier)] modifier: Modifier,
+    #[default(remember_pull_to_refresh_state())] state: Rc<dyn PullToRefreshState>,
+    #[default(Alignment::TopStart)] content_alignment: Alignment,
+    #[default(None)] indicator: Option<Rc<dyn Fn()>>,
+    #[default(true)] enabled: bool,
+    #[default(PullToRefreshDefaults::PositionalThreshold)] threshold: Dp,
+    content: impl Fn() + 'static,
+) {
+    let indicator_state = state.clone();
+    Box(
+        modifier = modifier.pull_to_refresh(
+            is_refreshing,
+            state,
+            enabled = enabled,
+            threshold = threshold,
+            on_refresh = on_refresh,
+        ),
+        content_alignment = content_alignment,
+        content = || {
+            content();
+            match &indicator {
+                Some(indicator) => indicator(),
+                None => PullToRefreshDefaults.Indicator(
+                    indicator_state.clone(),
+                    is_refreshing,
+                    modifier = Modifier.align(Alignment::TopCenter),
+                ),
+            }
+        },
+    );
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Modifier.pullToRefresh
@@ -388,9 +436,21 @@ impl PullToRefreshDefaults {
         MaterialTheme::color_scheme().surface_container_high
     }
 
+    /// The default container color of the loading indicator (Compose's composable
+    /// `loadingIndicatorContainerColor`): the contained loading indicator's.
+    pub fn loading_indicator_container_color() -> Color {
+        LoadingIndicatorDefaults::contained_container_color()
+    }
+
     /// The default color of the indicator (Compose's composable `indicatorColor`): the theme's on surface variant.
     pub fn indicator_color() -> Color {
         MaterialTheme::color_scheme().on_surface_variant
+    }
+
+    /// The default active indicator color of the loading indicator (Compose's composable `loadingIndicatorColor`):
+    /// the contained loading indicator's.
+    pub fn loading_indicator_color() -> Color {
+        LoadingIndicatorDefaults::contained_indicator_color()
     }
 
     /// The default refresh threshold (Compose's `PositionalThreshold`): 80 dp.
@@ -458,6 +518,126 @@ impl PullToRefreshDefaults {
                     .background(container_color, shape),
                 content_alignment = Alignment::Center,
                 content = || content(),
+            );
+        })
+    }
+
+    /// The default indicator of [`PullToRefreshBox`] (Compose's `Indicator`): an [`IndicatorBox`](Self::IndicatorBox)
+    /// of `container_color` coming out with `state` up to `max_distance`, crossfading (the motion scheme's default
+    /// effects) between the arrow growing with the pull and, `is_refreshing`, an endless circular progress indicator,
+    /// both in `color`.
+    #[track_caller]
+    pub fn Indicator(
+        &self,
+        state: Rc<dyn PullToRefreshState>,
+        is_refreshing: bool,
+        #[default(Modifier)] modifier: Modifier,
+        #[default(PullToRefreshDefaults::indicator_container_color())] container_color: Color,
+        #[default(PullToRefreshDefaults::indicator_color())] color: Color,
+        #[default(PullToRefreshDefaults::IndicatorMaxDistance)] max_distance: Dp,
+    ) {
+        kompozable_block!({
+            let progress_state = state.clone();
+            self.IndicatorBox(
+                state,
+                is_refreshing,
+                modifier = modifier,
+                container_color = container_color,
+                max_distance = max_distance,
+                content = move || {
+                    let progress_state = progress_state.clone();
+                    // TODO Load the motionScheme tokens from the component tokens file
+                    Crossfade(
+                        is_refreshing,
+                        animation_spec = MotionSchemeKeyTokens::DefaultEffects.value::<f32>(),
+                        content = move |refreshing| {
+                            if refreshing {
+                                IndeterminateCircularProgressIndicator(
+                                    stroke_width = StrokeWidth,
+                                    color = color,
+                                    modifier = Modifier.size(SpinnerSize),
+                                );
+                            } else {
+                                let s = progress_state.clone();
+                                CircularArrowProgressIndicator(
+                                    FloatProducer::new(move || s.distance_fraction()),
+                                    color,
+                                );
+                            }
+                        },
+                    );
+                },
+            );
+        })
+    }
+
+    /// A loading indicator for [`PullToRefreshBox`] (Compose's `LoadingIndicator`): an
+    /// [`IndicatorBox`](Self::IndicatorBox) of the loading indicator's size, `container_color` and `elevation`,
+    /// crossfading between the contained loading indicator morphing with the pull (the whole of it turning past the
+    /// threshold) and, `is_refreshing`, the endless one, both in `color`.
+    #[track_caller]
+    #[allow(clippy::too_many_arguments)]
+    pub fn LoadingIndicator(
+        &self,
+        state: Rc<dyn PullToRefreshState>,
+        is_refreshing: bool,
+        #[default(Modifier)] modifier: Modifier,
+        #[default(PullToRefreshDefaults::loading_indicator_container_color())] container_color: Color,
+        #[default(PullToRefreshDefaults::loading_indicator_color())] color: Color,
+        #[default(PullToRefreshDefaults::LoadingIndicatorElevation)] elevation: Dp,
+        #[default(PullToRefreshDefaults::IndicatorMaxDistance)] max_distance: Dp,
+    ) {
+        kompozable_block!({
+            let progress_state = state.clone();
+            self.IndicatorBox(
+                state,
+                is_refreshing,
+                modifier = modifier.size_wh(LoaderIndicatorWidth, LoaderIndicatorHeight),
+                container_color = container_color,
+                elevation = elevation,
+                max_distance = max_distance,
+                content = move || {
+                    let progress_state = progress_state.clone();
+                    // TODO Load the motionScheme tokens from the component tokens file
+                    Crossfade(
+                        is_refreshing,
+                        animation_spec = MotionSchemeKeyTokens::DefaultEffects.value::<f32>(),
+                        content = move |refreshing| {
+                            if refreshing {
+                                IndeterminateContainedLoadingIndicator(
+                                    // TODO Set the LoadingIndicator colors
+                                    modifier = Modifier.required_size_wh(LoaderIndicatorWidth, LoaderIndicatorHeight),
+                                    container_color = container_color,
+                                    indicator_color = color,
+                                );
+                            } else {
+                                // The LoadingIndicator will rotate and morph for a coerced progress value of 0 to 1.
+                                // When the state's distanceFraction is above one, we rotate the entire component we
+                                // have a continuous rotation until the refreshing flag is true.
+                                let (s, d) = (progress_state.clone(), progress_state.clone());
+                                ContainedLoadingIndicator(
+                                    // TODO Set the LoadingIndicator colors
+                                    progress = move || s.distance_fraction(),
+                                    modifier = Modifier
+                                        .required_size_wh(LoaderIndicatorWidth, LoaderIndicatorHeight)
+                                        .draw_with_content(move |c| {
+                                            let progress = d.distance_fraction();
+                                            if progress > 1.0 {
+                                                // Start the rotation on progress - 1 (i.e. 0) to avoid a jump that
+                                                // would be more noticeable on some LoadingIndicator shapes.
+                                                let center = c.center();
+                                                c.rotate_with(-(progress - 1.0) * 180.0, center, |c| c.draw_content());
+                                            } else {
+                                                c.draw_content();
+                                            }
+                                        }),
+                                    container_color = container_color,
+                                    indicator_color = color,
+                                );
+                            }
+                        },
+                    );
+                },
             );
         })
     }
@@ -561,7 +741,6 @@ impl PullToRefreshState for PullToRefreshStateImpl {
 /// The default pull indicator (Compose's private `CircularArrowProgressIndicator`): an arc growing with
 /// `progress` past 40 % of the threshold, its arrowhead at its end, faint until the threshold, turning a little
 /// past it; a progress to accessibility while pulled.
-#[allow(dead_code)] // (PullToRefreshDefaults.Indicator's, which comes with WP2's CircularProgressIndicator)
 #[kompozable]
 pub(crate) fn CircularArrowProgressIndicator(progress: FloatProducer, color: Color) {
     let path = remember(|| {
@@ -697,6 +876,10 @@ const ArcRadius: Dp = Dp(5.5);
 /// (ArcRadius + StrokeWidth) × 2 (Compose's internal `SpinnerSize`).
 pub(crate) const SpinnerSize: Dp = Dp(16.0);
 pub(crate) const SpinnerContainerSize: Dp = Dp(40.0);
+/// The loading indicator's container height (Compose's internal `LoaderIndicatorHeight`).
+pub(crate) const LoaderIndicatorHeight: Dp = LoadingIndicatorDefaults::ContainerHeight;
+/// The loading indicator's container width (Compose's internal `LoaderIndicatorWidth`).
+pub(crate) const LoaderIndicatorWidth: Dp = LoadingIndicatorDefaults::ContainerWidth;
 const ArrowWidth: Dp = Dp(10.0);
 const ArrowHeight: Dp = Dp(5.0);
 
@@ -712,126 +895,17 @@ use std::future::Future;
 
 #[cfg(test)]
 mod tests {
-    //! The indicator's arrow (private, so tested here): the C++ Kompoz's
-    //! `pull_to_refresh_indicator_comes_out_from_under_the_top_edge` but for its refreshing spinner (WP2's
-    //! CircularProgressIndicator, with PullToRefreshDefaults.Indicator), composed as Indicator composes it when not
-    //! refreshing — IndicatorBox around CircularArrowProgressIndicator (its Crossfade comes with the Indicator).
+    //! The default state's saver (private, so tested here; the indicators are tested through
+    //! `PullToRefreshDefaults.Indicator` in tests/swipe_pull.rs).
 
     use super::*;
-    use crate::color_scheme::light_color_scheme;
-    use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
-    use kompoz_graphics::{IntSize, UnitExt};
-    use kompoz_runtime::kompozable_lambda;
-    use kompoz_test::{KompozTestRule, RecordingCanvas};
-    use kompoz_ui::semantics::SemanticsProperties;
 
-    fn same_color(a: Color, b: Color) -> bool {
-        (a.red() - b.red()).abs() < 0.003
-            && (a.green() - b.green()).abs() < 0.003
-            && (a.blue() - b.blue()).abs() < 0.003
-            && (a.alpha() - b.alpha()).abs() < 0.003
-    }
-
-    /// The arcs drawn with a sweep (Compose draws the arc and its arrowhead at any progress: of nothing at first).
-    fn visible_arcs(canvas: &RecordingCanvas) -> Vec<kompoz_test::RecordedArc> {
-        canvas.arcs.iter().filter(|a| a.sweep != 0.0).cloned().collect()
-    }
-
-    /// The paths drawn with an area (the arrowhead, scaled by the progress past 40 %).
-    fn visible_paths(canvas: &RecordingCanvas) -> usize {
-        canvas.paths.iter().filter(|p| p.width() > 0.0 || p.height() > 0.0).count()
-    }
-
-    fn progress_info(rule: &KompozTestRule) -> Option<ProgressBarRangeInfo> {
-        rule.all_nodes(true).iter().find_map(|n| n.config().get(SemanticsProperties::ProgressBarRangeInfo))
-    }
-
-    fn the_arrow_comes_out_from_under_the_top_edge() {
-        let state = PullToRefreshState();
-        let scope: Rc<RefCell<Option<CoroutineScope>>> = Rc::new(RefCell::new(None));
-        let rule = {
-            let (state, scope) = (state.clone(), scope.clone());
-            KompozTestRule::with_viewport(
-                kompozable_lambda!(move || {
-                    *scope.borrow_mut() = Some(remember_coroutine_scope());
-                    let state = state.clone();
-                    Box(
-                        modifier = Modifier.fill_max_size().padding_sides_with(0.dp(), 50.dp(), 0.dp(), 0.dp()),
-                        content = move || {
-                            let progress_state = state.clone();
-                            PullToRefreshDefaults.IndicatorBox(
-                                state.clone(),
-                                false,
-                                modifier = Modifier.align(Alignment::TopCenter),
-                                container_color = PullToRefreshDefaults::indicator_container_color(),
-                                max_distance = PullToRefreshDefaults::IndicatorMaxDistance,
-                                content = move || {
-                                    let s = progress_state.clone();
-                                    CircularArrowProgressIndicator(
-                                        FloatProducer::new(move || s.distance_fraction()),
-                                        PullToRefreshDefaults::indicator_color(),
-                                    );
-                                },
-                            );
-                        },
-                    );
-                }),
-                IntSize::new(400, 800),
-            )
-        };
-        let snap = |to: f32| {
-            let s = state.clone();
-            named_args!(scope.borrow().clone().expect("composed").launch(async move { s.snap_to(to).await }));
-            rule.wait_for_idle();
-        };
-        let cs = light_color_scheme();
-        // Hidden: no shadow (only the circle's own color), no arc, no progress to accessibility.
-        let hidden = rule.draw();
-        assert!(visible_arcs(&hidden).is_empty() && visible_paths(&hidden) == 0 && !hidden.rect_colors.is_empty());
-        assert!(hidden.rect_colors.iter().all(|c| same_color(*c, cs.surface_container_high)));
-        assert!(hidden.elevation_shadows.is_empty() && progress_info(&rule).is_none());
-        // A quarter of the way: 20 dp of 80 out (the circle 40 dp tall moves up by 20), clipped at the edge it rests
-        // under, its arc not yet started (the first 40 % shows nothing). (The C++ described it as "Pull to refresh";
-        // M15's arrow tells its progress instead.)
-        snap(0.25);
-        let quarter = rule.draw();
-        assert!(quarter.transforms.iter().any(|m| (m.values[13] - (20.0 - 40.0)).abs() < 0.01));
-        assert!(quarter.clips.iter().any(|c| (c.top - 50.0).abs() < 0.5 && c.left < -1000.0 && c.right > 1000.0));
-        assert!(visible_arcs(&quarter).is_empty());
-        assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.25, 0.0..=1.0, 0)));
-        // Halfway past that, 70 % of the way: an arc of (0.7 - 0.4) × 5/3 × 0.8 of a turn, faint, with its arrowhead,
-        // in onSurfaceVariant.
-        snap(0.7);
-        let pulled = rule.draw();
-        let arcs = visible_arcs(&pulled);
-        assert!(arcs.len() == 1 && visible_paths(&pulled) == 1, "{arcs:?} {:?}", pulled.paths);
-        let a = &arcs[0];
-        assert!((a.sweep - 0.4 * 360.0).abs() < 0.1 && (a.stroke_width - 2.5).abs() < 0.01, "{a:?}");
-        assert!((a.oval.width() - 13.5).abs() < 0.01, "{a:?}");
-        assert!(same_color(a.color, named_args!(cs.on_surface_variant.copy(alpha = 0.3))), "{:?}", a.color);
-        // Its start turns with the pull: (-0.25 + 0.4 × 0.5) / 2 of a turn.
-        assert!((a.start - (-0.025 * 360.0)).abs() < 0.01, "{}", a.start);
-        // Past the threshold it shows in full: the whole arc (0.8 of a turn), turned on by the overshoot: (-0.25 + 0.4
-        // + (0.2 - 0.2² / 4)) / 2.
-        snap(1.2);
-        let past = visible_arcs(&rule.draw());
-        assert!(past.len() == 1 && same_color(past[0].color, cs.on_surface_variant), "{past:?}");
-        assert!((past[0].sweep - 288.0).abs() < 0.1 && (past[0].start - 0.17 * 360.0).abs() < 0.1, "{past:?}");
-        // Shown with a shadow while out.
-        assert!(!rule.draw().elevation_shadows.is_empty());
-    }
-
+    #[test]
     fn the_default_state_saves_its_fraction() {
+        kompoz_runtime::set_ui_thread();
         let saver = PullToRefreshStateImpl::Saver();
         let state = Rc::new(PullToRefreshStateImpl { anim: Animatable((0.6, f32::VectorConverter)) });
         let restored = saver.restore(&saver.save(&state)).expect("restored");
         assert!(!Rc::ptr_eq(&state, &restored) && restored.distance_fraction() == 0.6 && !restored.is_animating());
-    }
-
-    #[test]
-    fn the_indicators_arrow_and_the_default_state() {
-        kompoz_runtime::set_ui_thread();
-        the_arrow_comes_out_from_under_the_top_edge();
-        the_default_state_saves_its_fraction();
     }
 }

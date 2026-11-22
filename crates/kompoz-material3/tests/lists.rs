@@ -41,6 +41,8 @@ tests!(
     interactive_list_items_follow_hover_focus_and_drag,
     list_item_samples,
     clickable_list_item_samples,
+    selection_list_item_samples,
+    list_item_with_mode_change_on_long_click_sample,
     segmented_list_item_with_expansion_sample,
 );
 
@@ -943,6 +945,276 @@ fn clickable_list_item_samples() {
     rule.on_all_nodes(kompoz_test::has_click_action()).assert_count_equals(9);
 }
 
+/// The checked checkboxes drawn (a 20 dp box filled in the primary color, as Compose 1.4 draws them).
+fn checked_boxes(rule: &KompozTestRule) -> Vec<Rect> {
+    let canvas = rule.draw();
+    let primary = light_color_scheme().primary;
+    canvas
+        .rects
+        .iter()
+        .zip(&canvas.rect_colors)
+        .filter(|(r, c)| **c == primary && near(r.width(), 20.0, 0.01) && near(r.height(), 20.0, 0.01))
+        .map(|(r, _)| *r)
+        .collect()
+}
+
+/// How many checked checkboxes and selected radio buttons (a 10 dp dot in the primary color) are drawn.
+fn controls_on(rule: &KompozTestRule) -> (usize, usize) {
+    let canvas = rule.draw();
+    let primary = light_color_scheme().primary;
+    let dots = canvas
+        .rects
+        .iter()
+        .zip(&canvas.rect_colors)
+        .filter(|(r, c)| **c == primary && near(r.width(), 10.0, 0.01) && near(r.height(), 10.0, 0.01))
+        .count();
+    (checked_boxes(rule).len(), dots)
+}
+
+#[kompozable]
+fn SingleSelectionListItemSample() {
+    Column(
+        modifier = Modifier.selectable_group(),
+        content = || {
+            HorizontalDivider();
+
+            let selected_index = remember_saveable(|| mutable_state_of(None::<i32>));
+            for idx in 0..3 {
+                let selected = selected_index.get() == Some(idx);
+                let s = selected_index.clone();
+                SelectableListItem(
+                    selected,
+                    move || s.set(if selected { None } else { Some(idx) }),
+                    leading_content = slot(move || RadioButton(selected, None)),
+                    trailing_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                    supporting_content = slot(|| Text("Additional info")),
+                    content = move || Text(format!("Item {}", idx + 1)),
+                );
+
+                HorizontalDivider();
+            }
+        },
+    );
+}
+
+#[kompozable]
+fn MultiSelectionListItemSample() {
+    Column(|| {
+        HorizontalDivider();
+
+        for idx in 0..3 {
+            let checked = remember_saveable(|| mutable_state_of(false));
+            let (c, c2) = (checked.clone(), checked.clone());
+            ToggleableListItem(
+                checked.get(),
+                move |it| c.set(it),
+                leading_content = slot(move || Checkbox(c2.get(), None)),
+                trailing_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                supporting_content = slot(|| Text("Additional info")),
+                content = move || Text(format!("Item {}", idx + 1)),
+            );
+
+            HorizontalDivider();
+        }
+    });
+}
+
+#[kompozable]
+fn ListItemWithModeChangeOnLongClickSample() {
+    Column(|| {
+        HorizontalDivider();
+
+        let in_click_mode = remember_saveable(|| mutable_state_of(true));
+        let counts = remember_saveable(|| mutable_state_list_of(vec![0, 0, 0]));
+        let checked = remember_saveable(|| mutable_state_list_of(vec![false, false, false]));
+
+        for idx in 0..3usize {
+            if in_click_mode.get() {
+                let (c, c2, ch, m) = (counts.clone(), counts.clone(), checked.clone(), in_click_mode.clone());
+                ClickableListItem(
+                    move || c.set(idx, c.get(idx).unwrap() + 1),
+                    on_long_click = Some(Rc::new(move || {
+                        ch.set(idx, true);
+                        m.set(false);
+                    }) as Rc<dyn Fn()>),
+                    leading_content = slot(|| VectorIcon(Icons::Default::Home(), None)),
+                    trailing_content = slot(move || Text(format!("{}", c2.get(idx).unwrap()))),
+                    supporting_content = slot(|| Text("Long-click to change interaction mode.")),
+                    content = move || Text(format!("Item {}", idx + 1)),
+                );
+            } else {
+                let (ch, ch2, ch3, m) = (checked.clone(), checked.clone(), checked.clone(), in_click_mode.clone());
+                ToggleableListItem(
+                    checked.get(idx).unwrap(),
+                    move |it| ch.set(idx, it),
+                    on_long_click = Some(Rc::new(move || {
+                        m.set(true);
+                        ch2.clear();
+                        ch2.add_all(vec![false, false, false]);
+                    }) as Rc<dyn Fn()>),
+                    leading_content = slot(move || Checkbox(ch3.get(idx).unwrap(), None)),
+                    trailing_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                    supporting_content = slot(|| Text("Long-click to change interaction mode.")),
+                    content = move || Text(format!("Item {}", idx + 1)),
+                );
+            }
+
+            HorizontalDivider();
+        }
+    });
+}
+
+#[kompozable]
+fn SingleSelectionSegmentedListItemSample() {
+    let count = 4;
+    let colors =
+        named_args!(ListItemDefaults.colors(container_color = MaterialTheme::color_scheme().surface_container));
+    Column(
+        modifier = Modifier.selectable_group(),
+        vertical_arrangement = Arrangement::spaced_by(ListItemDefaults::SegmentedGap),
+        content = move || {
+            let selected_index = remember_saveable(|| mutable_state_of(None::<i32>));
+            for idx in 0..count {
+                let selected = selected_index.get() == Some(idx);
+                let s = selected_index.clone();
+                SelectableSegmentedListItem(
+                    selected,
+                    move || s.set(if selected { None } else { Some(idx) }),
+                    ListItemDefaults.segmented_shapes(idx, count),
+                    colors = colors,
+                    leading_content = slot(move || RadioButton(selected, None)),
+                    trailing_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                    supporting_content = slot(|| Text("Additional info")),
+                    content = move || Text(format!("Item {}", idx + 1)),
+                );
+            }
+        },
+    );
+}
+
+#[kompozable]
+fn MultiSelectionSegmentedListItemSample() {
+    let count = 4;
+    let colors =
+        named_args!(ListItemDefaults.colors(container_color = MaterialTheme::color_scheme().surface_container));
+    Column(
+        vertical_arrangement = Arrangement::spaced_by(ListItemDefaults::SegmentedGap),
+        content = move || {
+            for idx in 0..count {
+                let checked = remember_saveable(|| mutable_state_of(false));
+                let (c, c2) = (checked.clone(), checked.clone());
+                ToggleableSegmentedListItem(
+                    checked.get(),
+                    move |it| c.set(it),
+                    ListItemDefaults.segmented_shapes(idx, count),
+                    colors = colors,
+                    leading_content = slot(move || Checkbox(c2.get(), None)),
+                    trailing_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                    supporting_content = slot(|| Text("Additional info")),
+                    content = move || Text(format!("Item {}", idx + 1)),
+                );
+            }
+        },
+    );
+}
+
+/// A sample in a MaterialTheme, in a tall window.
+fn themed(content: impl Fn() + 'static) -> KompozTestRule {
+    let content = Rc::new(content);
+    KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let content = content.clone();
+            MaterialTheme(content = move || content());
+        }),
+        IntSize::new(400, 900),
+    )
+}
+
+/// The `Item n` list item's node.
+fn item(rule: &KompozTestRule, n: i32) -> kompoz_test::SemanticsNodeInteraction<'_> {
+    rule.on_node_with_text(&format!("Item {n}"))
+}
+
+/// A click on `Item n`, its controls' animations done.
+fn click_item(rule: &KompozTestRule, n: i32) {
+    item(rule, n).perform_click();
+    rule.advance_time_by(1000);
+}
+
+/// A long click on `Item n`, settled.
+fn long_click_item(rule: &KompozTestRule, n: i32) {
+    item(rule, n).perform_touch_input(|t| named_args!(t.long_click()));
+    rule.advance_time_by(1000);
+}
+
+fn selection_list_item_samples() {
+    // SingleSelectionListItemSample, SingleSelectionSegmentedListItemSample: one selected at a time, its RadioButton
+    // with it; a second click unselects it.
+    for (rule, count) in [
+        (themed(kompozable_lambda!(|| SingleSelectionListItemSample())), 3),
+        (themed(kompozable_lambda!(|| SingleSelectionSegmentedListItemSample())), 4),
+    ] {
+        rule.on_all_nodes(kompoz_test::is_selected()).assert_count_equals(0);
+        rule.on_all_nodes(has_role(Role::RadioButton)).assert_count_equals(count);
+        assert_eq!(controls_on(&rule), (0, 0));
+        click_item(&rule, 2);
+        item(&rule, 2).assert_is_selected();
+        rule.on_all_nodes(kompoz_test::is_selected()).assert_count_equals(1);
+        assert_eq!(controls_on(&rule), (0, 1));
+        click_item(&rule, 3);
+        item(&rule, 3).assert_is_selected();
+        item(&rule, 2).assert_is_not_selected();
+        assert_eq!(controls_on(&rule), (0, 1));
+        click_item(&rule, 3);
+        rule.on_all_nodes(kompoz_test::is_selected()).assert_count_equals(0);
+        assert_eq!(controls_on(&rule), (0, 0));
+    }
+    // MultiSelectionListItemSample, MultiSelectionSegmentedListItemSample: each item checks on its own, its Checkbox
+    // with it.
+    for (rule, count) in [
+        (themed(kompozable_lambda!(|| MultiSelectionListItemSample())), 3),
+        (themed(kompozable_lambda!(|| MultiSelectionSegmentedListItemSample())), 4),
+    ] {
+        rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(count);
+        click_item(&rule, 1);
+        click_item(&rule, 3);
+        item(&rule, 1).assert_is_on();
+        item(&rule, 2).assert_is_off();
+        item(&rule, 3).assert_is_on();
+        assert_eq!(controls_on(&rule), (2, 0));
+        click_item(&rule, 1);
+        item(&rule, 1).assert_is_off();
+        assert_eq!(controls_on(&rule), (1, 0));
+    }
+}
+
+fn list_item_with_mode_change_on_long_click_sample() {
+    let rule = themed(kompozable_lambda!(|| ListItemWithModeChangeOnLongClickSample()));
+    // Click mode: each item counts its clicks; no checkboxes.
+    click_item(&rule, 1);
+    click_item(&rule, 1);
+    named_args!(rule.on_all_nodes_with_text("2", use_unmerged_tree = true)).assert_count_equals(1);
+    rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(0);
+    // A long click: checkboxes, the long-clicked item checked.
+    long_click_item(&rule, 2);
+    rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(3);
+    item(&rule, 2).assert_is_on();
+    item(&rule, 1).assert_is_off();
+    assert_eq!(controls_on(&rule), (1, 0));
+    click_item(&rule, 3);
+    item(&rule, 3).assert_is_on();
+    assert_eq!(controls_on(&rule), (2, 0));
+    // A long click again: back to counting, the checks cleared, the counts kept.
+    long_click_item(&rule, 1);
+    rule.on_all_nodes(has_role(Role::Checkbox)).assert_count_equals(0);
+    assert_eq!(controls_on(&rule), (0, 0));
+    named_args!(rule.on_all_nodes_with_text("2", use_unmerged_tree = true)).assert_count_equals(1);
+    // (and once more: none checked but the long-clicked one)
+    long_click_item(&rule, 3);
+    item(&rule, 3).assert_is_on();
+    item(&rule, 2).assert_is_off();
+}
+
 #[kompozable]
 fn SegmentedListItemWithExpansionSample() {
     let expanded = remember_saveable(|| mutable_state_of(false));
@@ -986,15 +1258,16 @@ fn SegmentedListItemWithExpansionSample() {
                         content = move || {
                             for idx in 0..num_children {
                                 let checks = children_checked.clone();
-                                // (Compose's sample's trailingContent, `Checkbox(checked = childrenChecked[idx],
-                                // onCheckedChange = null)`, comes with WP2's Checkbox: paste-ready in the WP4b notes'
-                                // icons-pending.rs)
                                 ToggleableSegmentedListItem(
                                     children_checked.get(idx as usize).unwrap(),
                                     move |it| checks.set(idx as usize, it),
                                     ListItemDefaults.segmented_shapes(idx + 1, item_count),
                                     colors = colors,
                                     leading_content = slot(|| VectorIcon(Icons::Default::Favorite(), None)),
+                                    trailing_content = slot({
+                                        let checks = children_checked.clone();
+                                        move || Checkbox(checks.get(idx as usize).unwrap(), None)
+                                    }),
                                     content = move || Text(format!("Child {}", idx + 1)),
                                 );
                             }
@@ -1036,11 +1309,15 @@ fn segmented_list_item_with_expansion_sample() {
     for pair in items.windows(2) {
         assert!(near(pair[1].top, pair[0].bottom + 2.0, 0.5), "{items:?}");
     }
-    // (each child checks on its own click; the saved list keeps it)
+    // (each child checks on its own click, its Checkbox with it; the saved list keeps it)
     rule.on_node_with_text("Child 2").assert_is_off();
+    assert_eq!(controls_on(&rule), (0, 0));
     rule.on_node_with_text("Child 2").perform_click();
+    rule.advance_time_by(1000);
     rule.on_node_with_text("Child 2").assert_is_on();
     rule.on_node_with_text("Child 1").assert_is_off();
+    let (checked, child_2) = (checked_boxes(&rule), rule.on_node_with_text("Child 2").get_unclipped_bounds_in_root());
+    assert!(checked.len() == 1 && checked[0].top >= child_2.top && checked[0].bottom <= child_2.bottom, "{checked:?}");
     // Collapsed again: the children gone once they have shrunk.
     header().perform_click();
     rule.advance_time_by(1000);
@@ -1050,4 +1327,5 @@ fn segmented_list_item_with_expansion_sample() {
     header().perform_click();
     rule.advance_time_by(1000);
     rule.on_node_with_text("Child 2").assert_is_on();
+    assert_eq!(controls_on(&rule), (1, 0));
 }

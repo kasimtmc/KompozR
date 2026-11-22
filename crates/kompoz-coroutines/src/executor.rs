@@ -515,6 +515,8 @@ pub(crate) struct JobState {
     body: bool,
     failure: RefCell<Option<Failure>>,
     joiners: RefCell<Vec<Waker>>,
+    /// Told once it ends (Kotlin's `Job.invokeOnCompletion`), unless disposed first.
+    on_completion: RefCell<Vec<(Rc<Cell<bool>>, Box<dyn FnOnce()>)>>,
     /// Its scope's context (what it reads as `current_coroutine_context`).
     context: CoroutineContext,
 }
@@ -536,6 +538,7 @@ impl JobState {
             body,
             failure: RefCell::new(None),
             joiners: RefCell::new(Vec::new()),
+            on_completion: RefCell::new(Vec::new()),
         })
     }
 
@@ -594,6 +597,12 @@ impl JobState {
         }
         for w in std::mem::take(&mut *self.joiners.borrow_mut()) {
             w.wake();
+        }
+        let handlers = std::mem::take(&mut *self.on_completion.borrow_mut());
+        for (disposed, handler) in handlers {
+            if !disposed.get() {
+                handler();
+            }
         }
         let scope = self.scope.borrow().upgrade();
         if let Some(s) = scope {
@@ -836,7 +845,8 @@ impl CoroutineScope {
     }
 }
 
-/// What takes a handler back (Kotlin's DisposableHandle): [`CoroutineScope::invoke_on_completion`]'s.
+/// What takes a handler back (Kotlin's DisposableHandle): [`CoroutineScope::invoke_on_completion`]'s,
+/// [`Job::invoke_on_completion`]'s.
 #[derive(Clone)]
 pub struct DisposableHandle(Rc<Cell<bool>>);
 
@@ -894,6 +904,19 @@ impl Job {
     }
     pub fn is_cancelled(&self) -> bool {
         self.0.cancelled.get()
+    }
+    /// Calls `handler` once it ends (completed, failed or cancelled: Kotlin's `Job.invokeOnCompletion { … }`, its
+    /// cause not given, as [`CoroutineScope::invoke_on_completion`]'s), at once if it has; dispose the handle to take
+    /// it back.
+    pub fn invoke_on_completion(&self, handler: impl FnOnce() + 'static) -> DisposableHandle {
+        let disposed = Rc::new(Cell::new(false));
+        if self.0.done.get() {
+            handler();
+            disposed.set(true);
+        } else {
+            self.0.on_completion.borrow_mut().push((disposed.clone(), Box::new(handler)));
+        }
+        DisposableHandle(disposed)
     }
     /// Waits until it ends (completed, failed or cancelled); a `LAZY` one not started yet is started first.
     pub fn join(&self) -> impl Future<Output = ()> + 'static {

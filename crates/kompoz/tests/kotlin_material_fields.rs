@@ -121,19 +121,24 @@ fn transformation_and_icon_samples() {
 }
 
 /// TextFieldWithPlaceholder and TextFieldWithPrefixAndSuffix: empty and unfocused, the label expanded and the
-/// placeholder, prefix and suffix hidden; always minimized (`TextFieldLabelPosition.Attached(alwaysMinimize = …)`),
-/// all shown. PasswordTextField: what is typed hidden (the last character shown for a moment), shown by the
-/// trailing IconButton.
+/// placeholder, prefix and suffix hidden; the sample's Checkbox ticked, always minimized
+/// (`TextFieldLabelPosition.Attached(alwaysMinimize = …)`), all shown. PasswordTextField: what is typed hidden (the
+/// last character shown for a moment), shown by the trailing IconButton.
 fn placeholder_prefix_suffix_and_password_samples() {
     let rule = in_theme(kompozable_lambda!(|| TextFieldWithPlaceholder()));
     assert!(!drawn(&rule, "example@gmail.com") && drawn(&rule, "Email"));
-    rule.on_node_with_text("Show placeholder even when unfocused").perform_click();
+    rule.on_node_with(kompoz::test::has_role(kompoz::ui::semantics::Role::Checkbox), false)
+        .assert_is_off()
+        .perform_click();
     rule.advance_time_by(600);
     assert!(drawn(&rule, "example@gmail.com"));
+    rule.on_node_with(kompoz::test::has_role(kompoz::ui::semantics::Role::Checkbox), false).assert_is_on();
 
     let rule = in_theme(kompozable_lambda!(|| TextFieldWithPrefixAndSuffix()));
     assert!(!drawn(&rule, "www."));
-    rule.on_node_with_text("Show placeholder even when unfocused").perform_click();
+    rule.on_node_with(kompoz::test::has_role(kompoz::ui::semantics::Role::Checkbox), false)
+        .assert_is_off()
+        .perform_click();
     rule.advance_time_by(600);
     let texts = rule.drawn_texts();
     assert!(["www.", ".com", "google"].iter().all(|t| texts.contains(&t.to_string())), "{texts:?}");
