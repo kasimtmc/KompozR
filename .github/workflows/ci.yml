@@ -144,7 +144,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-validationlayers \
-            fonts-dejavu-core
+            fonts-dejavu-core libfontconfig1
       - name: kompoz-gpu's tests (Vulkan on lavapipe, validated, against tests/golden)
         env:
           KOMPOZ_GPU_REQUIRED: "1"
@@ -188,6 +188,16 @@ jobs:
         run: |
           export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
           cargo test -p counter-kotlin --test headless
+      # The showcase (examples/showcase: the C++ showcase's shell and Material screen, its UI .kt files): each
+      # section composed; run headless through the Material tab page by page (light and dark, scales 1 and 2), its
+      # sections against the C++ showcase's pictures (examples/showcase/reference) outside the listed regions.
+      - name: The showcase, headless, against the C++ showcase's pictures
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+        run: |
+          export VK_DRIVER_FILES="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          cargo test -p showcase --test headless
       - name: The Counter's shots
         if: always()
         uses: actions/upload-artifact@v4
@@ -205,6 +215,9 @@ jobs:
           path: |
             crates/kompoz-gpu/tests/golden/*.actual.png
             crates/kompoz-gpu/tests/golden/*.diff.png
+            target/tmp/showcase-shots/*/s*.png
+            target/tmp/showcase-shots/*/top*.png
+            target/tmp/showcase-shots/*/bottom*.png
           if-no-files-found: ignore
 
   # The shaders' generated SPIR-V, MSL and WGSL are what the .slang sources compile to (cargo xtask shaders --check),

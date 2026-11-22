@@ -10,11 +10,12 @@ use crate::material_color::hct::{Hct, cam_to_color};
 use crate::material_color::quantize::QuantizerCelebi;
 use crate::material_color::utils::math_utils::sanitize_degrees_double;
 use crate::material_color::wallpaper::{GOOGLE_BLUE, scale_to_extraction_area, seed_colors};
+use kompoz_runtime::KotlinProperties;
 
 /// The system's color palettes where it derives them from the wallpaper (Android 12+, "Material You"; its
 /// system_accent1_0 … system_neutral2_1000): five key colors in 13 tones each, from tone 100 (white) through 99,
 /// 95, 90, 80, …, 10 down to 0 (black). What Compose's dynamicLightColorScheme and dynamicDarkColorScheme read.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, KotlinProperties)]
 pub struct DynamicTonalPalette {
     pub accent1: [Color; 13],
     pub accent2: [Color; 13],

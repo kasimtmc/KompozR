@@ -15,6 +15,8 @@ pub struct Locale {
 impl Locale {
     /// The locale of a language tag (Compose's Locale(languageTag)); `_` separates as `-` does, and a tag that
     /// isn't well formed is undetermined (`und`), as Java's forLanguageTag makes it.
+    ///
+    /// Kotlin: `Locale(languageTag: String)`
     pub fn new(language_tag: &str) -> Locale {
         let tag = language_tag.trim().replace('_', "-");
         let id = LanguageIdentifier::try_from_str(&tag).unwrap_or(LanguageIdentifier::UNKNOWN);

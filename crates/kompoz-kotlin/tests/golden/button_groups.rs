@@ -116,11 +116,7 @@ pub fn Casts() {
         shape = {
             let __kz_f3: ::std::sync::Arc<dyn Shape> = {
                 let __kz_shared2: ::std::sync::Arc<dyn Shape> =
-                    if let ::core::option::Option::Some(maybe) = maybe.clone() {
-                        shape.clone()
-                    } else {
-                        ::std::sync::Arc::new(top.clone())
-                    };
+                    if maybe.is_some() { shape.clone() } else { ::std::sync::Arc::new(top.clone()) };
                 __kz_shared2
             };
             __kz_f3

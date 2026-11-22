@@ -743,6 +743,17 @@ impl Composer {
         None
     }
 
+    /// Whether `g` is in a movable content's group that left its place in this pass (parked: composed again where it
+    /// is called next, else destroyed): its scopes aren't run on their own meanwhile (Compose's removed groups'
+    /// scopes aren't either), as they would compose without the composition above them — its locals.
+    fn in_parked(st: &ComposerState, g: GroupId) -> bool {
+        let mut top = g;
+        while let Some(p) = st.groups.get(top.0).parent {
+            top = p;
+        }
+        st.parked.contains(&top)
+    }
+
     /// A group leaving the composition: a movable content in it (or it) waits in `parked` until the composition
     /// is over; returns what is to be destroyed.
     fn park(st: &mut ComposerState, g: GroupId) -> Option<GroupId> {
@@ -1475,7 +1486,12 @@ impl Composer {
                         best.map(|i| st.invalid.remove(i))
                     };
                     let Some(s) = next else { break };
-                    let still = self.state.borrow().scopes.try_get(s.0).is_some_and(|x| x.invalid);
+                    let still = {
+                        let st = self.state.borrow();
+                        st.scopes
+                            .try_get(s.0)
+                            .is_some_and(|x| x.invalid && !x.group.is_some_and(|g| Self::in_parked(&st, g)))
+                    };
                     if still {
                         first = false;
                         self.restart(s);

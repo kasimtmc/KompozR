@@ -29,10 +29,8 @@ impl Pixels {
     }
 }
 
-/// The largest difference of two pixels' channels.
-pub fn max_difference(a: [u8; 4], b: [u8; 4]) -> i32 {
-    a.iter().zip(b).map(|(&a, b)| (a as i32 - b as i32).abs()).max().unwrap_or(0)
-}
+/// The largest difference of two pixels' channels (the golden pictures').
+pub use kompoz_gpu::golden::max_difference;
 
 /// Within `tolerance` of the opaque color (0..255 each).
 pub fn near(p: [u8; 4], r: u8, g: u8, b: u8, tolerance: i32) -> bool {

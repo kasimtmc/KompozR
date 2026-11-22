@@ -418,7 +418,7 @@ impl Gen<'_, '_> {
         let frame = self.frames.pop().expect("its frame");
         self.pop_scope();
         let captures: Vec<proc_macro2::Ident> =
-            frame.used.iter().filter(|u| *u != "self").map(|u| proc_macro2::Ident::new(u, span)).collect();
+            frame.used.iter().filter(|u| *u != "self").map(|u| crate::codegen::names::ident(u, span)).collect();
         // (an outer receiver lambda's scope, given by reference: the scope itself, cloned)
         let scopes: Vec<String> = self.receivers.iter().filter(|r| r.by_ref).map(|r| r.rust.clone()).collect();
         let lets = |span: Span| -> TokenStream {

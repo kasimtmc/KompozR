@@ -88,6 +88,8 @@ impl RoundedPolygon {
 
     /// It as a [`Shape`] (material3's RoundedPolygon.toShape): its path stretched over the size it fills (its
     /// unit square, for a normalized one), centered there.
+    ///
+    /// Kotlin: `toShape(startAngle: Int = 0)`
     pub fn to_shape(&self, start_angle: i32) -> RoundedPolygonShape {
         RoundedPolygonShape { polygon: self.clone(), start_angle, path: self.to_path(start_angle) }
     }
@@ -330,166 +332,305 @@ fn star(n: i32, inner_radius: f32, rounding: CornerRounding) -> RoundedPolygon {
 /// Material 3 Expressive's 35 shapes (Compose's MaterialShapes), each made once, normalized into the unit square.
 pub struct MaterialShapes;
 
-macro_rules! material_shapes {
-    ($($(#[$doc:meta])* $name:ident => $make:expr;)*) => {
-        impl MaterialShapes {
-            $(
-                $(#[$doc])*
-                pub fn $name() -> &'static RoundedPolygon {
-                    static SHAPE: OnceLock<RoundedPolygon> = OnceLock::new();
-                    SHAPE.get_or_init(|| { $make }.normalized())
-                }
-            )*
-
-            /// All of them, in Material's order, with their names.
-            pub fn all() -> &'static [(&'static str, fn() -> &'static RoundedPolygon)] {
-                &[$((stringify!($name), MaterialShapes::$name)),*]
-            }
-        }
-    };
+/// One of [`MaterialShapes`]' shapes, made once (normalized into the unit square) the first time it is asked for.
+macro_rules! shape {
+    ($make:expr) => {{
+        static SHAPE: OnceLock<RoundedPolygon> = OnceLock::new();
+        SHAPE.get_or_init(|| { $make }.normalized())
+    }};
 }
 
-material_shapes! {
-    Circle => RoundedPolygon::circle(10, 1.0, 0.0, 0.0);
-    Square => RoundedPolygon::rectangle(1.0, 1.0, ROUND30, None, 0.0, 0.0);
-    Slanted => custom(&[pnr(0.926, 0.970, rs(0.189, 0.811)), pnr(-0.021, 0.967, rs(0.187, 0.057))], 2);
-    Arch => {
-        let rounding = [ROUND100, ROUND100, ROUND20, ROUND20];
-        let arch = RoundedPolygon::new(4, 1.0, 0.0, 0.0, CornerRounding::Unrounded, Some(&rounding));
-        arch.transformed_by(&rotated(-135.0))
-    };
-    Fan => custom(
+// (Written out one by one, so the API index sees them: Kotlin's `MaterialShapes.Diamond` reads one.)
+impl MaterialShapes {
+    pub fn Circle() -> &'static RoundedPolygon {
+        shape!(RoundedPolygon::circle(10, 1.0, 0.0, 0.0))
+    }
+
+    pub fn Square() -> &'static RoundedPolygon {
+        shape!(RoundedPolygon::rectangle(1.0, 1.0, ROUND30, None, 0.0, 0.0))
+    }
+
+    pub fn Slanted() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.926, 0.970, rs(0.189, 0.811)), pnr(-0.021, 0.967, rs(0.187, 0.057))], 2))
+    }
+
+    pub fn Arch() -> &'static RoundedPolygon {
+        shape!({
+            let rounding = [ROUND100, ROUND100, ROUND20, ROUND20];
+            let arch = RoundedPolygon::new(4, 1.0, 0.0, 0.0, CornerRounding::Unrounded, Some(&rounding));
+            arch.transformed_by(&rotated(-135.0))
+        })
+    }
+
+    pub fn Fan() -> &'static RoundedPolygon {
+        shape!(custom(
+            &[
+                pnr(1.004, 1.000, rs(0.148, 0.417)),
+                pnr(0.000, 1.000, r(0.151)),
+                pnr(0.000, -0.003, r(0.148)),
+                pnr(0.978, 0.020, r(0.803)),
+            ],
+            1,
+        ))
+    }
+
+    pub fn Arrow() -> &'static RoundedPolygon {
+        shape!(custom(
+            &[
+                pnr(0.500, 0.892, r(0.313)),
+                pnr(-0.216, 1.050, r(0.207)),
+                pnr(0.499, -0.160, rs(0.215, 1.000)),
+                pnr(1.225, 1.060, r(0.211)),
+            ],
+            1,
+        ))
+    }
+
+    pub fn SemiCircle() -> &'static RoundedPolygon {
+        shape!(RoundedPolygon::rectangle(
+            1.6,
+            1.0,
+            CornerRounding::Unrounded,
+            Some(&[ROUND20, ROUND20, ROUND100, ROUND100]),
+            0.0,
+            0.0,
+        ))
+    }
+
+    pub fn Oval() -> &'static RoundedPolygon {
+        shape!(
+            RoundedPolygon::circle(8, 1.0, 0.0, 0.0).transformed_by(&scaled(1.0, 0.64)).transformed_by(&rotated(-45.0))
+        )
+    }
+
+    pub fn Pill() -> &'static RoundedPolygon {
+        shape!(mirrored(&[pnr(0.961, 0.039, r(0.426)), p(1.001, 0.428), pnr(1.000, 0.609, r(1.000))], 2))
+    }
+
+    pub fn Triangle() -> &'static RoundedPolygon {
+        shape!(RoundedPolygon::new(3, 1.0, 0.0, 0.0, ROUND20, None).transformed_by(&rotated(-90.0)))
+    }
+
+    pub fn Diamond() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.500, 1.096, rs(0.151, 0.524)), pnr(0.040, 0.500, r(0.159))], 2))
+    }
+
+    pub fn ClamShell() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.171, 0.841, r(0.159)), pnr(-0.020, 0.500, r(0.140)), pnr(0.170, 0.159, r(0.159))], 2))
+    }
+
+    pub fn Pentagon() -> &'static RoundedPolygon {
+        shape!(mirrored(&[pnr(0.500, -0.009, r(0.172)), pnr(1.030, 0.365, r(0.164)), pnr(0.828, 0.970, r(0.169))], 1))
+    }
+
+    pub fn Gem() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[
+                pnr(0.499, 1.023, rs(0.241, 0.778)),
+                pnr(-0.005, 0.792, r(0.208)),
+                pnr(0.073, 0.258, r(0.228)),
+                pnr(0.433, -0.000, r(0.491)),
+            ],
+            1,
+        ))
+    }
+
+    pub fn Sunny() -> &'static RoundedPolygon {
+        shape!(star(8, 0.8, ROUND15))
+    }
+
+    pub fn VerySunny() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.500, 1.080, r(0.085)), pnr(0.358, 0.843, r(0.085))], 8))
+    }
+
+    pub fn Cookie4Sided() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(1.237, 1.236, r(0.258)), pnr(0.500, 0.918, r(0.233))], 4))
+    }
+
+    pub fn Cookie6Sided() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.723, 0.884, r(0.394)), pnr(0.500, 1.099, r(0.398))], 6))
+    }
+
+    pub fn Cookie7Sided() -> &'static RoundedPolygon {
+        shape!(star(7, 0.75, ROUND50).transformed_by(&rotated(-90.0)))
+    }
+
+    pub fn Cookie9Sided() -> &'static RoundedPolygon {
+        shape!(star(9, 0.8, ROUND50).transformed_by(&rotated(-90.0)))
+    }
+
+    pub fn Cookie12Sided() -> &'static RoundedPolygon {
+        shape!(star(12, 0.8, ROUND50).transformed_by(&rotated(-90.0)))
+    }
+
+    pub fn Ghostish() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[
+                pnr(0.500, 0.0, r(1.000)),
+                pnr(1.0, 0.0, r(1.000)),
+                pnr(1.0, 1.140, rs(0.254, 0.106)),
+                pnr(0.575, 0.906, r(0.253)),
+            ],
+            1,
+        ))
+    }
+
+    pub fn Clover4Leaf() -> &'static RoundedPolygon {
+        shape!(mirrored(&[p(0.500, 0.074), pnr(0.725, -0.099, r(0.476))], 4))
+    }
+
+    pub fn Clover8Leaf() -> &'static RoundedPolygon {
+        shape!(custom(&[p(0.500, 0.036), pnr(0.758, -0.101, r(0.209))], 8))
+    }
+
+    pub fn Burst() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.500, -0.006, r(0.006)), pnr(0.592, 0.158, r(0.006))], 12))
+    }
+
+    pub fn SoftBurst() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.193, 0.277, r(0.053)), pnr(0.176, 0.055, r(0.053))], 10))
+    }
+
+    pub fn Boom() -> &'static RoundedPolygon {
+        shape!(custom(&[pnr(0.457, 0.296, r(0.007)), pnr(0.500, -0.051, r(0.007))], 15))
+    }
+
+    pub fn SoftBoom() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[
+                p(0.733, 0.454),
+                pnr(0.839, 0.437, r(0.532)),
+                pnr(0.949, 0.449, rs(0.439, 1.000)),
+                pnr(0.998, 0.478, r(0.174)),
+            ],
+            16,
+        ))
+    }
+
+    pub fn Flower() -> &'static RoundedPolygon {
+        shape!(mirrored(&[p(0.370, 0.187), pnr(0.416, 0.049, r(0.381)), pnr(0.479, 0.001, r(0.095))], 8))
+    }
+
+    pub fn Puffy() -> &'static RoundedPolygon {
+        shape!(
+            mirrored(
+                &[
+                    p(0.500, 0.053),
+                    pnr(0.545, -0.040, r(0.405)),
+                    pnr(0.670, -0.035, r(0.426)),
+                    pnr(0.717, 0.066, r(0.574)),
+                    p(0.722, 0.128),
+                    pnr(0.777, 0.002, r(0.360)),
+                    pnr(0.914, 0.149, r(0.660)),
+                    pnr(0.926, 0.289, r(0.660)),
+                    p(0.881, 0.346),
+                    pnr(0.940, 0.344, r(0.126)),
+                    pnr(1.003, 0.437, r(0.255)),
+                ],
+                2,
+            )
+            .transformed_by(&scaled(1.0, 0.742))
+        )
+    }
+
+    pub fn PuffyDiamond() -> &'static RoundedPolygon {
+        shape!(mirrored(&[pnr(0.870, 0.130, r(0.146)), p(0.818, 0.357), pnr(1.000, 0.332, r(0.853))], 4))
+    }
+
+    pub fn PixelCircle() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[
+                p(0.500, 0.000),
+                p(0.704, 0.000),
+                p(0.704, 0.065),
+                p(0.843, 0.065),
+                p(0.843, 0.148),
+                p(0.926, 0.148),
+                p(0.926, 0.296),
+                p(1.000, 0.296),
+            ],
+            2,
+        ))
+    }
+
+    pub fn PixelTriangle() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[
+                p(0.110, 0.500),
+                p(0.113, 0.000),
+                p(0.287, 0.000),
+                p(0.287, 0.087),
+                p(0.421, 0.087),
+                p(0.421, 0.170),
+                p(0.560, 0.170),
+                p(0.560, 0.265),
+                p(0.674, 0.265),
+                p(0.675, 0.344),
+                p(0.789, 0.344),
+                p(0.789, 0.439),
+                p(0.888, 0.439),
+            ],
+            1,
+        ))
+    }
+
+    pub fn Bun() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[p(0.796, 0.500), pnr(0.853, 0.518, r(1.0)), pnr(0.992, 0.631, r(1.0)), pnr(0.968, 1.000, r(1.0))],
+            2,
+        ))
+    }
+
+    pub fn Heart() -> &'static RoundedPolygon {
+        shape!(mirrored(
+            &[
+                pnr(0.500, 0.268, r(0.016)),
+                pnr(0.792, -0.066, r(0.958)),
+                pnr(1.064, 0.276, r(1.000)),
+                pnr(0.501, 0.946, r(0.129)),
+            ],
+            1,
+        ))
+    }
+
+    /// All of them, in Material's order, with their names.
+    pub fn all() -> &'static [(&'static str, fn() -> &'static RoundedPolygon)] {
         &[
-            pnr(1.004, 1.000, rs(0.148, 0.417)),
-            pnr(0.000, 1.000, r(0.151)),
-            pnr(0.000, -0.003, r(0.148)),
-            pnr(0.978, 0.020, r(0.803)),
-        ],
-        1,
-    );
-    Arrow => custom(
-        &[
-            pnr(0.500, 0.892, r(0.313)),
-            pnr(-0.216, 1.050, r(0.207)),
-            pnr(0.499, -0.160, rs(0.215, 1.000)),
-            pnr(1.225, 1.060, r(0.211)),
-        ],
-        1,
-    );
-    SemiCircle => RoundedPolygon::rectangle(
-        1.6,
-        1.0,
-        CornerRounding::Unrounded,
-        Some(&[ROUND20, ROUND20, ROUND100, ROUND100]),
-        0.0,
-        0.0,
-    );
-    Oval => RoundedPolygon::circle(8, 1.0, 0.0, 0.0).transformed_by(&scaled(1.0, 0.64)).transformed_by(&rotated(-45.0));
-    Pill => mirrored(&[pnr(0.961, 0.039, r(0.426)), p(1.001, 0.428), pnr(1.000, 0.609, r(1.000))], 2);
-    Triangle => RoundedPolygon::new(3, 1.0, 0.0, 0.0, ROUND20, None).transformed_by(&rotated(-90.0));
-    Diamond => custom(&[pnr(0.500, 1.096, rs(0.151, 0.524)), pnr(0.040, 0.500, r(0.159))], 2);
-    ClamShell => custom(&[pnr(0.171, 0.841, r(0.159)), pnr(-0.020, 0.500, r(0.140)), pnr(0.170, 0.159, r(0.159))], 2);
-    Pentagon => mirrored(&[pnr(0.500, -0.009, r(0.172)), pnr(1.030, 0.365, r(0.164)), pnr(0.828, 0.970, r(0.169))], 1);
-    Gem => mirrored(
-        &[
-            pnr(0.499, 1.023, rs(0.241, 0.778)),
-            pnr(-0.005, 0.792, r(0.208)),
-            pnr(0.073, 0.258, r(0.228)),
-            pnr(0.433, -0.000, r(0.491)),
-        ],
-        1,
-    );
-    Sunny => star(8, 0.8, ROUND15);
-    VerySunny => custom(&[pnr(0.500, 1.080, r(0.085)), pnr(0.358, 0.843, r(0.085))], 8);
-    Cookie4Sided => custom(&[pnr(1.237, 1.236, r(0.258)), pnr(0.500, 0.918, r(0.233))], 4);
-    Cookie6Sided => custom(&[pnr(0.723, 0.884, r(0.394)), pnr(0.500, 1.099, r(0.398))], 6);
-    Cookie7Sided => star(7, 0.75, ROUND50).transformed_by(&rotated(-90.0));
-    Cookie9Sided => star(9, 0.8, ROUND50).transformed_by(&rotated(-90.0));
-    Cookie12Sided => star(12, 0.8, ROUND50).transformed_by(&rotated(-90.0));
-    Ghostish => mirrored(
-        &[
-            pnr(0.500, 0.0, r(1.000)),
-            pnr(1.0, 0.0, r(1.000)),
-            pnr(1.0, 1.140, rs(0.254, 0.106)),
-            pnr(0.575, 0.906, r(0.253)),
-        ],
-        1,
-    );
-    Clover4Leaf => mirrored(&[p(0.500, 0.074), pnr(0.725, -0.099, r(0.476))], 4);
-    Clover8Leaf => custom(&[p(0.500, 0.036), pnr(0.758, -0.101, r(0.209))], 8);
-    Burst => custom(&[pnr(0.500, -0.006, r(0.006)), pnr(0.592, 0.158, r(0.006))], 12);
-    SoftBurst => custom(&[pnr(0.193, 0.277, r(0.053)), pnr(0.176, 0.055, r(0.053))], 10);
-    Boom => custom(&[pnr(0.457, 0.296, r(0.007)), pnr(0.500, -0.051, r(0.007))], 15);
-    SoftBoom => mirrored(
-        &[
-            p(0.733, 0.454),
-            pnr(0.839, 0.437, r(0.532)),
-            pnr(0.949, 0.449, rs(0.439, 1.000)),
-            pnr(0.998, 0.478, r(0.174)),
-        ],
-        16,
-    );
-    Flower => mirrored(&[p(0.370, 0.187), pnr(0.416, 0.049, r(0.381)), pnr(0.479, 0.001, r(0.095))], 8);
-    Puffy => mirrored(
-        &[
-            p(0.500, 0.053),
-            pnr(0.545, -0.040, r(0.405)),
-            pnr(0.670, -0.035, r(0.426)),
-            pnr(0.717, 0.066, r(0.574)),
-            p(0.722, 0.128),
-            pnr(0.777, 0.002, r(0.360)),
-            pnr(0.914, 0.149, r(0.660)),
-            pnr(0.926, 0.289, r(0.660)),
-            p(0.881, 0.346),
-            pnr(0.940, 0.344, r(0.126)),
-            pnr(1.003, 0.437, r(0.255)),
-        ],
-        2,
-    )
-    .transformed_by(&scaled(1.0, 0.742));
-    PuffyDiamond => mirrored(&[pnr(0.870, 0.130, r(0.146)), p(0.818, 0.357), pnr(1.000, 0.332, r(0.853))], 4);
-    PixelCircle => mirrored(
-        &[
-            p(0.500, 0.000),
-            p(0.704, 0.000),
-            p(0.704, 0.065),
-            p(0.843, 0.065),
-            p(0.843, 0.148),
-            p(0.926, 0.148),
-            p(0.926, 0.296),
-            p(1.000, 0.296),
-        ],
-        2,
-    );
-    PixelTriangle => mirrored(
-        &[
-            p(0.110, 0.500),
-            p(0.113, 0.000),
-            p(0.287, 0.000),
-            p(0.287, 0.087),
-            p(0.421, 0.087),
-            p(0.421, 0.170),
-            p(0.560, 0.170),
-            p(0.560, 0.265),
-            p(0.674, 0.265),
-            p(0.675, 0.344),
-            p(0.789, 0.344),
-            p(0.789, 0.439),
-            p(0.888, 0.439),
-        ],
-        1,
-    );
-    Bun => mirrored(
-        &[p(0.796, 0.500), pnr(0.853, 0.518, r(1.0)), pnr(0.992, 0.631, r(1.0)), pnr(0.968, 1.000, r(1.0))],
-        2,
-    );
-    Heart => mirrored(
-        &[
-            pnr(0.500, 0.268, r(0.016)),
-            pnr(0.792, -0.066, r(0.958)),
-            pnr(1.064, 0.276, r(1.000)),
-            pnr(0.501, 0.946, r(0.129)),
-        ],
-        1,
-    );
+            ("Circle", MaterialShapes::Circle),
+            ("Square", MaterialShapes::Square),
+            ("Slanted", MaterialShapes::Slanted),
+            ("Arch", MaterialShapes::Arch),
+            ("Fan", MaterialShapes::Fan),
+            ("Arrow", MaterialShapes::Arrow),
+            ("SemiCircle", MaterialShapes::SemiCircle),
+            ("Oval", MaterialShapes::Oval),
+            ("Pill", MaterialShapes::Pill),
+            ("Triangle", MaterialShapes::Triangle),
+            ("Diamond", MaterialShapes::Diamond),
+            ("ClamShell", MaterialShapes::ClamShell),
+            ("Pentagon", MaterialShapes::Pentagon),
+            ("Gem", MaterialShapes::Gem),
+            ("Sunny", MaterialShapes::Sunny),
+            ("VerySunny", MaterialShapes::VerySunny),
+            ("Cookie4Sided", MaterialShapes::Cookie4Sided),
+            ("Cookie6Sided", MaterialShapes::Cookie6Sided),
+            ("Cookie7Sided", MaterialShapes::Cookie7Sided),
+            ("Cookie9Sided", MaterialShapes::Cookie9Sided),
+            ("Cookie12Sided", MaterialShapes::Cookie12Sided),
+            ("Ghostish", MaterialShapes::Ghostish),
+            ("Clover4Leaf", MaterialShapes::Clover4Leaf),
+            ("Clover8Leaf", MaterialShapes::Clover8Leaf),
+            ("Burst", MaterialShapes::Burst),
+            ("SoftBurst", MaterialShapes::SoftBurst),
+            ("Boom", MaterialShapes::Boom),
+            ("SoftBoom", MaterialShapes::SoftBoom),
+            ("Flower", MaterialShapes::Flower),
+            ("Puffy", MaterialShapes::Puffy),
+            ("PuffyDiamond", MaterialShapes::PuffyDiamond),
+            ("PixelCircle", MaterialShapes::PixelCircle),
+            ("PixelTriangle", MaterialShapes::PixelTriangle),
+            ("Bun", MaterialShapes::Bun),
+            ("Heart", MaterialShapes::Heart),
+        ]
+    }
 }

@@ -257,7 +257,7 @@ impl Gen<'_, '_> {
             },
             ExprKind::This { label } => match self.receiver(label.as_ref().map(|l| l.name.as_str())) {
                 Some(r) => {
-                    let i = proc_macro2::Ident::new(&r.rust, span);
+                    let i = crate::codegen::names::ident(&r.rust, span);
                     let ty = r.value.clone();
                     // (`self`, or a receiver lent by reference — `this@LookaheadScope` of an `&Rc<dyn LookaheadScope>`
                     // —: a clone where a value is taken, as Kotlin's reference is)
@@ -383,7 +383,7 @@ impl Gen<'_, '_> {
         }
         // A member of an implicit receiver (a property: its getter).
         if let Some((recv, item)) = self.receiver_member(&n.name, |i| i.params.is_empty()) {
-            let r = proc_macro2::Ident::new(&recv.rust, span);
+            let r = crate::codegen::names::ident(&recv.rust, span);
             let m = ident(item.rust, span);
             let ty = owner_arg_ret(&recv.value, item.ret);
             // (another of Rust's integer types read as Kotlin's `Int`: a buffer's `length` in `edit { … }`)
@@ -682,7 +682,7 @@ impl Gen<'_, '_> {
     /// A member extension property `item` of the implicit receiver `r` read of `recv`: `r.item(&recv)`.
     fn extension_property_read(&mut self, recv: Out, r: &ImplicitReceiver, item: &index::Item, loc: Loc) -> Out {
         let span = self.span(loc);
-        let ri = proc_macro2::Ident::new(&r.rust, span);
+        let ri = crate::codegen::names::ident(&r.rust, span);
         let m = ident(item.rust, span);
         let ty = owner_arg_ret(&recv.ty, item.ret);
         let arg = if item.params[0].ty.trim_start().starts_with('&') {

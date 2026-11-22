@@ -12,6 +12,9 @@
 //! cargo xtask adaptive-strings   convert material3-adaptive's layout texts (Compose for desktop's l10n) likewise
 //! cargo xtask material-icons     convert the material icons' Kotlin (core's) to their crate's data
 //!                                (each of the four with --check: convert and compare where the jar is, else skip)
+//! cargo xtask showcase-shots compare|reference …
+//!                                the showcase's shots against the C++ Kompoz showcase's: builds the showcase
+//!                                (release) and runs its showcase-shots with the rest (examples/showcase, shots.rs)
 //! ```
 //!
 //! Std, and syn to read Rust sources (the workspace's own, already built for its macros): building the workspace
@@ -37,7 +40,9 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage: cargo xtask shaders [--check] | cargo xtask wayland [--check] | cargo xtask kotlin-index \
                      [--check] | cargo xtask material3-tokens [--check] | cargo xtask material3-strings [--check] | \
-                     cargo xtask adaptive-strings [--check] | cargo xtask material-icons [--check]";
+                     cargo xtask adaptive-strings [--check] | cargo xtask material-icons [--check] | cargo xtask \
+                     showcase-shots compare [--showcase <binary>] [--out <dir>] | cargo xtask showcase-shots reference \
+                     --cpp <binary> --revision <commit>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -56,6 +61,7 @@ fn main() -> ExitCode {
         ["adaptive-strings", "--check"] => adaptive_strings::run(&workspace(), true),
         ["material-icons"] => material_icons::run(&workspace(), false),
         ["material-icons", "--check"] => material_icons::run(&workspace(), true),
+        ["showcase-shots", rest @ ..] => showcase_shots(rest),
         ["help" | "--help" | "-h"] => {
             println!("{USAGE}");
             Ok(())
@@ -69,6 +75,28 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `cargo xtask showcase-shots …`: the showcase and its showcase-shots built (release: lavapipe draws hundreds of
+/// pages) and run with `args`.
+fn showcase_shots(args: &[&str]) -> Result<(), String> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    // (both binaries: compare runs the showcase beside showcase-shots)
+    let built = std::process::Command::new(&cargo)
+        .current_dir(workspace())
+        .args(["build", "--release", "-p", "showcase", "--bins"])
+        .status()
+        .map_err(|e| format!("cargo: {e}"))?;
+    if !built.success() {
+        return Err(format!("building the showcase: {built}"));
+    }
+    let status = std::process::Command::new(cargo)
+        .current_dir(workspace())
+        .args(["run", "--release", "-p", "showcase", "--bin", "showcase-shots", "--"])
+        .args(args)
+        .status()
+        .map_err(|e| format!("cargo: {e}"))?;
+    if status.success() { Ok(()) } else { Err(format!("showcase-shots: {status}")) }
 }
 
 /// The workspace's root (this package is its `xtask/`).

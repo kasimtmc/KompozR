@@ -722,11 +722,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         };
 
         let vis = self.visibility(&f.modifiers, f.loc);
-        let name = if kompozable || is_pascal(&f.name.name) {
-            self.name_ident(&f.name.name, f.name.loc)
-        } else {
-            self.name_ident(&snake(&f.name.name), f.name.loc)
-        };
+        let name = self.name_ident(&fn_name(f), f.name.loc);
         let fn_kw = quote_spanned!(span=> fn);
         let asyncness = if suspend { quote_spanned!(span=> async) } else { quote!() };
         let mut allow = allow_attr(span);
@@ -1046,9 +1042,11 @@ fn literal_text(e: &Expr) -> Option<String> {
     }
 }
 
-/// A function's Rust name: a composable's or a PascalCase one as it is, others in snake_case.
+/// A function's Rust name: a PascalCase one (a composable that emits UI) as it is, others in snake_case — a
+/// camelCase composable too (`animateColorScheme` → `animate_color_scheme`, as the API's `remember_…` are), so a
+/// call from another file, which names a function it doesn't see in snake_case, finds it.
 fn fn_name(f: &Function) -> String {
-    if f.is_kompozable() || is_pascal(&f.name.name) { f.name.name.clone() } else { snake(&f.name.name) }
+    if is_pascal(&f.name.name) { f.name.name.clone() } else { snake(&f.name.name) }
 }
 
 /// The last segment of a dotted name.

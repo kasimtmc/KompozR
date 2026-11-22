@@ -977,6 +977,8 @@ impl Brush {
     }
     /// Left to right from `start_x` to `end_x` (Compose's Brush.horizontalGradient; Compose's defaults: 0 to
     /// infinity, the right edge).
+    ///
+    /// Kotlin: `horizontalGradient(colors: List<Color>, startX: Float = 0.0f, endX: Float = Float.POSITIVE_INFINITY, tileMode: TileMode = TileMode.Clamp)`
     pub fn horizontal_gradient(colors: &[Color], start_x: f32, end_x: f32, tile_mode: TileMode) -> Brush {
         Brush::linear_gradient(colors, Offset::new(start_x, 0.0), Offset::new(end_x, 0.0), tile_mode)
     }
@@ -990,6 +992,8 @@ impl Brush {
     }
     /// Top to bottom from `start_y` to `end_y` (Compose's Brush.verticalGradient; Compose's defaults: 0 to
     /// infinity, the bottom edge).
+    ///
+    /// Kotlin: `verticalGradient(colors: List<Color>, startY: Float = 0.0f, endY: Float = Float.POSITIVE_INFINITY, tileMode: TileMode = TileMode.Clamp)`
     pub fn vertical_gradient(colors: &[Color], start_y: f32, end_y: f32, tile_mode: TileMode) -> Brush {
         Brush::linear_gradient(colors, Offset::new(0.0, start_y), Offset::new(0.0, end_y), tile_mode)
     }
@@ -1359,7 +1363,8 @@ pub fn lerp_brush(start: &Brush, stop: &Brush, fraction: f32) -> Brush {
         .unwrap_or_else(|| if fraction < 0.5 { start.clone() } else { stop.clone() })
 }
 
-// (WP5: Kotlin's Brush.linearGradient(colors) with its defaults, the doc line's)
+// (WP5, WP9: Kotlin's Brush.linearGradient / horizontalGradient / verticalGradient(colors) with their defaults, the
+// doc lines')
 impl Brush {
     /// [`Brush::linear_gradient`] of a list of colors (Compose's `Brush.linearGradient(colors: List<Color>, …)`,
     /// what the Kotlin syntax calls: Kotlin's defaults, from the top left to the far corner, clamped, come from the
@@ -1368,6 +1373,23 @@ impl Brush {
     /// Kotlin: `linearGradient(colors: List<Color>, start: Offset = Offset.Zero, end: Offset = Offset.Infinite, tileMode: TileMode = TileMode.Clamp)`
     pub fn linear_gradient_of(colors: Vec<Color>, start: Offset, end: Offset, tile_mode: TileMode) -> Brush {
         Brush::linear_gradient(&colors, start, end, tile_mode)
+    }
+
+    /// [`Brush::horizontal_gradient`] of a list of colors (Compose's `Brush.horizontalGradient(colors: List<Color>,
+    /// …)`, what the Kotlin syntax calls: Kotlin's defaults, from the left edge to the right one, clamped, come from
+    /// the doc line).
+    ///
+    /// Kotlin: `horizontalGradient(colors: List<Color>, startX: Float = 0.0f, endX: Float = Float.POSITIVE_INFINITY, tileMode: TileMode = TileMode.Clamp)`
+    pub fn horizontal_gradient_of(colors: Vec<Color>, start_x: f32, end_x: f32, tile_mode: TileMode) -> Brush {
+        Brush::horizontal_gradient(&colors, start_x, end_x, tile_mode)
+    }
+
+    /// [`Brush::vertical_gradient`] of a list of colors (Compose's `Brush.verticalGradient(colors: List<Color>, …)`,
+    /// with Kotlin's defaults, from the top edge to the bottom one, clamped, from the doc line).
+    ///
+    /// Kotlin: `verticalGradient(colors: List<Color>, startY: Float = 0.0f, endY: Float = Float.POSITIVE_INFINITY, tileMode: TileMode = TileMode.Clamp)`
+    pub fn vertical_gradient_of(colors: Vec<Color>, start_y: f32, end_y: f32, tile_mode: TileMode) -> Brush {
+        Brush::vertical_gradient(&colors, start_y, end_y, tile_mode)
     }
 }
 

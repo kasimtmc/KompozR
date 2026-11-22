@@ -2014,6 +2014,11 @@ impl<T: Clone + Send + Sync + 'static> SnapshotStateList<T> {
     pub fn size(&self) -> i32 {
         self.len() as i32
     }
+    /// Inserts `element` at `index` (one change of the list).
+    /// Kotlin: `add(index: Int, element: E)`
+    pub fn add_at_index(&self, index: i32, element: T) {
+        self.add_at(index.max(0) as usize, element);
+    }
     /// Kotlin: `addAll(elements: Collection<E>): Boolean`
     pub fn add_all(&self, elements: impl IntoIterator<Item = T>) -> bool {
         let more: Vec<T> = elements.into_iter().collect();

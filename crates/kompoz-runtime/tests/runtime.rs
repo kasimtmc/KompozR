@@ -1359,6 +1359,38 @@ fn movable_content_leaves_a_composition_it_isnt_called_in() {
     assert_eq!(*log.borrow(), ["+m0", "-m0"]);
 }
 
+static LocalHost: KompozitionLocal<Option<String>> = KompozitionLocal::new(|| None);
+
+/// A scope inside movable content that reads the host's local (as LaunchedEffect reads LocalDispatcher).
+#[kompozable]
+fn HostReader(tone: MutableState<i32>) {
+    let host = LocalHost.current().expect("the host's local, provided at the root");
+    Text(format!("{host}:{tone}"));
+}
+
+/// Movable content made anew (`remember(content) { movableContentOf(content) }` with another content) leaves its
+/// old group parked; a scope in that group invalidated in the same pass isn't run on its own, without the locals
+/// above it (the WP9 showcase's NavigationSuiteScaffold, whose items' content changes with the theme).
+fn movable_content_made_anew_doesnt_run_the_old_ones_scopes() {
+    let version = mutable_state_of(0);
+    let tone = mutable_state_of(0);
+    let (v, t) = (version.clone(), tone.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let (v, t) = (v.clone(), t.clone());
+        KompozitionLocalProvider(&[LocalHost.provides(Some("host".into()))], move || {
+            let n = v.get();
+            let t = t.clone();
+            let content = remember_keyed(n, move || movable_content_of(move || HostReader(t.clone())));
+            Column("box", move || content.call());
+        });
+    }));
+    assert_eq!(rule.names(), ["box", "host:0"]);
+    version.set(1);
+    tone.set(1);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["box", "host:1"]);
+}
+
 fn movable_content_called_twice_makes_a_second_instance() {
     let handles = Rc::new(RefCell::new(Vec::new()));
     let h = handles.clone();
@@ -1608,6 +1640,7 @@ tests!(
     derived_state_follows_an_updated_state,
     movable_content_keeps_its_state_where_it_moves,
     movable_content_leaves_a_composition_it_isnt_called_in,
+    movable_content_made_anew_doesnt_run_the_old_ones_scopes,
     movable_content_called_twice_makes_a_second_instance,
     remember_saveable_comes_back_with_its_holders_key,
     saved_state_outlives_the_host,

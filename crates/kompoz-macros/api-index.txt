@@ -199,6 +199,7 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * kompozable DefaultThreePaneScaffold r crates/kompoz-material3-adaptive/src/layout/three_pane_scaffold.rs
 * method DeferredAnimatedContent dddddr crates/kompoz-animation/src/animated_content.rs DeferredTransition
 * method DeferredAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs DeferredTransition
+* fn Destination rr examples/showcase/src/lib.rs
 kompoz-material3-adaptive/samples kompozable DetailPaneContent rrrdddr crates/kompoz-material3-adaptive/tests/samples.rs
 * kompozable DetectClickFromInteractionSource rr crates/kompoz-material3/src/search_bar.rs
 * kompozable DeterminateLoadingIndicatorImpl rrrrrr crates/kompoz-material3/src/loading_indicator.rs
@@ -360,6 +361,7 @@ kompoz-material3/carousel kompozable HorizontalMultiBrowseCarouselSample - crate
 * kompozable HorizontalTimePicker rrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable HorizontalUncontainedCarousel rrdddddr crates/kompoz-material3/src/carousel/carousel.rs
 kompoz-material3/carousel kompozable HorizontalUncontainedCarouselSample - crates/kompoz-material3/tests/carousel.rs
+kompoz-runtime/runtime kompozable HostReader r crates/kompoz-runtime/tests/runtime.rs
 * kompozable Icon rrdd crates/kompoz-material3/src/icon.rs
 * method Icon rdd crates/kompoz-material3/src/segmented_button.rs SegmentedButtonDefaults
 * kompozable IconButton rdddddr crates/kompoz-material3/src/icon_button.rs

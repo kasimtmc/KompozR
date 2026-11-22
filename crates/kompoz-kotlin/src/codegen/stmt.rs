@@ -134,7 +134,7 @@ impl Gen<'_, '_> {
             ExprKind::Name(n) => {
                 let Some(l) = self.local(&n.name) else {
                     if let Some((r, setter)) = self.receiver_setter(&n.name) {
-                        let ri = proc_macro2::Ident::new(&r.rust, span);
+                        let ri = crate::codegen::names::ident(&r.rust, span);
                         let read = self.expr(operand).ts;
                         return quote_spanned!(span=> #ri.#setter(#kt::KtInc::#f(#read)));
                     }
@@ -501,7 +501,7 @@ impl Gen<'_, '_> {
                     };
                 }
                 if let Some((r, setter)) = self.receiver_setter(&n.name) {
-                    let ri = proc_macro2::Ident::new(&r.rust, span);
+                    let ri = crate::codegen::names::ident(&r.rust, span);
                     let setter = proc_macro2::Ident::new(&setter.to_string(), self.span(n.loc));
                     let read_ty = self.peek_ty(target);
                     let read = if op == AssignOp::Assign { quote!() } else { self.expr(target).ts };
@@ -788,12 +788,15 @@ impl Gen<'_, '_> {
             self.narrow(&n.name, l.ty.non_null());
             let b = self.braced(o, tail);
             self.pop_scope();
-            let ts = quote_spanned!(span=> if let ::core::option::Option::Some(#i) = #i.clone() #b else #a);
+            let narrowed = quote_spanned!(span=> let ::core::option::Option::Some(#i) = #i.clone());
+            let c = unused_narrowings(narrowed, &b);
+            let ts = quote_spanned!(span=> if #c #b else #a);
             return Out::plain(self.held_shared(ts, shared, span), ty);
         }
         self.push_scope();
         let c = self.condition(condition);
         let a = self.braced(then, tail);
+        let c = unused_narrowings(c, &a);
         self.pop_scope();
         let ts = match otherwise {
             Some(o) => {
@@ -1060,4 +1063,41 @@ fn state_value_ty(t: &Ty) -> Ty {
         }
         _ => Ty::Unknown,
     }
+}
+
+/// A condition's null checks narrowed for a branch that doesn't read the narrowed value (`if (x != null) "a" else
+/// "b"`): `x.is_some()` instead of `let Some(x) = x.clone()`, which would bind a value nothing uses.
+pub(crate) fn unused_narrowings(condition: TokenStream, branch: &TokenStream) -> TokenStream {
+    use proc_macro2::TokenTree;
+    fn mentions(ts: &TokenStream, name: &str) -> bool {
+        ts.clone().into_iter().any(|t| match t {
+            TokenTree::Ident(i) => i == name,
+            TokenTree::Group(g) => mentions(&g.stream(), name),
+            _ => false,
+        })
+    }
+    let tokens: Vec<TokenTree> = condition.into_iter().collect();
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < tokens.len() {
+        // `let :: core :: option :: Option :: Some (x) = x . clone ()`: 19 tokens (each `::` two puncts)
+        let narrowing = matches!(&tokens[k], TokenTree::Ident(i) if i == "let")
+            && tokens.len() >= k + 19
+            && matches!(&tokens[k + 12], TokenTree::Ident(i) if i == "Some")
+            && matches!(&tokens[k + 13], TokenTree::Group(_))
+            && matches!(&tokens[k + 14], TokenTree::Punct(p) if p.as_char() == '=');
+        if narrowing
+            && let TokenTree::Group(g) = &tokens[k + 13]
+            && let [TokenTree::Ident(x)] = g.stream().into_iter().collect::<Vec<_>>().as_slice()
+            && !mentions(branch, &x.to_string())
+        {
+            let span = x.span();
+            out.extend(quote_spanned!(span=> #x.is_some()));
+            k += 19;
+            continue;
+        }
+        out.push(tokens[k].clone());
+        k += 1;
+    }
+    out.into_iter().collect()
 }

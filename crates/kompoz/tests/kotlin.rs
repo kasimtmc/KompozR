@@ -2,11 +2,16 @@
 //! crate's paths), composed by the test rule.
 
 #![allow(non_snake_case)]
+// (the generated Rust binds nothing it doesn't use: a null check's value an unread branch doesn't take, WP9)
+#![deny(unused_variables)]
 
 mod common;
 
+use kompoz::foundation::text::selection::TextSelectionColors;
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
+use kompoz::text::intl::Locale;
+use kompoz::ui::semantics::CustomAccessibilityAction;
 
 // The Counter in Kotlin's syntax (the C++'s kompozable_tests.cpp 44-58), its button Material's.
 kompoz! {
@@ -516,7 +521,61 @@ fn rusts_lexer_takes_these() {
     assert_eq!(lexed(false), "yinner$'A\t|");
 }
 
+// (WP9, what the showcase's Kotlin needed) A local named as a Rust keyword (`box`) captured by lambdas; a camelCase
+// composable that returns a value, named in snake_case as the API's are; a null check whose branch doesn't read the
+// value; a state list's add at an index; Kotlin constructors and defaults the showcase calls.
+kompoz! {
+    @Kompozable
+    fun rememberedLabel(n: Int): String = remember(n) { "etiket $n" }
+
+    @Kompozable
+    fun KeywordsAndChecks(maybe: String?) {
+        var box by remember { mutableStateOf(1) }
+        val items = remember { mutableStateListOf(2, 3) }
+        Column {
+            Text("kutu $box", modifier = Modifier.clickable { box += 1 })
+            Text(rememberedLabel(box))
+            Text(if (maybe != null) "var" else "yok")
+            Button(onClick = { items.add(0, box) }) { Text("ekle") }
+            Text(items.joinToString(","), modifier = Modifier.testTag("items"))
+            Box(modifier = Modifier.size(10.dp).background(Brush.horizontalGradient(listOf(Color.Red, Color.Blue))))
+            Box(modifier = Modifier.size(10.dp).background(Color.Red, MaterialShapes.Diamond.toShape()))
+            Text("tr: ${Locale("tr").language}")
+            Text("seçim", modifier = Modifier.semantics { customActions = listOf(CustomAccessibilityAction("Arşivle") { true }) })
+            Text("${TextSelectionColors(Color.Red, Color.Blue).handleColor == Color.Red}")
+        }
+    }
+}
+
+fn keywords_checks_and_constructors() {
+    assert_eq!(remembered_label_of(3), "etiket 3");
+    let rule = KompozTestRule::new(kompozable_lambda!(|| KeywordsAndChecks(None)));
+    rule.on_node_with_text("kutu 1").assert_exists();
+    rule.on_node_with_text("etiket 1").assert_exists();
+    rule.on_node_with_text("yok").assert_exists();
+    rule.on_node_with_text("tr: tr").assert_exists();
+    rule.on_node_with_text("true").assert_exists();
+    rule.on_node_with_text("kutu 1").perform_click();
+    rule.on_node_with_text("kutu 2").assert_exists();
+    rule.on_node_with_text("etiket 2").assert_exists();
+    rule.on_node_with_text("ekle").perform_click();
+    rule.on_node_with_tag("items").assert_text_equals(&["2,2,3"]);
+    let some = KompozTestRule::new(kompozable_lambda!(|| KeywordsAndChecks(Some("x".into()))));
+    some.on_node_with_text("var").assert_exists();
+}
+
+/// `rememberedLabel` composed alone (its Rust name is snake_case).
+fn remembered_label_of(n: i32) -> String {
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let out = seen.clone();
+    let _rule = KompozTestRule::new(kompozable_lambda!(move || {
+        *out.borrow_mut() = remembered_label(n);
+    }));
+    seen.borrow().clone()
+}
+
 tests![
+    keywords_checks_and_constructors,
     launch_takes_kotlins_coroutine_start,
     remember_updated_state_gives_the_latest_value,
     empty_composes,

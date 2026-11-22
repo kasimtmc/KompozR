@@ -1,0 +1,23 @@
+[package]
+name = "showcase"
+description = "KompozR's showcase: the C++ Kompoz showcase's shell and Material screen in Kotlin's syntax (.kt files through kompoz_file!), run on the platform's window (KOMPOZ_HEADLESS=1: without one)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz = { path = "../../crates/kompoz" }
+
+[dev-dependencies]
+kompoz = { path = "../../crates/kompoz", features = ["test"] }
+
+# The showcase composed section by section by the test rule, and run headless (a GPU device: lavapipe in CI) through
+# the Material screen: one thread, in sequence.
+[[test]]
+name = "headless"
+harness = false

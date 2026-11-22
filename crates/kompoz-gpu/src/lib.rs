@@ -3,7 +3,7 @@
 //! compiled from Slang by `cargo xtask shaders`, and what they read laid out as they read it), a path's geometry in
 //! the target's pixels ([`path`]: curves cut into lines, strokes into outlines, projected, as edges for the coverage
 //! mask), text's glyphs ([`glyph`]: rasterized as FreeType does, colour glyphs painted, kept in an atlas), and the
-//! [`renderer`] that draws kompoz-ui's GraphicsContext with them.
+//! [`renderer`] that draws kompoz-ui's GraphicsContext with them; [`golden`] tells a picture from its golden one.
 //!
 //! `unsafe` code is confined to [`device::vulkan`], each block with a `// SAFETY:` comment; everything else is safe.
 
@@ -11,6 +11,7 @@
 
 pub mod device;
 pub mod glyph;
+pub mod golden;
 pub mod path;
 pub mod renderer;
 pub mod shaders;

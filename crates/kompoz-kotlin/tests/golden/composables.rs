@@ -66,7 +66,7 @@ fn NamedArguments() {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[::kompoz::runtime::kompozable(inline)]
-pub fn textSize() -> TextUnit {
+pub fn text_size() -> TextUnit {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     18.sp()

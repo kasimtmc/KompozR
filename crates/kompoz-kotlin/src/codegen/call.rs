@@ -260,7 +260,7 @@ impl Gen<'_, '_> {
                 // (its receiver: the implicit one of that type, or the innermost)
                 let label = self.receivers.iter().rev().find(|x| x.ty == r).and_then(|x| x.labels.first().cloned());
                 if let Some(x) = self.receiver(label.as_deref()) {
-                    let xi = proc_macro2::Ident::new(&x.rust, span);
+                    let xi = crate::codegen::names::ident(&x.rust, span);
                     vals.push(quote!(#xi));
                 }
             }
@@ -318,7 +318,7 @@ impl Gen<'_, '_> {
             })
         {
             let r = self.use_receiver(&r);
-            let ri = proc_macro2::Ident::new(&r.rust, span);
+            let ri = crate::codegen::names::ident(&r.rust, span);
             let ty = receiver_kotlin_ty(&r);
             let recv =
                 Out { ts: quote!(#ri), ty, kind: if r.rust == "self" { OutKind::Local } else { OutKind::Plain } };
@@ -334,13 +334,13 @@ impl Gen<'_, '_> {
                 && let Some((x, rest)) = self.implicit_extension(&r, items, args)
             {
                 let r = self.use_receiver(&r);
-                let ri = proc_macro2::Ident::new(&r.rust, span);
+                let ri = crate::codegen::names::ident(&r.rust, span);
                 let first = self.extension_receiver_arg(&x, &rest.params[0].ty, span);
                 let rest = Callee { params: rest.params[1..].to_vec(), ..rest };
                 return self.emit(&rest, Target::MethodFirst(quote!(#ri), first), args, loc, &n.name);
             }
             let r = self.use_receiver(&r);
-            let ri = proc_macro2::Ident::new(&r.rust, span);
+            let ri = crate::codegen::names::ident(&r.rust, span);
             let recv_ts = if r.rust == "self" { quote_spanned!(span=> self.clone()) } else { quote!(#ri) };
             let callee = match (items, file) {
                 (Some(items), _) => self.choose(&items, args, loc),
@@ -877,7 +877,7 @@ impl Gen<'_, '_> {
     /// (`&mut DrawScope<'_>`, `&Density`): lent again as that takes it.
     fn extension_receiver_arg(&mut self, x: &ImplicitReceiver, ty: &str, span: Span) -> TokenStream {
         let x = self.use_receiver(x);
-        let xi = proc_macro2::Ident::new(&x.rust, span);
+        let xi = crate::codegen::names::ident(&x.rust, span);
         let held = x.by_mut || x.by_ref;
         match (plain_type_text(ty).starts_with("&mut"), held) {
             (true, true) => quote_spanned!(span=> &mut *#xi),
@@ -956,7 +956,7 @@ impl Gen<'_, '_> {
             rv
         };
         let rv = if first_param_ref { quote_spanned!(span=> &#rv) } else { rv };
-        let ri = proc_macro2::Ident::new(&r.rust, span);
+        let ri = crate::codegen::names::ident(&r.rust, span);
         let rest = scoped_rest(item);
         self.emit(&rest, Target::MethodFirst(quote!(#ri), rv), args, loc, &name.name)
     }
@@ -1852,6 +1852,7 @@ impl Gen<'_, '_> {
             self.push_scope();
             let c = self.condition(condition);
             let a = self.branch_arg(then, p, transform_wraps);
+            let c = super::stmt::unused_narrowings(c, &a);
             self.pop_scope();
             let b = match otherwise.stmts.as_slice() {
                 [Stmt { kind: StmtKind::Expr(inner), .. }] if !otherwise.braced => {

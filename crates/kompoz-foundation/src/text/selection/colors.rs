@@ -1,12 +1,12 @@
 //! The colors of text selection (Compose's TextSelectionColors.kt and DefaultTextSelectionColors).
 
 use kompoz_graphics::Color;
-use kompoz_runtime::KompozitionLocal;
+use kompoz_runtime::{KompozitionLocal, KotlinProperties};
 use std::fmt;
 
 /// The colors of text selection (Compose's TextSelectionColors): the handles', and the background behind the
 /// selected text (with some transparency, about 40 %, to keep the text legible).
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, KotlinProperties)]
 pub struct TextSelectionColors {
     pub handle_color: Color,
     pub background_color: Color,
@@ -16,6 +16,7 @@ pub struct TextSelectionColors {
 const DefaultSelectionColor: Color = Color::from_argb(0xFF4286F4);
 
 impl TextSelectionColors {
+    /// Kotlin: `TextSelectionColors(handleColor: Color, backgroundColor: Color)`
     pub const fn new(handle_color: Color, background_color: Color) -> TextSelectionColors {
         TextSelectionColors { handle_color, background_color }
     }

@@ -351,8 +351,8 @@ fn make_move(e: &mut Expr) {
     }
 }
 
-/// A name as collected (`Ident::to_string`: a raw one with its `r#`, `r#type`) as an identifier again. (WP8: a
-/// Kotlin parameter named `type` is Rust's `r#type`.)
+/// A name as collected (`Ident::to_string`: a raw one with its `r#`, `r#type`, `r#box`) as an identifier again. (WP8:
+/// a Kotlin parameter named `type` is Rust's `r#type`; WP9: a local named `box`.)
 fn name_ident(n: &str, span: proc_macro2::Span) -> Ident {
     match n.strip_prefix("r#") {
         Some(raw) => Ident::new_raw(raw, span),
