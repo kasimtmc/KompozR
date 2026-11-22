@@ -1,5 +1,5 @@
 // Material's snackbars and plain tooltips as Compose's samples write them: material3 1.5's ScaffoldSamples' snackbar
-// samples, over a Scaffold, and TooltipSamples' plain tooltips (the rich ones are WP7's). ScaffoldWithCustomSnackbar
+// samples, over a Scaffold, and TooltipSamples' plain tooltips (the rich ones are in tooltips.kt). ScaffoldWithCustomSnackbar
 // declares a class implementing SnackbarVisuals: classes are stage 14's (its Rust port is in kompoz-material3's
 // tests/snackbars_tooltips.rs).
 

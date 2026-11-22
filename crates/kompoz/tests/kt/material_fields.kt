@@ -1,10 +1,8 @@
 // Material's text fields in a Kotlin file of their own (kompoz_file!): material3 1.5's TextFieldSamples.kt as Compose
 // writes them — test tags added to find them — and the C++ Kompoz's own Compose code (kompozable_tests.cpp's TextForms,
 // Phone; its AddTextDialog is in kotlin_lists_sheets.rs, beside its Dialog), then the API the samples leave out (the
-// label above, the indicator line, the field's shape and colors). What waits for other packages: the samples'
-// TooltipBox around an IconButton (WP7: the IconButton as it is). TextFieldWithErrorState's local function `validate`
-// is a lambda here (Kotlin's local
-// functions come with stage 14).
+// label above, the indicator line, the field's shape and colors). TextFieldWithErrorState's local function `validate`
+// is a lambda here (Kotlin's local functions come with stage 14).
 package com.example.materialfields
 
 import androidx.compose.foundation.*
@@ -86,8 +84,15 @@ fun TextFieldWithIcons() {
         label = { Text("Label") },
         leadingIcon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
         trailingIcon = {
-            IconButton(onClick = { state.clearText() }) {
-                Icon(Icons.Filled.Clear, contentDescription = "Clear text")
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text("Clear text") } },
+                state = rememberTooltipState(),
+            ) {
+                IconButton(onClick = { state.clearText() }) {
+                    Icon(Icons.Filled.Clear, contentDescription = "Clear text")
+                }
             }
         },
         modifier = Modifier.testTag("icons"),
@@ -194,10 +199,17 @@ fun PasswordTextField() {
         trailingIcon = {
             // Provide localized description for accessibility services
             val description = if (passwordHidden) "Show password" else "Hide password"
-            IconButton(onClick = { passwordHidden = !passwordHidden }) {
-                val visibilityIcon =
-                    if (passwordHidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
-                Icon(imageVector = visibilityIcon, contentDescription = description)
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text(description) } },
+                state = rememberTooltipState(),
+            ) {
+                IconButton(onClick = { passwordHidden = !passwordHidden }) {
+                    val visibilityIcon =
+                        if (passwordHidden) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                    Icon(imageVector = visibilityIcon, contentDescription = description)
+                }
             }
         },
         modifier = Modifier.testTag("password"),

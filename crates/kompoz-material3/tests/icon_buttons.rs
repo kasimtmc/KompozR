@@ -1112,10 +1112,35 @@ fn deprecated_overloads_are_the_standard_shapes() {
 
 // ---- M15's samples (IconButtonSamples.kt) ----------------------------------------------------------------------
 //
-// Each sample wraps its button in a `TooltipBox` with a `PlainTooltip` (for accessibility): the tooltips are WP7's,
-// so the buttons are composed here without them.
+// Each sample wraps its button in a `TooltipBox` with a `PlainTooltip` of its description (for accessibility), as
+// `Tipped` does.
 
 const LOCALIZED_DESCRIPTION: &str = "Localized description";
+
+/// The samples' `TooltipBox(positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+/// TooltipAnchorPosition.Above), tooltip = { PlainTooltip { Text(description) } }, state = rememberTooltipState())
+/// { … }` around their button.
+#[kompozable]
+fn Tipped(content: impl Fn() + 'static) {
+    TooltipBox(
+        position_provider = TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+        tooltip = |s: &dyn TooltipScope| s.PlainTooltip(content = || Text(LOCALIZED_DESCRIPTION)),
+        state = remember_tooltip_state(),
+        content = content,
+    );
+}
+
+/// A long press on `at` shows the sample's tooltip, its description.
+fn shows_its_tooltip(rule: &KompozTestRule, at: Offset) {
+    rule.host().pointer_down(at, -1, 0, PointerType::Touch);
+    rule.advance_time_by(600);
+    rule.host().pointer_up(at, -1, 0);
+    rule.advance_frame();
+    rule.on_node_with_text(LOCALIZED_DESCRIPTION).assert_exists();
+    rule.advance_time_by(1600);
+    rule.wait_for_idle();
+    rule.on_node_with_text(LOCALIZED_DESCRIPTION).assert_does_not_exist();
+}
 
 fn icon_button_samples() {
     // IconButtonSample, IconButtonWithAnimatedShapeSample, FilledIconButtonSample(+WithAnimatedShape),
@@ -1126,21 +1151,23 @@ fn icon_button_samples() {
             content = || {
                 Column(|| {
                     let lock = || VectorIcon(Icons::Filled::Lock(), Some(LOCALIZED_DESCRIPTION.into()));
-                    IconButton(|| { /* doSomething() */ }, content = lock);
-                    IconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock);
-                    FilledIconButton(|| {}, content = lock);
-                    FilledIconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock);
-                    FilledTonalIconButton(|| {}, content = lock);
-                    FilledTonalIconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock);
-                    OutlinedIconButton(|| {}, content = lock);
-                    OutlinedIconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock);
-                    IconButton(
-                        || {},
-                        content = || {
-                            let painter: Rc<dyn Painter> = Rc::new(remember_vector_painter(Icons::Filled::Lock()));
-                            Icon(painter, Some(LOCALIZED_DESCRIPTION.into()), tint = Color::Red);
-                        },
-                    );
+                    Tipped(|| IconButton(|| { /* doSomething() */ }, content = lock));
+                    Tipped(|| IconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock));
+                    Tipped(|| FilledIconButton(|| {}, content = lock));
+                    Tipped(|| FilledIconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock));
+                    Tipped(|| FilledTonalIconButton(|| {}, content = lock));
+                    Tipped(|| FilledTonalIconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock));
+                    Tipped(|| OutlinedIconButton(|| {}, content = lock));
+                    Tipped(|| OutlinedIconButtonWithShapes(|| {}, IconButtonDefaults.shapes(), content = lock));
+                    Tipped(|| {
+                        IconButton(
+                            || {},
+                            content = || {
+                                let painter: Rc<dyn Painter> = Rc::new(remember_vector_painter(Icons::Filled::Lock()));
+                                Icon(painter, Some(LOCALIZED_DESCRIPTION.into()), tint = Color::Red);
+                            },
+                        );
+                    });
                 });
             },
         );
@@ -1166,6 +1193,7 @@ fn icon_button_samples() {
         ]
     );
     assert_eq!(canvas.stroke_colors, vec![Color::Black, Color::Black]);
+    shows_its_tooltip(&rule, buttons[0].bounds_in_root().center());
 }
 
 fn icon_toggle_button_samples() {
@@ -1190,57 +1218,64 @@ fn icon_toggle_button_samples() {
                         };
                         let modifier = Modifier.test_tag(kind.to_string());
                         let shapes = IconButtonDefaults.toggleable_shapes();
-                        match kind {
-                            0 => {
-                                IconToggleButton(is_checked, on_checked_change, modifier = modifier, content = content)
+                        Tipped(move || {
+                            let (on_checked_change, modifier, shapes) =
+                                (on_checked_change.clone(), modifier.clone(), shapes.clone());
+                            match kind {
+                                0 => IconToggleButton(
+                                    is_checked,
+                                    on_checked_change,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                1 => IconToggleButtonWithShapes(
+                                    is_checked,
+                                    on_checked_change,
+                                    shapes,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                2 => FilledIconToggleButton(
+                                    is_checked,
+                                    on_checked_change,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                3 => FilledIconToggleButtonWithShapes(
+                                    is_checked,
+                                    on_checked_change,
+                                    shapes,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                4 => FilledTonalIconToggleButton(
+                                    is_checked,
+                                    on_checked_change,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                5 => FilledTonalIconToggleButtonWithShapes(
+                                    is_checked,
+                                    on_checked_change,
+                                    shapes,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                6 => OutlinedIconToggleButton(
+                                    is_checked,
+                                    on_checked_change,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
+                                _ => OutlinedIconToggleButtonWithShapes(
+                                    is_checked,
+                                    on_checked_change,
+                                    shapes,
+                                    modifier = modifier,
+                                    content = content,
+                                ),
                             }
-                            1 => IconToggleButtonWithShapes(
-                                is_checked,
-                                on_checked_change,
-                                shapes,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                            2 => FilledIconToggleButton(
-                                is_checked,
-                                on_checked_change,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                            3 => FilledIconToggleButtonWithShapes(
-                                is_checked,
-                                on_checked_change,
-                                shapes,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                            4 => FilledTonalIconToggleButton(
-                                is_checked,
-                                on_checked_change,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                            5 => FilledTonalIconToggleButtonWithShapes(
-                                is_checked,
-                                on_checked_change,
-                                shapes,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                            6 => OutlinedIconToggleButton(
-                                is_checked,
-                                on_checked_change,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                            _ => OutlinedIconToggleButtonWithShapes(
-                                is_checked,
-                                on_checked_change,
-                                shapes,
-                                modifier = modifier,
-                                content = content,
-                            ),
-                        }
+                        });
                     }
                 });
             },
@@ -1266,52 +1301,60 @@ fn sized_icon_button_samples() {
             content = || {
                 Column(|| {
                     // (small narrow round icon button, Compose's comment says: an extra small narrow square one)
-                    FilledIconButton(
-                        || {},
-                        modifier = Modifier
-                            .minimum_interactive_component_size()
-                            .size_dp(
-                                IconButtonDefaults
-                                    .extra_small_container_size(width_option = IconButtonWidthOption::Narrow),
-                            )
-                            .test_tag("xs"),
-                        shape = IconButtonDefaults::extra_small_square_shape(),
-                        content = || {
-                            VectorIcon(
-                                Icons::Filled::Lock(),
-                                Some(LOCALIZED_DESCRIPTION.into()),
-                                modifier = Modifier.size(IconButtonDefaults::ExtraSmallIconSize).test_tag("xs icon"),
-                            );
-                        },
-                    );
-                    IconButton(
-                        || {},
-                        modifier = Modifier
-                            .size_dp(
-                                IconButtonDefaults.medium_container_size(width_option = IconButtonWidthOption::Wide),
-                            )
-                            .test_tag("m"),
-                        shape = IconButtonDefaults::medium_round_shape(),
-                        content = || {
-                            VectorIcon(
-                                Icons::Filled::Lock(),
-                                Some(LOCALIZED_DESCRIPTION.into()),
-                                modifier = Modifier.size(IconButtonDefaults::MediumIconSize).test_tag("m icon"),
-                            );
-                        },
-                    );
-                    OutlinedIconButton(
-                        || {},
-                        modifier = Modifier.size_dp(IconButtonDefaults.large_container_size()).test_tag("l"),
-                        shape = IconButtonDefaults::large_round_shape(),
-                        content = || {
-                            VectorIcon(
-                                Icons::Filled::Lock(),
-                                Some(LOCALIZED_DESCRIPTION.into()),
-                                modifier = Modifier.size(IconButtonDefaults::LargeIconSize).test_tag("l icon"),
-                            );
-                        },
-                    );
+                    Tipped(|| {
+                        FilledIconButton(
+                            || {},
+                            modifier = Modifier
+                                .minimum_interactive_component_size()
+                                .size_dp(
+                                    IconButtonDefaults
+                                        .extra_small_container_size(width_option = IconButtonWidthOption::Narrow),
+                                )
+                                .test_tag("xs"),
+                            shape = IconButtonDefaults::extra_small_square_shape(),
+                            content = || {
+                                VectorIcon(
+                                    Icons::Filled::Lock(),
+                                    Some(LOCALIZED_DESCRIPTION.into()),
+                                    modifier =
+                                        Modifier.size(IconButtonDefaults::ExtraSmallIconSize).test_tag("xs icon"),
+                                );
+                            },
+                        );
+                    });
+                    Tipped(|| {
+                        IconButton(
+                            || {},
+                            modifier = Modifier
+                                .size_dp(
+                                    IconButtonDefaults
+                                        .medium_container_size(width_option = IconButtonWidthOption::Wide),
+                                )
+                                .test_tag("m"),
+                            shape = IconButtonDefaults::medium_round_shape(),
+                            content = || {
+                                VectorIcon(
+                                    Icons::Filled::Lock(),
+                                    Some(LOCALIZED_DESCRIPTION.into()),
+                                    modifier = Modifier.size(IconButtonDefaults::MediumIconSize).test_tag("m icon"),
+                                );
+                            },
+                        );
+                    });
+                    Tipped(|| {
+                        OutlinedIconButton(
+                            || {},
+                            modifier = Modifier.size_dp(IconButtonDefaults.large_container_size()).test_tag("l"),
+                            shape = IconButtonDefaults::large_round_shape(),
+                            content = || {
+                                VectorIcon(
+                                    Icons::Filled::Lock(),
+                                    Some(LOCALIZED_DESCRIPTION.into()),
+                                    modifier = Modifier.size(IconButtonDefaults::LargeIconSize).test_tag("l icon"),
+                                );
+                            },
+                        );
+                    });
                 });
             },
         );

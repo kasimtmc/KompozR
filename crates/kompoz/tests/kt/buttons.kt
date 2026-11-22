@@ -1,7 +1,7 @@
 // Material's buttons and containers as Compose's samples write them (material3 1.5's ButtonSamples,
 // FloatingActionButtonSamples, IconButtonSamples, CardSamples, ChipSamples, BadgeSamples; the animated FABs, over a
-// Scaffold, at the end). The other samples' TooltipBox is left out (see below); NavigationBarItemWithBadge is in
-// navigation_bar.kt (WP4b). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
+// Scaffold, at the end), each IconButton and FAB in its TooltipBox; NavigationBarItemWithBadge is in navigation_bar.kt
+// (WP4b). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
 
 @Composable
 fun ButtonSample() {
@@ -612,94 +612,141 @@ fun ChipGroupReflowSample() {
     }
 }
 
-// IconButtonSamples and the plain FAB samples of FloatingActionButtonSamples, their TooltipBox (WP7) left out (the
-// button it wraps as it is).
+// IconButtonSamples and the plain FAB samples of FloatingActionButtonSamples, each in its TooltipBox.
 
 @Composable
 fun IconButtonSample() {
     val description = "Localized description"
-    IconButton(onClick = { /* doSomething() */ }) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(onClick = { /* doSomething() */ }) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
 @Composable
 fun IconButtonWithAnimatedShapeSample() {
     val description = "Localized description"
-    IconButton(onClick = { /* doSomething() */ }, shapes = IconButtonDefaults.shapes()) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(onClick = { /* doSomething() */ }, shapes = IconButtonDefaults.shapes()) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
 @Composable
 fun ExtraSmallNarrowSquareIconButtonsSample() {
     val description = "Localized description"
-    // Small narrow round icon button
-    FilledIconButton(
-        onClick = { /* doSomething() */ },
-        modifier =
-            Modifier.minimumInteractiveComponentSize()
-                .size(
-                    IconButtonDefaults.extraSmallContainerSize(
-                        IconButtonDefaults.IconButtonWidthOption.Narrow
-                    )
-                ),
-        shape = IconButtonDefaults.extraSmallSquareShape,
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        Icon(
-            Icons.Filled.Lock,
-            contentDescription = description,
-            modifier = Modifier.size(IconButtonDefaults.extraSmallIconSize),
-        )
+        // Small narrow round icon button
+        FilledIconButton(
+            onClick = { /* doSomething() */ },
+            modifier =
+                Modifier.minimumInteractiveComponentSize()
+                    .size(
+                        IconButtonDefaults.extraSmallContainerSize(
+                            IconButtonDefaults.IconButtonWidthOption.Narrow
+                        )
+                    ),
+            shape = IconButtonDefaults.extraSmallSquareShape,
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = description,
+                modifier = Modifier.size(IconButtonDefaults.extraSmallIconSize),
+            )
+        }
     }
 }
 
 @Composable
 fun MediumRoundWideIconButtonSample() {
     val description = "Localized description"
-    IconButton(
-        onClick = { /* doSomething() */ },
-        modifier =
-            Modifier.size(
-                IconButtonDefaults.mediumContainerSize(
-                    IconButtonDefaults.IconButtonWidthOption.Wide
-                )
-            ),
-        shape = IconButtonDefaults.mediumRoundShape,
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        Icon(
-            Icons.Filled.Lock,
-            contentDescription = description,
-            modifier = Modifier.size(IconButtonDefaults.mediumIconSize),
-        )
+        IconButton(
+            onClick = { /* doSomething() */ },
+            modifier =
+                Modifier.size(
+                    IconButtonDefaults.mediumContainerSize(
+                        IconButtonDefaults.IconButtonWidthOption.Wide
+                    )
+                ),
+            shape = IconButtonDefaults.mediumRoundShape,
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = description,
+                modifier = Modifier.size(IconButtonDefaults.mediumIconSize),
+            )
+        }
     }
 }
 
 @Composable
 fun LargeRoundUniformOutlinedIconButtonSample() {
     val description = "Localized description"
-    OutlinedIconButton(
-        onClick = { /* doSomething() */ },
-        modifier = Modifier.size(IconButtonDefaults.largeContainerSize()),
-        shape = IconButtonDefaults.largeRoundShape,
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        Icon(
-            Icons.Filled.Lock,
-            contentDescription = description,
-            modifier = Modifier.size(IconButtonDefaults.largeIconSize),
-        )
+        OutlinedIconButton(
+            onClick = { /* doSomething() */ },
+            modifier = Modifier.size(IconButtonDefaults.largeContainerSize()),
+            shape = IconButtonDefaults.largeRoundShape,
+        ) {
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = description,
+                modifier = Modifier.size(IconButtonDefaults.largeIconSize),
+            )
+        }
     }
 }
 
 @Composable
 fun TintedIconButtonSample() {
     val description = "Localized description"
-    IconButton(onClick = { /* doSomething() */ }) {
-        Icon(
-            rememberVectorPainter(image = Icons.Filled.Lock),
-            contentDescription = description,
-            tint = Color.Red,
-        )
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(onClick = { /* doSomething() */ }) {
+            Icon(
+                rememberVectorPainter(image = Icons.Filled.Lock),
+                contentDescription = description,
+                tint = Color.Red,
+            )
+        }
     }
 }
 
@@ -707,11 +754,19 @@ fun TintedIconButtonSample() {
 fun IconToggleButtonSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    IconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        IconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -720,15 +775,23 @@ fun IconToggleButtonSample() {
 fun IconToggleButtonWithAnimatedShapeSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    IconToggleButton(
-        checked = checked,
-        onCheckedChange = { checked = it },
-        shapes = IconButtonDefaults.toggleableShapes(),
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+        IconToggleButton(
+            checked = checked,
+            onCheckedChange = { checked = it },
+            shapes = IconButtonDefaults.toggleableShapes(),
+        ) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -736,16 +799,32 @@ fun IconToggleButtonWithAnimatedShapeSample() {
 @Composable
 fun FilledIconButtonSample() {
     val description = "Localized description"
-    FilledIconButton(onClick = { /* doSomething() */ }) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        FilledIconButton(onClick = { /* doSomething() */ }) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
 @Composable
 fun FilledIconButtonWithAnimatedShapeSample() {
     val description = "Localized description"
-    FilledIconButton(onClick = { /* doSomething() */ }, shapes = IconButtonDefaults.shapes()) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        FilledIconButton(onClick = { /* doSomething() */ }, shapes = IconButtonDefaults.shapes()) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
@@ -753,11 +832,19 @@ fun FilledIconButtonWithAnimatedShapeSample() {
 fun FilledIconToggleButtonSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    FilledIconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        FilledIconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -766,15 +853,23 @@ fun FilledIconToggleButtonSample() {
 fun FilledIconToggleButtonWithAnimatedShapeSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    FilledIconToggleButton(
-        checked = checked,
-        onCheckedChange = { checked = it },
-        shapes = IconButtonDefaults.toggleableShapes(),
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+        FilledIconToggleButton(
+            checked = checked,
+            onCheckedChange = { checked = it },
+            shapes = IconButtonDefaults.toggleableShapes(),
+        ) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -782,19 +877,35 @@ fun FilledIconToggleButtonWithAnimatedShapeSample() {
 @Composable
 fun FilledTonalIconButtonSample() {
     val description = "Localized description"
-    FilledTonalIconButton(onClick = { /* doSomething() */ }) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        FilledTonalIconButton(onClick = { /* doSomething() */ }) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
 @Composable
 fun FilledTonalIconButtonWithAnimatedShapeSample() {
     val description = "Localized description"
-    FilledTonalIconButton(
-        onClick = { /* doSomething() */ },
-        shapes = IconButtonDefaults.shapes(),
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+        FilledTonalIconButton(
+            onClick = { /* doSomething() */ },
+            shapes = IconButtonDefaults.shapes(),
+        ) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
@@ -802,11 +913,19 @@ fun FilledTonalIconButtonWithAnimatedShapeSample() {
 fun FilledTonalIconToggleButtonSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    FilledTonalIconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        FilledTonalIconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -815,15 +934,23 @@ fun FilledTonalIconToggleButtonSample() {
 fun FilledTonalIconToggleButtonWithAnimatedShapeSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    FilledTonalIconToggleButton(
-        checked = checked,
-        onCheckedChange = { checked = it },
-        shapes = IconButtonDefaults.toggleableShapes(),
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+        FilledTonalIconToggleButton(
+            checked = checked,
+            onCheckedChange = { checked = it },
+            shapes = IconButtonDefaults.toggleableShapes(),
+        ) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -831,19 +958,35 @@ fun FilledTonalIconToggleButtonWithAnimatedShapeSample() {
 @Composable
 fun OutlinedIconButtonSample() {
     val description = "Localized description"
-    OutlinedIconButton(onClick = { /* doSomething() */ }) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        OutlinedIconButton(onClick = { /* doSomething() */ }) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
 @Composable
 fun OutlinedIconButtonWithAnimatedShapeSample() {
     val description = "Localized description"
-    OutlinedIconButton(
-        onClick = { /* doSomething() */ },
-        shapes = IconButtonDefaults.shapes(),
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        Icon(Icons.Filled.Lock, contentDescription = description)
+        OutlinedIconButton(
+            onClick = { /* doSomething() */ },
+            shapes = IconButtonDefaults.shapes(),
+        ) {
+            Icon(Icons.Filled.Lock, contentDescription = description)
+        }
     }
 }
 
@@ -851,11 +994,19 @@ fun OutlinedIconButtonWithAnimatedShapeSample() {
 fun OutlinedIconToggleButtonSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    OutlinedIconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
+    ) {
+        OutlinedIconToggleButton(checked = checked, onCheckedChange = { checked = it }) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -865,15 +1016,23 @@ fun OutlinedIconToggleButtonSample() {
 fun OutlinedIconToggleButtonWithAnimatedShapeSample() {
     var checked by remember { mutableStateOf(false) }
     val description = "Localized description"
-    OutlinedIconToggleButton(
-        checked = checked,
-        onCheckedChange = { checked = it },
-        shapes = IconButtonDefaults.toggleableShapes(),
+    // Icon button should have a tooltip associated with it for a11y.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(description) } },
+        state = rememberTooltipState(),
     ) {
-        if (checked) {
-            Icon(Icons.Filled.Lock, contentDescription = description)
-        } else {
-            Icon(Icons.Outlined.Lock, contentDescription = description)
+        OutlinedIconToggleButton(
+            checked = checked,
+            onCheckedChange = { checked = it },
+            shapes = IconButtonDefaults.toggleableShapes(),
+        ) {
+            if (checked) {
+                Icon(Icons.Filled.Lock, contentDescription = description)
+            } else {
+                Icon(Icons.Outlined.Lock, contentDescription = description)
+            }
         }
     }
 }
@@ -881,40 +1040,72 @@ fun OutlinedIconToggleButtonWithAnimatedShapeSample() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FloatingActionButtonSample() {
-    FloatingActionButton(onClick = { /* do something */ }) {
-        Icon(Icons.Filled.Add, "Localized description")
+    // A FAB should have a tooltip associated with it.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text("Localized description") } },
+        state = rememberTooltipState(),
+    ) {
+        FloatingActionButton(onClick = { /* do something */ }) {
+            Icon(Icons.Filled.Add, "Localized description")
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmallFloatingActionButtonSample() {
-    SmallFloatingActionButton(onClick = { /* do something */ }) {
-        Icon(Icons.Filled.Add, contentDescription = "Localized description")
+    // A FAB should have a tooltip associated with it.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text("Localized description") } },
+        state = rememberTooltipState(),
+    ) {
+        SmallFloatingActionButton(onClick = { /* do something */ }) {
+            Icon(Icons.Filled.Add, contentDescription = "Localized description")
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MediumFloatingActionButtonSample() {
-    MediumFloatingActionButton(onClick = { /* do something */ }) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = "Localized description",
-            modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize),
-        )
+    // A FAB should have a tooltip associated with it.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text("Localized description") } },
+        state = rememberTooltipState(),
+    ) {
+        MediumFloatingActionButton(onClick = { /* do something */ }) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = "Localized description",
+                modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize),
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LargeFloatingActionButtonSample() {
-    LargeFloatingActionButton(onClick = { /* do something */ }) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = "Localized description",
-            modifier = Modifier.size(FloatingActionButtonDefaults.LargeIconSize),
-        )
+    // A FAB should have a tooltip associated with it.
+    TooltipBox(
+        positionProvider =
+            TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text("Localized description") } },
+        state = rememberTooltipState(),
+    ) {
+        LargeFloatingActionButton(onClick = { /* do something */ }) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = "Localized description",
+                modifier = Modifier.size(FloatingActionButtonDefaults.LargeIconSize),
+            )
+        }
     }
 }
 

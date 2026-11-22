@@ -229,6 +229,20 @@ fn icon_button_samples() {
     let large = IconButtonDefaults.large_container_size().width.0;
     assert!(widths.iter().any(|w| (w - wide).abs() < 0.5), "{widths:?} {wide}");
     assert!(widths.iter().all(|w| *w <= large + 0.5), "{widths:?} {large}");
+    // (each in its tooltip box: a long press on the first shows its description in a plain tooltip, for a while)
+    rule.on_all_nodes_with(kompoz::test::has_click_action(), false).get(0).perform_scroll_to();
+    rule.wait_for_idle();
+    let first = rule.on_all_nodes_with(kompoz::test::has_click_action(), false).fetch_semantics_nodes()[0]
+        .unclipped_bounds_in_root()
+        .center();
+    rule.host().pointer_down(first, -1, 0, kompoz::ui::input::PointerType::Touch);
+    rule.advance_time_by(600);
+    rule.host().pointer_up(first, -1, 0);
+    rule.advance_frame();
+    rule.on_node_with_text("Localized description").assert_exists();
+    rule.advance_time_by(1600);
+    rule.wait_for_idle();
+    rule.on_node_with_text("Localized description").assert_does_not_exist();
 }
 
 fn fab_samples() {

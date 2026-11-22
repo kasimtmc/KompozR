@@ -8,9 +8,10 @@
 
 use crate::content_color::LocalContentColor;
 use crate::internal::basic_tooltip::{BasicTooltipBox, BasicTooltipDefaults, Shown, WaitCancelled};
+use crate::material_theme::MaterialTheme;
 use crate::surface::Surface;
 use crate::text::LocalTextStyle;
-use crate::tokens::{MotionSchemeKeyTokens, PlainTooltipTokens};
+use crate::tokens::{ElevationTokens, MotionSchemeKeyTokens, PlainTooltipTokens, RichTooltipTokens};
 use kompoz_animation::{MutableTransitionState, MutatePriority, MutatorMutex, remember_transition};
 use kompoz_coroutines::with_timeout;
 use kompoz_foundation::gestures::LocalFuture;
@@ -20,8 +21,8 @@ use kompoz_graphics::{
     PathDirection, PathOperation, Rect, Shape, Size,
 };
 use kompoz_runtime::{
-    KompozitionLocalProvider, MutableState, derived_state_of, key, kompozable, mutable_state_of, named, named_args,
-    remember, remember_keyed,
+    KompozitionLocalProvider, KotlinProperties, MutableState, derived_state_of, key, kompozable, mutable_state_of,
+    named, named_args, remember, remember_keyed,
 };
 use kompoz_ui::Modifier;
 use kompoz_ui::layout::{GraphicsLayerScope, LayoutCoordinates, MeasureScope};
@@ -257,6 +258,57 @@ impl TooltipDefaults {
             })
         })
     }
+
+    // (WP7: rich tooltips)
+    /// The position provider of a rich tooltip (Compose's deprecated `rememberRichTooltipPositionProvider`): lined
+    /// up with its anchor's start, else with its end where the window's right side would cut it, centered on it
+    /// where that would leave the window's left side too; above it, `spacing` from it, below it where above would
+    /// leave the window.
+    ///
+    /// Kotlin: `rememberRichTooltipPositionProvider(spacingBetweenTooltipAndAnchor: Dp = SpacingBetweenTooltipAndAnchor): PopupPositionProvider`
+    #[deprecated(note = "Deprecated in favor of rememberTooltipPositionProvider API.")]
+    #[track_caller]
+    pub fn remember_rich_tooltip_position_provider(
+        &self,
+        #[default(SpacingBetweenTooltipAndAnchor)] spacing_between_tooltip_and_anchor: Dp,
+    ) -> Rc<dyn PopupPositionProvider> {
+        kompoz_runtime::kompozable_block!({
+            let tooltip_anchor_spacing = LocalDensity.current().round_to_px(spacing_between_tooltip_and_anchor);
+            remember_keyed(tooltip_anchor_spacing, move || {
+                Rc::new(RichTooltipPositionProvider { tooltip_anchor_spacing }) as Rc<dyn PopupPositionProvider>
+            })
+        })
+    }
+
+    /// The colors of a [`RichTooltip`](TooltipScopeComposables::RichTooltip) (Compose's composable
+    /// `richTooltipColors()` and `richTooltipColors(containerColor, contentColor, titleContentColor,
+    /// actionContentColor)`: one method, what isn't given — unspecified — the theme's): the surface container
+    /// behind, the on-surface variant for the text and the title, the primary for the action.
+    ///
+    /// Kotlin: `richTooltipColors(containerColor: Color = Color.Unspecified, contentColor: Color = Color.Unspecified, titleContentColor: Color = Color.Unspecified, actionContentColor: Color = Color.Unspecified): RichTooltipColors`
+    #[track_caller]
+    pub fn rich_tooltip_colors(
+        &self,
+        #[default(Color::Unspecified)] container_color: Color,
+        #[default(Color::Unspecified)] content_color: Color,
+        #[default(Color::Unspecified)] title_content_color: Color,
+        #[default(Color::Unspecified)] action_content_color: Color,
+    ) -> RichTooltipColors {
+        // (Compose's `ColorScheme.defaultRichTooltipColors`, made afresh: no per-scheme cache, WP0's rule)
+        let scheme = MaterialTheme::color_scheme();
+        let default_rich_tooltip_colors = RichTooltipColors::new(
+            scheme.from_token(RichTooltipTokens::ContainerColor),
+            scheme.from_token(RichTooltipTokens::SupportingTextColor),
+            scheme.from_token(RichTooltipTokens::SubheadColor),
+            scheme.from_token(RichTooltipTokens::ActionLabelTextColor),
+        );
+        named_args!(default_rich_tooltip_colors.copy(
+            container_color = container_color,
+            content_color = content_color,
+            title_content_color = title_content_color,
+            action_content_color = action_content_color,
+        ))
+    }
 }
 
 impl TooltipDefaults {
@@ -283,6 +335,17 @@ impl TooltipDefaults {
     /// A plain tooltip's content color: the inverse on-surface (Compose's `plainTooltipContentColor`).
     pub fn plain_tooltip_content_color() -> Color {
         PlainTooltipTokens::SupportingTextColor.value()
+    }
+
+    // (WP7: rich tooltips)
+    /// The default maximum width of rich tooltips, 320 dp.
+    ///
+    /// Kotlin: `richTooltipMaxWidth`
+    pub const RichTooltipMaxWidth: Dp = Dp(320.0);
+
+    /// A rich tooltip's container shape: the theme's medium corners (Compose's `richTooltipContainerShape`).
+    pub fn rich_tooltip_container_shape() -> Arc<dyn Shape> {
+        RichTooltipTokens::ContainerShape.value()
     }
 
     /// The default caret shape of tooltips, of [`CaretSize`](TooltipDefaults::CaretSize) (Compose's
@@ -368,6 +431,82 @@ impl PopupPositionProvider for AboveTooltipPositionProvider {
             y = anchor_bounds.bottom + self.tooltip_anchor_spacing;
         }
         IntOffset::new(x, y)
+    }
+}
+
+// (WP7: rich tooltips)
+/// The deprecated rich tooltip provider's `object : PopupPositionProvider` (start aligned; end aligned at the
+/// window's right side, centered if that leaves its left side too; above, below if above leaves the window).
+struct RichTooltipPositionProvider {
+    tooltip_anchor_spacing: i32,
+}
+
+impl PopupPositionProvider for RichTooltipPositionProvider {
+    fn calculate_position(
+        &self,
+        anchor_bounds: IntRect,
+        window_size: IntSize,
+        _layout_direction: LayoutDirection,
+        popup_content_size: IntSize,
+    ) -> IntOffset {
+        let mut x = anchor_bounds.left;
+        // Try to shift it to the left of the anchor if the tooltip would collide with the right side of the screen
+        if x + popup_content_size.width > window_size.width {
+            x = anchor_bounds.right - popup_content_size.width;
+            // Center if it'll also collide with the left side of the screen
+            if x < 0 {
+                x = anchor_bounds.left + (anchor_bounds.width() - popup_content_size.width) / 2;
+            }
+        }
+
+        // Tooltip prefers to be above the anchor, but if this causes the tooltip to overlap with the anchor then we
+        // place it below the anchor
+        let mut y = anchor_bounds.top - popup_content_size.height - self.tooltip_anchor_spacing;
+        if y < 0 {
+            y = anchor_bounds.bottom + self.tooltip_anchor_spacing;
+        }
+        IntOffset::new(x, y)
+    }
+}
+
+/// The colors of a [`RichTooltip`](TooltipScopeComposables::RichTooltip) (Compose's `RichTooltipColors`): its
+/// container's, its text's, its title's and its action's.
+#[derive(Clone, Copy, PartialEq, Debug, KotlinProperties)]
+pub struct RichTooltipColors {
+    pub container_color: Color,
+    pub content_color: Color,
+    pub title_content_color: Color,
+    pub action_content_color: Color,
+}
+
+impl RichTooltipColors {
+    /// Kotlin: `RichTooltipColors(containerColor: Color, contentColor: Color, titleContentColor: Color, actionContentColor: Color)`
+    pub fn new(
+        container_color: Color,
+        content_color: Color,
+        title_content_color: Color,
+        action_content_color: Color,
+    ) -> RichTooltipColors {
+        RichTooltipColors { container_color, content_color, title_content_color, action_content_color }
+    }
+}
+
+#[named]
+impl RichTooltipColors {
+    /// The same with each color given one other than unspecified (Compose's `copy`).
+    pub fn copy(
+        &self,
+        #[default(self.container_color)] container_color: Color,
+        #[default(self.content_color)] content_color: Color,
+        #[default(self.title_content_color)] title_content_color: Color,
+        #[default(self.action_content_color)] action_content_color: Color,
+    ) -> RichTooltipColors {
+        RichTooltipColors::new(
+            container_color.take_or_else(|| self.container_color),
+            content_color.take_or_else(|| self.content_color),
+            title_content_color.take_or_else(|| self.title_content_color),
+            action_content_color.take_or_else(|| self.action_content_color),
+        )
     }
 }
 
@@ -728,6 +867,129 @@ impl<'a> DynTooltipScope<'a> {
                                 &[LocalContentColor.provides(content_color), LocalTextStyle.provides(text_style)],
                                 &*content,
                             );
+                        },
+                    );
+                },
+            );
+        });
+    }
+
+    // (WP7: rich tooltips)
+    /// A rich tooltip, a descriptive message with an optional title and action (Compose's
+    /// `TooltipScope.RichTooltip`): in a Column padded 16 dp at the sides, `title` (None: none) in `colors`' title
+    /// color and the title small style, its first baseline 28 dp from the top; `text` in `colors`' content color and
+    /// the body medium style (its first baseline 24 dp under the title's and 16 dp over the rest with a title or an
+    /// action, else padded 4 dp above and below); `action` (None: none) in `colors`' action color and the label
+    /// large style, at least 36 dp tall, 8 dp over the bottom. On a [`Surface`] of `shape` in `colors`' container
+    /// color with `tonal_elevation` and `shadow_elevation`, 40 × 24 dp at least and `max_width` at most. With a
+    /// `caret_shape` (see [`TooltipDefaults::caret_shape`]) a caret drawn of it points at the anchor, as a
+    /// [`PlainTooltip`](TooltipScopeComposables::PlainTooltip)'s.
+    ///
+    /// Kotlin: `RichTooltip(modifier: Modifier = Modifier, title: (@Composable () -> Unit)? = null, action: (@Composable () -> Unit)? = null, caretShape: Shape? = null, maxWidth: Dp = TooltipDefaults.richTooltipMaxWidth, shape: Shape = TooltipDefaults.richTooltipContainerShape, colors: RichTooltipColors = TooltipDefaults.richTooltipColors(), tonalElevation: Dp = 0.dp, shadowElevation: Dp = 3.dp, text: @Composable () -> Unit)`
+    #[track_caller]
+    #[allow(clippy::too_many_arguments)]
+    pub fn RichTooltip(
+        &self,
+        #[default(Modifier)] modifier: Modifier,
+        #[default(None)] title: Option<Rc<dyn Fn()>>,
+        #[default(None)] action: Option<Rc<dyn Fn()>>,
+        #[default(None)] caret_shape: Option<Arc<dyn Shape>>,
+        #[default(TooltipDefaults::RichTooltipMaxWidth)] max_width: Dp,
+        #[default(TooltipDefaults::rich_tooltip_container_shape())] shape: Arc<dyn Shape>,
+        #[default(TooltipDefaults.rich_tooltip_colors())] colors: RichTooltipColors,
+        #[default(ElevationTokens::Level0)] tonal_elevation: Dp,
+        #[default(RichTooltipTokens::ContainerElevation)] shadow_elevation: Dp,
+        text: impl Fn() + 'static,
+    ) {
+        let text = Rc::new(text);
+        kompoz_runtime::kompozable_block!({
+            let (tooltip_shape, tooltip_modifier): (Arc<dyn Shape>, Modifier) = match caret_shape {
+                Some(caret_shape) => {
+                    let transformation_matrix = remember(|| mutable_state_of(Matrix::new()));
+                    let density = LocalDensity.current();
+                    let window_container_size = LocalWindowInfo.current().container_size();
+                    let tooltip_modifier = layout_caret(
+                        Modifier,
+                        transformation_matrix.clone(),
+                        density,
+                        window_container_size,
+                        self.anchor_bounds_getter(),
+                        self.obtain_position_provider(),
+                    )
+                    .then(modifier);
+                    let tooltip_shape =
+                        remember_keyed((ShapeKey(shape.clone()), ShapeKey(caret_shape.clone())), move || {
+                            Arc::new(TooltipCaretShape { transformation_matrix, tooltip_shape: shape, caret_shape })
+                                as Arc<dyn Shape>
+                        });
+                    (tooltip_shape, tooltip_modifier)
+                }
+                None => (shape, modifier),
+            };
+
+            Surface(
+                modifier = tooltip_modifier.size_in(
+                    min_width = TooltipMinWidth,
+                    max_width = max_width,
+                    min_height = TooltipMinHeight,
+                ),
+                shape = tooltip_shape,
+                color = colors.container_color,
+                tonal_elevation = tonal_elevation,
+                shadow_elevation = shadow_elevation,
+                content = move || {
+                    let action_label_text_style = RichTooltipTokens::ActionLabelTextFont.value();
+                    let subhead_text_style = RichTooltipTokens::SubheadFont.value();
+                    let supporting_text_style = RichTooltipTokens::SupportingTextFont.value();
+                    let (title, action, text) = (title.clone(), action.clone(), text.clone());
+                    Column(
+                        modifier = Modifier.padding_hv(horizontal = RichTooltipHorizontalPadding),
+                        content = move || {
+                            if let Some(title) = title.clone() {
+                                let subhead_text_style = subhead_text_style.clone();
+                                Box(
+                                    modifier = Modifier.padding_from_baseline(top = HeightToSubheadFirstLine),
+                                    content = move || {
+                                        KompozitionLocalProvider(
+                                            &[
+                                                LocalContentColor.provides(colors.title_content_color),
+                                                LocalTextStyle.provides(subhead_text_style.clone()),
+                                            ],
+                                            &*title,
+                                        );
+                                    },
+                                );
+                            }
+                            let (text, supporting_text_style) = (text.clone(), supporting_text_style.clone());
+                            Box(
+                                modifier = text_vertical_padding(Modifier, title.is_some(), action.is_some()),
+                                content = move || {
+                                    KompozitionLocalProvider(
+                                        &[
+                                            LocalContentColor.provides(colors.content_color),
+                                            LocalTextStyle.provides(supporting_text_style.clone()),
+                                        ],
+                                        &*text,
+                                    );
+                                },
+                            );
+                            if let Some(action) = action.clone() {
+                                let action_label_text_style = action_label_text_style.clone();
+                                Box(
+                                    modifier = Modifier
+                                        .required_height_in(min = ActionLabelMinHeight)
+                                        .padding_sides(bottom = ActionLabelBottomPadding),
+                                    content = move || {
+                                        KompozitionLocalProvider(
+                                            &[
+                                                LocalContentColor.provides(colors.action_content_color),
+                                                LocalTextStyle.provides(action_label_text_style.clone()),
+                                            ],
+                                            &*action,
+                                        );
+                                    },
+                                );
+                            }
                         },
                     );
                 },
@@ -1134,3 +1396,29 @@ const PlainTooltipHorizontalPadding: Dp = Dp(8.0);
 pub(crate) fn PlainTooltipContentPadding() -> PaddingValues {
     PaddingValues::hv(PlainTooltipHorizontalPadding, PlainTooltipVerticalPadding)
 }
+
+// (WP7: rich tooltips)
+/// The rich tooltip's text padding (Compose's internal `Modifier.textVerticalPadding`): 4 dp above and below
+/// alone, else its first baseline 24 dp from the top and 16 dp under it.
+pub(crate) fn text_vertical_padding(modifier: Modifier, subhead_exists: bool, action_exists: bool) -> Modifier {
+    if !subhead_exists && !action_exists {
+        modifier.padding_hv_with(Dp(0.0), PlainTooltipVerticalPadding)
+    } else {
+        modifier.padding_from_baseline_with(HeightFromSubheadToTextFirstLine, Dp::Unspecified).padding_sides_with(
+            Dp(0.0),
+            Dp(0.0),
+            Dp(0.0),
+            TextBottomPadding,
+        )
+    }
+}
+
+/// The rich tooltip's measures (Compose's internal `RichTooltipHorizontalPadding`, `HeightToSubheadFirstLine`,
+/// `ActionLabelMinHeight`, `ActionLabelBottomPadding`; private `HeightFromSubheadToTextFirstLine`,
+/// `TextBottomPadding`).
+pub(crate) const RichTooltipHorizontalPadding: Dp = Dp(16.0);
+pub(crate) const HeightToSubheadFirstLine: Dp = Dp(28.0);
+const HeightFromSubheadToTextFirstLine: Dp = Dp(24.0);
+const TextBottomPadding: Dp = Dp(16.0);
+pub(crate) const ActionLabelMinHeight: Dp = Dp(36.0);
+pub(crate) const ActionLabelBottomPadding: Dp = Dp(8.0);

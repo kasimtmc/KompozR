@@ -9,9 +9,9 @@
 //!   `Modifier.pullToRefresh(isRefreshing =, state =, onRefresh =)` by name on a Box of `rememberPullToRefreshState()`
 //!   with `PullToRefreshDefaults.Indicator(state =, isRefreshing =, modifier =)` and `PullToRefreshDefaults.IndicatorBox(
 //!   state =, isRefreshing =, modifier =, shape =) { LoadingIndicator(progress =, modifier =) }` in it (stage 12 WP5,
-//!   WP2). (Its TopAppBar and AppBarRow are in kotlin_scaffold.rs (WP4a); its AppBarWithSearch is SearchBar.kt's;
-//!   a VelocityTracker's copies sharing samples is Kotlin's reference semantics of a class KompozR has as a value — see
-//!   stage10-followups.md.)
+//!   WP2). (Its TopAppBar and AppBarRow are in kotlin_scaffold.rs (WP4a); its AppBarWithSearch is in
+//!   kotlin_search_carousel.rs (WP7); a VelocityTracker's copies sharing samples is Kotlin's reference semantics of a
+//!   class KompozR has as a value — see stage10-followups.md.)
 //! - C++ 8188 (`layout_forms_take_compose_named_arguments`): `Arrangement.spacedBy(space, alignment)`, `spring(…)` of
 //!   a float with its damping and stiffness, `Modifier.onFirstVisible(minDurationMs =) { }`, a list's
 //!   `getOrNull` with a nullable index, `String.repeat`, `Modifier.approachLayout(isMeasurementApproachInProgress =,
@@ -19,8 +19,10 @@
 //!   in scope). (Its pane scaffolds are Material's adaptive ones, stage 12's.)
 //! - C++ 11965 (`lists_pagers_and_carousels_take_compose_arguments`): a grid's `span = { GridItemSpan(maxLineSpan) }`,
 //!   `items(n, span = { … })`, pager states with their count last and by name, `VerticalScrollbar(adapter =,
-//!   modifier =)`, Material's `PullToRefreshBox(isRefreshing =, onRefresh =, modifier =) { }` (stage 12 WP5, WP2). (Its
-//!   carousel is Material's, stage 12's; AsyncImage is stage 13's.)
+//!   modifier =)`, Material's `PullToRefreshBox(isRefreshing =, onRefresh =, modifier =) { }` (stage 12 WP5, WP2), a
+//!   carousel state with its count last (`rememberCarouselState(itemCount =)`) and `HorizontalMultiBrowseCarousel(state
+//!   =, preferredItemWidth =, modifier =, itemSpacing =) { index -> }` on its item scope and index (stage 12 WP7; the
+//!   C++'s item scope carried the index too: Compose's gives it as the lambda's parameter). (AsyncImage is stage 13's.)
 //! - C++ 7683 (`animations_take_compose_named_arguments`), its animated values (stage 11 WP1):
 //!   `animateFloatAsState(targetValue =, animationSpec =, label =)`, `animateColorAsState(target, spec)` (C++'s duration
 //!   in milliseconds is Compose's `tween(100)`), `updateTransition(targetState =, label =)` and its
@@ -324,7 +326,7 @@ fn layout_forms_take_compose_named_arguments() {
 
 kompoz! {
     @Composable
-    fun ListForms(pages: MutableState<Int>, byName: MutableState<Int>) {
+    fun ListForms(pages: MutableState<Int>, byName: MutableState<Int>, carouselItem: (Int) -> Unit) {
         Column {
             LazyVerticalGrid(GridCells.Fixed(3), modifier = Modifier.width(300.dp).height(200.dp)) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -336,6 +338,10 @@ kompoz! {
             }
             pages.value = rememberPagerState { 4 }.pageCount
             byName.value = rememberPagerState(initialPage = 1, pageCount = { 5 }).currentPage
+            val carousel = rememberCarouselState(itemCount = { 3 })
+            HorizontalMultiBrowseCarousel(state = carousel, preferredItemWidth = 100.dp, modifier = Modifier.width(300.dp).height(80.dp), itemSpacing = 8.dp) { index ->
+                carouselItem(index)
+            }
             val scroll = rememberScrollState()
             Box(modifier = Modifier.height(50.dp)) {
                 Column(modifier = Modifier.verticalScroll(scroll)) { Box(modifier = Modifier.size(10.dp, 500.dp)) }
@@ -347,7 +353,7 @@ kompoz! {
 }
 
 #[kompozable]
-fn RustListForms(pages: MutableState<i32>, by_name: MutableState<i32>) {
+fn RustListForms(pages: MutableState<i32>, by_name: MutableState<i32>, item: Rc<dyn Fn(i32)>) {
     Column(
         content = move || {
             LazyVerticalGrid(
@@ -370,6 +376,15 @@ fn RustListForms(pages: MutableState<i32>, by_name: MutableState<i32>) {
             );
             pages.set(remember_pager_state(page_count = || 4).page_count());
             by_name.set(remember_pager_state(initial_page = 1, page_count = || 5).current_page());
+            let carousel = remember_carousel_state(item_count = || 3);
+            let item = item.clone();
+            HorizontalMultiBrowseCarousel(
+                state = carousel,
+                preferred_item_width = 100.dp(),
+                modifier = Modifier.width(300.dp()).height(80.dp()),
+                item_spacing = 8.dp(),
+                content = move |_: &CarouselItemScope, index: i32| item(index),
+            );
             let scroll = remember_scroll_state();
             Box(
                 modifier = Modifier.height(50.dp()),
@@ -398,13 +413,19 @@ fn lists_pagers_and_scrollbars_take_compose_arguments() {
     let (pages, by_name) = (mutable_state_of(0), mutable_state_of(0));
     let (rust_pages, rust_by_name) = (mutable_state_of(0), mutable_state_of(0));
     let (p, b, rp, rb) = (pages.clone(), by_name.clone(), rust_pages.clone(), rust_by_name.clone());
+    // (the carousel items composed, each syntax's: their indices)
+    let (items, rust_items) = (Rc::new(RefCell::new(Vec::<i32>::new())), Rc::new(RefCell::new(Vec::<i32>::new())));
+    let (it, rit) = (items.clone(), rust_items.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
             Row(content = {
                 let (p, b, rp, rb) = (p.clone(), b.clone(), rp.clone(), rb.clone());
+                let (it, rit) = (it.clone(), rit.clone());
                 move || {
-                    ListForms(p.clone(), b.clone());
-                    RustListForms(rp.clone(), rb.clone());
+                    let it = it.clone();
+                    ListForms(p.clone(), b.clone(), move |i: i32| it.borrow_mut().push(i));
+                    let rit = rit.clone();
+                    RustListForms(rp.clone(), rb.clone(), Rc::new(move |i: i32| rit.borrow_mut().push(i)));
                 }
             });
         }),
@@ -418,6 +439,10 @@ fn lists_pagers_and_scrollbars_take_compose_arguments() {
         assert!(rule.on_node_with_text(&format!("{prefix}içerik")).exists());
     }
     assert_eq!((pages.peek(), by_name.peek(), rust_pages.peek(), rust_by_name.peek()), (4, 1, 4, 1));
+    for seen in [&items, &rust_items] {
+        let seen = seen.borrow();
+        assert!(seen.contains(&0) && seen.iter().all(|i| (0..3).contains(i)), "{seen:?}");
+    }
 }
 
 // ---- C++ 7683: animated values by name -----------------------------------------------------------------------

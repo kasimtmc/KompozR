@@ -12,7 +12,7 @@ pub async fn later(n: i32) -> i32 {
 pub fn Built(log: impl ::core::ops::Fn(AnnotatedString) + 'static) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let plain = build_annotated_string(|this| {
+    let plain = build_annotated_string(|this: &mut AnnotatedStringBuilder| {
         this.append(::std::string::String::from("a"));
         this.with_style(SpanStyle(color = Color::Red), |this1| this1.append(::std::string::String::from("b")));
         this.with_link(LinkAnnotation::url("https://kompoz.dev"), |this1| {
@@ -21,7 +21,7 @@ pub fn Built(log: impl ::core::ops::Fn(AnnotatedString) + 'static) {
     });
     log(plain.clone());
     LaunchedEffect((), async {
-        let built = build_annotated_string_async(async |this| {
+        let built = build_annotated_string_async(async |this: &mut AnnotatedStringBuilder| {
             this.append(::std::string::String::from("x"));
             this.with_style_async(SpanStyle(color = Color::Blue), async |this1| {
                 this1.append(::kompoz::runtime::kt::template!(later(1).await));
@@ -81,7 +81,7 @@ pub fn Vectors(
     use ::kompoz::runtime::kt::ext::*;
     LaunchedEffect((), async {
         nodes(
-            PathData_async(async |this| {
+            PathData_async(async |this: &mut PathBuilder| {
                 this.move_to(0_f32, 0_f32);
                 delay(10).await;
                 this.line_to(4_f32, 4_f32);

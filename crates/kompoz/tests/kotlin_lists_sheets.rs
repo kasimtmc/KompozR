@@ -801,7 +801,8 @@ fn material_forms_snackbar() {
 }
 
 // ---- sections_forms_take_compose_named_arguments (kompozable_tests.cpp `SectionsForms`): its TooltipBox; its search
-// bar (WP7's), date picker dialog (WP6's), swipe to dismiss box and focus rows come with those packages. (The C++ gave
+// bar and RichTooltip are in kotlin_search_carousel.rs, its date picker dialog, swipe to dismiss box and focus rows
+// come with their packages. (The C++ gave
 // its PlainTooltip `caretSize = TooltipDefaults.caretSize`: M15 takes `caretShape = TooltipDefaults.caretShape()`; its
 // `rememberTooltipPositionProvider()` is deprecated in M15 for the anchor-position form it names, written so here.)
 

@@ -59,6 +59,13 @@ tests!(
     plain_tooltips_are_sized_padded_and_styled_as_the_tokens,
     tooltip_defaults_and_caret_shapes,
     plain_tooltip_samples,
+    // (WP7) rich tooltips
+    rich_tooltip_stays_until_a_tap_outside,
+    tooltips_as_compose_1_4,
+    rich_tooltip_caret_points_at_the_anchor,
+    rich_tooltip_defaults_and_colors,
+    rich_tooltip_samples,
+    overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn,
 );
 
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
@@ -1063,7 +1070,8 @@ fn tooltip_box_shows_on_long_press_and_hover() {
 }
 
 fn tooltip_caret_points_at_the_anchor() {
-    // C++'s, the plain tooltip's half (the rich tooltip's is WP7's): M15's 4 dp spacing, the caret over it.
+    // C++'s, the plain tooltip's half (the rich tooltip's: rich_tooltip_caret_points_at_the_anchor): M15's 4 dp
+    // spacing, the caret over it.
     let top = mutable_state_of(300.0f32);
     let left = mutable_state_of(150.0f32);
     let side = mutable_state_of(40.0f32);
@@ -1597,4 +1605,418 @@ fn plain_tooltip_samples() {
     rule.advance_time_by(1600);
     rule.wait_for_idle();
     rule.on_node_with_text("Add to list").assert_does_not_exist();
+}
+
+// ---- (WP7) rich tooltips ---------------------------------------------------------------------------------------
+
+/// A rich tooltip's box: an info icon of `description` its anchor, the tooltip a title, a text and an action that
+/// dismisses it (`tag` on the tooltip; `caret` its caret shape).
+#[kompozable]
+fn RichTip(h: Held, text: &'static str, tag: &'static str, caret: Option<Arc<dyn Shape>>, with_title: bool) {
+    let s = remember_tooltip_state(is_persistent = true);
+    *h.borrow_mut() = Some(s.clone());
+    let dismissing = s.clone();
+    TooltipBox(
+        position_provider = TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+        tooltip = move |scope: &dyn TooltipScope| {
+            let dismissing = dismissing.clone();
+            scope.RichTooltip(
+                modifier = Modifier.test_tag(tag),
+                title = if with_title { Some(Rc::new(|| Text("Yedekleme")) as Rc<dyn Fn()>) } else { None },
+                action = if with_title {
+                    Some(Rc::new(move || {
+                        let dismissing = dismissing.clone();
+                        TextButton(on_click = move || dismissing.dismiss(), content = || Text("Anladım"));
+                    }) as Rc<dyn Fn()>)
+                } else {
+                    None
+                },
+                caret_shape = caret.clone(),
+                text = move || Text(text),
+            );
+        },
+        state = s,
+        has_action = with_title,
+        content = || VectorIcon(Icons::Filled::Info(), Some("Bilgi".to_string())),
+    );
+}
+
+/// C++ `rich_tooltip_stays_until_a_tap_outside`: a persistent rich tooltip shown by a long press stays (no room
+/// above: below the anchor) until its action dismisses it or a tap lands outside it.
+fn rich_tooltip_stays_until_a_tap_outside() {
+    let h: Held = Rc::default();
+    let hh = h.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let hh = hh.clone();
+            Column(
+                modifier = Modifier.padding_sides(top = 20.dp()),
+                content = move || {
+                    RichTip(hh.clone(), "Fotoğraflar her gece yedeklenir.", "kart", None, true);
+                },
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    let anchor = rule.on_node_with_content_description("Bilgi").get_unclipped_bounds_in_root();
+    rule.host().pointer_down(anchor.center(), -1, 0, PointerType::Touch);
+    rule.advance_time_by(500);
+    rule.host().pointer_up(anchor.center(), -1, 0);
+    rule.advance_time_by(3000);
+    assert!(held(&h).is_visible() && text_bounds(&rule, "Yedekleme").top > anchor.bottom);
+    rule.on_node_with_text("Anladım").perform_click();
+    assert!(!held(&h).is_visible());
+    rule.wait_for_idle();
+    let s = held(&h);
+    scope_of(&rule).launch(async move { s.show(MutatePriority::Default).await });
+    rule.wait_for_idle();
+    assert!(held(&h).is_visible());
+    rule.host().pointer_down(Offset::new(380.0, 780.0), -1, 0, PointerType::Touch); // outside
+    rule.host().pointer_up(Offset::new(380.0, 780.0), -1, 0);
+    rule.wait_for_idle();
+    assert!(!held(&h).is_visible());
+}
+
+/// C++ `tooltips_as_compose_1_4`, the rich tooltip (M15's values, which are 1.4's): growing and fading in; the
+/// title's first baseline 28 dp from the card's top, 16 dp in; the text's 24 dp under the title; 3 dp of
+/// elevation; still there while it fades out, then gone.
+fn tooltips_as_compose_1_4() {
+    let h: Held = Rc::default();
+    let hh = h.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let hh = hh.clone();
+            Column(
+                modifier = Modifier.padding_sides(top = 300.dp()),
+                content = move || {
+                    RichTip(hh.clone(), "Her gece", "kart", None, true);
+                },
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    let s = held(&h);
+    scope_of(&rule).launch(async move { s.show(MutatePriority::Default).await });
+    rule.advance_frame();
+    rule.advance_frame();
+    rule.advance_frame();
+    let coming = rule.draw();
+    let fading = coming.layer_alphas.iter().any(|a| *a > 0.01 && *a < 0.99);
+    let growing = coming.transforms.iter().any(|m| m.values[0] > 0.8 && m.values[0] < 0.99);
+    assert!(fading && growing, "{:?} {:?}", coming.layer_alphas, coming.transforms);
+    rule.wait_for_idle();
+    let card = bounds(&rule, "kart");
+    let shown = rule.draw();
+    let title_baseline = baseline_of(&shown, "Yedekleme");
+    let title_bounds = text_bounds(&rule, "Yedekleme");
+    assert!(
+        near(title_baseline.y, card.top + 28.0, 0.5) && near(title_baseline.x, card.left + 16.0, 0.5),
+        "{title_baseline:?} {card:?}"
+    );
+    let text_baseline = baseline_of(&shown, "Her gece");
+    assert!(near(text_baseline.y, title_bounds.bottom + 24.0, 0.5), "{text_baseline:?} {title_bounds:?}");
+    let up = shown
+        .elevation_shadows
+        .iter()
+        .filter(|e| near(e.bounds.center().x, card.center().x, 2.0))
+        .map(|e| e.elevation())
+        .fold(0.0f32, f32::max);
+    assert!(near(up, 3.0, 1e-4), "{up}");
+    held(&h).dismiss();
+    rule.advance_frame();
+    rule.advance_frame();
+    rule.on_node_with_tag_unmerged("kart").assert_exists();
+    rule.wait_for_idle();
+    assert!(!rule.on_node_with_tag_unmerged("kart").exists());
+}
+
+/// C++ `tooltip_caret_points_at_the_anchor`, the rich tooltip's half: its caret in the card's color, pointing down
+/// at the anchor's middle; M15's caret is part of the card's shape (`TooltipCaretShape`: the card's outline and the
+/// caret's united), so the card casts one shadow, of that outline (the C++ drew the caret's shadow apart).
+fn rich_tooltip_caret_points_at_the_anchor() {
+    let h: Held = Rc::default();
+    let container = Rc::new(RefCell::new(Color::Unspecified));
+    let (hh, cc) = (h.clone(), container.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            *cc.borrow_mut() = MaterialTheme::color_scheme().surface_container;
+            let hh = hh.clone();
+            Row(
+                modifier = Modifier.padding_sides(start = 150.dp(), top = 300.dp()),
+                content = move || {
+                    RichTip(
+                        hh.clone(),
+                        "Fotoğraflar her gece yedeklenir.",
+                        "tip",
+                        Some(TooltipDefaults::caret_shape()),
+                        false,
+                    );
+                },
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    let s = held(&h);
+    scope_of(&rule).launch(async move { s.show(MutatePriority::Default).await });
+    rule.wait_for_idle();
+    let container = *container.borrow();
+    let anchor = rule.on_node_with_content_description("Bilgi").get_unclipped_bounds_in_root();
+    let tip = bounds(&rule, "tip");
+    assert!(near(tip.bottom, anchor.top - 4.0, 0.5), "{tip:?} {anchor:?}");
+    let canvas = rule.draw();
+    let (_, path, origin) = path_of(&canvas, container).expect("the card's path");
+    let at = |x: f32, y: f32| path.contains(Offset::new(x, y) - origin);
+    let x = anchor.center().x;
+    assert!(at(x, tip.bottom + 2.0) && !at(x - 7.0, tip.bottom + 2.0) && !at(x + 7.0, tip.bottom + 2.0));
+    let shadows: Vec<_> =
+        canvas.elevation_shadows.iter().filter(|e| near(e.bounds.center().x, tip.center().x, 20.0)).collect();
+    assert!(
+        shadows.len() == 1
+            && matches!(shadows[0].outline, Outline::Generic(_))
+            && near(shadows[0].elevation(), 3.0, 1e-4)
+    );
+    assert!(shadows[0].bounds.bottom > tip.bottom + 4.0, "{:?}", shadows[0].bounds); // the caret's too
+}
+
+/// The rich tooltip's defaults: the tokens' (the surface container, the on-surface variant for the text and title,
+/// the primary for the action; medium corners, 320 dp at most), `copy` keeping what is unspecified; the deprecated
+/// rich position provider (start aligned, above).
+#[allow(deprecated)]
+fn rich_tooltip_defaults_and_colors() {
+    let got = Rc::new(RefCell::new(None));
+    let g = got.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            *g.borrow_mut() = Some((
+                TooltipDefaults.rich_tooltip_colors(),
+                TooltipDefaults.rich_tooltip_colors(container_color = Color::Red),
+                MaterialTheme::color_scheme(),
+                TooltipDefaults::rich_tooltip_container_shape(),
+                MaterialTheme::shapes().medium,
+                TooltipDefaults.remember_rich_tooltip_position_provider(),
+            ));
+        }),
+        IntSize::new(400, 800),
+    );
+    let _ = &rule;
+    let (colors, red, scheme, shape, medium, provider) = got.borrow().clone().expect("composed");
+    assert!(colors.container_color == scheme.surface_container && colors.content_color == scheme.on_surface_variant);
+    assert!(colors.title_content_color == scheme.on_surface_variant && colors.action_content_color == scheme.primary);
+    assert!(red.container_color == Color::Red && red.content_color == colors.content_color);
+    assert!(shape == medium && TooltipDefaults::RichTooltipMaxWidth == 320.dp());
+    let copied = named_args!(colors.copy(title_content_color = Color::Unspecified, action_content_color = Color::Blue));
+    assert!(copied.title_content_color == colors.title_content_color && copied.action_content_color == Color::Blue);
+    let anchor = IntRect { left: 100, top: 300, right: 140, bottom: 340 };
+    let window = IntSize::new(400, 800);
+    let ltr = LayoutDirection::Ltr;
+    assert_eq!(provider.calculate_position(anchor, window, ltr, IntSize::new(200, 80)), IntOffset::new(100, 216));
+    // Past the right side: end aligned; past the left too: centred; past the top: below.
+    let right = IntRect { left: 300, top: 300, right: 340, bottom: 340 };
+    assert_eq!(provider.calculate_position(right, window, ltr, IntSize::new(200, 80)), IntOffset::new(140, 216));
+    let wide = IntSize::new(390, 80);
+    let x = 100 + (40 - 390) / 2;
+    assert_eq!(
+        provider.calculate_position(IntRect { left: 100, top: 50, right: 140, bottom: 90 }, window, ltr, wide),
+        IntOffset::new(x, 94)
+    );
+}
+
+/// M15's TooltipSamples.kt rich tooltips: RichTooltipSample, RichTooltipWithManualInvocationSample,
+/// RichTooltipWithCaretSample, RichTooltipWithCustomCaretSample.
+#[kompozable]
+fn RichTooltipSampleOf(caret: Option<Arc<dyn Shape>>) {
+    let tooltip_state = remember_tooltip_state(is_persistent = true);
+    let scope = kompoz_coroutines::remember_coroutine_scope();
+    let dismissing = tooltip_state.clone();
+    TooltipBox(
+        position_provider = TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+        tooltip = move |s: &dyn TooltipScope| {
+            let (dismissing, scope) = (dismissing.clone(), scope.clone());
+            s.RichTooltip(
+                title = Some(Rc::new(|| Text(RichTooltipSubheadText))),
+                action = Some(Rc::new(move || {
+                    let (dismissing, scope) = (dismissing.clone(), scope.clone());
+                    TextButton(
+                        on_click = move || {
+                            let dismissing = dismissing.clone();
+                            scope.launch(async move { dismissing.dismiss() });
+                        },
+                        content = || Text(RichTooltipActionText),
+                    );
+                })),
+                caret_shape = caret.clone(),
+                text = || Text(RichTooltipText),
+            );
+        },
+        has_action = true,
+        state = tooltip_state,
+        content = || {
+            IconButton(
+                on_click = || {},
+                content = || VectorIcon(Icons::Filled::Info(), Some("Localized Description".to_string())),
+            );
+        },
+    );
+}
+
+#[kompozable]
+fn RichTooltipWithManualInvocationSample() {
+    let tooltip_state = remember_tooltip_state(is_persistent = true);
+    let scope = kompoz_coroutines::remember_coroutine_scope();
+    let (dismissing, showing) = (tooltip_state.clone(), tooltip_state.clone());
+    let (scope2, tooltip_scope) = (scope.clone(), scope.clone());
+    Column(
+        horizontal_alignment = Alignment::CenterHorizontally,
+        content = move || {
+            let (dismissing, tooltip_scope) = (dismissing.clone(), tooltip_scope.clone());
+            TooltipBox(
+                position_provider = TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+                tooltip = move |s: &dyn TooltipScope| {
+                    let (dismissing, scope) = (dismissing.clone(), tooltip_scope.clone());
+                    s.RichTooltip(
+                        title = Some(Rc::new(|| Text(RichTooltipSubheadText))),
+                        action = Some(Rc::new(move || {
+                            let (dismissing, scope) = (dismissing.clone(), scope.clone());
+                            TextButton(
+                                on_click = move || {
+                                    let dismissing = dismissing.clone();
+                                    scope.launch(async move { dismissing.dismiss() });
+                                },
+                                content = || Text(RichTooltipActionText),
+                            );
+                        })),
+                        text = || Text(RichTooltipText),
+                    );
+                },
+                has_action = true,
+                state = tooltip_state.clone(),
+                content = || {
+                    IconButton(
+                        on_click = || {},
+                        content = || VectorIcon(Icons::Filled::Info(), Some("Localized Description".to_string())),
+                    );
+                },
+            );
+            Spacer(Modifier.required_height(30.dp()));
+            let (showing, scope2) = (showing.clone(), scope2.clone());
+            OutlinedButton(
+                on_click = move || {
+                    let showing = showing.clone();
+                    scope2.launch(async move { showing.show(MutatePriority::Default).await });
+                },
+                content = || Text("Display tooltip"),
+            );
+        },
+    );
+}
+
+const RichTooltipSubheadText: &str = "Permissions";
+const RichTooltipText: &str = "Configure permissions for selected service accounts. You can add and remove service account members and assign roles to them. Visit go/permissions for details";
+const RichTooltipActionText: &str = "Request Access";
+
+fn rich_tooltip_samples() {
+    let sample = mutable_state_of(0usize);
+    let chosen = sample.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let sample = chosen.clone();
+            Box(
+                modifier = Modifier.fill_max_size(),
+                content_alignment = Alignment::Center,
+                content = move || match sample.get() {
+                    0 => RichTooltipSampleOf(None),
+                    1 => RichTooltipSampleOf(Some(TooltipDefaults::caret_shape())),
+                    2 => RichTooltipSampleOf(Some(TooltipDefaults::caret_shape_of_size(DpSize(32.dp(), 16.dp())))),
+                    _ => RichTooltipWithManualInvocationSample(),
+                },
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    // Shown by a long press, above the anchor (320 dp at most wide), staying (persistent) until its action.
+    let shown = |i: usize| {
+        sample.set(i);
+        rule.wait_for_idle();
+        let anchor = rule.on_node_with_content_description("Localized Description").get_unclipped_bounds_in_root();
+        rule.host().pointer_down(anchor.center(), -1, 0, PointerType::Touch);
+        rule.advance_time_by(600);
+        rule.host().pointer_up(anchor.center(), -1, 0);
+        rule.advance_time_by(3000);
+        (anchor, text_bounds(&rule, RichTooltipSubheadText))
+    };
+    for (i, caret) in [(0, 0.0), (1, 8.0), (2, 16.0)] {
+        let (anchor, title) = shown(i);
+        assert!(title.bottom < anchor.top, "{i}");
+        if caret > 0.0 {
+            // (the card and its caret one path: 4 dp off the anchor, the caret over the gap)
+            let canvas = rule.draw();
+            let container = light_color_scheme().surface_container;
+            let (path, _, _) = path_of(&canvas, container).expect("the card");
+            // (the anchor the tooltip box measures is the icon button's 48 dp room, 4 dp round its 40)
+            let room_top = anchor.top - 4.0;
+            assert!(
+                path.width() <= 320.0 + 0.5 && near(path.bottom, room_top - 4.0 + caret, 1.0),
+                "{i}: {path:?} {anchor:?}"
+            );
+        }
+        rule.on_node_with_text(RichTooltipActionText).perform_click();
+        rule.wait_for_idle();
+        assert!(!rule.on_node_with_text(RichTooltipSubheadText).exists(), "{i}");
+    }
+    sample.set(3);
+    rule.wait_for_idle();
+    rule.on_node_with_text("Display tooltip").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text(RichTooltipText).assert_exists();
+    rule.on_node_with_text(RichTooltipActionText).perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text(RichTooltipText).assert_does_not_exist();
+}
+
+/// C++ `overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn`, the tooltip's part (the
+/// menu's, field's and indicators' parts are in menus.rs, text_field.rs and progress.rs): a tooltip shown composes
+/// what is around it as it turns, not while it grows and fades in; it is there before it would go by itself (1.5 s);
+/// dismissed, it fades out without composing it again.
+fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn() {
+    let h: Held = Rc::default();
+    let composed = Rc::new(std::cell::Cell::new(0));
+    let (hh, c) = (h.clone(), composed.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            c.set(c.get() + 1);
+            let hh = hh.clone();
+            Column(
+                content = move || {
+                    let t = remember_tooltip_state();
+                    *hh.borrow_mut() = Some(t.clone());
+                    TooltipBox(
+                        position_provider =
+                            TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+                        tooltip = |s: &dyn TooltipScope| s.PlainTooltip(content = || Text("İpucu")),
+                        state = t,
+                        content = || Box(Modifier.size(40.dp())),
+                    );
+                },
+            );
+        }),
+        IntSize::new(400, 800),
+    );
+    assert!(!rule.on_node_with_text("İpucu").exists());
+    let s = held(&h);
+    scope_of(&rule).launch(async move { s.show(MutatePriority::Default).await });
+    rule.advance_frame();
+    rule.advance_frame(); // composed as it turns...
+    let before = composed.get();
+    rule.advance_time_by(48);
+    assert_eq!(composed.get(), before); // ...and not on the way
+    rule.advance_time_by(700); // there (before the tooltip goes by itself, at 1.5 s)
+    rule.on_node_with_text("İpucu").assert_exists();
+    held(&h).dismiss();
+    rule.advance_frame();
+    rule.advance_frame();
+    let before = composed.get();
+    rule.advance_time_by(48);
+    assert_eq!(composed.get(), before);
+    rule.wait_for_idle();
+    assert!(!rule.on_node_with_text("İpucu").exists());
 }

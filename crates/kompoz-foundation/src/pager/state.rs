@@ -459,15 +459,16 @@ impl PagerState {
         }
 
         let current = inner.layout_info.borrow().clone();
+        let page_count = self.page_count();
         let mut scrolled_layout_info =
-            current.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32)).map(Rc::new);
+            current.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32), page_count).map(Rc::new);
         let approach = inner.approach_layout_info.borrow().clone();
         if scrolled_layout_info.is_some()
             && let Some(approach) = approach
         {
             // (the lookahead's scrolled without a measure: the approach's too if it can be — they may differ — else
             // both are measured)
-            match approach.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32)) {
+            match approach.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32), page_count) {
                 Some(scrolled_approach) => *inner.approach_layout_info.borrow_mut() = Some(Rc::new(scrolled_approach)),
                 None => scrolled_layout_info = None,
             }

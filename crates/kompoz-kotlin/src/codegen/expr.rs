@@ -297,7 +297,21 @@ impl Gen<'_, '_> {
             }
             ExprKind::Lambda(l) => {
                 let ts = self.lambda(l, None, None);
-                Out::plain(ts, Ty::Unknown)
+                // (WP7: search/tooltips) A lambda whose parameters are all typed is a function of them (`val field =
+                // @Composable { tag: String -> … }`): a call of the local holding it gives its `String` a `String`.
+                let typed: Option<Vec<Ty>> =
+                    l.params.as_ref().and_then(|ps| ps.iter().map(|p| p.ty.as_ref().map(|t| self.ty_of(t))).collect());
+                let ty = match typed {
+                    Some(params) if !params.is_empty() => Ty::Fun(Box::new(super::resolve::FunTy {
+                        params,
+                        ret: Ty::Unknown,
+                        receiver: None,
+                        suspend: false,
+                        shared: false,
+                    })),
+                    _ => Ty::Unknown,
+                };
+                Out::plain(ts, ty)
             }
             ExprKind::AnonymousFunction(_) => Out::plain(self.later(e.loc, "an anonymous function"), Ty::Unknown),
             ExprKind::Object { .. } => Out::plain(self.later(e.loc, "an object expression"), Ty::Unknown),

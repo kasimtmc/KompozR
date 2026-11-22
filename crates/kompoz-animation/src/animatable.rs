@@ -10,7 +10,7 @@ use crate::state::{AnimationState, AnimationValue};
 use crate::suspend::animate_state;
 use crate::vector::{AnimationVector, AnimationVector1D};
 use kompoz_runtime::kt::{KtToString, panic_kt};
-use kompoz_runtime::{KotlinProperties, MutableState, State, mutable_state_of, named};
+use kompoz_runtime::{KotlinProperties, MutableState, SharedState, State, mutable_state_of, named};
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::future::Future;
@@ -196,6 +196,13 @@ impl<T: AnimationValue, V: AnimationVector> Animatable<T, V> {
     /// Its value as a read-only state (Compose's asState).
     pub fn as_state(&self) -> State<T> {
         self.inner.internal_state.as_state()
+    }
+
+    /// Its value as a read-only state shareable across threads (Compose's `asState()`, read by what must be
+    /// `Send + Sync`: a shape drawn by the animated value, say — Compose's shapes read an `Animatable` as they
+    /// make their outline).
+    pub fn as_shared_state(&self) -> SharedState<T> {
+        self.inner.internal_state.as_shared_state()
     }
 
     /// The spring it animates with by default: no bounce, medium stiffness, its visibility threshold.

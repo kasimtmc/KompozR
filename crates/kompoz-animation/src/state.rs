@@ -5,7 +5,7 @@ use crate::converter::{TwoWayConverter, VectorConverter};
 use crate::spec::AnimationConstants;
 use crate::vector::{AnimationVector, AnimationVector1D};
 use kompoz_runtime::kt::KtToString;
-use kompoz_runtime::{MutableState, State, StateSource, mutable_state_of, named};
+use kompoz_runtime::{MutableState, SharedState, State, StateSource, mutable_state_of, named};
 use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
@@ -158,6 +158,12 @@ impl<T: AnimationValue, V: AnimationVector> AnimationState<T, V> {
     /// Its value as a read-only state (it is one in Compose).
     pub fn as_state(&self) -> State<T> {
         State::from_source(self.clone())
+    }
+
+    /// Its value as a read-only state shareable across threads (Compose's state of it, read by what must be
+    /// `Send + Sync`: a shape drawn by it, say).
+    pub fn as_shared_state(&self) -> SharedState<T> {
+        self.0.value.as_shared_state()
     }
 }
 

@@ -149,6 +149,16 @@ impl Default for GraphicsLayerScope {
     }
 }
 
+/// A layer's scope is the density it is worked out in (Compose's `GraphicsLayerScope : Density`): `to_px(8.dp())`
+/// in a layer block, Kotlin's `8.dp.toPx()`.
+impl std::ops::Deref for GraphicsLayerScope {
+    type Target = Density;
+
+    fn deref(&self) -> &Density {
+        &self.density
+    }
+}
+
 impl fmt::Debug for GraphicsLayerScope {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("GraphicsLayerScope")

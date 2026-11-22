@@ -1351,9 +1351,21 @@ fn button_samples() {
     assert!(near(icon.left - button.left, 16.0, 0.01) && near(icon.width(), 20.0, 0.01), "{icon:?} {button:?}");
 }
 
-/// FloatingActionButtonSamples.kt (not the FAB menu's, WP1b's): the FABs as the samples compose them. The samples
-/// wrap them in a TooltipBox (WP7's: that part waits for it); the animated ones, over a Scaffold, are in
-/// tests/scaffold.rs.
+/// The samples' `TooltipBox(positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+/// TooltipAnchorPosition.Above), tooltip = { PlainTooltip { Text("Localized description") } }, state =
+/// rememberTooltipState()) { … }` around a FAB ("A FAB should have a tooltip associated with it").
+#[kompozable]
+fn FabTip(content: impl Fn() + 'static) {
+    TooltipBox(
+        position_provider = TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+        tooltip = |s: &dyn TooltipScope| s.PlainTooltip(content = || Text("Localized description")),
+        state = remember_tooltip_state(),
+        content = content,
+    );
+}
+
+/// FloatingActionButtonSamples.kt (not the FAB menu's, WP1b's): the FABs as the samples compose them, each in its
+/// TooltipBox (a long press shows it); the animated ones, over a Scaffold, are in tests/scaffold.rs.
 fn floating_action_button_samples() {
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(|| {
@@ -1361,51 +1373,61 @@ fn floating_action_button_samples() {
                 content = || {
                     Column(|| {
                         // FloatingActionButtonSample
-                        FloatingActionButton(
-                            || {},
-                            content = || {
-                                VectorIcon(
-                                    Icons::Filled::Add(),
-                                    Some("fab".to_string()),
-                                    modifier = Modifier.test_tag("fab"),
-                                )
-                            },
-                        );
+                        FabTip(|| {
+                            FloatingActionButton(
+                                || {},
+                                content = || {
+                                    VectorIcon(
+                                        Icons::Filled::Add(),
+                                        Some("fab".to_string()),
+                                        modifier = Modifier.test_tag("fab"),
+                                    )
+                                },
+                            );
+                        });
                         // SmallFloatingActionButtonSample
-                        SmallFloatingActionButton(
-                            || {},
-                            content = || {
-                                VectorIcon(
-                                    Icons::Filled::Add(),
-                                    Some("small".to_string()),
-                                    modifier = Modifier.test_tag("small"),
-                                )
-                            },
-                        );
+                        FabTip(|| {
+                            SmallFloatingActionButton(
+                                || {},
+                                content = || {
+                                    VectorIcon(
+                                        Icons::Filled::Add(),
+                                        Some("small".to_string()),
+                                        modifier = Modifier.test_tag("small"),
+                                    )
+                                },
+                            );
+                        });
                         // MediumFloatingActionButtonSample
-                        MediumFloatingActionButton(
-                            || {},
-                            content = || {
-                                VectorIcon(
-                                    Icons::Filled::Add(),
-                                    Some("medium".to_string()),
-                                    modifier =
-                                        Modifier.size(FloatingActionButtonDefaults::MediumIconSize).test_tag("medium"),
-                                )
-                            },
-                        );
+                        FabTip(|| {
+                            MediumFloatingActionButton(
+                                || {},
+                                content = || {
+                                    VectorIcon(
+                                        Icons::Filled::Add(),
+                                        Some("medium".to_string()),
+                                        modifier = Modifier
+                                            .size(FloatingActionButtonDefaults::MediumIconSize)
+                                            .test_tag("medium"),
+                                    )
+                                },
+                            );
+                        });
                         // LargeFloatingActionButtonSample
-                        LargeFloatingActionButton(
-                            || {},
-                            content = || {
-                                VectorIcon(
-                                    Icons::Filled::Add(),
-                                    Some("large".to_string()),
-                                    modifier =
-                                        Modifier.size(FloatingActionButtonDefaults::LargeIconSize).test_tag("large"),
-                                )
-                            },
-                        );
+                        FabTip(|| {
+                            LargeFloatingActionButton(
+                                || {},
+                                content = || {
+                                    VectorIcon(
+                                        Icons::Filled::Add(),
+                                        Some("large".to_string()),
+                                        modifier = Modifier
+                                            .size(FloatingActionButtonDefaults::LargeIconSize)
+                                            .test_tag("large"),
+                                    )
+                                },
+                            );
+                        });
                         // ExtendedFloatingActionButtonTextSample and its sizes
                         ExtendedFloatingActionButton(|| {}, content = || Text("Extended FAB"));
                         SmallExtendedFloatingActionButton(|| {}, content = || Text("Small Extended FAB"));
@@ -1456,6 +1478,16 @@ fn floating_action_button_samples() {
         let icon = rule.on_node_with_tag_unmerged(tag).get_unclipped_bounds_in_root();
         assert!(near(icon.width(), size, 0.01), "{tag}: {icon:?}");
     }
+    // (a long press on the FAB shows its tooltip, for a while)
+    let fab = rule.on_node_with_tag_unmerged("fab").get_unclipped_bounds_in_root().center();
+    rule.host().pointer_down(fab, -1, 0, PointerType::Touch);
+    rule.advance_time_by(600);
+    rule.host().pointer_up(fab, -1, 0);
+    rule.advance_frame();
+    rule.on_node_with_text("Localized description").assert_exists();
+    rule.advance_time_by(1600);
+    rule.wait_for_idle();
+    rule.on_node_with_text("Localized description").assert_does_not_exist();
     let texts = rule.drawn_texts();
     for label in [
         "Extended FAB",

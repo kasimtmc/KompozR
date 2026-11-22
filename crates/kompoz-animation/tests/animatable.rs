@@ -608,4 +608,29 @@ tests!(
     an_infinite_animation_policy_sees_infinite_animations,
     animatables_of_offsets_and_colors,
     androids_fling_takes_the_hosts_density,
+    an_animatables_shared_state_follows_its_animation,
 );
+
+/// `Animatable::as_shared_state` (and an AnimationState's): its value as a `Send + Sync` read-only state — what a
+/// shape drawn by an animated value holds (material3's search bars) — following each frame, a read recomposing.
+fn an_animatables_shared_state_follows_its_animation() {
+    fn send_sync<T: Send + Sync>(_: &T) {}
+    let anim = Animatable(0.0);
+    let shared = anim.as_shared_state();
+    send_sync(&shared);
+    let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
+    let (s, sh) = (seen.clone(), shared.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || s.borrow_mut().push(sh.get())));
+    let scope = CoroutineScope::new(rule.host().dispatcher());
+    let a = anim.clone();
+    scope.launch(async move {
+        named_args!(a.animate_to(100.0, linear_tween(1000))).await;
+    });
+    rule.advance_time_by(500);
+    assert!(shared.peek() == anim.peek() && shared.peek() > 10.0 && shared.peek() < 90.0, "{}", shared.peek());
+    rule.wait_for_idle();
+    assert!(shared.get() == 100.0 && seen.borrow().len() > 2 && *seen.borrow().last().unwrap() == 100.0);
+    assert!(shared == anim.as_shared_state() && shared != Animatable(0.0).as_shared_state());
+    let state = float_animation_state(3.0);
+    assert!(state.as_shared_state().get() == 3.0);
+}

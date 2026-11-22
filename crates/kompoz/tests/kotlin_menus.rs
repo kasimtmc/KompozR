@@ -3,8 +3,8 @@
 //! end by its scroll state; checkable items in groups of a DropdownMenuPopup (MenuDefaults' group and item shapes);
 //! the exposed dropdown menus (a read-only anchor and selectable items, an editable one filtering its options as one
 //! types, a multi-autocomplete one completing the token at the cursor) and ExposedDropdownMenuBox's documentation
-//! form — each composed and used as a user does. (The samples' TooltipBox, WP7's, and GroupedMenuSample's ButtonGroup,
-//! WP1b's, wait for those packages.) Density 1: dp are px.
+//! form — each composed and used as a user does, the icon button anchors in their TooltipBox. (GroupedMenuSample's
+//! ButtonGroup, WP1b's, waits for that package.) Density 1: dp are px.
 
 // (GroupedMenuSample leaves its `homeChecked` state unused, as Compose's sample does; OldAnchorMenu uses the deprecated
 // `MenuAnchorType`)
@@ -16,6 +16,9 @@ use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 use kompoz::ui::input::PointerType;
 use kompoz::ui::semantics::SemanticsProperties;
+
+// (the samples' TooltipBox types its position provider with the window's trait)
+use kompoz::ui::window::PopupPositionProvider;
 
 kompoz_file!("tests/kt/menus.kt");
 
@@ -84,6 +87,16 @@ fn menu_sample() {
     rule.wait_for_idle();
     rule.on_node_with_text("Edit").assert_does_not_exist();
     assert_eq!(rule.host().overlay_count(), 0);
+    // (the anchor in its tooltip box: a long press shows its description in a plain tooltip, the menu shut)
+    rule.host().pointer_down(anchor.center(), -1, 0, kompoz::ui::input::PointerType::Touch);
+    rule.advance_time_by(600);
+    rule.host().pointer_up(anchor.center(), -1, 0);
+    rule.advance_frame();
+    rule.on_node_with_text("Localized description").assert_exists();
+    rule.on_node_with_text("Edit").assert_does_not_exist();
+    rule.advance_time_by(1600);
+    rule.wait_for_idle();
+    rule.on_node_with_text("Localized description").assert_does_not_exist();
 }
 
 /// GroupedMenuSample: two groups under their labels, MenuDefaults' group shapes and spacing, the items' supporting

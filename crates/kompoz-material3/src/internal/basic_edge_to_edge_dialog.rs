@@ -65,7 +65,7 @@ impl PredictiveBackState {
         self.value.get()
     }
 
-    fn set_value(&self, value: BackEventProgress) {
+    pub(crate) fn set_value(&self, value: BackEventProgress) {
         self.value.set(value);
     }
 }

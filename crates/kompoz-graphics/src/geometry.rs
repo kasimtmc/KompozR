@@ -405,6 +405,13 @@ pub fn lerp_corner_radius(start: CornerRadius, stop: CornerRadius, fraction: f32
     CornerRadius::new(lerp(start.x, stop.x, fraction), lerp(start.y, stop.y, fraction))
 }
 
+/// A rect from `left`, `top` to `right`, `bottom` whose four corners are rounded by `corner_radius` (Compose's
+/// `RoundRect(left, top, right, bottom, cornerRadius)`).
+/// Kotlin: `RoundRect(left: Float, top: Float, right: Float, bottom: Float, cornerRadius: CornerRadius = CornerRadius.Zero)`
+pub fn RoundRect(left: f32, top: f32, right: f32, bottom: f32, corner_radius: CornerRadius) -> RoundRect {
+    RoundRect::from_rect_radius(Rect::new(left, top, right, bottom), corner_radius)
+}
+
 /// A rectangle with rounded corners (Compose's RoundRect).
 #[derive(Clone, Copy, PartialEq, Debug, Default, KotlinProperties)]
 pub struct RoundRect {

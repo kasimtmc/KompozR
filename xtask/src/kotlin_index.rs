@@ -1240,6 +1240,10 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
             }
             Item::Enum(e) if is_pub(&e.vis) && !hidden(&e.attrs) => {
                 let owner = e.ident.to_string();
+                // (WP7: carousel) an enum's doc line names it as Kotlin does too (`Path.Direction`), as a struct's
+                if let Some(kotlin) = kotlin_doc(&e.attrs).filter(|d| !d.contains('(')) {
+                    scan.types.insert((kotlin, owner.clone()));
+                }
                 for v in &e.variants {
                     let params = match &v.fields {
                         Fields::Unit => Vec::new(),

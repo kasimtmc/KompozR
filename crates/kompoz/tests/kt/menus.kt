@@ -1,7 +1,6 @@
 // Material's menus in a Kotlin file of their own (kompoz_file!): material3 1.5's MenuSamples.kt and
-// ExposedDropdownMenuSamples.kt as Compose writes them — test tags added to find them. The samples' IconButton
-// anchors come without the TooltipBox around them (TooltipBox is WP7's); GroupedMenuSample's DropdownMenuButtonGroup
-// (a ButtonGroup) is WP1b's. ExposedDropdownMenuSamples' private helpers (`filteredBy` and the multi-autocomplete
+// ExposedDropdownMenuSamples.kt as Compose writes them — test tags added to find them. GroupedMenuSample's
+// DropdownMenuButtonGroup (a ButtonGroup) is WP1b's. ExposedDropdownMenuSamples' private helpers (`filteredBy` and the multi-autocomplete
 // sample's `TextFieldState` extensions) are local functions there, whose `return null` leaves an inline lambda:
 // Kotlin's local functions and non-local returns come with stage 14, so they are the file's own private functions
 // here, the lambda's `return` an `if` (the samples' composables are as Compose writes them).
@@ -34,8 +33,15 @@ fun MenuSample() {
     var expanded by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.TopStart)) {
-        IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "Localized description")
+        TooltipBox(
+            positionProvider =
+                TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+            tooltip = { PlainTooltip { Text("Localized description") } },
+            state = rememberTooltipState(),
+        ) {
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Localized description")
+            }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
@@ -88,8 +94,15 @@ fun GroupedMenuSample() {
     }
 
     Box(modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.TopStart)) {
-        IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "Localized description")
+        TooltipBox(
+            positionProvider =
+                TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+            tooltip = { PlainTooltip { Text("Localized description") } },
+            state = rememberTooltipState(),
+        ) {
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Localized description")
+            }
         }
         DropdownMenuPopup(expanded = expanded, onDismissRequest = { expanded = false }) {
             val groupCount = groupLabels.size
@@ -174,8 +187,15 @@ fun MenuWithScrollStateSample() {
     var expanded by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     Box(modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.TopStart)) {
-        IconButton(onClick = { expanded = true }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "Localized description")
+        TooltipBox(
+            positionProvider =
+                TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+            tooltip = { PlainTooltip { Text("Localized description") } },
+            state = rememberTooltipState(),
+        ) {
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Localized description")
+            }
         }
         DropdownMenu(
             expanded = expanded,

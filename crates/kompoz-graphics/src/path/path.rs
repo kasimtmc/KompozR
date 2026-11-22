@@ -14,6 +14,8 @@ pub enum PathFillType {
 }
 
 /// Which way a shape added whole goes round (Compose's Path.Direction): its winding.
+///
+/// Kotlin: `Path.Direction`
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum PathDirection {
     #[default]
@@ -261,19 +263,23 @@ impl Path {
 
     // ---- Whole shapes ----------------------------------------------------------------------------------------------
 
-    /// A rect as a contour of its own from its top left, going round as `direction` says.
+    /// A rect as a contour of its own from its top left, going round as `direction` says (Compose's `addRect`).
+    /// Kotlin: `addRect(rect: Rect, direction: Path.Direction = Path.Direction.CounterClockwise)`
     pub fn add_rect(&mut self, rect: Rect, direction: PathDirection) {
         add_rect_from(self, rect, direction == PathDirection::Clockwise, 0);
     }
 
-    /// An oval as a contour of its own from its right, four conics going round as `direction` says.
+    /// An oval as a contour of its own from its right, four conics going round as `direction` says (Compose's
+    /// `addOval`).
+    /// Kotlin: `addOval(oval: Rect, direction: Path.Direction = Path.Direction.CounterClockwise)`
     pub fn add_oval(&mut self, oval: Rect, direction: PathDirection) {
         add_oval_from(self, oval, direction == PathDirection::Clockwise, 1);
     }
 
     /// A round rect as a contour of its own, its corners quarter ellipses (fitted as Skia fits them: all by one
     /// factor), from where its top left corner meets its left side (counterclockwise) or its bottom left corner
-    /// meets it (clockwise). All corners round: an oval from its left; none: a rect.
+    /// meets it (clockwise). All corners round: an oval from its left; none: a rect (Compose's `addRoundRect`).
+    /// Kotlin: `addRoundRect(roundRect: RoundRect, direction: Path.Direction = Path.Direction.CounterClockwise)`
     pub fn add_round_rect(&mut self, round_rect: &RoundRect, direction: PathDirection) {
         let clockwise = direction == PathDirection::Clockwise;
         add_round_rect_from(self, round_rect, clockwise, if clockwise { 6 } else { 7 });

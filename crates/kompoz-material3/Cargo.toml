@@ -88,6 +88,18 @@ harness = false
 name = "snackbars_tooltips"
 harness = false
 
+# (WP7: search) Search bars (the C++ Kompoz's search tests by name, M15's values; Compose's behaviour; M15's
+# SearchBarSamples): SearchBar, DockedSearchBar, the expanded search bars, TopSearchBar, AppBarWithSearch.
+[[test]]
+name = "search_bar"
+harness = false
+
+# (WP7: carousel) Carousels (the C++ Kompoz's carousel tests by name, M15's values; Compose's keyline math and
+# behaviour; M15's CarouselSamples).
+[[test]]
+name = "carousel"
+harness = false
+
 # (WP5: tabs) Tabs and tab rows (the C++ Kompoz's tab tests by name, Compose's behaviour, M15's TabSamples).
 [[test]]
 name = "tabs"

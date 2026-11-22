@@ -188,6 +188,15 @@ impl Ty {
 
     /// A Rust type written as text (the API index's): what the generator needs to know of it.
     pub fn from_rust(text: &str) -> Ty {
+        // (WP7: search/tooltips) A type the generator wrote itself, its tokens printed with spaces round the paths'
+        // `::` (`:: std :: string :: String`, a file function's `(String) -> Unit` parameter): read as one path.
+        let joined;
+        let text = if text.contains(":: ") {
+            joined = text.replace(":: ", "::").replace(" ::", "::");
+            joined.as_str()
+        } else {
+            text
+        };
         let mut p = TypeText { s: text.trim(), at: 0, params: Params::Unknown };
         p.ty()
     }
@@ -665,6 +674,18 @@ impl Callee {
         if snapshot_block(item) {
             for l in params.iter_mut().filter_map(|p| p.lambda.as_mut()) {
                 l.snapshot_block = true;
+            }
+        }
+        // (WP7: carousel) A plain function's builder lambda, its receiver `&mut` (`GenericShape { size, _ ->
+        // addRoundRect(…) }`'s Path): its parameters typed — a composable's body calls a plain function through the
+        // macro's positional builder, which is generic over the closure, so nothing tells Rust their types.
+        let builder = item.has(index::flags::NAMED) || item.has(index::flags::KOMPOZABLE);
+        if !builder && item.owner.is_empty() && item.kind == index::Kind::Function {
+            let mutable_receiver = |l: &LInfo| {
+                l.receiver.is_some() && l.inputs.first().is_some_and(|t| t.trim_start().starts_with("&mut"))
+            };
+            for l in params.iter_mut().filter_map(|p| p.lambda.as_mut()).filter(|l| mutable_receiver(l)) {
+                l.typed = true;
             }
         }
         Callee {

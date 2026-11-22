@@ -128,8 +128,6 @@ fn scaffold_pads_content_by_its_bars_and_insets() {
 }
 
 fn what_lays_out_by_a_scaffolds_padding_follows_it_without_recomposing() {
-    // (the C++'s HorizontalUncontainedCarousel with the padding as its content padding is WP7's carousel: it comes
-    // with it; the grid, the pager and the button follow here)
     let bar = mutable_state_of(50.0f32);
     let composed = Rc::new(Cell::new(0));
     let rule = {
@@ -144,6 +142,7 @@ fn what_lays_out_by_a_scaffolds_padding_follows_it_without_recomposing() {
                     content = move |padding: PaddingValues| {
                         composed.set(composed.get() + 1);
                         let pager = remember_pager_state(0, || 3);
+                        let carousel = remember_carousel_state(item_count = || 5);
                         Column(
                             modifier = Modifier.fill_max_size(),
                             content = move || {
@@ -165,6 +164,15 @@ fn what_lays_out_by_a_scaffolds_padding_follows_it_without_recomposing() {
                                     page_content =
                                         |p| Box(modifier = Modifier.fill_max_size().test_tag(format!("p{p}"))),
                                 );
+                                HorizontalUncontainedCarousel(
+                                    carousel.clone(),
+                                    100.dp(),
+                                    modifier = Modifier.fill_max_width().height(150.dp()).test_tag("carousel"),
+                                    content_padding = padding.clone(),
+                                    content = |_: &CarouselItemScope, i: i32| {
+                                        Box(modifier = Modifier.fill_max_size().test_tag(format!("c{i}")));
+                                    },
+                                );
                                 Button(
                                     || {},
                                     modifier = Modifier.test_tag("button"),
@@ -185,11 +193,11 @@ fn what_lays_out_by_a_scaffolds_padding_follows_it_without_recomposing() {
     let inset = || {
         let below = |container: &str, item: &str| bounds(&rule, item).top - bounds(&rule, container).top;
         let label = rule.on_node_with_tag_unmerged("label").get_unclipped_bounds_in_root().top;
-        [below("grid", "g0"), below("pager", "p0"), label - bounds(&rule, "button").top]
+        [below("grid", "g0"), below("pager", "p0"), below("carousel", "c0"), label - bounds(&rule, "button").top]
     };
     let before = composed.get();
     let was = inset();
-    assert!(near(was[0], 50.0) && near(was[1], 50.0), "{was:?}");
+    assert!(near(was[0], 50.0) && near(was[1], 50.0) && near(was[2], 50.0), "{was:?}");
     rule.on_node_with_text("Üst 50").assert_exists();
     bar.set(80.0);
     rule.wait_for_idle();
@@ -313,8 +321,8 @@ fn scaffold_and_navigation_bar_leave_the_keyboard_to_ime_padding() {
 }
 
 fn scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose() {
-    // The Scaffold and BottomSheetScaffold cases of the C++ test (its NavigationSuiteScaffoldLayout cases are WP8's,
-    // its carousel case WP7's: they come with those packages). Compose measures a scaffold's body with no minimum
+    // The Scaffold and BottomSheetScaffold cases of the C++ test (its NavigationSuiteScaffoldLayout cases are WP8's:
+    // they come with that package; its carousel case is in carousel.rs). Compose measures a scaffold's body with no minimum
     // size: content that doesn't fill keeps its size.
     let which = mutable_state_of(0);
     let rule = {

@@ -12,6 +12,7 @@ use common::*;
 use kompoz_animation::*;
 use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_foundation::gestures::LocalFuture;
+use kompoz_foundation::gestures::snapping::SnapPositionCalculator;
 use kompoz_foundation::pager::PageSizeCalculator;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
@@ -1279,4 +1280,69 @@ tests!(
     lazy_list_and_pager_states_hear_the_users_drags,
     pager_state_is_saved_with_the_host,
     rtl_nested_horizontal_scrolls_hand_over_the_right_way,
+    pager_current_page_is_the_closest_to_its_snap_position_however_it_scrolled,
 );
+
+/// A snap position of each page's own: page `i` snaps 30 × `i` from the start (as a carousel's keylines make
+/// theirs).
+struct PerPageSnap;
+
+impl SnapPositionCalculator for PerPageSnap {
+    fn position(&self, _: i32, _: i32, _: i32, _: i32, item_index: i32, _: i32) -> i32 {
+        30 * item_index
+    }
+}
+
+fn pager_current_page_is_the_closest_to_its_snap_position_however_it_scrolled() {
+    // (KompozR, against a Compose quirk: its scroll without a measure keeps the current page until the fraction
+    // reaches a half, where a measure takes the page closest to its own snap position — with snap positions of each
+    // page's own those differ, so the state depended on whether the scroll was measured; a carousel placing its
+    // items by the fraction put them a fraction of a pixel apart, which the layout check's measure from scratch
+    // found. The pager now measures when a scroll would change the closest page.)
+    let state_slot: Rc<RefCell<Option<PagerState>>> = Rc::new(RefCell::new(None));
+    let s = state_slot.clone();
+    let snap = SnapPosition::Custom(Rc::new(PerPageSnap));
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let state = remember_pager_state(page_count = || 10);
+            *s.borrow_mut() = Some(state.clone());
+            HorizontalPager(
+                state = state,
+                modifier = Modifier.size_wh(300.dp(), 100.dp()),
+                page_size = PageSize::Fixed(100.dp()),
+                snap_position = snap.clone(),
+                page_content = page("p"),
+            );
+        }),
+        IntSize::new(400, 400),
+    );
+    rule.wait_for_idle();
+    let state = state_slot.borrow().clone().unwrap();
+    // What a measure takes: the visible page closest to its snap position (the first of the closest).
+    let closest = |state: &PagerState| {
+        let info = state.layout_info();
+        let mut best: Option<(i32, i32)> = None;
+        for p in info.visible_pages_info() {
+            let d = (p.offset() - 30 * p.index()).abs();
+            if best.is_none_or(|(_, b)| d < b) {
+                best = Some((p.index(), d));
+            }
+        }
+        best.unwrap().0
+    };
+    let mut turned = 0;
+    for _ in 0..60 {
+        let before = state.current_page();
+        state.dispatch_raw_delta(5.0);
+        rule.wait_for_idle();
+        assert_eq!(state.current_page(), closest(&state), "{:?}", state.layout_info().visible_pages_info());
+        // (its fraction: of its own snap position)
+        let page = state.layout_info().visible_pages_info().into_iter().find(|p| p.index() == state.current_page());
+        let offset = page.unwrap().offset();
+        assert!(near(state.current_page_offset_fraction(), (30 * state.current_page() - offset) as f32 / 100.0));
+        if state.current_page() != before {
+            turned += 1;
+        }
+    }
+    assert!(turned >= 2, "{turned}");
+}

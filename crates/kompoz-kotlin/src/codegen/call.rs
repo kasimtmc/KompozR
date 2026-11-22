@@ -1728,10 +1728,18 @@ impl Gen<'_, '_> {
             };
         }
         let ArgValue::Expr(e) = a.value else { unreachable!() };
-        // (a kept closure parameter passed on through a rewritten call: as it is, the macro shares it with its identity)
+        // (a kept closure parameter passed on through a rewritten call: as it is, the macro shares it with its identity;
+        // (WP7: search/tooltips) not in a kept closure that moved its capture in — `navigationIcon = {
+        // IconButton(onClick = onMenu) { … } }`, a shared slot —, where it is the capture's, cloned as a kept closure
+        // is where it is a value)
         if transform_wraps
             && let ExprKind::Name(n) = &e.kind
-            && self.scopes.iter().rev().find_map(|s| s.get(&n.name)).is_some_and(|l| l.kept_closure)
+            && self
+                .scopes
+                .iter()
+                .rev()
+                .find_map(|s| s.get(&n.name))
+                .is_some_and(|l| l.kept_closure && !self.frames.iter().any(|f| f.kept && l.depth < f.boundary))
         {
             return self.expr(e).ts;
         }
@@ -1802,6 +1810,14 @@ impl Gen<'_, '_> {
             let kt = self.kt(span);
             let v = self.value(e);
             return quote_spanned!(span=> #kt::to_closed_range(#v));
+        }
+        // (WP7: search/tooltips) A nullable parameter given an `if`/`when` of a `null` branch and others
+        // (`scrollBehavior = if (pinned) null else scrollBehavior`): each other branch in `Some`, unless nullable.
+        if plain_type_text(&p.ty).starts_with("Option<")
+            && matches!(&e.kind, ExprKind::If { otherwise: Some(_), .. } | ExprKind::When(_))
+            && self.peek_ty(e).is_nullable()
+        {
+            return self.value_want(e, Want { str_ok: p.takes_str(), any: None, some: true, shared: None });
         }
         let o = self.expr(e);
         // (a `&mut` held — a receiver lambda's `this` lent mutably — given to a `&mut` parameter: reborrowed,
@@ -2285,6 +2301,20 @@ pub(crate) fn layout_scope_of(c: &Callee) -> Option<&'static str> {
         // (WP4a: bottom app bars) a bottom app bar's actions or content, a flexible one's content: Kotlin's
         // `@Composable RowScope.() -> Unit` (its floating action button's lambda takes none).
         ("kompoz_material3", "BottomAppBar" | "BottomAppBarWithContent" | "FlexibleBottomAppBar") => Some("RowScope"),
+        // (WP7: search/tooltips) the search bars' `content: @Composable ColumnScope.() -> Unit`, AppBarWithSearch's
+        // `actions: @Composable (RowScope.() -> Unit)?` (`AnimatedVisibility` in them is the scope's).
+        (
+            "kompoz_material3",
+            "SearchBarWithContent"
+            | "DockedSearchBar"
+            | "StringSearchBar"
+            | "StringDockedSearchBar"
+            | "ExpandedFullScreenSearchBar"
+            | "ExpandedFullScreenContainedSearchBar"
+            | "ExpandedDockedSearchBar"
+            | "ExpandedDockedSearchBarWithGap",
+        ) => Some("ColumnScope"),
+        ("kompoz_material3", "AppBarWithSearch") => Some("RowScope"),
         _ => None,
     }
 }

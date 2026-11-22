@@ -260,7 +260,11 @@ impl PagerMeasureResult {
 
     /// The same result scrolled by `delta` without a measure, if the first visible and the current page stay
     /// (Compose's `copyWithScrollDeltaWithoutRemeasure`).
-    pub(crate) fn copy_with_scroll_delta_without_remeasure(&self, delta: i32) -> Option<PagerMeasureResult> {
+    pub(crate) fn copy_with_scroll_delta_without_remeasure(
+        &self,
+        delta: i32,
+        page_count: i32,
+    ) -> Option<PagerMeasureResult> {
         let page_size_with_spacing = self.page_size + self.page_spacing;
         let new_offset = self.first_visible_page_scroll_offset - delta;
         if self.remeasure_needed
@@ -297,6 +301,14 @@ impl PagerMeasureResult {
         if !can_apply {
             return None;
         }
+        // (KompozR: a snap position of each page's own — a carousel's keyline snap — can make another page the
+        // closest to where it snaps before the fraction reaches a half; a measure would take that page, with its
+        // own fraction: measured then, so the current page and fraction are what a measure makes of the position
+        // however it got there. Compose keeps the page here, so its state depends on whether the scroll was
+        // measured — a carousel's items, placed by the fraction, a fraction of a pixel apart.)
+        if self.closest_page_after_scroll(delta, page_count) != self.current_page.as_ref().map(|p| p.index) {
+            return None;
+        }
         for page in self.visible_pages_info.iter().chain(&self.extra_pages_before).chain(&self.extra_pages_after) {
             page.apply_scroll_delta(delta);
         }
@@ -307,6 +319,33 @@ impl PagerMeasureResult {
             can_scroll_forward: self.can_scroll_forward || delta > 0,
             ..self.clone()
         })
+    }
+}
+
+impl PagerMeasureResult {
+    /// The visible page closest to where it snaps once scrolled by `delta` (what `calculate_new_current_page` would
+    /// take of it, the first of the closest).
+    fn closest_page_after_scroll(&self, delta: i32, page_count: i32) -> Option<i32> {
+        let viewport = self.viewport_size();
+        let layout_size = if self.orientation == Orientation::Horizontal { viewport.width } else { viewport.height };
+        let mut best: Option<(i32, f32)> = None;
+        for page in &self.visible_pages_info {
+            let v = -calculate_distance_to_desired_snap_position(
+                layout_size,
+                self.before_content_padding(),
+                self.after_content_padding,
+                self.page_size,
+                page.offset() + delta,
+                page.index,
+                &self.snap_position,
+                page_count,
+            )
+            .abs();
+            if best.is_none_or(|(_, b)| v > b) {
+                best = Some((page.index, v));
+            }
+        }
+        best.map(|(index, _)| index)
     }
 }
 

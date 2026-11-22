@@ -53,7 +53,8 @@ kompoz! {
     }
 
     // (what_lays_out_by_a_scaffolds_padding_follows_it_without_recomposing: a bar as tall as `bar`, read as it is
-    // measured, made taller by a click; a list and a button laid out by the padding, a text reading it while composing)
+    // measured, made taller by a click; a list, a carousel and a button laid out by the padding, a text reading it while
+    // composing)
     @Composable
     fun TopPaddingText(padding: PaddingValues) {
         Text("Üst ${padding.calculateTopPadding().value.toInt()}")
@@ -78,6 +79,12 @@ kompoz! {
                 LazyColumn(modifier = Modifier.fillMaxWidth().height(150.dp).testTag("liste"), contentPadding = padding) {
                     items(10) { Box(Modifier.fillMaxWidth().height(40.dp).testTag("l$it")) }
                 }
+                HorizontalUncontainedCarousel(
+                    state = rememberCarouselState { 5 },
+                    itemWidth = 100.dp,
+                    modifier = Modifier.fillMaxWidth().height(150.dp).testTag("karusel"),
+                    contentPadding = padding,
+                ) { i -> Box(Modifier.fillMaxSize().testTag("k$i")) }
                 Button(onClick = {}, modifier = Modifier.testTag("düğme"), contentPadding = padding) {
                     Text("Düğme", modifier = Modifier.testTag("etiket"))
                 }
@@ -130,11 +137,20 @@ kompoz! {
         }
     }
 
-    // (scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose: the Scaffold and the
-    // BottomSheetScaffold cases)
+    // (scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose: the Scaffold, the BottomSheetScaffold
+    // and the carousel cases)
     @Composable
-    fun OwnSizeBodies(sheet: Boolean) {
-        if (sheet) {
+    fun OwnSizeBodies(case: Int) {
+        if (case == 2) {
+            HorizontalMultiBrowseCarousel(
+                state = rememberCarouselState { 10 },
+                preferredItemWidth = 186.dp,
+                modifier = Modifier.fillMaxWidth().height(200.dp),
+                itemSpacing = 8.dp,
+            ) { i ->
+                if (i == 0) Box(modifier = Modifier.size(60.dp, 40.dp).testTag("içerik"))
+            }
+        } else if (case == 1) {
             BottomSheetScaffold(sheetContent = { Text("Ayrıntılar") }, modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.size(60.dp, 40.dp).testTag("içerik"))
             }
@@ -250,11 +266,15 @@ fn what_lays_out_by_a_scaffolds_padding_follows_it_without_recomposing() {
     // How far below its container's top each one's first item (the button's label) is.
     let inset = || {
         let label = rule.on_node_with_tag_unmerged("etiket").get_unclipped_bounds_in_root().top;
-        [bounds(&rule, "l0").top - bounds(&rule, "liste").top, label - bounds(&rule, "düğme").top]
+        [
+            bounds(&rule, "l0").top - bounds(&rule, "liste").top,
+            bounds(&rule, "k0").top - bounds(&rule, "karusel").top,
+            label - bounds(&rule, "düğme").top,
+        ]
     };
     let before = composed.get();
     let was = inset();
-    assert!(near(was[0], 50.0), "{was:?}");
+    assert!(near(was[0], 50.0) && near(was[1], 50.0), "{was:?}");
     rule.on_node_with_text("Üst 50").assert_exists();
     rule.on_node_with_tag("çubuk").perform_click();
     let now = inset();
@@ -316,11 +336,11 @@ fn scaffold_and_navigation_bar_leave_the_keyboard_to_ime_padding() {
 }
 
 fn scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose() {
-    for sheet in [false, true] {
+    for case in 0..3 {
         let rule =
-            KompozTestRule::with_viewport(kompozable_lambda!(move || OwnSizeBodies(sheet)), IntSize::new(400, 800));
+            KompozTestRule::with_viewport(kompozable_lambda!(move || OwnSizeBodies(case)), IntSize::new(400, 800));
         let b = bounds(&rule, "içerik");
-        assert!(near(b.width(), 60.0) && near(b.height(), 40.0), "{sheet}: {b:?}");
+        assert!(near(b.width(), 60.0) && near(b.height(), 40.0), "{case}: {b:?}");
     }
 }
 

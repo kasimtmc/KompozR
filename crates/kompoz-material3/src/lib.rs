@@ -80,10 +80,16 @@ mod navigation_drawer;
 mod precision_pointer;
 // (WP5: pull to refresh — Compose's package androidx.compose.material3.pulltorefresh)
 pub mod pulltorefresh;
+// (WP7: carousel — Compose's package androidx.compose.material3.carousel)
+pub mod carousel;
 mod ripples;
 // (WP4a: scaffold)
 mod scaffold;
 mod scrim;
+// (WP7: search)
+mod search_bar;
+mod search_bar_defaults;
+mod search_bar_desktop;
 mod secure_text_field;
 mod shapes;
 // (WP5: snackbars)
@@ -279,6 +285,16 @@ pub use ripples::{LocalRippleConfiguration, RippleConfiguration, RippleDefaults,
 // (WP4a: scaffold)
 pub use scaffold::{FabPosition, Scaffold, ScaffoldDefaults};
 pub use scrim::{Scrim, ScrimDefaults};
+// (WP7: search — SearchBar, SearchBarState, SearchBarDefaults)
+pub use search_bar::{
+    AppBarWithSearch, DockedSearchBar, ExpandedDockedSearchBar, ExpandedDockedSearchBarWithGap,
+    ExpandedFullScreenContainedSearchBar, ExpandedFullScreenSearchBar, SearchBar, SearchBarScrollBehavior,
+    SearchBarSlot, SearchBarState, SearchBarValue, SearchBarWithContent, remember_contained_search_bar_state,
+    remember_search_bar_state, remember_with_gap_search_bar_state,
+};
+#[allow(deprecated)]
+pub use search_bar::{StringDockedSearchBar, StringSearchBar, TopSearchBar};
+pub use search_bar_defaults::{AppBarWithSearchColors, SearchBarColors, SearchBarDefaults};
 pub use secure_text_field::{OutlinedSecureTextField, SecureTextField};
 pub use shapes::{ShapeDefaults, Shapes};
 #[allow(deprecated)]
@@ -343,6 +359,8 @@ pub use snackbar_host::{
 pub use tooltip::{
     DefaultTooltipCaretShape, DynTooltipScope, TooltipBox, TooltipScopeComposables, remember_tooltip_state,
 };
+// (WP7: rich tooltips)
+pub use tooltip::RichTooltipColors;
 pub use typography::{Typography, typography_with_font_family};
 pub use wavy_progress_indicator::{
     AmplitudeFunction, CircularWavyProgressIndicator, IndeterminateCircularWavyProgressIndicator,
@@ -400,5 +418,11 @@ pub mod prelude {
     pub use crate::pulltorefresh::{
         PullToRefreshBox, PullToRefreshDefaults, PullToRefreshModifiers, PullToRefreshState,
         remember_pull_to_refresh_state,
+    };
+    // (WP7: carousel — what a Compose app imports from androidx.compose.material3.carousel)
+    pub use crate::carousel::{
+        CarouselDefaults, CarouselItemDrawInfo, CarouselItemScope, CarouselState, GridMultiAspectCarouselItemDrawInfo,
+        HorizontalCenteredHeroCarousel, HorizontalMultiBrowseCarousel, HorizontalUncontainedCarousel,
+        MultiAspectCarouselItemDrawInfo, MultiAspectCarouselScope, remember_carousel_state,
     };
 }

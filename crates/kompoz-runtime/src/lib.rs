@@ -67,8 +67,8 @@ pub use snapshot::{
     StateKey, WriteObserver, global_snapshot_changed, set_global_write_observer, set_ui_thread, state_changed,
 };
 pub use state::{
-    MutableState, SnapshotMutationPolicy, State, StateSource, mutable_double_state_of, mutable_float_state_of,
-    mutable_int_state_of, mutable_long_state_of, mutable_state_of, mutable_state_of_with_policy, never_equal_policy,
-    structural_equality_policy,
+    MutableState, SharedState, SnapshotMutationPolicy, State, StateSource, mutable_double_state_of,
+    mutable_float_state_of, mutable_int_state_of, mutable_long_state_of, mutable_state_of,
+    mutable_state_of_with_policy, never_equal_policy, structural_equality_policy,
 };
 pub use state_observer::{OnChangedExecutor, SnapshotStateObserver};

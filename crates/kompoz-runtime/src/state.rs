@@ -166,6 +166,61 @@ pub fn mutable_double_state_of(value: f64) -> MutableState<f64> {
     mutable_state_of(value)
 }
 
+impl<T: Clone + Send + Sync + 'static> MutableState<T> {
+    /// A read-only view of it, `Send + Sync` as it is (see [`SharedState`]).
+    pub fn as_shared_state(&self) -> SharedState<T> {
+        SharedState { state: self.clone() }
+    }
+}
+
+/// A read-only view of a [`MutableState`], `Send + Sync` as the state is (Compose's `State<T>` of a mutable state,
+/// for what must be shareable — a shape, a theme value — and reads a state another part owns and sets: an
+/// `Animatable`'s value, say). Reading it in a composable (or a measure, a draw) subscribes the reader as reading the
+/// state does. Equal when it views the same state.
+pub struct SharedState<T> {
+    state: MutableState<T>,
+}
+
+impl<T> Clone for SharedState<T> {
+    fn clone(&self) -> Self {
+        SharedState { state: self.state.clone() }
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> SharedState<T> {
+    /// The value the snapshot this runs in sees (a read that subscribes; Compose's `value`).
+    pub fn get(&self) -> T {
+        self.state.get()
+    }
+
+    /// Runs `f` with the value, without copying it.
+    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        self.state.with(f)
+    }
+
+    /// The value, without subscribing the reader.
+    pub fn peek(&self) -> T {
+        self.state.peek()
+    }
+
+    /// As a [`State`] (what a composable reading a value takes).
+    pub fn as_state(&self) -> State<T> {
+        State::from_source(self.state.clone())
+    }
+}
+
+impl<T> PartialEq for SharedState<T> {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state.cell, &other.state.cell)
+    }
+}
+
+impl<T: Clone + Send + Sync + fmt::Debug + 'static> fmt::Debug for SharedState<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SharedState({:?})", self.peek())
+    }
+}
+
 /// What a read-only state reads from.
 pub trait StateSource<T>: 'static {
     /// Runs `f` with the value, the read recorded if `subscribe`.

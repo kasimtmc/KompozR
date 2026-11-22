@@ -19,6 +19,9 @@ use kompoz::ui::semantics::SemanticsProperties;
 use kompoz::ui::text::remember_text_measurer;
 use std::rc::Rc;
 
+// (the samples' TooltipBox types its position provider with the window's trait)
+use kompoz::ui::window::PopupPositionProvider;
+
 kompoz_file!("tests/kt/material_fields.kt");
 
 fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
@@ -118,6 +121,16 @@ fn transformation_and_icon_samples() {
     assert_eq!(shown(&rule, "icons"), "silinecek");
     rule.on_node_with_content_description("Clear text").perform_click();
     assert_eq!(shown(&rule, "icons"), "");
+    // (the clear button in its tooltip box: a long press shows "Clear text" in a plain tooltip, for a while)
+    let clear = rule.on_node_with_content_description("Clear text").get_unclipped_bounds_in_root().center();
+    rule.host().pointer_down(clear, -1, 0, kompoz::ui::input::PointerType::Touch);
+    rule.advance_time_by(600);
+    rule.host().pointer_up(clear, -1, 0);
+    rule.advance_frame();
+    rule.on_node_with_text("Clear text").assert_exists();
+    rule.advance_time_by(1600);
+    rule.wait_for_idle();
+    rule.on_node_with_text("Clear text").assert_does_not_exist();
 }
 
 /// TextFieldWithPlaceholder and TextFieldWithPrefixAndSuffix: empty and unfocused, the label expanded and the

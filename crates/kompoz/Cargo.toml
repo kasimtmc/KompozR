@@ -216,6 +216,13 @@ harness = false
 name = "kotlin_pickers"
 harness = false
 
+# (WP7) Material's search bars, rich tooltips and carousels in Kotlin's syntax (the C++ ScrollForms' SearchBar part,
+# SectionsForms' tooltip parts; material3's SearchBar, Tooltip and Carousel samples from .kt files, CarouselItemScope
+# and TooltipScope receivers).
+[[test]]
+name = "kotlin_search_carousel"
+harness = false
+
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
 [[test]]
 name = "kotlin_animations_all"

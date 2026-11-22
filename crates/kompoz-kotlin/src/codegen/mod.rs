@@ -710,7 +710,12 @@ impl<'a, 'd> Gen<'a, 'd> {
         };
         let fn_kw = quote_spanned!(span=> fn);
         let asyncness = if suspend { quote_spanned!(span=> async) } else { quote!() };
-        let allow = allow_attr(span);
+        let mut allow = allow_attr(span);
+        // (WP7: search/tooltips) Kotlin's `@Suppress("DEPRECATION")` on a function calling deprecated API: Rust's
+        // deprecation lint kept quiet in it.
+        if suppresses(&f.annotations, "DEPRECATION") {
+            allow.extend(quote_spanned!(span=> #[allow(deprecated)]));
+        }
         let has_defaults = info.params.iter().any(|p| p.default != PDefault::None);
 
         if let Some((self_ty, owner)) = self_ty {
@@ -922,7 +927,15 @@ impl<'a, 'd> Gen<'a, 'd> {
                 quote_spanned!(span=> #allow #vis const #name: #rt = #v;)
             }
             ValForm::StrConst => {
-                let v = self.expr(init).ts;
+                // ((WP7: search/tooltips) literals joined by `+`: Kotlin's constant of their text, one literal)
+                let v = match literal_text(init) {
+                    Some(text) if !matches!(init.kind, ExprKind::String(_)) => {
+                        let mut l = proc_macro2::Literal::string(&text);
+                        l.set_span(self.span(init.loc));
+                        quote!(#l)
+                    }
+                    _ => self.expr(init).ts,
+                };
                 quote_spanned!(span=> #allow #vis const #name: &str = #v;)
             }
             ValForm::Static => {
@@ -990,11 +1003,27 @@ fn val_form(p: &Property, ty: &Ty) -> ValForm {
     };
     match ty {
         Ty::Int | Ty::Long | Ty::Float | Ty::Double | Ty::Bool | Ty::Char if literal(init) => ValForm::Const,
-        Ty::String if matches!(&init.kind, ExprKind::String(s) if s.parts.iter().all(|p| matches!(p, StringPart::Text { .. }))) => {
-            ValForm::StrConst
-        }
+        Ty::String if literal_text(init).is_some() => ValForm::StrConst,
         _ if made_const => ValForm::Static,
         _ => ValForm::ThreadLocal,
+    }
+}
+
+/// The text of a string literal without templates, or of such literals joined by `+` (`"a " + "b"`: (WP7:
+/// search/tooltips) Kotlin's constant expression, a `const val`'s).
+fn literal_text(e: &Expr) -> Option<String> {
+    match &e.kind {
+        ExprKind::String(s) => s
+            .parts
+            .iter()
+            .map(|p| match p {
+                StringPart::Text { text, .. } => Some(text.as_str()),
+                StringPart::Expr { .. } => None,
+            })
+            .collect(),
+        ExprKind::Binary { op: BinaryOp::Add, lhs, rhs } => Some(literal_text(lhs)? + &literal_text(rhs)?),
+        ExprKind::Paren(x) => literal_text(x),
+        _ => None,
     }
 }
 
@@ -1006,6 +1035,14 @@ fn fn_name(f: &Function) -> String {
 /// The last segment of a dotted name.
 pub(crate) fn last_segment(dotted: &str) -> &str {
     dotted.rsplit('.').next().unwrap_or(dotted)
+}
+
+/// (WP7: search/tooltips) Whether the annotations hold `@Suppress("…")` of `name` (among its names).
+fn suppresses(annotations: &[Annotation], name: &str) -> bool {
+    annotations.iter().filter(|a| a.name.last().name == "Suppress").flat_map(|a| a.args.iter().flatten()).any(|arg| {
+        matches!(&arg.value.kind, ExprKind::String(s)
+            if matches!(s.parts.as_slice(), [StringPart::Text { text, .. }] if text == name))
+    })
 }
 
 /// The lints generated code may trip that the Kotlin it comes from doesn't make wrong: it is written for Kotlin's

@@ -1614,4 +1614,24 @@ tests!(
     remember_saveable_starts_again_when_its_inputs_change,
     remember_saveable_with_a_saver_of_its_own,
     a_state_list_is_saved_and_given_back,
+    a_shared_state_reads_its_state_from_anywhere,
 );
+
+/// `MutableState::as_shared_state`: a read-only view that is `Send + Sync` as the state is (what a shape or a theme
+/// value holds to read a state another part sets): it reads what the state holds, a read in a composition
+/// subscribes it, it is equal to another view of the same state only.
+fn a_shared_state_reads_its_state_from_anywhere() {
+    fn send_sync<T: Send + Sync>(_: &T) {}
+    let state = mutable_state_of(1);
+    let shared = state.as_shared_state();
+    send_sync(&shared);
+    assert!(shared.get() == 1 && shared.peek() == 1 && shared.with(|v| *v + 1) == 2);
+    assert!(shared == state.as_shared_state() && shared != mutable_state_of(1).as_shared_state());
+    let s = shared.clone();
+    let rule = Rule::new(kompozable_lambda!(move || Text(format!("v={}", s.get()))));
+    assert_eq!(rule.names(), ["v=1"]);
+    state.set(5);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["v=5"]);
+    assert!(shared.as_state().get() == 5 && format!("{shared:?}") == "SharedState(5)");
+}
