@@ -766,9 +766,17 @@ impl NodeCoordinator {
                     })
                     .clone()
                 };
-                owner.snapshot_observer().observe(&reads, || block(&mut scope));
+                // (Compose's `observeReads { layerBlock(scope); scope.updateOutline() }`: the outline made as the
+                // layer is placed, before what it wraps is)
+                owner.snapshot_observer().observe(&reads, || {
+                    block(&mut scope);
+                    scope.update_outline();
+                });
             }
-            None => block(&mut scope),
+            None => {
+                block(&mut scope);
+                scope.update_outline();
+            }
         }
         if let Some(recorded) = &scope.record_into {
             // (placed with a graphics layer: its properties changing are this layer's)

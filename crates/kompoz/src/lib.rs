@@ -159,6 +159,16 @@ pub mod prelude {
 
     pub use kompoz_kotlin_macro::{kompoz, kompoz_file};
     pub use kompoz_platform::App;
+    // (WP1b: toggle_split — the trait a TooltipBox's `positionProvider` is: Kotlin code naming none of it still
+    // makes a value of it, `TooltipDefaults.rememberTooltipPositionProvider(…)`, which the generated Rust types)
+    pub use kompoz_ui::window::PopupPositionProvider;
+    // (WP1b: fab_segmented — what M15's FloatingActionButtonMenuSample imports: the back handler (CMP's
+    // androidx.compose.ui.backhandler.BackHandler), the keys of androidx.compose.ui.input.key, the semantics' custom
+    // actions, the focus requester)
+    pub use kompoz_ui::back::BackHandler;
+    pub use kompoz_ui::focus::FocusRequester;
+    pub use kompoz_ui::input::{Key, KeyEvent, KeyEventType};
+    pub use kompoz_ui::semantics::CustomAccessibilityAction;
     // (the clipboard's entries, Compose's androidx.compose.ui.platform.ClipEntry & co.)
     pub use kompoz_ui::clipboard::{ClipEntry, ClipItem, ClipMetadata};
     pub use kompoz_ui::platform::{

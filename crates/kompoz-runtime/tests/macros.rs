@@ -387,6 +387,35 @@ fn methods_of_every_value_of_a_trait_reach_its_subtraits_objects() {
     assert_eq!(rule.names(), ["ax1 bx2"]);
 }
 
+/// A scope's method without defaults named as another type's indexed `#[named]` method with some (foundation's
+/// `Modifier.weight(weight, fill = true)`): the macros rewrite a call of that name to a builder whatever the
+/// receiver, so this one has a builder too (Material's `ButtonGroupScope.weight(modifier, weight)`).
+struct GroupScope;
+
+#[named]
+impl GroupScope {
+    fn weight(&self, base: i32, weight: i32) -> String {
+        format!("weight({base}, {weight})")
+    }
+
+    /// (WP1b: fab_segmented) An associated function without `self` of an indexed method's name stays plain (no
+    /// by-name method call is its: `MenuDefaults::container_color()` beside another type's `container_color` method).
+    fn colors(all: i32) -> String {
+        format!("colors({all})")
+    }
+}
+
+fn a_method_without_defaults_named_as_an_indexed_one_takes_its_calls() {
+    assert_eq!(GroupScope.weight(1, 2), "weight(1, 2)");
+    let rule = Rule::new(kompozable_lambda!(|| {
+        let scope = GroupScope;
+        Label(scope.weight(3, 4));
+        Label(scope.weight(weight = 6, base = 5));
+        Label(GroupScope::colors(7));
+    }));
+    assert_eq!(rule.names(), ["weight(3, 4)", "weight(5, 6)", "colors(7)"]);
+}
+
 // ---- Generics ------------------------------------------------------------------------------------------------
 
 #[kompozable]
@@ -1014,6 +1043,7 @@ tests!(
     calls_inside_macros_are_rewritten,
     methods_of_a_type_from_elsewhere_take_named_arguments_through_a_trait,
     methods_of_every_value_of_a_trait_reach_its_subtraits_objects,
+    a_method_without_defaults_named_as_an_indexed_one_takes_its_calls,
     a_name_bound_inside_a_closure_hides_the_outer_one_only_after_its_binding,
     closures_are_the_same_while_what_they_capture_is,
     a_closure_parameter_passed_on_keeps_its_identity,

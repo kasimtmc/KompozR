@@ -18,6 +18,14 @@ fn index() -> Result<&'static [Entry]> {
     }
 }
 
+/// Whether the index has a method named `name` (of any type, in any crate). The macros rewrite a method call by its
+/// name (they don't know the receiver's type), so a method of that name without defaults gets a builder too: a call
+/// of it rewritten for another type's method (a scope's `group.weight(modifier, 1.0)` beside foundation's
+/// `Modifier.weight(weight, fill = true)`) goes through its own builder.
+pub(crate) fn indexed_method(name: &str) -> Result<bool> {
+    Ok(index()?.iter().any(|e| e.kind == Kind::Method && e.name == name))
+}
+
 /// A function's or method's parameters: what it is, whether each has a default, and whether one is `#[memoized]`.
 struct Shape {
     kind: Kind,

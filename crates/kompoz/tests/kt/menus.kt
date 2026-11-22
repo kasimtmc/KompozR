@@ -1,6 +1,6 @@
 // Material's menus in a Kotlin file of their own (kompoz_file!): material3 1.5's MenuSamples.kt and
 // ExposedDropdownMenuSamples.kt as Compose writes them — test tags added to find them. GroupedMenuSample's
-// DropdownMenuButtonGroup (a ButtonGroup) is WP1b's. ExposedDropdownMenuSamples' private helpers (`filteredBy` and the multi-autocomplete
+// DropdownMenuButtonGroup (a ButtonGroup, WP1b's) as written. ExposedDropdownMenuSamples' private helpers (`filteredBy` and the multi-autocomplete
 // sample's `TextFieldState` extensions) are local functions there, whose `return null` leaves an inline lambda:
 // Kotlin's local functions and non-local returns come with stage 14, so they are the file's own private functions
 // here, the lambda's `return` an `if` (the samples' composables are as Compose writes them).
@@ -177,7 +177,89 @@ fun GroupedMenuSample() {
                     Spacer(Modifier.height(MenuDefaults.GroupSpacing))
                 }
             }
+            if (checked.last().last()) {
+                DropdownMenuButtonGroup()
+            }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun DropdownMenuButtonGroup() {
+    ButtonGroup(
+        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterHorizontally),
+    ) {
+        customItem(
+            buttonGroupContent = {
+                FilledIconButton(
+                    onClick = {},
+                    colors =
+                        IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MenuDefaults.groupStandardContainerColor
+                        ),
+                ) {
+                    Icon(Icons.Filled.ThumbUp, contentDescription = "Localized description")
+                }
+            },
+            menuContent = {
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(Icons.Filled.ThumbUp, contentDescription = "Localized description")
+                    },
+                    text = { Text("Thumbs up") },
+                    onClick = {},
+                )
+            },
+        )
+
+        customItem(
+            buttonGroupContent = {
+                FilledIconButton(
+                    onClick = {},
+                    colors =
+                        IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MenuDefaults.groupStandardContainerColor
+                        ),
+                ) {
+                    Icon(Icons.Filled.ThumbDown, contentDescription = "Localized description")
+                }
+            },
+            menuContent = {
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(Icons.Filled.ThumbDown, contentDescription = "Localized description")
+                    },
+                    text = { Text("Thumbs down") },
+                    onClick = {},
+                )
+            },
+        )
+
+        customItem(
+            buttonGroupContent = {
+                FilledIconButton(
+                    onClick = {},
+                    colors =
+                        IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MenuDefaults.groupStandardContainerColor
+                        ),
+                ) {
+                    Icon(Icons.Filled.TagFaces, contentDescription = "Localized description")
+                }
+            },
+            menuContent = {
+                DropdownMenuItem(
+                    leadingIcon = {
+                        Icon(Icons.Filled.TagFaces, contentDescription = "Localized description")
+                    },
+                    text = { Text("Emotes") },
+                    onClick = {},
+                )
+            },
+        )
     }
 }
 

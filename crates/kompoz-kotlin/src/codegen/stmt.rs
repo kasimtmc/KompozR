@@ -756,11 +756,17 @@ impl Gen<'_, '_> {
         loc: Loc,
     ) -> Out {
         let span = self.span(loc);
-        let ty = if matches!(tail, Tail::Unit) {
-            Ty::Unit
+        let (ty, tail, shared) = if matches!(tail, Tail::Unit) {
+            (Ty::Unit, tail, None)
         } else {
             let a = self.peek_block(then);
-            if a == Ty::Unknown { otherwise.map(|o| self.peek_block(o)).unwrap_or(Ty::Unit) } else { a }
+            match otherwise {
+                Some(o) => {
+                    let tys = [a, self.peek_block(o)];
+                    self.joined(&tys, tail)
+                }
+                None => (Ty::Unit, tail, None),
+            }
         };
         let tail = if otherwise.is_none() { Tail::Unit } else { tail };
         // (x == null) with an else: the else branch is the narrowed one
@@ -777,10 +783,8 @@ impl Gen<'_, '_> {
             self.narrow(&n.name, l.ty.non_null());
             let b = self.braced(o, tail);
             self.pop_scope();
-            return Out::plain(
-                quote_spanned!(span=> if let ::core::option::Option::Some(#i) = #i.clone() #b else #a),
-                ty,
-            );
+            let ts = quote_spanned!(span=> if let ::core::option::Option::Some(#i) = #i.clone() #b else #a);
+            return Out::plain(self.held_shared(ts, shared, span), ty);
         }
         self.push_scope();
         let c = self.condition(condition);
@@ -799,7 +803,62 @@ impl Gen<'_, '_> {
             }
             None => quote_spanned!(span=> if #c #a),
         };
-        Out::plain(ts, ty)
+        Out::plain(self.held_shared(ts, shared, span), ty)
+    }
+
+    /// The type `if`/`when` branches of `tys` give together, as Kotlin's common supertype, and the tail their values
+    /// are given to: a `null` branch beside a value of a type makes it nullable (the values given in `Some`); a
+    /// shared trait object's branch (`Arc<dyn Shape>`) beside values of types of their own (`RoundedCornerShape`)
+    /// makes it the shared trait object's type (those values made one: `Arc::new`), the trait named for the value
+    /// held ([`Gen::held_shared`]). Otherwise the first type known.
+    pub(crate) fn joined(&self, tys: &[Ty], tail: Tail) -> (Ty, Tail, Option<(super::expr::Shared, String)>) {
+        let first = tys.iter().find(|t| **t != Ty::Unknown).cloned().unwrap_or(Ty::Unknown);
+        let Tail::Value(mut want) = tail else { return (first, tail, None) };
+        let is_null = |t: &Ty| matches!(t, Ty::Nullable(x) if **x == Ty::Unknown);
+        if tys.iter().any(is_null)
+            && let Some(value) = tys.iter().find(|t| !is_null(t) && **t != Ty::Unknown && !t.is_nullable())
+        {
+            want.some = true;
+            return (value.clone().nullable(), Tail::Value(want), None);
+        }
+        // (`Arc<dyn Shape>` is `Arc` of `Shape` here; a bare trait's name is one too)
+        let shared = tys.iter().find_map(|t| match t {
+            Ty::Named(p, args) if matches!(p.as_str(), "Arc" | "Rc") && args.len() == 1 => match &args[0] {
+                Ty::Named(n, a) if a.is_empty() && trait_object(n).is_some() => {
+                    Some((n.clone(), p.as_str(), t.clone()))
+                }
+                _ => None,
+            },
+            Ty::Named(n, args) if args.is_empty() => trait_object(n).map(|p| (n.clone(), p, t.clone())),
+            _ => None,
+        });
+        let concrete = |t: &Ty| matches!(t, Ty::Named(n, _) if !matches!(n.as_str(), "Arc" | "Rc" | "Box") && trait_object(n).is_none());
+        if let Some((name, ptr, held)) = shared
+            && tys.iter().any(concrete)
+            && want.shared.is_none()
+        {
+            let ptr = if ptr == "Arc" { super::expr::Shared::Arc } else { super::expr::Shared::Rc };
+            want.shared = Some(ptr);
+            return (held, Tail::Value(want), Some((ptr, name)));
+        }
+        (first, Tail::Value(want), None)
+    }
+
+    /// `ts` held as the shared trait object `shared` names (a typed binding: the branches' `Arc::new(…)` coerce to it).
+    fn held_shared(
+        &mut self,
+        ts: TokenStream,
+        shared: Option<(super::expr::Shared, String)>,
+        span: proc_macro2::Span,
+    ) -> TokenStream {
+        let Some((ptr, name)) = shared else { return ts };
+        let f = self.fresh("shared", span);
+        let tr = proc_macro2::Ident::new(&name, span);
+        let held = match ptr {
+            super::expr::Shared::Arc => quote_spanned!(span=> ::std::sync::Arc<dyn #tr>),
+            super::expr::Shared::Rc => quote_spanned!(span=> ::std::rc::Rc<dyn #tr>),
+        };
+        quote_spanned!(span=> { let #f: #held = #ts; #f })
     }
 
     /// Whether a name is a local whose null check smart-casts it.
@@ -838,10 +897,11 @@ impl Gen<'_, '_> {
     pub(crate) fn when(&mut self, w: &When, tail: Tail, loc: Loc) -> Out {
         let span = self.span(loc);
         let kt = self.kt(span);
-        let ty = if matches!(tail, Tail::Unit) {
-            Ty::Unit
+        let (ty, tail, shared) = if matches!(tail, Tail::Unit) {
+            (Ty::Unit, tail, None)
         } else {
-            w.branches.iter().map(|b| self.peek_block(&b.body)).find(|t| *t != Ty::Unknown).unwrap_or(Ty::Unknown)
+            let tys: Vec<Ty> = w.branches.iter().map(|b| self.peek_block(&b.body)).collect();
+            self.joined(&tys, tail)
         };
         self.push_scope();
         let mut prelude = TokenStream::new();
@@ -915,7 +975,7 @@ impl Gen<'_, '_> {
         }
         self.pop_scope();
         let ts = if prelude.is_empty() { chain } else { quote_spanned!(span=> { #prelude #chain }) };
-        Out::plain(ts, ty)
+        Out::plain(self.held_shared(ts, shared, span), ty)
     }
 }
 

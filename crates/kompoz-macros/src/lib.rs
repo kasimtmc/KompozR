@@ -593,7 +593,13 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
         let wants_id: Vec<bool> = params.iter().map(|p| p.memoized.is_some()).collect();
         let pass_ids = wants_id.contains(&true);
         let n = params.len();
-        if params.iter().all(|p| p.default.is_none()) && !pass_ids {
+        // (an associated function without `self` is never a by-name method call's: it stays plain whatever the index
+        // has of its name — WP1b: fab_segmented, `MenuDefaults::container_color()` beside a `container_color` method)
+        let has_receiver = matches!(m.sig.inputs.first(), Some(FnArg::Receiver(_)));
+        if params.iter().all(|p| p.default.is_none())
+            && !pass_ids
+            && (!has_receiver || !known::indexed_method(&m.sig.ident.to_string())?)
+        {
             if ext.is_some() {
                 m.vis = Visibility::Inherited;
                 let docs = m.attrs.iter().filter(|a| a.path().is_ident("doc"));

@@ -13,7 +13,7 @@ use kompoz::test::KompozTestRule;
 // The C++ Kompoz's navigation bar tests (kompoz_tests.cpp: navigation_bar_switches_tabs,
 // navigation_bar_items_as_compose_1_4, short_navigation_bar_is_64_dp_over_the_navigation_bar,
 // short_navigation_bar_ripples_start_under_the_finger, short_navigation_bar_shares_the_width_or_centres_its_items, the
-// bar and button half of layouts_that_measure_twice_probe_first_so_sizes_settle) written in Kotlin, checked as
+// whole of layouts_that_measure_twice_probe_first_so_sizes_settle, its ButtonGroup half WP1b's) written in Kotlin, checked as
 // crates/kompoz-material3/tests/navigation_bar.rs checks them (M15's values; the differences from the C++'s said
 // there), and material3's NavigationBarSamples + BadgeSamples' NavigationBarItemWithBadge from kt/navigation_bar.kt.
 
@@ -78,12 +78,20 @@ kompoz! {
         }
     }
 
-    // (the C++'s ButtonGroup half waits for WP1b)
+    // (WP1b: group) the C++'s ButtonGroup half too: a held button squeezing its neighbour (M15's deprecated content
+    // overload, as the C++ composed it)
     @Composable
     fun MeasuredTwice() {
+        var squeezed by remember { mutableStateOf(0) }
         var item by remember { mutableStateOf(0) }
         var label by remember { mutableStateOf(0) }
+        val first = remember { MutableInteractionSource() }
+        val second = remember { MutableInteractionSource() }
         Column {
+            ButtonGroup {
+                Button({}, Modifier.animateWidth(first).testTag("a"), interactionSource = first) { Text("Önceki") }
+                Button({}, Modifier.animateWidth(second).onSizeChanged { squeezed = it.width }, interactionSource = second) { Text("Oynat") }
+            }
             ShortNavigationBar(arrangement = ShortNavigationBarArrangement.Centered, windowInsets = WindowInsets()) {
                 ShortNavigationBarItem(true, {}, {}, { Text("Ana") }, Modifier.onSizeChanged { item = it.width })
                 ShortNavigationBarItem(false, {}, {}, { Text("Uzun sekme") })
@@ -91,7 +99,7 @@ kompoz! {
             Button({}, Modifier.width(16.dp)) {
                 Text("Dar", Modifier.onSizeChanged { label = it.height })
             }
-            Text("ölçüler $item $label")
+            Text("ölçüler $squeezed $item $label")
         }
     }
 }
@@ -219,11 +227,16 @@ fn short_navigation_bar_shares_the_width_or_centres_its_items() {
     assert!(kt_near(kt_bounds(&wide, "Ana").width(), 233.0, 0.01));
 }
 
+#[allow(deprecated)] // (WP1b: group — ButtonGroup's deprecated content overload, as the C++ composed it)
 fn layouts_that_measure_twice_probe_first_so_sizes_settle() {
     let rule = KompozTestRule::new(MeasuredTwice);
     rule.wait_for_idle();
+    // (WP1b: group) held and settled: the second button squeezed, 84 less 15% of 91 in whole px (the C++'s 70.35)
+    let a = rule.on_node_with_tag("a").get_unclipped_bounds_in_root();
+    rule.host().pointer_down(a.center(), -1, 0, kompoz::ui::input::PointerType::Touch);
+    rule.advance_time_by(600);
     // M15's top-icon items, centered: each the equal share between the 25% paddings (100); the label wrapped.
-    let sizes = || named_args!(rule.on_node_with_text("ölçüler 100 ", substring = true));
+    let sizes = || named_args!(rule.on_node_with_text("ölçüler 70 100 ", substring = true));
     sizes().assert_exists();
     let told = format!("{:?}", sizes().fetch_semantics_node().config());
     rule.advance_time_by(300);

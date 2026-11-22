@@ -18,6 +18,7 @@ pub(crate) mod draggable_anchors;
 pub(crate) mod elevation;
 pub(crate) mod float_producer;
 pub(crate) mod icons;
+pub(crate) mod interactions; // (WP1b: toggle_split)
 pub(crate) mod internal_mutator_mutex;
 pub(crate) mod kotlinx_datetime_calendar_model;
 pub(crate) mod l10n;

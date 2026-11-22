@@ -3464,8 +3464,63 @@ fn what_a_frames_continuation_writes_is_drawn_in_that_frame() {
     assert!(rule.draw().rect_colors.contains(&Color::Blue));
 }
 
+/// A shape telling the sizes it was outlined in (WP1b: toggle_split's test of the layer's outline).
+#[derive(Debug)]
+struct OutlinedSizes(std::sync::Mutex<Vec<Size>>);
+
+impl PartialEq for OutlinedSizes {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Shape for OutlinedSizes {
+    fn create_outline(&self, size: Size, _: LayoutDirection, _: &Density) -> Outline {
+        self.0.lock().unwrap().push(size);
+        Outline::Rectangle(size.to_rect())
+    }
+}
+
+fn a_layers_shape_is_outlined_as_it_is_placed_before_what_it_wraps() {
+    // Compose's NodeCoordinator.updateLayerParameters runs the layer's block and `updateOutline()` (the shape's
+    // createOutline in the layer's size) as the layer is placed — before what it wraps is placed: a shape whose
+    // outline remembers what it was made in (material3's animated shapes keep the size) has it by the time a layout
+    // inside reads it (a split button's optical centering). (WP1b: toggle_split)
+    let shape = Arc::new(OutlinedSizes(std::sync::Mutex::new(Vec::new())));
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let (sh, se) = (shape.clone(), seen.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (sh, se) = (sh.clone(), se.clone());
+        let clip: Arc<dyn Shape> = sh.clone();
+        Box(
+            modifier = Modifier.size_wh(40.dp(), 30.dp()).graphics_layer_block(move |l| {
+                l.shape = clip.clone();
+                l.clip = true;
+            }),
+            content = move || {
+                let (sh, se) = (sh.clone(), se.clone());
+                Box(modifier = Modifier.size(10.dp()).layout(move |scope, measurable, constraints| {
+                    let placeable = measurable.measure(constraints);
+                    let (sh, se) = (sh.clone(), se.clone());
+                    scope.layout(placeable.width(), placeable.height(), move |p| {
+                        // (placed: what the layer around was outlined in so far)
+                        se.borrow_mut().push(sh.0.lock().unwrap().last().copied());
+                        p.place_relative(&placeable, 0, 0);
+                    })
+                }));
+            },
+        );
+    }));
+    rule.wait_for_idle();
+    assert_eq!(seen.borrow().first().copied().flatten(), Some(Size::new(40.0, 30.0)), "{:?}", seen.borrow());
+    // (the outline made then is the layer's: drawing doesn't need another for its clip)
+    let canvas = rule.draw();
+    assert!(canvas.clips.iter().any(|c| c.width() == 40.0 && c.height() == 30.0), "{:?}", canvas.clips);
+}
+
 tests!(
     what_a_frames_continuation_writes_is_drawn_in_that_frame,
+    a_layers_shape_is_outlined_as_it_is_placed_before_what_it_wraps,
     a_vector_painter_moved_with_a_resizing_ancestor_is_kept_as_drawn,
     a_layout_node_draws_in_the_space_of_what_it_wraps,
     graphics_layer_stretch_draws_through_a_stretched_layer,

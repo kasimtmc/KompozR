@@ -4,7 +4,7 @@
 //! the exposed dropdown menus (a read-only anchor and selectable items, an editable one filtering its options as one
 //! types, a multi-autocomplete one completing the token at the cursor) and ExposedDropdownMenuBox's documentation
 //! form — each composed and used as a user does, the icon button anchors in their TooltipBox. (GroupedMenuSample's
-//! ButtonGroup, WP1b's, waits for that package.) Density 1: dp are px.
+//! ButtonGroup, WP1b's, is as written.) Density 1: dp are px.
 
 // (GroupedMenuSample leaves its `homeChecked` state unused, as Compose's sample does; OldAnchorMenu uses the deprecated
 // `MenuAnchorType`)
@@ -126,6 +126,20 @@ fn grouped_menu_sample() {
     rule.on_node_with_text("Edit").perform_click();
     rule.wait_for_idle();
     assert!(is_selected(&rule, "Edit") && !is_selected(&rule, "Settings"));
+    // (WP1b: group) the last item checked, the sample's ButtonGroup of three filled icon buttons comes under the
+    // groups (the anchor's icon has the same description)
+    let described =
+        || rule.on_all_nodes_with_content_description("Localized description").fetch_semantics_nodes().len();
+    assert_eq!(described(), 1);
+    rule.on_node_with_text("More Options").perform_click();
+    rule.wait_for_idle();
+    assert!(is_selected(&rule, "More Options"));
+    assert_eq!(described(), 4);
+    let (more, thumbs) = (
+        text_bounds(&rule, "More Options"),
+        rule.on_all_nodes_with_content_description("Localized description").get(1).get_unclipped_bounds_in_root(),
+    );
+    assert!(thumbs.top > more.bottom, "{more:?} {thumbs:?}");
 }
 
 /// MenuWithScrollStateSample: 30 items in a menu taller than the window, scrolled to its end by the sample's effect

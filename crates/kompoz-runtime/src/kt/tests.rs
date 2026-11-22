@@ -1045,3 +1045,10 @@ fn elvis_of_text_ranges_given_to_rust_and_closed_ranges_print_as_kotlin() {
     assert_eq!(to_string(&dates), "2023-04-15..2023-04-20");
     assert!(is_in(&LocalDate::of(2023, 4, 17), &dates) && !is_in(&LocalDate::of(2023, 4, 21), &dates));
 }
+
+#[test]
+fn casts_of_a_value_to_its_own_type() {
+    // Kotlin's `x as T` / `x as? T` of a value that is a `T`: the value (a clone of it).
+    assert_eq!(KtAs::<String>::kt_as(&"a".to_string()), "a");
+    assert_eq!(KtAs::<i32>::kt_as_safe(&3), Some(3));
+}

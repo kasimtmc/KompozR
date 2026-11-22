@@ -1364,7 +1364,7 @@ fn FabTip(content: impl Fn() + 'static) {
     );
 }
 
-/// FloatingActionButtonSamples.kt (not the FAB menu's, WP1b's): the FABs as the samples compose them, each in its
+/// FloatingActionButtonSamples.kt (the FAB menu's sample is in tests/fab_menu.rs): the FABs as the samples compose them, each in its
 /// TooltipBox (a long press shows it); the animated ones, over a Scaffold, are in tests/scaffold.rs.
 fn floating_action_button_samples() {
     let rule = KompozTestRule::with_viewport(

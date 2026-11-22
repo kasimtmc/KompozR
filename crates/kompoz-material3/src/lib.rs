@@ -22,6 +22,8 @@ mod badge;
 mod button;
 // (WP6: pickers)
 mod calendar_locale;
+// (WP1b: group)
+mod button_group;
 mod card;
 mod checkbox;
 mod chip;
@@ -39,6 +41,8 @@ mod exposed_dropdown_menu;
 mod exposed_dropdown_menu_desktop;
 mod flags;
 mod floating_action_button;
+// (WP1b: fab_segmented)
+mod floating_action_button_menu;
 mod horizontal_center_optically;
 mod icon;
 mod icon_button;
@@ -91,6 +95,8 @@ mod search_bar;
 mod search_bar_defaults;
 mod search_bar_desktop;
 mod secure_text_field;
+// (WP1b: fab_segmented)
+mod segmented_button;
 mod shapes;
 // (WP5: snackbars)
 mod snackbar;
@@ -115,6 +121,9 @@ mod app_bar_row;
 mod bottom_app_bar;
 
 pub(crate) mod tokens;
+// (WP1b: toggle_split)
+mod split_button;
+mod toggle_button;
 mod tonal_palette;
 mod tooltip;
 // (WP4a: toolbar)
@@ -296,6 +305,16 @@ pub use search_bar::{
 pub use search_bar::{StringDockedSearchBar, StringSearchBar, TopSearchBar};
 pub use search_bar_defaults::{AppBarWithSearchColors, SearchBarColors, SearchBarDefaults};
 pub use secure_text_field::{OutlinedSecureTextField, SecureTextField};
+// (WP1b: fab_segmented — FloatingActionButtonMenu)
+pub use floating_action_button_menu::{
+    FloatingActionButtonMenu, FloatingActionButtonMenuScope, ToggleFloatingActionButton,
+    ToggleFloatingActionButtonDefaults, ToggleFloatingActionButtonModifiers, ToggleFloatingActionButtonScope,
+};
+// (WP1b: fab_segmented — SegmentedButton)
+pub use segmented_button::{
+    MultiChoiceSegmentedButtonRow, MultiChoiceSegmentedButtonRowScope, SegmentedButtonColors, SegmentedButtonDefaults,
+    SingleChoiceSegmentedButtonRow, SingleChoiceSegmentedButtonRowScope,
+};
 pub use shapes::{ShapeDefaults, Shapes};
 #[allow(deprecated)]
 pub use slider::SliderPositions;
@@ -401,6 +420,17 @@ pub use app_bar::{
 };
 pub use top_app_bar_defaults::{
     TopAppBarColors, TopAppBarDefaults, TopAppBarScrollBehavior, TopAppBarState, remember_top_app_bar_state,
+};
+
+// (WP1b: group — ButtonGroup)
+pub use button_group::ButtonGroupWithoutOverflowIndicator;
+pub use button_group::{ButtonGroup, ButtonGroupDefaults, ButtonGroupMenuState, ButtonGroupScope};
+// (WP1b: toggle_split — SplitButton)
+pub use split_button::{SplitButtonDefaults, SplitButtonLayout, SplitButtonShapes};
+// (WP1b: toggle_split — ToggleButton)
+pub use toggle_button::{
+    ElevatedToggleButton, OutlinedToggleButton, ToggleButton, ToggleButtonColors, ToggleButtonDefaults,
+    ToggleButtonShapes, TonalToggleButton,
 };
 
 // (WP6: pickers)

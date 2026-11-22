@@ -604,7 +604,8 @@ fn checkboxes_and_radio_buttons_ripple_and_hover_in_a_40_dp_circle() {
 
 fn chips_radio_buttons_and_segments_select() {
     // The C++ test's radio buttons (rows of a RadioButton and a Text, the button tapped). Its FilterChip is the chips'
-    // (WP1a's tests) and its SingleChoiceSegmentedButtonRow the segmented buttons' (WP1b's).
+    // (WP1a's tests) and its SingleChoiceSegmentedButtonRow the segmented buttons' (tests/segmented_buttons.rs, same
+    // name).
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         let selected = remember(|| mutable_state_of("Kahve".to_string()));
         Column(move || {

@@ -7,6 +7,7 @@
 use super::names::{ident, is_pascal, snake, value_name};
 use super::resolve::*;
 use super::stmt::Tail;
+use super::types::TypePos;
 use super::{Gen, respan};
 use crate::ast::*;
 use crate::index::{self, Kind};
@@ -320,7 +321,7 @@ impl Gen<'_, '_> {
             ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, e.loc),
             ExprKind::Infix { name, lhs, rhs } => self.infix(name, lhs, rhs, e.loc),
             ExprKind::Is { .. } => Out::plain(self.later(e.loc, "an `is` check"), Ty::Bool),
-            ExprKind::As { .. } => Out::plain(self.later(e.loc, "an `as` cast"), Ty::Unknown),
+            ExprKind::As { expr: inner, safe, ty } => self.cast(inner, *safe, ty, e.loc),
             ExprKind::If { condition, then, otherwise } => {
                 self.if_expr(condition, then, otherwise.as_ref(), Tail::Value(Want::default()), e.loc)
             }
@@ -338,6 +339,25 @@ impl Gen<'_, '_> {
             ExprKind::Annotated { expr, .. } => self.expr(expr),
             // (the parser said what is wrong)
             ExprKind::Error => Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown),
+        }
+    }
+
+    /// `x as T` / `x as? T`: through kt's `KtAs` (a value of `T` itself, or a shared trait object's crate saying which
+    /// concrete types its objects can be — an `Arc<dyn Shape>` as a `RoundedCornerShape`); `as T` a ClassCastException
+    /// when it isn't one, `as? T` null then. A nullable target (`as T?`) is the safe cast's.
+    fn cast(&mut self, inner: &Expr, safe: bool, ty: &Type, loc: Loc) -> Out {
+        let span = self.span(loc);
+        let kt = self.kt(span);
+        let operand = self.expr(inner).ts;
+        let target_ty = Type { nullable: false, ..ty.clone() };
+        let target = self.rust_type(&target_ty, TypePos::Value);
+        let base = self.ty_of(&target_ty);
+        if safe || ty.nullable {
+            let ts = quote_spanned!(span=> #kt::KtAs::<#target>::kt_as_safe(&#operand));
+            Out::plain(ts, base.nullable())
+        } else {
+            let ts = quote_spanned!(span=> #kt::KtAs::<#target>::kt_as(&#operand));
+            Out::plain(ts, base)
         }
     }
 
@@ -1151,6 +1171,10 @@ impl Gen<'_, '_> {
             ExprKind::String(_) => Ty::String,
             ExprKind::Char(_) => Ty::Char,
             ExprKind::Bool(_) | ExprKind::Is { .. } => Ty::Bool,
+            ExprKind::As { safe, ty, .. } => {
+                let base = self.ty_of(&Type { nullable: false, ..(**ty).clone() });
+                if *safe || ty.nullable { base.nullable() } else { base }
+            }
             ExprKind::Null => Ty::Nullable(Box::new(Ty::Unknown)),
             ExprKind::Name(n) => {
                 if let Some(t) = self.peeked_local(&n.name) {
@@ -1253,16 +1277,16 @@ impl Gen<'_, '_> {
                         .unwrap_or(Ty::Unknown)
                 }
             },
-            ExprKind::If { then, otherwise, .. } => {
-                let a = self.peek_block(then);
-                match otherwise {
-                    Some(o) if a == Ty::Unknown => self.peek_block(o),
-                    Some(_) => a,
-                    None => Ty::Unit,
+            ExprKind::If { then, otherwise, .. } => match otherwise {
+                Some(o) => {
+                    self.joined(&[self.peek_block(then), self.peek_block(o)], super::stmt::Tail::Value(Want::default()))
+                        .0
                 }
-            }
+                None => Ty::Unit,
+            },
             ExprKind::When(w) => {
-                w.branches.iter().map(|b| self.peek_block(&b.body)).find(|t| *t != Ty::Unknown).unwrap_or(Ty::Unknown)
+                let tys: Vec<Ty> = w.branches.iter().map(|b| self.peek_block(&b.body)).collect();
+                self.joined(&tys, super::stmt::Tail::Value(Want::default())).0
             }
             ExprKind::Member { receiver, safe, name } => {
                 if let ExprKind::Number(_) = &receiver.kind {
@@ -1604,6 +1628,9 @@ impl Gen<'_, '_> {
             "Option<Self::Item>" | "Option<T>" => elem.nullable(),
             "Vec<Self::Item>" | "Vec<T>" => Ty::List(Box::new(elem)),
             "Self" => recv.clone(),
+            // (WP1b: fab_segmented — a pair's parts, `KtPair`'s `Self::A`/`Self::B`: `item.first` of a
+            // `listOf(Icons.Filled.X to "…")` an ImageVector, which picks `Icon`'s overload)
+            "Self::A" | "Self::B" => pair_part(recv, ret),
             "" => Ty::Unknown,
             r if r.starts_with("Vec<R>") => Ty::List(Box::new(Ty::Unknown)),
             r => Ty::from_rust(r),
@@ -1708,6 +1735,10 @@ impl Gen<'_, '_> {
                         .find_map(|rt| extension_member(rt, &r, &name.name, usize::MAX))
                         .map(|i| owner_arg_ret(&r, i.ret))
                         .unwrap_or(Ty::Unknown);
+                }
+                // (Kotlin's `copy` gives its receiver's type: see `as_written`)
+                if t == Ty::Unknown && name.name == "copy" && matches!(r, Ty::Named(..)) {
+                    t = r;
                 }
                 if *safe { t.nullable() } else { t }
             }
@@ -1899,6 +1930,16 @@ impl<'e> GivenArg<'e> {
             ExprKind::Lambda(l) => GivenArg::Lambda(l),
             _ => GivenArg::Value(e),
         }
+    }
+}
+
+/// The part of a pair (`recv`) a kt shim's `KtPair` result names (`Self::A`: its first, `Self::B`: its second);
+/// unknown for what isn't a pair. (WP1b: fab_segmented)
+pub(crate) fn pair_part(recv: &Ty, ret: &str) -> Ty {
+    match (recv, ret) {
+        (Ty::Pair(a, _), "Self::A") => (**a).clone(),
+        (Ty::Pair(_, b), "Self::B") => (**b).clone(),
+        _ => Ty::Unknown,
     }
 }
 

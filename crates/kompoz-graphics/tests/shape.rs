@@ -278,6 +278,29 @@ fn shared_shapes_equal_shapes_of_a_kind_as_kotlin() {
     assert!(rectangle == RectangleShape && RectangleShape == rectangle);
 }
 
+#[test]
+fn shared_shapes_cast_to_the_kind_they_are_as_kotlin() {
+    // Kotlin's `shape as RoundedCornerShape` (M15's VerticalButtonGroupSample: a theme's `ShapeDefaults.Small` copied
+    // with full top corners) and `as?`: the shape itself, or the kind a corner-based shape holds; another kind is a
+    // ClassCastException (`as`) or null (`as?`).
+    use kompoz_runtime::kt::KtAs;
+    let theme: Arc<dyn Shape> = Arc::new(CornerBasedShape::from(RoundedCornerShape(8.0)));
+    let rounded: RoundedCornerShape = theme.kt_as();
+    assert!(rounded == RoundedCornerShape(8.0));
+    assert!(KtAs::<CutCornerShape>::kt_as_safe(&theme).is_none());
+    let held: CornerBasedShape = theme.kt_as();
+    assert!(held == RoundedCornerShape(8.0));
+    let cut: Arc<dyn Shape> = Arc::new(CutCornerShape(4.0));
+    assert!(KtAs::<CutCornerShape>::kt_as(&cut) == CutCornerShape(4.0));
+    assert!(KtAs::<CornerBasedShape>::kt_as(&cut) == CutCornerShape(4.0));
+    let rectangle: Arc<dyn Shape> = Arc::new(RectangleShape);
+    assert!(KtAs::<RectangleShape>::kt_as_safe(&rectangle).is_some());
+    assert!(KtAs::<RoundedCornerShape>::kt_as_safe(&rectangle).is_none());
+    let thrown = catch_unwind(AssertUnwindSafe(|| KtAs::<RoundedCornerShape>::kt_as(&cut))).unwrap_err();
+    let message = thrown.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(message.starts_with("ClassCastException"), "{message}");
+}
+
 // ---- Rounded polygons, Material's shapes and morphs -------------------------------------------------------------
 
 /// Points along a polygon's cubics, in order round it.

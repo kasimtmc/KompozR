@@ -4,7 +4,8 @@
 //! [`down_to`], [`step`], [`is_in`]), strings in UTF-16 units ([`KtStr`], [`KtChar`], [`format()`]),
 //! collections ([`list_of`], [`KtList`], [`KtMutableList`], [`KtMap`], [`KtMapExt`]), nullables ([`safe`],
 //! [`elvis`], [`not_null`]), scope functions ([`KtScope`]), numbers and `kotlin.math` ([`KtNumber`], [`KtFloat`]),
-//! a Rust `Result` as Kotlin's `Result` ([`KtResult`]: `getOrThrow()`, …), [`require`], [`check`], [`error`].
+//! a Rust `Result` as Kotlin's `Result` ([`KtResult`]: `getOrThrow()`, …), casts ([`KtAs`]: `as`, `as?`), [`require`],
+//! [`check`], [`error`].
 //!
 //! Kotlin's exceptions are panics whose message is what Kotlin's `toString()` of the exception says
 //! (`IllegalStateException: Check failed.`), at the caller's line (`#[track_caller]`).
@@ -33,6 +34,7 @@
 //! `TextFieldState::edit_async`, the draw transforms'…); a `#[named]` one's twin is a `fn` giving an `impl Future`
 //! (what `#[named]` takes), with the same defaults, so a call naming its arguments goes through its builder too.
 
+pub mod cast;
 pub mod collections;
 pub mod delegate;
 pub mod format;
@@ -49,6 +51,7 @@ pub mod text;
 #[cfg(test)]
 mod tests;
 
+pub use cast::KtAs;
 pub use collections::{
     KtComponent3, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable, KtMap, KtMapExt, KtMapLike,
     KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of, empty_list, empty_map,

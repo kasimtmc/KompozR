@@ -641,3 +641,54 @@ shared_shape_eq!(
     GenericShape,
     OutlineShape,
 );
+
+// ---- A shared shape cast to a shape of a kind (Kotlin's `shape as RoundedCornerShape`) ---------------------------
+
+/// A shared shape (`Arc<dyn Shape>`, what Kotlin types `Shape`) as a shape of a kind, if it is one (Kotlin's
+/// `shape as RoundedCornerShape` / `as?`): the shape itself, or the kind a corner-based shape holds (Kotlin's
+/// `CornerBasedShape` is the kinds' abstract class: a theme's `shapes.small` is a `RoundedCornerShape`).
+macro_rules! shared_shape_as {
+    ($($name:ident => $variant:ident),* $(,)?) => {
+        $(
+            impl kompoz_runtime::kt::KtAs<$name> for Arc<dyn Shape> {
+                fn kt_as_safe(&self) -> Option<$name> {
+                    let any = (**self).shape_as_any();
+                    if let Some(shape) = any.downcast_ref::<$name>() {
+                        return Some(shape.clone());
+                    }
+                    match any.downcast_ref::<CornerBasedShape>() {
+                        Some(CornerBasedShape::$variant(shape)) => Some(shape.clone()),
+                        _ => None,
+                    }
+                }
+            }
+        )*
+    };
+}
+
+shared_shape_as!(
+    RoundedCornerShape => Rounded,
+    CutCornerShape => Cut,
+    AbsoluteRoundedCornerShape => AbsoluteRounded,
+    AbsoluteCutCornerShape => AbsoluteCut,
+);
+
+impl kompoz_runtime::kt::KtAs<CornerBasedShape> for Arc<dyn Shape> {
+    fn kt_as_safe(&self) -> Option<CornerBasedShape> {
+        let any = (**self).shape_as_any();
+        if let Some(shape) = any.downcast_ref::<CornerBasedShape>() {
+            return Some(shape.clone());
+        }
+        any.downcast_ref::<RoundedCornerShape>()
+            .map(|s| CornerBasedShape::from(s.clone()))
+            .or_else(|| any.downcast_ref::<CutCornerShape>().map(|s| CornerBasedShape::from(s.clone())))
+            .or_else(|| any.downcast_ref::<AbsoluteRoundedCornerShape>().map(|s| CornerBasedShape::from(s.clone())))
+            .or_else(|| any.downcast_ref::<AbsoluteCutCornerShape>().map(|s| CornerBasedShape::from(s.clone())))
+    }
+}
+
+impl kompoz_runtime::kt::KtAs<RectangleShape> for Arc<dyn Shape> {
+    fn kt_as_safe(&self) -> Option<RectangleShape> {
+        (**self).shape_as_any().downcast_ref::<RectangleShape>().cloned()
+    }
+}

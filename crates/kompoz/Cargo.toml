@@ -223,6 +223,12 @@ harness = false
 name = "kotlin_search_carousel"
 harness = false
 
+# Material's Expressive buttons in Kotlin's syntax (the C++ Kompoz's Expressive, Mixed's segments and Navigation's FAB
+# menu; its toggle/split/group/FAB-menu/segmented tests written as a Compose user would; material3's samples of them).
+[[test]]
+name = "kotlin_expressive_buttons"
+harness = false
+
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
 [[test]]
 name = "kotlin_animations_all"

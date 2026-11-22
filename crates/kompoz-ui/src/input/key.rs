@@ -732,12 +732,15 @@ pub enum KeyEventType {
 }
 
 /// A key event (Compose's KeyEvent): its key, whether it went down or up, the character it types (UTF-16 code
-/// point; 0 for none) and the modifier keys held.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/// point; 0 for none) and the modifier keys held. Its key, type and character are Kotlin's properties (`it.key`,
+/// `it.type`, `it.utf16CodePoint`; Compose's extension properties of the event).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, kompoz_runtime::KotlinProperties)]
 pub struct KeyEvent {
     pub key: Key,
     pub r#type: KeyEventType,
     pub utf16_code_point: i32,
+    // (no Kotlin property: Compose's are `isShiftPressed` and the others)
+    #[kotlin(skip)]
     pub modifiers: KeyModifiers,
 }
 

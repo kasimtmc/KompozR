@@ -100,6 +100,7 @@ pub struct CustomAccessibilityAction {
 }
 
 impl CustomAccessibilityAction {
+    /// Kotlin: `CustomAccessibilityAction(label: String, action: () -> Boolean)`
     pub fn new(label: impl Into<String>, action: impl Fn() -> bool + 'static) -> Self {
         CustomAccessibilityAction { label: label.into(), action: Rc::new(action) }
     }

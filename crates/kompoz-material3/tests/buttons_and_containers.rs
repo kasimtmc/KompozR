@@ -730,18 +730,19 @@ fn test_rule_assertions() {
 // ---- Buttons and containers together (area A) ----------------------------------------------------------------------
 
 fn buttons_and_chips_keep_48_dp_of_room_to_touch_them() {
-    // C++'s test (its ToggleButton: WP1b's): each 48 dp tall to touch where it looks smaller (the button 40, the
-    // chip 32, the small FAB 40 square), drawn in the middle; a tap 2 dp from the top lands; no room asked for, as
-    // big as they look. (Compose's semantics bounds of a clickable component are its clickable's — the 40 dp
+    // C++'s test (its ToggleButton: WP1b's, in place): each 48 dp tall to touch where it looks smaller (the button
+    // and the toggle button 40, the chip 32, the small FAB 40 square), drawn in the middle; a tap 2 dp from the top
+    // lands (the toggle button checked); no room asked for, as big as they look. (Compose's semantics bounds of a clickable component are its clickable's — the 40 dp
     // container —, so the room is measured on a Box around each, as big as what it holds.)
     let taps = new_log();
     let room = mutable_state_of(48.0f32);
-    let (t, r) = (taps.clone(), room.clone());
+    let on = mutable_state_of(false); // (WP1b: toggle_split)
+    let (t, r, o) = (taps.clone(), room.clone(), on.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
-            let t = t.clone();
+            let (t, o) = (t.clone(), o.clone());
             KompozitionLocalProvider(&[LocalMinimumInteractiveComponentSize.provides(Dp(r.get()))], move || {
-                let t = t.clone();
+                let (t, o) = (t.clone(), o.clone());
                 Column(move || {
                     let push = |t: &Log, s: &'static str| {
                         let t = t.clone();
@@ -758,6 +759,15 @@ fn buttons_and_chips_keep_48_dp_of_room_to_touch_them() {
                         modifier = Modifier.test_tag("metin"),
                         content = move || {
                             TextButton(b, content = || Text("İptal"));
+                        },
+                    );
+                    // (WP1b: toggle_split)
+                    let o = o.clone();
+                    Box(
+                        modifier = Modifier.test_tag("aç"),
+                        content = move || {
+                            let o2 = o.clone();
+                            ToggleButton(o.get(), move |v| o2.set(v), content = || Text("Aç"));
                         },
                     );
                     Box(
@@ -782,6 +792,7 @@ fn buttons_and_chips_keep_48_dp_of_room_to_touch_them() {
     );
     let (b, m, c, f) = (bounds(&rule, "düğme"), bounds(&rule, "metin"), bounds(&rule, "çip"), bounds(&rule, "fab"));
     assert!(b.height() == 48.0 && m.height() == 48.0 && c.height() == 48.0, "{b:?} {m:?} {c:?}");
+    assert_eq!(bounds(&rule, "aç").height(), 48.0); // (WP1b: toggle_split)
     assert!(f.width() == 48.0 && f.height() == 48.0, "{f:?}");
     // The button's container is 40 dp in the middle.
     let primary = light_color_scheme().primary;
@@ -797,12 +808,13 @@ fn buttons_and_chips_keep_48_dp_of_room_to_touch_them() {
             .zip(&canvas.path_colors)
             .any(|(r, k)| *k == primary && near(r.top, b.top + 4.0, 0.01) && near(r.height(), 40.0, 0.01));
     assert!(container, "the container drawn 40 dp tall, 4 dp down");
-    for tag in ["düğme", "metin", "çip", "fab"] {
+    for tag in ["düğme", "metin", "aç", "çip", "fab"] {
         let r = bounds(&rule, tag);
         tap(&rule, Offset::new(r.center().x, r.top + 2.0));
     }
     rule.wait_for_idle();
     assert_eq!(*taps.borrow(), ["düğme", "metin", "çip", "fab"]);
+    assert!(on.get(), "the toggle button checked by a tap 2 dp from the top"); // (WP1b: toggle_split)
     // No room asked for: as big as they look.
     room.set(0.0);
     rule.wait_for_idle();
@@ -810,19 +822,33 @@ fn buttons_and_chips_keep_48_dp_of_room_to_touch_them() {
     assert_eq!(bounds(&rule, "fab").width(), 40.0);
 }
 
+#[allow(deprecated)] // (WP1b: group — ButtonGroup's deprecated content overload, as the C++ composed it)
 fn buttons_animate_composing_around_them_only_as_they_turn() {
-    // C++'s test's Button and small extended FAB (its ToggleButton and ButtonGroup: WP1b's): hovered, their
-    // elevation rises without composing what is around them again; collapsed, the FAB narrows as it is laid out,
-    // what is around it composed once as it turns.
+    // C++'s test's Button, ToggleButton (WP1b: toggle_split), small extended FAB and ButtonGroup (WP1b: group; M15's
+    // deprecated content overload, as the C++ composed it): hovered, their elevation rises without composing what is
+    // around them again; a held button in the group grows without composing it again; checked and collapsed, the toggle
+    // button's corners morph from round towards 12 dp as it is drawn and the FAB narrows as it is laid out, what is
+    // around them composed once as they turn.
     let expanded = mutable_state_of(true);
+    let checked = mutable_state_of(false); // (WP1b: toggle_split)
+    let held = MutableInteractionSource::new(); // (WP1b: group)
     let composed = Rc::new(Cell::new(0));
-    let (e, c) = (expanded.clone(), composed.clone());
+    let (e, c, k, h) = (expanded.clone(), composed.clone(), checked.clone(), held.clone());
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
             c.set(c.get() + 1);
             let open = e.get();
+            let (k, h) = (k.clone(), h.clone());
             Column(move || {
                 Button(|| {}, modifier = Modifier.test_tag("düğme"), content = || Text("Gönder"));
+                // (WP1b: toggle_split)
+                let k2 = k.clone();
+                ToggleButton(
+                    k.get(),
+                    move |v| k2.set(v),
+                    modifier = Modifier.test_tag("seçim"),
+                    content = || Text("Seç"),
+                );
                 TextIconSmallExtendedFloatingActionButton(
                     || Text("Ekle"),
                     || VectorIcon(Icons::Filled::Add(), None),
@@ -830,10 +856,25 @@ fn buttons_animate_composing_around_them_only_as_they_turn() {
                     modifier = Modifier.test_tag("fab"),
                     expanded = open,
                 );
+                // (WP1b: group)
+                let h = h.clone();
+                ButtonGroupWithoutOverflowIndicator(
+                    content = move |group: &ButtonGroupScope| {
+                        let other = remember(MutableInteractionSource::new);
+                        Button(|| {}, modifier = group.animate_width(Modifier, &other), content = || Text("Önceki"));
+                        Button(
+                            || {},
+                            modifier = group.animate_width(Modifier, &h).test_tag("tutulan"),
+                            interaction_source = Some(h.clone()),
+                            content = || Text("Oynat"),
+                        );
+                    },
+                );
             });
         }),
         IntSize::new(400, 800),
     );
+    let natural = bounds(&rule, "tutulan").width(); // (WP1b: group)
     for tag in ["düğme", "fab"] {
         rule.host().pointer_move(center(&rule, tag), -1, 0);
         rule.advance_frame();
@@ -843,18 +884,43 @@ fn buttons_animate_composing_around_them_only_as_they_turn() {
     }
     rule.host().pointer_exit();
     rule.wait_for_idle();
+    // (WP1b: group) pressed: the button grows as it is laid out, nothing composed again
+    rule.host().pointer_down(center(&rule, "tutulan"), -1, 0, PointerType::Touch);
+    rule.advance_frame();
+    let before = composed.get();
+    rule.advance_time_by(500);
+    assert!(composed.get() == before && bounds(&rule, "tutulan").width() > natural + 3.0, "{natural}");
+    rule.host().pointer_up(center(&rule, "tutulan"), -1, 0);
+    rule.wait_for_idle();
+    // (WP1b: toggle_split) the toggle button's container as drawn: its corner radius
+    let corner = |rule: &KompozTestRule| {
+        let b = bounds(rule, "seçim");
+        let canvas = rule.draw();
+        canvas
+            .rects
+            .iter()
+            .zip(&canvas.rect_radii)
+            .find(|(r, _)| b.contains(r.center()) && near(r.height(), 40.0, 0.01))
+            .map_or(-1.0, |(_, radius)| *radius)
+    };
     let full = bounds(&rule, "fab").width();
+    let round = corner(&rule);
+    checked.set(true);
     expanded.set(false);
     rule.advance_frame();
     let before = composed.get();
     rule.advance_time_by(64);
     let narrowing = bounds(&rule, "fab").width();
+    let morphing = corner(&rule);
     assert!(composed.get() == before && narrowing < full - 5.0, "{full} {narrowing}");
+    // (from round towards the checked shape's 12 dp corners, as it is drawn)
+    assert!(near(round, 20.0, 0.01) && morphing < 19.0 && morphing > 12.5, "{round} {morphing}");
     rule.wait_for_idle();
     let narrow = bounds(&rule, "fab").width();
     // (collapsed to its icon: the small FAB's 56 dp square container)
     assert!(narrow < narrowing && composed.get() == before, "{narrow}");
     assert_eq!(narrow, 56.0);
+    assert!(near(corner(&rule), 12.0, 0.01)); // (WP1b: toggle_split)
 }
 
 fn rows_line_children_up_by_their_baselines() {

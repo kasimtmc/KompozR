@@ -37,10 +37,16 @@ pub trait AnyTypeAnimationSpec: Send + Sync + 'static {
     /// Whether `other` is a spec equal to this one.
     #[doc(hidden)]
     fn equals(&self, other: &dyn Any) -> bool;
+    /// Its damping ratio and stiffness if it is a spring, whatever its type (Kotlin's `spec is SpringSpec<T>`, whose
+    /// type argument is erased). (WP1b: fab_segmented — the FAB menu's stagger asks.)
+    #[doc(hidden)]
+    fn spring_parameters(&self) -> Option<(f32, f32)> {
+        None
+    }
 }
 
 macro_rules! any_type_spec {
-    ($ty:ident, |$s:ident| $make:expr) => {
+    ($ty:ident, |$s:ident| $make:expr $(, spring = |$sp:ident| $spring:expr)?) => {
         impl<T: 'static> AnyTypeAnimationSpec for $ty<T>
         where
             $ty<T>: PartialEq + Send + Sync,
@@ -67,11 +73,21 @@ macro_rules! any_type_spec {
             fn equals(&self, other: &dyn Any) -> bool {
                 other.downcast_ref::<Self>().is_some_and(|o| o == self)
             }
+            $(
+                fn spring_parameters(&self) -> Option<(f32, f32)> {
+                    let $sp = self;
+                    Some($spring)
+                }
+            )?
         }
     };
 }
 
-any_type_spec!(SpringSpec, |s| VectorizedSpringSpec::new(s.damping_ratio, s.stiffness, None));
+any_type_spec!(
+    SpringSpec,
+    |s| VectorizedSpringSpec::new(s.damping_ratio, s.stiffness, None),
+    spring = |s| (s.damping_ratio, s.stiffness)
+);
 any_type_spec!(TweenSpec, |s| VectorizedTweenSpec::new(s.duration_millis, s.delay, s.easing.clone()));
 any_type_spec!(SnapSpec, |s| VectorizedSnapSpec::new(s.delay));
 

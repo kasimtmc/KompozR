@@ -15,10 +15,10 @@
 // (the deprecated ChipBorder's own items name it)
 #![allow(deprecated)]
 
-use crate::card::track_interaction;
 use crate::color_scheme::ColorScheme;
 use crate::content_color::LocalContentColor;
 use crate::internal::elevation::AnimateElevation;
+use crate::internal::interactions::track_interaction_with_drags; // (WP1b: toggle_split)
 use crate::material_theme::MaterialTheme;
 use crate::surface::{ClickableSurface, SelectableSurface};
 use crate::text::LocalTextStyle;
@@ -2177,7 +2177,7 @@ fn animate_chip_elevation(e: ChipElevation, enabled: bool, interaction_source: I
         let last_interaction = remember(|| Rc::new(RefCell::new(None::<Arc<dyn Interaction>>)));
         let collected = interactions.clone();
         let collecting = interaction_source.interactions().collect(move |interaction| {
-            track_interaction(&collected, interaction);
+            track_interaction_with_drags(&collected, interaction);
         });
         LaunchedEffect(interaction_source.clone(), collecting);
 

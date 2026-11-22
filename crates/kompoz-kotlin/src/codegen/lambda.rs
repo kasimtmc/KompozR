@@ -198,6 +198,23 @@ impl Gen<'_, '_> {
         let input_tys: Vec<Ty> = info.inputs.iter().skip(first_input).map(|t| self.input_ty(t)).collect();
         let mut_refs: Vec<bool> =
             info.inputs.iter().skip(first_input).map(|t| t.trim_start().starts_with("&mut")).collect();
+        // (a parameter lent by shared reference — a value's, not a trait object's, a slice's or a string's —: a lambda
+        // kept inside uses a clone of it, see `Local::lent_ref`)
+        let shared_refs: Vec<bool> = info
+            .inputs
+            .iter()
+            .skip(first_input)
+            .map(|t| {
+                let t = t.trim_start();
+                t.starts_with('&')
+                    && !t.starts_with("&mut")
+                    && !t.starts_with("&dyn")
+                    && !t.starts_with("&[")
+                    && !t.starts_with("&str")
+                    && !t.starts_with("&'")
+            })
+            .collect();
+        let mut lent_refs: Vec<(proc_macro2::Ident, std::rc::Rc<std::cell::Cell<bool>>)> = Vec::new();
         // (its body's calls are its own: the call it is given to binds no `T` of theirs)
         let outer_type_arg = self.type_arg.take();
         let outer_owner_arg = self.owner_arg.take();
@@ -244,6 +261,8 @@ impl Gen<'_, '_> {
                             }
                             if lent.get(k) == Some(&true) {
                                 unpack.extend(quote_spanned!(span=> let #i = ::core::clone::Clone::clone(#i);));
+                            } else if shared_refs.get(k) == Some(&true) && p.ty.is_none() {
+                                lent_refs.push((i.clone(), self.mark_lent_ref(&n.name)));
                             }
                             params.push(quote_spanned!(span=> #i #annot));
                         }
@@ -279,6 +298,8 @@ impl Gen<'_, '_> {
                     let used = self.declare_it(ty);
                     if mut_refs.first() == Some(&true) {
                         self.mark_mut_ref("it");
+                    } else if shared_refs.first() == Some(&true) && lent.first() != Some(&true) {
+                        lent_refs.push((proc_macro2::Ident::new("it", span), self.mark_lent_ref("it")));
                     }
                     implicit_it = Some((used, !unknown));
                 } else {
@@ -314,6 +335,13 @@ impl Gen<'_, '_> {
                 params.push(quote_spanned!(span=> it #t));
             } else if one {
                 params.push(quote_spanned!(span=> _ #t));
+            }
+        }
+        // (a parameter lent by reference that a lambda kept inside uses: held as a clone of it, which that one captures)
+        for (i, flag) in &lent_refs {
+            if flag.get() {
+                let o = proc_macro2::Ident::new(&format!("__kz_{i}"), span);
+                unpack = quote_spanned!(span=> let #o = ::core::clone::Clone::clone(#i); #unpack);
             }
         }
         // (a scope lent by reference that a lambda inside uses: held as a clone of it, which that lambda captures)

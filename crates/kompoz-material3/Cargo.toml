@@ -218,3 +218,33 @@ harness = false
 [[test]]
 name = "floating_toolbar"
 harness = false
+
+# (WP1b: toggle_split) Toggle buttons (the C++ Kompoz's toggle button test by name, M15's values, Compose's
+# behaviour, M15's ToggleButtonSamples): ToggleButton, Elevated/Tonal/OutlinedToggleButton, ToggleButtonDefaults.
+[[test]]
+name = "toggle_buttons"
+harness = false
+
+# (WP1b: toggle_split) Split buttons (the C++ Kompoz's split button test by name, M15's values, Compose's behaviour,
+# M15's SplitButtonSamples): SplitButtonLayout, SplitButtonDefaults' buttons, sizes and shapes.
+[[test]]
+name = "split_buttons"
+harness = false
+
+# (WP1b: group) Button groups (C++ button_group_* tests, connected groups, expressive named arguments, the group's
+# whole-pixel part; Compose's behaviour; M15's ButtonGroupSamples): ButtonGroup, ButtonGroupScope, ButtonGroupDefaults.
+[[test]]
+name = "button_groups"
+harness = false
+
+# (WP1b: fab_segmented) Segmented buttons (the C++ Kompoz's segmented button tests by name, M15's values, Compose's
+# behaviour, M15's SegmentedButtonSamples): Single/MultiChoiceSegmentedButtonRow, SegmentedButton, the defaults.
+[[test]]
+name = "segmented_buttons"
+harness = false
+
+# (WP1b: fab_segmented) The FAB menu (the C++ Kompoz's FAB menu test and its named form by name, M15's values,
+# Compose's behaviour, M15's FloatingActionButtonMenuSample): FloatingActionButtonMenu, ToggleFloatingActionButton.
+[[test]]
+name = "fab_menu"
+harness = false

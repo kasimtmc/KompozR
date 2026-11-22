@@ -308,6 +308,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             shared_closure: false,
             mut_ref: false,
             used: None,
+            lent_ref: None,
         };
         self.scopes.last_mut().expect("a scope").insert(kotlin.to_string(), local);
         rust
@@ -325,9 +326,16 @@ impl<'a, 'd> Gen<'a, 'd> {
 
     /// The local a name is, if it is one; a use of it from inside a lambda is recorded as a capture.
     pub fn local(&mut self, kotlin: &str) -> Option<Local> {
-        let found = self.scopes.iter().rev().find_map(|s| s.get(kotlin)).cloned()?;
+        let mut found = self.scopes.iter().rev().find_map(|s| s.get(kotlin)).cloned()?;
         if let Some(u) = &found.used {
             u.set(true);
+        }
+        // (a parameter lent by reference used from a lambda kept inside the lending one: the lending lambda's clone)
+        if let Some(lent) = &found.lent_ref
+            && self.frames.iter().any(|f| found.depth < f.boundary && f.kept)
+        {
+            lent.set(true);
+            found.rust = format!("__kz_{}", found.rust);
         }
         for f in &mut self.frames {
             if found.depth < f.boundary && !f.used.contains(&found.rust) {
@@ -335,6 +343,16 @@ impl<'a, 'd> Gen<'a, 'd> {
             }
         }
         Some(found)
+    }
+
+    /// Marks a local of the innermost scope as a parameter lent by shared reference (see `Local::lent_ref`): the flag
+    /// set when a lambda kept inside uses it.
+    pub fn mark_lent_ref(&mut self, kotlin: &str) -> std::rc::Rc<std::cell::Cell<bool>> {
+        let flag: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
+        if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(kotlin)) {
+            l.lent_ref = Some(flag.clone());
+        }
+        flag
     }
 
     /// Marks a local of the innermost scope as a `&mut` (see `Local::mut_ref`).

@@ -457,17 +457,43 @@ fn short_navigation_bar_shares_the_width_or_centres_its_items() {
     assert!(near(ana.width(), 233.0, 0.01) && near(ana.left, 0.0, 0.01), "{ana:?}");
 }
 
+#[allow(deprecated)] // (WP1b: group — ButtonGroup's deprecated content overload, as the C++ composed it)
 fn layouts_that_measure_twice_probe_first_so_sizes_settle() {
-    // The C++'s ButtonGroup half (a held button squeezing its neighbour, told once of its size) waits for WP1b's
-    // ButtonGroup (WP4b notes, bar-pending.rs); here the short bar's centered items (measured by their intrinsic
-    // sizes first) and a button narrower than its label.
+    // The C++'s test, whole: a held button in a group squeezing its neighbour (WP1b: group), the short bar's centered
+    // items (measured by their intrinsic sizes first) and a button narrower than its label — each told once of the
+    // size it ends up with.
+    let squeezed = mutable_state_of(0.0f32); // (WP1b: group)
     let item = mutable_state_of(0.0f32);
     let label = mutable_state_of(0.0f32);
     let reports = Rc::new(Cell::new(0));
-    let (it, la, re) = (item.clone(), label.clone(), reports.clone());
+    let (first, second) = (MutableInteractionSource::new(), MutableInteractionSource::new()); // (WP1b: group)
+    let (sq, it, la, re, f, sc) =
+        (squeezed.clone(), item.clone(), label.clone(), reports.clone(), first.clone(), second.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (it, la, re) = (it.clone(), la.clone(), re.clone());
+        let (sq, it, la, re, f, sc) = (sq.clone(), it.clone(), la.clone(), re.clone(), f.clone(), sc.clone());
         Column(move || {
+            // (WP1b: group)
+            let (sq2, re2, f, sc) = (sq.clone(), re.clone(), f.clone(), sc.clone());
+            ButtonGroupWithoutOverflowIndicator(
+                content = move |group: &ButtonGroupScope| {
+                    Button(
+                        || {},
+                        modifier = group.animate_width(Modifier, &f).test_tag("a"),
+                        interaction_source = Some(f.clone()),
+                        content = || Text("Önceki"),
+                    );
+                    let (sq, re) = (sq2.clone(), re2.clone());
+                    Button(
+                        || {},
+                        modifier = group.animate_width(Modifier, &sc).on_size_changed(move |s| {
+                            re.set(re.get() + 1);
+                            sq.set(s.width as f32);
+                        }),
+                        interaction_source = Some(sc.clone()),
+                        content = || Text("Oynat"),
+                    );
+                },
+            );
             let (it2, re2) = (it.clone(), re.clone());
             ShortNavigationBar(
                 arrangement = ShortNavigationBarArrangement::Centered,
@@ -503,13 +529,21 @@ fn layouts_that_measure_twice_probe_first_so_sizes_settle() {
                     );
                 },
             );
-            Text(format!("{} {}", it.get(), la.get())); // reads them: a change recomposes
+            Text(format!("{} {} {}", sq.get(), it.get(), la.get())); // reads them: a change recomposes
         });
     }));
     rule.wait_for_idle();
+    // (WP1b: group) the natural widths: Önceki 43 + 48 of padding, Oynat 36 + 48 (labelLarge's letters 7.1 wide)
+    let a = rule.on_node_with_tag_unmerged("a").get_unclipped_bounds_in_root();
+    let natural = squeezed.get();
+    assert!(near(a.width(), 91.0, 0.01) && near(natural, 84.0, 0.01), "{a:?} {natural}");
+    rule.host().pointer_down(a.center(), -1, 0, PointerType::Touch);
+    rule.advance_time_by(600); // held and settled: the second button squeezed
     let settled = reports.get();
     rule.advance_time_by(300);
     assert_eq!(reports.get(), settled); // told once of each size, not of a size measured on the way
+    // (WP1b: group) 84 less 15% of 91 rounded to a whole px, as M15's group gives up whole px (the C++'s 70.35)
+    assert!(near(squeezed.get(), 70.0, 0.01), "{}", squeezed.get());
     // M15's centered top-icon items (the icon position Kotlin's default): "Uzun sekme" 65 wide is less than the
     // equal share between the 25% paddings (400 / 4 = 100), so each item is 100 (the C++'s, its icons at the
     // start, the widest's 16 + 65 + 16 = 97).

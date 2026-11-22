@@ -69,6 +69,11 @@ kompoz-foundation/scroll kompozable Boxes rrr crates/kompoz-foundation/tests/scr
 * kompozable Button rddddddddr crates/kompoz-material3/src/button.rs
 kompoz-runtime/macros kompozable Button rdr crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/semantics kompozable Button rr crates/kompoz-ui/tests/semantics.rs
+* kompozable ButtonGroup rddddr crates/kompoz-material3/src/button_group.rs
+* kompozable ButtonGroupItems r crates/kompoz-material3/src/button_group.rs
+* fn ButtonGroupMenuState d crates/kompoz-material3/src/button_group.rs
+kompoz-material3/button_groups kompozable ButtonGroupSample - crates/kompoz-material3/tests/button_groups.rs
+* kompozable ButtonGroupWithoutOverflowIndicator dddr crates/kompoz-material3/src/button_group.rs
 * kompozable ButtonSurface rrrrrrrrrrr crates/kompoz-material3/src/button.rs
 * kompozable ButtonWithShapes rrdddddddr crates/kompoz-material3/src/button.rs
 kompoz-animation/shared kompozable CallerManaged rrrr crates/kompoz-animation/tests/shared.rs
@@ -83,6 +88,7 @@ kompoz-material3/floating_toolbar kompozable CenteredHorizontalFloatingToolbarWi
 * method CenteredTrack rdddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 kompoz-material3/floating_toolbar kompozable CenteredVerticalFloatingToolbarWithFabSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable CheckableDropdownMenuItem rrrrddddddddd crates/kompoz-material3/src/menu.rs
+kompoz-material3/split_buttons kompozable CheckableSample rr crates/kompoz-material3/tests/split_buttons.rs
 * kompozable Checkbox rrdddd crates/kompoz-material3/src/checkbox.rs
 * fn CheckboxColors rrrrrrrrrrrrr crates/kompoz-material3/src/checkbox.rs
 * kompozable CheckboxImpl rrrrrr crates/kompoz-material3/src/checkbox.rs
@@ -97,6 +103,7 @@ kompoz-material3/containers kompozable ChipGroupSingleLineSample r crates/kompoz
 * kompozable CircularWavyProgressIndicator rddddddddd crates/kompoz-material3/src/wavy_progress_indicator.rs
 kompoz-material3/search_bar kompozable CityRows rr crates/kompoz-material3/tests/search_bar.rs
 kompoz-runtime/runtime kompozable CityText r crates/kompoz-runtime/tests/runtime.rs
+* kompozable ClickableButtonGroupItemContent rrrrrr crates/kompoz-material3/src/button_group.rs
 * kompozable ClickableCard rdddddddr crates/kompoz-material3/src/card.rs
 kompoz-material3/containers kompozable ClickableCardSample r crates/kompoz-material3/tests/containers.rs
 * kompozable ClickableElevatedCard rddddddr crates/kompoz-material3/src/card.rs
@@ -233,10 +240,13 @@ kompoz-material3/containers kompozable ElevatedCardSample - crates/kompoz-materi
 * kompozable ElevatedFilterChip rrrddddddddddd crates/kompoz-material3/src/chip.rs
 kompoz-material3/containers kompozable ElevatedFilterChipSample - crates/kompoz-material3/tests/containers.rs
 * kompozable ElevatedFilterChipWithoutArrangement rrrddddddddd crates/kompoz-material3/src/chip.rs
+* method ElevatedLeadingButton rddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 * kompozable ElevatedSuggestionChip rrdddddddddd crates/kompoz-material3/src/chip.rs
 kompoz-material3/containers kompozable ElevatedSuggestionChipSample - crates/kompoz-material3/tests/containers.rs
 * kompozable ElevatedSuggestionChipWithChipBorder rrdddddddd crates/kompoz-material3/src/chip.rs
 * kompozable ElevatedSuggestionChipWithoutArrangement rrdddddddd crates/kompoz-material3/src/chip.rs
+* kompozable ElevatedToggleButton rrddddddddr crates/kompoz-material3/src/toggle_button.rs
+* method ElevatedTrailingButton rrddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 * kompozable EnsurePrecisionPointerListenersRegistered r crates/kompoz-material3/src/precision_pointer.rs
 kompoz-material3/top_app_bars kompozable EnterAlwaysTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
 kompoz-material3/top_app_bars kompozable EnterAlwaysTopAppBarWithReverseScrolling - crates/kompoz-material3/tests/top_app_bars.rs
@@ -298,6 +308,11 @@ kompoz-material3/containers kompozable FilterChipWithTrailingIconSample - crates
 * kompozable FloatCircularProgressIndicator rddddd crates/kompoz-material3/src/progress_indicator.rs
 * kompozable FloatLinearProgressIndicator rdddd crates/kompoz-material3/src/progress_indicator.rs
 * kompozable FloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
+* kompozable FloatingActionButtonMenu rrddr crates/kompoz-material3/src/floating_action_button_menu.rs
+* method FloatingActionButtonMenuItem rrrddd crates/kompoz-material3/src/floating_action_button_menu.rs FloatingActionButtonMenuScope
+* kompozable FloatingActionButtonMenuItemColumn rrrrr crates/kompoz-material3/src/floating_action_button_menu.rs
+* kompozable FloatingActionButtonMenuItemImpl rrrrrrr crates/kompoz-material3/src/floating_action_button_menu.rs
+kompoz-material3/fab_menu kompozable FloatingActionButtonMenuSample - crates/kompoz-material3/tests/fab_menu.rs
 * kompozable FlowColumn dddddddr crates/kompoz-foundation/src/layout/flow_layout.rs
 kompoz-coroutines/coroutines kompozable FlowReader r crates/kompoz-coroutines/tests/coroutines.rs
 * kompozable FlowRow dddddddr crates/kompoz-foundation/src/layout/flow_layout.rs
@@ -335,6 +350,7 @@ kompoz-material3/carousel kompozable HorizontalMultiBrowseCarouselSample - crate
 * kompozable HorizontalUncontainedCarousel rrdddddr crates/kompoz-material3/src/carousel/carousel.rs
 kompoz-material3/carousel kompozable HorizontalUncontainedCarouselSample - crates/kompoz-material3/tests/carousel.rs
 * kompozable Icon rrdd crates/kompoz-material3/src/icon.rs
+* method Icon rdd crates/kompoz-material3/src/segmented_button.rs SegmentedButtonDefaults
 * kompozable IconButton rdddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable IconButtonImpl rrrrrrr crates/kompoz-material3/src/icon_button.rs
 * fn IconButtonShapes rd crates/kompoz-material3/src/icon_button.rs
@@ -417,6 +433,7 @@ kompoz-runtime/subcomposition kompozable Label r crates/kompoz-runtime/tests/sub
 * kompozable LazyStaggeredGrid rrrrrrrrrrrr crates/kompoz-foundation/src/lazy/staggeredgrid/grid.rs
 * kompozable LazyVerticalGrid rdddddddddr crates/kompoz-foundation/src/lazy/grid/dsl.rs
 * kompozable LazyVerticalStaggeredGrid rdddddddddr crates/kompoz-foundation/src/lazy/staggeredgrid/dsl.rs
+* method LeadingButton rddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 kompoz-material3/floating_toolbar kompozable LeadingContent - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable LeadingDecorator rrrr crates/kompoz-material3/src/list_item.rs
 * kompozable LeadingIcon rrrrr crates/kompoz-material3/src/menu.rs
@@ -463,6 +480,7 @@ kompoz-material3/top_app_bars kompozable MenuButton - crates/kompoz-material3/te
 * kompozable MenuItem rrr crates/kompoz-foundation/src/context_menu.rs
 * fn MenuItemColors rrrrrrdddddd crates/kompoz-material3/src/menu.rs
 * kompozable MenuItemContent rrrr crates/kompoz-foundation/src/context_menu.rs
+kompoz-material3/split_buttons kompozable MenuSample r crates/kompoz-material3/tests/split_buttons.rs
 * kompozable MenuSeparator r crates/kompoz-foundation/src/context_menu.rs
 kompoz-runtime/runtime kompozable Middle - crates/kompoz-runtime/tests/runtime.rs
 * kompozable ModalBottomSheet rddddddddddddr crates/kompoz-material3/src/modal_bottom_sheet.rs
@@ -482,8 +500,11 @@ kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/t
 * kompozable MonthsNavigation rrrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
 kompoz-material3/carousel kompozable MultiAspectCarouselLazyRowSample - crates/kompoz-material3/tests/carousel.rs
 * kompozable MultiAspectCarouselScope r crates/kompoz-material3/src/carousel/multi_aspect_carousel.rs
+* kompozable MultiChoiceSegmentedButtonRow ddr crates/kompoz-material3/src/segmented_button.rs
 * kompozable MultiContentLayout rdr crates/kompoz-ui/src/layout/composables.rs
 * kompozable MultiMeasureLayout drR crates/kompoz-ui/src/layout/composables.rs
+kompoz-material3/button_groups kompozable MultiSelectConnectedButtonGroupSample - crates/kompoz-material3/tests/button_groups.rs
+kompoz-material3/button_groups kompozable MultiSelectConnectedButtonGroupWithFlowLayoutSample - crates/kompoz-material3/tests/button_groups.rs
 kompoz-material3/lists kompozable MultiSelectionListItemSample - crates/kompoz-material3/tests/lists.rs
 kompoz-material3/lists kompozable MultiSelectionSegmentedListItemSample - crates/kompoz-material3/tests/lists.rs
 * fn MutableContentTransform ddddd crates/kompoz-animation/src/deferred_enter_exit.rs
@@ -515,9 +536,14 @@ kompoz-material3/containers kompozable OutlinedCardSample - crates/kompoz-materi
 * kompozable OutlinedIconButtonWithShapes rrdddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable OutlinedIconToggleButton rrddddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable OutlinedIconToggleButtonWithShapes rrrdddddr crates/kompoz-material3/src/icon_button.rs
+* method OutlinedLeadingButton rddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 * kompozable OutlinedSecureTextField rdddddddddddddddddddddd crates/kompoz-material3/src/secure_text_field.rs
 * kompozable OutlinedTextField rdddddddddddddddddddddddd crates/kompoz-material3/src/outlined_text_field.rs
 * kompozable OutlinedTextFieldLayout rrrrrrrrrrrrrrrrr crates/kompoz-material3/src/outlined_text_field.rs
+* kompozable OutlinedToggleButton rrddddddddr crates/kompoz-material3/src/toggle_button.rs
+* method OutlinedTrailingButton rrddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
+* method OverflowIndicator rddddd crates/kompoz-material3/src/button_group.rs ButtonGroupDefaults
+* kompozable OverflowIndicatorImpl rrrrrr crates/kompoz-material3/src/button_group.rs
 kompoz-material3/floating_toolbar kompozable OverflowingHorizontalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-material3/floating_toolbar kompozable OverflowingVerticalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable OverlineDecorator rrr crates/kompoz-material3/src/list_item.rs
@@ -617,6 +643,7 @@ kompoz-material3/floating_toolbar kompozable SampleRow r crates/kompoz-material3
 kompoz-material3/time_picker kompozable SampleScaffold rr crates/kompoz-material3/tests/time_picker.rs
 kompoz-material3/search_bar kompozable SampleSearchResults r crates/kompoz-material3/tests/search_bar.rs
 kompoz-material3/search_bar kompozable SampleSideIcon rrrrr crates/kompoz-material3/tests/search_bar.rs
+kompoz-material3/button_groups kompozable SampleToggle rrrrrr crates/kompoz-material3/tests/button_groups.rs
 kompoz-material3/search_bar kompozable SampleTrailingIcon - crates/kompoz-material3/tests/search_bar.rs
 kompoz-material3/navigation_rail kompozable SampleWideItems rrr crates/kompoz-material3/tests/navigation_rail.rs
 kompoz-runtime/runtime kompozable SavedChecks r crates/kompoz-runtime/tests/runtime.rs
@@ -653,12 +680,18 @@ kompoz-material3/tabs kompozable SecondaryIconTabs - crates/kompoz-material3/tes
 * kompozable SecondaryTabRow rdddddr crates/kompoz-material3/src/tab_row.rs
 kompoz-material3/tabs kompozable SecondaryTextTabs - crates/kompoz-material3/tests/tabs.rs
 * kompozable SecureTextField rdddddddddddddddddddddd crates/kompoz-material3/src/secure_text_field.rs
+* method SegmentedButton rrrdddddddr crates/kompoz-material3/src/segmented_button.rs MultiChoiceSegmentedButtonRowScope
+* method SegmentedButton rrrdddddddr crates/kompoz-material3/src/segmented_button.rs SingleChoiceSegmentedButtonRowScope
+* kompozable SegmentedButtonContent rrr crates/kompoz-material3/src/segmented_button.rs
+kompoz-material3/segmented_buttons kompozable SegmentedButtonMultiSelectSample - crates/kompoz-material3/tests/segmented_buttons.rs
+kompoz-material3/segmented_buttons kompozable SegmentedButtonSingleSelectSample - crates/kompoz-material3/tests/segmented_buttons.rs
 * kompozable SegmentedListItem rrdddddddddddddr crates/kompoz-material3/src/list_item.rs
 kompoz-material3/lists kompozable SegmentedListItemWithExpansionSample - crates/kompoz-material3/tests/lists.rs
 * kompozable SelectableChip rrrrrrrrrrrrrrdrr crates/kompoz-material3/src/chip.rs
 * kompozable SelectableDropdownMenuItem rrrrddddddddd crates/kompoz-material3/src/menu.rs
 * kompozable SelectableDropdownMenuItemContent rrrrrrrrrrrrr crates/kompoz-material3/src/menu.rs
 * kompozable SelectableListItem rrddddddddddddddr crates/kompoz-material3/src/list_item.rs
+* kompozable SelectableSegmentedButton rrrrrrrrrrr crates/kompoz-material3/src/segmented_button.rs
 * kompozable SelectableSegmentedListItem rrrdddddddddddddr crates/kompoz-material3/src/list_item.rs
 * kompozable SelectableSurface rrdddddddddr crates/kompoz-material3/src/surface.rs
 kompoz-material3/tabs kompozable SelectedText r crates/kompoz-material3/tests/tabs.rs
@@ -688,12 +721,16 @@ kompoz-material3/scaffold kompozable SimpleScaffoldWithTopBar - crates/kompoz-ma
 kompoz-material3/search_bar kompozable SimpleSearchBarSample - crates/kompoz-material3/tests/search_bar.rs
 kompoz-material3/top_app_bars kompozable SimpleTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
 kompoz-material3/top_app_bars kompozable SimpleTopAppBarWithSubtitle - crates/kompoz-material3/tests/top_app_bars.rs
+* kompozable SingleChoiceSegmentedButtonRow ddr crates/kompoz-material3/src/segmented_button.rs
 * kompozable SingleRowTopAppBar rrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
+kompoz-material3/button_groups kompozable SingleSelectConnectedButtonGroupSample - crates/kompoz-material3/tests/button_groups.rs
+kompoz-material3/button_groups kompozable SingleSelectConnectedButtonGroupWithFlowLayoutSample - crates/kompoz-material3/tests/button_groups.rs
 kompoz-material3/lists kompozable SingleSelectionListItemSample - crates/kompoz-material3/tests/lists.rs
 kompoz-material3/lists kompozable SingleSelectionSegmentedListItemSample - crates/kompoz-material3/tests/lists.rs
 kompoz/kotlin_ported fn Size2 dd crates/kompoz/tests/kotlin_ported.rs
 * kompozable SizedExtendedFloatingActionButton rrrrrrrrrrrrrrrr crates/kompoz-material3/src/floating_action_button.rs
 * kompozable SizedExtendedFloatingActionButtonRow rrrrrrrrrrrrr crates/kompoz-material3/src/floating_action_button.rs
+kompoz-material3/split_buttons kompozable SizedSample rrr crates/kompoz-material3/tests/split_buttons.rs
 * kompozable SkippableItem rrrr crates/kompoz-foundation/src/lazy/layout/lazy_layout.rs
 * kompozable Slider rrddddddd crates/kompoz-material3/src/slider/mod.rs
 * fn SliderColors rrrrrrrrrr crates/kompoz-material3/src/slider/defaults.rs
@@ -711,6 +748,7 @@ kompoz-runtime/macros kompozable Slotted rdd crates/kompoz-runtime/tests/macros.
 kompoz/kotlin_ported fn Spacing dd crates/kompoz/tests/kotlin_ported.rs
 * fn SpanStyle dddddddddddddddddd crates/kompoz-text/src/span_style.rs
 kompoz-runtime/runtime kompozable SpeedReader - crates/kompoz-runtime/tests/runtime.rs
+* kompozable SplitButtonLayout rrdd crates/kompoz-material3/src/split_button.rs
 kompoz-ui/tree kompozable Stack dr crates/kompoz-ui/tests/tree.rs
 kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
 * kompozable StandardBottomSheet rrrrrrrrrrr crates/kompoz-material3/src/bottom_sheet_scaffold.rs
@@ -819,10 +857,19 @@ kompoz-runtime/runtime kompozable TintedContent - crates/kompoz-runtime/tests/ru
 kompoz-material3/icon_buttons kompozable Tipped r crates/kompoz-material3/tests/icon_buttons.rs
 * method Title rd crates/kompoz-material3/src/time_picker_dialog.rs TimePickerDialogDefaults
 kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.rs
+* kompozable ToggleButton rrddddddddr crates/kompoz-material3/src/toggle_button.rs
+* kompozable ToggleFloatingActionButton rrdddddr crates/kompoz-material3/src/floating_action_button_menu.rs
+* kompozable ToggleFloatingActionButtonWithProgress rrrrrrrrr crates/kompoz-material3/src/floating_action_button_menu.rs
 * kompozable ToggleItem rrrrr crates/kompoz-material3/src/time_picker.rs
+* kompozable ToggleableButtonGroupItemContent rrrrrrr crates/kompoz-material3/src/button_group.rs
 * kompozable ToggleableListItem rrddddddddddddddr crates/kompoz-material3/src/list_item.rs
+* kompozable ToggleableSegmentedButton rrrrrrrrrrr crates/kompoz-material3/src/segmented_button.rs
 * kompozable ToggleableSegmentedListItem rrrdddddddddddddr crates/kompoz-material3/src/list_item.rs
 * kompozable ToggleableSurface rrdddddddddr crates/kompoz-material3/src/surface.rs
+* method ToggleableTrailingButton rrddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
+* method TonalLeadingButton rddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
+* kompozable TonalToggleButton rrddddddddr crates/kompoz-material3/src/toggle_button.rs
+* method TonalTrailingButton rrddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 * kompozable ToolbarFloatingActionButton rrrrrrr crates/kompoz-material3/src/floating_toolbar.rs
 * kompozable TooltipArea rdddr crates/kompoz-foundation/src/tooltip_area.rs
 * kompozable TooltipBox rrrdddddr crates/kompoz-material3/src/tooltip.rs
@@ -839,6 +886,9 @@ kompoz-material3/scaffold kompozable TopPaddingText r crates/kompoz-material3/te
 * kompozable TopSearchBar rrddddddd crates/kompoz-material3/src/search_bar.rs
 * method Track rddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 * kompozable TrackImpl rrrrrrrrrrr crates/kompoz-material3/src/slider/defaults.rs
+kompoz-material3/button_groups kompozable TrailingArrow r crates/kompoz-material3/tests/button_groups.rs
+kompoz-material3/split_buttons kompozable TrailingArrow rrr crates/kompoz-material3/tests/split_buttons.rs
+* method TrailingButton rddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 kompoz-material3/floating_toolbar kompozable TrailingContent - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable TrailingDecorator rrrr crates/kompoz-material3/src/list_item.rs
 * method TrailingIcon rd crates/kompoz-material3/src/exposed_dropdown_menu.rs ExposedDropdownMenuDefaults
@@ -861,6 +911,7 @@ kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-founda
 * kompozable ValueTextField rrddddddddddddddddddddd crates/kompoz-material3/src/text_field.rs
 * kompozable VectorIcon rrdd crates/kompoz-material3/src/icon.rs
 * kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
+kompoz-material3/button_groups kompozable VerticalButtonGroupSample - crates/kompoz-material3/tests/button_groups.rs
 * kompozable VerticalClockDisplay rr crates/kompoz-material3/src/time_picker.rs
 * kompozable VerticalDivider ddd crates/kompoz-material3/src/divider.rs
 * kompozable VerticalDragHandle ddddd crates/kompoz-material3/src/drag_handle.rs
@@ -925,6 +976,7 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 * method animate_float rrrd crates/kompoz-animation/src/infinite_transition.rs InfiniteTransition
 * kompozable animate_float_as_state rdddd crates/kompoz-animation/src/animate_as_state.rs
 * method animate_floating_action_button rrddd crates/kompoz-material3/src/floating_action_button.rs Modifier as FloatingActionButtonModifiers
+* method animate_icon rdd crates/kompoz-material3/src/floating_action_button_menu.rs Modifier as ToggleFloatingActionButtonModifiers
 * kompozable animate_indicator_progress_as_state r crates/kompoz-material3/src/navigation_item.rs
 * method animate_int ddr crates/kompoz-animation/src/transition.rs Transition
 * kompozable animate_int_as_state rddd crates/kompoz-animation/src/animate_as_state.rs
@@ -983,6 +1035,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method blur_xy rrdd crates/kompoz-ui/src/draw/modifiers.rs Modifier
 * method border rrd crates/kompoz-foundation/src/border.rs Modifier as BorderModifiers
 * method border_stroke rd crates/kompoz-foundation/src/border.rs Modifier as BorderModifiers
+* method border_stroke rd crates/kompoz-material3/src/segmented_button.rs SegmentedButtonDefaults
 * method bottom_app_bar_fab_elevation dddd crates/kompoz-material3/src/floating_action_button.rs FloatingActionButtonDefaults
 * method bottom_end dd crates/kompoz-material3/src/internal/animated_shape.rs AnimatedShapeStateOf
 * method bottom_start dd crates/kompoz-material3/src/internal/animated_shape.rs AnimatedShapeStateOf
@@ -1001,6 +1054,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method click dd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method clickable ddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
 * method clickable_indication rrdddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method clickable_item rrddd crates/kompoz-material3/src/button_group.rs ButtonGroupScope
 * method clickable_item rrrd crates/kompoz-material3/src/app_bar_dsl.rs S as AppBarScopeItems
 * method clip_path rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 * method clip_rect ddddd crates/kompoz-ui/src/draw/scope.rs DrawTransform
@@ -1016,6 +1070,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method colors ddddddd crates/kompoz-material3/src/wide_navigation_rail.rs WideNavigationRailItemDefaults
 * method colors dddddddd crates/kompoz-material3/src/navigation_drawer.rs NavigationDrawerItemDefaults
 * method colors dddddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
+* method colors dddddddddddd crates/kompoz-material3/src/segmented_button.rs SegmentedButtonDefaults
 * method colors dddddddddddddd crates/kompoz-material3/src/time_picker.rs TimePickerDefaults
 * method colors dddddddddddddddd crates/kompoz-material3/src/switch.rs SwitchDefaults
 * method colors dddddddddddddddddddddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemDefaults
@@ -1026,6 +1081,12 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method colors_with_headline_color ddddddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemDefaults
 * method combined_clickable ddddddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
 * method combined_clickable_indication rrdddddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method connected_leading_button_shapes ddd crates/kompoz-material3/src/button_group.rs ButtonGroupDefaults
+* method connected_middle_button_shapes ddd crates/kompoz-material3/src/button_group.rs ButtonGroupDefaults
+* method connected_trailing_button_shapes ddd crates/kompoz-material3/src/button_group.rs ButtonGroupDefaults
+* method container_color_by_progress dd crates/kompoz-material3/src/floating_action_button_menu.rs ToggleFloatingActionButtonDefaults
+* method container_corner_radius_of rd crates/kompoz-material3/src/floating_action_button_menu.rs ToggleFloatingActionButtonDefaults
+* method container_size_of rd crates/kompoz-material3/src/floating_action_button_menu.rs ToggleFloatingActionButtonDefaults
 * method content_padding dddd crates/kompoz-material3/src/text_field_defaults.rs OutlinedTextFieldDefaults
 * method content_padding_for rdd crates/kompoz-material3/src/button.rs ButtonDefaults
 * method content_padding_with_label dddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
@@ -1038,6 +1099,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method copy dd crates/kompoz-material3/src/menu.rs MenuItemShapes
 * method copy ddd crates/kompoz-material3/src/icon_button.rs IconToggleButtonShapes
 * method copy ddd crates/kompoz-material3/src/search_bar_defaults.rs SearchBarColors
+* method copy ddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonShapes
 * method copy ddd crates/kompoz-text/src/input.rs TextFieldValue
 * method copy dddd crates/kompoz-graphics/src/color.rs Color
 * method copy dddd crates/kompoz-graphics/src/constraints.rs Constraints
@@ -1052,6 +1114,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method copy ddddd crates/kompoz-material3/src/wide_navigation_rail.rs WideNavigationRailColors
 * method copy dddddd crates/kompoz-material3/src/icon_button.rs IconToggleButtonColors
 * method copy dddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemShapes
+* method copy dddddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonColors
 * method copy dddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarColors
 * method copy ddddddd crates/kompoz-foundation/src/text/keyboard_options.rs KeyboardOptions
 * method copy ddddddd crates/kompoz-material3/src/navigation_bar.rs NavigationBarItemColors
@@ -1062,6 +1125,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method copy ddddddddd crates/kompoz-text/src/paragraph_style.rs ParagraphStyle
 * method copy dddddddddd crates/kompoz-material3/src/slider/defaults.rs SliderColors
 * method copy dddddddddddd crates/kompoz-material3/src/menu.rs MenuItemColors
+* method copy dddddddddddd crates/kompoz-material3/src/segmented_button.rs SegmentedButtonColors
 * method copy ddddddddddddd crates/kompoz-material3/src/checkbox.rs CheckboxColors
 * method copy ddddddddddddd crates/kompoz-material3/src/chip.rs SelectableChipColors
 * method copy dddddddddddddd crates/kompoz-material3/src/time_picker.rs TimePickerColors
@@ -1129,6 +1193,7 @@ kompoz-runtime/runtime kompozable effect rrr crates/kompoz-runtime/tests/runtime
 * method elevated_filter_chip_elevation dddddd crates/kompoz-material3/src/chip.rs FilterChipDefaults
 * method elevated_suggestion_chip_colors dddddd crates/kompoz-material3/src/chip.rs SuggestionChipDefaults
 * method elevated_suggestion_chip_elevation dddddd crates/kompoz-material3/src/chip.rs SuggestionChipDefaults
+* method elevated_toggle_button_colors dddddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonDefaults
 * method elevation dd crates/kompoz-material3/src/list_item_defaults.rs ListItemDefaults
 * method elevation dddd crates/kompoz-material3/src/floating_action_button.rs FloatingActionButtonDefaults
 * method enter d crates/kompoz-test/src/input.rs MouseInjectionScope
@@ -1197,6 +1262,8 @@ kompoz-runtime/macros fn handled dd crates/kompoz-runtime/tests/macros.rs
 kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/icon_buttons.rs
 * method icon_button_colors dddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
 * method icon_button_vibrant_colors dddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
+* method icon_color_by_progress dd crates/kompoz-material3/src/floating_action_button_menu.rs ToggleFloatingActionButtonDefaults
+* method icon_size_of rd crates/kompoz-material3/src/floating_action_button_menu.rs ToggleFloatingActionButtonDefaults
 * method icon_toggle_button_colors dddddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
 * method icon_toggle_button_vibrant_colors dddddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
 * kompozable indicator_line rrr crates/kompoz-material3/src/tab_row.rs
@@ -1209,12 +1276,14 @@ kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/i
 * method input_field_colors ddddddddddddddddddddddd crates/kompoz-material3/src/search_bar_defaults.rs SearchBarDefaults
 * method insert_text_at_cursor dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method inset_hv dd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* kompozable interaction_count_as_state r crates/kompoz-material3/src/segmented_button.rs
 * kompozable is_24_hour_format - crates/kompoz-material3/src/time_format.rs
 * method item dddr crates/kompoz-foundation/src/lazy/grid/dsl.rs LazyGridScope
 * method item dddr crates/kompoz-foundation/src/lazy/staggeredgrid/dsl.rs LazyStaggeredGridScope
 * method item ddr crates/kompoz-foundation/src/lazy/list/dsl.rs LazyListScope
 kompoz-runtime/macros method item rd crates/kompoz-runtime/tests/macros.rs S as ItemScopeItems
 * method item_colors dddddd crates/kompoz-material3/src/menu_defaults.rs MenuDefaults
+* method item_shape rrd crates/kompoz-material3/src/segmented_button.rs SegmentedButtonDefaults
 * kompozable item_shape_by_interaction rrr crates/kompoz-material3/src/menu.rs
 * method item_shapes dd crates/kompoz-material3/src/menu_defaults.rs MenuDefaults
 * method items rdddr crates/kompoz-foundation/src/lazy/grid/dsl.rs LazyGridScope
@@ -1290,6 +1359,7 @@ kompoz-runtime/macros method of_static R crates/kompoz-runtime/tests/macros.rs I
 * method outlined_icon_toggle_button_vibrant_colors dddddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
 * method outlined_text_field_colors ddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/exposed_dropdown_menu.rs ExposedDropdownMenuDefaults
 * method outlined_text_field_padding dddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
+* method outlined_toggle_button_colors dddddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonDefaults
 * method padding_from rdd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
 * method padding_from_baseline dd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
 * method padding_from_baseline_sp dd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
@@ -1478,11 +1548,14 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 * method shadow rdddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
 * kompozable shape_by_interaction rrr crates/kompoz-material3/src/button.rs
 * kompozable shape_by_interaction rrr crates/kompoz-material3/src/icon_button.rs
+* kompozable shape_by_interaction rrrr crates/kompoz-material3/src/split_button.rs
+* kompozable shape_by_interaction rrrr crates/kompoz-material3/src/toggle_button.rs
 * kompozable shape_for_interaction rr crates/kompoz-material3/src/icon_button.rs
 * kompozable shape_for_interaction rrrrrrr crates/kompoz-material3/src/list_item_defaults.rs
 * method shapes dd crates/kompoz-material3/src/button.rs ButtonDefaults
 * method shapes dd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
 * method shapes ddd crates/kompoz-material3/src/drag_handle.rs VerticalDragHandleDefaults
+* method shapes ddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonDefaults
 * method shapes dddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemDefaults
 * method shared_bounds rrrdddddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * method shared_element rrrddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
@@ -1544,10 +1617,13 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * method to_path_with dddd crates/kompoz-material3/src/internal/shape_util.rs RoundedPolygon as RoundedPolygonPaths
 * method to_path_with rdddddd crates/kompoz-material3/src/internal/shape_util.rs Morph as MorphPaths
 * method to_pixel_map dddd crates/kompoz-graphics/src/image/bitmap.rs ImageBitmap
+* method toggle_button_colors dddddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonDefaults
 * method toggleable rdddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 * method toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
+* method toggleable_item rrrddd crates/kompoz-material3/src/button_group.rs ButtonGroupScope
 * method toggleable_item rrrrd crates/kompoz-material3/src/app_bar_dsl.rs S as AppBarScopeItems
 * method toggleable_shapes ddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
+* method tonal_toggle_button_colors dddddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonDefaults
 * method top_app_bar_colors dddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macros.rs
 * method top_end dd crates/kompoz-material3/src/internal/animated_shape.rs AnimatedShapeStateOf

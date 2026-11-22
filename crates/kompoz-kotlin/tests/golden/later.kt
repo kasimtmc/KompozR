@@ -23,8 +23,6 @@ fun tries(): Int {
 
 fun checks(x: Any): Boolean = x is String
 
-fun casts(x: Int) = x as Long
-
 fun throws(): Int = throw IllegalStateException("x")
 
 fun references() = ::tries

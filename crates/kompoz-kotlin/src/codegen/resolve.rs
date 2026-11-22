@@ -906,6 +906,11 @@ pub(crate) struct Local {
     /// Set when it is used ([`Gen::local`](super::Gen::local)): a lambda's implicit `it`, which the lambda takes only
     /// when its body (or a lambda inside it without an `it` of its own) uses it.
     pub used: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    /// A lambda's parameter lent by shared reference (`{ menuState -> … }` given a `&ButtonGroupMenuState`): set when
+    /// a lambda kept inside the lending one uses it — the lending lambda then holds a clone of it, `__kz_<name>`
+    /// (Kotlin's lambda holds the object), which that lambda captures (as a receiver lent by reference is, see
+    /// `ImplicitReceiver::owned_used`).
+    pub lent_ref: Option<std::rc::Rc<std::cell::Cell<bool>>>,
 }
 
 /// An implicit receiver: an extension function's `self`, a receiver lambda's scope parameter.

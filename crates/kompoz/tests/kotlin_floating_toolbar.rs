@@ -61,8 +61,9 @@ fn moved(rule: &KompozTestRule, tag: &str) -> Rect {
 
 // ==== the C++ Kompoz's ===============================================================================================
 // kompoz_tests.cpp's floating_toolbar_shows_its_side_actions_when_expanded_and_leaves_on_scroll (kompozable_tests.cpp
-// has no source for it) and the HorizontalFloatingToolbar of kompozable_tests.cpp's Navigation (2849-2899; its tabs are
-// in kotlin_lists_sheets.rs, its FloatingActionButtonMenu is WP1b's).
+// has no source for it) and the HorizontalFloatingToolbar of kompozable_tests.cpp's Navigation (2849-2899; the whole
+// source, with its tabs and FAB menu, and its test tabs_and_fab_menu_as_compose_writes_them are in
+// kotlin_expressive_buttons.rs).
 
 kompoz! {
     // (the C++'s `action`: a 48 dp action)
@@ -127,8 +128,8 @@ kompoz! {
         }
     }
 
-    // Navigation's floating toolbar as the C++ wrote it (its text without the tab and the FAB menu's pick, which are
-    // the parts kotlin_lists_sheets.rs and WP1b have).
+    // Navigation's floating toolbar as the C++ wrote it, on its own (its text without the tab and the FAB menu's pick;
+    // the whole Navigation is kotlin_expressive_buttons.rs's).
     @Kompozable
     fun NavigationToolbar() {
         var more by remember { mutableStateOf(false) }

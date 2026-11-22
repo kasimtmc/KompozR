@@ -1121,7 +1121,7 @@ fn collect_interactions(
                 {
                     interactions.push(interaction);
                 } else {
-                    crate::button::remove_ended(&mut interactions, &*interaction);
+                    crate::internal::interactions::remove_ended(&mut interactions, &*interaction);
                 }
                 let target_interaction = interactions.last().cloned();
                 scope.launch(animatable.animate_elevation(target_interaction));

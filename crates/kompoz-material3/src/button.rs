@@ -13,6 +13,7 @@
 use crate::color_scheme::ColorScheme;
 use crate::internal::animated_shape::remember_animated_shape;
 use crate::internal::elevation::AnimateElevation;
+use crate::internal::interactions::track_interaction; // (WP1b: toggle_split)
 use crate::internal::provide_content_color_text_style::ProvideContentColorTextStyle;
 use crate::material_theme::MaterialTheme;
 use crate::precision_pointer::should_use_precision_pointer_component_sizing_state;
@@ -1259,42 +1260,6 @@ impl ButtonElevation {
 
             animatable.as_state()
         })
-    }
-}
-
-/// An interaction's part in what goes on (Compose's `when (interaction)` of a collected one): a hover, a focus or
-/// a press added, its end taking it away (the first of it).
-pub(crate) fn track_interaction(
-    interactions: &kompoz_runtime::SnapshotStateList<Arc<dyn Interaction>>,
-    interaction: Arc<dyn Interaction>,
-) {
-    if interaction.is::<HoverInteraction::Enter>()
-        || interaction.is::<FocusInteraction::Focus>()
-        || interaction.is::<PressInteraction::Press>()
-    {
-        interactions.add(interaction);
-    } else {
-        interactions.update(|list| remove_ended(list, &*interaction));
-    }
-}
-
-/// Takes the first interaction `end` ends out of `list` (Kotlin's `remove(interaction.enter)` and the others).
-pub(crate) fn remove_ended(list: &mut Vec<Arc<dyn Interaction>>, end: &dyn Interaction) {
-    let started = |i: &Arc<dyn Interaction>| -> bool {
-        if let Some(exit) = end.downcast_ref::<HoverInteraction::Exit>() {
-            i.downcast_ref::<HoverInteraction::Enter>() == Some(&exit.enter)
-        } else if let Some(unfocus) = end.downcast_ref::<FocusInteraction::Unfocus>() {
-            i.downcast_ref::<FocusInteraction::Focus>() == Some(&unfocus.focus)
-        } else if let Some(release) = end.downcast_ref::<PressInteraction::Release>() {
-            i.downcast_ref::<PressInteraction::Press>() == Some(&release.press)
-        } else if let Some(cancel) = end.downcast_ref::<PressInteraction::Cancel>() {
-            i.downcast_ref::<PressInteraction::Press>() == Some(&cancel.press)
-        } else {
-            false
-        }
-    };
-    if let Some(index) = list.iter().position(started) {
-        list.remove(index);
     }
 }
 

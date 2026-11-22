@@ -296,7 +296,7 @@ fn list_item_forms() {
 
 // ==== tabs and dialogs ===============================================================================================
 // The C++ Kompoz's `tabs_and_fab_menu_as_compose_writes_them` (kompozable_tests.cpp 2849-2899, Navigation: its tabs;
-// its FloatingActionButtonMenu is WP1b's, its HorizontalFloatingToolbar in kotlin_floating_toolbar.rs) and
+// the whole source, with its FAB menu and floating toolbar, is in kotlin_expressive_buttons.rs) and
 // `the_users_add_text_dialog` (249-388, AddTextDialog/DialogHost) through `kompoz!`, and material3's TabSamples and
 // AlertDialogSamples from kt/tabs_dialogs.kt.
 

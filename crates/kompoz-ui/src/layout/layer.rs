@@ -116,6 +116,11 @@ pub struct GraphicsLayerScope {
     /// is recorded into that layer too, which can draw it again (a lazy list's item fading out after it left).
     #[kotlin(skip)]
     pub(crate) record_into: Option<crate::draw::GraphicsLayer>,
+    /// Its outline as the layer's parameters were last updated (Compose's internal `outline`, made by
+    /// `updateOutline` as the layer is placed: a shape whose outline depends on what it was last made in — an
+    /// animated one's size — knows it before what is placed inside reads it).
+    #[kotlin(skip)]
+    pub(crate) outline: Option<Outline>,
 }
 
 impl Default for GraphicsLayerScope {
@@ -145,6 +150,7 @@ impl Default for GraphicsLayerScope {
             density: Density::default(),
             layout_direction: LayoutDirection::Ltr,
             record_into: None,
+            outline: None,
         }
     }
 }
@@ -208,9 +214,18 @@ impl GraphicsLayerScope {
         })
     }
 
-    /// Its outline (its shape in its size).
+    /// Its outline (its shape in its size): the one made as its parameters were last updated, else made now.
     pub fn outline(&self) -> Outline {
-        self.shape.create_outline(self.size, self.layout_direction, &self.density)
+        match &self.outline {
+            Some(outline) => outline.clone(),
+            None => self.shape.create_outline(self.size, self.layout_direction, &self.density),
+        }
+    }
+
+    /// Makes its outline of its shape in its size (Compose's internal `updateOutline`, run with the layer's block
+    /// as its parameters are updated: what the shape reads is observed with the block).
+    pub(crate) fn update_outline(&mut self) {
+        self.outline = Some(self.shape.create_outline(self.size, self.layout_direction, &self.density));
     }
 
     /// Whether its matrix moves anything: the positional properties aren't all at their defaults.

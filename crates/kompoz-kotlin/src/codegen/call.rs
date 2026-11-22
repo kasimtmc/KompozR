@@ -950,6 +950,9 @@ impl Gen<'_, '_> {
     /// name has one (`x.for_each_async(async |it| …).await`).
     fn as_written(&mut self, recv: Out, name: &Ident, args: &[ArgRef], loc: Loc) -> Out {
         let span = self.span(loc);
+        // (Kotlin's `copy` gives a value of its receiver's type — a data class's, CornerBasedShape's covariant one —:
+        // typed so where the index doesn't know the method, as a macro's `copy` of a shape kind)
+        let copied = (name.name == "copy").then(|| recv.ty.clone()).filter(|t| matches!(t, Ty::Named(..)));
         let r = recv.ts;
         let m = self.name_ident(&snake(&name.name), name.loc);
         let twin = kt_twin(&name.name);
@@ -977,7 +980,7 @@ impl Gen<'_, '_> {
             let a = self.awaited(None, loc);
             return Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*) #a), Ty::Unknown);
         }
-        Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*)), Ty::Unknown)
+        Out::plain(quote_spanned!(span=> #r.#m(#(#vals),*)), copied.unwrap_or(Ty::Unknown))
     }
 
     /// The arguments of a call [`as_written`](Self::as_written), its lambdas run in place (`twin`: by a callee with a
@@ -2163,6 +2166,8 @@ fn kt_ret(c: &Ty, text: &str, elem: &Ty, recv: &Ty) -> Ty {
         "Option<Self::Item>" | "Option<T>" => elem.clone().nullable(),
         "Vec<Self::Item>" | "Vec<T>" => Ty::List(Box::new(elem.clone())),
         "Self" => recv.clone(),
+        // (WP1b: fab_segmented — a pair's parts: `pair.first`, `pair.component1()`)
+        "Self::A" | "Self::B" => super::expr::pair_part(recv, text),
         t if t.starts_with("Vec<IndexedValue<") => {
             Ty::List(Box::new(Ty::Named("IndexedValue".into(), vec![elem.clone()])))
         }

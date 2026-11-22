@@ -7,6 +7,7 @@
 
 use crate::color_scheme::{ColorScheme, DisabledAlpha, content_color_for};
 use crate::internal::elevation::AnimateElevation;
+use crate::internal::interactions::track_interaction_with_drags; // (WP1b: toggle_split)
 use crate::material_theme::MaterialTheme;
 use crate::surface::{ClickableSurface, Surface};
 use crate::tokens::{ElevatedCardTokens, FilledCardTokens, OutlinedCardTokens};
@@ -19,8 +20,8 @@ use kompoz_foundation::interaction::{
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{BorderStroke, Color, Dp, Offset, Shape};
 use kompoz_runtime::{
-    KotlinProperties, SnapshotStateList, State, kompozable, kompozable_block, mutable_state_list_of, mutable_state_of,
-    named, named_args, remember, remember_keyed,
+    KotlinProperties, State, kompozable, kompozable_block, mutable_state_list_of, mutable_state_of, named, named_args,
+    remember, remember_keyed,
 };
 use kompoz_ui::Modifier;
 use std::sync::Arc;
@@ -514,7 +515,7 @@ impl CardElevation {
             let interactions = remember(|| mutable_state_list_of(Vec::<Arc<dyn Interaction>>::new()));
             let collected = interactions.clone();
             let collecting = interaction_source.interactions().collect(move |interaction| {
-                track_interaction(&collected, interaction);
+                track_interaction_with_drags(&collected, interaction);
             });
             LaunchedEffect(interaction_source.clone(), collecting);
 
@@ -561,48 +562,6 @@ impl CardElevation {
 
             animatable.as_state()
         })
-    }
-}
-
-/// An interaction's part in what goes on (the `when (interaction)` of Compose's elevation classes, a card's and a
-/// chip's): a hover, a focus, a press or a drag added, its end taking it away.
-pub(crate) fn track_interaction(
-    interactions: &SnapshotStateList<Arc<dyn Interaction>>,
-    interaction: Arc<dyn Interaction>,
-) {
-    if interaction.is::<HoverInteraction::Enter>()
-        || interaction.is::<FocusInteraction::Focus>()
-        || interaction.is::<PressInteraction::Press>()
-        || interaction.is::<DragInteraction::Start>()
-    {
-        interactions.add(interaction);
-    } else {
-        interactions.update(|list| remove_ended(list, &*interaction));
-    }
-}
-
-/// Takes the first interaction `end` ends out of `list` (Kotlin's `interactions.remove(interaction.enter)` and the
-/// others).
-fn remove_ended(list: &mut Vec<Arc<dyn Interaction>>, end: &dyn Interaction) {
-    let started = |i: &Arc<dyn Interaction>| -> bool {
-        if let Some(exit) = end.downcast_ref::<HoverInteraction::Exit>() {
-            i.downcast_ref::<HoverInteraction::Enter>() == Some(&exit.enter)
-        } else if let Some(unfocus) = end.downcast_ref::<FocusInteraction::Unfocus>() {
-            i.downcast_ref::<FocusInteraction::Focus>() == Some(&unfocus.focus)
-        } else if let Some(release) = end.downcast_ref::<PressInteraction::Release>() {
-            i.downcast_ref::<PressInteraction::Press>() == Some(&release.press)
-        } else if let Some(cancel) = end.downcast_ref::<PressInteraction::Cancel>() {
-            i.downcast_ref::<PressInteraction::Press>() == Some(&cancel.press)
-        } else if let Some(stop) = end.downcast_ref::<DragInteraction::Stop>() {
-            i.downcast_ref::<DragInteraction::Start>() == Some(&stop.start)
-        } else if let Some(cancel) = end.downcast_ref::<DragInteraction::Cancel>() {
-            i.downcast_ref::<DragInteraction::Start>() == Some(&cancel.start)
-        } else {
-            false
-        }
-    };
-    if let Some(index) = list.iter().position(started) {
-        list.remove(index);
     }
 }
 
