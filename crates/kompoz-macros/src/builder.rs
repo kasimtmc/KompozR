@@ -244,6 +244,8 @@ pub(crate) struct Generic {
     pub(crate) inferred: bool,
     /// Its bounds, for `__call`.
     pub(crate) bounds: Option<Ts>,
+    /// Whether it may be unsized (`S: ?Sized`, an impl's for a trait object too): the builder declares it so.
+    pub(crate) maybe_unsized: bool,
 }
 
 impl Generic {
@@ -261,6 +263,21 @@ pub(crate) fn generics(
     params: &mut [Param],
 ) -> Result<Vec<Generic>> {
     let mut out = Vec::new();
+    // (`?Sized` written in the bounds or in a where clause of the impl or the signature)
+    let maybe_unsized_in = |bounds: &Punctuated<TypeParamBound, Token![+]>| {
+        bounds.iter().any(|b| {
+            matches!(b, TypeParamBound::Trait(t) if t.maybe.is_some()
+                && t.path.is_ident("Sized"))
+        })
+    };
+    let where_unsized = |ident: &Ident| {
+        impl_generics.into_iter().chain([sig_generics]).filter_map(|g| g.where_clause.as_ref()).any(|w| {
+            w.predicates.iter().any(|p| {
+                matches!(p, WherePredicate::Type(t) if matches!(&t.bounded_ty, Type::Path(tp) if tp.path.is_ident(ident))
+                    && maybe_unsized_in(&t.bounds))
+            })
+        })
+    };
     let mut push = |g: &GenericParam, inferred: bool| -> Result<()> {
         match g {
             GenericParam::Type(t) => {
@@ -271,6 +288,7 @@ pub(crate) fn generics(
                     initial: if inferred { quote!(#rt::__private::Infer) } else { quote!(#i) },
                     inferred,
                     bounds: (!b.is_empty()).then(|| quote!(#i: #b)),
+                    maybe_unsized: maybe_unsized_in(b) || where_unsized(i),
                 });
             }
             GenericParam::Lifetime(l) => {
@@ -281,6 +299,7 @@ pub(crate) fn generics(
                     initial: if inferred { quote!('static) } else { quote!(#i) },
                     inferred,
                     bounds: (!b.is_empty()).then(|| quote!(#i: #b)),
+                    maybe_unsized: false,
                 });
             }
             GenericParam::Const(c) => return Err(Error::new(c.span(), "kompoz: const generics aren't supported here")),
@@ -300,7 +319,14 @@ pub(crate) fn generics(
         NameLifetimes { fresh: &mut fresh }.visit_type_mut(&mut p.ty);
     }
     for l in fresh {
-        out.push(Generic { name: quote!(#l), lifetime: true, initial: quote!('static), inferred: true, bounds: None });
+        out.push(Generic {
+            name: quote!(#l),
+            lifetime: true,
+            initial: quote!('static),
+            inferred: true,
+            bounds: None,
+            maybe_unsized: false,
+        });
     }
     Ok(out)
 }
@@ -374,7 +400,9 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     };
     let lt_names: Vec<&Ts> = lifetimes.iter().map(|g| &g.name).collect();
     let ty_names: Vec<&Ts> = types.iter().map(|g| &g.name).collect();
-    let phantom = quote!(::core::marker::PhantomData<fn() -> (#(&#lt_names (),)* #(#ty_names,)*)>);
+    // (each type in a PhantomData of its own: a type parameter may be unsized)
+    let phantom =
+        quote!(::core::marker::PhantomData<fn() -> (#(&#lt_names (),)* #(::core::marker::PhantomData<#ty_names>,)*)>);
 
     let recv_ty = recv.map(|r| match r {
         Receiver::Value(t) => quote!(#t),
@@ -387,7 +415,18 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     let recv_move = recv.map(|_| quote!(recv: self.recv,));
     let ids_field = pass_ids.then(|| quote!(__kz_ids: [::core::option::Option<u64>; #n],));
     let ids_move = pass_ids.then(|| quote!(__kz_ids: self.__kz_ids,));
-    let ids_init = pass_ids.then(|| quote!(__kz_ids: [::core::option::Option::None; #n],));
+    // (a closure parameter left at its default has the default's identity, the same each call, as Kotlin's default
+    // lambda is one instance; a setter resets it)
+    let ids_init = pass_ids.then(|| {
+        let ids = params.iter().zip(wants_id).map(|(p, w)| {
+            if *w && p.default.is_some() {
+                quote!(#rt::__private::DEFAULT_CLOSURE_ID)
+            } else {
+                quote!(::core::option::Option::None)
+            }
+        });
+        quote!(__kz_ids: [#(#ids),*],)
+    });
 
     let mut missing = Vec::new();
     let mut initial = Vec::new();
@@ -580,9 +619,19 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             }
         };
         let (memo_name, memo_arg, some_name, some_arg) = (memo(name), memo(&arg), some(name), some(&arg));
+        // (an argument given: no identity, unless its memoized twin gives it one after)
+        let ids_set = if wants_id[i] {
+            Some(quote!(__kz_ids: {
+                let mut ids = self.__kz_ids;
+                ids[#i] = ::core::option::Option::None;
+                ids
+            },))
+        } else {
+            ids_move.clone()
+        };
         setters.push(quote! {
             pub fn #name #generic(self, v: #value) -> #ret {
-                #builder_name { _g: ::core::marker::PhantomData, #recv_move #ids_move #(#fields),* }
+                #builder_name { _g: ::core::marker::PhantomData, #recv_move #ids_set #(#fields),* }
             }
             pub fn #arg #generic(self, v: #value) -> #ret {
                 self.#name(v)
@@ -663,7 +712,27 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             .collect(),
         _ => Vec::new(),
     };
-    let static_wc = (!static_bounds.is_empty()).then(|| quote!(where #(#static_bounds),*));
+    // (a type parameter that may be unsized declared so wherever the builder declares it)
+    let unsized_bounds: Vec<Ts> = types
+        .iter()
+        .filter(|g| g.maybe_unsized)
+        .map(|g| {
+            let n = &g.name;
+            quote!(#n: ?Sized)
+        })
+        .collect();
+    let new_unsized: Vec<Ts> = types
+        .iter()
+        .filter(|g| g.maybe_unsized && !g.inferred)
+        .map(|g| {
+            let n = &g.name;
+            quote!(#n: ?Sized)
+        })
+        .collect();
+    let head_bounds: Vec<&Ts> = static_bounds.iter().chain(unsized_bounds.iter()).collect();
+    let static_wc = (!head_bounds.is_empty()).then(|| quote!(where #(#head_bounds),*));
+    let new_bounds: Vec<&Ts> = static_bounds.iter().chain(new_unsized.iter()).collect();
+    let new_wc = (!new_bounds.is_empty()).then(|| quote!(where #(#new_bounds),*));
     bounds.extend(static_bounds.iter().cloned());
     let items = quote! {
         #(#missing)*
@@ -677,7 +746,7 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
         }
         #[doc(hidden)]
         #[allow(non_snake_case, clippy::needless_lifetimes)]
-        #vis fn #new_name<#recv_lt #(#outer_g,)* #(#free_names,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> #static_wc {
+        #vis fn #new_name<#recv_lt #(#outer_g,)* #(#free_names,)*>(#new_param) -> #builder_name<#recv_lt #(#init_g,)* #(#initial),*> #new_wc {
             #builder_name { _g: ::core::marker::PhantomData, #new_init #ids_init #(#fs: #initial),* }
         }
         #[allow(clippy::type_complexity, clippy::too_many_arguments, non_snake_case)]

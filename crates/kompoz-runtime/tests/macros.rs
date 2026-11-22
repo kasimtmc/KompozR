@@ -334,6 +334,59 @@ fn methods_of_a_type_from_elsewhere_take_named_arguments_through_a_trait() {
     );
 }
 
+/// Methods of every value of a trait, trait objects of its subtraits too (Compose's members of an interface a scope
+/// implements, material3's `AppBarScope.clickableItem`): a blanket `#[named(trait …)]` impl of `S: ?Sized`.
+mod scope_items {
+    use kompoz_runtime::named;
+    use std::cell::RefCell;
+
+    pub trait ItemScope {
+        fn added(&self) -> &RefCell<Vec<String>>;
+    }
+
+    pub trait RowItemScope: ItemScope {}
+
+    #[derive(Default)]
+    pub struct RowItems(pub RefCell<Vec<String>>);
+
+    impl ItemScope for RowItems {
+        fn added(&self) -> &RefCell<Vec<String>> {
+            &self.0
+        }
+    }
+
+    impl RowItemScope for RowItems {}
+
+    #[named(trait ItemScopeItems)]
+    impl<S: ItemScope + ?Sized> S {
+        fn item(&self, label: String, #[default(1)] times: i32) {
+            self.added().borrow_mut().push(format!("{label}x{times}"));
+        }
+    }
+}
+
+use scope_items::{ItemScopeItems, RowItemScope, RowItems};
+
+#[kompozable]
+fn ScopeItems(content: impl Fn(&dyn RowItemScope) + 'static) {
+    let items = RowItems::default();
+    content(&items);
+    Label(items.0.borrow().join(" "));
+}
+
+fn methods_of_every_value_of_a_trait_reach_its_subtraits_objects() {
+    let plain = RowItems::default();
+    (&plain as &dyn RowItemScope).item("plain".to_string());
+    assert_eq!(*plain.0.borrow(), ["plainx1"]);
+    let rule = Rule::new(kompozable_lambda!(|| {
+        ScopeItems(|scope: &dyn RowItemScope| {
+            scope.item("a".to_string());
+            scope.item(label = "b".to_string(), times = 2);
+        });
+    }));
+    assert_eq!(rule.names(), ["ax1 bx2"]);
+}
+
 // ---- Generics ------------------------------------------------------------------------------------------------
 
 #[kompozable]
@@ -495,6 +548,46 @@ fn a_closure_parameter_passed_on_keeps_its_identity() {
     rule.wait_for_idle();
     assert!(rule.has("other 1"));
     assert_eq!(child_runs(), ["forwarded", "wrapped"]);
+}
+
+/// Two slots with default closures (Kotlin's `slot: @Composable () -> Unit = {}`).
+#[kompozable]
+fn Slotted(name: &'static str, #[default(|| {})] top: impl Fn(), #[default(|| {})] bottom: impl Fn()) {
+    CHILD_RUNS.with(|r| r.borrow_mut().push(name.to_string()));
+    top();
+    bottom();
+}
+
+fn a_closure_parameter_left_at_its_default_is_the_same_each_time() {
+    // Kotlin's default lambda is one instance: a composable called again with its closure parameters at their
+    // defaults (and the others equal) is skipped, as Compose skips it.
+    CHILD_RUNS.with(|r| r.borrow_mut().clear());
+    let tick = mutable_state_of(0);
+    let given = mutable_state_of(false);
+    let (t, g) = (tick.clone(), given.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        Label(format!("tick {t}"));
+        Slotted("defaults");
+        Slotted("one given", top = || Label("top"));
+        if g.get() {
+            Slotted("switched", bottom = || Label("bottom"));
+        } else {
+            Slotted("switched");
+        }
+    }));
+    let runs = |name: &str| child_runs().iter().filter(|n| *n == name).count();
+    assert_eq!((runs("defaults"), runs("one given"), runs("switched")), (1, 1, 1));
+    tick.set(1);
+    rule.wait_for_idle();
+    assert!(rule.has("tick 1"));
+    assert_eq!((runs("defaults"), runs("one given"), runs("switched")), (1, 1, 1));
+    // A closure given where the default was (another call site here, so composed anew) and back: run again.
+    given.set(true);
+    rule.wait_for_idle();
+    assert!(rule.has("bottom"));
+    given.set(false);
+    rule.wait_for_idle();
+    assert_eq!(runs("switched"), 3);
 }
 
 /// An inline composable keeping what it makes of a `#[memoized]` closure while it is the same.
@@ -920,9 +1013,11 @@ tests!(
     each_call_site_is_its_own_identity,
     calls_inside_macros_are_rewritten,
     methods_of_a_type_from_elsewhere_take_named_arguments_through_a_trait,
+    methods_of_every_value_of_a_trait_reach_its_subtraits_objects,
     a_name_bound_inside_a_closure_hides_the_outer_one_only_after_its_binding,
     closures_are_the_same_while_what_they_capture_is,
     a_closure_parameter_passed_on_keeps_its_identity,
+    a_closure_parameter_left_at_its_default_is_the_same_each_time,
     a_memoized_parameter_is_kept_by_its_identity,
     a_memoized_method_parameter_has_its_identity_from_a_positional_call,
     positional_arguments_past_the_required_ones_go_through_the_builder,

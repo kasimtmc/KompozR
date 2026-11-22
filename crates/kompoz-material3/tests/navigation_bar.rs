@@ -114,18 +114,14 @@ fn ripple_at(rule: &KompozTestRule, press: Offset, at: Offset) -> bool {
 // ---- The C++ Kompoz's tests ------------------------------------------------------------------------------------
 
 fn navigation_bar_switches_tabs() {
-    // (The C++'s bar is a Scaffold's bottom bar; until WP4a's Scaffold it is at the bottom of a column of the
-    // page, which is what the Scaffold lays out — the Scaffold form waits in the WP4b notes, bar-pending.rs.)
     let tab = mutable_state_of(0);
     let t = tab.clone();
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(move || {
-            let t = t.clone();
-            Column(
+            let (t, page) = (t.clone(), t.clone());
+            Scaffold(
                 modifier = Modifier.fill_max_size(),
-                content = move || {
-                    let page = if t.get() == 0 { "sayfa 1" } else { "sayfa 2" };
-                    Text(page, modifier = Modifier.weight(1.0));
+                bottom_bar = move || {
                     let t = t.clone();
                     NavigationBar(
                         content = move || {
@@ -143,6 +139,12 @@ fn navigation_bar_switches_tabs() {
                                 label = slot(|| Text("İki")),
                             );
                         },
+                    );
+                },
+                content = move |padding: PaddingValues| {
+                    Text(
+                        if page.get() == 0 { "sayfa 1" } else { "sayfa 2" },
+                        modifier = Modifier.padding_values(padding),
                     );
                 },
             );

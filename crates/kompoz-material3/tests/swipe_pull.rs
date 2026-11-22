@@ -2,8 +2,8 @@
 //! Kompoz's tests by name (kompoz_tests.cpp; M15's behaviour where the C++ differed, said at each), Compose's
 //! behaviour (the state's values, constructors and savers, the directions allowed, the fling, the callback; the
 //! pull's state, its taking and giving back of scrolls, the box, the indicators and their box, the defaults), and
-//! the M15 sample of SwipeToDismissSamples.kt. (PullToRefreshSamples.kt's samples compose WP4a's Scaffold and
-//! TopAppBar: they come with that package.)
+//! the M15 samples of SwipeToDismissSamples.kt and PullToRefreshSamples.kt (+ LoadingIndicatorSamples.kt's
+//! LoadingIndicatorPullToRefreshSample), each a Scaffold with a TopAppBar.
 
 #![allow(non_snake_case, non_upper_case_globals, deprecated)]
 
@@ -11,10 +11,15 @@
 mod common;
 
 use common::*;
-use kompoz_animation::animate_color_as_state;
+use kompoz_animation::{
+    Animatable, AnimationVector1D, Easing, LinearOutSlowInEasing, Spring, VectorConverter, animate_color_as_state,
+    spring,
+};
 use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
+use kompoz_foundation::gestures::LocalFuture;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
+use kompoz_material_icons_core::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
 use kompoz_test::KompozTestRule;
@@ -51,6 +56,15 @@ tests!(
     pull_to_refresh_loading_indicator_morphs_with_the_pull_and_turns_past_it,
     pull_to_refresh_box_takes_an_indicator_of_its_own,
     pull_to_refresh_defaults_follow_the_tokens,
+    // (M15's pull-to-refresh samples)
+    pull_to_refresh_sample,
+    pull_to_refresh_with_loading_indicator_sample,
+    pull_to_refresh_view_model_sample,
+    pull_to_refresh_scaling_sample,
+    pull_to_refresh_linear_progress_indicator_sample,
+    pull_to_refresh_sample_custom_state,
+    pull_to_refresh_custom_indicator_with_default_transform,
+    loading_indicator_pull_to_refresh_sample,
 );
 
 fn near(a: f32, b: f32) -> bool {
@@ -1343,4 +1357,684 @@ fn pull_to_refresh_defaults_follow_the_tokens() {
             dark.on_primary_container,
         ]
     );
+}
+
+// ---- The M15 samples (PullToRefreshSamples.kt; LoadingIndicatorSamples.kt's LoadingIndicatorPullToRefreshSample) ----
+// Each a Scaffold with a TopAppBar whose action refreshes too (the accessible alternative the samples give).
+
+/// The samples' `onRefresh`: refreshing, `item_count` up by 5 after `ms` (the samples' fetch).
+fn sample_on_refresh(
+    item_count: &MutableState<i32>,
+    is_refreshing: &MutableState<bool>,
+    coroutine_scope: &CoroutineScope,
+    ms: i64,
+) -> Rc<dyn Fn()> {
+    let (item_count, is_refreshing, coroutine_scope) =
+        (item_count.clone(), is_refreshing.clone(), coroutine_scope.clone());
+    Rc::new(move || {
+        is_refreshing.set(true);
+        let (item_count, is_refreshing) = (item_count.clone(), is_refreshing.clone());
+        named_args!(coroutine_scope.launch(async move {
+            kompoz_coroutines::delay(ms).await;
+            item_count.set(item_count.get() + 5);
+            is_refreshing.set(false);
+        }));
+    })
+}
+
+/// The samples' top bar: `title`, its action the refresh.
+#[kompozable]
+fn RefreshTopAppBar(title: &'static str, on_refresh: Rc<dyn Fn()>) {
+    TopAppBar(
+        title = || Text(title),
+        // Provide an accessible alternative to trigger refresh.
+        actions = || {
+            let on_refresh = on_refresh.clone();
+            IconButton(
+                on_click = move || on_refresh(),
+                content = || VectorIcon(Icons::Filled::Refresh(), Some("Trigger Refresh".to_string())),
+            );
+        },
+    );
+}
+
+/// The samples' list: `item_count` list items, the newest first.
+#[kompozable]
+fn RefreshItems(item_count: MutableState<i32>) {
+    LazyColumn(
+        modifier = Modifier.fill_max_size(),
+        content = move |scope: &mut LazyListScope| {
+            let count = item_count.get();
+            scope.items(count, move |it| {
+                ListItem(headline_content = move || Text(text = format!("Item {}", count - it)))
+            });
+        },
+    );
+}
+
+/// `PullToRefreshSample`.
+#[kompozable]
+fn PullToRefreshSample() {
+    let item_count = remember(|| mutable_int_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let state = remember_pull_to_refresh_state();
+    let coroutine_scope = remember_coroutine_scope();
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 5000);
+
+    let bar_refresh = on_refresh.clone();
+    Scaffold(
+        top_bar = move || RefreshTopAppBar("Title", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (on_refresh, item_count) = (on_refresh.clone(), item_count.clone());
+            PullToRefreshBox(
+                modifier = Modifier.padding_values(it),
+                state = state.clone(),
+                is_refreshing = is_refreshing.get(),
+                on_refresh = move || on_refresh(),
+                content = move || RefreshItems(item_count.clone()),
+            );
+        },
+    );
+}
+
+/// `PullToRefreshWithLoadingIndicatorSample`.
+#[kompozable]
+fn PullToRefreshWithLoadingIndicatorSample() {
+    let item_count = remember(|| mutable_int_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let state = remember_pull_to_refresh_state();
+    let coroutine_scope = remember_coroutine_scope();
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 5000);
+
+    let bar_refresh = on_refresh.clone();
+    Scaffold(
+        top_bar = move || RefreshTopAppBar("Title", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (on_refresh, item_count, indicator_state) = (on_refresh.clone(), item_count.clone(), state.clone());
+            let refreshing = is_refreshing.get();
+            PullToRefreshBox(
+                modifier = Modifier.padding_values(it),
+                state = state.clone(),
+                is_refreshing = refreshing,
+                on_refresh = move || on_refresh(),
+                indicator = Some(Rc::new(move || {
+                    PullToRefreshDefaults.LoadingIndicator(
+                        state = indicator_state.clone(),
+                        is_refreshing = refreshing,
+                        modifier = Modifier.align(Alignment::TopCenter),
+                    );
+                })),
+                content = move || RefreshItems(item_count.clone()),
+            );
+        },
+    );
+}
+
+/// `PullToRefreshViewModelSample`'s view model (Kotlin's `object : ViewModel()`, its `viewModelScope` a scope of its
+/// own on the main dispatcher — the host's —, never cleared, as the sample remembers it).
+struct RefreshViewModel {
+    refresh_requests: kompoz_coroutines::Channel<()>,
+    is_refreshing: MutableState<bool>,
+    item_count: MutableState<i32>,
+}
+
+impl RefreshViewModel {
+    fn new(view_model_scope: CoroutineScope) -> Rc<RefreshViewModel> {
+        let view_model = Rc::new(RefreshViewModel {
+            refresh_requests: kompoz_coroutines::Channel::new(1, kompoz_coroutines::BufferOverflow::Suspend),
+            is_refreshing: mutable_state_of(false),
+            item_count: mutable_int_state_of(15),
+        });
+        let (requests, is_refreshing, item_count) =
+            (view_model.refresh_requests.clone(), view_model.is_refreshing.clone(), view_model.item_count.clone());
+        named_args!(view_model_scope.launch(async move {
+            while let Some(_r) = requests.receive().await {
+                is_refreshing.set(true);
+                // (Kotlin's try / finally: a guard sets it back however the block ends, cancelled too)
+                let _finally = Finally(Some({
+                    let is_refreshing = is_refreshing.clone();
+                    move || is_refreshing.set(false)
+                }));
+                item_count.set(item_count.get() + 5);
+                kompoz_coroutines::delay(5000).await; // simulate doing real work
+            }
+        }));
+        view_model
+    }
+
+    fn is_refreshing(&self) -> bool {
+        self.is_refreshing.get()
+    }
+
+    fn item_count(&self) -> i32 {
+        self.item_count.get()
+    }
+
+    fn refresh(&self) {
+        self.refresh_requests.try_send(());
+    }
+}
+
+/// Runs its block when dropped (Kotlin's `finally`).
+struct Finally<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for Finally<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f();
+        }
+    }
+}
+
+/// `PullToRefreshViewModelSample`.
+#[kompozable]
+fn PullToRefreshViewModelSample() {
+    let dispatcher = kompoz_coroutines::LocalDispatcher.current().expect("the host's dispatcher");
+    let view_model = remember(move || RefreshViewModel::new(CoroutineScope::new(&dispatcher)));
+
+    let bar_view_model = view_model.clone();
+    Scaffold(
+        top_bar = move || {
+            let view_model = bar_view_model.clone();
+            TopAppBar(
+                title = || Text("Title"),
+                // Provide an accessible alternative to trigger refresh.
+                actions = move || {
+                    let view_model = view_model.clone();
+                    IconButton(
+                        enabled = !view_model.is_refreshing(),
+                        on_click = move || view_model.refresh(),
+                        content = || VectorIcon(Icons::Filled::Refresh(), Some("Trigger Refresh".to_string())),
+                    );
+                },
+            );
+        },
+        content = move |it: PaddingValues| {
+            let (refresh_view_model, list_view_model) = (view_model.clone(), view_model.clone());
+            PullToRefreshBox(
+                modifier = Modifier.padding_values(it),
+                is_refreshing = view_model.is_refreshing(),
+                on_refresh = move || refresh_view_model.refresh(),
+                content = move || {
+                    let view_model = list_view_model.clone();
+                    LazyColumn(
+                        modifier = Modifier.fill_max_size(),
+                        content = move |scope: &mut LazyListScope| {
+                            if !view_model.is_refreshing() {
+                                let view_model = view_model.clone();
+                                scope.items(view_model.item_count(), move |it| {
+                                    let count = view_model.item_count();
+                                    ListItem(headline_content = move || Text(text = format!("Item {}", count - it)));
+                                });
+                            }
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+/// `PullToRefreshScalingSample`.
+#[kompozable]
+fn PullToRefreshScalingSample() {
+    let item_count = remember(|| mutable_int_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let state = remember_pull_to_refresh_state();
+    let coroutine_scope = remember_coroutine_scope();
+    // (fetch something)
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 5000);
+
+    let scale_fraction = {
+        let (is_refreshing, state) = (is_refreshing.clone(), state.clone());
+        move || {
+            if is_refreshing.get() {
+                1.0
+            } else {
+                LinearOutSlowInEasing.transform(state.distance_fraction()).clamp(0.0, 1.0)
+            }
+        }
+    };
+
+    let (box_refresh, bar_refresh) = (on_refresh.clone(), on_refresh.clone());
+    Scaffold(
+        modifier = Modifier.pull_to_refresh(
+            state = state.clone(),
+            is_refreshing = is_refreshing.get(),
+            on_refresh = move || box_refresh(),
+        ),
+        top_bar = move || RefreshTopAppBar("TopAppBar", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (item_count, is_refreshing, state, scale_fraction) =
+                (item_count.clone(), is_refreshing.clone(), state.clone(), scale_fraction.clone());
+            Box(
+                modifier = Modifier.padding_values(it),
+                content = move || {
+                    let item_count = item_count.clone();
+                    let refreshing = is_refreshing.get();
+                    LazyColumn(
+                        modifier = Modifier.fill_max_size(),
+                        content = move |scope: &mut LazyListScope| {
+                            if !refreshing {
+                                let count = item_count.get();
+                                scope.items(count, move |it| {
+                                    ListItem(headline_content = move || Text(text = format!("Item {}", count - it)));
+                                });
+                            }
+                        },
+                    );
+                    let (scale_fraction, state) = (scale_fraction.clone(), state.clone());
+                    Box(
+                        modifier = Modifier.align(Alignment::TopCenter).graphics_layer_block(move |layer| {
+                            layer.scale_x = scale_fraction();
+                            layer.scale_y = scale_fraction();
+                        }),
+                        content =
+                            move || PullToRefreshDefaults.Indicator(state = state.clone(), is_refreshing = refreshing),
+                    );
+                },
+            );
+        },
+    );
+}
+
+/// `PullToRefreshLinearProgressIndicatorSample`.
+#[kompozable]
+fn PullToRefreshLinearProgressIndicatorSample() {
+    let item_count = remember(|| mutable_int_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let state = remember_pull_to_refresh_state();
+    let coroutine_scope = remember_coroutine_scope();
+    // (fetch something)
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 5000);
+
+    let (box_refresh, bar_refresh) = (on_refresh.clone(), on_refresh.clone());
+    Scaffold(
+        modifier = Modifier.pull_to_refresh(
+            state = state.clone(),
+            is_refreshing = is_refreshing.get(),
+            on_refresh = move || box_refresh(),
+        ),
+        top_bar = move || RefreshTopAppBar("TopAppBar", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (item_count, is_refreshing, state) = (item_count.clone(), is_refreshing.clone(), state.clone());
+            Box(
+                modifier = Modifier.padding_values(it),
+                content = move || {
+                    let item_count = item_count.clone();
+                    let refreshing = is_refreshing.get();
+                    LazyColumn(
+                        modifier = Modifier.fill_max_size(),
+                        content = move |scope: &mut LazyListScope| {
+                            if !refreshing {
+                                let count = item_count.get();
+                                scope.items(count, move |it| {
+                                    ListItem(headline_content = move || Text(text = format!("Item {}", count - it)));
+                                });
+                            }
+                        },
+                    );
+                    if refreshing {
+                        IndeterminateLinearProgressIndicator(modifier = Modifier.fill_max_width());
+                    } else {
+                        let state = state.clone();
+                        LinearProgressIndicator(
+                            modifier = Modifier.fill_max_width(),
+                            progress = move || state.distance_fraction(),
+                        );
+                    }
+                },
+            );
+        },
+    );
+}
+
+/// `PullToRefreshSampleCustomState`'s state (Kotlin's `object : PullToRefreshState`): an Animatable of the
+/// fraction, to the threshold with a high bouncy spring.
+struct BouncyPullToRefreshState {
+    anim: Animatable<f32, AnimationVector1D>,
+}
+
+impl PullToRefreshState for BouncyPullToRefreshState {
+    fn distance_fraction(&self) -> f32 {
+        self.anim.value()
+    }
+
+    fn is_animating(&self) -> bool {
+        self.anim.is_running()
+    }
+
+    fn animate_to_threshold(&self) -> LocalFuture<'static, ()> {
+        let animation = named_args!(
+            self.anim
+                .animate_to(1.0, animation_spec = Arc::new(spring(damping_ratio = Spring::DampingRatioHighBouncy)),)
+        );
+        Box::pin(async move {
+            animation.await;
+        })
+    }
+
+    fn animate_to_hidden(&self) -> LocalFuture<'static, ()> {
+        let animation = named_args!(self.anim.animate_to(0.0));
+        Box::pin(async move {
+            animation.await;
+        })
+    }
+
+    fn snap_to(&self, target_value: f32) -> LocalFuture<'static, ()> {
+        Box::pin(self.anim.snap_to(target_value))
+    }
+}
+
+/// `PullToRefreshSampleCustomState`.
+#[kompozable]
+fn PullToRefreshSampleCustomState() {
+    let item_count = remember(|| mutable_int_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let coroutine_scope = remember_coroutine_scope();
+    // (fetch something)
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 5000);
+
+    let state: Rc<dyn PullToRefreshState> = remember(|| {
+        Rc::new(BouncyPullToRefreshState { anim: Animatable((0.0, f32::VectorConverter)) })
+            as Rc<dyn PullToRefreshState>
+    });
+
+    let bar_refresh = on_refresh.clone();
+    Scaffold(
+        top_bar = move || RefreshTopAppBar("TopAppBar", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (on_refresh, item_count) = (on_refresh.clone(), item_count.clone());
+            let refreshing = is_refreshing.get();
+            PullToRefreshBox(
+                modifier = Modifier.padding_values(it),
+                is_refreshing = refreshing,
+                on_refresh = move || on_refresh(),
+                state = state.clone(),
+                content = move || {
+                    let item_count = item_count.clone();
+                    LazyColumn(
+                        modifier = Modifier.fill_max_size(),
+                        content = move |scope: &mut LazyListScope| {
+                            if !refreshing {
+                                let count = item_count.get();
+                                scope.items(count, move |it| {
+                                    ListItem(headline_content = move || Text(text = format!("Item {}", count - it)));
+                                });
+                            }
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+/// `PullToRefreshCustomIndicatorWithDefaultTransform`.
+#[kompozable]
+fn PullToRefreshCustomIndicatorWithDefaultTransform() {
+    let item_count = remember(|| mutable_int_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let state = remember_pull_to_refresh_state();
+    let coroutine_scope = remember_coroutine_scope();
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 1500);
+
+    let bar_refresh = on_refresh.clone();
+    Scaffold(
+        top_bar = move || RefreshTopAppBar("Title", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (on_refresh, item_count, indicator_state) = (on_refresh.clone(), item_count.clone(), state.clone());
+            let refreshing = is_refreshing.get();
+            PullToRefreshBox(
+                modifier = Modifier.padding_values(it),
+                state = state.clone(),
+                is_refreshing = refreshing,
+                on_refresh = move || on_refresh(),
+                indicator = Some(Rc::new(move || {
+                    let progress_state = indicator_state.clone();
+                    PullToRefreshDefaults.IndicatorBox(
+                        state = indicator_state.clone(),
+                        is_refreshing = refreshing,
+                        modifier = Modifier.align(Alignment::TopCenter),
+                        elevation = 0.dp(),
+                        content = move || {
+                            if refreshing {
+                                IndeterminateCircularProgressIndicator();
+                            } else {
+                                let state = progress_state.clone();
+                                CircularProgressIndicator(
+                                    progress = move || state.distance_fraction(),
+                                    track_color = ProgressIndicatorDefaults::circular_indeterminate_track_color(),
+                                );
+                            }
+                        },
+                    );
+                })),
+                content = move || RefreshItems(item_count.clone()),
+            );
+        },
+    );
+}
+
+/// `LoadingIndicatorPullToRefreshSample` (LoadingIndicatorSamples.kt).
+#[kompozable]
+fn LoadingIndicatorPullToRefreshSample() {
+    let item_count = remember(|| mutable_state_of(15));
+    let is_refreshing = remember(|| mutable_state_of(false));
+    let state = remember_pull_to_refresh_state();
+    let coroutine_scope = remember_coroutine_scope();
+    // (fetch something)
+    let on_refresh = sample_on_refresh(&item_count, &is_refreshing, &coroutine_scope, 5000);
+
+    let scale_fraction = {
+        let (is_refreshing, state) = (is_refreshing.clone(), state.clone());
+        move || {
+            if is_refreshing.get() {
+                1.0
+            } else {
+                LinearOutSlowInEasing.transform(state.distance_fraction()).clamp(0.0, 1.0)
+            }
+        }
+    };
+
+    let (box_refresh, bar_refresh) = (on_refresh.clone(), on_refresh.clone());
+    Scaffold(
+        modifier = Modifier.pull_to_refresh(
+            state = state.clone(),
+            is_refreshing = is_refreshing.get(),
+            on_refresh = move || box_refresh(),
+        ),
+        top_bar = move || RefreshTopAppBar("TopAppBar", bar_refresh.clone()),
+        content = move |it: PaddingValues| {
+            let (item_count, is_refreshing, state, scale_fraction) =
+                (item_count.clone(), is_refreshing.clone(), state.clone(), scale_fraction.clone());
+            Box(
+                modifier = Modifier.padding_values(it),
+                content = move || {
+                    let item_count = item_count.clone();
+                    let refreshing = is_refreshing.get();
+                    LazyColumn(
+                        modifier = Modifier.fill_max_size(),
+                        content = move |scope: &mut LazyListScope| {
+                            if !refreshing {
+                                let count = item_count.get();
+                                scope.items(count, move |it| {
+                                    ListItem(headline_content = move || Text(text = format!("Item {}", count - it)));
+                                });
+                            }
+                        },
+                    );
+                    let (scale_fraction, state) = (scale_fraction.clone(), state.clone());
+                    Box(
+                        modifier = Modifier.align(Alignment::TopCenter).graphics_layer_block(move |layer| {
+                            layer.scale_x = scale_fraction();
+                            layer.scale_y = scale_fraction();
+                        }),
+                        content = move || {
+                            PullToRefreshDefaults.LoadingIndicator(state = state.clone(), is_refreshing = refreshing)
+                        },
+                    );
+                },
+            );
+        },
+    );
+}
+
+/// A sample's window: 400 × 800, the 64 dp top bar over the list.
+fn sample_rule(sample: impl Content + 'static) -> KompozTestRule {
+    KompozTestRule::with_viewport(sample, IntSize::new(400, 800))
+}
+
+/// The first item's text, if the list shows one (the list under the 64 dp bar).
+fn first_item(rule: &KompozTestRule) -> Option<String> {
+    let items: Vec<_> = rule
+        .all_nodes(true)
+        .iter()
+        .filter_map(|n| {
+            let text = n.config().get(SemanticsProperties::Text)?.first()?.text().to_string();
+            // (shown: the list composes and places past its viewport what it keeps around, clipped to nothing)
+            let shown = n.bounds_in_root();
+            (text.starts_with("Item ") && shown.height() > 0.0).then_some((shown.top, text))
+        })
+        .collect();
+    let (top, text) = items.into_iter().min_by(|a, b| a.0.total_cmp(&b.0))?;
+    assert!(top >= 64.0, "{text} at {top}");
+    Some(text)
+}
+
+/// Pulled 300 down on the list, held, let go: past the 80 dp threshold.
+fn pull_past(rule: &KompozTestRule) {
+    slow_drag20(rule, at(200.0, 150.0), at(200.0, 450.0));
+}
+
+/// Pulled 88 down on the list (80 past the slop: the state half way, 40 of 80), held there.
+fn pull_half(rule: &KompozTestRule) {
+    pull_to(rule, at(200.0, 150.0), at(200.0, 238.0));
+}
+
+/// A click of the pointer on what `description` describes (`perform_click` waits until idle: the indicator's
+/// animations would take the samples' fetch time with them).
+fn click_without_waiting(rule: &KompozTestRule, description: &str) {
+    let at = rule.on_node_with_content_description(description).get_unclipped_bounds_in_root().center();
+    rule.host().pointer_down(at, -1, 0, PointerType::Touch);
+    rule.host().pointer_up(at, -1, 0);
+}
+
+/// What the samples do: a pull past the threshold refreshes (an endless indicator shown) and 5 more items come after
+/// `ms`; the bar's action refreshes too. `hides_list`: the list is gone while refreshing.
+fn refreshes_by_pull_and_action(rule: &KompozTestRule, ms: i64, hides_list: bool) {
+    assert_eq!(first_item(rule).as_deref(), Some("Item 15"));
+    pull_past(rule);
+    rule.advance_time_by(500);
+    assert!(endless_progress_shown(rule));
+    assert_eq!(first_item(rule).is_none(), hides_list);
+    rule.advance_time_by(ms);
+    rule.wait_for_idle();
+    assert_eq!(first_item(rule).as_deref(), Some("Item 20"));
+    assert!(!endless_progress_shown(rule));
+    click_without_waiting(rule, "Trigger Refresh");
+    rule.advance_time_by(500);
+    assert!(endless_progress_shown(rule));
+    rule.advance_time_by(ms);
+    rule.wait_for_idle();
+    assert_eq!(first_item(rule).as_deref(), Some("Item 25"));
+    assert!(!endless_progress_shown(rule));
+}
+
+fn pull_to_refresh_sample() {
+    let rule = sample_rule(PullToRefreshSample);
+    refreshes_by_pull_and_action(&rule, 5000, false);
+}
+
+fn pull_to_refresh_with_loading_indicator_sample() {
+    let rule = sample_rule(PullToRefreshWithLoadingIndicatorSample);
+    // Half way: the loading indicator's determinate one at 0.5 (the default arrow tells no progress).
+    pull_half(&rule);
+    assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.5, 0.0..=1.0, 0)));
+    let_go(&rule, at(200.0, 238.0));
+    refreshes_by_pull_and_action(&rule, 5000, false);
+}
+
+fn pull_to_refresh_view_model_sample() {
+    let rule = sample_rule(PullToRefreshViewModelSample);
+    assert_eq!(first_item(&rule).as_deref(), Some("Item 15"));
+    // The count goes up at once, the list hidden while refreshing; the action turned off meanwhile.
+    pull_past(&rule);
+    rule.advance_time_by(500);
+    assert!(endless_progress_shown(&rule) && first_item(&rule).is_none());
+    rule.on_node_with_content_description("Trigger Refresh").assert_is_not_enabled();
+    rule.advance_time_by(5000);
+    rule.wait_for_idle();
+    assert_eq!(first_item(&rule).as_deref(), Some("Item 20"));
+    rule.on_node_with_content_description("Trigger Refresh").assert_is_enabled().perform_click();
+    rule.advance_time_by(500);
+    assert!(endless_progress_shown(&rule));
+    rule.advance_time_by(5000);
+    rule.wait_for_idle();
+    assert_eq!(first_item(&rule).as_deref(), Some("Item 25"));
+}
+
+/// Whether a layer was drawn scaled by `scale`.
+fn layer_scaled_by(canvas: &kompoz_test::RecordingCanvas, scale: f32) -> bool {
+    canvas.transforms.iter().any(|m| (m.values[0] - scale).abs() < 0.01 && (m.values[5] - scale).abs() < 0.01)
+}
+
+fn pull_to_refresh_scaling_sample() {
+    let rule = sample_rule(PullToRefreshScalingSample);
+    // Half way: the indicator scaled by LinearOutSlowIn of the fraction.
+    pull_half(&rule);
+    let scale = LinearOutSlowInEasing.transform(0.5);
+    assert!(layer_scaled_by(&rule.draw(), scale), "{scale}");
+    let_go(&rule, at(200.0, 238.0));
+    refreshes_by_pull_and_action(&rule, 5000, true);
+}
+
+fn pull_to_refresh_linear_progress_indicator_sample() {
+    let rule = sample_rule(PullToRefreshLinearProgressIndicatorSample);
+    // Half way: the linear indicator at the fraction.
+    pull_half(&rule);
+    assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.5, 0.0..=1.0, 0)));
+    let_go(&rule, at(200.0, 238.0));
+    refreshes_by_pull_and_action(&rule, 5000, true);
+}
+
+fn pull_to_refresh_sample_custom_state() {
+    let rule = sample_rule(PullToRefreshSampleCustomState);
+    assert_eq!(first_item(&rule).as_deref(), Some("Item 15"));
+    // Let go past the threshold, the state goes to it with its high bouncy spring: past it (the indicator box out
+    // further than its 80 dp less its 40) and back.
+    pull_to(&rule, at(200.0, 150.0), at(200.0, 450.0));
+    rule.advance_time_by(200);
+    rule.host().pointer_up(at(200.0, 450.0), -1, 0);
+    let mut furthest = f32::MIN;
+    for _ in 0..40 {
+        rule.advance_frame();
+        let canvas = rule.draw();
+        furthest = canvas.transforms.iter().map(|m| m.values[13]).filter(|y| *y < 200.0).fold(furthest, f32::max);
+    }
+    assert!(furthest > 80.0 - 40.0 + 1.0, "{furthest}");
+    assert!(endless_progress_shown(&rule) && first_item(&rule).is_none());
+    rule.advance_time_by(5000);
+    rule.wait_for_idle();
+    assert_eq!(first_item(&rule).as_deref(), Some("Item 20"));
+}
+
+fn pull_to_refresh_custom_indicator_with_default_transform() {
+    let rule = sample_rule(PullToRefreshCustomIndicatorWithDefaultTransform);
+    // Half way: its circular indicator at the fraction, without a shadow (elevation 0).
+    pull_half(&rule);
+    assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.5, 0.0..=1.0, 0)));
+    assert!(rule.draw().elevation_shadows.is_empty());
+    let_go(&rule, at(200.0, 238.0));
+    refreshes_by_pull_and_action(&rule, 1500, false);
+}
+
+fn loading_indicator_pull_to_refresh_sample() {
+    let rule = sample_rule(LoadingIndicatorPullToRefreshSample);
+    // Half way: the loading indicator scaled by LinearOutSlowIn of the fraction, its determinate one at 0.5.
+    pull_half(&rule);
+    assert!(layer_scaled_by(&rule.draw(), LinearOutSlowInEasing.transform(0.5)));
+    assert_eq!(progress_info(&rule), Some(ProgressBarRangeInfo::new(0.5, 0.0..=1.0, 0)));
+    let_go(&rule, at(200.0, 238.0));
+    refreshes_by_pull_and_action(&rule, 5000, true);
 }

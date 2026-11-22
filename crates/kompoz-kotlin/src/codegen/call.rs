@@ -1675,8 +1675,12 @@ impl Gen<'_, '_> {
         }
         if let Some(l) = a.value.lambda() {
             let label = self.call_labels.last().cloned();
-            // (a Row's, a Column's, a Box's content: in its layout scope)
-            let scope = self.layout_scope_callee.take().filter(|_| p.rust == "content");
+            // (a Row's, a Column's, a Box's content: in its layout scope; a floating toolbar's side content too —
+            // its FAB's lambda before its content not; a top app bar's actions)
+            let scope = match p.rust.as_str() {
+                "content" | "leading_content" | "trailing_content" | "actions" => self.layout_scope_callee.take(),
+                _ => None,
+            };
             if let Some(s) = scope {
                 self.layout_scopes.push(s);
             }
@@ -2262,6 +2266,25 @@ pub(crate) fn layout_scope_of(c: &Callee) -> Option<&'static str> {
         // (WP4b: bar) Material's components whose `content` is a layout scope's lambda in Kotlin (their Rust closure
         // takes none): a NavigationBar's `RowScope` (`RowScope.NavigationBarItem` inside).
         ("kompoz_material3", "NavigationBar") => Some("RowScope"),
+        // (WP4a: toolbar) a floating toolbar's content and its leading and trailing content: a horizontal one's
+        // `RowScope`, a vertical one's `ColumnScope` (`RowScope.AnimatedVisibility` inside).
+        ("kompoz_material3", "HorizontalFloatingToolbar" | "HorizontalFloatingToolbarWithFab") => Some("RowScope"),
+        ("kompoz_material3", "VerticalFloatingToolbar" | "VerticalFloatingToolbarWithFab") => Some("ColumnScope"),
+        // (WP4a: top app bars) a top app bar's actions: Kotlin's `actions: @Composable RowScope.() -> Unit`.
+        (
+            "kompoz_material3",
+            "TopAppBar"
+            | "TopAppBarWithSubtitle"
+            | "CenterAlignedTopAppBar"
+            | "MediumTopAppBar"
+            | "MediumFlexibleTopAppBar"
+            | "LargeTopAppBar"
+            | "LargeFlexibleTopAppBar"
+            | "TwoRowsTopAppBar",
+        ) => Some("RowScope"),
+        // (WP4a: bottom app bars) a bottom app bar's actions or content, a flexible one's content: Kotlin's
+        // `@Composable RowScope.() -> Unit` (its floating action button's lambda takes none).
+        ("kompoz_material3", "BottomAppBar" | "BottomAppBarWithContent" | "FlexibleBottomAppBar") => Some("RowScope"),
         _ => None,
     }
 }

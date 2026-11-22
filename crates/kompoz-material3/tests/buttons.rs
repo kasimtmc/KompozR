@@ -1352,9 +1352,8 @@ fn button_samples() {
 }
 
 /// FloatingActionButtonSamples.kt (not the FAB menu's, WP1b's): the FABs as the samples compose them. The samples
-/// wrap them in a TooltipBox (WP7's) and the animated ones in a Scaffold (WP4a's) over a LazyColumn: those parts
-/// wait for their packages; here a Box holds the list and the FABs, the list's scrolling driving `visible` and
-/// `expanded` as it does there.
+/// wrap them in a TooltipBox (WP7's: that part waits for it); the animated ones, over a Scaffold, are in
+/// tests/scaffold.rs.
 fn floating_action_button_samples() {
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(|| {
@@ -1470,71 +1469,6 @@ fn floating_action_button_samples() {
     ] {
         assert!(texts.iter().any(|t| t == label), "{label}");
     }
-
-    // AnimatedFloatingActionButtonSample and AnimatedExtendedFloatingActionButtonSample (its sizes alike): shown and
-    // expanded while the list's first item is the first visible one.
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(|| {
-            MaterialTheme(
-                content = || {
-                    let list_state = remember_lazy_list_state();
-                    let s = list_state.clone();
-                    let fab_visible = remember(move || derived_state_of(move || s.first_visible_item_index() == 0));
-                    Box(
-                        modifier = Modifier.fill_max_size(),
-                        content = move || {
-                            LazyColumn(
-                                state = list_state.clone(),
-                                modifier = Modifier.fill_max_size().test_tag("liste"),
-                                content = |scope: &mut LazyListScope| {
-                                    for index in 0..100 {
-                                        scope.item(move || {
-                                            Text(format!("List item - {index}"), modifier = Modifier.padding(24.dp()));
-                                        });
-                                    }
-                                },
-                            );
-                            let (v1, v2) = (fab_visible.clone(), fab_visible.clone());
-                            Column(
-                                modifier = Modifier.align(Alignment::BottomEnd).test_tag("sütun"),
-                                content = move || {
-                                    MediumFloatingActionButton(
-                                        || {},
-                                        modifier = named_args!(
-                                            Modifier.animate_floating_action_button(v1.value(), Alignment::BottomEnd)
-                                        ),
-                                        content = || {
-                                            VectorIcon(
-                                                Icons::Filled::Add(),
-                                                Some("Localized description".to_string()),
-                                                modifier = Modifier.size(FloatingActionButtonDefaults::MediumIconSize),
-                                            )
-                                        },
-                                    );
-                                    TextIconExtendedFloatingActionButton(
-                                        || Text("Extended FAB"),
-                                        || VectorIcon(Icons::Filled::Add(), Some("Localized Description".to_string())),
-                                        on_click = || {},
-                                        expanded = v2.value(),
-                                        modifier = Modifier.test_tag("daralan"),
-                                    );
-                                },
-                            );
-                        },
-                    );
-                },
-            );
-        }),
-        IntSize::new(400, 800),
-    );
-    let wide = bounds(&rule, "daralan").width();
-    let column = bounds(&rule, "sütun").height();
-    assert!(wide > 80.0 && column == 80.0 + 56.0, "{wide} {column}");
-    rule.on_node_with_tag("liste").perform_scroll_to_index(10);
-    rule.advance_time_by(2000);
-    assert_eq!(bounds(&rule, "daralan").width(), 56.0);
-    assert_eq!(bounds(&rule, "sütun").height(), 56.0);
-    rule.on_node_with_tag("liste").perform_scroll_to_index(0);
-    rule.advance_time_by(2000);
-    assert!(near(bounds(&rule, "daralan").width(), wide, 0.01) && bounds(&rule, "sütun").height() == column);
+    // (AnimatedFloatingActionButtonSample and the four AnimatedExtendedFloatingActionButtonSamples compose a Scaffold
+    // over a LazyColumn and a TooltipBox: written as M15 has them in tests/scaffold.rs)
 }

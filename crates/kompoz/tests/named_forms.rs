@@ -9,7 +9,7 @@
 //!   `Modifier.pullToRefresh(isRefreshing =, state =, onRefresh =)` by name on a Box of `rememberPullToRefreshState()`
 //!   with `PullToRefreshDefaults.Indicator(state =, isRefreshing =, modifier =)` and `PullToRefreshDefaults.IndicatorBox(
 //!   state =, isRefreshing =, modifier =, shape =) { LoadingIndicator(progress =, modifier =) }` in it (stage 12 WP5,
-//!   WP2). (Its app bars are WP4a's;
+//!   WP2). (Its TopAppBar and AppBarRow are in kotlin_scaffold.rs (WP4a); its AppBarWithSearch is SearchBar.kt's;
 //!   a VelocityTracker's copies sharing samples is Kotlin's reference semantics of a class KompozR has as a value — see
 //!   stage10-followups.md.)
 //! - C++ 8188 (`layout_forms_take_compose_named_arguments`): `Arrangement.spacedBy(space, alignment)`, `spring(…)` of

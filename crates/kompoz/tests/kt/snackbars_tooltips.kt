@@ -1,27 +1,13 @@
 // Material's snackbars and plain tooltips as Compose's samples write them: material3 1.5's ScaffoldSamples' snackbar
-// samples (their Scaffold is WP4a's: its slots are laid out by ScaffoldStandIn here, the body filling the screen, the
-// host at the bottom, the floating action button at the bottom end) and TooltipSamples' plain tooltips (the rich ones
-// are WP7's). ScaffoldWithCustomSnackbar declares a class implementing SnackbarVisuals: classes are stage 14's (its
-// Rust port is in kompoz-material3's tests/snackbars_tooltips.rs).
-
-@Composable
-fun ScaffoldStandIn(
-    snackbarHost: @Composable () -> Unit,
-    floatingActionButton: @Composable () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        content()
-        Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)) { snackbarHost() }
-        Box(modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) { floatingActionButton() }
-    }
-}
+// samples, over a Scaffold, and TooltipSamples' plain tooltips (the rich ones are WP7's). ScaffoldWithCustomSnackbar
+// declares a class implementing SnackbarVisuals: classes are stage 14's (its Rust port is in kompoz-material3's
+// tests/snackbars_tooltips.rs).
 
 @Composable
 fun ScaffoldWithSimpleSnackbar() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    ScaffoldStandIn(
+    Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             var clickCount by remember { mutableStateOf(0) }
@@ -34,10 +20,10 @@ fun ScaffoldWithSimpleSnackbar() {
                 Text("Show snackbar")
             }
         },
-        content = {
+        content = { innerPadding ->
             Text(
                 text = "Body content",
-                modifier = Modifier.fillMaxSize().wrapContentSize(),
+                modifier = Modifier.padding(innerPadding).fillMaxSize().wrapContentSize(),
             )
         },
     )
@@ -47,7 +33,7 @@ fun ScaffoldWithSimpleSnackbar() {
 fun ScaffoldWithIndefiniteSnackbar() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    ScaffoldStandIn(
+    Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             var clickCount by remember { mutableStateOf(0) }
@@ -67,10 +53,10 @@ fun ScaffoldWithIndefiniteSnackbar() {
                 Text("Show snackbar")
             }
         },
-        content = {
+        content = { innerPadding ->
             Text(
                 text = "Body content",
-                modifier = Modifier.fillMaxSize().wrapContentSize(),
+                modifier = Modifier.padding(innerPadding).fillMaxSize().wrapContentSize(),
             )
         },
     )
@@ -95,12 +81,14 @@ fun SnackbarForEachCount() {
             }
         }
     }
-    ScaffoldStandIn(
+    Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = { clickCount++ }) { Text("Show snackbar") }
         },
-        content = { Text("Snackbar demo: $clickCount", modifier = Modifier.fillMaxSize().wrapContentSize()) },
+        content = { innerPadding ->
+            Text("Snackbar demo: $clickCount", modifier = Modifier.padding(innerPadding).fillMaxSize().wrapContentSize())
+        },
     )
 }
 
@@ -108,7 +96,7 @@ fun SnackbarForEachCount() {
 fun ScaffoldWithMultilineSnackbar() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    ScaffoldStandIn(
+    Scaffold(
         snackbarHost = {
             SnackbarHost(snackbarHostState) { data ->
                 Snackbar(modifier = Modifier.testTag("multiline")) {
@@ -132,10 +120,10 @@ fun ScaffoldWithMultilineSnackbar() {
                 Text("Show snackbar")
             }
         },
-        content = {
+        content = { innerPadding ->
             Text(
                 text = "Multiline Snackbar Demo",
-                modifier = Modifier.fillMaxSize().wrapContentSize(),
+                modifier = Modifier.padding(innerPadding).fillMaxSize().wrapContentSize(),
             )
         },
     )

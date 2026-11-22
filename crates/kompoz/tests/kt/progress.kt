@@ -326,7 +326,7 @@ fun GraphicsFormsLoadingIndicator() {
     }
 }
 
-// ---- LoadingIndicatorSamples (LoadingIndicatorPullToRefreshSample is pull to refresh's) --------------------------
+// ---- LoadingIndicatorSamples (LoadingIndicatorPullToRefreshSample, a Scaffold, is in swipe_pull.kt) --------------
 
 @Composable
 fun LoadingIndicatorSample() {

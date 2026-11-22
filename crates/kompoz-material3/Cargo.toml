@@ -180,3 +180,29 @@ harness = false
 [[test]]
 name = "time_picker"
 harness = false
+
+# (WP4a: scaffold) The scaffold (the C++ Kompoz's scaffold tests by name, M15's values; Compose's behaviour: the slots'
+# places, the FAB's positions, the snackbar, the content's padding and insets; M15's ScaffoldSamples and animated FAB samples).
+[[test]]
+name = "scaffold"
+harness = false
+
+# (WP4a: top app bars) The top app bars (the C++ Kompoz's top app bar tests by name, M15's values; Compose's behaviour:
+# the state, the scroll behaviors, the drags, the colors, the overrides, the defaults; M15's AppBarSamples' top bars).
+[[test]]
+name = "top_app_bars"
+harness = false
+
+# (WP4a: bottom app bars) The bottom app bars, AppBarRow and AppBarColumn (the C++ Kompoz's tests by name, M15's
+# values; Compose's behaviour: the state and its saver, the exit-always behavior, the drags, the defaults, the items and
+# the overflow menu; M15's AppBarSamples' bottom bars).
+[[test]]
+name = "bottom_app_bars"
+harness = false
+
+# (WP4a: toolbar) The floating toolbars (the C++ Kompoz's toolbar test by name, M15's values; Compose's behaviour: the
+# screen reader's actions, the FABs, the balanced padding, the nested scroll, the exit-always behavior, the overrides,
+# the defaults; M15's FloatingToolbarSamples).
+[[test]]
+name = "floating_toolbar"
+harness = false

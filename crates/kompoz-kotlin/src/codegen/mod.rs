@@ -389,31 +389,7 @@ impl<'a, 'd> Gen<'a, 'd> {
 
     /// The file's top-level functions and properties, for the calls and reads that come before them.
     fn collect(&mut self, file: &File) {
-        // An object's member imported by name: `import a.b.Owner.Member` (`as Name`), the owner a type or object of
-        // the API with that member (a constant, an entry, a value, a function of no parameters, a value object's
-        // member). Kotlin reads it by its last name.
-        for import in &file.imports {
-            let segments = &import.path.segments;
-            if import.star || segments.len() < 2 {
-                continue;
-            }
-            let member = &segments[segments.len() - 1].name;
-            // (`a.b.Owner.Companion.Member`: the owner's)
-            let owner = match &segments[segments.len() - 2].name {
-                c if c == "Companion" && segments.len() >= 3 => &segments[segments.len() - 3].name,
-                o => o,
-            };
-            let rust_owner = owner_name(owner);
-            let known = is_pascal(owner)
-                && (associated(&rust_owner, member).iter().any(|i| match i.kind {
-                    crate::index::Kind::Function => i.params.is_empty(),
-                    _ => true,
-                }) || (is_value_object(owner) && members_of(owner, member).next().is_some()));
-            if known {
-                let name = import.alias.as_ref().map_or(member, |a| &a.name);
-                self.file.imported_members.insert(name.clone(), (owner.clone(), member.clone()));
-            }
-        }
+        self.collect_imports(file);
         let mut untyped = Vec::new();
         for decl in &file.decls {
             match decl {
@@ -451,6 +427,26 @@ impl<'a, 'd> Gen<'a, 'd> {
             if untyped.len() == before {
                 break;
             }
+        }
+    }
+
+    /// The members of classes and objects the file's imports name (Kotlin's `import a.b.Type.member`): an import
+    /// whose path goes on past its first capitalized name (a class or object, packages being lowercase) imports a
+    /// member of it, a companion's (`Type.Companion.member`) being its class's. The file's names that are none of its
+    /// locals or its receivers' members are those members (`ScreenOffset` → `FloatingToolbarDefaults.ScreenOffset`).
+    fn collect_imports(&mut self, file: &File) {
+        for import in file.imports.iter().filter(|i| !i.star) {
+            let segs = &import.path.segments;
+            let Some(class) = segs.iter().position(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase())) else {
+                continue;
+            };
+            let Some((member, between)) = segs[class..].split_last() else { continue };
+            if between.is_empty() {
+                continue;
+            }
+            let qualifier: Vec<Ident> = between.iter().filter(|s| s.name != "Companion").cloned().collect();
+            let name = import.alias.as_ref().unwrap_or(member).name.clone();
+            self.file.imports.insert(name, (qualifier, member.clone()));
         }
     }
 

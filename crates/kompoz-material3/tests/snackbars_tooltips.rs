@@ -1,7 +1,7 @@
 //! Material's snackbars and plain tooltips as Compose's material3 has them: the C++ Kompoz's snackbar and tooltip
 //! tests by name (kompoz_tests.cpp; M15's values where the C++ differed, said where), Compose's behaviour (the
 //! host's queue, durations, results and cancellation; the layouts; the tooltip box's transition, caret, state and
-//! position providers) and M15's snackbar samples (ScaffoldSamples.kt's, without the Scaffold: WP4a's) and
+//! position providers) and M15's snackbar samples (ScaffoldSamples.kt's, over a Scaffold) and
 //! TooltipSamples.kt's plain tooltips.
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -509,30 +509,7 @@ fn snackbar_defaults_are_the_tokens() {
     assert_eq!((action, action_content, dismiss), (c.inverse_primary, c.inverse_primary, c.inverse_on_surface));
 }
 
-// ---- M15's snackbar samples (ScaffoldSamples.kt): Scaffold is WP4a's, so its slots are laid out by hand — the body
-// filling the screen, the host at the bottom, the floating action button at the bottom end.
-
-#[kompozable]
-fn ScaffoldStandIn(
-    body: &'static str,
-    snackbar_host: impl Fn() + 'static,
-    floating_action_button: impl Fn() + 'static,
-) {
-    Box(
-        modifier = Modifier.fill_max_size(),
-        content = || {
-            Text(text = body, modifier = Modifier.fill_max_size().wrap_content_size());
-            Box(
-                modifier = Modifier.align(Alignment::BottomCenter).padding_sides(bottom = 88.dp()),
-                content = || snackbar_host(),
-            );
-            Box(
-                modifier = Modifier.align(Alignment::BottomEnd).padding(16.dp()),
-                content = || floating_action_button(),
-            );
-        },
-    );
-}
+// ---- M15's snackbar samples (ScaffoldSamples.kt), over a Scaffold as written
 
 /// `ScaffoldWithSimpleSnackbar`.
 #[kompozable]
@@ -540,8 +517,7 @@ fn ScaffoldWithSimpleSnackbar() {
     let snackbar_host_state = remember(SnackbarHostState::new);
     let scope = kompoz_coroutines::remember_coroutine_scope();
     let host = snackbar_host_state.clone();
-    ScaffoldStandIn(
-        "Body content",
+    Scaffold(
         snackbar_host = move || SnackbarHost(host.clone()),
         floating_action_button = move || {
             let click_count = remember(|| mutable_state_of(0));
@@ -554,6 +530,12 @@ fn ScaffoldWithSimpleSnackbar() {
                     launch_show(&scope, shown);
                 },
                 content = || Text("Show snackbar"),
+            );
+        },
+        content = |inner_padding: PaddingValues| {
+            Text(
+                text = "Body content",
+                modifier = Modifier.padding_values(inner_padding).fill_max_size().wrap_content_size(),
             );
         },
     );
@@ -570,9 +552,12 @@ fn scaffold_with_simple_snackbar_sample() {
     rule.wait_for_idle();
     rule.on_node_with_text("Snackbar # 1").assert_does_not_exist();
     rule.on_node_with_text("Snackbar # 2").assert_exists();
-    // (the host at the bottom: the snackbar, padded 12 dp, above the button's room)
+    // (the scaffold puts the host right above the 56 dp button, itself 16 dp above the bottom: the snackbar in it,
+    // padded 12 dp, centered)
     let snackbar = text_bounds(&rule, "Snackbar # 2");
-    assert!(snackbar.bottom > 600.0 && snackbar.bottom < 800.0 - 88.0);
+    assert!(snackbar.bottom > 600.0 && snackbar.bottom < 800.0 - 16.0 - 56.0 - 12.0, "{snackbar:?}");
+    let host = rule.on_node_with_text("Show snackbar").get_unclipped_bounds_in_root();
+    assert!(host.right == 400.0 - 16.0 && host.bottom == 800.0 - 16.0, "{host:?}");
 }
 
 /// `ScaffoldWithIndefiniteSnackbar`.
@@ -581,8 +566,7 @@ fn ScaffoldWithIndefiniteSnackbar() {
     let snackbar_host_state = remember(SnackbarHostState::new);
     let scope = kompoz_coroutines::remember_coroutine_scope();
     let host = snackbar_host_state.clone();
-    ScaffoldStandIn(
-        "Body content",
+    Scaffold(
         snackbar_host = move || SnackbarHost(host.clone()),
         floating_action_button = move || {
             let click_count = remember(|| mutable_state_of(0));
@@ -600,6 +584,12 @@ fn ScaffoldWithIndefiniteSnackbar() {
                     launch_show(&scope, shown);
                 },
                 content = || Text("Show snackbar"),
+            );
+        },
+        content = |inner_padding: PaddingValues| {
+            Text(
+                text = "Body content",
+                modifier = Modifier.padding_values(inner_padding).fill_max_size().wrap_content_size(),
             );
         },
     );
@@ -658,8 +648,7 @@ fn ScaffoldWithCustomSnackbar() {
     let snackbar_host_state = remember(SnackbarHostState::new);
     let scope = kompoz_coroutines::remember_coroutine_scope();
     let host = snackbar_host_state.clone();
-    ScaffoldStandIn(
-        "Custom Snackbar Demo",
+    Scaffold(
         snackbar_host = move || {
             // reuse default SnackbarHost to have default animation and timing handling
             SnackbarHost(
@@ -716,6 +705,12 @@ fn ScaffoldWithCustomSnackbar() {
                 content = || Text("Show snackbar"),
             );
         },
+        content = |inner_padding: PaddingValues| {
+            Text(
+                text = "Custom Snackbar Demo",
+                modifier = Modifier.padding_values(inner_padding).fill_max_size().wrap_content_size(),
+            );
+        },
     );
 }
 
@@ -767,8 +762,7 @@ fn ScaffoldWithCoroutinesSnackbar(results: Results) {
             .await;
     });
     let host = snackbar_host_state.clone();
-    ScaffoldStandIn(
-        "Snackbar demo",
+    Scaffold(
         snackbar_host = move || SnackbarHost(host.clone()),
         floating_action_button = move || {
             let click_count = remember(|| mutable_state_of(0));
@@ -780,6 +774,12 @@ fn ScaffoldWithCoroutinesSnackbar(results: Results) {
                     channel.try_send(click_count.get());
                 },
                 content = || Text("Show snackbar"),
+            );
+        },
+        content = |inner_padding: PaddingValues| {
+            Text(
+                text = "Snackbar demo",
+                modifier = Modifier.padding_values(inner_padding).fill_max_size().wrap_content_size(),
             );
         },
     );
@@ -818,8 +818,7 @@ fn ScaffoldWithMultilineSnackbar() {
     let snackbar_host_state = remember(SnackbarHostState::new);
     let scope = kompoz_coroutines::remember_coroutine_scope();
     let host = snackbar_host_state.clone();
-    ScaffoldStandIn(
-        "Multiline Snackbar Demo",
+    Scaffold(
         snackbar_host = move || {
             SnackbarHost(
                 host.clone(),
@@ -845,6 +844,12 @@ fn ScaffoldWithMultilineSnackbar() {
                     launch_show(&scope, shown);
                 },
                 content = || Text("Show snackbar"),
+            );
+        },
+        content = |inner_padding: PaddingValues| {
+            Text(
+                text = "Multiline Snackbar Demo",
+                modifier = Modifier.padding_values(inner_padding).fill_max_size().wrap_content_size(),
             );
         },
     );

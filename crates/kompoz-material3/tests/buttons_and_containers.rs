@@ -875,49 +875,97 @@ fn rows_line_children_up_by_their_baselines() {
 }
 
 fn center_aligned_bar_clickable_cards_fab_sizes_and_positions() {
-    // C++'s test's clickable Card and FAB sizes (its Scaffold, CenterAlignedTopAppBar and FAB positions: WP4a's):
-    // the card clicks; a small FAB is 40 dp in 48 of room, a large one 96, the FAB 56.
+    // C++'s test whole: a Scaffold's CenterAlignedTopAppBar keeps its title in the middle of the bar, between its
+    // icons; the card clicks; a small FAB is 40 dp in 48 of room, a large one 96; the scaffold's FAB at each position.
+    let title = mutable_state_of("Başlık".to_string());
+    let position = mutable_state_of(FabPosition::End);
     let clicks = Rc::new(Cell::new(0));
-    let c = clicks.clone();
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(move || {
-            let c = c.clone();
-            Column(move || {
-                let c = c.clone();
-                ClickableCard(
-                    move || c.set(c.get() + 1),
-                    modifier = Modifier.test_tag("kart"),
-                    content = || {
-                        Text("Kart", modifier = Modifier.padding(16.dp()));
+    let rule = {
+        let (title, position, c) = (title.clone(), position.clone(), clicks.clone());
+        KompozTestRule::with_viewport(
+            kompozable_lambda!(move || {
+                let (title, c) = (title.clone(), c.clone());
+                Scaffold(
+                    modifier = Modifier.fill_max_size(),
+                    top_bar = move || {
+                        let title = title.clone();
+                        CenterAlignedTopAppBar(
+                            title = move || {
+                                Text(
+                                    title.get(),
+                                    modifier = Modifier.test_tag("başlık"),
+                                    max_lines = 1,
+                                    overflow = kompoz_text::style::TextOverflow::Ellipsis,
+                                );
+                            },
+                            navigation_icon = || {
+                                IconButton(|| {}, content = || VectorIcon(Icons::Filled::Menu(), Some("Menü".into())));
+                            },
+                            actions = || {
+                                IconButton(|| {}, content = || VectorIcon(Icons::Filled::Search(), Some("Ara".into())));
+                                IconButton(
+                                    || {},
+                                    content = || VectorIcon(Icons::Filled::MoreVert(), Some("Diğer".into())),
+                                );
+                            },
+                        );
+                    },
+                    bottom_bar = || Box(modifier = Modifier.fill_max_width().height(80.dp())),
+                    floating_action_button = || {
+                        FloatingActionButton(
+                            || {},
+                            modifier = Modifier.test_tag("fab"),
+                            content = || VectorIcon(Icons::Filled::Add(), Some("Ekle".into())),
+                        );
+                    },
+                    floating_action_button_position = position.get(),
+                    content = move |padding: PaddingValues| {
+                        let c = c.clone();
+                        Column(
+                            modifier = Modifier.padding_values(padding),
+                            content = move || {
+                                let c = c.clone();
+                                ClickableCard(
+                                    move || c.set(c.get() + 1),
+                                    modifier = Modifier.test_tag("kart"),
+                                    content = || {
+                                        Text("Kart", modifier = Modifier.padding(16.dp()));
+                                    },
+                                );
+                                Row(|| {
+                                    SmallFloatingActionButton(
+                                        || {},
+                                        modifier = Modifier.test_tag("küçük"),
+                                        content = || {
+                                            VectorIcon(Icons::Filled::Add(), Some("Küçük".into()));
+                                        },
+                                    );
+                                    LargeFloatingActionButton(
+                                        || {},
+                                        modifier = Modifier.test_tag("büyük"),
+                                        content = || {
+                                            VectorIcon(Icons::Filled::Add(), Some("Büyük".into()));
+                                        },
+                                    );
+                                });
+                            },
+                        );
                     },
                 );
-                Row(|| {
-                    SmallFloatingActionButton(
-                        || {},
-                        modifier = Modifier.test_tag("küçük"),
-                        content = || {
-                            VectorIcon(Icons::Filled::Add(), Some("Küçük".into()));
-                        },
-                    );
-                    LargeFloatingActionButton(
-                        || {},
-                        modifier = Modifier.test_tag("büyük"),
-                        content = || {
-                            VectorIcon(Icons::Filled::Add(), Some("Büyük".into()));
-                        },
-                    );
-                });
-                FloatingActionButton(
-                    || {},
-                    modifier = Modifier.test_tag("fab"),
-                    content = || {
-                        VectorIcon(Icons::Filled::Add(), Some("Ekle".into()));
-                    },
-                );
-            });
-        }),
-        IntSize::new(400, 800),
-    );
+            }),
+            IntSize::new(400, 800),
+        )
+    };
+    let t = rule.on_node_with_tag_unmerged("başlık").get_unclipped_bounds_in_root();
+    assert!((t.center().x - 200.0).abs() <= 1.0, "{t:?}"); // in the middle of the bar, not of what the icons leave
+    title.set("Çok çok uzun bir başlık, simgelerin arasına sığmayacak kadar uzun".to_string());
+    rule.wait_for_idle();
+    let t = rule.on_node_with_tag_unmerged("başlık").get_unclipped_bounds_in_root();
+    // Kept between them. M15 (TopAppBarMeasurePolicy) gives the title the room the icons leave — 400 less the
+    // navigation icon's 4 + 48 and the actions' 96 + 4, the title padded 4 at each side: 240 for the text — and,
+    // centered, it would run under the wider actions, so it moves towards the start until it ends where they begin
+    // (the C++ kept it out of the wider side's room on both sides, centered: 84 to 316).
+    assert!(near(t.left, 4.0 + 48.0 + 4.0, 0.5) && near(t.right, 400.0 - 4.0 - 96.0 - 4.0, 0.5), "{t:?}");
     rule.on_node_with_tag("kart").perform_click();
     assert_eq!(clicks.get(), 1);
     // (the small FAB's node is its 40 dp container, the large one starting 48 dp along: its room)
@@ -926,7 +974,18 @@ fn center_aligned_bar_clickable_cards_fab_sizes_and_positions() {
         small.width() == 40.0 && small.left == 4.0 && large.left == 48.0 && large.width() == 96.0,
         "{small:?} {large:?}"
     );
-    assert_eq!(bounds(&rule, "fab").width(), 56.0);
+    let fab = bounds(&rule, "fab");
+    assert_eq!((fab.left, fab.top, fab.width()), (400.0 - 56.0 - 16.0, 800.0 - 80.0 - 16.0 - 56.0, 56.0)); // at the end, above the bottom bar
+    position.set(FabPosition::Center);
+    rule.wait_for_idle();
+    assert_eq!(bounds(&rule, "fab").left, 172.0);
+    position.set(FabPosition::Start);
+    rule.wait_for_idle();
+    assert_eq!(bounds(&rule, "fab").left, 16.0);
+    position.set(FabPosition::EndOverlay); // over the bottom bar
+    rule.wait_for_idle();
+    let fab = bounds(&rule, "fab");
+    assert_eq!((fab.left, fab.top), (400.0 - 56.0 - 16.0, 800.0 - 16.0 - 56.0));
 }
 
 tests!(

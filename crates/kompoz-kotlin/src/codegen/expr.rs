@@ -232,6 +232,9 @@ impl Gen<'_, '_> {
 
     /// An expression as written.
     pub(crate) fn expr(&mut self, e: &Expr) -> Out {
+        if let Some(qualified) = self.imported_member(e) {
+            return self.expr(&qualified);
+        }
         let span = self.span(e.loc);
         match &e.kind {
             ExprKind::Name(n) => self.name(n, e.loc),
@@ -363,14 +366,6 @@ impl Gen<'_, '_> {
                 ValForm::ThreadLocal => Out::plain(quote_spanned!(span=> #i.with(::core::clone::Clone::clone)), v.ty),
             };
         }
-        // An object's member imported by name (`import …TimePickerDialogDefaults.MinHeightForTimePicker`): read as its
-        // qualified name is.
-        if let Some((owner, member)) = self.file.imported_members.get(&n.name).cloned() {
-            let qe = Expr { kind: ExprKind::Name(Ident { name: owner, backticked: false, loc }), loc };
-            if let Some(q) = self.qualifier(&qe) {
-                return self.qualified(&q, &qe, &Ident { name: member, backticked: false, loc }, loc);
-            }
-        }
         if n.name == "Unit" {
             return Out::plain(quote_spanned!(span=> ()), Ty::Unit);
         }
@@ -490,6 +485,10 @@ impl Gen<'_, '_> {
 
     /// Whether `e` names a type or an object (a PascalCase name that isn't a value here), and its name.
     pub(crate) fn qualifier(&self, e: &Expr) -> Option<String> {
+        // (a nested object the file imports: `Absolute` of `import …Arrangement.Absolute`)
+        if let Some(qualified) = self.imported_member(e) {
+            return self.qualifier(&qualified);
+        }
         match &e.kind {
             ExprKind::Name(n)
                 if is_pascal(&n.name)
@@ -707,6 +706,18 @@ impl Gen<'_, '_> {
         if let Some(item) = assoc.iter().find(|i| i.kind == Kind::Function && i.params.is_empty()) {
             let mi = ident(item.rust, self.span(name.loc));
             return Out::plain(quote_spanned!(span=> #qi::#mi()), Ty::from_rust(item.ret));
+        }
+        // (WP4a: bottom app bars) a Kotlin object's property that is a method of a unit struct of its name, the struct
+        // its own value: `BottomAppBarDefaults.bottomAppBarFabColor` is `BottomAppBarDefaults.bottom_app_bar_fab_color()`,
+        // as the call `PagerDefaults.flingBehavior(…)` is `PagerDefaults.fling_behavior(…)`
+        if let Some(item) = lookup(&name.name).iter().find(|i| {
+            i.owner == q
+                && i.kind == Kind::Method
+                && i.params.is_empty()
+                && matches!(i.receiver, crate::index::Receiver::Ref | crate::index::Receiver::Value)
+        }) {
+            let mi = ident(item.rust, self.span(name.loc));
+            return Out::plain(quote_spanned!(span=> #qi.#mi()), Ty::from_rust(item.ret));
         }
         if is_pascal(&name.name) || name.name.chars().all(|c| !c.is_lowercase()) {
             let mi = self.name_ident(&name.name, name.loc);
@@ -1112,6 +1123,9 @@ impl Gen<'_, '_> {
     /// scope's type, or the value a scope function lends) and its parameters' types known, a block's own locals, a
     /// member extension of a receiver (`LocalX.currentValue`, `1.3f at 100`), a shared value's members.
     pub(crate) fn peek_ty(&self, e: &Expr) -> Ty {
+        if let Some(qualified) = self.imported_member(e) {
+            return self.peek_ty(&qualified);
+        }
         match &e.kind {
             ExprKind::Number(n) => match n.kind {
                 NumberKind::Int => Ty::Int,
@@ -1335,6 +1349,48 @@ impl Gen<'_, '_> {
 
     /// The implicit receivers' types with their type arguments where known, in [`receiver_tys`](Self::receiver_tys)'
     /// order (each with its Rust type's name): what their members' `T` is.
+    /// A name the file imports as a member of a class or object (`Bottom` of `import …Direction.Companion.Bottom`),
+    /// or a call of one (`exitAlwaysScrollBehavior(…)`), qualified as Kotlin reads it (`Direction.Bottom`): unless a
+    /// local or an implicit receiver's member of that name is nearer (Kotlin's order: locals, the implicit receivers'
+    /// members, then the explicit imports).
+    pub(crate) fn imported_member(&self, e: &Expr) -> Option<Expr> {
+        let (n, call) = match &e.kind {
+            ExprKind::Name(n) => (n, None),
+            ExprKind::Call { callee, type_args, args, trailing_lambda } => match &callee.kind {
+                ExprKind::Name(n) => (n, Some((type_args, args, trailing_lambda))),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let (qualifier, member) = self.file.imports.get(&n.name)?;
+        if self.is_local(&n.name)
+            || self.peeked_local(&n.name).is_some()
+            || self.receiver_values().iter().any(|(r, _)| members_of(r, &n.name).next().is_some())
+        {
+            return None;
+        }
+        let at = |kind: ExprKind| Expr { kind, loc: n.loc };
+        let mut receiver = at(ExprKind::Name(Ident { loc: n.loc, ..qualifier[0].clone() }));
+        for s in &qualifier[1..] {
+            let name = Ident { loc: n.loc, ..s.clone() };
+            receiver = at(ExprKind::Member { receiver: Box::new(receiver), safe: false, name });
+        }
+        let name = Ident { loc: n.loc, ..member.clone() };
+        let qualified = at(ExprKind::Member { receiver: Box::new(receiver), safe: false, name });
+        Some(match call {
+            None => qualified,
+            Some((type_args, args, trailing_lambda)) => Expr {
+                kind: ExprKind::Call {
+                    callee: Box::new(qualified),
+                    type_args: type_args.clone(),
+                    args: args.clone(),
+                    trailing_lambda: trailing_lambda.clone(),
+                },
+                loc: e.loc,
+            },
+        })
+    }
+
     pub(crate) fn receiver_values(&self) -> Vec<(String, Ty)> {
         let mut out: Vec<(String, Ty)> = self.peek_receivers.borrow().iter().rev().cloned().collect();
         out.extend(self.receivers.iter().rev().map(|r| (r.ty.clone(), r.value.clone())));

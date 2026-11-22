@@ -1,7 +1,7 @@
 // Material's buttons and containers as Compose's samples write them (material3 1.5's ButtonSamples,
-// FloatingActionButtonSamples, IconButtonSamples, CardSamples, ChipSamples, BadgeSamples). The samples composing in a
-// TooltipBox (WP7) or a Scaffold (WP4a) come with those packages; NavigationBarItemWithBadge is in navigation_bar.kt
-// (WP4b). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
+// FloatingActionButtonSamples, IconButtonSamples, CardSamples, ChipSamples, BadgeSamples; the animated FABs, over a
+// Scaffold, at the end). The other samples' TooltipBox is left out (see below); NavigationBarItemWithBadge is in
+// navigation_bar.kt (WP4b). ChipGroupSingleLineSample has its DropdownMenu (WP3's).
 
 @Composable
 fun ButtonSample() {
@@ -915,5 +915,224 @@ fun LargeFloatingActionButtonSample() {
             contentDescription = "Localized description",
             modifier = Modifier.size(FloatingActionButtonDefaults.LargeIconSize),
         )
+    }
+}
+
+// ---- FloatingActionButtonSamples' animated FABs, each over a Scaffold's LazyColumn, as written ----------------------
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Preview
+@Sampled
+@Composable
+fun AnimatedFloatingActionButtonSample() {
+    val listState = rememberLazyListState()
+    // The FAB is initially shown. Upon scrolling past the first item we hide the FAB by using a
+    // remembered derived state to minimize unnecessary compositions.
+    val fabVisible by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+
+    Scaffold(
+        floatingActionButton = {
+            // A FAB should have a tooltip associated with it.
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = { PlainTooltip { Text("Localized description") } },
+                state = rememberTooltipState(),
+            ) {
+                MediumFloatingActionButton(
+                    modifier =
+                        Modifier.animateFloatingActionButton(
+                            visible = fabVisible,
+                            alignment = Alignment.BottomEnd,
+                        ),
+                    onClick = { /* do something */ },
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "Localized description",
+                        modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize),
+                    )
+                }
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
+    ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            for (index in 0 until 100) {
+                item { Text(text = "List item - $index", modifier = Modifier.padding(24.dp)) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview
+@Sampled
+@Composable
+fun AnimatedExtendedFloatingActionButtonSample() {
+    val listState = rememberLazyListState()
+    // The FAB is initially expanded. Once the first visible item is past the first item we
+    // collapse the FAB. We use a remembered derived state to minimize unnecessary compositions.
+    val expandedFab by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    Scaffold(
+        floatingActionButton = {
+            // A collapsed FAB should have a tooltip associated with it.
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = {
+                    if (!expandedFab) {
+                        PlainTooltip { Text("Localized description") }
+                    }
+                },
+                state = rememberTooltipState(),
+            ) {
+                ExtendedFloatingActionButton(
+                    onClick = { /* do something */ },
+                    expanded = expandedFab,
+                    icon = { Icon(Icons.Filled.Add, "Localized Description") },
+                    text = { Text(text = "Extended FAB") },
+                )
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
+    ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            for (index in 0 until 100) {
+                item { Text(text = "List item - $index", modifier = Modifier.padding(24.dp)) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Preview
+@Sampled
+@Composable
+fun SmallAnimatedExtendedFloatingActionButtonSample() {
+    val listState = rememberLazyListState()
+    // The FAB is initially expanded. Once the first visible item is past the first item we
+    // collapse the FAB. We use a remembered derived state to minimize unnecessary compositions.
+    val expandedFab by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    Scaffold(
+        floatingActionButton = {
+            // A collapsed FAB should have a tooltip associated with it.
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = {
+                    if (!expandedFab) {
+                        PlainTooltip { Text("Localized description") }
+                    }
+                },
+                state = rememberTooltipState(),
+            ) {
+                SmallExtendedFloatingActionButton(
+                    onClick = { /* do something */ },
+                    expanded = expandedFab,
+                    icon = { Icon(Icons.Filled.Add, "Localized Description") },
+                    text = { Text(text = "Small Extended FAB") },
+                )
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
+    ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            for (index in 0 until 100) {
+                item { Text(text = "List item - $index", modifier = Modifier.padding(24.dp)) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Preview
+@Sampled
+@Composable
+fun MediumAnimatedExtendedFloatingActionButtonSample() {
+    val listState = rememberLazyListState()
+    // The FAB is initially expanded. Once the first visible item is past the first item we
+    // collapse the FAB. We use a remembered derived state to minimize unnecessary compositions.
+    val expandedFab by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    Scaffold(
+        floatingActionButton = {
+            // A collapsed FAB should have a tooltip associated with it.
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = {
+                    if (!expandedFab) {
+                        PlainTooltip { Text("Localized description") }
+                    }
+                },
+                state = rememberTooltipState(),
+            ) {
+                MediumExtendedFloatingActionButton(
+                    onClick = { /* do something */ },
+                    expanded = expandedFab,
+                    icon = {
+                        Icon(
+                            Icons.Filled.Add,
+                            "Localized Description",
+                            modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize),
+                        )
+                    },
+                    text = { Text(text = "Medium Extended FAB") },
+                )
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
+    ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            for (index in 0 until 100) {
+                item { Text(text = "List item - $index", modifier = Modifier.padding(24.dp)) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Preview
+@Sampled
+@Composable
+fun LargeAnimatedExtendedFloatingActionButtonSample() {
+    val listState = rememberLazyListState()
+    // The FAB is initially expanded. Once the first visible item is past the first item we
+    // collapse the FAB. We use a remembered derived state to minimize unnecessary compositions.
+    val expandedFab by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    Scaffold(
+        floatingActionButton = {
+            // A collapsed FAB should have a tooltip associated with it.
+            TooltipBox(
+                positionProvider =
+                    TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                tooltip = {
+                    if (!expandedFab) {
+                        PlainTooltip { Text("Localized description") }
+                    }
+                },
+                state = rememberTooltipState(),
+            ) {
+                LargeExtendedFloatingActionButton(
+                    onClick = { /* do something */ },
+                    expanded = expandedFab,
+                    icon = {
+                        Icon(
+                            Icons.Filled.Add,
+                            "Localized Description",
+                            modifier = Modifier.size(FloatingActionButtonDefaults.LargeIconSize),
+                        )
+                    },
+                    text = { Text(text = "Large Extended FAB") },
+                )
+            }
+        },
+        floatingActionButtonPosition = FabPosition.End,
+    ) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            for (index in 0 until 100) {
+                item { Text(text = "List item - $index", modifier = Modifier.padding(24.dp)) }
+            }
+        }
     }
 }

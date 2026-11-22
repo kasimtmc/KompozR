@@ -47,6 +47,7 @@ tests!(
     manual_modal_bottom_sheet_sample,
     modal_bottom_sheet_sample,
     simple_bottom_sheet_scaffold_sample,
+    bottom_sheet_scaffold_nested_scroll_sample,
     vertical_drag_handle_sample,
 );
 
@@ -1169,8 +1170,6 @@ fn vertical_drag_handles_grow_while_pressed() {
 }
 
 // ---- material3's samples (BottomSheetSamples.kt, DragHandleSamples.kt) --------------------------------------------
-// (BottomSheetScaffoldNestedScrollSample composes a TopAppBar and its scroll behavior (WP4a): it comes with that
-// package.)
 
 #[kompozable]
 fn ManualModalBottomSheetSample() {
@@ -1441,6 +1440,94 @@ fn simple_bottom_sheet_scaffold_sample() {
     rule.wait_for_idle();
     let swipe_box = rule.on_node_with_text("Swipe up to expand sheet").get_unclipped_bounds_in_root();
     assert!(swipe_box.center().y > 800.0 - 80.0, "{swipe_box:?}");
+}
+
+#[kompozable]
+#[allow(clippy::mixed_case_hex_literals)] // (as the sample writes them)
+fn BottomSheetScaffoldNestedScrollSample() {
+    let colors = vec![
+        Color::from_argb(0xFFffd7d7),
+        Color::from_argb(0xFFffe9d6),
+        Color::from_argb(0xFFfffbd0),
+        Color::from_argb(0xFFe3ffd9),
+        Color::from_argb(0xFFd0fff8),
+    ];
+
+    let scaffold_state = remember_bottom_sheet_scaffold_state();
+    let scroll_behavior = TopAppBarDefaults.pinned_scroll_behavior();
+
+    let bar = scroll_behavior.clone();
+    BottomSheetScaffold(
+        modifier = Modifier.nested_scroll(scroll_behavior.nested_scroll_connection()),
+        sheet_content = || {
+            LazyColumn(
+                content = |scope: &mut LazyListScope| {
+                    scope.items(50, |it| {
+                        ListItem(
+                            headline_content = move || Text(format!("Item {it}")),
+                            leading_content = Some(Rc::new(|| {
+                                VectorIcon(
+                                    Icons::Default::Favorite(),
+                                    content_description = Some("Localized description".into()),
+                                );
+                            })),
+                            colors = ListItemDefaults
+                                .colors(container_color = MaterialTheme::color_scheme().surface_container_low),
+                        );
+                    });
+                },
+            );
+        },
+        scaffold_state = Some(scaffold_state),
+        sheet_peek_height = 128.dp(),
+        top_bar = Some(Rc::new(move || {
+            TopAppBar(
+                title = || Text("Bottom sheet scaffold"),
+                navigation_icon = || {
+                    IconButton(
+                        on_click = || { /*TODO*/ },
+                        content = || {
+                            VectorIcon(
+                                Icons::Default::Menu(),
+                                content_description = Some("Localized description".into()),
+                            );
+                        },
+                    );
+                },
+                scroll_behavior = bar.clone(),
+            );
+        })),
+        content = move |inner_padding: PaddingValues| {
+            let colors = colors.clone();
+            LazyColumn(
+                content_padding = inner_padding,
+                content = move |scope: &mut LazyListScope| {
+                    let colors = colors.clone();
+                    scope.items(100, move |it| {
+                        Box(modifier =
+                            Modifier.fill_max_width().height(50.dp()).background(colors[it as usize % colors.len()]));
+                    });
+                },
+            );
+        },
+    );
+}
+
+fn bottom_sheet_scaffold_nested_scroll_sample() {
+    let rule = KompozTestRule::new(BottomSheetScaffoldNestedScrollSample);
+    rule.wait_for_idle();
+    let cs = light_color_scheme();
+    // The bar at the top (64 dp), the sheet peeking 128 dp at the bottom, its first item under the drag handle.
+    let title = rule.on_node_with_text("Bottom sheet scaffold").get_unclipped_bounds_in_root();
+    assert!(title.bottom < 64.0, "{title:?}");
+    let item = rule.on_node_with_text("Item 0").get_unclipped_bounds_in_root();
+    assert!(item.top > 800.0 - 128.0 && item.top < 800.0, "{item:?}");
+    // The body's list scrolled under the pinned bar (its nested scroll reaching the scaffold's connection): the bar
+    // takes its scrolled container color.
+    assert!(!rule.draw().rect_colors.contains(&cs.surface_container));
+    swipe(&rule, Offset::new(200.0, 400.0), Offset::new(200.0, 200.0), 10);
+    rule.wait_for_idle();
+    assert!(rule.draw().rect_colors.contains(&cs.surface_container));
 }
 
 #[kompozable]

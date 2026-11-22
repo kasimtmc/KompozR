@@ -1,6 +1,5 @@
 // Material's bottom sheets as Compose's samples write them (material3 1.5's BottomSheetSamples.kt and
-// DragHandleSamples.kt). BottomSheetScaffoldNestedScrollSample composes a TopAppBar with its scroll behavior (WP4a):
-// it comes with that package.
+// DragHandleSamples.kt).
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Sampled
@@ -172,6 +171,66 @@ fun SimpleBottomSheetScaffoldSample() {
             contentAlignment = Alignment.Center,
         ) {
             Text("Scaffold Content")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview
+@Sampled
+@Composable
+fun BottomSheetScaffoldNestedScrollSample() {
+    val colors =
+        listOf(
+            Color(0xFFffd7d7.toInt()),
+            Color(0xFFffe9d6.toInt()),
+            Color(0xFFfffbd0.toInt()),
+            Color(0xFFe3ffd9.toInt()),
+            Color(0xFFd0fff8.toInt()),
+        )
+
+    val scaffoldState = rememberBottomSheetScaffoldState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+
+    BottomSheetScaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        sheetContent = {
+            LazyColumn {
+                items(50) {
+                    ListItem(
+                        headlineContent = { Text("Item $it") },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.Favorite,
+                                contentDescription = "Localized description",
+                            )
+                        },
+                        colors =
+                            ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                            ),
+                    )
+                }
+            }
+        },
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 128.dp,
+        topBar = {
+            TopAppBar(
+                title = { Text("Bottom sheet scaffold") },
+                navigationIcon = {
+                    IconButton(onClick = { /*TODO*/ }) {
+                        Icon(Icons.Default.Menu, contentDescription = "Localized description")
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+    ) { innerPadding ->
+        LazyColumn(contentPadding = innerPadding) {
+            items(100) {
+                Box(Modifier.fillMaxWidth().height(50.dp).background(colors[it % colors.size]))
+            }
         }
     }
 }

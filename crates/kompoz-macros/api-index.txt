@@ -2,7 +2,9 @@
 # Written by `cargo xtask kotlin-index` (don't edit by hand); read by kompoz-macros and kompoz-kotlin.
 # The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one (R, D #[memoized]).
 # <scope> <kind> <name> <parameters> <owner>
+kompoz-material3/floating_toolbar kompozable Action r crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-material3/snackbars_tooltips kompozable ActionButton r crates/kompoz-material3/tests/snackbars_tooltips.rs
+kompoz-material3/bottom_app_bars kompozable AddFab r crates/kompoz-material3/tests/bottom_app_bars.rs
 * kompozable AffixBoxes rrrr crates/kompoz-material3/src/text_field.rs
 * kompozable AlertDialog rrdddddddddddd crates/kompoz-material3/src/alert_dialog.rs
 * kompozable AlertDialogContent rdrrrrrrrrrr crates/kompoz-material3/src/alert_dialog.rs
@@ -14,12 +16,17 @@ kompoz-material3/dialogs kompozable AlertDialogWithIconSample - crates/kompoz-ma
 kompoz-material3/menus kompozable Anchored r crates/kompoz-material3/tests/menus.rs
 * kompozable AnimatedContent rdddddr crates/kompoz-animation/src/animated_content.rs
 * method AnimatedContent ddddr crates/kompoz-animation/src/animated_content.rs Transition
+kompoz-material3/scaffold kompozable AnimatedExtendedFloatingActionButtonSampleOf r crates/kompoz-material3/tests/scaffold.rs
+kompoz-material3/scaffold kompozable AnimatedFloatingActionButtonSample - crates/kompoz-material3/tests/scaffold.rs
 * kompozable AnimatedNavigationItem rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/navigation_item.rs
 * kompozable AnimatedNavigationItemLayout rrrrrrrrrrrrr crates/kompoz-material3/src/navigation_item.rs
 * kompozable AnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs
 * method AnimatedVisibility rdddr crates/kompoz-animation/src/animated_visibility.rs Transition
 * kompozable AnimatedVisibilityWithState rddddr crates/kompoz-animation/src/animated_visibility.rs
 * kompozable AnimatingChipContent rrrrrrrrrrr crates/kompoz-material3/src/chip.rs
+* kompozable AppBarColumn dddr crates/kompoz-material3/src/app_bar_column.rs
+* kompozable AppBarOverflowIndicator rddddd crates/kompoz-material3/src/app_bar_dsl.rs
+* kompozable AppBarRow dddr crates/kompoz-material3/src/app_bar_row.rs
 * kompozable AssistChip rrddddddddddd crates/kompoz-material3/src/chip.rs
 kompoz-material3/containers kompozable AssistChipSample - crates/kompoz-material3/tests/containers.rs
 * kompozable AssistChipWithChipBorder rrddddddddd crates/kompoz-material3/src/chip.rs
@@ -42,10 +49,16 @@ kompoz-material3/dialogs kompozable BasicAlertDialogSample - crates/kompoz-mater
 * kompozable BitmapIcon rrdd crates/kompoz-material3/src/icon.rs
 * kompozable BitmapImage rrdddddd crates/kompoz-foundation/src/image.rs
 * fn BitmapPainter rddd crates/kompoz-ui/src/draw/painter.rs
+* kompozable BottomAppBar rdddddddd crates/kompoz-material3/src/bottom_app_bar.rs
+* kompozable BottomAppBarLayout rrrrrrrrrr crates/kompoz-material3/src/bottom_app_bar.rs
+* kompozable BottomAppBarWithContent dddddddr crates/kompoz-material3/src/bottom_app_bar.rs
+kompoz-material3/bottom_app_bars kompozable BottomAppBarWithFAB - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable BottomAppBarWithOverflow - crates/kompoz-material3/tests/bottom_app_bars.rs
 * kompozable BottomSheet dddddddddddddr crates/kompoz-material3/src/sheet_defaults.rs
 * kompozable BottomSheetImpl rddddddddddddr crates/kompoz-material3/src/sheet_defaults.rs
 * kompozable BottomSheetScaffold rdddddddddddddddr crates/kompoz-material3/src/bottom_sheet_scaffold.rs
 * kompozable BottomSheetScaffoldLayout rrrrrr crates/kompoz-material3/src/bottom_sheet_scaffold.rs
+kompoz-material3/sheets kompozable BottomSheetScaffoldNestedScrollSample - crates/kompoz-material3/tests/sheets.rs
 * fn BottomSheetScaffoldState rr crates/kompoz-material3/src/bottom_sheet_scaffold.rs
 * kompozable Box dddd crates/kompoz-foundation/src/layout/box_.rs
 * kompozable BoxWithConstraints dddr crates/kompoz-foundation/src/layout/box_with_constraints.rs
@@ -61,7 +74,10 @@ kompoz-animation/shared kompozable CallerManaged rrrr crates/kompoz-animation/te
 * kompozable Canvas rdr crates/kompoz-foundation/src/canvas.rs
 * kompozable Card dddddr crates/kompoz-material3/src/card.rs
 kompoz-material3/containers kompozable CardSample - crates/kompoz-material3/tests/containers.rs
+* kompozable CenterAlignedTopAppBar rdddddddd crates/kompoz-material3/src/app_bar.rs
+kompoz-material3/floating_toolbar kompozable CenteredHorizontalFloatingToolbarWithFabSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * method CenteredTrack rdddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
+kompoz-material3/floating_toolbar kompozable CenteredVerticalFloatingToolbarWithFabSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable CheckableDropdownMenuItem rrrrddddddddd crates/kompoz-material3/src/menu.rs
 * kompozable Checkbox rrdddd crates/kompoz-material3/src/checkbox.rs
 * fn CheckboxColors rrrrrrrrrrrrr crates/kompoz-material3/src/checkbox.rs
@@ -128,6 +144,7 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 * kompozable Crossfade rdddr crates/kompoz-animation/src/crossfade.rs
 * method Crossfade dddr crates/kompoz-animation/src/crossfade.rs Transition
 * kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
+kompoz-material3/top_app_bars kompozable CustomTwoRowsTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable CustomizedLookaheadAnimationVisualDebugging rr crates/kompoz-animation/src/lookahead_debug.rs
 * kompozable DataSnackbar rdddddddd crates/kompoz-material3/src/snackbar.rs
 * kompozable DateEntryContainer rrrrrrrr crates/kompoz-material3/src/date_picker.rs
@@ -210,11 +227,28 @@ kompoz-material3/containers kompozable ElevatedSuggestionChipSample - crates/kom
 * kompozable ElevatedSuggestionChipWithChipBorder rrdddddddd crates/kompoz-material3/src/chip.rs
 * kompozable ElevatedSuggestionChipWithoutArrangement rrdddddddd crates/kompoz-material3/src/chip.rs
 * kompozable EnsurePrecisionPointerListenersRegistered r crates/kompoz-material3/src/precision_pointer.rs
+kompoz-material3/top_app_bars kompozable EnterAlwaysTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable EnterAlwaysTopAppBarWithReverseScrolling - crates/kompoz-material3/tests/top_app_bars.rs
 kompoz-runtime/macros kompozable Equal rr crates/kompoz-runtime/tests/macros.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBar - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBarFixed - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBarFixedVibrant - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBarSpacedAround - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBarSpacedBetween - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBarSpacedEvenly - crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/bottom_app_bars kompozable ExitAlwaysFlexibleSample rrr crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/top_app_bars kompozable ExitUntilCollapsedCenterAlignedLargeFlexibleTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable ExitUntilCollapsedCenterAlignedMediumFlexibleTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable ExitUntilCollapsedLargeTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable ExitUntilCollapsedMediumTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/floating_toolbar kompozable ExpandableHorizontalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
+kompoz-material3/floating_toolbar kompozable ExpandableVerticalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * method ExposedDropdownMenu rrddddddddr crates/kompoz-material3/src/exposed_dropdown_menu.rs ExposedDropdownMenuBoxScope
 * kompozable ExposedDropdownMenuBox rrdr crates/kompoz-material3/src/exposed_dropdown_menu.rs
 * kompozable ExposedDropdownMenuImpl rrrrrrrrrrrr crates/kompoz-material3/src/exposed_dropdown_menu.rs
 * kompozable ExtendedFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
+kompoz-material3/scaffold kompozable Fab - crates/kompoz-material3/tests/scaffold.rs
+kompoz-material3/floating_toolbar kompozable FabSampleButtons r crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable FadeInFadeOutWithScale rdr crates/kompoz-material3/src/snackbar_host.rs
 kompoz-material3/tabs kompozable FancyAnimatedIndicatorWithModifier rrd crates/kompoz-material3/tests/tabs.rs
 kompoz-material3/tabs kompozable FancyIndicator rd crates/kompoz-material3/tests/tabs.rs
@@ -222,6 +256,7 @@ kompoz-material3/tabs kompozable FancyIndicatorContainerTabs - crates/kompoz-mat
 kompoz-material3/tabs kompozable FancyIndicatorTabs - crates/kompoz-material3/tests/tabs.rs
 kompoz-material3/tabs kompozable FancyTab rrr crates/kompoz-material3/tests/tabs.rs
 kompoz-material3/tabs kompozable FancyTabs - crates/kompoz-material3/tests/tabs.rs
+kompoz-material3/top_app_bars kompozable FavoriteButton - crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable FilledContainer rrrrrrrr crates/kompoz-material3/src/text_field_defaults.rs
 * kompozable FilledIconButton rdddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable FilledIconButtonWithShapes rrddddr crates/kompoz-material3/src/icon_button.rs
@@ -240,6 +275,7 @@ kompoz-material3/containers kompozable FilterChipWithLeadingIconSample - crates/
 kompoz-material3/containers kompozable FilterChipWithTrailingIconSample - crates/kompoz-material3/tests/containers.rs
 * kompozable FilterChipWithoutArrangement rrrddddddddd crates/kompoz-material3/src/chip.rs
 * kompozable FlexBox dDr crates/kompoz-foundation/src/layout/flex_box.rs
+* kompozable FlexibleBottomAppBar ddddddddr crates/kompoz-material3/src/bottom_app_bar.rs
 * kompozable FloatCircularProgressIndicator rddddd crates/kompoz-material3/src/progress_indicator.rs
 * kompozable FloatLinearProgressIndicator rdddd crates/kompoz-material3/src/progress_indicator.rs
 * kompozable FloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
@@ -260,6 +296,12 @@ kompoz-runtime/macros fn Handler dd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable Held r crates/kompoz-runtime/tests/macros.rs
 * kompozable HorizontalClockDisplay rr crates/kompoz-material3/src/time_picker.rs
 * kompozable HorizontalDivider ddd crates/kompoz-material3/src/divider.rs
+* kompozable HorizontalFloatingToolbar rdddddddddr crates/kompoz-material3/src/floating_toolbar.rs
+kompoz-material3/floating_toolbar kompozable HorizontalFloatingToolbarAsScaffoldFabSample - crates/kompoz-material3/tests/floating_toolbar.rs
+* kompozable HorizontalFloatingToolbarLayout rrrrrrrrrrrr crates/kompoz-material3/src/floating_toolbar.rs
+* kompozable HorizontalFloatingToolbarWithFab rrdddddddddr crates/kompoz-material3/src/floating_toolbar.rs
+* kompozable HorizontalFloatingToolbarWithFabLayout rrrrrrrrrrrrrr crates/kompoz-material3/src/floating_toolbar.rs
+kompoz-material3/floating_toolbar kompozable HorizontalFloatingToolbarWithFabSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable HorizontalMonthsList rrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable HorizontalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs
 * kompozable HorizontalPeriodToggle rrr crates/kompoz-material3/src/time_picker.rs
@@ -325,9 +367,12 @@ kompoz-foundation/lazy kompozable KeyedItem r crates/kompoz-foundation/tests/laz
 * method Label ddr crates/kompoz-material3/src/menu_defaults.rs MenuDefaults
 kompoz-runtime/macros kompozable Label rdd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/subcomposition kompozable Label r crates/kompoz-runtime/tests/subcomposition.rs
+* kompozable LabelTooltipBox rr crates/kompoz-material3/src/app_bar_dsl.rs
 * kompozable LabelWithSupportingText rrr crates/kompoz-material3/src/menu.rs
 * kompozable LargeExtendedFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
+* kompozable LargeFlexibleTopAppBar rdddddddddd crates/kompoz-material3/src/app_bar.rs
 * kompozable LargeFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
+* kompozable LargeTopAppBar rdddddddd crates/kompoz-material3/src/app_bar.rs
 * kompozable LaunchedEffect rr crates/kompoz-coroutines/src/compose.rs
 * kompozable Layout ddR crates/kompoz-ui/src/layout/composables.rs
 * kompozable LayoutWithLinksAndInlineContent rrrrrrr crates/kompoz-foundation/src/text/basic_text.rs
@@ -343,6 +388,7 @@ kompoz-runtime/subcomposition kompozable Label r crates/kompoz-runtime/tests/sub
 * kompozable LazyStaggeredGrid rrrrrrrrrrrr crates/kompoz-foundation/src/lazy/staggeredgrid/grid.rs
 * kompozable LazyVerticalGrid rdddddddddr crates/kompoz-foundation/src/lazy/grid/dsl.rs
 * kompozable LazyVerticalStaggeredGrid rdddddddddr crates/kompoz-foundation/src/lazy/staggeredgrid/dsl.rs
+kompoz-material3/floating_toolbar kompozable LeadingContent - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable LeadingDecorator rrrr crates/kompoz-material3/src/list_item.rs
 * kompozable LeadingIcon rrrrr crates/kompoz-material3/src/menu.rs
 * kompozable LeadingIconTab rrrrddddd crates/kompoz-material3/src/tab.rs
@@ -365,6 +411,7 @@ kompoz-foundation/layout kompozable LineLeaf rrr crates/kompoz-foundation/tests/
 kompoz-material3/lists kompozable ListItemWithModeChangeOnLongClickSample - crates/kompoz-material3/tests/lists.rs
 * kompozable LoadingIndicator rddd crates/kompoz-material3/src/loading_indicator.rs
 * method LoadingIndicator rrddddd crates/kompoz-material3/src/pulltorefresh.rs PullToRefreshDefaults
+kompoz-material3/swipe_pull kompozable LoadingIndicatorPullToRefreshSample - crates/kompoz-material3/tests/swipe_pull.rs
 kompoz-runtime/macros kompozable Local d crates/kompoz-runtime/tests/macros.rs
 kompoz-foundation/clickable kompozable LogInteractions rr crates/kompoz-foundation/tests/clickable.rs
 kompoz-foundation/pager kompozable LogInteractions rr crates/kompoz-foundation/tests/pager.rs
@@ -375,11 +422,15 @@ kompoz-material3/slider kompozable LogInteractions rr crates/kompoz-material3/te
 kompoz-material3/controls kompozable LogPresses rr crates/kompoz-material3/tests/controls.rs
 * kompozable LookaheadAnimationVisualDebugging ddddddr crates/kompoz-animation/src/lookahead_debug.rs
 * kompozable LookaheadScope r crates/kompoz-ui/src/layout/lookahead.rs
+kompoz-material3/floating_toolbar kompozable LoremColumn r crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-material3/sheets kompozable ManualModalBottomSheetSample - crates/kompoz-material3/tests/sheets.rs
 * kompozable MaterialExpressiveTheme ddddr crates/kompoz-material3/src/material_theme.rs
 * kompozable MaterialTheme ddddr crates/kompoz-material3/src/material_theme.rs
 * kompozable MediumExtendedFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
+* kompozable MediumFlexibleTopAppBar rdddddddddd crates/kompoz-material3/src/app_bar.rs
 * kompozable MediumFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
+* kompozable MediumTopAppBar rdddddddd crates/kompoz-material3/src/app_bar.rs
+kompoz-material3/top_app_bars kompozable MenuButton - crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable MenuItem rrr crates/kompoz-foundation/src/context_menu.rs
 * fn MenuItemColors rrrrrrdddddd crates/kompoz-material3/src/menu.rs
 * kompozable MenuItemContent rrrr crates/kompoz-foundation/src/context_menu.rs
@@ -420,6 +471,7 @@ kompoz-material3/navigation_bar kompozable NavigationBarSample - crates/kompoz-m
 * kompozable NavigationRailItemLayout rrrrrrr crates/kompoz-material3/src/navigation_rail.rs
 * kompozable NewLineButtonSnackbar rrrrrr crates/kompoz-material3/src/snackbar.rs
 * kompozable OnPlatformWindowBoundsChange r crates/kompoz-material3/src/exposed_dropdown_menu_desktop.rs
+kompoz-material3/top_app_bars kompozable OneLine r crates/kompoz-material3/tests/top_app_bars.rs
 kompoz-material3/lists kompozable OneLineListItem - crates/kompoz-material3/tests/lists.rs
 * kompozable OneRowChildren rrrrrrr crates/kompoz-material3/src/snackbar.rs
 * kompozable OneRowSnackbar rrrrrr crates/kompoz-material3/src/snackbar.rs
@@ -435,6 +487,8 @@ kompoz-material3/containers kompozable OutlinedCardSample - crates/kompoz-materi
 * kompozable OutlinedSecureTextField rdddddddddddddddddddddd crates/kompoz-material3/src/secure_text_field.rs
 * kompozable OutlinedTextField rdddddddddddddddddddddddd crates/kompoz-material3/src/outlined_text_field.rs
 * kompozable OutlinedTextFieldLayout rrrrrrrrrrrrrrrrr crates/kompoz-material3/src/outlined_text_field.rs
+kompoz-material3/floating_toolbar kompozable OverflowingHorizontalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
+kompoz-material3/floating_toolbar kompozable OverflowingVerticalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable OverlineDecorator rrr crates/kompoz-material3/src/list_item.rs
 * fn OverscrollConfiguration dd crates/kompoz-foundation/src/overscroll_android.rs
 * fn PaddingValues dddd crates/kompoz-foundation/src/layout/padding.rs
@@ -447,6 +501,9 @@ kompoz-material3/containers kompozable OutlinedCardSample - crates/kompoz-materi
 * kompozable PermanentDrawerSheet ddddddr crates/kompoz-material3/src/navigation_drawer.rs
 * kompozable PermanentNavigationDrawer rdr crates/kompoz-material3/src/navigation_drawer.rs
 kompoz-material3/navigation_drawer kompozable PermanentNavigationDrawerSample - crates/kompoz-material3/tests/navigation_drawer.rs
+kompoz-material3/top_app_bars kompozable PinnedTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable PinnedTopAppBarWithPreScrolledLazyColumn - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable PinnedTopAppBarWithReversedLazyGrid - crates/kompoz-material3/tests/top_app_bars.rs
 * method PlainTooltip ddddddddr crates/kompoz-material3/src/tooltip.rs DynTooltipScope as TooltipScopeComposables
 kompoz-material3/snackbars_tooltips kompozable PlainTooltipSampleOf rr crates/kompoz-material3/tests/snackbars_tooltips.rs
 kompoz-material3/snackbars_tooltips kompozable PlainTooltipWithManualInvocationSample - crates/kompoz-material3/tests/snackbars_tooltips.rs
@@ -470,6 +527,13 @@ kompoz-runtime/macros kompozable Provide rr crates/kompoz-runtime/tests/macros.r
 * kompozable ProvideTextStyle rr crates/kompoz-material3/src/text.rs
 * kompozable ProvideTextStyleFromToken rrr crates/kompoz-material3/src/list_item.rs
 * kompozable PullToRefreshBox rrddddddr crates/kompoz-material3/src/pulltorefresh.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshCustomIndicatorWithDefaultTransform - crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshLinearProgressIndicatorSample - crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshSample - crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshSampleCustomState - crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshScalingSample - crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshViewModelSample - crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable PullToRefreshWithLoadingIndicatorSample - crates/kompoz-material3/tests/swipe_pull.rs
 * kompozable RadioButton rrdddd crates/kompoz-material3/src/radio_button.rs
 * fn RadioButtonColors rrrr crates/kompoz-material3/src/radio_button.rs
 * method RangeCornerSizeTrack rrddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
@@ -480,6 +544,8 @@ kompoz-runtime/macros kompozable Provide rr crates/kompoz-runtime/tests/macros.r
 * kompozable RangeTrackImpl rrrrrrrrr crates/kompoz-material3/src/slider/defaults.rs
 kompoz-runtime/runtime kompozable Reader - crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable ReadsItsCallback rrr crates/kompoz-runtime/tests/runtime.rs
+kompoz-material3/swipe_pull kompozable RefreshItems r crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/swipe_pull kompozable RefreshTopAppBar rr crates/kompoz-material3/tests/swipe_pull.rs
 * kompozable RegisterBackCallback r crates/kompoz-ui/src/back.rs
 kompoz-runtime/macros kompozable Remembering r crates/kompoz-runtime/tests/macros.rs
 * kompozable RenderVectorGroup rd crates/kompoz-ui/src/draw/vector.rs
@@ -494,6 +560,7 @@ kompoz-foundation/lazy kompozable Row20 rr crates/kompoz-foundation/tests/lazy.r
 * kompozable RowAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs
 * kompozable RowAnimatedVisibilityWithState rddddr crates/kompoz-animation/src/animated_visibility.rs
 kompoz-material3/swipe_pull kompozable Rows rr crates/kompoz-material3/tests/swipe_pull.rs
+kompoz-material3/top_app_bars kompozable Rows rr crates/kompoz-material3/tests/top_app_bars.rs
 kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros.rs
 kompoz/named_forms kompozable RustAnimatedForms rrr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustAnimationForms rr crates/kompoz/tests/named_forms.rs
@@ -503,24 +570,34 @@ kompoz/named_forms kompozable RustListForms rr crates/kompoz/tests/named_forms.r
 kompoz/named_forms kompozable RustScrollForms r crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSharedForms r crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSliding r crates/kompoz/tests/named_forms.rs
+kompoz-material3/bottom_app_bars kompozable SampleButtons - crates/kompoz-material3/tests/bottom_app_bars.rs
 kompoz-material3/time_picker kompozable SampleConfirm rrrrr crates/kompoz-material3/tests/time_picker.rs
+kompoz-material3/floating_toolbar kompozable SampleIcon r crates/kompoz-material3/tests/floating_toolbar.rs
+kompoz-material3/bottom_app_bars kompozable SampleList r crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/scaffold kompozable SampleList r crates/kompoz-material3/tests/scaffold.rs
+kompoz-material3/top_app_bars kompozable SampleList rr crates/kompoz-material3/tests/top_app_bars.rs
 kompoz-material3/navigation_rail kompozable SampleRailHeader r crates/kompoz-material3/tests/navigation_rail.rs
+kompoz-material3/floating_toolbar kompozable SampleRow r crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-material3/time_picker kompozable SampleScaffold rr crates/kompoz-material3/tests/time_picker.rs
 kompoz-material3/navigation_rail kompozable SampleWideItems rrr crates/kompoz-material3/tests/navigation_rail.rs
 kompoz-runtime/runtime kompozable SavedChecks r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
+* kompozable Scaffold dddddddddr crates/kompoz-material3/src/scaffold.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable ScaffoldExample - crates/kompoz-runtime/tests/macros.rs
-kompoz-material3/snackbars_tooltips kompozable ScaffoldStandIn rrr crates/kompoz-material3/tests/snackbars_tooltips.rs
+* kompozable ScaffoldLayout rrrrrrr crates/kompoz-material3/src/scaffold.rs
 kompoz-material3/snackbars_tooltips kompozable ScaffoldWithCoroutinesSnackbar r crates/kompoz-material3/tests/snackbars_tooltips.rs
 kompoz-material3/snackbars_tooltips kompozable ScaffoldWithCustomSnackbar - crates/kompoz-material3/tests/snackbars_tooltips.rs
 kompoz-material3/snackbars_tooltips kompozable ScaffoldWithIndefiniteSnackbar - crates/kompoz-material3/tests/snackbars_tooltips.rs
 kompoz-material3/snackbars_tooltips kompozable ScaffoldWithMultilineSnackbar - crates/kompoz-material3/tests/snackbars_tooltips.rs
 kompoz-material3/snackbars_tooltips kompozable ScaffoldWithSimpleSnackbar - crates/kompoz-material3/tests/snackbars_tooltips.rs
+kompoz-runtime/macros kompozable ScopeItems r crates/kompoz-runtime/tests/macros.rs
 * kompozable Scrim rdddd crates/kompoz-material3/src/scrim.rs
+kompoz-material3/floating_toolbar kompozable ScrollableHorizontalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable ScrollableTabRow rddddddr crates/kompoz-material3/src/tab_row.rs
 * kompozable ScrollableTabRowImpl rrrrrrrrrr crates/kompoz-material3/src/tab_row.rs
 * kompozable ScrollableTabRowWithSubcomposeImpl rrrrrrrrr crates/kompoz-material3/src/tab_row.rs
+kompoz-material3/floating_toolbar kompozable ScrollableVerticalFloatingToolbarSample - crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-material3/tabs kompozable ScrollingFancyIndicatorContainerTabs - crates/kompoz-material3/tests/tabs.rs
 kompoz-material3/tabs kompozable ScrollingPrimaryTextTabs - crates/kompoz-material3/tests/tabs.rs
 kompoz-material3/tabs kompozable ScrollingSecondaryTextTabs - crates/kompoz-material3/tests/tabs.rs
@@ -557,8 +634,15 @@ kompoz-material3/navigation_bar kompozable ShortNavigationBarSample - crates/kom
 kompoz-material3/navigation_bar kompozable ShortNavigationBarWithHorizontalItemsSample - crates/kompoz-material3/tests/navigation_bar.rs
 kompoz-runtime/runtime kompozable Shown r crates/kompoz-runtime/tests/runtime.rs
 * kompozable SideEffect r crates/kompoz-runtime/src/remember.rs
+kompoz-material3/bottom_app_bars kompozable SimpleBottomAppBar - crates/kompoz-material3/tests/bottom_app_bars.rs
 kompoz-material3/sheets kompozable SimpleBottomSheetScaffoldSample - crates/kompoz-material3/tests/sheets.rs
+kompoz-material3/top_app_bars kompozable SimpleCenterAlignedTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable SimpleCenterAlignedTopAppBarWithSubtitle - crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable SimpleLayout dr crates/kompoz-foundation/src/text/selection/container.rs
+kompoz-material3/scaffold kompozable SimpleScaffoldWithTopBar - crates/kompoz-material3/tests/scaffold.rs
+kompoz-material3/top_app_bars kompozable SimpleTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
+kompoz-material3/top_app_bars kompozable SimpleTopAppBarWithSubtitle - crates/kompoz-material3/tests/top_app_bars.rs
+* kompozable SingleRowTopAppBar rrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
 kompoz-material3/lists kompozable SingleSelectionListItemSample - crates/kompoz-material3/tests/lists.rs
 kompoz-material3/lists kompozable SingleSelectionSegmentedListItemSample - crates/kompoz-material3/tests/lists.rs
 kompoz/kotlin_ported fn Size2 dd crates/kompoz/tests/kotlin_ported.rs
@@ -572,6 +656,7 @@ kompoz/kotlin_ported fn Size2 dd crates/kompoz/tests/kotlin_ported.rs
 * fn SliderState dddd crates/kompoz-material3/src/slider/state.rs
 * kompozable SlotRangeSlider rrddddddddddd crates/kompoz-material3/src/slider/mod.rs
 * kompozable SlotSlider rrddddddddd crates/kompoz-material3/src/slider/mod.rs
+kompoz-runtime/macros kompozable Slotted rdd crates/kompoz-runtime/tests/macros.rs
 * kompozable SmallExtendedFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
 * kompozable SmallFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
 * kompozable Snackbar dddddddddr crates/kompoz-material3/src/snackbar.rs
@@ -583,6 +668,7 @@ kompoz-runtime/runtime kompozable SpeedReader - crates/kompoz-runtime/tests/runt
 kompoz-ui/tree kompozable Stack dr crates/kompoz-ui/tests/tree.rs
 kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
 * kompozable StandardBottomSheet rrrrrrrrrrr crates/kompoz-material3/src/bottom_sheet_scaffold.rs
+* method StandardFloatingActionButton rdddddr crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
 * fn StartOffset rd crates/kompoz-animation/src/spec.rs
 * kompozable StateRangeSlider rdddddddd crates/kompoz-material3/src/slider/mod.rs
 * kompozable StateSlider rdddddd crates/kompoz-material3/src/slider/mod.rs
@@ -687,13 +773,22 @@ kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.
 * kompozable ToggleableListItem rrddddddddddddddr crates/kompoz-material3/src/list_item.rs
 * kompozable ToggleableSegmentedListItem rrrdddddddddddddr crates/kompoz-material3/src/list_item.rs
 * kompozable ToggleableSurface rrdddddddddr crates/kompoz-material3/src/surface.rs
+* kompozable ToolbarFloatingActionButton rrrrrrr crates/kompoz-material3/src/floating_toolbar.rs
 * kompozable TooltipArea rdddr crates/kompoz-foundation/src/tooltip_area.rs
 * kompozable TooltipBox rrrdddddr crates/kompoz-material3/src/tooltip.rs
+kompoz-material3/bottom_app_bars kompozable TooltipIconButton rrr crates/kompoz-material3/tests/bottom_app_bars.rs
+kompoz-material3/top_app_bars kompozable TooltipIconButton rrr crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable TooltipPopup rrrrr crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable TooltipPopup rrrrrrr crates/kompoz-material3/src/internal/basic_tooltip.rs
+kompoz-material3/floating_toolbar kompozable Tooltipped r crates/kompoz-material3/tests/floating_toolbar.rs
+* kompozable TopAppBar rdddddddd crates/kompoz-material3/src/app_bar.rs
 kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros.rs
+* kompozable TopAppBarLayout rRrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
+* kompozable TopAppBarWithSubtitle rrddddddddd crates/kompoz-material3/src/app_bar.rs
+kompoz-material3/scaffold kompozable TopPaddingText r crates/kompoz-material3/tests/scaffold.rs
 * method Track rddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 * kompozable TrackImpl rrrrrrrrrrr crates/kompoz-material3/src/slider/defaults.rs
+kompoz-material3/floating_toolbar kompozable TrailingContent - crates/kompoz-material3/tests/floating_toolbar.rs
 * kompozable TrailingDecorator rrrr crates/kompoz-material3/src/list_item.rs
 * method TrailingIcon rd crates/kompoz-material3/src/exposed_dropdown_menu.rs ExposedDropdownMenuDefaults
 * kompozable TransitionAnimatedContent rrrrrrr crates/kompoz-animation/src/animated_content.rs
@@ -704,6 +799,8 @@ kompoz-material3/date_picker kompozable Turkish r crates/kompoz-material3/tests/
 kompoz-material3/time_picker kompozable Turkish r crates/kompoz-material3/tests/time_picker.rs
 kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
 kompoz-material3/lists kompozable TwoLineListItem - crates/kompoz-material3/tests/lists.rs
+* kompozable TwoRowsTopAppBar rdddddddddd crates/kompoz-material3/src/app_bar.rs
+* kompozable TwoRowsTopAppBarImpl rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
 * fn Typography dddddddddddddddddddddddddddddd crates/kompoz-material3/src/typography.rs
 kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/tests/text_input.rs
 kompoz-runtime/runtime kompozable UpdatedReader rr crates/kompoz-runtime/tests/runtime.rs
@@ -717,6 +814,11 @@ kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-founda
 * kompozable VerticalDivider ddd crates/kompoz-material3/src/divider.rs
 * kompozable VerticalDragHandle ddddd crates/kompoz-material3/src/drag_handle.rs
 kompoz-material3/sheets kompozable VerticalDragHandleSample - crates/kompoz-material3/tests/sheets.rs
+* kompozable VerticalFloatingToolbar rdddddddddr crates/kompoz-material3/src/floating_toolbar.rs
+* kompozable VerticalFloatingToolbarLayout rrrrrrrrrrrr crates/kompoz-material3/src/floating_toolbar.rs
+* kompozable VerticalFloatingToolbarWithFab rrdddddddddr crates/kompoz-material3/src/floating_toolbar.rs
+* kompozable VerticalFloatingToolbarWithFabLayout rrrrrrrrrrrrrr crates/kompoz-material3/src/floating_toolbar.rs
+kompoz-material3/floating_toolbar kompozable VerticalFloatingToolbarWithFabSample - crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-foundation/tests/layout_modifiers.rs
 * kompozable VerticalMonthsList rrrrrrrrrr crates/kompoz-material3/src/date_range_picker.rs
 * kompozable VerticalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs
@@ -724,6 +826,7 @@ kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-fou
 * kompozable VerticalScrollbar rdddd crates/kompoz-foundation/src/scrollbar.rs
 * kompozable VerticalSlider rddddddd crates/kompoz-material3/src/slider/mod.rs
 * kompozable VerticalTimePicker rrrr crates/kompoz-material3/src/time_picker.rs
+* method VibrantFloatingActionButton rdddddr crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
 * kompozable WeekDays rr crates/kompoz-material3/src/date_picker.rs
 * kompozable WideNavigationRail ddddddddr crates/kompoz-material3/src/wide_navigation_rail.rs
 * kompozable WideNavigationRailItem rrrrrdddddd crates/kompoz-material3/src/wide_navigation_rail.rs
@@ -835,6 +938,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method button_elevation ddddd crates/kompoz-material3/src/button.rs ButtonDefaults
 * method card_colors dddd crates/kompoz-material3/src/card.rs CardDefaults
 * method card_elevation dddddd crates/kompoz-material3/src/card.rs CardDefaults
+* method center_aligned_top_app_bar_colors ddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * kompozable checked_shape_by_interaction rrrr crates/kompoz-material3/src/icon_button.rs
 * kompozable checked_shape_for_interaction rrr crates/kompoz-material3/src/icon_button.rs
 * method clear_text_substitution dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -842,6 +946,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method click dd crates/kompoz-test/src/input.rs MouseInjectionScope
 * method clickable ddddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
 * method clickable_indication rrdddr crates/kompoz-foundation/src/clickable.rs Modifier as ClickableModifiers
+* method clickable_item rrrd crates/kompoz-material3/src/app_bar_dsl.rs S as AppBarScopeItems
 * method clip_path rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 * method clip_rect ddddd crates/kompoz-ui/src/draw/scope.rs DrawTransform
 * method collapse dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -882,12 +987,14 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method copy dddd crates/kompoz-graphics/src/shape.rs CornerBasedShape
 * method copy dddd crates/kompoz-material3/src/button.rs ButtonColors
 * method copy dddd crates/kompoz-material3/src/card.rs CardColors
+* method copy dddd crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarColors
 * method copy dddd crates/kompoz-material3/src/icon_button.rs IconButtonColors
 * method copy dddd crates/kompoz-material3/src/radio_button.rs RadioButtonColors
 * method copy ddddd crates/kompoz-animation/src/state.rs AnimationState
 * method copy ddddd crates/kompoz-material3/src/wide_navigation_rail.rs WideNavigationRailColors
 * method copy dddddd crates/kompoz-material3/src/icon_button.rs IconToggleButtonColors
 * method copy dddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemShapes
+* method copy dddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarColors
 * method copy ddddddd crates/kompoz-foundation/src/text/keyboard_options.rs KeyboardOptions
 * method copy ddddddd crates/kompoz-material3/src/navigation_bar.rs NavigationBarItemColors
 * method copy ddddddd crates/kompoz-material3/src/navigation_item.rs NavigationItemColors
@@ -967,7 +1074,14 @@ kompoz-runtime/runtime kompozable effect rrr crates/kompoz-runtime/tests/runtime
 * method elevation dd crates/kompoz-material3/src/list_item_defaults.rs ListItemDefaults
 * method elevation dddd crates/kompoz-material3/src/floating_action_button.rs FloatingActionButtonDefaults
 * method enter d crates/kompoz-test/src/input.rs MouseInjectionScope
+* method enter_always_scroll_behavior dDddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
+* method enter_always_scroll_behavior_lazy_list rdDdd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
+* method enter_always_scroll_behavior_reverse_layout dDddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
+* method enter_always_scroll_behavior_scroll_state rddDdd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * method exit d crates/kompoz-test/src/input.rs MouseInjectionScope
+* method exit_always_scroll_behavior dDdd crates/kompoz-material3/src/bottom_app_bar.rs BottomAppBarDefaults
+* method exit_always_scroll_behavior rddd crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
+* method exit_until_collapsed_scroll_behavior dDdd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * method expand dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * fn expand_horizontally dddd crates/kompoz-animation/src/enter_exit.rs
 * fn expand_in dddd crates/kompoz-animation/src/enter_exit.rs
@@ -1000,6 +1114,7 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method fling_behavior rdddd crates/kompoz-foundation/src/pager/pager.rs PagerDefaults
 * fn float_animation_state rdddd crates/kompoz-animation/src/state.rs
 * fn float_decay_animation rrd crates/kompoz-animation/src/animation.rs
+* method floating_toolbar_vertical_nested_scroll rRRddd crates/kompoz-material3/src/floating_toolbar.rs Modifier as FloatingToolbarDefaultsModifiers
 * method focus_restorer d crates/kompoz-ui/src/focus/restorer.rs Modifier
 * method focusable dd crates/kompoz-foundation/src/focusable.rs Modifier as FocusableModifiers
 * method get_text_layout_result dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -1037,6 +1152,7 @@ kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/i
 * method item dddr crates/kompoz-foundation/src/lazy/grid/dsl.rs LazyGridScope
 * method item dddr crates/kompoz-foundation/src/lazy/staggeredgrid/dsl.rs LazyStaggeredGridScope
 * method item ddr crates/kompoz-foundation/src/lazy/list/dsl.rs LazyListScope
+kompoz-runtime/macros method item rd crates/kompoz-runtime/tests/macros.rs S as ItemScopeItems
 * method item_colors dddddd crates/kompoz-material3/src/menu_defaults.rs MenuDefaults
 * kompozable item_shape_by_interaction rrr crates/kompoz-material3/src/menu.rs
 * method item_shapes dd crates/kompoz-material3/src/menu_defaults.rs MenuDefaults
@@ -1053,6 +1169,7 @@ kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/i
 * kompozable label_progress rr crates/kompoz-material3/src/internal/text_field_impl.rs
 * kompozable label_text_style_color rrr crates/kompoz-material3/src/internal/text_field_impl.rs
 * method large_container_size d crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
+* method large_top_app_bar_colors ddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * method launch dr crates/kompoz-coroutines/src/executor.rs CoroutineScope
 * method launch dr crates/kompoz-ui/src/platform_text_input.rs PlatformTextInputSessionScope
 * method layout rrddr crates/kompoz-ui/src/layout/measure.rs MeasureScope
@@ -1073,6 +1190,7 @@ kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/i
 * method material_path dddr crates/kompoz-material-icons-core/src/lib.rs ImageVectorBuilder as MaterialPathBuilder
 * method measure rdddddddddd crates/kompoz-text/src/text_measurer.rs TextMeasurer
 * method medium_container_size d crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
+* method medium_top_app_bar_colors ddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * method menu_anchor rrd crates/kompoz-material3/src/exposed_dropdown_menu.rs ExposedDropdownMenuBoxScope
 * kompozable minimized_label_half_height - crates/kompoz-material3/src/internal/text_field_impl.rs
 * method mutate dr crates/kompoz-animation/src/mutator.rs MutatorMutex
@@ -1127,6 +1245,9 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method path ddddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method path_async ddddddddddr crates/kompoz-graphics/src/vector/image_vector.rs ImageVectorBuilder
 * method pinch rrrrd crates/kompoz-test/src/input.rs TouchInjectionScope
+* method pinned_scroll_behavior dDD crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
+* method pinned_scroll_behavior_lazy_list rdD crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
+* method pinned_scroll_behavior_scroll_state rddD crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * method place rrrd crates/kompoz-ui/src/layout/measure.rs PlacementScope
 * method place_relative rrrd crates/kompoz-ui/src/layout/measure.rs PlacementScope
 * method place_relative_with_layer rrrdr crates/kompoz-ui/src/layout/measure.rs PlacementScope
@@ -1152,8 +1273,10 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * kompozable remember_animated_shape_of_state r crates/kompoz-material3/src/internal/animated_shape.rs
 * kompozable remember_animated_vector_painter rr crates/kompoz-animation-graphics/src/res/animated_vector_painter.rs
 * kompozable remember_animated_vector_painter_with rrr crates/kompoz-animation-graphics/src/res/animated_vector_painter.rs
+* kompozable remember_app_bar_overflow_state - crates/kompoz-material3/src/app_bar_dsl.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-material3/src/internal/basic_tooltip.rs
+* kompozable remember_bottom_app_bar_state ddd crates/kompoz-material3/src/bottom_app_bar.rs
 * kompozable remember_bottom_sheet_scaffold_state dd crates/kompoz-material3/src/bottom_sheet_scaffold.rs
 * kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_cursor_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
@@ -1166,8 +1289,11 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * kompozable remember_draggable2d_state r crates/kompoz-foundation/src/gestures/draggable2d.rs
 * kompozable remember_draggable_state r crates/kompoz-foundation/src/gestures/draggable.rs
 * kompozable remember_drawer_state rd crates/kompoz-material3/src/navigation_drawer.rs
+* kompozable remember_floating_toolbar_state ddd crates/kompoz-material3/src/floating_toolbar.rs
 * kompozable remember_graphics_layer - crates/kompoz-ui/src/draw/graphics_layer.rs
 * kompozable remember_infinite_transition d crates/kompoz-animation/src/infinite_transition.rs
+* kompozable remember_is_scrolling_content_at_start_lazy_list r crates/kompoz-material3/src/top_app_bar_defaults.rs
+* kompozable remember_is_scrolling_content_at_start_scroll_state rr crates/kompoz-material3/src/top_app_bar_defaults.rs
 * kompozable remember_lazy_grid_item_provider_lambda rr crates/kompoz-foundation/src/lazy/grid/grid.rs
 * kompozable remember_lazy_grid_state dd crates/kompoz-foundation/src/lazy/grid/state.rs
 * kompozable remember_lazy_grid_state_with_cache_window rdd crates/kompoz-foundation/src/lazy/grid/state.rs
@@ -1220,7 +1346,10 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * method remember_tooltip_position_provider rd crates/kompoz-material3/src/tooltip.rs TooltipDefaults
 * method remember_tooltip_position_provider_with_spacing d crates/kompoz-material3/src/tooltip.rs TooltipDefaults
 * kompozable remember_tooltip_state ddd crates/kompoz-material3/src/tooltip.rs
+* kompozable remember_top_app_bar_state ddd crates/kompoz-material3/src/top_app_bar_defaults.rs
 * kompozable remember_touch_exploration_or_switch_access_service_state - crates/kompoz-material3/src/internal/basic_tooltip.rs
+* kompozable remember_touch_exploration_service - crates/kompoz-material3/src/bottom_app_bar.rs
+* kompozable remember_touch_exploration_service - crates/kompoz-material3/src/floating_toolbar.rs
 * kompozable remember_transformable_state r crates/kompoz-foundation/src/gestures/transformable_state.rs
 * kompozable remember_transition rd crates/kompoz-animation/src/transition.rs
 * kompozable remember_transition_of rr crates/kompoz-animation/src/transition.rs
@@ -1228,6 +1357,7 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
 * kompozable remember_wide_navigation_rail_state d crates/kompoz-material3/src/wide_navigation_rail_state.rs
+* kompozable remembered_spline_based_decay - crates/kompoz-material3/src/floating_toolbar.rs
 * method render_in_shared_transition_scope_overlay rdd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * fn repeatable rrdd crates/kompoz-animation/src/spec.rs
 * method request_focus d crates/kompoz-ui/src/focus/requester.rs FocusRequester
@@ -1287,6 +1417,7 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 * method shared_bounds rrrdddddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * method shared_element rrrddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * method shared_element_with_caller_managed_visibility rrrddddd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
+* kompozable should_focus_state r crates/kompoz-material3/src/floating_toolbar.rs
 * kompozable should_force_focusable_for_a11y r crates/kompoz-material3/src/internal/basic_tooltip.rs
 * method show_snackbar rddd crates/kompoz-material3/src/snackbar_host.rs SnackbarHostState
 * method show_text_substitution dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -1312,6 +1443,7 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * method smooth_scroll rdd crates/kompoz-test/src/input.rs MouseInjectionScope
 * fn snap d crates/kompoz-animation/src/spec.rs
 * fn spring ddd crates/kompoz-animation/src/spec.rs
+* method standard_floating_toolbar_colors dddd crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
 * method sticky_header ddr crates/kompoz-foundation/src/lazy/grid/dsl.rs LazyGridScope
 * method sticky_header ddr crates/kompoz-foundation/src/lazy/list/dsl.rs LazyListScope
 * method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable2d_state.rs S as Scrollable2DStateExtensions
@@ -1343,7 +1475,9 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * method to_pixel_map dddd crates/kompoz-graphics/src/image/bitmap.rs ImageBitmap
 * method toggleable rdddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
 * method toggleable_indication rrrddr crates/kompoz-foundation/src/selection/toggleable.rs Modifier as ToggleableModifiers
+* method toggleable_item rrrrd crates/kompoz-material3/src/app_bar_dsl.rs S as AppBarScopeItems
 * method toggleable_shapes ddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
+* method top_app_bar_colors dddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macros.rs
 * method top_end dd crates/kompoz-material3/src/internal/animated_shape.rs AnimatedShapeStateOf
 * method top_start dd crates/kompoz-material3/src/internal/animated_shape.rs AnimatedShapeStateOf
@@ -1366,6 +1500,7 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * fn veil_out ddd crates/kompoz-animation/src/enter_exit.rs
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
+* method vibrant_floating_toolbar_colors dddd crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
 * method wait_until ddr crates/kompoz-test/src/lib.rs KompozTestRule
 * method weight rd crates/kompoz-foundation/src/layout/scope.rs Modifier as LayoutScopeModifiers
 * method width_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers

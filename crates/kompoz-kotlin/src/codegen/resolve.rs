@@ -975,9 +975,10 @@ pub(crate) struct FileVal {
 pub(crate) struct FileTable {
     pub functions: HashMap<String, Vec<FileFn>>,
     pub vals: HashMap<String, FileVal>,
-    /// The members of objects imported by name (`import a.b.TimePickerDialogDefaults.MinHeightForTimePicker`, or
-    /// `as` another name), by the name they are read by: the object's Kotlin name and the member's.
-    pub imported_members: HashMap<String, (String, String)>,
+    /// The members of classes and objects the file imports by name (`import a.b.Defaults.ScreenOffset`, `import
+    /// a.b.Direction.Companion.Bottom`, `import a.b.Defaults.value as v`), by the name the file calls them: the
+    /// qualifier the member is of (`Defaults`, `Direction`: a companion's members are its class's) and the member.
+    pub imports: HashMap<String, (Vec<crate::ast::Ident>, crate::ast::Ident)>,
 }
 
 impl FileTable {

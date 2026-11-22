@@ -308,9 +308,33 @@ fn filled_and_tonal_icon_buttons_as_compose_1_4() {
     assert_eq!(canvas.rect_colors, vec![cs.secondary_container, faded(cs.on_surface, 0.1), faded(cs.on_surface, 0.1)]);
 }
 
+/// The C++ test's `SnackbarData{.message, .withDismissAction}`: a snackbar's data of the app's own.
+struct GoneSnackbar;
+
+impl SnackbarVisuals for GoneSnackbar {
+    fn message(&self) -> String {
+        "Gitti".to_string()
+    }
+    fn action_label(&self) -> Option<String> {
+        None
+    }
+    fn with_dismiss_action(&self) -> bool {
+        true
+    }
+    fn duration(&self) -> SnackbarDuration {
+        SnackbarDuration::Indefinite
+    }
+}
+
+impl SnackbarData for GoneSnackbar {
+    fn visuals(&self) -> Rc<dyn SnackbarVisuals> {
+        Rc::new(GoneSnackbar)
+    }
+    fn perform_action(&self) {}
+    fn dismiss(&self) {}
+}
+
 fn icon_buttons_take_the_content_color_around_them() {
-    // (the C++ test's Snackbar with a dismiss action — its close button an IconButton in inverse on surface — waits
-    // for WP4a's Snackbar)
     let red = Color::new(0.8, 0.1, 0.1, 1.0);
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         MaterialTheme(
@@ -323,13 +347,15 @@ fn icon_buttons_take_the_content_color_around_them() {
                         // (its own)
                         FilledTonalIconButton(|| {}, content = || icon(Icons::Filled::Add(), "Tonal"));
                     });
+                    // the close button: inverseOnSurface
+                    DataSnackbar(Rc::new(GoneSnackbar) as Rc<dyn SnackbarData>);
                 });
             },
         );
     }));
     let canvas = rule.draw();
     let cs = light_color_scheme();
-    assert_eq!(canvas.vector_colors, vec![red, faded(red, 0.38), cs.on_secondary_container]);
+    assert_eq!(canvas.vector_colors, vec![red, faded(red, 0.38), cs.on_secondary_container, cs.inverse_on_surface]);
 }
 
 // ---- Compose's behaviour ---------------------------------------------------------------------------------------

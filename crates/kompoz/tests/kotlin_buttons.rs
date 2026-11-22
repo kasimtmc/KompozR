@@ -1,7 +1,7 @@
 //! Material's buttons and containers in Kotlin's syntax, as a Compose user writes them: the C++ Kompoz's
 //! `required_arguments_by_name` (kompozable_tests.cpp 201-226: all of its NamedHeads, the Checkbox, TextButton,
 //! TextField, Icon and texts) and `containers_as_compose_writes_them` (2799-2848: its buttons, lazy list, badges,
-//! segmented list items and extended FAB; its LoadingIndicator in kotlin_progress.rs, its BottomAppBar WP4a's) through
+//! segmented list items, extended FAB and bottom app bar; its LoadingIndicator in kotlin_progress.rs) through
 //! `kompoz!`, and
 //! material3's samples of buttons, icon buttons, FABs, cards and chips from a `.kt` file (kompoz_file!).
 
@@ -11,6 +11,8 @@ mod common;
 
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
+// (what the generated code types the animated FAB samples' tooltip position providers with)
+use kompoz::ui::window::PopupPositionProvider;
 
 // ---- required_arguments_by_name (kompozable_tests.cpp 201-226) -----------------------------------------------------
 
@@ -76,6 +78,8 @@ kompoz! {
             }
             SmallExtendedFloatingActionButton(onClick = { open = !open }, expanded = open, icon = { Icon(Icons.Filled.Add, contentDescription = null) },
                                               text = { Text("Yeni") }, modifier = Modifier.testTag("fab"))
+            BottomAppBar(actions = { IconButton(onClick = { }) { Icon(Icons.Filled.Check, contentDescription = "Tamam") } },
+                         windowInsets = WindowInsets(0.dp), modifier = Modifier.testTag("çubuk"))
         }
     }
 }
@@ -104,6 +108,11 @@ fn containers_as_compose_writes_them() {
     // (collapsed, its label left with its exit animation, as Compose's AnimatedVisibility takes it out; the C++ kept
     // it composed)
     rule.on_node_with_text("Yeni").assert_does_not_exist();
+    // The bottom app bar: no inset padding (its window insets none), 80 dp; its action 4 dp in.
+    let bar = rule.on_node_with_tag("çubuk").get_unclipped_bounds_in_root();
+    assert!(bar.height() <= 80.5 && (bar.height() - 80.0).abs() <= 0.5, "{bar:?}");
+    let action = rule.on_node_with_content_description("Tamam").get_unclipped_bounds_in_root();
+    assert!((action.center().x - (bar.left + 4.0 + 24.0)).abs() <= 0.5, "{action:?}");
 }
 
 // ---- material3's samples (kt/buttons.kt) ----------------------------------------------------------------------------
@@ -358,6 +367,68 @@ fn chip_group_reflow_sample() {
     assert!(last.top > first.bottom, "{first:?} {last:?}");
 }
 
+// ---- FloatingActionButtonSamples' animated FABs (kt/buttons.kt: each a Scaffold's FAB over a LazyColumn) ---------
+
+/// The list dragged `dy` (up: negative; above the FABs) over 20 frames, let go, settled with the FAB's animations.
+fn drag_list(rule: &KompozTestRule, dy: f32) {
+    let h = rule.host();
+    let from = Offset::new(200.0, if dy < 0.0 { 550.0 } else { 100.0 });
+    h.pointer_down(from, -1, 0, kompoz::ui::input::PointerType::Touch);
+    for i in 1..=20 {
+        rule.advance_frame();
+        h.pointer_move(from + Offset::new(0.0, dy * i as f32 / 20.0), -1, 0);
+    }
+    rule.advance_time_by(100);
+    h.pointer_up(from + Offset::new(0.0, dy), -1, 0);
+    rule.advance_time_by(2000);
+}
+
+fn animated_fab_samples() {
+    // AnimatedFloatingActionButtonSample: the medium FAB (80 dp) at the scaffold's bottom end, 16 dp in; hidden (scaled
+    // to nothing, taking no room) once the list's first item scrolls away, back with it.
+    let rule = KompozTestRule::with_viewport(AnimatedFloatingActionButtonSample, IntSize::new(400, 800));
+    let fab = || rule.on_node_with_content_description("Localized description").get_unclipped_bounds_in_root();
+    let shown = fab();
+    assert_eq!((shown.width(), shown.right, shown.bottom), (80.0, 400.0 - 16.0, 800.0 - 16.0));
+    drag_list(&rule, -450.0);
+    rule.on_node_with_text("List item - 0").assert_does_not_exist();
+    // (its layout's size: what the scaffold has to place)
+    assert_eq!(rule.on_node_with_content_description("Localized description").layout_node().size(), IntSize::new(0, 0));
+    drag_list(&rule, 500.0);
+    rule.on_node_with_text("List item - 0").assert_exists();
+    assert_eq!(fab(), shown);
+
+    // The four AnimatedExtendedFloatingActionButtonSamples: expanded (wider than tall) at the bottom end; collapsed to
+    // a square of their height once the list scrolls, expanded again back at its start.
+    let samples: [(fn() -> KompozTestRule, f32); 4] = [
+        (|| KompozTestRule::with_viewport(AnimatedExtendedFloatingActionButtonSample, IntSize::new(400, 800)), 56.0),
+        (
+            || KompozTestRule::with_viewport(SmallAnimatedExtendedFloatingActionButtonSample, IntSize::new(400, 800)),
+            56.0,
+        ),
+        (
+            || KompozTestRule::with_viewport(MediumAnimatedExtendedFloatingActionButtonSample, IntSize::new(400, 800)),
+            80.0,
+        ),
+        (
+            || KompozTestRule::with_viewport(LargeAnimatedExtendedFloatingActionButtonSample, IntSize::new(400, 800)),
+            96.0,
+        ),
+    ];
+    for (make, height) in samples {
+        let rule = make();
+        let fab = || rule.on_node_with_content_description("Localized Description").get_unclipped_bounds_in_root();
+        let expanded = fab();
+        assert!(expanded.width() > height && expanded.height() == height, "{expanded:?}");
+        assert_eq!((expanded.right, expanded.bottom), (400.0 - 16.0, 800.0 - 16.0));
+        drag_list(&rule, -450.0);
+        let collapsed = fab();
+        assert!((collapsed.width() - height).abs() < 0.5 && collapsed.right == 400.0 - 16.0, "{collapsed:?}");
+        drag_list(&rule, 500.0);
+        assert!((fab().width() - expanded.width()).abs() < 0.5);
+    }
+}
+
 fn main() {
     common::run(&[
         // (WP4b: icons)
@@ -368,6 +439,7 @@ fn main() {
         ("buttons_with_icons_come_in_sizes", buttons_with_icons_come_in_sizes),
         ("icon_button_samples", icon_button_samples),
         ("fab_samples", fab_samples),
+        ("animated_fab_samples", animated_fab_samples),
         ("card_samples", card_samples),
         ("chip_samples", chip_samples),
         ("chip_group_single_line_sample", chip_group_single_line_sample),

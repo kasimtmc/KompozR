@@ -179,4 +179,7 @@ pub mod prelude {
     // androidx.compose.ui.text.input)
     pub use kompoz_foundation::text::{BasicSecureTextField, BasicTextField, TextFieldDecorator};
     pub use kompoz_ui::platform::{ImeAction, KeyboardCapitalization, KeyboardType};
+    // (WP4a: tooling preview) (Compose's androidx.compose.ui.tooling.preview: `LoremIpsum().values.first()` in the
+    // samples)
+    pub use kompoz_ui::tooling::preview::{CollectionPreviewParameterProvider, LoremIpsum, PreviewParameterProvider};
 }

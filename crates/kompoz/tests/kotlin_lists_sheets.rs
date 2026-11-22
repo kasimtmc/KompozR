@@ -11,6 +11,8 @@ use kompoz::test::KompozTestRule;
 // (shared by the sections: the window types the Kotlin sources name — Compose's androidx.compose.ui.window imports —
 // and the generated code types with, as a tooltip box's position provider)
 use kompoz::ui::window::{Dialog, DialogProperties, PopupPositionProvider};
+// (sheets: what the generated code types nestedScroll's connection with — BottomSheetScaffoldNestedScrollSample's)
+use kompoz::ui::input::NestedScrollConnection;
 
 // ==== lists ==========================================================================================================
 // The C++ Kompoz's `list_items_by_name` (kompozable_tests.cpp 651-670, Settings) and the ListItem line of its
@@ -294,9 +296,9 @@ fn list_item_forms() {
 
 // ==== tabs and dialogs ===============================================================================================
 // The C++ Kompoz's `tabs_and_fab_menu_as_compose_writes_them` (kompozable_tests.cpp 2849-2899, Navigation: its tabs;
-// its FloatingActionButtonMenu is WP1b's, its HorizontalFloatingToolbar WP4a's) and `the_users_add_text_dialog`
-// (249-388, AddTextDialog/DialogHost) through `kompoz!`, and material3's TabSamples and AlertDialogSamples from
-// kt/tabs_dialogs.kt.
+// its FloatingActionButtonMenu is WP1b's, its HorizontalFloatingToolbar in kotlin_floating_toolbar.rs) and
+// `the_users_add_text_dialog` (249-388, AddTextDialog/DialogHost) through `kompoz!`, and material3's TabSamples and
+// AlertDialogSamples from kt/tabs_dialogs.kt.
 
 kompoz! {
     // Tabs as Compose writes them (Navigation's tabs: the text and icon tab, the leading icon tab, a scrolling row
@@ -717,6 +719,17 @@ fn bottom_sheet_samples() {
     assert!((content.center().y - (800.0 - 128.0) / 2.0).abs() < 0.5, "{content:?}");
     let swipe_box = rule.on_node_with_text("Swipe up to expand sheet").get_unclipped_bounds_in_root();
     assert!(swipe_box.center().y > 800.0 - 80.0, "{swipe_box:?}");
+
+    // BottomSheetScaffoldNestedScrollSample: the pinned bar takes its scrolled color as the body's list scrolls
+    // under it (its nested scroll reaching the scaffold's connection); the sheet peeks 128 dp.
+    let rule = KompozTestRule::with_viewport(BottomSheetScaffoldNestedScrollSample, IntSize::new(400, 800));
+    rule.wait_for_idle();
+    let item = rule.on_node_with_text("Item 0").get_unclipped_bounds_in_root();
+    assert!(item.top > 800.0 - 128.0 && item.top < 800.0, "{item:?}");
+    let scrolled = light_color_scheme().surface_container;
+    assert!(!rule.draw().rect_colors.contains(&scrolled));
+    swipe_pull_swipe(&rule, Offset::new(200.0, 400.0), Offset::new(200.0, 200.0), 10);
+    assert!(rule.draw().rect_colors.contains(&scrolled));
 }
 
 fn drag_handle_samples() {
@@ -828,6 +841,12 @@ fn snackbar_samples() {
     rule.on_node_with_text("Body content").assert_exists();
     rule.on_node_with_text("Show snackbar").perform_click();
     rule.on_node_with_text("Snackbar # 1").assert_exists();
+    // (the scaffold's: the button at the bottom end, 16 dp in; the snackbar above it)
+    let (d, root) = (rule.density().density, rule.on_root().get_unclipped_bounds_in_root());
+    let fab = rule.on_node_with_text("Show snackbar").get_unclipped_bounds_in_root();
+    assert!((fab.right - (root.right - 16.0 * d)).abs() < 0.5 && (fab.bottom - (root.bottom - 16.0 * d)).abs() < 0.5);
+    let snackbar = rule.on_node_with_text("Snackbar # 1").get_unclipped_bounds_in_root();
+    assert!(snackbar.bottom < fab.top, "{snackbar:?} {fab:?}");
     rule.advance_time_by(4500);
     rule.wait_for_idle();
     rule.on_node_with_text("Snackbar # 1").assert_does_not_exist();
@@ -1030,6 +1049,74 @@ fn pull_forms() {
     assert!(endless_progress_shown(&rule));
 }
 
+/// The pull-to-refresh samples' first item shown, if any (under the 64 dp bar).
+fn pull_sample_first_item(rule: &KompozTestRule) -> Option<String> {
+    use kompoz::ui::semantics::SemanticsProperties;
+    let mut shown: Vec<(f32, String)> = rule
+        .all_nodes(true)
+        .iter()
+        .filter_map(|n| {
+            let text = n.config().get(SemanticsProperties::Text)?.first()?.text().to_string();
+            let b = n.bounds_in_root();
+            (text.starts_with("Item ") && b.height() > 0.0).then_some((b.top, text))
+        })
+        .collect();
+    shown.sort_by(|a, b| a.0.total_cmp(&b.0));
+    shown.into_iter().next().map(|(top, text)| {
+        assert!(top >= 64.0 * rule.density().density, "{text} at {top}");
+        text
+    })
+}
+
+/// A sample refreshed by a pull past the threshold (5 more items after `ms`, an endless indicator meanwhile) and by
+/// its bar's action. `hides_list`: the list is gone while refreshing.
+fn pull_sample_refreshes(rule: &KompozTestRule, ms: i64, hides_list: bool) {
+    assert_eq!(pull_sample_first_item(rule).as_deref(), Some("Item 15"));
+    let h = rule.host();
+    let (from, to) = (Offset::new(200.0, 150.0), Offset::new(200.0, 450.0));
+    h.pointer_down(from, -1, 0, kompoz::ui::input::PointerType::Touch);
+    for i in 1..=20 {
+        rule.advance_frame();
+        h.pointer_move(from + (to - from) * (i as f32 / 20.0), -1, 0);
+    }
+    rule.advance_time_by(200);
+    h.pointer_up(to, -1, 0);
+    rule.advance_time_by(500);
+    assert!(endless_progress_shown(rule));
+    assert_eq!(pull_sample_first_item(rule).is_none(), hides_list);
+    rule.advance_time_by(ms);
+    rule.wait_for_idle();
+    assert_eq!(pull_sample_first_item(rule).as_deref(), Some("Item 20"));
+    assert!(!endless_progress_shown(rule));
+    // (a click of the pointer: `perform_click` waits until idle, the indicator's animations taking the fetch's time)
+    let action = rule.on_node_with_content_description("Trigger Refresh").get_unclipped_bounds_in_root().center();
+    h.pointer_down(action, -1, 0, kompoz::ui::input::PointerType::Touch);
+    h.pointer_up(action, -1, 0);
+    rule.advance_time_by(500);
+    assert!(endless_progress_shown(rule));
+    rule.advance_time_by(ms);
+    rule.wait_for_idle();
+    assert_eq!(pull_sample_first_item(rule).as_deref(), Some("Item 25"));
+}
+
+fn pull_to_refresh_samples() {
+    let window = IntSize::new(400, 800);
+    pull_sample_refreshes(&KompozTestRule::with_viewport(PullToRefreshSample, window), 5000, false);
+    pull_sample_refreshes(&KompozTestRule::with_viewport(PullToRefreshWithLoadingIndicatorSample, window), 5000, false);
+    pull_sample_refreshes(&KompozTestRule::with_viewport(PullToRefreshScalingSample, window), 5000, true);
+    pull_sample_refreshes(
+        &KompozTestRule::with_viewport(PullToRefreshLinearProgressIndicatorSample, window),
+        5000,
+        true,
+    );
+    pull_sample_refreshes(
+        &KompozTestRule::with_viewport(PullToRefreshCustomIndicatorWithDefaultTransform, window),
+        1500,
+        false,
+    );
+    pull_sample_refreshes(&KompozTestRule::with_viewport(LoadingIndicatorPullToRefreshSample, window), 5000, true);
+}
+
 /// Whether an endless progress is shown to accessibility (a refreshing indicator's).
 fn endless_progress_shown(rule: &KompozTestRule) -> bool {
     use kompoz::ui::semantics::{ProgressBarRangeInfo, SemanticsProperties};
@@ -1070,5 +1157,6 @@ fn main() {
         ("swipe_to_dismiss_samples", swipe_to_dismiss_samples),
         ("swipe_forms", swipe_forms),
         ("pull_forms", pull_forms),
+        ("pull_to_refresh_samples", pull_to_refresh_samples),
     ]);
 }

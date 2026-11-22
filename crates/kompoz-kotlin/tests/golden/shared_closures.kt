@@ -10,3 +10,16 @@ fun SharedClosures() {
     val fourth = rememberSwipeToDismissBoxState(positionalThreshold = typed)
     Text("${threshold(400f)} ${state.currentValue == own.currentValue} ${third.currentValue == fourth.currentValue}")
 }
+
+// A lambda kept in a `val` (a closure moving its captures in) is a Kotlin function value too: given to two
+// parameters, each a clone of it; called in place.
+@Composable
+fun LambdaValues() {
+    var count by remember { mutableStateOf(0) }
+    val onRefresh: () -> Unit = { count += 1 }
+    val described = { "sayı $count" }
+    Column {
+        Button(onClick = onRefresh) { Text(described()) }
+        PullToRefreshBox(isRefreshing = false, onRefresh = onRefresh) { Text("$count") }
+    }
+}

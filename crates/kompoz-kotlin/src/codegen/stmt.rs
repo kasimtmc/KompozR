@@ -367,8 +367,11 @@ impl Gen<'_, '_> {
                     }
                     PropertyInit::Delegate(_) => unreachable!(),
                 };
-                // (a shared closure an API gave, an `Rc`: cloned when used as a value)
-                let shared_closure = matches!(&ty, Ty::Fun(f) if f.shared);
+                // (a shared closure an API gave, an `Rc`: cloned when used as a value; (WP4a: scaffold) so is a lambda
+                // kept in a `val`, a closure moving its captures in — Kotlin's function value, given to several
+                // parameters: `val onRefresh: () -> Unit = { … }` an action's `onClick` and the box's `onRefresh`)
+                let lambda_value = matches!(init, PropertyInit::Value(e) if matches!(e.kind, ExprKind::Lambda(_)));
+                let shared_closure = matches!(&ty, Ty::Fun(f) if f.shared) || lambda_value;
                 self.declare(&n.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
                 if shared_closure && let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
                     l.shared_closure = true;

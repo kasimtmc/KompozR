@@ -412,6 +412,12 @@ pub fn memo_id<K: Keys + 'static>(keys: K) -> Option<u64> {
     crate::remember::memo_id_at(Location::caller(), keys)
 }
 
+/// The identity of a closure parameter's default (its `#[default(…)]` closure, given when no argument is): always
+/// the same one, as Kotlin's default lambda (`topBar: @Composable () -> Unit = {}`) is one instance — a default
+/// can't capture the other arguments, so each call's default does the same. (Memoized identities count up from 1:
+/// never this one.)
+pub const DEFAULT_CLOSURE_ID: Option<u64> = Some(u64::MAX);
+
 /// Whether two identities are the same one (none never is).
 pub fn same_id(a: Option<u64>, b: Option<u64>) -> bool {
     a.is_some() && a == b

@@ -16,6 +16,8 @@
 
 // (WP5: dialogs)
 mod alert_dialog;
+// (WP4a: top app bars — modules)
+mod app_bar;
 mod badge;
 mod button;
 // (WP6: pickers)
@@ -46,6 +48,7 @@ mod interactive_component_size;
 mod time_format;
 mod time_picker;
 mod time_picker_dialog;
+mod top_app_bar_defaults;
 // (WP5: sheets)
 mod bottom_sheet_scaffold;
 mod drag_handle;
@@ -78,6 +81,8 @@ mod precision_pointer;
 // (WP5: pull to refresh — Compose's package androidx.compose.material3.pulltorefresh)
 pub mod pulltorefresh;
 mod ripples;
+// (WP4a: scaffold)
+mod scaffold;
 mod scrim;
 mod secure_text_field;
 mod shapes;
@@ -97,9 +102,17 @@ mod tab_row;
 mod text;
 mod text_field;
 mod text_field_defaults;
+// (WP4a: bottom app bars — modules)
+mod app_bar_column;
+mod app_bar_dsl;
+mod app_bar_row;
+mod bottom_app_bar;
+
 pub(crate) mod tokens;
 mod tonal_palette;
 mod tooltip;
+// (WP4a: toolbar)
+mod floating_toolbar;
 mod typography;
 mod wavy_progress_indicator;
 
@@ -263,6 +276,8 @@ pub use progress_indicator::{
 pub use progress_indicator::{FloatCircularProgressIndicator, FloatLinearProgressIndicator};
 pub use radio_button::{RadioButton, RadioButtonColors, RadioButtonDefaults};
 pub use ripples::{LocalRippleConfiguration, RippleConfiguration, RippleDefaults, ripple, ripple_color_producer};
+// (WP4a: scaffold)
+pub use scaffold::{FabPosition, Scaffold, ScaffoldDefaults};
 pub use scrim::{Scrim, ScrimDefaults};
 pub use secure_text_field::{OutlinedSecureTextField, SecureTextField};
 pub use shapes::{ShapeDefaults, Shapes};
@@ -332,6 +347,42 @@ pub use typography::{Typography, typography_with_font_family};
 pub use wavy_progress_indicator::{
     AmplitudeFunction, CircularWavyProgressIndicator, IndeterminateCircularWavyProgressIndicator,
     IndeterminateLinearWavyProgressIndicator, LinearWavyProgressIndicator, WavyProgressIndicatorDefaults,
+};
+// (WP4a: bottom app bars — AppBarRow, AppBarColumn and their items)
+pub use app_bar_column::{AppBarColumn, AppBarColumnScope};
+pub use app_bar_dsl::{AppBarMenuState, AppBarOverflowIndicator, AppBarScope, AppBarScopeItems};
+pub use app_bar_row::{AppBarRow, AppBarRowScope};
+// (WP4a: bottom app bars — BottomAppBar, FlexibleBottomAppBar, their scroll behavior, state and defaults)
+pub use bottom_app_bar::{
+    BottomAppBar, BottomAppBarDefaults, BottomAppBarScrollBehavior, BottomAppBarState, BottomAppBarWithContent,
+    FlexibleBottomAppBar, remember_bottom_app_bar_state,
+};
+
+// (WP4a: toolbar — FloatingToolbar.kt)
+pub use floating_toolbar::{
+    DefaultHorizontalFloatingToolbarOverride, DefaultHorizontalFloatingToolbarWithFabOverride,
+    DefaultVerticalFloatingToolbarOverride, DefaultVerticalFloatingToolbarWithFabOverride,
+    ExitAlwaysFloatingToolbarScrollBehavior, FloatingToolbarColors, FloatingToolbarDefaults,
+    FloatingToolbarDefaultsModifiers, FloatingToolbarExitDirection, FloatingToolbarHorizontalFabPosition,
+    FloatingToolbarScrollBehavior, FloatingToolbarState, FloatingToolbarVerticalFabPosition, HorizontalFloatingToolbar,
+    HorizontalFloatingToolbarOverride, HorizontalFloatingToolbarOverrideScope, HorizontalFloatingToolbarWithFab,
+    HorizontalFloatingToolbarWithFabOverride, HorizontalFloatingToolbarWithFabOverrideScope,
+    LocalHorizontalFloatingToolbarOverride, LocalHorizontalFloatingToolbarWithFabOverride,
+    LocalVerticalToolbarOverride, LocalVerticalToolbarWithFabOverride, VerticalFloatingToolbar,
+    VerticalFloatingToolbarOverride, VerticalFloatingToolbarOverrideScope, VerticalFloatingToolbarWithFab,
+    VerticalFloatingToolbarWithFabOverride, VerticalFloatingToolbarWithFabOverrideScope,
+    remember_floating_toolbar_state,
+};
+
+// (WP4a: top app bars — TopAppBar & co, TopAppBarDefaults, TopAppBarState, the scroll behaviors, the overrides)
+pub use app_bar::{
+    CenterAlignedTopAppBar, DefaultSingleRowTopAppBarOverride, DefaultTwoRowsTopAppBarOverride, LargeFlexibleTopAppBar,
+    LargeTopAppBar, LocalSingleRowTopAppBarOverride, LocalTwoRowsTopAppBarOverride, MediumFlexibleTopAppBar,
+    MediumTopAppBar, SingleRowTopAppBarOverride, SingleRowTopAppBarOverrideScope, TopAppBar, TopAppBarWithSubtitle,
+    TwoRowsTopAppBar, TwoRowsTopAppBarOverride, TwoRowsTopAppBarOverrideScope,
+};
+pub use top_app_bar_defaults::{
+    TopAppBarColors, TopAppBarDefaults, TopAppBarScrollBehavior, TopAppBarState, remember_top_app_bar_state,
 };
 
 // (WP6: pickers)

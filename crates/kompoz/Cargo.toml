@@ -231,3 +231,20 @@ harness = false
 [[test]]
 name = "kotlin_menus"
 harness = false
+
+# Material's Scaffold in Kotlin's syntax (the C++ Kompoz's ScaffoldExample, ScrollForms' app bars, Navigation's floating
+# toolbar; material3's ScaffoldSamples and the samples written over a Scaffold from .kt files).
+[[test]]
+name = "kotlin_scaffold"
+harness = false
+
+# Material's app bars in Kotlin's syntax (material3's AppBarSamples from .kt files: top and bottom app bars, AppBarRow and
+# AppBarColumn).
+[[test]]
+name = "kotlin_app_bars"
+harness = false
+
+# Material's floating toolbars in Kotlin's syntax (material3's FloatingToolbarSamples from a .kt file).
+[[test]]
+name = "kotlin_floating_toolbar"
+harness = false

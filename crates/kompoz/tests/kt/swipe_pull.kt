@@ -1,6 +1,6 @@
 // Material's swipe to dismiss and pull to refresh as Compose's samples write them (material3 1.5's
-// SwipeToDismissSamples.kt), and the rest of their API as a Compose app writes it (SwipeForms, PullForms).
-// PullToRefreshSamples.kt's samples all compose a Scaffold with a TopAppBar (WP4a): they come with that package.
+// SwipeToDismissSamples.kt, PullToRefreshSamples.kt — each a Scaffold with a TopAppBar — and LoadingIndicatorSamples.kt's
+// LoadingIndicatorPullToRefreshSample), and the rest of their API as a Compose app writes it (SwipeForms, PullForms).
 
 @Preview
 @Sampled
@@ -147,5 +147,343 @@ fun PullForms() {
             LazyColumn(modifier = Modifier.fillMaxSize()) { items(20) { Text("Öğe $it", modifier = Modifier.height(50.dp)) } }
         }
         Text("kutu: $boxRefreshing")
+    }
+}
+
+// ---- material3 1.5's PullToRefreshSamples.kt (+ LoadingIndicatorSamples.kt's LoadingIndicatorPullToRefreshSample), as
+// written. PullToRefreshViewModelSample (`object : ViewModel()`) and PullToRefreshSampleCustomState (`object :
+// PullToRefreshState`) declare object expressions: Kotlin's classes are stage 14's (their Rust ports are in
+// kompoz-material3's tests/swipe_pull.rs).
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Sampled
+@Composable
+@Preview
+fun PullToRefreshSample() {
+    var itemCount by remember { mutableIntStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val state = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            delay(5000)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Title") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        }
+    ) {
+        PullToRefreshBox(
+            modifier = Modifier.padding(it),
+            state = state,
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
+            }
+        }
+    }
+}
+
+@Sampled
+@Composable
+@Preview
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+fun PullToRefreshWithLoadingIndicatorSample() {
+    var itemCount by remember { mutableIntStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val state = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            delay(5000)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Title") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        }
+    ) {
+        PullToRefreshBox(
+            modifier = Modifier.padding(it),
+            state = state,
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            indicator = {
+                PullToRefreshDefaults.LoadingIndicator(
+                    state = state,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            },
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Sampled
+@Composable
+@Preview
+fun PullToRefreshScalingSample() {
+    var itemCount by remember { mutableIntStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val state = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            // fetch something
+            delay(5000)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    val scaleFraction = {
+        if (isRefreshing) 1f
+        else LinearOutSlowInEasing.transform(state.distanceFraction).coerceIn(0f, 1f)
+    }
+
+    Scaffold(
+        modifier =
+            Modifier.pullToRefresh(
+                state = state,
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+            ),
+        topBar = {
+            TopAppBar(
+                title = { Text("TopAppBar") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        },
+    ) {
+        Box(Modifier.padding(it)) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (!isRefreshing) {
+                    items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
+                }
+            }
+            Box(
+                Modifier.align(Alignment.TopCenter).graphicsLayer {
+                    scaleX = scaleFraction()
+                    scaleY = scaleFraction()
+                }
+            ) {
+                PullToRefreshDefaults.Indicator(state = state, isRefreshing = isRefreshing)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Sampled
+@Composable
+@Preview
+fun PullToRefreshLinearProgressIndicatorSample() {
+    var itemCount by remember { mutableIntStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val state = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            // fetch something
+            delay(5000)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    Scaffold(
+        modifier =
+            Modifier.pullToRefresh(
+                state = state,
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+            ),
+        topBar = {
+            TopAppBar(
+                title = { Text("TopAppBar") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        },
+    ) {
+        Box(Modifier.padding(it)) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (!isRefreshing) {
+                    items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
+                }
+            }
+            if (isRefreshing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    progress = { state.distanceFraction },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Sampled
+@Composable
+@Preview
+fun PullToRefreshCustomIndicatorWithDefaultTransform() {
+    var itemCount by remember { mutableIntStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val state = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            delay(1500)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Title") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        }
+    ) {
+        PullToRefreshBox(
+            modifier = Modifier.padding(it),
+            state = state,
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            indicator = {
+                PullToRefreshDefaults.IndicatorBox(
+                    state = state,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    elevation = 0.dp,
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator()
+                    } else {
+                        CircularProgressIndicator(
+                            progress = { state.distanceFraction },
+                            trackColor = ProgressIndicatorDefaults.circularIndeterminateTrackColor,
+                        )
+                    }
+                }
+            },
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
+@Sampled
+@Composable
+fun LoadingIndicatorPullToRefreshSample() {
+    var itemCount by remember { mutableStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val state = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            // fetch something
+            delay(5000)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    val scaleFraction = {
+        if (isRefreshing) 1f
+        else LinearOutSlowInEasing.transform(state.distanceFraction).coerceIn(0f, 1f)
+    }
+
+    Scaffold(
+        modifier =
+            Modifier.pullToRefresh(
+                state = state,
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+            ),
+        topBar = {
+            TopAppBar(
+                title = { Text("TopAppBar") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        },
+    ) {
+        Box(Modifier.padding(it)) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (!isRefreshing) {
+                    items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
+                }
+            }
+            Box(
+                Modifier.align(Alignment.TopCenter).graphicsLayer {
+                    scaleX = scaleFraction()
+                    scaleY = scaleFraction()
+                }
+            ) {
+                PullToRefreshDefaults.LoadingIndicator(state = state, isRefreshing = isRefreshing)
+            }
+        }
     }
 }

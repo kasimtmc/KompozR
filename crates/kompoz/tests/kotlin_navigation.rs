@@ -18,17 +18,16 @@ use kompoz::test::KompozTestRule;
 // there), and material3's NavigationBarSamples + BadgeSamples' NavigationBarItemWithBadge from kt/navigation_bar.kt.
 
 kompoz! {
-    // (the C++'s Scaffold bottom bar: a column of the page and the bar until WP4a's Scaffold)
+    // (the C++'s: a Scaffold's bottom bar)
     @Composable
     fun BarSwitchingTabs() {
         var tab by remember { mutableStateOf(0) }
-        Column(Modifier.fillMaxSize()) {
-            Text(if (tab == 0) "sayfa 1" else "sayfa 2", Modifier.weight(1f))
+        Scaffold(Modifier.fillMaxSize(), bottomBar = {
             NavigationBar {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Bir") })
                 NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("İki") })
             }
-        }
+        }) { padding -> Text(if (tab == 0) "sayfa 1" else "sayfa 2", Modifier.padding(padding)) }
     }
 
     @Composable

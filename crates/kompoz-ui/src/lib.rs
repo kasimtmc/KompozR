@@ -35,6 +35,8 @@ pub mod state;
 pub mod strings;
 pub mod text;
 pub mod text_input;
+// (WP4a: tooling preview)
+pub mod tooling;
 pub mod unit;
 pub mod util;
 pub mod window;
