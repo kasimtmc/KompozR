@@ -18,6 +18,14 @@ kompoz-material-ripple = { path = "../kompoz-material-ripple" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
+# (WP6: pickers) Dates and times by the locale (D4): CLDR's patterns, names, first day of the week, digits; "today"
+# from the C library's localtime_r.
+icu_calendar = "2.4.0"
+icu_datetime = "2.4.0"
+icu_decimal = "2.4.0"
+icu_locale_core = "2.4.0"
+libc = "0.2"
+writeable = "0.6.4"
 
 [dev-dependencies]
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
@@ -159,4 +167,16 @@ harness = false
 # defaults: morphs, turns, sizes, colors, semantics (the C++ Kompoz loading indicator tests by name, M15 behaviour).
 [[test]]
 name = "loading_indicator"
+harness = false
+
+# (WP6: date pickers) Date pickers, date range pickers, their input modes and the dialog (the C++ Kompoz's date picker
+# tests by name, Compose's behaviour, M15's DatePickerSamples), the calendar model and the locale's date formats.
+[[test]]
+name = "date_picker"
+harness = false
+
+# (WP6: time pickers) Time pickers, time inputs and the dialog (the C++ Kompoz's time picker tests by name, Compose's
+# behaviour, M15's TimePickerSamples).
+[[test]]
+name = "time_picker"
 harness = false

@@ -72,6 +72,7 @@ kompoz-foundation/layout kompozable Child r crates/kompoz-foundation/tests/layou
 kompoz-material3/containers kompozable ChipGroupReflowSample - crates/kompoz-material3/tests/containers.rs
 kompoz-material3/containers kompozable ChipGroupSingleLineSample r crates/kompoz-material3/tests/containers.rs
 * kompozable CircularArrowProgressIndicator rr crates/kompoz-material3/src/pulltorefresh.rs
+* kompozable CircularLayout rrr crates/kompoz-material3/src/time_picker.rs
 * kompozable CircularProgressIndicator rdddddd crates/kompoz-material3/src/progress_indicator.rs
 * kompozable CircularWavyProgressIndicator rddddddddd crates/kompoz-material3/src/wavy_progress_indicator.rs
 kompoz-runtime/runtime kompozable CityText r crates/kompoz-runtime/tests/runtime.rs
@@ -86,6 +87,9 @@ kompoz-material3/lists kompozable ClickableListItemWithClickableChildSample r cr
 kompoz-material3/containers kompozable ClickableOutlinedCardSample - crates/kompoz-material3/tests/containers.rs
 * kompozable ClickableSurface rdddddddddr crates/kompoz-material3/src/surface.rs
 kompoz-runtime/macros kompozable Clicker rr crates/kompoz-runtime/tests/macros.rs
+* kompozable ClockDisplayNumbers rr crates/kompoz-material3/src/time_picker.rs
+* kompozable ClockFace rrrr crates/kompoz-material3/src/time_picker.rs
+* kompozable ClockText rrrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable CollectInteractionsAsState rrrrr crates/kompoz-material3/src/list_item.rs
 * kompozable ColorProducerSurface rrddr crates/kompoz-material3/src/surface.rs
 * fn ColorScheme rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/color_scheme.rs
@@ -126,6 +130,29 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 * kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
 * kompozable CustomizedLookaheadAnimationVisualDebugging rr crates/kompoz-animation/src/lookahead_debug.rs
 * kompozable DataSnackbar rdddddddd crates/kompoz-material3/src/snackbar.rs
+* kompozable DateEntryContainer rrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable DateInputContent rrrrrrrr crates/kompoz-material3/src/date_input.rs
+kompoz-material3/date_picker kompozable DateInputSample - crates/kompoz-material3/tests/date_picker.rs
+* kompozable DateInputTextField rrrrrrrrrrrr crates/kompoz-material3/src/date_input.rs
+* kompozable DatePicker rddddddd crates/kompoz-material3/src/date_picker.rs
+kompoz-material3/date_picker kompozable DatePickerApi26Sample - crates/kompoz-material3/tests/date_picker.rs
+* kompozable DatePickerContent rrrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable DatePickerDialog rrddddddr crates/kompoz-material3/src/date_picker_dialog.rs
+kompoz-material3/date_picker kompozable DatePickerDialogSample - crates/kompoz-material3/tests/date_picker.rs
+* kompozable DatePickerHeader rrrrrr crates/kompoz-material3/src/date_picker.rs
+* method DatePickerHeadline rrrdd crates/kompoz-material3/src/date_picker.rs DatePickerDefaults
+kompoz-material3/date_picker kompozable DatePickerSample - crates/kompoz-material3/tests/date_picker.rs
+* method DatePickerTitle rdd crates/kompoz-material3/src/date_picker.rs DatePickerDefaults
+kompoz-material3/date_picker kompozable DatePickerWithDateSelectableDatesSample - crates/kompoz-material3/tests/date_picker.rs
+* kompozable DateRangeInputContent rrrrrrrrr crates/kompoz-material3/src/date_range_input.rs
+* kompozable DateRangePicker rddddddd crates/kompoz-material3/src/date_range_picker.rs
+kompoz-material3/date_picker kompozable DateRangePickerApi26Sample - crates/kompoz-material3/tests/date_picker.rs
+* kompozable DateRangePickerContent rrrrrrrrrr crates/kompoz-material3/src/date_range_picker.rs
+* method DateRangePickerHeadline rrrrdd crates/kompoz-material3/src/date_range_picker.rs DateRangePickerDefaults
+* kompozable DateRangePickerHeadlineImpl rrrrrrrrrrrr crates/kompoz-material3/src/date_range_picker.rs
+kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-material3/tests/date_picker.rs
+* method DateRangePickerTitle rdd crates/kompoz-material3/src/date_range_picker.rs DateRangePickerDefaults
+* kompozable Day rrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable DecoratedLabel rrrrrrrrrr crates/kompoz-material3/src/internal/text_field_impl.rs
 * kompozable Decoration rrr crates/kompoz-material3/src/internal/text_field_impl.rs
 * method DecorationBox rrrrrrddddddddddd crates/kompoz-material3/src/text_field_defaults.rs OutlinedTextFieldDefaults
@@ -144,6 +171,9 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 * kompozable DismissibleDrawerSheetWithDrawerState rddddddr crates/kompoz-material3/src/navigation_drawer.rs
 * kompozable DismissibleNavigationDrawer rdddr crates/kompoz-material3/src/navigation_drawer.rs
 kompoz-material3/navigation_drawer kompozable DismissibleNavigationDrawerSample - crates/kompoz-material3/tests/navigation_drawer.rs
+* method DisplayModeToggle rrd crates/kompoz-material3/src/time_picker_dialog.rs TimePickerDialogDefaults
+* kompozable DisplayModeToggleButton rrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable DisplaySeparator r crates/kompoz-material3/src/time_picker.rs
 * kompozable DisposableEffect rr crates/kompoz-runtime/src/remember.rs
 * kompozable Divider ddd crates/kompoz-material3/src/divider.rs
 kompoz-platform/drag_display kompozable DragApp - crates/kompoz-platform/tests/drag_display.rs
@@ -228,14 +258,19 @@ kompoz-foundation/grid kompozable GridLeaf rrrr crates/kompoz-foundation/tests/g
 * kompozable HandlePopup rrr crates/kompoz-foundation/src/text/selection/handles.rs
 kompoz-runtime/macros fn Handler dd crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/macros kompozable Held r crates/kompoz-runtime/tests/macros.rs
+* kompozable HorizontalClockDisplay rr crates/kompoz-material3/src/time_picker.rs
 * kompozable HorizontalDivider ddd crates/kompoz-material3/src/divider.rs
+* kompozable HorizontalMonthsList rrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable HorizontalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs
+* kompozable HorizontalPeriodToggle rrr crates/kompoz-material3/src/time_picker.rs
 * kompozable HorizontalScrollbar rdddd crates/kompoz-foundation/src/scrollbar.rs
+* kompozable HorizontalTimePicker rrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable Icon rrdd crates/kompoz-material3/src/icon.rs
 * kompozable IconButton rdddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable IconButtonImpl rrrrrrr crates/kompoz-material3/src/icon_button.rs
 * fn IconButtonShapes rd crates/kompoz-material3/src/icon_button.rs
 * kompozable IconButtonWithShapes rrddddr crates/kompoz-material3/src/icon_button.rs
+* kompozable IconButtonWithTooltip rrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable IconButtonWithoutShape rddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable IconToggleButton rrdddddr crates/kompoz-material3/src/icon_button.rs
 * kompozable IconToggleButtonImpl rrrrrrrr crates/kompoz-material3/src/icon_button.rs
@@ -363,6 +398,8 @@ kompoz-material3/navigation_drawer kompozable ModalNavigationDrawerSample - crat
 * kompozable ModalWideNavigationRailDialog rrrrrr crates/kompoz-material3/src/wide_navigation_rail.rs
 * fn ModalWideNavigationRailProperties d crates/kompoz-material3/src/wide_navigation_rail.rs
 kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/tests/text_input.rs
+* kompozable Month rrrrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable MonthsNavigation rrrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable MultiContentLayout rdr crates/kompoz-ui/src/layout/composables.rs
 * kompozable MultiMeasureLayout drR crates/kompoz-ui/src/layout/composables.rs
 kompoz-material3/lists kompozable MultiSelectionListItemSample - crates/kompoz-material3/tests/lists.rs
@@ -406,6 +443,7 @@ kompoz-material3/containers kompozable OutlinedCardSample - crates/kompoz-materi
 * fn ParagraphStyle ddddddddd crates/kompoz-text/src/paragraph_style.rs
 * fn PasswordVisualTransformation d crates/kompoz-text/src/visual_transformation.rs
 * kompozable Path rddddddddddddd crates/kompoz-ui/src/draw/vector.rs
+* kompozable PeriodToggleImpl rrrrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable PermanentDrawerSheet ddddddr crates/kompoz-material3/src/navigation_drawer.rs
 * kompozable PermanentNavigationDrawer rdr crates/kompoz-material3/src/navigation_drawer.rs
 kompoz-material3/navigation_drawer kompozable PermanentNavigationDrawerSample - crates/kompoz-material3/tests/navigation_drawer.rs
@@ -465,7 +503,9 @@ kompoz/named_forms kompozable RustListForms rr crates/kompoz/tests/named_forms.r
 kompoz/named_forms kompozable RustScrollForms r crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSharedForms r crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSliding r crates/kompoz/tests/named_forms.rs
+kompoz-material3/time_picker kompozable SampleConfirm rrrrr crates/kompoz-material3/tests/time_picker.rs
 kompoz-material3/navigation_rail kompozable SampleRailHeader r crates/kompoz-material3/tests/navigation_rail.rs
+kompoz-material3/time_picker kompozable SampleScaffold rr crates/kompoz-material3/tests/time_picker.rs
 kompoz-material3/navigation_rail kompozable SampleWideItems rrr crates/kompoz-material3/tests/navigation_rail.rs
 kompoz-runtime/runtime kompozable SavedChecks r crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
@@ -568,6 +608,7 @@ kompoz-material3/containers kompozable SuggestionChipSample - crates/kompoz-mate
 * kompozable SuggestionChipWithoutArrangement rrdddddddd crates/kompoz-material3/src/chip.rs
 * kompozable SupportingBox r crates/kompoz-material3/src/text_field.rs
 * kompozable SupportingDecorator rrr crates/kompoz-material3/src/list_item.rs
+* kompozable SupportingText rrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable Surface dddddddr crates/kompoz-material3/src/surface.rs
 * kompozable SurfaceIconButton rrrrrrrr crates/kompoz-material3/src/icon_button.rs
 * kompozable SurfaceIconButtonWithShapes rrrrrrrr crates/kompoz-material3/src/icon_button.rs
@@ -578,6 +619,8 @@ kompoz-material3/swipe_pull kompozable SwipeToDismissListItems - crates/kompoz-m
 * kompozable Switch rrddddd crates/kompoz-material3/src/switch.rs
 * fn SwitchColors rrrrrrrrrrrrrrrr crates/kompoz-material3/src/switch.rs
 * kompozable SwitchImpl rrrrrrr crates/kompoz-material3/src/switch.rs
+* kompozable SwitchableDateEntryContent rrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable SwitchableDateEntryContent rrrrrrrrrrrr crates/kompoz-material3/src/date_range_picker.rs
 * kompozable Tab rrdddddr crates/kompoz-material3/src/tab.rs
 * kompozable TabBaselineLayout rr crates/kompoz-material3/src/tab.rs
 * kompozable TabRow rdddddr crates/kompoz-material3/src/tab_row.rs
@@ -625,10 +668,22 @@ kompoz-material3/lists kompozable ThreeLineListItemWithExtendedSupporting - crat
 kompoz-material3/lists kompozable ThreeLineListItemWithOverlineAndSupporting - crates/kompoz-material3/tests/lists.rs
 * kompozable Thumb rrrrrr crates/kompoz-material3/src/slider/defaults.rs
 * method Thumb rdddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
+* kompozable TimeInput rdd crates/kompoz-material3/src/time_picker.rs
+* kompozable TimeInputImpl rrr crates/kompoz-material3/src/time_picker.rs
+* kompozable TimePicker rddd crates/kompoz-material3/src/time_picker.rs
+* kompozable TimePickerCustomLayout rrr crates/kompoz-material3/src/time_picker_dialog.rs
+* kompozable TimePickerDialog rrrddddddr crates/kompoz-material3/src/time_picker_dialog.rs
+* kompozable TimePickerDialogLayout rrrrrrrr crates/kompoz-material3/src/time_picker_dialog.rs
+* kompozable TimePickerDialogTitle rr crates/kompoz-material3/src/time_picker_dialog.rs
+* kompozable TimePickerDisplayModeToggle rrr crates/kompoz-material3/src/time_picker_dialog.rs
+* kompozable TimePickerTextField rrrrrrrr crates/kompoz-material3/src/time_picker.rs
+* kompozable TimeSelector rrrrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable TintProducerIcon rrrd crates/kompoz-material3/src/icon.rs
 kompoz-runtime/runtime kompozable TintReader - crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable TintedContent - crates/kompoz-runtime/tests/runtime.rs
+* method Title rd crates/kompoz-material3/src/time_picker_dialog.rs TimePickerDialogDefaults
 kompoz-runtime/runtime kompozable Toggle rr crates/kompoz-runtime/tests/runtime.rs
+* kompozable ToggleItem rrrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable ToggleableListItem rrddddddddddddddr crates/kompoz-material3/src/list_item.rs
 * kompozable ToggleableSegmentedListItem rrrdddddddddddddr crates/kompoz-material3/src/list_item.rs
 * kompozable ToggleableSurface rrdddddddddr crates/kompoz-material3/src/surface.rs
@@ -645,6 +700,8 @@ kompoz-runtime/macros kompozable TopAppBar rd crates/kompoz-runtime/tests/macros
 * kompozable TransitionAnimatedVisibility rrrrrrr crates/kompoz-animation/src/animated_visibility.rs
 * kompozable TransitionCrossfade rrrrr crates/kompoz-animation/src/crossfade.rs
 * kompozable TriStateCheckbox rrdddd crates/kompoz-material3/src/checkbox.rs
+kompoz-material3/date_picker kompozable Turkish r crates/kompoz-material3/tests/date_picker.rs
+kompoz-material3/time_picker kompozable Turkish r crates/kompoz-material3/tests/time_picker.rs
 kompoz-runtime/macros fn Twice rd crates/kompoz-runtime/tests/macros.rs
 kompoz-material3/lists kompozable TwoLineListItem - crates/kompoz-material3/tests/lists.rs
 * fn Typography dddddddddddddddddddddddddddddd crates/kompoz-material3/src/typography.rs
@@ -656,13 +713,18 @@ kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-founda
 * kompozable ValueTextField rrddddddddddddddddddddd crates/kompoz-material3/src/text_field.rs
 * kompozable VectorIcon rrdd crates/kompoz-material3/src/icon.rs
 * kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
+* kompozable VerticalClockDisplay rr crates/kompoz-material3/src/time_picker.rs
 * kompozable VerticalDivider ddd crates/kompoz-material3/src/divider.rs
 * kompozable VerticalDragHandle ddddd crates/kompoz-material3/src/drag_handle.rs
 kompoz-material3/sheets kompozable VerticalDragHandleSample - crates/kompoz-material3/tests/sheets.rs
 kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-foundation/tests/layout_modifiers.rs
+* kompozable VerticalMonthsList rrrrrrrrrr crates/kompoz-material3/src/date_range_picker.rs
 * kompozable VerticalPager rdddddddddddddr crates/kompoz-foundation/src/pager/pager.rs
+* kompozable VerticalPeriodToggle rrr crates/kompoz-material3/src/time_picker.rs
 * kompozable VerticalScrollbar rdddd crates/kompoz-foundation/src/scrollbar.rs
 * kompozable VerticalSlider rddddddd crates/kompoz-material3/src/slider/mod.rs
+* kompozable VerticalTimePicker rrrr crates/kompoz-material3/src/time_picker.rs
+* kompozable WeekDays rr crates/kompoz-material3/src/date_picker.rs
 * kompozable WideNavigationRail ddddddddr crates/kompoz-material3/src/wide_navigation_rail.rs
 * kompozable WideNavigationRailItem rrrrrdddddd crates/kompoz-material3/src/wide_navigation_rail.rs
 * kompozable WideNavigationRailLayout rrrrrrrrrr crates/kompoz-material3/src/wide_navigation_rail.rs
@@ -675,6 +737,9 @@ kompoz-foundation/selection kompozable WithToolbar rr crates/kompoz-foundation/t
 * kompozable WrappedAnchor rrrrr crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable WrappedAnchor rrrrrr crates/kompoz-material3/src/internal/basic_tooltip.rs
 * kompozable WrappedLeadingIcon r crates/kompoz-material3/src/menu.rs
+* kompozable Year rrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable YearPicker rrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* kompozable YearPickerMenuButton rrrr crates/kompoz-material3/src/date_picker.rs
 * method absolute_offset dd crates/kompoz-foundation/src/layout/offset.rs Modifier as OffsetModifiers
 * method absolute_padding dddd crates/kompoz-foundation/src/layout/padding.rs Modifier as PaddingModifiers
 kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
@@ -790,8 +855,10 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method colors ddddddd crates/kompoz-material3/src/wide_navigation_rail.rs WideNavigationRailItemDefaults
 * method colors dddddddd crates/kompoz-material3/src/navigation_drawer.rs NavigationDrawerItemDefaults
 * method colors dddddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
+* method colors dddddddddddddd crates/kompoz-material3/src/time_picker.rs TimePickerDefaults
 * method colors dddddddddddddddd crates/kompoz-material3/src/switch.rs SwitchDefaults
 * method colors dddddddddddddddddddddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemDefaults
+* method colors ddddddddddddddddddddddddd crates/kompoz-material3/src/date_picker.rs DatePickerDefaults
 * method colors ddddddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/text_field_defaults.rs OutlinedTextFieldDefaults
 * method colors ddddddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
 * method colors_of_parts ddddddddddddd crates/kompoz-material3/src/checkbox.rs CheckboxDefaults
@@ -832,9 +899,11 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method copy dddddddddddd crates/kompoz-material3/src/menu.rs MenuItemColors
 * method copy ddddddddddddd crates/kompoz-material3/src/checkbox.rs CheckboxColors
 * method copy ddddddddddddd crates/kompoz-material3/src/chip.rs SelectableChipColors
+* method copy dddddddddddddd crates/kompoz-material3/src/time_picker.rs TimePickerColors
 * method copy dddddddddddddddd crates/kompoz-material3/src/switch.rs SwitchColors
 * method copy dddddddddddddddddd crates/kompoz-text/src/span_style.rs SpanStyle
 * method copy dddddddddddddddddddddddd crates/kompoz-material3/src/list_item_defaults.rs ListItemColors
+* method copy ddddddddddddddddddddddddd crates/kompoz-material3/src/date_picker.rs DatePickerColors
 * method copy dddddddddddddddddddddddddd crates/kompoz-text/src/text_style.rs TextStyle
 * method copy dddddddddddddddddddddddddddddd crates/kompoz-material3/src/typography.rs Typography
 * method copy ddddddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldColors
@@ -848,9 +917,16 @@ kompoz-runtime/macros method copy dddd crates/kompoz-runtime/tests/macros.rs Col
 * method create_deferred_animation rd crates/kompoz-animation/src/transition.rs Transition
 * method cut_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * fn dark_color_scheme dddddddddddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/color_scheme.rs
+* method date_formatter ddd crates/kompoz-material3/src/date_picker.rs DatePickerDefaults
+* fn date_picker_state rddddd crates/kompoz-material3/src/date_picker.rs
+* fn date_picker_state_of_date rrdddd crates/kompoz-material3/src/date_picker_java_time.rs
+* fn date_range_picker_state rdddddd crates/kompoz-material3/src/date_range_picker.rs
+* fn date_range_picker_state_of_dates rrrdddd crates/kompoz-material3/src/date_picker_java_time.rs
+* kompozable day_content_description rrrrr crates/kompoz-material3/src/date_picker.rs
 * method decorator rrrrrdddddddddddd crates/kompoz-material3/src/text_field_defaults.rs OutlinedTextFieldDefaults
 * method decorator rrrrrdddddddddddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
 * kompozable default_decay_animation_spec - crates/kompoz-animation/src/spline_decay.rs
+* kompozable default_locale - crates/kompoz-material3/src/calendar_locale.rs
 * method default_min_size dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
 * kompozable derived_media_query r crates/kompoz-ui/src/media_query.rs
 * method dismiss dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -957,6 +1033,7 @@ kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/i
 * method input_chip_elevation dddddd crates/kompoz-material3/src/chip.rs InputChipDefaults
 * method insert_text_at_cursor dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method inset_hv dd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+* kompozable is_24_hour_format - crates/kompoz-material3/src/time_format.rs
 * method item dddr crates/kompoz-foundation/src/lazy/grid/dsl.rs LazyGridScope
 * method item dddr crates/kompoz-foundation/src/lazy/staggeredgrid/dsl.rs LazyStaggeredGridScope
 * method item ddr crates/kompoz-foundation/src/lazy/list/dsl.rs LazyListScope
@@ -1080,6 +1157,10 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * kompozable remember_bottom_sheet_scaffold_state dd crates/kompoz-material3/src/bottom_sheet_scaffold.rs
 * kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_cursor_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
+* kompozable remember_date_picker_state ddddd crates/kompoz-material3/src/date_picker.rs
+* kompozable remember_date_picker_state_of_date rdddd crates/kompoz-material3/src/date_picker_java_time.rs
+* kompozable remember_date_range_picker_state dddddd crates/kompoz-material3/src/date_range_picker.rs
+* kompozable remember_date_range_picker_state_of_dates rrdddd crates/kompoz-material3/src/date_picker_java_time.rs
 * kompozable remember_default_prefetch_scheduler - crates/kompoz-foundation/src/lazy/layout/prefetch.rs
 * kompozable remember_deferred_transition rd crates/kompoz-animation/src/transition.rs
 * kompozable remember_draggable2d_state r crates/kompoz-foundation/src/gestures/draggable2d.rs
@@ -1121,6 +1202,7 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * kompozable remember_sheet_state drdddd crates/kompoz-material3/src/sheet_defaults.rs
 * kompozable remember_slider_state dddd crates/kompoz-material3/src/slider/state.rs
 * kompozable remember_snap_fling_behavior r crates/kompoz-foundation/src/gestures/snapping/snap_fling_behavior.rs
+* method remember_snap_fling_behavior rd crates/kompoz-material3/src/date_picker.rs DatePickerDefaults
 * kompozable remember_snap_fling_behavior_for_grid rd crates/kompoz-foundation/src/gestures/snapping/lazy_grid.rs
 * kompozable remember_snap_fling_behavior_for_list rd crates/kompoz-foundation/src/gestures/snapping/lazy_list.rs
 * kompozable remember_spline_based_decay - crates/kompoz-animation/src/spline_decay.rs
@@ -1133,6 +1215,8 @@ kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Sl
 * kompozable remember_text_field_state dd crates/kompoz-foundation/src/text/input/text_field_state.rs
 * kompozable remember_text_field_vertical_scroll_state d crates/kompoz-foundation/src/text/text_field_scroll_state.rs
 * kompozable remember_text_measurer d crates/kompoz-ui/src/text.rs
+* kompozable remember_time_input_error_handler r crates/kompoz-material3/src/time_picker.rs
+* kompozable remember_time_picker_state ddd crates/kompoz-material3/src/time_picker.rs
 * method remember_tooltip_position_provider rd crates/kompoz-material3/src/tooltip.rs TooltipDefaults
 * method remember_tooltip_position_provider_with_spacing d crates/kompoz-material3/src/tooltip.rs TooltipDefaults
 * kompozable remember_tooltip_state ddd crates/kompoz-material3/src/tooltip.rs

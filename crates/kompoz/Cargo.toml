@@ -210,6 +210,12 @@ harness = false
 name = "kotlin_progress"
 harness = false
 
+# (WP6: pickers) Material's date and time pickers in Kotlin's syntax: the C++ Kompoz's picker tests written as a
+# Compose user would, material3's DatePickerSamples and TimePickerSamples from .kt files.
+[[test]]
+name = "kotlin_pickers"
+harness = false
+
 # The C++ Kompoz's whole Animations (kompozable_tests.cpp animation_as_compose_writes_it) from a .kt file
 [[test]]
 name = "kotlin_animations_all"

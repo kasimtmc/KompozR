@@ -1024,3 +1024,24 @@ fn delegates_of_a_declared_type_and_a_states_setter() {
     set(false);
     assert!(!state.get());
 }
+
+// (WP6: pickers)
+#[test]
+fn elvis_of_text_ranges_given_to_rust_and_closed_ranges_print_as_kotlin() {
+    // `a ?: "text"` of what isn't text: either side's text (Kotlin prints the `Any` it gives so).
+    assert_eq!(elvis(Some(1578096000000_i64), || String::from("none")), "1578096000000");
+    assert_eq!(elvis(None::<i64>, || String::from("none")), "none");
+    assert_eq!(elvis(Some(2.5_f32), || "none"), "2.5");
+    assert_eq!(elvis(Some(LocalDate::of(2023, 4, 15)), || "open"), "2023-04-15");
+    // An IntRange given where Rust holds a `RangeInclusive`: its first value to its last.
+    assert_eq!(to_closed_range(range_to(2000, 2030)), 2000..=2030);
+    assert_eq!(to_closed_range(until(0, 3)), 0..=2);
+    // A `ClosedRange`'s text: `start..endInclusive` (`1900..2100`, `0.0..1.0`, dates').
+    assert_eq!(to_string(&(1900..=2100)), "1900..2100");
+    assert_eq!(to_string(&(0.0_f32..=1.0)), "0.0..1.0");
+    assert_eq!(to_string(&(LocalDate::of(2023, 4, 15)..=LocalDate::of(2023, 4, 20))), "2023-04-15..2023-04-20");
+    // Dates' `a..b` (Comparable: not counted), as a range prints.
+    let dates = range_to(LocalDate::of(2023, 4, 15), LocalDate::of(2023, 4, 20));
+    assert_eq!(to_string(&dates), "2023-04-15..2023-04-20");
+    assert!(is_in(&LocalDate::of(2023, 4, 17), &dates) && !is_in(&LocalDate::of(2023, 4, 21), &dates));
+}

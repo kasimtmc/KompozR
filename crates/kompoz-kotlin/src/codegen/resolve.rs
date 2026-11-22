@@ -975,6 +975,9 @@ pub(crate) struct FileVal {
 pub(crate) struct FileTable {
     pub functions: HashMap<String, Vec<FileFn>>,
     pub vals: HashMap<String, FileVal>,
+    /// The members of objects imported by name (`import a.b.TimePickerDialogDefaults.MinHeightForTimePicker`, or
+    /// `as` another name), by the name they are read by: the object's Kotlin name and the member's.
+    pub imported_members: HashMap<String, (String, String)>,
 }
 
 impl FileTable {

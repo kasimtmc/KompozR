@@ -1792,6 +1792,13 @@ impl Gen<'_, '_> {
         if let Some(w) = AnyWrap::of_rust(&p.ty) {
             return self.value_want(e, Want { str_ok: false, any: Some(w), some: false, shared: None });
         }
+        // (a Kotlin `IntRange` — a progression here — to a parameter Rust holds as a `RangeInclusive`, a date
+        // picker's `yearRange = 2000..2030`: its ends)
+        if matches!(pty, Ty::ClosedRange(_)) && matches!(self.peek_ty(e), Ty::Range(_)) {
+            let kt = self.kt(span);
+            let v = self.value(e);
+            return quote_spanned!(span=> #kt::to_closed_range(#v));
+        }
         let o = self.expr(e);
         // (a `&mut` held — a receiver lambda's `this` lent mutably — given to a `&mut` parameter: reborrowed,
         // `drawStopIndicator(drawScope = this, …)`)

@@ -137,6 +137,8 @@ pub mod prelude {
     pub use crate::Icons;
     pub use kompoz_material_icons_core::{MaterialPathBuilder, material_icon};
     pub use kompoz_material3::{Icon, Surface, Text};
+    // (WP6: pickers — java.time's dates, as a Kotlin/JVM file imports them for the date pickers' JVM forms)
+    pub use kompoz_runtime::kt::{DayOfWeek, LocalDate, YearMonth};
 
     pub use kompoz_graphics::{shape, unit};
     pub use kompoz_ui::{draw, input};

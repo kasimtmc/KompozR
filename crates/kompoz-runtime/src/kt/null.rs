@@ -37,6 +37,34 @@ impl<T> KtElvis<T> for Option<T> {
     }
 }
 
+/// `a ?: "text"` of a value that isn't text (`state.selectedDateMillis ?: "no selection"`): Kotlin's result is of
+/// their common supertype (`Any`), which code can only print or compare — here the text either side prints as
+/// (Kotlin's `toString` of the value), what a string template or a `Text` takes.
+macro_rules! elvis_to_text {
+    ($($t:ty),* $(,)?) => {$(
+        impl KtElvis<$t> for String {
+            type Out = String;
+            fn kt_from_value(value: $t) -> String {
+                crate::kt::to_string(&value)
+            }
+            fn kt_from_other(self) -> String {
+                self
+            }
+        }
+        impl KtElvis<$t> for &str {
+            type Out = String;
+            fn kt_from_value(value: $t) -> String {
+                crate::kt::to_string(&value)
+            }
+            fn kt_from_other(self) -> String {
+                self.to_string()
+            }
+        }
+    )*};
+}
+elvis_to_text!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, bool, char);
+elvis_to_text!(crate::kt::LocalDate, crate::kt::YearMonth, crate::kt::DayOfWeek);
+
 /// Kotlin's `a ?: b`: `a`'s value, else `b` (made only then). `a ?: return`, `?: throw`, `?: error(…)` are a
 /// `match` the generator writes, as their `b` never gives a value.
 pub fn elvis<T, R: KtElvis<T>>(value: Option<T>, otherwise: impl FnOnce() -> R) -> R::Out {

@@ -337,6 +337,13 @@ pub fn range_to<T: KtRangeBound>(start: T, end_inclusive: T) -> KtProgression<T>
     KtProgression::range(start, end_inclusive)
 }
 
+/// A Kotlin `IntRange` (a progression here) as the `RangeInclusive` a Rust API holds it in: its first value to its
+/// last (`2000..2030` → `2000..=2030`; `0 until 3` → `0..=2`). The generator writes it where such a parameter is
+/// given a Kotlin range (a date picker's `yearRange`).
+pub fn to_closed_range<T: Clone>(range: KtProgression<T>) -> std::ops::RangeInclusive<T> {
+    range.first()..=range.last()
+}
+
 /// Kotlin's `a until b` and `a..<b`.
 pub fn until<T: KtRangeBound>(start: T, end: T) -> KtProgression<T> {
     T::kt_until(start, end)

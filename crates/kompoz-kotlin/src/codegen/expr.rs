@@ -363,6 +363,14 @@ impl Gen<'_, '_> {
                 ValForm::ThreadLocal => Out::plain(quote_spanned!(span=> #i.with(::core::clone::Clone::clone)), v.ty),
             };
         }
+        // An object's member imported by name (`import …TimePickerDialogDefaults.MinHeightForTimePicker`): read as its
+        // qualified name is.
+        if let Some((owner, member)) = self.file.imported_members.get(&n.name).cloned() {
+            let qe = Expr { kind: ExprKind::Name(Ident { name: owner, backticked: false, loc }), loc };
+            if let Some(q) = self.qualifier(&qe) {
+                return self.qualified(&q, &qe, &Ident { name: member, backticked: false, loc }, loc);
+            }
+        }
         if n.name == "Unit" {
             return Out::plain(quote_spanned!(span=> ()), Ty::Unit);
         }

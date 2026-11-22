@@ -389,6 +389,31 @@ impl<'a, 'd> Gen<'a, 'd> {
 
     /// The file's top-level functions and properties, for the calls and reads that come before them.
     fn collect(&mut self, file: &File) {
+        // An object's member imported by name: `import a.b.Owner.Member` (`as Name`), the owner a type or object of
+        // the API with that member (a constant, an entry, a value, a function of no parameters, a value object's
+        // member). Kotlin reads it by its last name.
+        for import in &file.imports {
+            let segments = &import.path.segments;
+            if import.star || segments.len() < 2 {
+                continue;
+            }
+            let member = &segments[segments.len() - 1].name;
+            // (`a.b.Owner.Companion.Member`: the owner's)
+            let owner = match &segments[segments.len() - 2].name {
+                c if c == "Companion" && segments.len() >= 3 => &segments[segments.len() - 3].name,
+                o => o,
+            };
+            let rust_owner = owner_name(owner);
+            let known = is_pascal(owner)
+                && (associated(&rust_owner, member).iter().any(|i| match i.kind {
+                    crate::index::Kind::Function => i.params.is_empty(),
+                    _ => true,
+                }) || (is_value_object(owner) && members_of(owner, member).next().is_some()));
+            if known {
+                let name = import.alias.as_ref().map_or(member, |a| &a.name);
+                self.file.imported_members.insert(name.clone(), (owner.clone(), member.clone()));
+            }
+        }
         let mut untyped = Vec::new();
         for decl in &file.decls {
             match decl {

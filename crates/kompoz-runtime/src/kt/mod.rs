@@ -36,6 +36,8 @@
 pub mod collections;
 pub mod delegate;
 pub mod format;
+// (WP6: pickers) java.time's dates, what Compose's JVM date picker APIs take.
+pub mod java_time;
 pub mod math;
 pub mod null;
 pub mod random;
@@ -59,6 +61,7 @@ pub use delegate::{
     KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, delegate_of, lazy, post_dec, post_inc, pre_dec, pre_inc,
 };
 pub use format::format;
+pub use java_time::{DayOfWeek, LocalDate, YearMonth};
 pub use math::{
     E, KtAbs, KtFloat, KtNumber, KtSum, PI, abs, acos, asin, atan, atan2, cbrt, ceil, cos, cosh, exp, floor, hypot, ln,
     log2, log10, max, max_of, min, min_of, pow, round, sign, sin, sinh, sqrt, tan, tanh, to_char, truncate,
@@ -69,7 +72,7 @@ pub use null::{elvis_async, run_async, safe_async, with_async};
 pub use random::{KtShuffle, Random};
 pub use range::{
     IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to, is_in,
-    range_to, step, until,
+    range_to, step, to_closed_range, until,
 };
 pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};

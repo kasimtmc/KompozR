@@ -5,7 +5,9 @@
 //! [`Surface`], [`Icon`], the ripple ([`ripple`]), dividers, the scrim, the minimum interactive size, the selection
 //! controls ([`Checkbox`], [`TriStateCheckbox`], [`RadioButton`], [`Switch`]), the sliders ([`Slider`],
 //! [`RangeSlider`], [`VerticalSlider`]), the progress and loading indicators ([`LinearProgressIndicator`],
-//! [`CircularProgressIndicator`], their wavy forms, [`LoadingIndicator`], [`ContainedLoadingIndicator`]), and the
+//! [`CircularProgressIndicator`], their wavy forms, [`LoadingIndicator`], [`ContainedLoadingIndicator`]), the date
+//! and time pickers ([`DatePicker`], [`DateRangePicker`], [`TimePicker`], [`TimeInput`], their dialogs; dates in
+//! the locale's CLDR forms), and the
 //! design tokens and texts (in Compose for desktop's 80 or so languages) its components are made of.
 //!
 //! Its modifiers extend `Modifier` through traits: `use kompoz_material3::prelude::*`.
@@ -16,11 +18,19 @@
 mod alert_dialog;
 mod badge;
 mod button;
+// (WP6: pickers)
+mod calendar_locale;
 mod card;
 mod checkbox;
 mod chip;
 mod color_scheme;
 mod content_color;
+mod date_input;
+mod date_picker;
+mod date_picker_dialog;
+mod date_picker_java_time;
+mod date_range_input;
+mod date_range_picker;
 mod divider;
 mod dynamic_color;
 mod exposed_dropdown_menu;
@@ -32,6 +42,10 @@ mod icon;
 mod icon_button;
 mod icon_button_defaults;
 mod interactive_component_size;
+// (WP6: time pickers)
+mod time_format;
+mod time_picker;
+mod time_picker_dialog;
 // (WP5: sheets)
 mod bottom_sheet_scaffold;
 mod drag_handle;
@@ -89,6 +103,21 @@ mod tooltip;
 mod typography;
 mod wavy_progress_indicator;
 
+// (WP6: pickers)
+pub use calendar_locale::CalendarLocale;
+pub use date_picker::{
+    CalendarModelHandle, DatePicker, DatePickerColors, DatePickerDefaults, DatePickerFormatter, DatePickerState,
+    DisplayMode, SelectableDates, date_picker_state, remember_date_picker_state,
+};
+pub use date_picker_dialog::DatePickerDialog;
+pub use date_picker_java_time::{
+    DatePickerStateJavaTime, DateRangePickerStateJavaTime, date_picker_state_of_date, date_range_picker_state_of_dates,
+    remember_date_picker_state_of_date, remember_date_range_picker_state_of_dates,
+};
+pub use date_range_picker::{
+    DateRangePicker, DateRangePickerDefaults, DateRangePickerState, date_range_picker_state,
+    remember_date_range_picker_state,
+};
 // (WP1a: buttons — Button, FloatingActionButton)
 pub use button::{
     Button, ButtonColors, ButtonDefaults, ButtonElevation, ButtonShapes, ButtonWithShapes, ElevatedButton,
@@ -102,6 +131,12 @@ pub use floating_action_button::{
     SmallFloatingActionButton, TextIconExtendedFloatingActionButton, TextIconLargeExtendedFloatingActionButton,
     TextIconMediumExtendedFloatingActionButton, TextIconSmallExtendedFloatingActionButton,
 };
+// (WP6: time pickers)
+pub use time_picker::{
+    TimeInput, TimePicker, TimePickerColors, TimePickerDefaults, TimePickerLayoutType, TimePickerSelectionMode,
+    TimePickerState, TimePickerStateExt, remember_time_picker_state,
+};
+pub use time_picker_dialog::{TimePickerDialog, TimePickerDialogDefaults, TimePickerDisplayMode};
 // (WP1a: icon buttons — IconButton, IconButtonDefaults)
 pub use icon_button::{
     FilledIconButton, FilledIconButtonWithShapes, FilledIconToggleButton, FilledIconToggleButtonWithShapes,
@@ -298,6 +333,14 @@ pub use wavy_progress_indicator::{
     AmplitudeFunction, CircularWavyProgressIndicator, IndeterminateCircularWavyProgressIndicator,
     IndeterminateLinearWavyProgressIndicator, LinearWavyProgressIndicator, WavyProgressIndicatorDefaults,
 };
+
+// (WP6: pickers)
+/// Test support, not Compose API: the date pickers' "today" read from a test's clock (Compose's tests pass
+/// kotlinx-datetime a `Clock`; the pickers here read the system's local date otherwise).
+#[doc(hidden)]
+pub mod testing {
+    pub use crate::internal::kotlinx_datetime_calendar_model::set_today_for_tests;
+}
 
 /// What an app using Material 3 imports: the theme, the components, the modifier extension traits.
 pub mod prelude {

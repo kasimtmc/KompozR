@@ -170,6 +170,15 @@ macro_rules! ints {
 }
 ints!(i8: 8, i16: 16, i32: 32, i64: 64, i128: 128, isize: 64, u8: 8, u16: 16, u32: 32, u64: 64, u128: 128, usize: 64);
 
+/// Kotlin's `ClosedRange.toString()` (a `Comparable`'s or a `Float`'s `a..b`): `start..endInclusive`.
+impl<T: KtToString> KtToString for std::ops::RangeInclusive<T> {
+    fn kt_write(&self, out: &mut String) {
+        self.start().kt_write(out);
+        out.push_str("..");
+        self.end().kt_write(out);
+    }
+}
+
 impl KtToString for f64 {
     fn kt_write(&self, out: &mut String) {
         write_java_float(out, *self, false);
