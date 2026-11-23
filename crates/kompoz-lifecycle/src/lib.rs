@@ -8,7 +8,19 @@
 //!   `with_state_at_least` / `with_created` / `with_started` / `with_resumed`, a flow's `flow_with_lifecycle`;
 //! - lifecycle-runtime-compose (androidx.lifecycle.compose) — [`LocalLifecycleOwner`], [`LifecycleEventEffect`],
 //!   [`LifecycleStartEffect`], [`LifecycleResumeEffect`], `collect_as_state_with_lifecycle`,
-//!   `current_state_as_state`, [`drop_unless_started`] / [`drop_unless_resumed`], [`remember_lifecycle_owner`].
+//!   `current_state_as_state`, [`drop_unless_started`] / [`drop_unless_resumed`], [`remember_lifecycle_owner`];
+//! - savedstate 1.4 (androidx.savedstate, savedstate-compose) — [`SavedState`] ([`saved_state`], read and written
+//!   through a [`SavedStateReader`] / [`SavedStateWriter`]), [`SavedStateRegistry`], [`SavedStateRegistryOwner`],
+//!   [`SavedStateRegistryController`], [`LocalSavedStateRegistryOwner`], and its serialization over
+//!   [`Saveable`](kompoz_runtime::Saveable) ([`encode_to_saved_state`], [`decode_from_saved_state`], `saved { }`);
+//! - lifecycle-viewmodel, lifecycle-viewmodel-savedstate, lifecycle-viewmodel-compose — [`ViewModel`],
+//!   [`ViewModelStore`], [`ViewModelStoreOwner`], [`ViewModelProvider`] and its factories, [`CreationExtras`],
+//!   [`SavedStateHandle`], [`LocalViewModelStoreOwner`], [`view_model`] (Kotlin's `viewModel`),
+//!   [`remember_view_model_store_owner`].
+//!
+//! The host is the app's saved state registry owner and ViewModel store owner too ([`LocalSavedStateRegistryOwner`],
+//! [`LocalViewModelStoreOwner`]): its ViewModels are cleared as it is destroyed, their handles written out with its
+//! state.
 //!
 //! The host (kompoz-ui's) is the app's lifecycle owner, provided as [`LocalLifecycleOwner`]: resumed while its
 //! window has the focus, started while it is shown without it, created while it is hidden or minimized, destroyed
@@ -33,6 +45,9 @@ mod lifecycle;
 mod pausing;
 mod registry;
 mod repeat;
+// (stage 13 WP1: androidx.savedstate 1.4, lifecycle-viewmodel 2.11)
+mod saved_state;
+mod viewmodel;
 
 pub use compose::{
     FlowLifecycleExtensions, LifecycleEventEffect, LifecyclePauseOrDisposeEffectResult, LifecycleResumeEffect,
@@ -46,3 +61,10 @@ pub use lifecycle::{
 };
 pub use registry::LifecycleRegistry;
 pub use repeat::{LifecycleDestroyedException, LifecycleFlowExtensions};
+pub use saved_state::{
+    LocalSavedStateRegistryOwner, SavedState, SavedStateDelegate, SavedStateProvider, SavedStateReader,
+    SavedStateRegistry, SavedStateRegistryController, SavedStateRegistryOwner, SavedStateRegistryOwnerExtensions,
+    SavedStateWriter, decode_from_saved_state, decode_from_saved_state_with, encode_to_saved_state,
+    encode_to_saved_state_with, saved_state, saved_state_from, saved_state_of,
+};
+pub use viewmodel::*;

@@ -576,7 +576,7 @@ impl ModalWideNavigationRailOverride for DefaultModalWideNavigationRailOverride 
                 LaunchedEffect(channel.clone(), async move {
                     coroutine_scope(move |scope: CoroutineScope| async move {
                         while let Some(target) = channel.receive().await {
-                            let new_target = channel.try_receive().unwrap_or(target);
+                            let new_target = channel.try_receive().get_or_null().unwrap_or(target);
                             let modal_state = modal_state.clone();
                             named_args!(scope.launch(async move {
                                 if new_target {

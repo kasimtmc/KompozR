@@ -869,6 +869,66 @@ fn swipe_pull_swipe(rule: &KompozTestRule, from: Offset, to: Offset, frames: i32
     rule.wait_for_idle();
 }
 
+/// PullToRefreshViewModelSample's `object : ViewModel() { private val refreshRequests = Channel<Unit>(1); var
+/// isRefreshing by mutableStateOf(false); var itemCount by mutableIntStateOf(15); init { viewModelScope.launch { for
+/// (r in refreshRequests) { isRefreshing = true; try { itemCount += 5; delay(5000) } finally { isRefreshing = false } }
+/// } }; fun refresh() { refreshRequests.trySend(Unit) } }` (stage 14's object expression): a ViewModel, its
+/// requests served in its `viewModelScope`.
+pub type RefreshViewModel = std::rc::Rc<RefreshViewModelClass>;
+
+/// RefreshViewModel's object.
+pub struct RefreshViewModelClass {
+    base: ViewModelImpl,
+    refresh_requests: Channel<()>,
+    is_refreshing: MutableState<bool>,
+    item_count: MutableState<i32>,
+}
+
+pub fn RefreshViewModel() -> RefreshViewModel {
+    let view_model = std::rc::Rc::new(RefreshViewModelClass {
+        base: ViewModelImpl::new(),
+        refresh_requests: Channel(1, BufferOverflow::Suspend),
+        is_refreshing: mutable_state_of(false),
+        item_count: mutable_int_state_of(15),
+    });
+    let (requests, is_refreshing, item_count) =
+        (view_model.refresh_requests.clone(), view_model.is_refreshing.clone(), view_model.item_count.clone());
+    view_model.view_model_scope().launch(async move {
+        while let Some(()) = requests.receive().await {
+            is_refreshing.set(true);
+            // (Kotlin's try / finally: set back however the block ends, cancelled too)
+            struct Finally(MutableState<bool>);
+            impl Drop for Finally {
+                fn drop(&mut self) {
+                    self.0.set(false);
+                }
+            }
+            let _finally = Finally(is_refreshing.clone());
+            item_count.set(item_count.get() + 5);
+            delay(5000).await; // simulate doing real work
+        }
+    });
+    view_model
+}
+
+impl RefreshViewModelClass {
+    pub fn is_refreshing(&self) -> bool {
+        self.is_refreshing.get()
+    }
+    pub fn item_count(&self) -> i32 {
+        self.item_count.get()
+    }
+    pub fn refresh(&self) {
+        self.refresh_requests.try_send(());
+    }
+}
+
+impl ViewModel for RefreshViewModelClass {
+    fn view_model_impl(&self) -> &ViewModelImpl {
+        &self.base
+    }
+}
+
 kompoz_file!("tests/kt/swipe_pull.kt");
 
 fn swipe_to_dismiss_samples() {
@@ -1028,6 +1088,8 @@ fn pull_to_refresh_samples() {
         false,
     );
     pull_sample_refreshes(&KompozTestRule::with_viewport(LoadingIndicatorPullToRefreshSample, window), 5000, true);
+    // (stage 13 WP1: its ViewModel a real one, its requests served in its viewModelScope)
+    pull_sample_refreshes(&KompozTestRule::with_viewport(PullToRefreshViewModelSample, window), 5000, true);
 }
 
 /// Whether an endless progress is shown to accessibility (a refreshing indicator's).

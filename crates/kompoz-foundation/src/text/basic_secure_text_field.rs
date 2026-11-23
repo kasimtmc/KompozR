@@ -170,7 +170,7 @@ impl SecureTextFieldController {
             PasswordInputTransformation {
                 schedule_hide: Box::new(move || {
                     // A new hide scheduled; the signal refused: hidden at once.
-                    if !signal.try_send(())
+                    if !signal.try_send(()).is_success()
                         && let Some(t) = me.upgrade()
                     {
                         t.hide();

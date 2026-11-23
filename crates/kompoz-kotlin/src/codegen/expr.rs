@@ -293,6 +293,16 @@ impl Gen<'_, '_> {
             }
             ExprKind::Member { receiver, safe, name } => self.member(receiver, *safe, name, e.loc),
             ExprKind::Index { receiver, indices } => self.index(receiver, indices, e.loc),
+            // (stage 13 WP1) A class reference `Type::class` (a ViewModel's, what a factory is given): the API's
+            // `KClass::of::<Type>()` (kotlin.reflect's KClass of a ViewModel).
+            ExprKind::CallableRef { receiver: Some(r), name } if name.name == "class" => match &r.kind {
+                ExprKind::Name(n) if n.name.chars().next().is_some_and(char::is_uppercase) => {
+                    let span = self.span(e.loc);
+                    let t = ident(&n.name, self.span(n.loc));
+                    Out::plain(quote_spanned!(span=> KClass::of::<#t>()), Ty::Named("KClass".into(), Vec::new()))
+                }
+                _ => Out::plain(self.later(e.loc, "a callable reference (`::name`)"), Ty::Unknown),
+            },
             ExprKind::CallableRef { .. } => {
                 Out::plain(self.later(e.loc, "a callable reference (`::name`)"), Ty::Unknown)
             }
@@ -974,6 +984,22 @@ impl Gen<'_, '_> {
                     self.concat_pieces(lhs, &mut pieces);
                     self.concat_pieces(rhs, &mut pieces);
                     return Out::plain(quote_spanned!(span=> #kt::template!(#(#pieces),*)), Ty::String);
+                }
+                // A list plus or minus an element or a collection (Kotlin's `plus`/`minus` operators of
+                // `Collection`: `served + order`), a new list.
+                if matches!(op, BinaryOp::Add | BinaryOp::Sub)
+                    && let ty @ Ty::List(_) = self.peek_ty(lhs)
+                {
+                    let a = self.expr(lhs).ts;
+                    let many = matches!(self.peek_ty(rhs), Ty::List(_) | Ty::Set(_) | Ty::Range(_));
+                    let b = self.expr(rhs).ts;
+                    let ts = match (op, many) {
+                        (BinaryOp::Add, true) => quote_spanned!(span=> #kt::KtList::plus(&#a, &#b)),
+                        (BinaryOp::Add, false) => quote_spanned!(span=> #kt::KtList::plus_element(&#a, #b)),
+                        (_, true) => quote_spanned!(span=> #kt::KtList::minus(&#a, &#b)),
+                        _ => quote_spanned!(span=> #kt::KtList::minus_element(&#a, #b)),
+                    };
+                    return Out::plain(ts, ty);
                 }
                 let (a, b) = self.numeric_operands(lhs, rhs);
                 let ty = if a.ty == Ty::Unknown || (b.ty.is_float() && !a.ty.is_float()) {

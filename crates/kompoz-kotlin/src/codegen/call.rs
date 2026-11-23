@@ -2633,8 +2633,9 @@ fn generic_result_of(kotlin: &str, type_args: usize) -> Option<String> {
                 && i.owner.is_empty()
                 && names_type_param(i.ret)
                 && !i.ret.starts_with("impl ")
-                // (a shared trait object of it: what Rust can't infer the parameter of from its use)
-                && i.ret.contains("dyn ")
+                // (a shared trait object of it, or it — `viewModel<T>()`, `decodeFromSavedState<T>(…)` —: what Rust
+                // can't infer the parameter of from its use)
+                && (i.ret.contains("dyn ") || i.ret == "T")
                 && !i.params.iter().any(|p| p.default == crate::index::Default::None && names_type_param(p.ty))
                 && !i.ret.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| {
                     w.len() == 1 && w != "T" && w.chars().all(|c| c.is_ascii_uppercase())

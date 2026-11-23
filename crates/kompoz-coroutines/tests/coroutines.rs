@@ -8,6 +8,10 @@ mod common;
 
 use common::*;
 use kompoz_coroutines::*;
+use kompoz_lifecycle::{
+    CreationExtras, LocalViewModelStoreOwner, SavedState, ViewModel, ViewModelImpl, ViewModelStore,
+    ViewModelStoreOwner, view_model,
+};
 use kompoz_runtime::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,12 +20,22 @@ use std::time::Duration;
 
 const MS: i64 = 1_000_000;
 
-/// Composes content with a dispatcher, running frames as a host does.
+impl Drop for CoRule {
+    /// The composition disposed of, then its ViewModels cleared (a host destroyed).
+    fn drop(&mut self) {
+        self.composition.take();
+        self.view_models.clear();
+    }
+}
+
+/// Composes content with a dispatcher (the main one), running frames as a host does; a ViewModel store owner of its
+/// own (LocalViewModelStoreOwner), cleared as it goes, as a host's.
 struct CoRule {
     root: Rc<TestNode>,
     composition: Option<Composition>,
     dispatcher: Dispatcher,
     time: Cell<i64>,
+    view_models: ViewModelStore,
 }
 
 impl CoRule {
@@ -29,13 +43,16 @@ impl CoRule {
         let root = TestNode::new("root");
         let composition = Composition::new(Some(root.clone()));
         let dispatcher = Dispatcher::new();
+        dispatcher.make_main();
         let d = dispatcher.clone();
+        let view_models = ViewModelStore::new();
+        let owner = ViewModelStoreOwner(view_models.clone(), SavedState::new(), None, None);
         let content = Rc::new(content);
         composition.set_content(kompozable_lambda!(move || KompozitionLocalProvider(
-            &[LocalDispatcher.provides(Some(d.clone()))],
+            &[LocalDispatcher.provides(Some(d.clone())), LocalViewModelStoreOwner.provides(owner.clone())],
             || content.compose()
         )));
-        let rule = CoRule { root, composition: Some(composition), dispatcher, time: Cell::new(0) };
+        let rule = CoRule { root, composition: Some(composition), dispatcher, time: Cell::new(0), view_models };
         rule.frame();
         rule
     }
@@ -612,8 +629,8 @@ thread_local! {
 #[kompozable]
 fn FlowReader(vm: DownloadViewModel) {
     FLOW_READER_RUNS.with(|r| r.set(r.get() + 1));
-    let progress = vm.progress.collect_as_state();
-    Text(format!("{} · %{progress}", vm.status.collect_as_state()));
+    let progress = vm.progress.collect_as_state().get();
+    Text(format!("{} · %{progress}", vm.status.collect_as_state().get()));
 }
 
 fn state_flow_is_collected_as_state() {
@@ -787,7 +804,7 @@ fn flow_collection_stops_with_its_coroutine() {
         let (th, c) = (thirds.clone(), c.clone());
         scoped(move || {
             c.set(c.get() + 1);
-            Text(format!("thirds {}", th.collect_as_state(-1)));
+            Text(format!("thirds {}", th.collect_as_state(-1).get()));
         });
         let (sums, t) = (sums.clone(), t.clone());
         LaunchedEffect(0, async move { sums.collect(move |v| t.borrow_mut().push(v)).await });
@@ -805,15 +822,24 @@ fn flow_collection_stops_with_its_coroutine() {
     assert_eq!(alive.get(), 0);
 }
 
-/// A search as Compose apps write it: the query debounced, combined with a filter, each one searched (the
-/// previous search cancelled), into a StateFlow for the screen.
+/// A search as Compose apps write it: a ViewModel, the query debounced, combined with a filter, each one searched
+/// (the previous search cancelled), into a StateFlow for the screen in its `viewModelScope`.
 struct SearchModel {
+    base: ViewModelImpl,
     query: MutableStateFlow<String>,
     exact: MutableStateFlow<bool>,
     searches: Rc<Cell<i32>>,
     cancelled: Rc<Cell<i32>>,
     results: StateFlow<String>,
-    _scope: CoroutineScope,
+}
+
+impl ViewModel for SearchModel {
+    fn view_model_impl(&self) -> &ViewModelImpl {
+        &self.base
+    }
+    fn new_instance(_extras: &CreationExtras) -> Option<Self> {
+        Some(SearchModel::new())
+    }
 }
 
 fn search(q: String, exactly: bool, searches: Rc<Cell<i32>>, cancelled: Rc<Cell<i32>>) -> Flow<String> {
@@ -839,8 +865,9 @@ fn search(q: String, exactly: bool, searches: Rc<Cell<i32>>, cancelled: Rc<Cell<
 }
 
 impl SearchModel {
-    fn new(dispatcher: &Dispatcher) -> SearchModel {
-        let scope = CoroutineScope::new(dispatcher);
+    fn new() -> SearchModel {
+        let base = ViewModelImpl::new();
+        let scope = base.view_model_scope();
         let query = MutableStateFlow::new(String::new());
         let exact = MutableStateFlow::new(false);
         let (searches, cancelled) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
@@ -848,7 +875,7 @@ impl SearchModel {
         let results = combine(&query.debounce(Duration::from_millis(300)), &exact.as_flow(), |q, e| (q.clone(), *e))
             .flat_map_latest(move |(q, e)| search(q, e, s.clone(), c.clone()))
             .state_in(&scope, SharingStarted::Eagerly, "-".into());
-        SearchModel { query, exact, searches, cancelled, results, _scope: scope }
+        SearchModel { base, query, exact, searches, cancelled, results }
     }
 }
 
@@ -856,10 +883,9 @@ fn flows_combine_debounce_and_follow_the_latest_into_a_state_flow() {
     let model: Rc<RefCell<Option<Rc<SearchModel>>>> = Rc::new(RefCell::new(None));
     let m = model.clone();
     let rule = CoRule::new(kompozable_lambda!(move || {
-        let d = LocalDispatcher.current().unwrap();
-        let vm = remember(|| Rc::new(SearchModel::new(&d)));
+        let vm: Rc<SearchModel> = view_model();
         *m.borrow_mut() = Some(vm.clone());
-        Text(vm.results.collect_as_state());
+        Text(vm.results.collect_as_state().get());
     }));
     let model = model.borrow().clone().unwrap();
     assert!(rule.has("-")); // the initial value, until the debounced query is searched
@@ -969,7 +995,7 @@ fn rendezvous_channels_hand_each_element_from_sender_to_receiver() {
         }
     }));
     // Nobody receives yet: the first send waits.
-    assert!(log.borrow().is_empty() && !channel.is_empty() && !channel.try_send(9));
+    assert!(log.borrow().is_empty() && !channel.is_empty() && !channel.try_send(9).is_success());
     receiving.set(true);
     rule.wait_for_idle();
     // In order, each send done only once its element was taken: never more than one ahead of what the receiver
@@ -987,7 +1013,7 @@ fn rendezvous_channels_hand_each_element_from_sender_to_receiver() {
     assert_eq!(received, ["received 1", "received 2", "received 3"]);
     assert_eq!(sent, ["sent 1", "sent 2", "sent 3"]);
     assert!(log.borrow().len() == 7 && log.borrow().last().unwrap() == "done");
-    assert!(channel.is_closed_for_receive() && !channel.try_send(4));
+    assert!(channel.is_closed_for_receive() && !channel.try_send(4).is_success());
 }
 
 fn buffered_channels_wait_only_when_full() {
@@ -1004,13 +1030,16 @@ fn buffered_channels_wait_only_when_full() {
         });
     }));
     assert_eq!(sent.get(), 2); // two fit; the third waits for room
-    assert_eq!(channel.try_receive(), Some(1));
+    assert_eq!(channel.try_receive().get_or_null(), Some(1));
     rule.wait_for_idle();
     assert_eq!(sent.get(), 3); // it moved into the room
-    assert!(channel.try_receive() == Some(2) && channel.try_receive() == Some(3));
+    assert!(channel.try_receive().get_or_null() == Some(2) && channel.try_receive().get_or_null() == Some(3));
     rule.wait_for_idle();
     assert!(
-        sent.get() == 4 && channel.try_receive() == Some(4) && channel.try_receive().is_none() && channel.is_empty()
+        sent.get() == 4
+            && channel.try_receive().get_or_null() == Some(4)
+            && channel.try_receive().get_or_null().is_none()
+            && channel.is_empty()
     );
 }
 
@@ -1019,13 +1048,19 @@ fn conflated_and_dropping_channels_keep_what_their_overflow_says() {
     let oldest = Channel::<i32>::new(2, BufferOverflow::DropOldest);
     let latest = Channel::<i32>::new(2, BufferOverflow::DropLatest);
     for i in 1..=4 {
-        assert!(conflated.try_send(i) && oldest.try_send(i) && latest.try_send(i));
+        assert!(
+            conflated.try_send(i).is_success() && oldest.try_send(i).is_success() && latest.try_send(i).is_success()
+        );
     }
-    assert!(conflated.try_receive() == Some(4) && conflated.try_receive().is_none());
-    assert!(oldest.try_receive() == Some(3) && oldest.try_receive() == Some(4));
-    assert!(latest.try_receive() == Some(1) && latest.try_receive() == Some(2) && latest.try_receive().is_none());
+    assert!(conflated.try_receive().get_or_null() == Some(4) && conflated.try_receive().get_or_null().is_none());
+    assert!(oldest.try_receive().get_or_null() == Some(3) && oldest.try_receive().get_or_null() == Some(4));
+    assert!(
+        latest.try_receive().get_or_null() == Some(1)
+            && latest.try_receive().get_or_null() == Some(2)
+            && latest.try_receive().get_or_null().is_none()
+    );
     let full = Channel::<i32>::new(1, BufferOverflow::Suspend);
-    assert!(full.try_send(1) && !full.try_send(2)); // Suspend: try_send fails when full
+    assert!(full.try_send(1).is_success() && !full.try_send(2).is_success()); // Suspend: try_send fails when full
 }
 
 fn closed_channels_give_what_is_left_and_cancelled_ones_drop_it() {
@@ -1033,8 +1068,11 @@ fn closed_channels_give_what_is_left_and_cancelled_ones_drop_it() {
     channel.try_send("a".into());
     channel.try_send("b".into());
     assert!(channel.close() && !channel.close() && channel.is_closed_for_send() && !channel.is_closed_for_receive());
-    assert!(!channel.try_send("c".into()));
-    assert!(channel.try_receive().as_deref() == Some("a") && channel.try_receive().as_deref() == Some("b"));
+    assert!(!channel.try_send("c".into()).is_success());
+    assert!(
+        channel.try_receive().get_or_null().as_deref() == Some("a")
+            && channel.try_receive().get_or_null().as_deref() == Some("b")
+    );
     assert!(channel.is_closed_for_receive());
     // Cancelled: buffered elements and a waiting sender's go; the sender hears false.
     let cancelled = Channel::<i32>::new(1, BufferOverflow::Suspend);
@@ -1050,7 +1088,11 @@ fn closed_channels_give_what_is_left_and_cancelled_ones_drop_it() {
     assert!(result.get().is_none());
     cancelled.cancel();
     rule.wait_for_idle();
-    assert!(result.get() == Some(false) && cancelled.try_receive().is_none() && cancelled.is_closed_for_receive());
+    assert!(
+        result.get() == Some(false)
+            && cancelled.try_receive().get_or_null().is_none()
+            && cancelled.is_closed_for_receive()
+    );
 }
 
 fn channel_receivers_share_its_elements_and_a_cancelled_one_takes_nothing() {
@@ -1088,7 +1130,7 @@ fn channel_receivers_share_its_elements_and_a_cancelled_one_takes_nothing() {
     rule.wait_for_idle();
     channel.try_send(7);
     rule.wait_for_idle();
-    assert_eq!(channel.try_receive(), Some(7));
+    assert_eq!(channel.try_receive().get_or_null(), Some(7));
 }
 
 fn produce_sends_from_a_coroutine_and_consume_each_takes_it_all() {
@@ -1136,6 +1178,103 @@ fn produce_sends_from_a_coroutine_and_consume_each_takes_it_all() {
     assert!(*seen.borrow() == [42] && where_.get() == Some(std::thread::current().id()));
 }
 
+/// kotlinx's `trySend`/`tryReceive` give a ChannelResult: a success (with the element received), a failure (no room,
+/// nothing yet), closed; its `onSuccess`/`onFailure`/`onClosed` and `getOrNull`.
+fn try_send_and_try_receive_give_channel_results() {
+    let channel = Channel::<i32>::new(1, BufferOverflow::Suspend);
+    let sent = channel.try_send(1);
+    assert!(sent.is_success() && !sent.is_failure() && !sent.is_closed());
+    let full = channel.try_send(2);
+    assert!(full.is_failure() && !full.is_closed());
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let s = seen.clone();
+    let got = channel.try_receive().on_success(|v| s.borrow_mut().push(*v)).on_failure(|| unreachable!());
+    assert!(got.get_or_null() == Some(1) && *seen.borrow() == [1]);
+    assert!(channel.try_receive().is_failure() && !channel.try_receive().is_closed());
+    channel.close();
+    let closed = channel.try_send(3);
+    assert!(closed.is_closed() && closed.is_failure());
+    let s = seen.clone();
+    assert!(channel.try_receive().on_closed(move || s.borrow_mut().push(0)).get_or_null().is_none());
+    assert_eq!(*seen.borrow(), [1, 0]);
+    let thrown =
+        quietly(|| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| channel.try_receive().get_or_throw())));
+    assert!(thrown.is_err());
+}
+
+/// kotlinx's `scope.produce<Int> { send(i) }` (the block's receiver a ProducerScope: its channel's `send`) and a
+/// suspending `consumeEach { delay(…) }`: each element's action ends before the next is received, then the channel
+/// is consumed.
+fn a_scopes_produce_and_a_suspending_consume_each() {
+    let got = Rc::new(RefCell::new(String::new()));
+    let g = got.clone();
+    let rule = CoRule::new(kompozable_lambda!(move || {
+        let scope = remember_coroutine_scope();
+        let g = g.clone();
+        LaunchedEffect(0, async move {
+            let numbers = scope.produce(|this: ProducerScope<i32>| async move {
+                for i in (1..=3).rev() {
+                    this.send(i).await;
+                }
+            });
+            let g2 = g.clone();
+            numbers
+                .consume_each_async(async move |v| {
+                    delay_ms(10).await;
+                    g2.borrow_mut().push_str(&v.to_string());
+                })
+                .await;
+            g.borrow_mut().push('!');
+        });
+    }));
+    rule.advance_time_by(15);
+    assert_eq!(*got.borrow(), "3");
+    rule.wait_for_idle();
+    assert_eq!(*got.borrow(), "321!");
+}
+
+/// `SharingStarted.WhileSubscribed(stopTimeoutMillis, replayExpirationMillis)`: stopped `stopTimeout` after the
+/// last collector left, the state back at its initial value `replayExpiration` after that (kotlinx's
+/// STOP_AND_RESET_REPLAY_CACHE); `Long.MAX_VALUE` keeps it.
+fn while_subscribed_forgets_the_replay_cache_once_it_expires() {
+    let shown = mutable_state_of(true);
+    type Shared = (StateFlow<i32>, StateFlow<i32>, CoroutineScope);
+    let shared: Rc<RefCell<Option<Shared>>> = Rc::new(RefCell::new(None));
+    let (sh, sd) = (shown.clone(), shared.clone());
+    let rule = CoRule::new(kompozable_lambda!(move || {
+        if sd.borrow().is_none() {
+            let scope = CoroutineScope::new(&LocalDispatcher.current().unwrap());
+            let counting = || {
+                flow(|emit| async move {
+                    let mut i = 1;
+                    loop {
+                        emit.emit(i).await;
+                        i += 1;
+                        delay_ms(100).await;
+                    }
+                })
+            };
+            let expiring = counting().state_in(&scope, SharingStarted::WhileSubscribed_millis(200, 300), 0);
+            let kept = counting().state_in(&scope, SharingStarted::WhileSubscribed_millis(200, i64::MAX), 0);
+            *sd.borrow_mut() = Some((expiring, kept, scope));
+        }
+        if sh.get() {
+            let (expiring, kept, _) = sd.borrow().clone().unwrap();
+            Text(format!("{} {}", expiring.collect_as_state().get(), kept.collect_as_state().get()));
+        }
+    }));
+    let (expiring, kept, _scope) = shared.borrow().clone().unwrap();
+    rule.advance_time_by(250);
+    assert!(expiring.value() >= 2 && kept.value() >= 2);
+    shown.set(false);
+    rule.advance_time_by(350); // stopped, not expired yet
+    assert!(expiring.value() >= 2 && kept.value() >= 2);
+    rule.advance_time_by(300); // expired: back at its initial value; the other keeps its value
+    assert!(expiring.value() == 0 && kept.value() >= 2, "{} {}", expiring.value(), kept.value());
+    let negative = quietly(|| std::panic::catch_unwind(|| SharingStarted::WhileSubscribed_millis(-1, 0)));
+    assert!(negative.is_err());
+}
+
 fn closed_channels_answer_at_once_and_consumers_and_producers_end_them() {
     // Closed: a send says no and a receive gives nothing, neither waiting.
     let closed = Channel::<i32>::rendezvous();
@@ -1178,9 +1317,9 @@ fn closed_channels_answer_at_once_and_consumers_and_producers_end_them() {
     let e = early.borrow().clone().unwrap();
     assert!(
         e.is_closed_for_send()
-            && e.try_receive() == Some(1)
-            && e.try_receive() == Some(2)
-            && e.try_receive() == Some(3)
+            && e.try_receive().get_or_null() == Some(1)
+            && e.try_receive().get_or_null() == Some(2)
+            && e.try_receive().get_or_null() == Some(3)
     );
     // A producer cancelled while it waits: its channel cancelled.
     let producers = CoroutineScope::new(&rule.dispatcher);
@@ -1196,7 +1335,7 @@ fn closed_channels_answer_at_once_and_consumers_and_producers_end_them() {
     assert!(*got.borrow() == [5] && !consumed.is_closed_for_send());
     consuming.set(false); // stops consuming
     rule.wait_for_idle();
-    assert!(consumed.is_closed_for_send() && !consumed.try_send(6));
+    assert!(consumed.is_closed_for_send() && !consumed.try_send(6).is_success());
 }
 
 fn sharing_started_while_subscribed_collects_only_while_collected() {
@@ -1223,13 +1362,14 @@ fn sharing_started_while_subscribed_collects_only_while_collected() {
     let rule = CoRule::new(kompozable_lambda!(move || {
         if sd.borrow().is_none() {
             let scope = CoroutineScope::new(&LocalDispatcher.current().unwrap());
-            let state = t.state_in(&scope, SharingStarted::WhileSubscribed(Duration::from_millis(1000)), 0);
+            let state =
+                t.state_in(&scope, SharingStarted::WhileSubscribed(Duration::from_millis(1000), Duration::MAX), 0);
             let lazy = t.share_in(&scope, SharingStarted::Lazily, 1);
             *sd.borrow_mut() = Some((state, lazy, scope));
         }
         if sh.get() {
             let state = sd.borrow().as_ref().unwrap().0.clone();
-            Text(format!("value {}", state.collect_as_state()));
+            Text(format!("value {}", state.collect_as_state().get()));
         }
     }));
     let (state, lazy, _scope) = shared.borrow().clone().unwrap();
@@ -1294,7 +1434,7 @@ fn state_flow_collect_follows_the_latest_value_until_cancelled() {
             return;
         }
         let flow = if so.get() == 0 { aa.as_state_flow() } else { bb.as_state_flow() };
-        sh.set(flow.collect_as_state()); // another flow: the new one's value at once
+        sh.set(flow.collect_as_state().get()); // another flow: the new one's value at once
         let (aa, se) = (aa.clone(), se.clone());
         LaunchedEffect(0, async move { aa.collect(move |v| se.borrow_mut().push(v)).await });
     }));
@@ -1949,8 +2089,11 @@ tests!(
     closed_channels_give_what_is_left_and_cancelled_ones_drop_it,
     channel_receivers_share_its_elements_and_a_cancelled_one_takes_nothing,
     produce_sends_from_a_coroutine_and_consume_each_takes_it_all,
+    try_send_and_try_receive_give_channel_results,
+    a_scopes_produce_and_a_suspending_consume_each,
     closed_channels_answer_at_once_and_consumers_and_producers_end_them,
     sharing_started_while_subscribed_collects_only_while_collected,
+    while_subscribed_forgets_the_replay_cache_once_it_expires,
     state_flow_values_arrive_after_input_stamped_ahead_of_frames,
     state_flow_collect_follows_the_latest_value_until_cancelled,
     remember_updated_state_gives_effects_the_latest_value,

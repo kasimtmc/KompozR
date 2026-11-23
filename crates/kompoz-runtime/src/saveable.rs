@@ -647,3 +647,24 @@ impl<T: Saveable + Clone + Send + Sync + 'static> Saveable for crate::SnapshotSt
         Vec::<T>::restore(saved).map(crate::SnapshotStateList::new)
     }
 }
+
+/// A state map of saveable keys and values is saveable (savedstate-compose's `SnapshotStateMapSerializer`; Compose's
+/// SnapshotStateMap is Parcelable on Android): its entries written out as pairs, in their order.
+impl<K: Saveable + Ord + Clone + Send + Sync + 'static, V: Saveable + Clone + Send + Sync + 'static> Saveable
+    for crate::SnapshotStateMap<K, V>
+{
+    fn save(&self) -> SavedValue {
+        self.peek_with(|entries| SavedValue::list(entries.iter().map(|(k, v)| SavedValue::list([k.save(), v.save()]))))
+    }
+    fn restore(saved: &SavedValue) -> Option<Self> {
+        let entries = saved
+            .as_list()?
+            .iter()
+            .map(|pair| match pair.as_list()? {
+                [k, v] => Some((K::restore(k)?, V::restore(v)?)),
+                _ => None,
+            })
+            .collect::<Option<std::collections::BTreeMap<K, V>>>()?;
+        Some(crate::SnapshotStateMap::new(entries))
+    }
+}

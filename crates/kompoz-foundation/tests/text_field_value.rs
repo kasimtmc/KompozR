@@ -326,7 +326,7 @@ fn a_field_whose_value_comes_back_a_frame_later_keeps_what_is_typed() {
         let (q, d, t) = (q.clone(), d.clone(), t.clone());
         Column(move || {
             BasicText(format!("{}", t.get()));
-            let current = q.collect_as_state();
+            let current = q.collect_as_state().get();
             let q2 = q.clone();
             BasicTextFieldString(
                 current,

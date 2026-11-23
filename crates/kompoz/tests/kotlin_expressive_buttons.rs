@@ -694,10 +694,11 @@ mod fab_segmented {
     use kompoz::test::RecordingCanvas;
     use kompoz::ui::input::PointerType;
     use kompoz::ui::semantics::{Role, SemanticsActions, SemanticsProperties, ToggleableState};
+    use std::rc::Rc;
 
-    // (WP1b: fab_segmented) kompozable_tests.cpp's `Mixed` (its segments and staggered grid as written; its
-    // `viewModel<TodoViewModel>()` and `SideLine(vm, Side.Right)` lines are stage 13's) with
-    // view_models_maps_and_segments_as_kotlin_writes_them's segment checks (kompoz_tests.cpp's
+    // (WP1b: fab_segmented) kompozable_tests.cpp's `Mixed` (whole as written: its ViewModel and SideLine — stage 13
+    // WP1 —, segments and staggered grid) with view_models_maps_and_segments_as_kotlin_writes_them's checks
+    // (kompoz_tests.cpp's
     // segmented_buttons_take_compose_named_arguments, much the same content, is in both syntaxes in named_forms.rs, as
     // are its tabs_and_fab_menu_… and expressive_buttons_…); `Navigation` (whole as written: its tabs, FAB
     // menu and floating toolbar — the one copy of it; kotlin_lists_sheets.rs's NavigationTabs and
@@ -710,14 +711,93 @@ mod fab_segmented {
     // segmented_buttons}.rs check them (M15's values; the differences from the C++'s said there); material3's
     // SegmentedButtonSamples (2) and FloatingActionButtonMenuSample from kt/fab_menu_segmented.kt.
 
+    // ---- Rust twins of Mixed's Kotlin classes (stage 14) ----
+
+    /// kompozable_tests.cpp's `class TodoViewModel : ViewModel() { val items = MutableStateFlow(listOf(Todo(1, "Yaz"),
+    /// Todo(2, "Gönder"))) … }` (its items' count is what SideLine shows: their titles here).
+    pub type TodoViewModel = Rc<TodoViewModelClass>;
+
+    /// TodoViewModel's object.
+    pub struct TodoViewModelClass {
+        base: ViewModelImpl,
+        items: MutableStateFlow<Vec<String>>,
+    }
+
+    impl TodoViewModelClass {
+        pub fn items(&self) -> MutableStateFlow<Vec<String>> {
+            self.items.clone()
+        }
+    }
+
+    impl ViewModel for TodoViewModelClass {
+        fn view_model_impl(&self) -> &ViewModelImpl {
+            &self.base
+        }
+        fn new_instance(_extras: &CreationExtras) -> Option<Self> {
+            Some(TodoViewModelClass {
+                base: ViewModelImpl::new(),
+                items: MutableStateFlow::new(vec!["Yaz".into(), "Gönder".into()]),
+            })
+        }
+    }
+
+    /// kompozable_tests.cpp's `enum class Side { Left, Right }`.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    pub enum Side {
+        #[allow(dead_code)] // (the C++ test uses the other one)
+        Left,
+        Right,
+    }
+
+    impl Side {
+        pub fn ordinal(self) -> i32 {
+            self as i32
+        }
+    }
+
+    /// kompozable_tests.cpp's `namespace routes { struct Item { int n = 0; }; }` (Kotlin's `object routes` with its
+    /// `class Item(val n: Int)`).
+    #[derive(Clone, Copy)]
+    pub struct Routes;
+
+    #[allow(non_upper_case_globals)]
+    pub const routes: Routes = Routes;
+
+    /// `routes.Item`.
+    #[derive(Clone, Copy)]
+    pub struct RoutesItem {
+        n: i32,
+    }
+
+    impl Routes {
+        pub fn Item(&self, n: i32) -> RoutesItem {
+            RoutesItem { n }
+        }
+    }
+
+    impl RoutesItem {
+        pub fn n(&self) -> i32 {
+            self.n
+        }
+    }
+
     kompoz! {
         @Composable
+        fun SideLine(vm: TodoViewModel, side: Side) {
+            val items by vm.items.collectAsState()
+            val counts = mapOf(1 to 3)
+            val n = counts[1] ?: 0
+            val m = counts[2] ?: 0
+            Text("öğe ${items.size} · ${side.ordinal} · $n $m · ${counts.keys.sum()} · ${counts.values.sum()} · ${routes.Item(7).n}")
+        }
+
+        @Composable
         fun Mixed() {
-            // (C++: `val vm = viewModel<TodoViewModel>()` — stage 13's)
+            val vm = viewModel<TodoViewModel>()
             var pick by remember { mutableStateOf(0) }
             var bold by remember { mutableStateOf(false) }
             Column {
-                // (C++: `SideLine(vm, Side.Right)` — stage 13's)
+                SideLine(vm, Side.Right)
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.width(300.dp)) {
                     val labels = listOf("Bir", "İki")
                     for (i in 0 until 2) {
@@ -898,8 +978,9 @@ mod fab_segmented {
     }
 
     pub fn view_models_maps_and_segments_as_kotlin_writes_them() {
-        // The segment checks (the view model's and the maps' are stage 13's).
+        // The ViewModel's and the maps' line, then the segment checks.
         let rule = KompozTestRule::with_viewport(kompozable_lambda!(|| Mixed()), IntSize::new(400, 800));
+        rule.on_node_with_text("öğe 2 · 1 · 3 0 · 1 · 3 · 7").assert_exists();
         rule.on_node_with_text("İki").perform_click();
         rule.on_node_with_text("Kalın").perform_click();
         rule.on_node_with_text("seçim 1 kalın").assert_exists();

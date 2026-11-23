@@ -246,6 +246,7 @@ kompoz-runtime/macros kompozable Clicker rr crates/kompoz-runtime/tests/macros.r
 * super ClockFaceSizeModifier - ModifierNode
 * super ClockFaceSizeModifier - ModifierNodeElement
 * kompozable ClockText rrrrr crates/kompoz-material3/src/time_picker.rs
+* super CloseableCoroutineScope - AutoCloseable
 * kompozable CollectInteractionsAsState rrrrr crates/kompoz-material3/src/list_item.rs
 * kompozable CollectPredictiveBackScale rr crates/kompoz-material3-adaptive/src/layout/predictive_back_scale_state.rs
 * super ColorPainter - Painter
@@ -399,6 +400,7 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DefaultTwoRowsTopAppBarOverride - TwoRowsTopAppBarOverride
 * super DefaultVerticalFloatingToolbarOverride - VerticalFloatingToolbarOverride
 * super DefaultVerticalFloatingToolbarWithFabOverride - VerticalFloatingToolbarWithFabOverride
+* super DefaultViewModelProviderFactory - ViewModelProviderFactory
 * super DefaultWideNavigationRailOverride - WideNavigationRailOverride
 * method DeferredAnimatedContent dddddr crates/kompoz-animation/src/animated_content.rs DeferredTransition
 * method DeferredAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs DeferredTransition
@@ -723,6 +725,7 @@ kompoz-foundation/grid kompozable GridLeaf rrrr crates/kompoz-foundation/tests/g
 * kompozable HandlePopup rrr crates/kompoz-foundation/src/text/selection/handles.rs
 * super HandlePositionProvider - PopupPositionProvider
 kompoz-runtime/macros fn Handler dd crates/kompoz-runtime/tests/macros.rs
+* super HandlesVmFactory - ViewModelProviderFactory
 * super HarfrustBackend - FontBackend
 * super Hears - NavigationEventInputCallbacks
 * super HeightForSingleLineFieldElement - ModifierNodeElement
@@ -760,7 +763,10 @@ kompoz-material3/carousel kompozable HorizontalMultiBrowseCarouselSample - crate
 * kompozable HorizontalUncontainedCarousel rrdddddr crates/kompoz-material3/src/carousel/carousel.rs
 kompoz-material3/carousel kompozable HorizontalUncontainedCarouselSample - crates/kompoz-material3/tests/carousel.rs
 * super HostAutofillManager - SemanticsListener
-* super HostLifecycleOwner - LifecycleOwner
+* super HostOwner - HasDefaultViewModelProviderFactory
+* super HostOwner - LifecycleOwner
+* super HostOwner - SavedStateRegistryOwner
+* super HostOwner - ViewModelStoreOwner
 kompoz-runtime/runtime kompozable HostReader r crates/kompoz-runtime/tests/runtime.rs
 * super HoverIconElement - ModifierNodeElement
 * super HoverIconModifierNode - ModifierNode
@@ -815,6 +821,7 @@ kompoz-runtime/macros kompozable Iconed rdd crates/kompoz-runtime/tests/macros.r
 * kompozable IndicatorRipple rr crates/kompoz-material3/src/navigation_item.rs
 * super IndirectPointerInputDragCycleDetector - DraggableGestureConnection
 * super IndirectPointerInputDragCycleDetector - GestureConnection
+* super InitializerViewModelFactory - ViewModelProviderFactory
 * super InlineChildPolicy - MeasurePolicy
 * kompozable InlineChildren rr crates/kompoz-foundation/src/text/inline_content.rs
 * kompozable InputChip rrrdddddddddddd crates/kompoz-material3/src/chip.rs
@@ -1138,6 +1145,7 @@ kompoz-material3/lists kompozable MultiSelectionListItemSample - crates/kompoz-m
 kompoz-material3/lists kompozable MultiSelectionSegmentedListItemSample - crates/kompoz-material3/tests/lists.rs
 * super MultiWidgetSelectionDelegate - Selectable
 * fn MutableContentTransform ddddd crates/kompoz-animation/src/deferred_enter_exit.rs
+* super MutableCreationExtras - CreationExtras
 * super MutableCubic - Cubic
 * super MutableInteractionSource - InteractionSource
 * super MutableSharedFlow - SharedFlow
@@ -1184,6 +1192,7 @@ kompoz-material3/navigation_bar kompozable NavigationBarSample - crates/kompoz-m
 * super NestedScrollElement - ModifierNodeElement
 * super NestedScrollNode - ModifierNode
 * super NestedScrollNode - TraversableNode
+* super NewInstanceFactory - ViewModelProviderFactory
 * kompozable NewLineButtonSnackbar rrrrrr crates/kompoz-material3/src/snackbar.rs
 * super NewScrollbarAdapterAsOld - OldScrollbarAdapter
 * super NoApproach - SnapLayoutInfoProvider
@@ -1369,6 +1378,7 @@ kompoz-material3/tabs kompozable PrimaryIconTabs - crates/kompoz-material3/tests
 * kompozable PrimaryScrollableTabRow rddddddddr crates/kompoz-material3/src/tab_row.rs
 * kompozable PrimaryTabRow rdddddr crates/kompoz-material3/src/tab_row.rs
 kompoz-material3/tabs kompozable PrimaryTextTabs - crates/kompoz-material3/tests/tabs.rs
+* super ProducerScope - CoroutineScope
 kompoz-runtime/macros kompozable Provide rr crates/kompoz-runtime/tests/macros.rs
 * kompozable ProvideContentColorTextStyle rrr crates/kompoz-material3/src/internal/provide_content_color_text_style.rs
 * kompozable ProvideContentColorTextStyleWithValues rrrr crates/kompoz-material3/src/internal/provide_content_color_text_style.rs
@@ -1409,6 +1419,7 @@ kompoz-runtime/runtime kompozable ReadsItsImplCallback rrrr crates/kompoz-runtim
 * super RecordedOutline - Shape
 * super RecordingCanvas - GraphicsContext
 * super RectangleShape - Shape
+* super ReferenceToken - AutoCloseable
 kompoz-material3/swipe_pull kompozable RefreshItems r crates/kompoz-material3/tests/swipe_pull.rs
 kompoz-material3/swipe_pull kompozable RefreshTopAppBar rr crates/kompoz-material3/tests/swipe_pull.rs
 * super Registry - LifecycleImpl
@@ -1504,6 +1515,20 @@ kompoz-material3/search_bar kompozable SampleTrailingIcon - crates/kompoz-materi
 kompoz-material3/navigation_rail kompozable SampleWideItems rrr crates/kompoz-material3/tests/navigation_rail.rs
 * super SaveableStateHolder - Saveable
 kompoz-runtime/runtime kompozable SavedChecks r crates/kompoz-runtime/tests/runtime.rs
+* super SavedState - Saveable
+* super SavedStateHandleAttacher - LifecycleEventObserver
+* super SavedStateHandleAttacher - LifecycleObserver
+* super SavedStateHandleSupport - SavedStateRegistryOwner
+* super SavedStateHandleSupport - ViewModelStoreOwner
+* super SavedStateHandlesProvider - SavedStateProvider
+* super SavedStateHandlesVM - ViewModel
+* super SavedStateRegistryOwner - LifecycleOwner
+* super SavedStateRegistryOwnerExtensions - SavedStateRegistryOwner
+* super SavedStateStoreOwner - HasDefaultViewModelProviderFactory
+* super SavedStateStoreOwner - LifecycleOwner
+* super SavedStateStoreOwner - SavedStateRegistryOwner
+* super SavedStateStoreOwner - ViewModelStoreOwner
+* super SavedStateViewModelFactory - ViewModelProviderFactory
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 * super SavedValue - Saveable
 * kompozable Scaffold dddddddddr crates/kompoz-material3/src/scaffold.rs
@@ -1734,6 +1759,7 @@ kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
 * super StartIconMeasurePolicy - MeasurePolicy
 * fn StartOffset rd crates/kompoz-animation/src/spec.rs
 * super StartTransferScope - DragAndDropStartTransferScope
+* super StateHolder - ViewModel
 * kompozable StateListDetailPaneScaffold rrrrdddd crates/kompoz-material3-adaptive/src/layout/list_detail_pane_scaffold.rs
 * kompozable StateRangeSlider rdddddddd crates/kompoz-material3/src/slider/mod.rs
 * super StateSession - TextContextMenuSession
@@ -1747,6 +1773,8 @@ kompoz-material3/text_field_halves kompozable Steady rr crates/kompoz-material3/
 * fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
 kompoz/kotlin_ported fn Sticker rd crates/kompoz/tests/kotlin_ported.rs
 * super StickyHeaderBringIntoViewSpec - BringIntoViewSpec
+* super StoreOwner - HasDefaultViewModelProviderFactory
+* super StoreOwner - ViewModelStoreOwner
 * super StretchOverscrollNode - DrawModifierNode
 * super StretchOverscrollNode - ModifierNode
 * super String - BuilderAppend
@@ -2090,6 +2118,7 @@ kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-fou
 * kompozable VerticalSlider rddddddd crates/kompoz-material3/src/slider/mod.rs
 * kompozable VerticalTimePicker rrrr crates/kompoz-material3/src/time_picker.rs
 * method VibrantFloatingActionButton rdddddr crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
+* super ViewModelExtensions - ViewModel
 * super VirtualLayoutNode - Node
 * super VisibleModifier - LayoutModifierNode
 * super VisibleModifier - ModifierNode
@@ -2460,6 +2489,7 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method flow_with_lifecycle rd crates/kompoz-lifecycle/src/repeat.rs Flow as LifecycleFlowExtensions
 * method focus_restorer d crates/kompoz-ui/src/focus/restorer.rs Modifier
 * method focusable dd crates/kompoz-foundation/src/focusable.rs Modifier as FocusableModifiers
+* method get_or_create_owner rdddd crates/kompoz-lifecycle/src/viewmodel/store_provider.rs ViewModelStoreProvider
 * method get_text_layout_result dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * kompozable get_window_container_height - crates/kompoz-material3/src/search_bar_desktop.rs
 * method graphics_layer dddddddddddddddddddd crates/kompoz-ui/src/draw/modifiers.rs Modifier
@@ -2589,6 +2619,7 @@ kompoz-runtime/macros method of_static R crates/kompoz-runtime/tests/macros.rs I
 * method outlined_text_field_colors ddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/exposed_dropdown_menu.rs ExposedDropdownMenuDefaults
 * method outlined_text_field_padding dddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
 * method outlined_toggle_button_colors dddddd crates/kompoz-material3/src/toggle_button.rs ToggleButtonDefaults
+* kompozable owner_at rrr crates/kompoz-lifecycle/src/viewmodel/compose.rs
 * method padding_from rdd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
 * method padding_from_baseline dd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
 * method padding_from_baseline_sp dd crates/kompoz-foundation/src/layout/alignment_line.rs Modifier as AlignmentLinePaddingModifiers
@@ -2622,8 +2653,10 @@ kompoz/kotlin_search_carousel fn painter_resource r crates/kompoz/tests/kotlin_s
 * kompozable popup_properties_for_anchor_type rr crates/kompoz-material3/src/exposed_dropdown_menu_desktop.rs
 * method press d crates/kompoz-test/src/input.rs MouseInjectionScope
 * method press_key rd crates/kompoz-test/src/input.rs KeyInjectionScope
+* method produce dr crates/kompoz-coroutines/src/channel.rs CoroutineScope
 * kompozable produce_state rrr crates/kompoz-coroutines/src/compose.rs
 * method progress_semantics rdd crates/kompoz-foundation/src/progress_semantics.rs Modifier as ProgressSemanticsModifiers
+* kompozable provider_at rrrrr crates/kompoz-lifecycle/src/viewmodel/compose.rs
 * method provides_computed R crates/kompoz-runtime/src/local.rs KompozitionLocal
 * method pull_to_refresh rrddR crates/kompoz-material3/src/pulltorefresh.rs Modifier as PullToRefreshModifiers
 * method read_pixels rdddddd crates/kompoz-graphics/src/image/bitmap.rs ImageBitmap
@@ -2745,6 +2778,11 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_updated_style_state rd crates/kompoz-foundation/src/style/state.rs
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
+* kompozable remember_view_model_store_owner ddddd crates/kompoz-lifecycle/src/viewmodel/compose.rs
+* kompozable remember_view_model_store_owner_keyed rrd crates/kompoz-lifecycle/src/viewmodel/compose.rs
+* kompozable remember_view_model_store_owner_of rd crates/kompoz-lifecycle/src/viewmodel/compose.rs
+* kompozable remember_view_model_store_provider dddd crates/kompoz-lifecycle/src/viewmodel/compose.rs
+* kompozable remember_view_model_store_provider_keyed rdddd crates/kompoz-lifecycle/src/viewmodel/compose.rs
 * kompozable remember_wide_navigation_rail_state d crates/kompoz-material3/src/wide_navigation_rail_state.rs
 * kompozable remember_window_navigation - crates/kompoz-ui/src/navigationevent.rs
 * kompozable remember_with_gap_search_bar_state ddddd crates/kompoz-material3/src/search_bar.rs
@@ -2903,6 +2941,9 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vibrant_floating_toolbar_colors dddd crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
+* kompozable view_model dddd crates/kompoz-lifecycle/src/viewmodel/compose.rs
+* kompozable view_model_of rdddd crates/kompoz-lifecycle/src/viewmodel/compose.rs
+* kompozable view_model_with ddr crates/kompoz-lifecycle/src/viewmodel/compose.rs
 * method wait_until ddr crates/kompoz-test/src/lib.rs KompozTestRule
 * method weight rd crates/kompoz-foundation/src/layout/scope.rs Modifier as LayoutScopeModifiers
 * method width_in dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers

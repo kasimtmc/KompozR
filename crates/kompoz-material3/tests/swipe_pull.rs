@@ -19,6 +19,7 @@ use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_foundation::gestures::LocalFuture;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
+use kompoz_lifecycle::{ViewModel, ViewModelExtensions, ViewModelImpl};
 use kompoz_material_icons_core::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
@@ -1470,24 +1471,26 @@ fn PullToRefreshWithLoadingIndicatorSample() {
     );
 }
 
-/// `PullToRefreshViewModelSample`'s view model (Kotlin's `object : ViewModel()`, its `viewModelScope` a scope of its
-/// own on the main dispatcher — the host's —, never cleared, as the sample remembers it).
+/// `PullToRefreshViewModelSample`'s view model (Kotlin's `object : ViewModel()`: its `viewModelScope` on the main
+/// dispatcher — the host's —; the sample remembers it, outside any store: never cleared).
 struct RefreshViewModel {
+    base: ViewModelImpl,
     refresh_requests: kompoz_coroutines::Channel<()>,
     is_refreshing: MutableState<bool>,
     item_count: MutableState<i32>,
 }
 
 impl RefreshViewModel {
-    fn new(view_model_scope: CoroutineScope) -> Rc<RefreshViewModel> {
+    fn new() -> Rc<RefreshViewModel> {
         let view_model = Rc::new(RefreshViewModel {
+            base: ViewModelImpl::new(),
             refresh_requests: kompoz_coroutines::Channel::new(1, kompoz_coroutines::BufferOverflow::Suspend),
             is_refreshing: mutable_state_of(false),
             item_count: mutable_int_state_of(15),
         });
         let (requests, is_refreshing, item_count) =
             (view_model.refresh_requests.clone(), view_model.is_refreshing.clone(), view_model.item_count.clone());
-        named_args!(view_model_scope.launch(async move {
+        named_args!(view_model.view_model_scope().launch(async move {
             while let Some(_r) = requests.receive().await {
                 is_refreshing.set(true);
                 // (Kotlin's try / finally: a guard sets it back however the block ends, cancelled too)
@@ -1515,6 +1518,12 @@ impl RefreshViewModel {
     }
 }
 
+impl ViewModel for RefreshViewModel {
+    fn view_model_impl(&self) -> &ViewModelImpl {
+        &self.base
+    }
+}
+
 /// Runs its block when dropped (Kotlin's `finally`).
 struct Finally<F: FnOnce()>(Option<F>);
 
@@ -1529,8 +1538,7 @@ impl<F: FnOnce()> Drop for Finally<F> {
 /// `PullToRefreshViewModelSample`.
 #[kompozable]
 fn PullToRefreshViewModelSample() {
-    let dispatcher = kompoz_coroutines::LocalDispatcher.current().expect("the host's dispatcher");
-    let view_model = remember(move || RefreshViewModel::new(CoroutineScope::new(&dispatcher)));
+    let view_model = remember(RefreshViewModel::new);
 
     let bar_view_model = view_model.clone();
     Scaffold(

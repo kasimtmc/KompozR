@@ -13,6 +13,10 @@ workspace = true
 kompoz-runtime = { path = "../kompoz-runtime" }
 parking_lot.workspace = true
 
+[dev-dependencies]
+# (flows_combine_debounce_and_follow_the_latest_into_a_state_flow: its model a ViewModel, as the C++ test's)
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
+
 [[test]]
 name = "coroutines"
 harness = false

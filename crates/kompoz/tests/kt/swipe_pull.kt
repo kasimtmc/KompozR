@@ -151,9 +151,10 @@ fun PullForms() {
 }
 
 // ---- material3 1.5's PullToRefreshSamples.kt (+ LoadingIndicatorSamples.kt's LoadingIndicatorPullToRefreshSample), as
-// written. PullToRefreshViewModelSample (`object : ViewModel()`) and PullToRefreshSampleCustomState (`object :
-// PullToRefreshState`) declare object expressions: Kotlin's classes are stage 14's (their Rust ports are in
-// kompoz-material3's tests/swipe_pull.rs).
+// written. PullToRefreshViewModelSample's `object : ViewModel() { … }` and PullToRefreshSampleCustomState's `object :
+// PullToRefreshState` are object expressions, Kotlin's classes, stage 14's: the ViewModel is a Rust twin beside this
+// file (`RefreshViewModel()`, kotlin_lists_sheets.rs), the state's sample is ported in kompoz-material3's
+// tests/swipe_pull.rs.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Sampled
@@ -483,6 +484,44 @@ fun LoadingIndicatorPullToRefreshSample() {
                 }
             ) {
                 PullToRefreshDefaults.LoadingIndicator(state = state, isRefreshing = isRefreshing)
+            }
+        }
+    }
+}
+
+// (the sample's `remember { object : ViewModel() { … } }`: its Rust twin, `RefreshViewModel()`)
+@Sampled
+@Composable
+fun PullToRefreshViewModelSample() {
+    val viewModel = remember { RefreshViewModel() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Title") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(
+                        enabled = !viewModel.isRefreshing,
+                        onClick = { viewModel.refresh() },
+                    ) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        }
+    ) {
+        PullToRefreshBox(
+            modifier = Modifier.padding(it),
+            isRefreshing = viewModel.isRefreshing,
+            onRefresh = { viewModel.refresh() },
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (!viewModel.isRefreshing) {
+                    items(viewModel.itemCount) {
+                        ListItem({ Text(text = "Item ${viewModel.itemCount - it}") })
+                    }
+                }
             }
         }
     }

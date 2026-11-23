@@ -6,7 +6,7 @@ use crate::executor::{CoroutineScope, Dispatcher};
 use crate::flow::{Flow, flow};
 use crate::hot::{AsFlow, StateFlow};
 use kompoz_runtime::{
-    DisposableEffect, KompozitionLocal, MutableState, RememberObserver, Snapshot, StateKey, group, kompozable,
+    DisposableEffect, KompozitionLocal, MutableState, RememberObserver, Snapshot, State, StateKey, group, kompozable,
     kompozable_block, mutable_state_of, observe_reads, on_dispose, remember, remember_keyed, remember_observer,
 };
 use std::collections::HashSet;
@@ -102,9 +102,10 @@ where
 }
 
 impl<T: PartialEq + Clone + Send + Sync + 'static> Flow<T> {
-    /// Its latest value as state (`initial` until the first): recomposes the caller as it changes.
+    /// Its latest value as state (`initial` until the first; Compose's `collectAsState(initial)`): what reads it
+    /// recomposes as it changes.
     #[track_caller]
-    pub fn collect_as_state(&self, initial: T) -> T {
+    pub fn collect_as_state(&self, initial: T) -> State<T> {
         group(|| {
             let state = remember_keyed(self.clone(), || mutable_state_of(initial));
             let (flow, s) = (self.clone(), state.clone());
@@ -113,15 +114,16 @@ impl<T: PartialEq + Clone + Send + Sync + 'static> Flow<T> {
             kompozable_block!({
                 LaunchedEffect(key, collecting);
             });
-            state.get()
+            State::from(state)
         })
     }
 }
 
 impl<T: PartialEq + Clone + Send + Sync + 'static> StateFlow<T> {
-    /// Its value as state: recomposes the caller as it changes. Another flow: the new one's value at once.
+    /// Its value as state (Compose's `collectAsState()`): what reads it recomposes as it changes. Another flow: the
+    /// new one's value at once.
     #[track_caller]
-    pub fn collect_as_state(&self) -> T {
+    pub fn collect_as_state(&self) -> State<T> {
         group(|| {
             let state = remember_keyed(self.clone(), || mutable_state_of(self.value()));
             let s = state.clone();
@@ -130,7 +132,7 @@ impl<T: PartialEq + Clone + Send + Sync + 'static> StateFlow<T> {
             kompozable_block!({
                 LaunchedEffect(key, collecting);
             });
-            state.get()
+            State::from(state)
         })
     }
 }

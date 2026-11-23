@@ -44,6 +44,8 @@ mod api_index;
 mod builder;
 mod known;
 mod kotlin_properties;
+// (stage 13 WP1: #[derive(Saveable)])
+mod saveable;
 mod transform;
 
 use builder::{Param, Receiver, Spec, builder, fn_sugar, generics, take_params};
@@ -182,6 +184,13 @@ fn known_in_expr(e: &Expr) -> Result<Known> {
 #[proc_macro_derive(KotlinProperties, attributes(kotlin))]
 pub fn kotlin_properties(item: TokenStream) -> TokenStream {
     kotlin_properties::derive(parse_macro_input!(item as DeriveInput)).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+/// `#[derive(Saveable)]`: a struct or enum written out as a `SavedValue` and read back (Kotlin's `@Serializable` for
+/// savedstate's serialization; see `saveable`).
+#[proc_macro_derive(Saveable, attributes(saveable))]
+pub fn saveable(item: TokenStream) -> TokenStream {
+    saveable::derive(parse_macro_input!(item as DeriveInput), runtime()).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 /// A closure written as a `#[kompozable]` body: `set_content(kompozable_lambda!(move || App()))`.

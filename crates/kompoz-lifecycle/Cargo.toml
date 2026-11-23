@@ -16,7 +16,13 @@ kompoz-runtime = { path = "../kompoz-runtime" }
 [dev-dependencies]
 # (the effects composed in a test rule's host: the app's lifecycle owner)
 kompoz-test = { path = "../kompoz-test" }
+# (the host half of saved_state_outlives_the_host: a text field state)
+kompoz-foundation = { path = "../kompoz-foundation" }
 
 [[test]]
 name = "lifecycle"
+harness = false
+
+[[test]]
+name = "viewmodel"
 harness = false

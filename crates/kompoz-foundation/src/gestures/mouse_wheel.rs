@@ -261,11 +261,13 @@ impl MouseWheelScrollingLogic {
             let should_apply_immediately = !self.mouse_wheel_scroll_config.is_smooth_scrolling_enabled()
                 // (a free-spinning wheel or a trackpad: at once, no delay)
                 || self.mouse_wheel_scroll_config.is_precise_wheel_scroll(event);
-            self.channel.try_send(MouseWheelScrollDelta {
-                value: scroll_delta,
-                time_millis: event.changes[0].uptime_millis,
-                should_apply_immediately,
-            })
+            self.channel
+                .try_send(MouseWheelScrollDelta {
+                    value: scroll_delta,
+                    time_millis: event.changes[0].uptime_millis,
+                    should_apply_immediately,
+                })
+                .is_success()
         } else {
             self.base.is_scrolling.get()
         }
@@ -274,7 +276,7 @@ impl MouseWheelScrollingLogic {
     /// What is waiting, added up (Compose's `sumOrNull`).
     fn sum_or_null(&self) -> Option<MouseWheelScrollDelta> {
         let mut sum: Option<MouseWheelScrollDelta> = None;
-        while let Some(i) = self.channel.try_receive() {
+        while let Some(i) = self.channel.try_receive().get_or_null() {
             sum = Some(match sum {
                 None => i,
                 Some(s) => s + i,
@@ -577,21 +579,25 @@ impl TrackpadScrollingLogic {
             for h in change.historical() {
                 let delta = -h.pan_offset;
                 if self.can_consume_delta(delta) {
-                    sent = self.channel.try_send(TrackpadScrollDelta {
-                        value: delta,
-                        time_millis: h.uptime_millis,
-                        is_end: false,
-                    }) || sent;
+                    sent = self
+                        .channel
+                        .try_send(TrackpadScrollDelta { value: delta, time_millis: h.uptime_millis, is_end: false })
+                        .is_success()
+                        || sent;
                 }
             }
             let delta = -change.pan_offset;
             let is_pan_end = event.r#type == PointerEventType::PanEnd;
             if self.can_consume_delta(delta) || is_pan_end {
-                sent = self.channel.try_send(TrackpadScrollDelta {
-                    value: delta,
-                    time_millis: change.uptime_millis,
-                    is_end: is_pan_end,
-                }) || sent;
+                sent = self
+                    .channel
+                    .try_send(TrackpadScrollDelta {
+                        value: delta,
+                        time_millis: change.uptime_millis,
+                        is_end: is_pan_end,
+                    })
+                    .is_success()
+                    || sent;
             }
         }
         sent || self.base.is_scrolling.get()
@@ -599,7 +605,7 @@ impl TrackpadScrollingLogic {
 
     fn sum_or_null(&self) -> Option<TrackpadScrollDelta> {
         let mut sum: Option<TrackpadScrollDelta> = None;
-        while let Some(i) = self.channel.try_receive() {
+        while let Some(i) = self.channel.try_receive().get_or_null() {
             sum = Some(match sum {
                 None => i,
                 Some(s) => s + i,

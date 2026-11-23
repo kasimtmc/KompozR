@@ -17,7 +17,6 @@ use kompoz::test::KompozTestRule;
 use kompoz::ui::semantics::ContentType;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
 
 // ---- Rust twins of the Kotlin classes (stage 14) -------------------------------------------------------------------
 
@@ -67,18 +66,39 @@ pub fn CounterState() -> CounterStateClass {
 }
 
 /// KitchenForms' `class TickViewModel : ViewModel() { val ticks: StateFlow<Int> = flow<Int> { var i = 0; while (true)
-/// { emit(i++); delay(100) } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0) }`: its ticks, in the
-/// scope given (its `viewModelScope`).
-fn tick_view_model_ticks(view_model_scope: &CoroutineScope) -> StateFlow<i32> {
-    flow(|emit| async move {
-        let mut i = 0;
-        loop {
-            emit.emit(i).await;
-            i += 1;
-            delay_ms(100).await;
-        }
-    })
-    .state_in(view_model_scope, SharingStarted::WhileSubscribed(Duration::from_millis(5000)), 0)
+/// { emit(i++); delay(100) } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0) }` (its public
+/// constructor taking nothing: what `viewModel<TickViewModel>()` makes it with).
+pub type TickViewModel = Rc<TickViewModelClass>;
+
+/// TickViewModel's object.
+pub struct TickViewModelClass {
+    base: ViewModelImpl,
+    ticks: StateFlow<i32>,
+}
+
+impl TickViewModelClass {
+    pub fn ticks(&self) -> StateFlow<i32> {
+        self.ticks.clone()
+    }
+}
+
+impl ViewModel for TickViewModelClass {
+    fn view_model_impl(&self) -> &ViewModelImpl {
+        &self.base
+    }
+    fn new_instance(_extras: &CreationExtras) -> Option<Self> {
+        let base = ViewModelImpl::new();
+        let ticks = flow(|emit| async move {
+            let mut i = 0;
+            loop {
+                emit.emit(i).await;
+                i += 1;
+                delay_ms(100).await;
+            }
+        })
+        .state_in(&base.view_model_scope(), SharingStarted::WhileSubscribed_millis(5000, i64::MAX), 0);
+        Some(TickViewModelClass { base, ticks })
+    }
 }
 
 /// The samples' `private interface TimeAnalytics { fun stopTimeTracking(): TimeAnalytics }`: here one that logs.
@@ -187,21 +207,23 @@ kompoz! {
 
 // ---- tests ----------------------------------------------------------------------------------------------------------
 
-/// C++ `state_forms_as_kotlin_writes_them` (kompozable_tests.cpp 3228), its lifecycle lines: KitchenForms' state
-/// open while the app is resumed or started, closed in the background; its ticks those of TickViewModel's flow
-/// (the ViewModel itself is stage 13 WP1's), collected while started.
+/// C++ `state_forms_as_kotlin_writes_them` (kompozable_tests.cpp 3228), whole: orders sent without waiting (one more
+/// than the channel holds refused) and served by a suspending consumer, a producer's countdown, KitchenForms' state
+/// open while the app is resumed or started, closed in the background; its ticks the TickViewModel's (the host's
+/// ViewModel), collected while started.
 fn state_forms_as_kotlin_writes_them() {
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(|| {
-            let scope = remember_coroutine_scope();
-            let ticks = remember(|| tick_view_model_ticks(&scope));
-            KitchenForms(ticks);
-        }),
-        IntSize::new(400, 800),
-    );
+    let rule = KompozTestRule::with_viewport(kompozable_lambda!(|| KitchenForms()), IntSize::new(400, 800));
     rule.set_lifecycle_state(LifecycleState::Resumed);
     rule.wait_for_idle();
+    rule.on_node_with_text("servis 0 · ret 0 · ").assert_exists();
     rule.on_node_with_text("durum açık · 400 ms · tik var").assert_exists();
+    rule.on_node_with_tag("ver").perform_click();
+    rule.advance_time_by(50);
+    rule.wait_for_idle();
+    rule.on_node_with_text("servis 1 · ret 0 · ").assert_exists();
+    rule.on_node_with_text("say").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("servis 1 · ret 0 · 321!").assert_exists();
     let alan = rule.on_node_with_tag("alan").get_unclipped_bounds_in_root();
     assert!((alan.left - 12.0).abs() < 0.5 && (alan.top - 8.0).abs() < 0.5, "{alan:?}"); // PaddingValues(12.dp, 8.dp)
     // (in the background: closed — the lifecycle's state as state)

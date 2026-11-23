@@ -35,6 +35,8 @@
 //! (what `#[named]` takes), with the same defaults, so a call naming its arguments goes through its builder too.
 
 pub mod cast;
+// (stage 13 WP1: what a ViewModel closes)
+pub mod closeable;
 pub mod collections;
 pub mod delegate;
 pub mod format;
@@ -52,6 +54,7 @@ pub mod text;
 mod tests;
 
 pub use cast::KtAs;
+pub use closeable::AutoCloseable;
 pub use collections::{
     KtComponent3, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable, KtMap, KtMapExt, KtMapLike,
     KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of, empty_list, empty_map,

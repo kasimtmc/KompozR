@@ -83,15 +83,48 @@ pub enum SharingStarted {
     Eagerly,
     /// When the first collector comes, never stopped.
     Lazily,
-    /// While someone collects, and `stop_timeout` after the last one left.
-    WhileSubscribed { stop_timeout: Duration },
+    /// While someone collects, and `stop_timeout` after the last one left; `replay_expiration` after it stopped,
+    /// its replayed values are forgotten (a state flow back at its initial value; `Duration::MAX`: never).
+    WhileSubscribed { stop_timeout: Duration, replay_expiration: Duration },
 }
 
 impl SharingStarted {
-    /// `WhileSubscribed(stopTimeout)`.
+    /// Kotlin's `SharingStarted.WhileSubscribed(stopTimeout, replayExpiration)` (kotlin.time's Durations;
+    /// `Duration.INFINITE` is `Duration::MAX`).
+    ///
+    /// Kotlin: `WhileSubscribed(stopTimeout: Duration = Duration.ZERO, replayExpiration: Duration = Duration.INFINITE)`
     #[allow(non_snake_case)]
-    pub fn WhileSubscribed(stop_timeout: Duration) -> SharingStarted {
-        SharingStarted::WhileSubscribed { stop_timeout }
+    pub fn WhileSubscribed(stop_timeout: Duration, replay_expiration: Duration) -> SharingStarted {
+        SharingStarted::WhileSubscribed { stop_timeout, replay_expiration }
+    }
+
+    /// Kotlin's `SharingStarted.WhileSubscribed(stopTimeoutMillis, replayExpirationMillis)` (`Long.MAX_VALUE`:
+    /// never expires).
+    ///
+    /// # Panics
+    /// On a negative time ("stopTimeout(…ms) cannot be negative", Kotlin's IllegalArgumentException).
+    ///
+    /// Kotlin: `WhileSubscribed(stopTimeoutMillis: Long = 0, replayExpirationMillis: Long = Long.MAX_VALUE)`
+    #[allow(non_snake_case)]
+    #[track_caller]
+    pub fn WhileSubscribed_millis(stop_timeout_millis: i64, replay_expiration_millis: i64) -> SharingStarted {
+        assert!(
+            stop_timeout_millis >= 0,
+            "IllegalArgumentException: stopTimeout({stop_timeout_millis} ms) cannot be negative"
+        );
+        assert!(
+            replay_expiration_millis >= 0,
+            "IllegalArgumentException: replayExpiration({replay_expiration_millis} ms) cannot be negative"
+        );
+        let replay_expiration = if replay_expiration_millis == i64::MAX {
+            Duration::MAX
+        } else {
+            Duration::from_millis(replay_expiration_millis as u64)
+        };
+        SharingStarted::WhileSubscribed {
+            stop_timeout: Duration::from_millis(stop_timeout_millis as u64),
+            replay_expiration,
+        }
     }
 }
 
@@ -101,6 +134,7 @@ fn share<T: 'static>(
     started: SharingStarted,
     up: Flow<T>,
     sink: impl Fn(T) + 'static,
+    reset_replay_cache: impl Fn() + 'static,
     subscriptions: Arc<Subscriptions>,
 ) -> Job {
     let sink = std::rc::Rc::new(sink);
@@ -121,7 +155,7 @@ fn share<T: 'static>(
                 subscriptions.wait_for(|n| n > 0).await;
                 collect().await;
             }
-            SharingStarted::WhileSubscribed { stop_timeout } => loop {
+            SharingStarted::WhileSubscribed { stop_timeout, replay_expiration } => loop {
                 subscriptions.wait_for(|n| n > 0).await;
                 let running = FlowChildren::new();
                 // (kotlinx's `collectLatest` of the sharing command: `transformLatest`, UNDISPATCHED)
@@ -134,6 +168,14 @@ fn share<T: 'static>(
                     }
                 }
                 drop(running);
+                // (kotlinx's STOP, then STOP_AND_RESET_REPLAY_CACHE after `replay_expiration` unless someone came back:
+                // a state flow back at its initial value, a shared flow's cache emptied)
+                if replay_expiration != Duration::MAX {
+                    race(delay(replay_expiration), subscriptions.wait_for(|n| n > 0)).await;
+                    if subscriptions.count() == 0 {
+                        reset_replay_cache();
+                    }
+                }
             },
         }
     };
@@ -533,9 +575,16 @@ impl<T: 'static> Flow<T> {
     where
         T: Clone + PartialEq + Send,
     {
-        let state = MutableStateFlow::new(initial);
-        let s = state.clone();
-        share(scope, started, self.clone(), move |v| s.set_value(v), state.inner.subscriptions.clone());
+        let state = MutableStateFlow::new(initial.clone());
+        let (s, r) = (state.clone(), state.clone());
+        share(
+            scope,
+            started,
+            self.clone(),
+            move |v| s.set_value(v),
+            move || r.set_value(initial.clone()),
+            state.inner.subscriptions.clone(),
+        );
         state.as_state_flow()
     }
 
@@ -545,7 +594,7 @@ impl<T: 'static> Flow<T> {
         T: Clone + Send,
     {
         let shared = MutableSharedFlow::new(replay);
-        let s = shared.clone();
+        let (s, r) = (shared.clone(), shared.clone());
         share(
             scope,
             started,
@@ -553,6 +602,7 @@ impl<T: 'static> Flow<T> {
             move |v| {
                 s.try_emit(v);
             },
+            move || r.reset_replay_cache(),
             shared.inner.subscriptions.clone(),
         );
         shared.as_shared_flow()

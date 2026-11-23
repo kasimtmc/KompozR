@@ -11,7 +11,7 @@
 //! it but before it resumed loses that element (as in Kotlin, without onUndeliveredElement).
 
 use crate::executor::CoroutineScope;
-use crate::flow::{BoxFuture, Flow, flow};
+use crate::flow::{Flow, flow};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -23,10 +23,16 @@ use std::task::{Context, Poll, Waker};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BufferOverflow {
     /// `send` waits for room, `try_send` fails.
+    ///
+    /// Kotlin: `SUSPEND`
     Suspend,
     /// The oldest buffered element makes room.
+    ///
+    /// Kotlin: `DROP_OLDEST`
     DropOldest,
     /// The new element is dropped (`send` and `try_send` still succeed).
+    ///
+    /// Kotlin: `DROP_LATEST`
     DropLatest,
 }
 
@@ -157,6 +163,16 @@ impl<T: 'static> Default for Channel<T> {
     }
 }
 
+/// A channel of `capacity` (kotlinx's `Channel<E>(capacity, onBufferOverflow)` factory): `RENDEZVOUS` (0, the
+/// default), a number, `BUFFERED`, `UNLIMITED`; a full one does what `on_buffer_overflow` says. (Kotlin's
+/// `CONFLATED` is [`Channel::conflated`]; its `onUndeliveredElement` has no form here.)
+///
+/// Kotlin: `Channel(capacity: Int = Channel.RENDEZVOUS, onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND)`
+#[allow(non_snake_case)]
+pub fn Channel<T: 'static>(capacity: usize, on_buffer_overflow: BufferOverflow) -> Channel<T> {
+    Channel::new(capacity, on_buffer_overflow)
+}
+
 impl<T: 'static> Channel<T> {
     /// No buffer: a send waits until a receiver takes the element.
     pub const RENDEZVOUS: usize = 0;
@@ -201,20 +217,35 @@ impl<T: 'static> Channel<T> {
         ReceiveFuture { cell: self.cell.clone(), slot: None }
     }
 
-    /// Sends without waiting (from any thread): false if there is no room or it is closed.
-    pub fn try_send(&self, value: T) -> bool {
+    /// Sends without waiting (from any thread) (Kotlin's `trySend`): a success if it was sent, a failure if there
+    /// was no room, closed if the channel is.
+    pub fn try_send(&self, value: T) -> ChannelResult<()> {
         let mut wakeups = Vec::new();
-        let sent = matches!(self.cell.lock().offer(value, &mut wakeups), Offer::Sent);
+        let offered = self.cell.lock().offer(value, &mut wakeups);
         wake(wakeups);
-        sent
+        match offered {
+            Offer::Sent => ChannelResult::success(()),
+            Offer::Full(_) => ChannelResult::failure(),
+            Offer::Closed => ChannelResult::closed(),
+        }
     }
 
-    /// The next element if there is one now.
-    pub fn try_receive(&self) -> Option<T> {
+    /// The next element if there is one now (Kotlin's `tryReceive`): a success with it, a failure if there is none
+    /// yet, closed if the channel is closed and empty.
+    pub fn try_receive(&self) -> ChannelResult<T> {
         let mut wakeups = Vec::new();
-        let v = self.cell.lock().take(&mut wakeups);
+        let (v, closed) = {
+            let mut c = self.cell.lock();
+            let v = c.take(&mut wakeups);
+            let closed = c.closed;
+            (v, closed)
+        };
         wake(wakeups);
-        v
+        match v {
+            Some(v) => ChannelResult::success(v),
+            None if closed => ChannelResult::closed(),
+            None => ChannelResult::failure(),
+        }
     }
 
     /// No more sends; what is in it is still received. False if it was closed already.
@@ -292,14 +323,166 @@ impl<T: 'static> Channel<T> {
 
     /// Calls `on_element` with each element until the channel is closed and empty; then (or if this is
     /// cancelled) the channel is cancelled: nobody consumes it any more.
-    pub fn consume_each(&self, mut on_element: impl FnMut(T) + 'static) -> BoxFuture {
+    pub async fn consume_each(&self, mut on_element: impl FnMut(T)) {
         let ch = self.clone();
-        Box::pin(async move {
-            let _cancel = CancelChannel(ch.clone());
-            while let Some(v) = ch.receive().await {
-                on_element(v);
+        let _cancel = CancelChannel(ch.clone());
+        while let Some(v) = ch.receive().await {
+            on_element(v);
+        }
+    }
+
+    /// [`consume_each`](Self::consume_each)'s suspending twin (Kotlin's inline `consumeEach` whose action suspends:
+    /// `consumeEach { order -> delay(10); … }`): each element's action runs to its end before the next is received.
+    #[doc(hidden)]
+    pub async fn consume_each_async(&self, mut on_element: impl AsyncFnMut(T)) {
+        let ch = self.clone();
+        let _cancel = CancelChannel(ch.clone());
+        while let Some(v) = ch.receive().await {
+            on_element(v).await;
+        }
+    }
+}
+
+/// What a non-waiting channel operation gives (kotlinx's `ChannelResult<T>`): a success with its value, a failure
+/// (no room to send, nothing to receive yet), or closed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelResult<T>(ChannelOutcome<T>);
+
+#[derive(Clone, Debug, PartialEq)]
+enum ChannelOutcome<T> {
+    Success(T),
+    Failed,
+    Closed,
+}
+
+impl<T> ChannelResult<T> {
+    /// A success with `value` (Kotlin's `ChannelResult.success`).
+    pub fn success(value: T) -> ChannelResult<T> {
+        ChannelResult(ChannelOutcome::Success(value))
+    }
+    /// A failure (Kotlin's `ChannelResult.failure()`).
+    pub fn failure() -> ChannelResult<T> {
+        ChannelResult(ChannelOutcome::Failed)
+    }
+    /// Closed (Kotlin's `ChannelResult.closed(cause)`; a closed channel has no cause here).
+    pub fn closed() -> ChannelResult<T> {
+        ChannelResult(ChannelOutcome::Closed)
+    }
+    /// Whether it succeeded (Kotlin's `isSuccess`).
+    pub fn is_success(&self) -> bool {
+        matches!(self.0, ChannelOutcome::Success(_))
+    }
+    /// Whether it didn't (Kotlin's `isFailure`): a failure or closed.
+    pub fn is_failure(&self) -> bool {
+        !self.is_success()
+    }
+    /// Whether the channel is closed (Kotlin's `isClosed`).
+    pub fn is_closed(&self) -> bool {
+        matches!(self.0, ChannelOutcome::Closed)
+    }
+    /// Its value if it succeeded (Kotlin's `getOrNull()`).
+    pub fn get_or_null(self) -> Option<T> {
+        match self.0 {
+            ChannelOutcome::Success(v) => Some(v),
+            _ => None,
+        }
+    }
+    /// Its value (Kotlin's `getOrThrow()`).
+    ///
+    /// # Panics
+    /// If it failed (Kotlin's IllegalStateException; ClosedReceiveChannelException when closed).
+    #[track_caller]
+    pub fn get_or_throw(self) -> T {
+        match self.0 {
+            ChannelOutcome::Success(v) => v,
+            ChannelOutcome::Failed => {
+                panic!("IllegalStateException: Trying to call 'getOrThrow' on a failed channel result: Failed")
             }
-        })
+            ChannelOutcome::Closed => panic!("ClosedReceiveChannelException: Channel was closed"),
+        }
+    }
+    /// Calls `action` with its value if it succeeded (Kotlin's `onSuccess`); gives itself.
+    pub fn on_success(self, action: impl FnOnce(&T)) -> ChannelResult<T> {
+        if let ChannelOutcome::Success(v) = &self.0 {
+            action(v);
+        }
+        self
+    }
+    /// Calls `action` if it failed (Kotlin's `onFailure`, its exception none here); gives itself.
+    pub fn on_failure(self, action: impl FnOnce()) -> ChannelResult<T> {
+        if self.is_failure() {
+            action();
+        }
+        self
+    }
+    /// Calls `action` if the channel is closed (Kotlin's `onClosed`); gives itself.
+    pub fn on_closed(self, action: impl FnOnce()) -> ChannelResult<T> {
+        if self.is_closed() {
+            action();
+        }
+        self
+    }
+}
+
+/// The receiver of [`CoroutineScope::produce`]'s block (Kotlin's `ProducerScope<E>`): the producer's coroutine
+/// scope (Deref) and the channel it sends to.
+pub struct ProducerScope<T> {
+    scope: CoroutineScope,
+    channel: Channel<T>,
+}
+
+impl<T: 'static> ProducerScope<T> {
+    /// The channel it sends to (Kotlin's `channel`).
+    pub fn channel(&self) -> Channel<T> {
+        self.channel.clone()
+    }
+    /// Sends `value`, waiting for room (Kotlin's `send`).
+    pub fn send(&self, value: T) -> SendFuture<T> {
+        self.channel.send(value)
+    }
+    /// Sends without waiting (Kotlin's `trySend`).
+    pub fn try_send(&self, value: T) -> ChannelResult<()> {
+        self.channel.try_send(value)
+    }
+    /// No more sends (Kotlin's `close()`).
+    pub fn close(&self) -> bool {
+        self.channel.close()
+    }
+}
+
+impl<T: 'static> std::ops::Deref for ProducerScope<T> {
+    type Target = CoroutineScope;
+    fn deref(&self) -> &CoroutineScope {
+        &self.scope
+    }
+}
+
+#[kompoz_runtime::named]
+impl CoroutineScope {
+    /// A channel `block` sends to from a coroutine of this scope (kotlinx's `CoroutineScope.produce`, `block`'s
+    /// receiver a [`ProducerScope`]): closed when it is done, cancelled if it is; `capacity` its buffer
+    /// (`Channel::RENDEZVOUS`, the default: each send waits for its receiver).
+    ///
+    /// ```no_run
+    /// # use kompoz_coroutines::*;
+    /// # fn f(scope: &CoroutineScope) {
+    /// let numbers = scope.produce(|this: ProducerScope<i32>| async move {
+    ///     for i in (1..=3).rev() {
+    ///         this.send(i).await;
+    ///     }
+    /// });
+    /// # let _ = numbers;
+    /// # }
+    /// ```
+    ///
+    /// Kotlin: `produce(capacity: Int = 0, block: suspend ProducerScope<E>.() -> Unit)`
+    pub fn produce<T: 'static, Fut: Future<Output = ()> + 'static>(
+        &self,
+        #[default(Channel::<T>::RENDEZVOUS)] capacity: usize,
+        block: impl FnOnce(ProducerScope<T>) -> Fut,
+    ) -> Channel<T> {
+        let scope = self.clone();
+        produce(self, capacity, move |channel| block(ProducerScope { scope, channel }))
     }
 }
 

@@ -371,7 +371,7 @@ pub(crate) fn remember_animated_shape<S: AnimatedCornerShape>(
         (InstanceKey(state.clone()), InstanceKey(channel)),
         coroutine_scope(move |scope| async move {
             while let Some(target) = c.receive().await {
-                let new_target = c.try_receive().unwrap_or(target);
+                let new_target = c.try_receive().get_or_null().unwrap_or(target);
                 scope.launch(s.animate_to_shape(new_target));
             }
         }),

@@ -200,7 +200,7 @@ fn value_as_state<T: AnimationValue, V: AnimationVector>(
         coroutine_scope(move |scope: CoroutineScope| async move {
             while let Some(target) = ch.receive().await {
                 // (two targets sent before this resumes: the last; an animation is no frame late)
-                let new_target = ch.try_receive().unwrap_or(target);
+                let new_target = ch.try_receive().get_or_null().unwrap_or(target);
                 let (a, spec, listener) = (a.clone(), anim_spec.clone(), listener.clone());
                 scope.launch(async move {
                     if new_target != a.target_value() {

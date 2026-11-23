@@ -568,6 +568,7 @@ dependencies = [
 name = "kompoz-coroutines"
 version = "0.1.0"
 dependencies = [
+ "kompoz-lifecycle",
  "kompoz-runtime",
  "parking_lot",
 ]
@@ -630,6 +631,7 @@ name = "kompoz-lifecycle"
 version = "0.1.0"
 dependencies = [
  "kompoz-coroutines",
+ "kompoz-foundation",
  "kompoz-runtime",
  "kompoz-test",
 ]
@@ -687,6 +689,7 @@ dependencies = [
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-graphics",
+ "kompoz-lifecycle",
  "kompoz-material-icons-core",
  "kompoz-material-icons-extended",
  "kompoz-material-ripple",

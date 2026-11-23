@@ -26,11 +26,17 @@ use crate::window::Overlays;
 use kompoz_coroutines::{CoroutineContext, Dispatcher, LocalDispatcher, LocalEffectCoroutineContext};
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Density, Dp, IntOffset, IntSize, LayoutDirection, Offset};
-use kompoz_lifecycle::{Lifecycle, LifecycleOwner, LifecycleRegistry, LifecycleState, LocalLifecycleOwner};
+use kompoz_lifecycle::{
+    CreationExtras, HasDefaultViewModelProviderFactory, Lifecycle, LifecycleOwner, LifecycleRegistry, LifecycleState,
+    LocalLifecycleOwner, LocalSavedStateRegistryOwner, LocalViewModelStoreOwner, MutableCreationExtras,
+    SAVED_STATE_REGISTRY_OWNER_KEY, SavedState, SavedStateHandleSupport, SavedStateRegistry,
+    SavedStateRegistryController, SavedStateRegistryOwner, SavedStateViewModelFactory, VIEW_MODEL_STORE_OWNER_KEY,
+    ViewModelProviderFactory, ViewModelStore, ViewModelStoreOwner,
+};
 use kompoz_runtime::{
     Composition, Content, KompozitionLocalProvider, MutableState, ProvideSaveableStateRegistry, RecompositionStats,
-    SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block, mutable_state_of,
-    restartable,
+    SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block,
+    mutable_confined_state_of_with_policy, mutable_state_of, never_equal_policy, restartable,
 };
 use kompoz_text::FontFamilyResolver;
 use parking_lot::Mutex;
@@ -85,15 +91,83 @@ pub fn frame_time_on_beat(last: Option<i64>, now: i64, period: i64) -> i64 {
     }
 }
 
-/// The app's lifecycle owner (CMP's `DefaultArchitectureComponentsOwner`'s lifecycle part, C++'s `AppLifecycle`):
-/// the host's, resumed from the start, moved by the platform as its window goes to the background and back.
-struct HostLifecycleOwner {
+/// The app's architecture components (CMP's `DefaultArchitectureComponentsOwner`, C++'s `AppLifecycle` and the
+/// host's ViewModel store): its lifecycle (resumed from the start, moved by the platform as its window goes to the
+/// background and back), its ViewModel store (cleared as it is destroyed: CMP's `setLifecycleState`) and its saved
+/// state registry (restored from the state it is made with, its ViewModels' handles enabled; saved into the host's
+/// state).
+struct HostOwner {
+    me: std::rc::Weak<HostOwner>,
     registry: LifecycleRegistry,
+    view_model_store: ViewModelStore,
+    saved_state_controller: SavedStateRegistryController,
 }
 
-impl LifecycleOwner for HostLifecycleOwner {
+impl LifecycleOwner for HostOwner {
     fn lifecycle(&self) -> Lifecycle {
         self.registry.lifecycle()
+    }
+}
+
+impl ViewModelStoreOwner for HostOwner {
+    fn view_model_store(&self) -> ViewModelStore {
+        self.view_model_store.clone()
+    }
+    fn as_has_default_view_model_provider_factory(&self) -> Option<&dyn HasDefaultViewModelProviderFactory> {
+        Some(self)
+    }
+}
+
+impl HasDefaultViewModelProviderFactory for HostOwner {
+    fn default_view_model_provider_factory(&self) -> Rc<dyn ViewModelProviderFactory> {
+        Rc::new(SavedStateViewModelFactory)
+    }
+    /// CMP's `defaultViewModelCreationExtras(this, this)`: the owner as the saved state registry owner and the
+    /// ViewModel store owner.
+    fn default_view_model_creation_extras(&self) -> CreationExtras {
+        let me = self.me.upgrade().expect("kompoz: the host's owner is there");
+        let extras = MutableCreationExtras::new(&CreationExtras::default());
+        extras.set(&SAVED_STATE_REGISTRY_OWNER_KEY, me.clone() as Rc<dyn SavedStateRegistryOwner>);
+        extras.set(&VIEW_MODEL_STORE_OWNER_KEY, me as Rc<dyn ViewModelStoreOwner>);
+        extras.into()
+    }
+}
+
+impl SavedStateRegistryOwner for HostOwner {
+    fn saved_state_registry(&self) -> SavedStateRegistry {
+        self.saved_state_controller.saved_state_registry()
+    }
+}
+
+impl HostOwner {
+    /// Made from `saved_state` (what [`save_state`](Self::save_state) wrote), in `INITIALIZED` (CMP's constructor:
+    /// the registry attached and restored), handles enabled (CMP's container's `enableSavedStateHandles()`).
+    fn new(saved_state: Option<&SavedState>) -> Rc<HostOwner> {
+        let owner = Rc::new_cyclic(|me: &std::rc::Weak<HostOwner>| HostOwner {
+            me: me.clone(),
+            registry: LifecycleRegistry::new(me.clone()),
+            view_model_store: ViewModelStore::new(),
+            saved_state_controller: SavedStateRegistryController::create(me.clone()),
+        });
+        owner.saved_state_controller.perform_attach();
+        owner.saved_state_controller.perform_restore(saved_state);
+        owner.enable_saved_state_handles();
+        owner
+    }
+
+    /// CMP's `saveState()`.
+    fn save_state(&self) -> SavedState {
+        let saved = SavedState::new();
+        self.saved_state_controller.perform_save(&saved);
+        saved
+    }
+
+    /// CMP's `setLifecycleState`: the ViewModels cleared as it is destroyed.
+    fn set_lifecycle_state(&self, state: LifecycleState) {
+        self.registry.set_current_state(state);
+        if state == LifecycleState::Destroyed {
+            self.view_model_store.clear();
+        }
     }
 }
 
@@ -188,8 +262,10 @@ pub struct KompozHost {
     idle_work: IdleWorkQueue,
     /// A trackpad's pinch under way (ScaleStart sent, ScaleEnd not yet).
     scaling: Cell<bool>,
-    /// The app's lifecycle owner (LocalLifecycleOwner at the root).
-    lifecycle_owner: Rc<HostLifecycleOwner>,
+    /// The app's lifecycle, ViewModel store and saved state registry owner (LocalLifecycleOwner,
+    /// LocalViewModelStoreOwner and LocalSavedStateRegistryOwner at the root): a state, as `restore_state` makes it
+    /// again.
+    architecture: MutableState<Rc<HostOwner>>,
 }
 
 impl KompozHost {
@@ -276,12 +352,10 @@ impl KompozHost {
             deep_links: DeepLinks::new(),
             idle_work: IdleWorkQueue::new(),
             scaling: Cell::new(false),
-            lifecycle_owner: Rc::new_cyclic(|me: &std::rc::Weak<HostLifecycleOwner>| HostLifecycleOwner {
-                registry: LifecycleRegistry::new(me.clone()),
-            }),
+            architecture: mutable_confined_state_of_with_policy(HostOwner::new(None), never_equal_policy()),
         };
         // (resumed from the start, as C++'s and CMP's on a focused window; the platform moves it)
-        host.lifecycle_owner.registry.set_current_state(LifecycleState::Resumed);
+        host.architecture.peek().set_lifecycle_state(LifecycleState::Resumed);
         host.semantics_owner().add_listener(autofill);
         let composition = Composition::new(Some(root as Rc<dyn kompoz_runtime::Node>));
         composition.set_content(host.root_content(Rc::new(move || content.compose())));
@@ -312,9 +386,10 @@ impl KompozHost {
         let deep_links = self.deep_links.clone();
         let idle_work = self.idle_work.clone();
         let autofill = self.owner.autofill().map(|a| crate::autofill::AutofillManager(Rc::downgrade(&a)));
-        let lifecycle_owner: Rc<dyn LifecycleOwner> = self.lifecycle_owner.clone();
+        let architecture = self.architecture.clone();
         move || {
             let env = environment.get();
+            let owner = architecture.get();
             let content = content.clone();
             let resolver = font_family_resolver.borrow().clone();
             let values = [
@@ -347,7 +422,9 @@ impl KompozHost {
                 LocalIdleWorkQueue.provides(Some(idle_work.clone())),
                 LocalFontFamilyResolver.provides_unequal(resolver),
                 crate::autofill::LocalAutofillManager.provides(autofill.clone()),
-                LocalLifecycleOwner.provides(lifecycle_owner.clone()),
+                LocalLifecycleOwner.provides(owner.clone() as Rc<dyn LifecycleOwner>),
+                LocalViewModelStoreOwner.provides(owner.clone() as Rc<dyn ViewModelStoreOwner>),
+                LocalSavedStateRegistryOwner.provides(owner as Rc<dyn SavedStateRegistryOwner>),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
             let g = generation.get();
@@ -365,7 +442,20 @@ impl KompozHost {
     /// The app's lifecycle owner (C++'s `lifecycleOwner()`): what [`LocalLifecycleOwner`] gives outside a navigation
     /// entry; resumed from the start, the platform moves it ([`set_lifecycle_state`](Self::set_lifecycle_state)).
     pub fn lifecycle_owner(&self) -> Rc<dyn LifecycleOwner> {
-        self.lifecycle_owner.clone()
+        self.architecture.peek()
+    }
+
+    /// The app's ViewModel store owner (CMP's `DefaultArchitectureComponentsOwner`, C++'s host `viewModelStore()`):
+    /// what [`LocalViewModelStoreOwner`] gives outside a navigation entry; its ViewModels are cleared as the app is
+    /// destroyed.
+    pub fn view_model_store_owner(&self) -> Rc<dyn ViewModelStoreOwner> {
+        self.architecture.peek()
+    }
+
+    /// The app's saved state registry owner: what [`LocalSavedStateRegistryOwner`] gives outside a navigation entry;
+    /// its registry is written out with the host's state ([`save_state`](Self::save_state)).
+    pub fn saved_state_registry_owner(&self) -> Rc<dyn SavedStateRegistryOwner> {
+        self.architecture.peek()
     }
 
     /// Moves the app's lifecycle to `state`, its observers told at once (C++'s `setLifecycleState`, CMP's
@@ -375,7 +465,7 @@ impl KompozHost {
     /// # Panics
     /// Out of `DESTROYED` (as Compose's LifecycleRegistry).
     pub fn set_lifecycle_state(&self, state: LifecycleState) {
-        self.lifecycle_owner.registry.set_current_state(state);
+        self.architecture.peek().set_lifecycle_state(state);
     }
 
     /// Composes `content` instead (at the next frame): a generation of its own, so the content's scope (which
@@ -475,19 +565,36 @@ impl KompozHost {
         self.update_media();
     }
 
-    /// The state to keep while the platform ends the app (C++'s `saveState`): the composition's saveable values
-    /// (`remember_saveable` outside any holder, what nodes registered: a focus restorer's child), as bytes.
+    /// The state to keep while the platform ends the app (C++'s `saveState`, CMP's container's `saveState()`), as
+    /// bytes: a map of the composition's saveable values under `"composition"` (`remember_saveable` outside any
+    /// holder, what nodes registered: a focus restorer's child) and the app's saved state registry's state under
+    /// `"savedState"` (CMP's `DefaultArchitectureComponentsOwner.saveState()`: its providers' states, the app's
+    /// ViewModels' handles among them, and what was restored and not consumed yet).
     pub fn save_state(&self) -> Vec<u8> {
-        SavedValue::map([("composition", self.saveable.save())]).encode()
+        let saved_state = self.architecture.peek().save_state();
+        SavedValue::map([("composition", self.saveable.save()), ("savedState", saved_state.to_saved_value())]).encode()
     }
 
     /// Gives back a state `save_state` wrote (C++'s `restoreState`): call it before the first frame, and what
-    /// composes finds its values again. Bytes that aren't such a state are ignored.
+    /// composes finds its values again — the composition's saveable values, and the app's owners made again from
+    /// the saved state registry's state (as CMP makes its container's with the state it is given; the ones there
+    /// before destroyed, the new ones at their lifecycle state). Bytes that aren't such a state are ignored.
     pub fn restore_state(&self, bytes: &[u8]) {
         let Some(saved) = SavedValue::decode(bytes) else { return };
         let composition = saved.get("composition");
         if composition.as_map().is_some() {
             self.saveable.restore(composition);
+        }
+        let saved_state = saved.get("savedState");
+        if saved_state.as_map().is_some() {
+            let old = self.architecture.peek();
+            let state = old.lifecycle().current_state();
+            let restored = HostOwner::new(Some(&SavedState::from_saved_value(saved_state)));
+            if state != LifecycleState::Destroyed {
+                restored.set_lifecycle_state(state);
+                old.set_lifecycle_state(LifecycleState::Destroyed);
+            }
+            self.architecture.set(restored);
         }
     }
 
@@ -1412,8 +1519,9 @@ impl Drop for KompozHost {
     /// The app's lifecycle destroyed (paused, stopped, destroyed: told while what observes it is still here, as
     /// CMP's container disposed of), the composition disposed of (what it holds forgotten), then the tree detached.
     fn drop(&mut self) {
-        if self.lifecycle_owner.registry.current_state() != LifecycleState::Destroyed {
-            self.lifecycle_owner.registry.set_current_state(LifecycleState::Destroyed);
+        let owner = self.architecture.peek();
+        if owner.lifecycle().current_state() != LifecycleState::Destroyed {
+            owner.set_lifecycle_state(LifecycleState::Destroyed);
         }
         self.composition.borrow_mut().take();
         if self.root.is_attached() {

@@ -191,6 +191,15 @@ impl Dispatcher {
             .expect("kompoz: no main dispatcher here (made by a host on the UI thread)")
     }
 
+    /// [`main`](Self::main), or none outside a coroutine on a thread without a host (where Kotlin's
+    /// `Dispatchers.Main` throws: what a ViewModel made outside a host falls back from).
+    pub fn try_main() -> Option<Dispatcher> {
+        if let Some((inner, _)) = CURRENT.with(|c| c.borrow().last().cloned()) {
+            return Some(Dispatcher(inner));
+        }
+        MAIN.with(|m| m.borrow().upgrade()).map(Dispatcher)
+    }
+
     /// Makes it this thread's main dispatcher ([`main`](Self::main)) while it lives: a host's, as it is made.
     pub fn make_main(&self) {
         MAIN.with(|m| *m.borrow_mut() = Rc::downgrade(&self.0));

@@ -1909,6 +1909,12 @@ fn receiver_of(first: &Type) -> String {
                 | "Density"
                 // (Kotlin's `flow { emit(…) }`: the collector is the block's receiver)
                 | "FlowCollector"
+                // (savedstate's `savedState { putInt(…) }`, `state.read { getInt(…) }`; viewmodel's
+                // `viewModel { createSavedStateHandle() }`, `CreationExtras { set(…) }`)
+                | "SavedStateWriter"
+                | "SavedStateReader"
+                | "CreationExtras"
+                | "MutableCreationExtras"
         );
     if scope { name } else { String::new() }
 }

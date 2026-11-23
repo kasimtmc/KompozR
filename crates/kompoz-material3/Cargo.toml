@@ -39,6 +39,8 @@ kompoz-material3-adaptive = { path = "../kompoz-material3-adaptive" }
 # link this crate's one library, so the dev-dependency cycle makes no second copy of its types)
 kompoz-material3-adaptive-navigation-suite = { path = "../kompoz-material3-adaptive-navigation-suite" }
 kompoz-test = { path = "../kompoz-test" }
+# (stage 13 WP1: PullToRefreshViewModelSample's `object : ViewModel()`)
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
 
 # The theme: color schemes (baseline, dynamic, wallpaper), MaterialTheme, typography, shapes, motion, the content
 # color, the scrollbar style (the C++ Kompoz's area T, Compose's behaviour).

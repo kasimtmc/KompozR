@@ -288,6 +288,12 @@ harness = false
 name = "kotlin_lifecycle"
 harness = false
 
+# (stage 13 WP1) ViewModels and saved state in Kotlin's syntax (the C++ Kompoz's TodoScreen and QueryViewModel;
+# lifecycle-viewmodel-compose's and savedstate's samples from a .kt file).
+[[test]]
+name = "kotlin_viewmodel"
+harness = false
+
 # (stage 13 WP-E) Back handling in Kotlin's syntax: activity-compose's and navigationevent-compose's samples from a
 # .kt file (BackHandler, PredictiveBackHandler, rememberNavigationEventDispatcherOwner) and navigationevent's
 # composables as an app writes them (NavigationBackHandler, NavigationEventHandler, rememberNavigationEventState).

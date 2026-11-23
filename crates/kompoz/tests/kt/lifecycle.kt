@@ -1,12 +1,13 @@
-// Lifecycles as a Compose app writes them: the C++ Kompoz's KitchenForms (kompozable_tests.cpp, its lifecycle lines:
-// a flow's collectAsStateWithLifecycle() as a member, Lifecycle.State names from LocalLifecycleOwner.current) and
+// Lifecycles as a Compose app writes them: the C++ Kompoz's KitchenForms (kompozable_tests.cpp, whole: a ViewModel's
+// flow's collectAsStateWithLifecycle() as a member, Lifecycle.State names from LocalLifecycleOwner.current, a channel's
+// and a producer's Kotlin forms) and
 // lifecycle-runtime-compose 2.11's samples (LifecycleComposeSamples.kt, DropUnlessLifecycleSamples.kt,
 // RememberLifecycleOwnerSamples.kt).
 //
 // Kotlin's classes are stage 14's: what the sources declare as classes is Rust beside this file
 // (kotlin_lifecycle.rs) — the samples' local `class ExampleState` (two of them: the second is `CounterState` there)
 // and their private `interface DataAnalytics` / `TimeAnalytics`, and KitchenForms' `class TickViewModel :
-// ViewModel()` (`viewModel<TickViewModel>()` is stage 13 WP1's: its ticks are given to KitchenForms here).
+// ViewModel()` (a Rust twin implementing `ViewModel`, as the stage-14 generator will make it).
 
 package androidx.lifecycle.compose.samples
 
@@ -28,15 +29,38 @@ import kotlinx.coroutines.launch
 
 // ---- KitchenForms (kompozable_tests.cpp 3186-3226) ----
 
-// Its lifecycle lines, in their Column (the others — a Channel's trySend(…).isSuccess, scope.produce<Int> { }, a
-// suspending consumeEach { } — are the coroutines' Kotlin forms: tools/stage13-followups.md, WP0).
+// Whole, as the C++ test writes it: a Channel's trySend(…).isSuccess, consumeEach { order -> } suspending per element,
+// scope.produce<Int> { send(i) }, the ViewModel's flow's collectAsStateWithLifecycle() as a member, Lifecycle.State
+// names from LocalLifecycleOwner.current, a ViewConfiguration's timeouts in millis, semantics { contentType = … }
+// (its `class TickViewModel : ViewModel()`, with SharingStarted.WhileSubscribed(5000), is Rust beside this file).
 @Composable
-fun KitchenForms(ticksOfViewModel: StateFlow<Int>) {
-    val ticks by ticksOfViewModel.collectAsStateWithLifecycle()
+fun KitchenForms() {
+    val orders = remember { Channel<Int>(2) }
+    var served by remember { mutableStateOf(listOf<Int>()) }
+    var refused by remember { mutableStateOf(0) }
+    var countdown by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val vm = viewModel<TickViewModel>()
+    val ticks by vm.ticks.collectAsStateWithLifecycle()
     val state by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val gestures = LocalViewConfiguration.current
+    LaunchedEffect(Unit) {
+        orders.consumeEach { order ->
+            delay(10)
+            served = served + order
+        }
+    }
     Column(modifier = Modifier.padding(PaddingValues(12.dp, 8.dp))) {
         Box(modifier = Modifier.size(10.dp).semantics { contentType = ContentType.Username }.testTag("alan"))
+        Button(onClick = { if (!orders.trySend(served.size + 1).isSuccess) refused++ }, modifier = Modifier.testTag("ver")) { Text("sipariş") }
+        Button(onClick = {
+            scope.launch {
+                val numbers = scope.produce<Int> { for (i in 3 downTo 1) send(i) }
+                numbers.consumeEach { countdown = countdown + it.toString() }
+                countdown = countdown + "!"
+            }
+        }) { Text("say") }
+        Text("servis ${served.size} · ret $refused · $countdown", modifier = Modifier.testTag("durum"))
         Text("durum ${if (state == Lifecycle.State.RESUMED || state == Lifecycle.State.STARTED) "açık" else "kapalı"} · ${gestures.longPressTimeoutMillis} ms · tik ${if (ticks >= 0) "var" else "yok"}")
     }
 }

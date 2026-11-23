@@ -47,7 +47,9 @@ pub use context::{
     remember_kompozition_context,
 };
 pub use derived::{DerivedState, derived_state_of, derived_state_of_with_policy};
-pub use kompoz_macros::{KotlinProperties, kompozable, kompozable_block, kompozable_lambda, named, named_args};
+pub use kompoz_macros::{
+    KotlinProperties, Saveable, kompozable, kompozable_block, kompozable_lambda, named, named_args,
+};
 pub use local::{
     KompozitionLocal, KompozitionLocalAccessorScope, KompozitionLocalContext, KompozitionLocalProvider,
     KompozitionLocalProviderContext, ProvidedValue, current_kompozition_local_context,
