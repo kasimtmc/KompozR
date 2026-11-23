@@ -69,7 +69,7 @@ fn painted(
 }
 
 fn vector_of(seen: &Rc<RefCell<Option<VectorPainter>>>) -> ImageVector {
-    seen.borrow().as_ref().expect("composed").vector.clone()
+    seen.borrow().as_ref().expect("composed").vector()
 }
 
 /// The play time of `avd` (one of `candidates`) whose `vector_at` the painter's vector is.

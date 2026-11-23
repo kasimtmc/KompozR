@@ -4,7 +4,7 @@
 //! bitmaps kept). [`RenderVectorGroup`] makes a vector's tree again as such content, each group and path with the
 //! values a [`VectorConfig`] of its name gives (an animated vector's).
 
-use super::painter::VectorPainter;
+use super::painter::{VectorPainter, VectorSource};
 use crate::platform::LocalDensity;
 use kompoz_graphics::{
     BlendMode, Brush, Color, DefaultFillType, DefaultGroupName, DefaultPathName, DefaultPivotX, DefaultPivotY,
@@ -13,7 +13,7 @@ use kompoz_graphics::{
     DefaultTrimPathStart, Dp, ImageVector, ImageVectorBuilder, PathFillType, PathNode, StrokeCap, StrokeJoin,
     VectorGroup, VectorNode, VectorPath,
 };
-use kompoz_runtime::{kompozable, remember};
+use kompoz_runtime::{Composition, CompositionContext, kompozable, remember, remember_kompozition_context};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -32,7 +32,10 @@ fn current() -> Option<Rc<RefCell<ImageVectorBuilder>>> {
 
 /// A vector made by composable `content` (Compose's rememberVectorPainter { Group { Path() } }), given the viewport's
 /// size: `Group` and `Path` in it make its tree. Without a viewport, its default size in px (`LocalDensity`), as
-/// Compose's. Made the same as last time, the same vector (its painter equal, its bitmaps kept).
+/// Compose's. As Compose's, the content is composed in a composition of its own (a child of this place's): what it
+/// reads (a state, an animation) composes it again, not the caller, and the painter — the same one while this place
+/// stays — draws the vector it made last (its drawing told, as Compose's VectorPainter's `invalidateCount`). Made the
+/// same as last time, the same vector (its bitmaps kept).
 ///
 /// Kotlin: `rememberVectorPainter(defaultWidth: Dp, defaultHeight: Dp, viewportWidth: Float, viewportHeight: Float, name: String, tintColor: Color, tintBlendMode: BlendMode, autoMirror: Boolean, content: (Float, Float) -> Unit)`
 #[kompozable]
@@ -46,34 +49,109 @@ pub fn remember_vector_painter_content(
     #[default(Color::Unspecified)] tint_color: Color,
     #[default(BlendMode::SrcIn)] tint_blend_mode: BlendMode,
     #[default(false)] auto_mirror: bool,
-    content: impl Fn(f32, f32),
+    content: impl Fn(f32, f32) + 'static,
 ) -> VectorPainter {
     let density = LocalDensity.current();
     let vw = if viewport_width.is_nan() { density.to_px(default_width) } else { viewport_width };
     let vh = if viewport_height.is_nan() { density.to_px(default_height) } else { viewport_height };
-    let builder = Rc::new(RefCell::new(ImageVector::Builder(
-        name.as_str(),
+    let context = remember_kompozition_context();
+    let vector = remember(move || VectorComposition::new(&context));
+    *vector.config.borrow_mut() = VectorContentConfig {
+        name,
         default_width,
         default_height,
-        vw,
-        vh,
+        viewport_width: vw,
+        viewport_height: vh,
         tint_color,
         tint_blend_mode,
         auto_mirror,
-    )));
-    CONTENT.with(|c| c.borrow_mut().push(builder.clone()));
-    content(vw, vh);
-    CONTENT.with(|c| c.borrow_mut().pop());
-    let made = builder.borrow_mut().build();
-    let last: Rc<RefCell<Option<ImageVector>>> = remember(|| Rc::new(RefCell::new(None)));
-    let vector = {
-        let mut last = last.borrow_mut();
-        if last.as_ref() != Some(&made) {
-            *last = Some(made);
-        }
-        last.clone().expect("a vector")
+        content: Rc::new(content),
     };
-    VectorPainter::new(vector, density)
+    // (Compose's `composeVector`: the content set again each time this place composes, composed at once)
+    let weak = Rc::downgrade(&vector);
+    vector.composition.set_content(move || {
+        if let Some(vector) = weak.upgrade() {
+            vector.compose_content();
+        }
+    });
+    VectorPainter::of_source(vector.source.clone(), density)
+}
+
+/// What [`remember_vector_painter_content`]'s child composition composes with: the vector's configuration and its
+/// content as last given.
+struct VectorContentConfig {
+    name: String,
+    default_width: Dp,
+    default_height: Dp,
+    viewport_width: f32,
+    viewport_height: f32,
+    tint_color: Color,
+    tint_blend_mode: BlendMode,
+    auto_mirror: bool,
+    content: Rc<dyn Fn(f32, f32)>,
+}
+
+/// A vector's composition (Compose's VectorPainter's `composition` and its VectorComponent): the child composition
+/// its content composes in, what it gives the content, and the vector it made last (what the painter draws).
+struct VectorComposition {
+    composition: Composition,
+    config: RefCell<VectorContentConfig>,
+    source: Rc<VectorSource>,
+}
+
+impl VectorComposition {
+    fn new(context: &CompositionContext) -> Rc<VectorComposition> {
+        let config = VectorContentConfig {
+            name: RootGroupName.to_string(),
+            default_width: Dp(0.0),
+            default_height: Dp(0.0),
+            viewport_width: 0.0,
+            viewport_height: 0.0,
+            tint_color: Color::Unspecified,
+            tint_blend_mode: BlendMode::SrcIn,
+            auto_mirror: false,
+            content: Rc::new(|_, _| {}),
+        };
+        let blank = ImageVector::Builder(
+            RootGroupName,
+            Dp(0.0),
+            Dp(0.0),
+            0.0,
+            0.0,
+            Color::Unspecified,
+            BlendMode::SrcIn,
+            false,
+        )
+        .build();
+        Rc::new(VectorComposition {
+            composition: Composition::with_parent(None, context),
+            config: RefCell::new(config),
+            source: Rc::new(VectorSource::new(blank)),
+        })
+    }
+
+    /// The content composed (in the child composition): `Group` and `Path` make the tree it gives the painter.
+    fn compose_content(&self) {
+        let (builder, content, vw, vh) = {
+            let c = self.config.borrow();
+            let builder = ImageVector::Builder(
+                c.name.as_str(),
+                c.default_width,
+                c.default_height,
+                c.viewport_width,
+                c.viewport_height,
+                c.tint_color,
+                c.tint_blend_mode,
+                c.auto_mirror,
+            );
+            (Rc::new(RefCell::new(builder)), c.content.clone(), c.viewport_width, c.viewport_height)
+        };
+        CONTENT.with(|c| c.borrow_mut().push(builder.clone()));
+        content(vw, vh);
+        CONTENT.with(|c| c.borrow_mut().pop());
+        let made = builder.borrow_mut().build();
+        self.source.set(made);
+    }
 }
 
 /// A group in a vector's content (Compose's Group): its transform and clip, what `content` makes inside it.

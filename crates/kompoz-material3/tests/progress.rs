@@ -43,8 +43,7 @@ tests!(
     wavy_amplitude_rises_and_falls_on_their_own_curves,
     indeterminate_wavy_progress_chases_with_its_track_in_the_gaps,
     semantics_ranges_live_regions_custom_actions_and_order_progress,
-    overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn_progress,
-    graphics_forms_take_compose_named_arguments_progress,
+    a_wavy_wave_rising_composes_nothing_around_it,
     determinate_progress_is_kept_between_0_and_1,
     the_gap_and_the_stop_indicator_follow_the_stroke_cap,
     a_custom_stop_indicator_or_none,
@@ -579,9 +578,9 @@ fn semantics_ranges_live_regions_custom_actions_and_order_progress() {
     assert!(!node("yükleme").settable && !node("bekleme").settable);
 }
 
-fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn_progress() {
-    // The wavy indicator's part (the tooltip, the text field, the menus and the rail there are other packages'): its
-    // wave rises from none composing nothing around it. (The C++ gave `o ? 0.5f : 0.f` as a value read in composition;
+fn a_wavy_wave_rising_composes_nothing_around_it() {
+    // The wavy indicator's part of C++ overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn (whole in
+    // cross_area.rs; the wave's heights checked here): its wave rises from none composing nothing around it. (The C++ gave `o ? 0.5f : 0.f` as a value read in composition;
     // M15 takes a lambda, read as it draws: turning it composes nothing at all.)
     let on = mutable_state_of(false);
     let composed = Rc::new(Cell::new(0));
@@ -609,35 +608,8 @@ fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_tur
     assert!(heights[2] < 1.0 && *heights.last().unwrap() > 5.5, "{heights:?}"); // the wave rose
 }
 
-fn graphics_forms_take_compose_named_arguments_progress() {
-    // The wavy indicators' part (the loading indicators' is loading_indicator.rs', the rest the lower crates'): by
-    // name, sized by their modifiers; the C++'s `WavyProgressIndicatorOptions{.strokeWidth = 2}` is M15's `stroke`
-    // (and `trackStroke`).
-    let rule = KompozTestRule::new(kompozable_lambda!(|| {
-        Column(
-            content = || {
-                LinearWavyProgressIndicator(
-                    progress = || 0.5,
-                    modifier = Modifier.width(100.dp()).test_tag("dalga"),
-                    stop_size = 0.dp(),
-                );
-                LinearWavyProgressIndicator(
-                    progress = || 0.5,
-                    modifier = Modifier.width(80.dp()).test_tag("yerinde"),
-                    stroke = Stroke(width = 2.0, cap = StrokeCap::Round),
-                    track_stroke = Stroke(width = 2.0, cap = StrokeCap::Round),
-                );
-                IndeterminateCircularWavyProgressIndicator(track_color = Color::Gray);
-            },
-        );
-    }));
-    let width = |tag: &str| rule.on_node_with_tag(tag).get_unclipped_bounds_in_root().width();
-    assert!(near(width("dalga"), 100.0, 0.01) && near(width("yerinde"), 80.0, 0.01));
-    let canvas = rule.draw();
-    let thin = (0..canvas.paths.len()).filter(|&i| (10.0..20.0).contains(&canvas.paths[i].center().y));
-    assert!(thin.clone().count() >= 2 && thin.into_iter().all(|i| canvas.path_strokes[i] == 2.0));
-    assert!(canvas.path_colors.contains(&Color::Gray));
-}
+// (C++ graphics_forms_take_compose_named_arguments: its wavy indicators, with the rest of its Material part, in both
+// syntaxes in crates/kompoz/tests/named_forms.rs)
 
 // ---- Compose's behaviour ------------------------------------------------------------------------------------------
 

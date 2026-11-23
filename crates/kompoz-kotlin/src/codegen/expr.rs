@@ -526,6 +526,7 @@ impl Gen<'_, '_> {
         match &e.kind {
             ExprKind::Name(n)
                 if is_pascal(&n.name)
+                    && !is_kt_constant(&n.name)
                     && !self.is_local(&n.name)
                     && !self.file.vals.contains_key(&n.name)
                     && !self.receivers.iter().any(|r| members_of(&r.ty, &n.name).next().is_some()) =>
@@ -594,6 +595,7 @@ impl Gen<'_, '_> {
             return Out::plain(quote_spanned!(span=> #n.#m()), ty);
         }
         let recv = self.expr(receiver);
+        let recv = super::call::int_receiver(receiver, recv, span);
         if safe {
             let it = self.fresh("it", span);
             let inner_ty = recv.ty.non_null();
@@ -739,6 +741,11 @@ impl Gen<'_, '_> {
         }
         if let Some(item) = assoc.iter().find(|i| i.kind == Kind::Function && i.params.is_empty()) {
             let mi = ident(item.rust, self.span(name.loc));
+            // (one lent, `MaterialShapes.Heart`'s `&'static RoundedPolygon`: Kotlin's value is the object, Rust's a
+            // clone of it)
+            if let Some(owned) = item.ret.strip_prefix("&'static ").or_else(|| item.ret.strip_prefix('&')) {
+                return Out::plain(quote_spanned!(span=> #qi::#mi().clone()), Ty::from_rust(owned));
+            }
             return Out::plain(quote_spanned!(span=> #qi::#mi()), Ty::from_rust(item.ret));
         }
         // (WP4a: bottom app bars) a Kotlin object's property that is a method of a unit struct of its name, the struct
@@ -1681,13 +1688,16 @@ impl Gen<'_, '_> {
                 let named = |i: &&crate::index::Item| {
                     args.iter().filter_map(|a| a.name.as_ref()).all(|a| i.params.iter().any(|p| p.answers_to(&a.name)))
                 };
+                // (a type's constructor: its result, generic or not — `StyleStateKey(false)` a
+                // `StyleStateKey<Boolean>`; before a function of that name the arguments are too few for — `Path()`,
+                // not the vector `Path(pathData, …)`)
+                let constructor = || constructor_overloads(&n.name).find(|i| i.params.len() == n_args && named(i));
                 free_functions(&n.name)
-                    .find(|i| i.params.len() >= n_args && named(i))
+                    .find(|i| i.params.len() >= n_args && i.required() <= n_args && named(i))
+                    .or_else(constructor)
+                    .or_else(|| free_functions(&n.name).find(|i| i.params.len() >= n_args && named(i)))
                     .or_else(|| free_functions(&n.name).find(named))
                     .or_else(|| free_functions(&n.name).next())
-                    // (a type's constructor: its result, generic or not — `StyleStateKey(false)` a
-                    // `StyleStateKey<Boolean>`)
-                    .or_else(|| constructor_overloads(&n.name).find(|i| i.params.len() == n_args && named(i)))
                     .map(|i| self.generic_ret(i, type_args, args, trailing))
                     .unwrap_or_else(|| if is_pascal(&n.name) { Ty::named(&n.name) } else { Ty::Unknown })
             }
@@ -1715,7 +1725,10 @@ impl Gen<'_, '_> {
                             .map(|i| owner_arg_ret(&value, i.ret))
                             .unwrap_or(Ty::Unknown);
                     }
-                    return associated(&q, &name.name).first().map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::Unknown);
+                    // (or an interface's companion function's)
+                    let own = associated(&q, &name.name);
+                    let items = if own.is_empty() { associated_functions(&q, &name.name).0 } else { own };
+                    return items.first().map(|i| Ty::from_rust(i.ret)).unwrap_or(Ty::Unknown);
                 }
                 let r = self.peek_ty(receiver).non_null();
                 let mut t = self.member_ty(&r, &name.name, true);
@@ -2110,4 +2123,9 @@ pub(crate) fn keyed_operator(ty: &Ty, name: &str) -> bool {
                 !matches!(t, "usize" | "isize" | "i32" | "i64" | "u32" | "u64" | "Int" | "Long")
             })
     })
+}
+
+/// Whether `name` is one of kotlin.math's constants (`PI`, `E`): a value, not a type to qualify a member with.
+fn is_kt_constant(name: &str) -> bool {
+    lookup(name).iter().any(|i| i.kind == Kind::Value && i.krate == "kompoz_runtime" && i.module.starts_with("kt"))
 }

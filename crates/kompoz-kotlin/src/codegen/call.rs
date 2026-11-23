@@ -643,13 +643,15 @@ impl Gen<'_, '_> {
                 let recv = Out::plain(quote_spanned!(qspan=> #qi), Ty::named(&q));
                 return self.method_on(recv, Some(receiver), name, args, loc);
             }
-            let items: Vec<&'static crate::index::Item> =
-                associated(&q, &name.name).into_iter().filter(|i| i.kind == Kind::Function).collect();
+            // (an interface's companion function, the trait object's own: `TextAutoSize.StepBased(…)` is
+            // `<dyn TextAutoSize>::step_based(…)`)
+            let (items, companion) = associated_functions(&q, &name.name);
+            let owner = if companion { quote_spanned!(qspan=> <dyn #qi>) } else { quote_spanned!(qspan=> #qi) };
             if let Some(c) = (!items.is_empty()).then(|| self.choose(&items, args, loc)).flatten() {
                 let m = ident(&c.rust, nspan);
                 return self.emit(
                     &c,
-                    Target::Path(quote_spanned!(span=> #qi::#m), c.rust.clone()),
+                    Target::Path(quote_spanned!(span=> #owner::#m), c.rust.clone()),
                     args,
                     loc,
                     &name.name,
@@ -661,6 +663,7 @@ impl Gen<'_, '_> {
             return Out::plain(quote_spanned!(span=> #qi::#m(#(#vals),*)), Ty::Unknown);
         }
         let recv = self.expr(receiver);
+        let recv = int_receiver(receiver, recv, span);
         // (WP8) A receiver whose expression gives no type, typed as inference reads it (`listOf(4, 5).forEachIndexed
         // { i, x -> … }`: a list's, not another type's method of that name)
         let recv = if recv.ty == Ty::Unknown { Out { ty: self.peek_ty(receiver), ..recv } } else { recv };
@@ -2265,6 +2268,20 @@ fn compatible(a: &Ty, p: &Ty) -> bool {
         (Ty::List(_), p) => matches!(p, Ty::List(_) | Ty::Named(_, _)),
         _ => true,
     }
+}
+
+/// A member's receiver as Kotlin types it: an Int literal's (`(-3).sign`) Kotlin's Int, which Rust's literal isn't
+/// until told.
+pub(crate) fn int_receiver(receiver: &Expr, recv: Out, span: Span) -> Out {
+    let inner = match &receiver.kind {
+        ExprKind::Paren(inner) => inner,
+        _ => receiver,
+    };
+    if int_literal(inner).is_none() {
+        return recv;
+    }
+    let ts = recv.ts;
+    Out { ts: quote_spanned!(span=> (#ts as i32)), ..recv }
 }
 
 /// An integer literal (`2`, `-2`).

@@ -65,7 +65,7 @@ tests!(
     rich_tooltip_caret_points_at_the_anchor,
     rich_tooltip_defaults_and_colors,
     rich_tooltip_samples,
-    overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn,
+    a_tooltip_composes_around_it_only_as_it_shows_and_goes,
 );
 
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
@@ -1973,11 +1973,11 @@ fn rich_tooltip_samples() {
     rule.on_node_with_text(RichTooltipText).assert_does_not_exist();
 }
 
-/// C++ `overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn`, the tooltip's part (the
-/// menu's, field's and indicators' parts are in menus.rs, text_field.rs and progress.rs): a tooltip shown composes
+/// The tooltip's part of C++ `overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn` (whole in
+/// cross_area.rs; its fading out checked here): a tooltip shown composes
 /// what is around it as it turns, not while it grows and fades in; it is there before it would go by itself (1.5 s);
 /// dismissed, it fades out without composing it again.
-fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn() {
+fn a_tooltip_composes_around_it_only_as_it_shows_and_goes() {
     let h: Held = Rc::default();
     let composed = Rc::new(std::cell::Cell::new(0));
     let (hh, c) = (h.clone(), composed.clone());

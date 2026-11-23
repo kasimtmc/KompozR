@@ -697,8 +697,9 @@ mod fab_segmented {
 
     // (WP1b: fab_segmented) kompozable_tests.cpp's `Mixed` (its segments and staggered grid as written; its
     // `viewModel<TodoViewModel>()` and `SideLine(vm, Side.Right)` lines are stage 13's) with
-    // view_models_maps_and_segments_as_kotlin_writes_them's segment checks — also the Kotlin form of kompoz_tests.cpp's
-    // segmented_buttons_take_compose_named_arguments, the same content —; `Navigation` (whole as written: its tabs, FAB
+    // view_models_maps_and_segments_as_kotlin_writes_them's segment checks (kompoz_tests.cpp's
+    // segmented_buttons_take_compose_named_arguments, much the same content, is in both syntaxes in named_forms.rs, as
+    // are its tabs_and_fab_menu_… and expressive_buttons_…); `Navigation` (whole as written: its tabs, FAB
     // menu and floating toolbar — the one copy of it; kotlin_lists_sheets.rs's NavigationTabs and
     // kotlin_floating_toolbar.rs's NavigationToolbar check its parts on their own) with
     // tabs_and_fab_menu_as_compose_writes_them; the C++ Kompoz's

@@ -2755,16 +2755,21 @@ fn vector_paths_trim_and_vectors_come_from_composable_content() {
         IntSize::new(100, 100),
     );
     let first = painters.borrow().clone();
+    let first_vector = first[2].vector();
     let first_remembered = remembered.get();
     other.set(1);
     rule.wait_for_idle();
     let now = painters.borrow().clone();
-    assert!(now[2] == first[2] && remembered.get() == first_remembered); // composed again, made the same
+    // composed again, made the same
+    assert!(now[2] == first[2] && now[2].vector() == first_vector && remembered.get() == first_remembered);
     assert!(now[0] == first[0] && now[1] == first[1] && now[0] != now[1]);
+    // What the content read changed: its own composition composes it again (as Compose's vector composition), not
+    // the caller — the painter it gave stays, drawing the vector made now.
+    let caller_painter = painters.borrow()[2].clone();
     turn.set(90.0);
     rule.wait_for_idle();
     let now = painters.borrow().clone();
-    assert!(now[2] != first[2] && remembered.get() == first_remembered);
+    assert!(now[2] == caller_painter && now[2].vector() != first_vector && remembered.get() == first_remembered);
     let turned_line = |degrees: f32| {
         let v = ImageVector::Builder(
             vector::RootGroupName,
@@ -2788,6 +2793,7 @@ fn vector_paths_trim_and_vectors_come_from_composable_content() {
         VectorPainter::new(v, Density::default())
     };
     assert!(now[2] == turned_line(90.0) && now[2] != turned_line(0.0));
+    assert!(now[2].vector() == turned_line(90.0).vector());
     // Its group's matrix now a quarter turn: its line from the right edge in.
     let c = rule.draw();
     let turned = c.drawn_images.iter().any(|image| {
@@ -2844,7 +2850,7 @@ fn vector_paths_trim_and_vectors_come_from_composable_content() {
             b.add_path_of(square("M0,0h4v4z", Some(SolidColor(Color::White)), 1.0));
         })
         .build();
-    assert!(named.borrow().as_ref().unwrap().vector == expected);
+    assert!(named.borrow().as_ref().unwrap().vector() == expected);
     let blank = ImageVector::Builder(
         vector::RootGroupName,
         24.dp(),
@@ -2856,7 +2862,7 @@ fn vector_paths_trim_and_vectors_come_from_composable_content() {
         false,
     )
     .build();
-    assert!(no_viewport.borrow().as_ref().unwrap().vector == blank && given.get() == sz(48.0, 32.0));
+    assert!(no_viewport.borrow().as_ref().unwrap().vector() == blank && given.get() == sz(48.0, 32.0));
 }
 
 /// A config giving every value of its own (C++'s `Everything`).
@@ -3007,7 +3013,7 @@ fn render_vector_group_draws_a_tree_through_configs() {
         .add_path_of(VectorPath { fill: None, ..kare })
         .build();
     let p = painters.borrow();
-    assert!(p[0].vector == as_is && p[1].vector == through);
+    assert!(p[0].vector() == as_is && p[1].vector() == through);
 }
 
 /// A renderer that fills what it is asked to draw into white (and counts the draws of the one bitmap it watches).

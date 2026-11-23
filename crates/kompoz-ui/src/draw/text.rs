@@ -280,6 +280,8 @@ impl<'a> DrawScope<'a> {
     /// …)): in `style`, cut as `overflow` says, wrapping where `soft_wrap` says, at most `max_lines` lines, in
     /// `size` (unspecified: what is left of the scope from `top_left`), blended by `blend_mode`; the scope's density
     /// and layout direction.
+    ///
+    /// Kotlin: `drawText(textMeasurer: TextMeasurer, text: AnnotatedString, topLeft: Offset, style: TextStyle, overflow: TextOverflow, softWrap: Boolean, maxLines: Int, placeholders: List<AnnotatedString.Range<Placeholder>>, size: Size, blendMode: BlendMode)`
     #[allow(clippy::too_many_arguments)]
     pub fn draw_text_measurer(
         &mut self,

@@ -28,7 +28,7 @@ tests!(
     pane_expansion_handle_drags_the_split_and_settles_on_an_anchor,
     pane_expansion_handle_alone_brings_its_own_state,
     pane_expansion_without_a_handle_and_on_a_supporting_pane_scaffold,
-    material_states_come_back_after_the_process_ended,
+    a_pane_width_comes_back_with_the_saved_ui_state,
     pane_expansion_states_take_widths_proportions_and_anchors,
 );
 
@@ -318,9 +318,9 @@ fn pane_expansion_without_a_handle_and_on_a_supporting_pane_scaffold() {
     rule.on_node_with_tag("destek").assert_is_not_displayed();
 }
 
-/// The pane expansion part of the C++ test (its other states are material3's, ported there): a width set is saved
-/// and comes back with the UI's state, the list as wide again.
-fn material_states_come_back_after_the_process_ended() {
+/// A width set is saved and comes back with the UI's state through a saveable registry, the list as wide again
+/// (C++ material_states_come_back_after_the_process_ended is whole in kompoz-material3's cross_area.rs, through the host).
+fn a_pane_width_comes_back_with_the_saved_ui_state() {
     fn app(registry: &SaveableStateRegistry, out: &Slot<PaneExpansionState>) -> KompozTestRule {
         let (r, out) = (registry.clone(), out.clone());
         KompozTestRule::with_viewport(

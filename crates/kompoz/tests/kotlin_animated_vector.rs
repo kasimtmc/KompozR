@@ -60,7 +60,7 @@ fn animated_vector_painter_as_compose_writes_it() {
         let s = s.clone();
         Spinner(i.clone(), a.get(), move |p| *s.borrow_mut() = Some(p));
     }));
-    let painted = || seen.borrow().as_ref().expect("composed").vector.clone();
+    let painted = || seen.borrow().as_ref().expect("composed").vector();
     assert_eq!(rotation(&painted()), 0.0);
     assert!(rule.draw().vectors.contains(&painted().id()));
     at_end.set(true);
@@ -88,13 +88,13 @@ fn the_animated_vector_sample_in_a_kt_file() {
         AnimatedVectorSample(SPINNER.to_string(), move |at_end, painter| s.borrow_mut().push((at_end, painter)));
     }));
     let last = || seen.borrow().last().cloned().expect("composed");
-    assert!(!last().0 && rotation(&last().1.vector) == 0.0);
+    assert!(!last().0 && rotation(&last().1.vector()) == 0.0);
     rule.on_node_with_content_description("Your content description").perform_click();
     rule.wait_for_idle();
-    assert!(last().0 && rotation(&last().1.vector) == 180.0);
+    assert!(last().0 && rotation(&last().1.vector()) == 180.0);
     rule.on_node_with_content_description("Your content description").perform_click();
     rule.wait_for_idle();
-    assert!(!last().0 && rotation(&last().1.vector) == 0.0);
+    assert!(!last().0 && rotation(&last().1.vector()) == 0.0);
 }
 
 fn a_failed_read_as_kotlin_reads_a_result() {

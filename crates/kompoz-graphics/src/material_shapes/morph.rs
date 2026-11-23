@@ -193,6 +193,9 @@ pub struct Morph {
 }
 
 impl Morph {
+    /// The morph from `start` to `end`.
+    ///
+    /// Kotlin: `Morph(start: RoundedPolygon, end: RoundedPolygon)`
     pub fn new(start: RoundedPolygon, end: RoundedPolygon) -> Morph {
         let morph_match = Morph::match_polygons(&start, &end);
         Morph { start, end, morph_match }

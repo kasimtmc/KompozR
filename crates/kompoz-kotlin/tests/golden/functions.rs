@@ -105,3 +105,54 @@ pub fn apply2(x: i32, f: impl ::core::ops::Fn(i32) -> i32 + 'static) -> i32 {
     use ::kompoz::runtime::kt::ext::*;
     ::kompoz::runtime::named_args!({ f(f(x)) })
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn arrows() -> ::std::vec::Vec<Key> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::list_of([Key::DirectionLeft, Key::MoveEnd]) })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn step_sizes() -> ::std::rc::Rc<dyn TextAutoSize> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({ <dyn TextAutoSize>::step_based(8.sp(), 40.sp(), 1.sp()) })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn two_anchors() -> ::std::sync::Arc<dyn DraggableAnchors<i32>> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        ::std::sync::Arc::new(DraggableAnchors(|this: &mut DraggableAnchorsConfig<_>| {
+            this.at(1, 0_f32);
+            this.at(2, 120_f32);
+        }))
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn math_forms() -> bool {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        ::kompoz::runtime::kt::round(2.5_f32) == 2_f32
+            && ::kompoz::runtime::kt::KtNumber::to_float(((-3) as i32)) == -3_f32
+            && ::kompoz::runtime::kt::KtNumber::to_float(::kompoz::runtime::kt::PI) > 3_f32
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn heart_to_pill() -> Morph {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({ Morph::new(MaterialShapes::Heart().clone(), MaterialShapes::Pill().clone()) })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn ten_long() -> f32 {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        let mut path = Path::new();
+        path.line_to(10_f32, 0_f32);
+        let mut measure = PathMeasure::new();
+        measure.set_path(&path.clone(), false);
+        return measure.length();
+    })
+}

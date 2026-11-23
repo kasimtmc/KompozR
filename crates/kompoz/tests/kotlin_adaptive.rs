@@ -1,5 +1,6 @@
 //! Material's adaptive layouts and navigation suite in Kotlin's syntax, as a Compose user writes them: the C++
-//! Kompoz's sources (kompozable_tests.cpp's LayoutForms pane scaffolds and MaterialForms' NavigationSuiteScaffold,
+//! Kompoz's sources (kompozable_tests.cpp's LayoutForms pane scaffolds; MaterialForms, its NavigationSuiteScaffold
+//! too, is whole in kotlin_material_sources.rs;
 //! kompoz_tests.cpp's named-form pane scaffolds) and its adaptive tests written in Kotlin through `kompoz!`, and the
 //! adaptive-layout and navigation-suite samples from `.kt` files (kompoz_file!).
 
@@ -20,7 +21,9 @@ use std::rc::Rc;
 // ==== window size classes and pane scaffolds =========================================================================
 // kompozable_tests.cpp's LayoutForms pane scaffold (its list-detail scaffold of two cities with a pane expansion
 // state of a proportion anchor and a drag handle) and kompoz_tests.cpp's layout_forms_take_compose_named_arguments
-// pane scaffolds (both scaffolds by name), written as Compose writes them: the C++'s `ListDetailPaneScaffold(
+// pane scaffolds (both scaffolds by name, in both syntaxes: `RustNamedPaneScaffolds`, its drag handle's
+// `VerticalDragHandle(modifier = Modifier.paneExpansionDraggable(state, …))` too), written as Compose writes them:
+// the C++'s `ListDetailPaneScaffold(
 // navigator =, listPane =, …, listPaneWidth =)` is Compose's NavigableListDetailPaneScaffold of a navigator, its panes
 // AnimatedPanes, the list's width `Modifier.preferredWidth(…)` (Compose has no `listPaneWidth`).
 
@@ -89,6 +92,13 @@ kompoz! {
                             Text(if (key != null) "ayrıntı $key" else "seçin")
                         }
                     },
+                    paneExpansionDragHandle = { state ->
+                        val interactionSource = remember { MutableInteractionSource() }
+                        VerticalDragHandle(
+                            modifier = Modifier.paneExpansionDraggable(state, LocalMinimumInteractiveComponentSize.current, interactionSource),
+                            interactionSource = interactionSource,
+                        )
+                    },
                 )
             }
             Box(modifier = Modifier.size(400.dp, 100.dp)) {
@@ -111,14 +121,103 @@ fn layout_forms_as_compose_writes_them_panes() {
     assert!(named_args!(rule.on_node_with_text("şehir: İzmir")).exists());
 }
 
+/// The Rust syntax's twin of `NamedPaneScaffolds`, by name.
+#[kompozable]
+fn RustNamedPaneScaffolds() {
+    let navigator = remember_list_detail_pane_scaffold_navigator::<i32>();
+    let support = remember_supporting_pane_scaffold_navigator::<i32>();
+    let scope = remember_coroutine_scope();
+    Column(move || {
+        let (navigator, scope) = (navigator.clone(), scope.clone());
+        Box(
+            modifier = Modifier.size_wh(400.dp(), 200.dp()),
+            content = move || {
+                let (list, detail, scope) = (navigator.clone(), navigator.clone(), scope.clone());
+                NavigableListDetailPaneScaffold(
+                    navigator = navigator.clone(),
+                    list_pane = move |pane: &ThreePaneScaffoldPaneScope| {
+                        let (n, scope) = (list.clone(), scope.clone());
+                        pane.AnimatedPane(
+                            modifier = pane.preferred_width(Modifier, 160.dp()),
+                            content = move |_: &AnimatedPaneScope| {
+                                let (n, scope) = (n.clone(), scope.clone());
+                                Text(
+                                    "rust liste",
+                                    modifier = Modifier.clickable(
+                                        on_click = move || {
+                                            scope.launch(n.navigate_to(
+                                                pane = ListDetailPaneScaffoldRole::Detail,
+                                                content_key = Some(1),
+                                            ));
+                                        },
+                                    ),
+                                );
+                            },
+                        );
+                    },
+                    detail_pane = move |pane: &ThreePaneScaffoldPaneScope| {
+                        let n = detail.clone();
+                        pane.AnimatedPane(
+                            content = move |_: &AnimatedPaneScope| {
+                                let key = n.current_destination().and_then(|d| d.content_key);
+                                Text(key.map_or("rust seçin".to_string(), |k| format!("rust ayrıntı {k}")));
+                            },
+                        );
+                    },
+                    pane_expansion_drag_handle =
+                        Some(Rc::new(|scope: &ThreePaneScaffoldScope, state: PaneExpansionState| {
+                            let interaction_source = remember(MutableInteractionSource::new);
+                            let semantics = Some(state.default_drag_handle_semantics());
+                            VerticalDragHandle(
+                                modifier = scope.pane_expansion_draggable(
+                                    Modifier,
+                                    state,
+                                    LocalMinimumInteractiveComponentSize.current(),
+                                    interaction_source.clone(),
+                                    semantics,
+                                ),
+                                interaction_source = Some(interaction_source),
+                            );
+                        }) as ThreePaneDragHandle),
+                );
+            },
+        );
+        Box(
+            modifier = Modifier.size_wh(400.dp(), 100.dp()),
+            content = move || {
+                NavigableSupportingPaneScaffold(
+                    navigator = support.clone(),
+                    main_pane = |pane: &ThreePaneScaffoldPaneScope| {
+                        pane.AnimatedPane(content = |_: &AnimatedPaneScope| Text("rust ana"));
+                    },
+                    supporting_pane = |pane: &ThreePaneScaffoldPaneScope| {
+                        pane.AnimatedPane(
+                            modifier = pane.preferred_width(Modifier, 120.dp()),
+                            content = |_: &AnimatedPaneScope| Text("rust destek"),
+                        );
+                    },
+                );
+            },
+        );
+    });
+}
+
 fn layout_forms_take_compose_named_arguments_panes() {
-    let rule = KompozTestRule::with_viewport(NamedPaneScaffolds, IntSize::new(400, 800));
-    rule.wait_for_idle();
-    assert!(named_args!(rule.on_node_with_text("liste")).exists());
-    assert!(named_args!(rule.on_node_with_text("ana")).exists());
-    named_args!(rule.on_node_with_text("liste")).perform_click();
-    rule.wait_for_idle();
-    assert!(named_args!(rule.on_node_with_text("ayrıntı 1")).exists());
+    // Both syntaxes, one after the other (each a window of its own: the scaffolds take what the window's size class
+    // says).
+    for rust in [false, true] {
+        let rule = KompozTestRule::with_viewport(
+            kompozable_lambda!(move || if rust { RustNamedPaneScaffolds() } else { NamedPaneScaffolds() }),
+            IntSize::new(400, 800),
+        );
+        let text = |t: &str| if rust { format!("rust {t}") } else { t.to_string() };
+        rule.wait_for_idle();
+        assert!(named_args!(rule.on_node_with_text(&text("liste"))).exists());
+        assert!(named_args!(rule.on_node_with_text(&text("ana"))).exists());
+        named_args!(rule.on_node_with_text(&text("liste"))).perform_click();
+        rule.wait_for_idle();
+        assert!(named_args!(rule.on_node_with_text(&text("ayrıntı 1"))).exists());
+    }
 }
 
 // ---- samples ------------------------------------------------------------------------------------------------------
@@ -436,8 +535,7 @@ fn navigable_list_detail_pane_scaffold_sample_in_kotlin() {
 }
 
 // ==== navigation suite ===============================================================================================
-// kompozable_tests.cpp's MaterialForms NavigationSuiteScaffold (its "Settings"/"Tab 1" checks of
-// material_as_compose_writes_it), the C++ Kompoz's navigation-suite tests (kompoz_tests.cpp:
+// The C++ Kompoz's navigation-suite tests (kompoz_tests.cpp:
 // window_size_classes_and_the_navigation_they_suit, navigation_suite_scaffold_moves_its_items_and_keeps_the_screen,
 // navigation_suite_types_as_compose_1_4, navigation_suite_scaffold_with_its_own_items_a_primary_action_and_hiding,
 // navigation_suite_items_suit_each_type, the NavigationSuiteScaffoldLayout cases of
@@ -446,24 +544,6 @@ fn navigable_list_detail_pane_scaffold_sample_in_kotlin() {
 // differences from the C++'s said there), and NavigationSuiteScaffoldSamples from kt/navigation_suite.kt.
 
 kompoz! {
-    // (MaterialForms' NavigationSuiteScaffold part: its items given to the NavigationSuiteScope)
-    @Kompozable
-    fun MaterialFormsNavigationSuite() {
-        var tab by rememberSaveable { mutableStateOf(0) }
-        Column {
-            NavigationSuiteScaffold(
-                navigationSuiteItems = {
-                    item(selected = tab == 0, onClick = { tab = 0 }, icon = { Icon(Icons.Filled.Home, contentDescription = null) }, label = { Text("Home") })
-                    item(selected = tab == 1, onClick = { tab = 1 }, icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Settings") })
-                },
-                modifier = Modifier.height(300.dp),
-                layoutType = NavigationSuiteType.NavigationBar,
-            ) {
-                Text("Tab $tab")
-            }
-        }
-    }
-
     @Composable
     fun SuitedTypes(log: (String) -> Unit) {
         val phone = WindowSizeClass.compute(400f, 800f)
@@ -574,13 +654,6 @@ fn kt_suite_placed_bounds(rule: &KompozTestRule, tag: &str) -> Rect {
 
 fn kt_suite_near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
-}
-
-fn material_forms_navigation_suite() {
-    let rule = KompozTestRule::with_viewport(MaterialFormsNavigationSuite, IntSize::new(400, 800));
-    rule.on_node_with_text("Tab 0").assert_exists();
-    rule.on_node_with_text("Settings").perform_click();
-    rule.on_node_with_text("Tab 1").assert_exists();
 }
 
 fn navigation_suite_types_in_kotlin() {
@@ -800,7 +873,6 @@ fn main() {
         ),
         ("navigable_list_detail_pane_scaffold_sample_in_kotlin", navigable_list_detail_pane_scaffold_sample_in_kotlin),
         // (navigation suite)
-        ("material_forms_navigation_suite", material_forms_navigation_suite),
         ("navigation_suite_types_in_kotlin", navigation_suite_types_in_kotlin),
         ("navigation_suite_scaffold_moves_its_items_in_kotlin", navigation_suite_scaffold_moves_its_items_in_kotlin),
         (

@@ -1029,6 +1029,19 @@ fn badged_navigation_bar_items() {
     let item_width = 600.0 / 3.0 - 8.0 * 2.0 / 3.0;
     // (each item's icon centered in its item, the badge past its end)
     assert!(dot.left > item_width / 2.0 && dot.left < item_width / 2.0 + 12.0 + 6.0, "{dot:?}");
+    // The long count's badge: its start 12 dp in from the icon's end, its bottom 14 dp below the icon's top.
+    let icons = named_args!(rule.on_all_nodes_with_content_description("Favorite", use_unmerged_tree = true))
+        .fetch_semantics_nodes();
+    assert_eq!(icons.len(), 3);
+    let third = icons
+        .iter()
+        .map(|n| n.bounds_in_root())
+        .fold(Rect::new(0.0, 0.0, 0.0, 0.0), |a, b| if b.left > a.left { b } else { a });
+    let canvas = rule.draw();
+    assert!(
+        canvas.rects.iter().any(|r| near(r.left, third.right - 12.0, 0.01) && near(r.bottom, third.top + 14.0, 0.01)),
+        "{third:?}"
+    );
 }
 
 /// NavigationBarSamples.kt's `ShortNavigationBarSample`.

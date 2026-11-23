@@ -36,7 +36,6 @@ tests!(
     motion_schemes_set_how_material_components_move,
     material_type_styles_carry_line_heights_and_letter_spacing,
     text_selection_colors_come_from_the_theme_or_the_local,
-    theme_pieces_take_compose_named_arguments,
     surfaces_are_tinted_by_their_elevation,
     expressive_themes_nest,
     typography_of_a_font_family,
@@ -389,58 +388,7 @@ fn text_selection_colors_come_from_the_theme_or_the_local() {
     assert!(highlighted(own.background_color));
 }
 
-fn theme_pieces_take_compose_named_arguments() {
-    // lightColorScheme(primary = …), scheme.copy(…), Typography's and TextStyle's copy by name, and a MaterialTheme
-    // given a typography (its color scheme, left out, the one around it).
-    let brand = named_args!(light_color_scheme(primary = Color(0xFF0061A4_i64), on_primary = Color::White));
-    assert!(brand.primary == Color(0xFF0061A4_i64) && brand.on_primary == Color::White);
-    assert_eq!(brand.secondary, light_color_scheme().secondary);
-    // (the surface tint is the primary given)
-    assert_eq!(brand.surface_tint, brand.primary);
-    let changed = named_args!(brand.copy(on_primary = Color::Black));
-    assert!(changed.on_primary == Color::Black && changed.primary == brand.primary);
-    let base = Typography();
-    let headline = named_args!(base.headline_small.copy(font_family = Some(FontFamily::Serif), font_size = 30.sp()));
-    let ty = named_args!(base.copy(headline_small = headline));
-    assert!(ty.headline_small.font_family == Some(FontFamily::Serif) && ty.headline_small.font_size == 30.sp());
-    assert_eq!(ty.body_medium, Typography().body_medium);
-    let seen = Rc::new(RefCell::new(None));
-    let s = seen.clone();
-    let t = ty.clone();
-    let _rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (s, t) = (s.clone(), t.clone());
-        MaterialTheme(
-            color_scheme = dark_color_scheme(),
-            content = move || {
-                let s = s.clone();
-                MaterialTheme(
-                    typography = t.clone(),
-                    content = move || {
-                        *s.borrow_mut() =
-                            Some((MaterialTheme::typography().headline_small, MaterialTheme::color_scheme().primary));
-                    },
-                );
-            },
-        );
-    }));
-    let (headline, primary) = seen.borrow().clone().unwrap();
-    assert!(headline.font_family == Some(FontFamily::Serif) && headline.font_size == 30.sp());
-    // (kept from the theme around it)
-    assert_eq!(primary, dark_color_scheme().primary);
-    // Shapes: Material's scale by default, MaterialTheme(shapes = …) for what is inside.
-    assert_eq!(Shapes().medium, CornerBasedShape::from(RoundedCornerShape(12.dp())));
-    let shapes = named_args!(Shapes().copy(medium = RoundedCornerShape(20.dp()).into()));
-    assert_eq!(shapes.medium, CornerBasedShape::from(RoundedCornerShape(20.dp())));
-    let corner = Rc::new(RefCell::new(None));
-    let c = corner.clone();
-    let _shaped = KompozTestRule::new(kompozable_lambda!(move || {
-        let c = c.clone();
-        let shapes = named_args!(Shapes().copy(large = RoundedCornerShape(24.dp()).into()));
-        MaterialTheme(shapes = shapes, content = move || *c.borrow_mut() = Some(MaterialTheme::shapes().large));
-    }));
-    assert_eq!(corner.borrow().clone(), Some(CornerBasedShape::from(RoundedCornerShape(24.dp()))));
-    assert_eq!(MaterialTheme::shapes().large, CornerBasedShape::from(RoundedCornerShape(16.dp())));
-}
+// (C++ theme_pieces_take_compose_named_arguments: in both syntaxes in crates/kompoz/tests/named_forms.rs)
 
 fn surfaces_are_tinted_by_their_elevation() {
     // Compose's surfaceColorAtElevation: none at 0, (4.5 ln(e + 1) + 2)% of the tint over the surface; a Surface's

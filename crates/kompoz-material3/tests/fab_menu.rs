@@ -1,6 +1,6 @@
 //! Material Expressive's FAB menu as Compose's material3 (1.5.0-alpha17) has it: the C++ Kompoz's
-//! fab_menu_opens_from_the_bottom_and_its_button_turns_round and tabs_and_fab_menu_take_compose_named_arguments
-//! (its tabs, FAB menu and floating toolbar; with M15's values where the C++ had its own), Compose's
+//! fab_menu_opens_from_the_bottom_and_its_button_turns_round (with M15's values where the C++ had its own; its
+//! tabs_and_fab_menu_take_compose_named_arguments is in both syntaxes in crates/kompoz/tests/named_forms.rs), Compose's
 //! behaviour (the toggleable FAB's defaults and icon, the menu's alignment, scrolling, keyboard focus and
 //! accessibility) and M15's FloatingActionButtonMenuSample.
 
@@ -29,7 +29,6 @@ use std::rc::Rc;
 
 tests!(
     fab_menu_opens_from_the_bottom_and_its_button_turns_round,
-    tabs_and_fab_menu_take_compose_named_arguments,
     toggle_floating_action_button_defaults_go_from_the_fab_to_the_close_button,
     a_toggle_fabs_icon_is_sized_and_tinted_by_its_progress,
     fab_menu_items_line_up_as_the_menu_says,
@@ -211,116 +210,7 @@ fn fab_menu_opens_from_the_bottom_and_its_button_turns_round() {
     assert!(same_rect(bounds(&sized, "orta"), xywh(24.0, 0.0, 56.0, 56.0)), "{:?}", bounds(&sized, "orta"));
 }
 
-// ---- C++ tabs_and_fab_menu_take_compose_named_arguments -------------------------------------------------------
-
-fn tabs_and_fab_menu_take_compose_named_arguments() {
-    // The C++ test in Rust's named form (its Kotlin form, `Navigation`, in crates/kompoz/tests/
-    // kotlin_expressive_buttons.rs): its tabs (WP5's), FAB menu — the items made through the scope — and
-    // HorizontalFloatingToolbar (WP4a's).
-    let tab = mutable_state_of(0);
-    let open = mutable_state_of(false);
-    let picked = mutable_state_of("yok".to_string());
-    let (t, o, p) = (tab.clone(), open.clone(), picked.clone());
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(move || {
-            let (t, o, p) = (t.clone(), o.clone(), p.clone());
-            Column(move || {
-                let (t1, t2) = (t.clone(), t.clone());
-                PrimaryTabRow(
-                    selected_tab_index = t.get(),
-                    tabs = move || {
-                        for i in 0..2 {
-                            let t = t1.clone();
-                            TextIconTab(
-                                selected = t.get() == i,
-                                on_click = move || t.set(i),
-                                text = Some(Rc::new(move || Text(format!("sekme {i}")))),
-                                icon = Some(Rc::new(|| VectorIcon(Icons::Filled::Star(), Some(String::new())))),
-                            );
-                        }
-                    },
-                );
-                SecondaryScrollableTabRow(
-                    selected_tab_index = t.get(),
-                    edge_padding = Dp(0.0),
-                    tabs = move || {
-                        for i in 0..2 {
-                            let t = t2.clone();
-                            LeadingIconTab(
-                                selected = t.get() == i,
-                                on_click = move || t.set(i),
-                                text = move || Text(format!("kayan {i}")),
-                                icon = || VectorIcon(Icons::Filled::Home(), Some(String::new())),
-                                unselected_content_color = Some(Color::Red),
-                            );
-                        }
-                    },
-                );
-                Text(format!("seçili {} · {}", t.get(), p.get()));
-                let (o, p) = (o.clone(), p.clone());
-                Box(
-                    modifier = Modifier.size(300.dp()),
-                    content_alignment = Alignment::BottomEnd,
-                    content = move || {
-                        let (button_open, items_open, p) = (o.clone(), o.clone(), p.clone());
-                        FloatingActionButtonMenu(
-                            expanded = o.get(),
-                            button = move || {
-                                let set = button_open.clone();
-                                ToggleFloatingActionButton(
-                                    checked = button_open.get(),
-                                    on_checked_change = move |on| set.set(on),
-                                    modifier = Modifier.test_tag("aç"),
-                                    content = |_: &ToggleFloatingActionButtonScope| {
-                                        VectorIcon(Icons::Filled::Add(), Some("Menü".into()))
-                                    },
-                                );
-                            },
-                            content = move |menu: &FloatingActionButtonMenuScope| {
-                                for label in ["Not", "Konum"] {
-                                    let (p, o) = (p.clone(), items_open.clone());
-                                    menu.FloatingActionButtonMenuItem(
-                                        on_click = move || {
-                                            p.set(label.to_string());
-                                            o.set(false);
-                                        },
-                                        text = move || Text(label),
-                                        icon = || VectorIcon(Icons::Filled::Edit(), Some(String::new())),
-                                    );
-                                }
-                            },
-                        );
-                    },
-                );
-                // (WP4a's toolbar, its colors by name)
-                HorizontalFloatingToolbar(
-                    expanded = true,
-                    colors = FloatingToolbarDefaults.vibrant_floating_toolbar_colors(),
-                    content = || {
-                        IconButton(|| {}, content = || VectorIcon(Icons::Filled::MoreVert(), Some("Daha".into())));
-                    },
-                );
-            });
-        }),
-        IntSize::new(400, 800),
-    );
-    rule.on_node_with_text("sekme 1").assert_exists();
-    rule.on_node_with_text("kayan 1").assert_exists();
-    rule.on_node_with_text("kayan 1").perform_click();
-    rule.on_node_with_text("seçili 1 · yok").assert_exists();
-    rule.on_node_with_tag("aç").perform_click();
-    for _ in 0..91 {
-        rule.advance_frame();
-    }
-    rule.on_node_with_text("Konum").assert_exists();
-    rule.on_node_with_text("Konum").perform_click();
-    for _ in 0..90 {
-        rule.advance_frame();
-    }
-    rule.on_node_with_text("seçili 1 · Konum").assert_exists();
-    rule.on_node_with_content_description("Daha").assert_exists();
-    assert!(!shows(&rule, "Konum"), "closed by the item");
-}
+// (C++ tabs_and_fab_menu_take_compose_named_arguments: in both syntaxes in crates/kompoz/tests/named_forms.rs)
 
 // ---- Compose's behaviour ----------------------------------------------------------------------------------------
 

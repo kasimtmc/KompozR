@@ -6,7 +6,7 @@ pub mod line_break;
 pub mod line_height_style;
 
 pub use line_break::LineBreak;
-pub use line_height_style::LineHeightStyle;
+pub use line_height_style::{LineHeightStyle, LineHeightStyleAlignment, LineHeightStyleMode, LineHeightStyleTrim};
 
 use crate::lerp_discrete;
 use kompoz_graphics::{LayoutDirection, TextUnit, TextUnitType, lerp};

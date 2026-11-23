@@ -84,8 +84,9 @@ pub use range::{StringTextRangeExt, TextRange, TextRangeArgs};
 pub use shape::{FakeBackend, FakeFontFamilyResolver, FontBackend, FontMetrics, HarfrustBackend};
 pub use span_style::{SpanStyle, TextForegroundStyle, lerp_span_style};
 pub use style::{
-    BaselineShift, Hyphens, LineBreak, LineHeightStyle, ResolvedTextDirection, TextAlign, TextDecoration,
-    TextDirection, TextGeometricTransform, TextIndent, TextMotion, TextOverflow, resolve_text_direction,
+    BaselineShift, Hyphens, LineBreak, LineHeightStyle, LineHeightStyleAlignment, LineHeightStyleMode,
+    LineHeightStyleTrim, ResolvedTextDirection, TextAlign, TextDecoration, TextDirection, TextGeometricTransform,
+    TextIndent, TextMotion, TextOverflow, resolve_text_direction,
 };
 pub use text_granularity::{TextGranularity, TextInclusionStrategy};
 pub use text_layout_result::{TextLayoutInput, TextLayoutResult};

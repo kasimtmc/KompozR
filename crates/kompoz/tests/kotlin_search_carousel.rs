@@ -1,5 +1,6 @@
 //! Material's search bars, rich tooltips and carousels in Kotlin's syntax, as a Compose user writes them: the C++
-//! Kompoz's sources (kompozable_tests.cpp ScrollForms' SearchBar part, SectionsForms' tooltip parts) through
+//! Kompoz's sources (kompozable_tests.cpp SectionsForms' rich tooltip; SectionsForms and ScrollForms are whole, their
+//! search bars too, in kotlin_material_sources.rs) through
 //! `kompoz!`, and material3's samples of those components from `.kt` files (kompoz_file!) — their `CarouselItemScope`
 //! and `TooltipScope` receivers as Compose's.
 
@@ -16,7 +17,7 @@ use kompoz::test::KompozTestRule;
 // full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture, top_search_bar_sits_alone_and_slides_away,
 // app_bar_with_search_slides_away_with_the_content) written in Kotlin (kompozable_tests.cpp has no source for them),
 // checked as crates/kompoz-material3/tests/search_bar.rs checks them (M15's values; the differences from the C++'s
-// said there); kompozable_tests.cpp's SectionsForms SearchBar and ScrollForms AppBarWithSearch parts; material3's
+// said there); material3's
 // SearchBarSamples and each public search API by Kotlin's named arguments from kt/search_bar.kt.
 
 // (what Kotlin's imports name, for the Rust the Kotlin becomes: the module's own `use`s)
@@ -261,35 +262,6 @@ kompoz! {
             }
         }
         ExpandedFullScreenSearchBar(state = searchBarState, inputField = inputField) { Text("Sonuçlar") }
-    }
-
-    // kompozable_tests.cpp SectionsForms' search bar (its swipe boxes are in kotlin_lists_sheets.rs, its tooltip box
-    // there and in this file's tooltips): a search bar of a state by name, its field's `onSearch = { chosen = it }`.
-    @Kompozable
-    fun SectionsFormsSearch() {
-        val search = rememberSearchBarState()
-        val query = rememberTextFieldState()
-        var chosen by remember { mutableStateOf("yok") }
-        Column {
-            SearchBar(state = search, inputField = {
-                SearchBarDefaults.InputField(textFieldState = query, searchBarState = search, onSearch = { chosen = it },
-                                             placeholder = { Text("Ara") }, leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Ara") })
-            }, modifier = Modifier.testTag("arama"))
-            Text("seçilen $chosen")
-        }
-    }
-
-    // kompozable_tests.cpp ScrollForms' AppBarWithSearch (its TopAppBar and AppBarRow are in kotlin_scaffold.rs'
-    // ScrollFormsAppBar; its pull to refresh is in named_forms.rs).
-    @Kompozable
-    fun ScrollFormsSearch() {
-        val search = rememberSearchBarState()
-        val query = rememberTextFieldState()
-        Column {
-            AppBarWithSearch(state = search,
-                             inputField = { SearchBarDefaults.InputField(searchBarState = search, textFieldState = query, onSearch = {}, placeholder = { Text("ara") }) },
-                             navigationIcon = { Icon(Icons.Filled.Menu, contentDescription = "Menü") })
-        }
     }
 }
 
@@ -794,18 +766,6 @@ fn app_bar_with_search_slides_away_with_the_content() {
     assert!(s.current_value() == SearchBarValue::Collapsed);
     sb_slow_drag(&rule, Offset::new(200.0, 600.0), Offset::new(200.0, 400.0), 20);
     assert!(sb_near(sb_bounds(&rule, "çubuk").height(), 64.0, 0.5));
-}
-
-/// kompozable_tests.cpp SectionsForms' and ScrollForms' search parts (C++ `sections_forms_take_compose_named_
-/// arguments`, `scroll_forms_take_compose_named_arguments`): the bars by name; a search by the field's `onSearch`.
-fn search_forms_take_compose_named_arguments() {
-    let rule = KompozTestRule::with_viewport(SectionsFormsSearch, IntSize::new(400, 800));
-    rule.on_node_with_tag("arama").assert_exists();
-    rule.on_node_with_text("seçilen yok").assert_exists();
-    rule.on_node_with_content_description("Ara").assert_exists();
-    let rule = KompozTestRule::with_viewport(ScrollFormsSearch, IntSize::new(400, 800));
-    rule.on_node_with_content_description("Menü").assert_exists();
-    rule.on_node_with_text("ara").assert_exists();
 }
 
 /// SearchBarSamples.kt's `SimpleSearchBarSample` from kt/search_bar.kt, checked as search_bar.rs checks its Rust
@@ -1486,7 +1446,6 @@ fn main() {
         ),
         ("top_search_bar_sits_alone_and_slides_away", top_search_bar_sits_alone_and_slides_away),
         ("app_bar_with_search_slides_away_with_the_content", app_bar_with_search_slides_away_with_the_content),
-        ("search_forms_take_compose_named_arguments", search_forms_take_compose_named_arguments),
         ("simple_search_bar_sample", simple_search_bar_sample),
         ("full_screen_search_bar_scaffold_sample", full_screen_search_bar_scaffold_sample),
         ("docked_search_bar_scaffold_sample", docked_search_bar_scaffold_sample),

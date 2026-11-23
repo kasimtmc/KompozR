@@ -21,7 +21,7 @@ use kompoz_graphics::{
     ImageVector, IntOffset, IntSize, LayoutDirection, MAX_IMAGE_DIMENSION, Matrix, Offset, Rect, Size, VectorGroup,
     VectorNode, VectorPath, to_path,
 };
-use kompoz_runtime::{kompozable, named};
+use kompoz_runtime::{MutableState, kompozable, mutable_state_of, named};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -276,31 +276,82 @@ impl Painter for DrawPainter {
 
 /// A vector drawn into the size it is given (Compose's VectorPainter): through a bitmap it was drawn into and kept
 /// (for each size and config), as a mask in its one color where it paints in one, tinted by a color filter, else by
-/// its own tint; mirrored right to left if it says so. Its intrinsic size its default size in px. Equal when the
-/// vectors are.
+/// its own tint; mirrored right to left if it says so. Its intrinsic size its default size in px. A painter of a
+/// vector given is equal to another when the vectors are; one of composable content
+/// ([`remember_vector_painter_content`](super::vector::remember_vector_painter_content)) draws the vector its content
+/// made last (read as it draws: a new one draws again, nothing composed) and is equal to the painters of that content.
 #[derive(Clone)]
 pub struct VectorPainter {
-    pub vector: ImageVector,
+    vector: ImageVector,
+    source: Option<Rc<VectorSource>>,
     intrinsic_size: Size,
+}
+
+/// The vector a vector's content made last, and its changes as a state (Compose's VectorPainter's
+/// `invalidateCount`): read as the painter draws.
+pub(crate) struct VectorSource {
+    vector: RefCell<ImageVector>,
+    version: MutableState<u64>,
+}
+
+impl VectorSource {
+    pub(crate) fn new(vector: ImageVector) -> VectorSource {
+        VectorSource { vector: RefCell::new(vector), version: mutable_state_of(0) }
+    }
+
+    /// The vector made last (its version read: who reads it is told of the next).
+    fn current(&self) -> ImageVector {
+        let _ = self.version.get();
+        self.vector.borrow().clone()
+    }
+
+    /// `made` is what the content made now: kept, and told, if it isn't the same as last time.
+    pub(crate) fn set(&self, made: ImageVector) {
+        if *self.vector.borrow() == made {
+            return;
+        }
+        *self.vector.borrow_mut() = made;
+        self.version.set(self.version.peek().wrapping_add(1));
+    }
 }
 
 impl VectorPainter {
     /// `vector` at `density` (its default size in px).
     pub fn new(vector: ImageVector, density: Density) -> VectorPainter {
         let size = Size::new(density.to_px(vector.default_width()), density.to_px(vector.default_height()));
-        VectorPainter { vector, intrinsic_size: size }
+        VectorPainter { vector, source: None, intrinsic_size: size }
+    }
+
+    /// The vector `source`'s content made last, at `density`.
+    pub(crate) fn of_source(source: Rc<VectorSource>, density: Density) -> VectorPainter {
+        let vector = source.vector.borrow().clone();
+        let size = Size::new(density.to_px(vector.default_width()), density.to_px(vector.default_height()));
+        VectorPainter { vector, source: Some(source), intrinsic_size: size }
+    }
+
+    /// The vector it draws: the one given, or the one its content made last (read: who reads it in a composition,
+    /// a layout or a drawing is told of the next).
+    pub fn vector(&self) -> ImageVector {
+        match &self.source {
+            Some(source) => source.current(),
+            None => self.vector.clone(),
+        }
     }
 }
 
 impl PartialEq for VectorPainter {
     fn eq(&self, other: &Self) -> bool {
-        self.vector == other.vector && self.intrinsic_size == other.intrinsic_size
+        let same = match (&self.source, &other.source) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            _ => self.vector() == other.vector(),
+        };
+        same && self.intrinsic_size == other.intrinsic_size
     }
 }
 
 impl fmt::Debug for VectorPainter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("VectorPainter").field("vector", &self.vector).finish()
+        f.debug_struct("VectorPainter").field("vector", &self.vector()).finish()
     }
 }
 
@@ -309,7 +360,7 @@ impl Painter for VectorPainter {
         self.intrinsic_size
     }
     fn on_draw(&self, scope: &mut DrawScope<'_>, alpha: f32, color_filter: Option<&ColorFilter>) {
-        draw_vector(scope, &self.vector, alpha, color_filter);
+        draw_vector(scope, &self.vector(), alpha, color_filter);
     }
     fn applies_alpha(&self) -> bool {
         true

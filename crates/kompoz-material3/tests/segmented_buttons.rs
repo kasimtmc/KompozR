@@ -1,9 +1,10 @@
 //! Material's segmented buttons as Compose's material3 (1.5.0-alpha17) has them: the C++ Kompoz's
 //! segmented_buttons_as_compose_1_4, segmented_buttons_keep_48_dp_of_room_and_draw_40,
-//! multi_choice_segmented_buttons_toggle_each_and_tell_their_roles, segmented_buttons_take_compose_named_arguments and
-//! the segments of chips_radio_buttons_and_segments_select (with M15's values where the C++ had its own), Compose's
-//! behaviour (the colors and their copy, the segments' shapes, the padding, the icon's crossfade, a pressed segment
-//! drawn over its neighbours) and the 2 samples of M15's SegmentedButtonSamples.kt.
+//! multi_choice_segmented_buttons_toggle_each_and_tell_their_roles and the segments of
+//! chips_radio_buttons_and_segments_select (with M15's values where the C++ had its own; its
+//! segmented_buttons_take_compose_named_arguments is in both syntaxes in crates/kompoz/tests/named_forms.rs),
+//! Compose's behaviour (the colors and their copy, the segments' shapes, the padding, the icon's crossfade, a pressed
+//! segment drawn over its neighbours) and the 2 samples of M15's SegmentedButtonSamples.kt.
 //!
 //! M15's `SegmentedButton` takes its `shape` (no default): the C++ tests' segments without one are given
 //! `SegmentedButtonDefaults.item_shape(index, count)` here.
@@ -15,7 +16,6 @@ mod common;
 
 use common::*;
 use kompoz_foundation::interaction::{MutableInteractionSource, PressInteraction};
-use kompoz_foundation::lazy::staggeredgrid::{LazyStaggeredGridScope, StaggeredGridCells, StaggeredGridItemSpan};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_material_icons_extended::Icons;
@@ -34,7 +34,6 @@ tests!(
     segmented_buttons_as_compose_1_4,
     segmented_buttons_keep_48_dp_of_room_and_draw_40,
     multi_choice_segmented_buttons_toggle_each_and_tell_their_roles,
-    segmented_buttons_take_compose_named_arguments,
     chips_radio_buttons_and_segments_select,
     segmented_button_colors_follow_the_scheme_and_copy_what_is_given,
     segmented_button_defaults_follow_the_tokens,
@@ -294,85 +293,7 @@ fn multi_choice_segmented_buttons_toggle_each_and_tell_their_roles() {
     assert_eq!(canvas.colors[araba], faded(light_color_scheme().on_surface, 0.38));
 }
 
-// ---- C++ segmented_buttons_take_compose_named_arguments ---------------------------------------------------------
-
-fn segmented_buttons_take_compose_named_arguments() {
-    // The C++ test in Rust's named form (its Kotlin form is in crates/kompoz/tests/kotlin_expressive_buttons.rs). M15:
-    // the shapes are given (the multi-choice row's one segment the base shape), the base shape is CircleShape (50%
-    // corners, the C++'s too).
-    let pick = mutable_state_of(0);
-    let bold = mutable_state_of(false);
-    let (p, b) = (pick.clone(), bold.clone());
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(move || {
-            let (p, b) = (p.clone(), b.clone());
-            Column(move || {
-                let (p, b) = (p.clone(), b.clone());
-                let p2 = p.clone();
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier.width(300.dp()),
-                    content = move |row| {
-                        for i in 0..2 {
-                            let p = p2.clone();
-                            row.SegmentedButton(
-                                selected = p.get() == i,
-                                on_click = move || p.set(i),
-                                shape = SegmentedButtonDefaults.item_shape(i, 2),
-                                label = move || Text(if i == 0 { "Bir" } else { "İki" }),
-                            );
-                        }
-                    },
-                );
-                let b2 = b.clone();
-                MultiChoiceSegmentedButtonRow(
-                    content = move |row| {
-                        let b = b2.clone();
-                        row.SegmentedButton(
-                            checked = b.get(),
-                            on_checked_change = move |on| b.set(on),
-                            shape = SegmentedButtonDefaults.item_shape(0, 1),
-                            label = || Text("Kalın"),
-                        );
-                    },
-                );
-                Text(format!("seçim {} {}", p.get(), if b.get() { "kalın" } else { "ince" }));
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells::Fixed(2),
-                    modifier = Modifier.size(200.dp()),
-                    content = move |this: &mut LazyStaggeredGridScope| {
-                        this.item(
-                            span = Some(StaggeredGridItemSpan::FullLine),
-                            content = || Text("Başlık", modifier = Modifier.test_tag("başlık")),
-                        );
-                        this.items(
-                            2,
-                            item_content = |i| {
-                                Text(i.to_string(), modifier = Modifier.height(40.dp()).test_tag(format!("kart{i}")))
-                            },
-                        );
-                    },
-                );
-            });
-        }),
-        IntSize::new(400, 800),
-    );
-    rule.on_node_with_text("İki").perform_click();
-    rule.on_node_with_text("Kalın").perform_click();
-    rule.on_node_with_text("seçim 1 kalın").assert_exists();
-    let (header, a, b) = (bounds(&rule, "başlık"), bounds(&rule, "kart0"), bounds(&rule, "kart1"));
-    assert!(a.top >= header.top + header.height() - 1.0 && (a.top - b.top).abs() < 1.0 && a.left < b.left);
-    let shape = |i, n| item_shape(i, n);
-    let corners = |s: &Arc<dyn Shape>| {
-        let c = (**s).shape_as_any().downcast_ref::<CornerBasedShape>().expect("a corner based shape").clone();
-        (c.top_start().clone(), c.top_end().clone(), c.bottom_end().clone(), c.bottom_start().clone())
-    };
-    let (first, middle, last) = (shape(0, 3), shape(1, 3), shape(2, 3));
-    let zero = CornerSize::dp(Dp(0.0));
-    let full = CornerSize::percent(50);
-    assert_eq!(corners(&first), (full.clone(), zero.clone(), zero.clone(), full.clone()));
-    assert!(*middle == *(&RectangleShape as &dyn Shape));
-    assert_eq!(corners(&last), (zero.clone(), full.clone(), full.clone(), zero));
-}
+// (C++ segmented_buttons_take_compose_named_arguments: in both syntaxes in crates/kompoz/tests/named_forms.rs)
 
 // ---- C++ chips_radio_buttons_and_segments_select: its segments --------------------------------------------------
 

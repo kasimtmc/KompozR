@@ -635,11 +635,25 @@ pub(crate) fn plain_type_text(t: &str) -> String {
 /// trait of the API (a trait is what the index has methods of through it, of no type).
 pub(crate) fn trait_object(name: &str) -> Option<&'static str> {
     let (arc, rc) = (format!("Arc<dyn {name}"), format!("Rc<dyn {name}"));
-    let held = |p: &str| index::ITEMS.iter().flat_map(|i| i.params).filter(|x| x.ty.contains(p)).count();
-    let (arcs, rcs) = (held(&arc), held(&rc));
+    // (the whole name: `Rc<dyn KeyMapping>` holds no `Key`)
+    let names = |ty: &str, p: &str| {
+        ty.match_indices(p)
+            .any(|(at, _)| ty[at + p.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_')))
+    };
+    let held = |p: &str| index::ITEMS.iter().flat_map(|i| i.params).filter(|x| names(x.ty, p)).count();
+    let (mut arcs, mut rcs) = (held(&arc), held(&rc));
+    // (none taken: as the API hands them out — `DraggableAnchors<T>`, taken as `impl DraggableAnchors<T>`, a state's
+    // `anchors` an `Arc<dyn DraggableAnchors<T>>`)
+    if arcs + rcs == 0 {
+        let given = |p: &str| index::ITEMS.iter().filter(|i| names(i.ret, p)).count();
+        (arcs, rcs) = (given(&arc), given(&rc));
+    }
     // (a trait the index knows a method of, or one the API takes as a shared trait object: `AnimationSpec<T>`, whose
-    // methods are hidden but which `animationSpec: Arc<dyn AnimationSpec<T>>` takes)
-    let is_trait = index::ITEMS.iter().any(|i| i.via == name && i.owner.is_empty() && i.kind == Kind::Method);
+    // methods are hidden but which `animationSpec: Arc<dyn AnimationSpec<T>>` takes); not the macros' support traits
+    // (`kompoz_runtime::private`'s `Key`, which Compose's `Key` isn't)
+    let is_trait = index::ITEMS
+        .iter()
+        .any(|i| i.via == name && i.owner.is_empty() && i.kind == Kind::Method && i.module != "private");
     if !is_trait && arcs + rcs == 0 {
         return None;
     }
@@ -794,7 +808,20 @@ pub(crate) fn lookup(kotlin: &str) -> &'static [Item] {
 
 /// A free function of the index (no owner, not through a trait).
 pub(crate) fn free_functions(kotlin: &str) -> impl Iterator<Item = &'static Item> {
-    lookup(kotlin).iter().filter(|i| i.kind == Kind::Function && i.owner.is_empty() && i.via.is_empty())
+    // (kotlin.math's functions are what Kotlin's name calls where it has one: `round(2.5f)`, not an API's function of
+    // that name — material-color's `round`, Compose's internal `MathUtils.round`)
+    let kt_math = |i: &Item| i.krate == "kompoz_runtime" && i.module == "kt::math";
+    let items = lookup(kotlin);
+    let math = items.iter().any(|i| i.kind == Kind::Function && kt_math(i));
+    items
+        .iter()
+        .filter(move |i| i.kind == Kind::Function && i.owner.is_empty() && i.via.is_empty() && (!math || kt_math(i)))
+}
+
+/// Whether the API changes a value of Rust type `owner` in place: it has a `&mut self` method (`Path`'s `line_to`,
+/// `PathMeasure`'s `set_path`).
+pub(crate) fn changed_in_place(owner: &str) -> bool {
+    index::ITEMS.iter().any(|i| i.owner == owner && i.kind == Kind::Method && i.receiver == index::Receiver::RefMut)
 }
 
 /// Kotlin's constructors of a type that a Rust type's associated functions are (their doc line naming them
@@ -863,8 +890,11 @@ pub(crate) fn is_value_object(name: &str) -> bool {
 /// The index's items owned by a type of Rust name `owner` (its associated functions, constants, entries); a function
 /// Kotlin names qualified (`TextFieldLineLimits.MultiLine(…)`, Rust's `multi_line`: a doc line's name) too.
 pub(crate) fn associated(owner: &str, kotlin: &str) -> Vec<&'static Item> {
+    // (an interface's companion is the trait object's own items, `impl dyn TextAutoSize`: owner `dyn TextAutoSize`,
+    // its doc lines naming it `TextAutoSize.StepBased`)
+    let named = owner.strip_prefix("dyn ").unwrap_or(owner);
     let qualified =
-        lookup(&format!("{owner}.{kotlin}")).iter().filter(|i| i.owner == owner && i.kind == Kind::Function);
+        lookup(&format!("{named}.{kotlin}")).iter().filter(|i| i.owner == owner && i.kind == Kind::Function);
     qualified
         .chain(lookup(kotlin).iter())
         .filter(|i| {
@@ -872,6 +902,19 @@ pub(crate) fn associated(owner: &str, kotlin: &str) -> Vec<&'static Item> {
                 || (i.kind == Kind::Value && i.module.rsplit("::").next() == Some(owner))
         })
         .collect()
+}
+
+/// The functions `Owner.kotlin(…)` calls: the type's associated ones, or, for an interface, its companion's — the
+/// trait object's own (`TextAutoSize.StepBased(…)`: `impl dyn TextAutoSize`'s `step_based`); whether they are that.
+pub(crate) fn associated_functions(owner: &str, kotlin: &str) -> (Vec<&'static Item>, bool) {
+    let functions = |owner: &str| -> Vec<&'static Item> {
+        associated(owner, kotlin).into_iter().filter(|i| i.kind == Kind::Function).collect()
+    };
+    let own = functions(owner);
+    if own.is_empty() && trait_object(owner).is_some() {
+        return (functions(&format!("dyn {owner}")), true);
+    }
+    (own, false)
 }
 
 // ---- Scopes ----------------------------------------------------------------------------------------------------

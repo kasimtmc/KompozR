@@ -14,9 +14,9 @@ use kompoz::ui::window::{Dialog, DialogProperties};
 // (sheets: what the generated code types nestedScroll's connection with — BottomSheetScaffoldNestedScrollSample's)
 
 // ==== lists ==========================================================================================================
-// The C++ Kompoz's `list_items_by_name` (kompozable_tests.cpp 651-670, Settings) and the ListItem line of its
-// `kotlin_helpers_through_kompozc` (577-615, KotlinHelpers: the rest of it is Kotlin's String.format and collection
-// functions, not lists'), and material3's ListSamples with the rest of the list API from kt/lists.kt.
+// The C++ Kompoz's `list_items_by_name` (kompozable_tests.cpp 651-670, Settings; its KotlinHelpers' ListItem is in
+// kotlin_material_sources.rs, KotlinHelpers whole), and material3's ListSamples with the rest of the list API from
+// kt/lists.kt.
 
 kompoz! {
     // ListItem as Compose writes it: its slots by name; an interactive one's headline is its block.
@@ -31,13 +31,6 @@ kompoz! {
         }
     }
 
-    // (KotlinHelpers' ListItemDefaults.colors: its other lines are String.format's and collections')
-    @Kompozable
-    fun KotlinHelpersListItem() {
-        Column {
-            ListItem(headlineContent = { Text("Saydam satır") }, colors = ListItemDefaults.colors(containerColor = Color.Transparent))
-        }
-    }
 }
 
 fn list_items_by_name() {
@@ -50,15 +43,6 @@ fn list_items_by_name() {
     rule.on_node_with_text("1 kez").assert_exists();
     // (the checked item a checkbox to accessibility, on now)
     rule.on_node_with_text("Wi-Fi'yi aç").assert_is_on();
-}
-
-fn kotlin_helpers_list_item() {
-    let rule = KompozTestRule::new(KotlinHelpersListItem);
-    rule.on_node_with_text("Saydam satır").assert_exists();
-    // (no container drawn: transparent; the headline on surface outside a theme too)
-    let canvas = rule.draw();
-    assert!(!canvas.rect_colors.contains(&light_color_scheme().surface));
-    assert!(canvas.colors.contains(&light_color_scheme().on_surface));
 }
 
 kompoz_file!("tests/kt/lists.kt");
@@ -759,60 +743,8 @@ fn drag_handle_samples() {
 
 // ==== snackbars and tooltips =========================================================================================
 
-// ---- material_as_compose_writes_it (kompozable_tests.cpp `MaterialForms`): its chip, its toggleable row with a
-// Checkbox, its snackbar awaited with an action label and its progress bar (what the C++ asserted of them; the
-// progress line's 40% is kotlin_progress.rs' `material_forms_progress`); its NavigationSuiteScaffold (WP8's) comes
-// with that package.
-
-kompoz! {
-    @Kompozable
-    fun MaterialFormsSnackbar(undo: () -> Unit) {
-        var unread by remember { mutableStateOf(false) }
-        var muted by remember { mutableStateOf(false) }
-        val snackbars = remember { SnackbarHostState() }
-        val scope = rememberCoroutineScope()
-        Column {
-            FilterChip(selected = unread, onClick = { unread = !unread }, label = { Text("Unread") }, modifier = Modifier.testTag("chip"))
-            Row(modifier = Modifier.toggleable(value = muted, onValueChange = { muted = it }, role = Role.Checkbox).testTag("row")) {
-                Checkbox(checked = muted, onCheckedChange = null)
-                Text("Mute")
-            }
-            Button(onClick = {
-                scope.launch {
-                    if (snackbars.showSnackbar("Deleted", actionLabel = "Undo") == SnackbarResult.ActionPerformed) undo()
-                }
-            }) { Text("Delete") }
-            SnackbarHost(hostState = snackbars)
-            LinearProgressIndicator(progress = { 0.4f }, modifier = Modifier.testTag("bar"))
-        }
-    }
-}
-
-fn material_forms_snackbar() {
-    let undone = std::rc::Rc::new(std::cell::Cell::new(0));
-    let u = undone.clone();
-    let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let u = u.clone();
-        MaterialFormsSnackbar(move || u.set(u.get() + 1))
-    }));
-    rule.on_node_with_tag("chip").assert_is_not_selected().perform_click();
-    rule.on_node_with_tag("chip").assert_is_selected();
-    // (the row toggles its Checkbox, which takes no clicks of its own)
-    rule.on_node_with_tag("row").assert_is_off().perform_click();
-    rule.on_node_with_tag("row").assert_is_on();
-    let checked = light_color_scheme().primary; // (the checked box's fill)
-    assert!(rule.draw().path_colors.contains(&checked) || rule.draw().rect_colors.contains(&checked));
-    rule.on_node_with_tag("bar").assert_exists();
-    rule.on_node_with_text("Delete").perform_click();
-    rule.on_node_with_text("Deleted").assert_exists();
-    rule.on_node_with_text("Undo").perform_click();
-    assert_eq!(undone.get(), 1);
-    rule.on_node_with_text("Deleted").assert_does_not_exist();
-}
-
-// ---- sections_forms_take_compose_named_arguments (kompozable_tests.cpp `SectionsForms`): its TooltipBox; its search
-// bar and RichTooltip are in kotlin_search_carousel.rs, its date picker dialog, swipe to dismiss box and focus rows
-// come with their packages. (The C++ gave
+// ---- kompozable_tests.cpp `SectionsForms`' TooltipBox shown and its tooltip's action (SectionsForms is whole in
+// kotlin_material_sources.rs; here its tooltip box's behaviour). (The C++ gave
 // its PlainTooltip `caretSize = TooltipDefaults.caretSize`: M15 takes `caretShape = TooltipDefaults.caretShape()`; its
 // `rememberTooltipPositionProvider()` is deprecated in M15 for the anchor-position form it names, written so here.)
 
@@ -920,28 +852,10 @@ fn plain_tooltip_samples() {
 }
 
 // ==== swipe to dismiss and pull to refresh ===========================================================================
-// The C++ Kompoz's `sections_forms_take_compose_named_arguments` (kompozable_tests.cpp `SectionsForms`): its swipe to
-// dismiss boxes (`rememberSwipeToDismissBoxState(confirmValueChange =)`: M15's deprecated overload); material3's
-// SwipeToDismissSamples and the rest of the swipe-to-dismiss and pull-to-refresh API from kt/swipe_pull.kt. (The C++
+// (kompozable_tests.cpp `SectionsForms`' swipe to dismiss boxes are in kotlin_material_sources.rs, SectionsForms
+// whole.) Material3's SwipeToDismissSamples and the rest of the swipe-to-dismiss and pull-to-refresh API from
+// kt/swipe_pull.kt. (The C++
 // ScrollForms' pull to refresh is in named_forms.rs.)
-
-kompoz! {
-    @Kompozable
-    fun SectionsFormsSwipe() {
-        val tasks = remember { mutableStateListOf(1, 2) }
-        Column {
-            for (id in tasks) {
-                key(id) {
-                    val state = rememberSwipeToDismissBoxState(confirmValueChange = { tasks.remove(id); true })
-                    SwipeToDismissBox(state = state, backgroundContent = { Box(modifier = Modifier.fillMaxSize().background(Color.Red)) }) {
-                        Text("görev $id", modifier = Modifier.fillMaxWidth().testTag("görev$id"))
-                    }
-                }
-            }
-            Text("görevler ${tasks.size}")
-        }
-    }
-}
 
 /// A move each frame from `from` to `to` over `frames` frames, then up (a fling at the speed of the moves).
 fn swipe_pull_swipe(rule: &KompozTestRule, from: Offset, to: Offset, frames: i32) {
@@ -953,18 +867,6 @@ fn swipe_pull_swipe(rule: &KompozTestRule, from: Offset, to: Offset, frames: i32
     }
     h.pointer_up(to, -1, 0);
     rule.wait_for_idle();
-}
-
-fn sections_forms_swipe() {
-    let rule = KompozTestRule::with_viewport(SectionsFormsSwipe, IntSize::new(400, 800));
-    rule.on_node_with_tag("görev1").assert_exists();
-    rule.on_node_with_text("görevler 2").assert_exists();
-    // Swiped away: asked to confirm, the task removed (its box with it).
-    let y = rule.on_node_with_tag("görev1").get_unclipped_bounds_in_root().center().y;
-    swipe_pull_swipe(&rule, Offset::new(350.0, y), Offset::new(50.0, y), 20);
-    rule.on_node_with_tag("görev1").assert_does_not_exist();
-    rule.on_node_with_tag("görev2").assert_exists();
-    rule.on_node_with_text("görevler 1").assert_exists();
 }
 
 kompoz_file!("tests/kt/swipe_pull.kt");
@@ -1140,7 +1042,6 @@ fn main() {
     common::run(&[
         // (lists)
         ("list_items_by_name", list_items_by_name),
-        ("kotlin_helpers_list_item", kotlin_helpers_list_item),
         ("list_item_samples", list_item_samples),
         ("clickable_list_item_samples", clickable_list_item_samples),
         // (WP4b: icons)
@@ -1159,12 +1060,10 @@ fn main() {
         ("bottom_sheet_samples", bottom_sheet_samples),
         ("drag_handle_samples", drag_handle_samples),
         // (snackbars and tooltips)
-        ("material_forms_snackbar", material_forms_snackbar),
         ("sections_forms_tooltip", sections_forms_tooltip),
         ("snackbar_samples", snackbar_samples),
         ("plain_tooltip_samples", plain_tooltip_samples),
         // (swipe to dismiss and pull to refresh)
-        ("sections_forms_swipe", sections_forms_swipe),
         ("swipe_to_dismiss_samples", swipe_to_dismiss_samples),
         ("swipe_forms", swipe_forms),
         ("pull_forms", pull_forms),

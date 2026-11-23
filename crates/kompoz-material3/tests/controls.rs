@@ -42,7 +42,6 @@ tests!(
     control_colors_come_from_the_scheme_and_copy_what_is_given,
     controls_keep_48_dp_of_room_and_take_taps_anywhere_in_it,
     rtl_mirrors_arrows_switches_and_sliders,
-    selection_controls_animate_composing_around_them_only_as_they_turn,
 );
 
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
@@ -1155,56 +1154,6 @@ fn rtl_mirrors_arrows_switches_and_sliders() {
     rule.wait_for_idle();
     let ltr = rule.draw();
     assert!(ltr.vectors.first() == Some(&back.id()) && mirrored_at(&ltr).is_empty());
-}
-
-// ---- C++ selection_controls_animate_composing_around_them_only_as_they_turn -----------------------------------
-
-fn selection_controls_animate_composing_around_them_only_as_they_turn() {
-    // (its ListItem, SegmentedButton, PrimaryTabRow and VerticalDragHandle are the lists', segmented buttons',
-    // tabs' and adaptive work's tests) Checkbox, Switch and RadioButton compose what is around them once as they
-    // turn, not as they animate (their animations read in drawing and measuring); a slider's thumb (M15's, of a
-    // 20 dp size: C++'s ShapeThumb) is thinner while held — composed as it is pressed, nothing around it.
-    let on = mutable_state_of(false);
-    let composed = Rc::new(Cell::new(0));
-    let (o, c) = (on.clone(), composed.clone());
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(move || {
-            c.set(c.get() + 1);
-            let value = o.get();
-            let o = o.clone();
-            Column(move || {
-                let (o1, o2, o3) = (o.clone(), o.clone(), o.clone());
-                Checkbox(value, on_change(move |x| o1.set(x)));
-                Switch(value, on_change(move |x| o2.set(x)));
-                RadioButton(value, on_click(move || o3.set(true)));
-                let source = remember(MutableInteractionSource::new);
-                let thumb_source = source.clone();
-                SlotSlider(
-                    0.5,
-                    |_| {},
-                    modifier = Modifier.width(200.dp()).test_tag("kaydırıcı"),
-                    interaction_source = source,
-                    thumb = Some(Rc::new(move |_: SliderState| {
-                        SliderDefaults.Thumb(thumb_source.clone(), thumb_size = DpSize::new(20.dp(), 20.dp()))
-                    }) as Rc<dyn Fn(SliderState)>),
-                );
-            });
-        }),
-        IntSize::new(400, 800),
-    );
-    on.set(true);
-    rule.advance_frame(); // composed as they turn...
-    let before = composed.get();
-    rule.wait_for_idle();
-    assert_eq!(composed.get(), before); // ...not as they animate
-    let center = bounds(&rule, "kaydırıcı").center();
-    rule.host().pointer_down(center, -1, 0, PointerType::Touch);
-    rule.advance_frame();
-    let before = composed.get();
-    rule.advance_time_by(300);
-    assert_eq!(composed.get(), before);
-    rule.host().pointer_up(center, -1, 0);
-    rule.wait_for_idle();
 }
 
 /// The tagged layout's bounds (a slider's semantics node is 10 dp wider each side, for a screen reader).

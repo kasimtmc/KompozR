@@ -1,15 +1,7 @@
-// Material's progress indicators as Compose writes them: the progress lines of the C++ Kompoz's MaterialForms and
-// GraphicsForms (kompozable_tests.cpp material_forms_as_compose_writes_them, graphics_forms_as_compose_writes_them:
-// the rest of those sources is other packages'), material3 1.5's ProgressIndicatorSamples (the wavy ones too); the
+// Material's progress indicators as Compose writes them: the progress lines of the C++ Kompoz's GraphicsForms
+// (kompozable_tests.cpp graphics_forms_as_compose_writes_them, checked in detail; its Material lines whole in
+// kotlin_material_sources.rs), material3 1.5's ProgressIndicatorSamples (the wavy ones too); the
 // loading indicators of the C++'s Containers and GraphicsForms and material3 1.5's LoadingIndicatorSamples.
-
-// MaterialForms' progress: `progress = { … }`.
-@Composable
-fun MaterialFormsProgress() {
-    Column {
-        LinearProgressIndicator(progress = { 0.4f }, modifier = Modifier.testTag("bar"))
-    }
-}
 
 // GraphicsForms' wavy indicators: a lambda amplitude, a stop size; an endless one with its track's color.
 @Composable

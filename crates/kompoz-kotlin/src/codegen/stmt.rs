@@ -25,7 +25,7 @@ impl Tail {
     fn want(self, fun: &super::FnState) -> Want {
         match self {
             Tail::Value(w) => w,
-            Tail::Return => Want { some: fun.nullable_result, ..Want::default() },
+            Tail::Return => Want { some: fun.nullable_result, shared: fun.shared_result, ..Want::default() },
             Tail::Unit => Want::default(),
         }
     }
@@ -302,14 +302,14 @@ impl Gen<'_, '_> {
                 let declared = p.ty.as_ref().map(|t| (self.ty_of(t), t));
                 let rust = snake(&n.name);
                 let i = self.name_ident(&rust, n.loc);
-                // (a collection held by a `val` is still changed through it: Kotlin's lists are objects)
-                let collection = matches!(
-                    declared.as_ref().map(|d| d.0.clone()).unwrap_or_else(|| match init {
-                        PropertyInit::Value(e) => self.peek_ty(e),
-                        _ => Ty::Unknown,
-                    }),
-                    Ty::List(_) | Ty::Set(_) | Ty::Map(_, _)
-                );
+                // (a collection held by a `val` is still changed through it: Kotlin's lists are objects; so is a value
+                // of a type changed in place — `val path = Path()`, then `path.lineTo(…)`: a `&mut self` method)
+                let value_ty = declared.as_ref().map(|d| d.0.clone()).unwrap_or_else(|| match init {
+                    PropertyInit::Value(e) => self.peek_ty(e),
+                    _ => Ty::Unknown,
+                });
+                let collection = matches!(value_ty, Ty::List(_) | Ty::Set(_) | Ty::Map(_, _))
+                    || matches!(&value_ty, Ty::Named(n, _) if super::resolve::changed_in_place(n));
                 let m = if mutable || collection { quote_spanned!(span=> mut) } else { quote!() };
                 let declared_rt = match &declared {
                     Some((ty, t)) if !matches!(ty, Ty::Fun(_)) => Some(self.rust_type(t, super::types::TypePos::Value)),
@@ -719,7 +719,11 @@ impl Gen<'_, '_> {
                     Some(v) => {
                         let want = match self.lambdas.last() {
                             Some(l) => l.result,
-                            None => Want { some: self.fun.nullable_result, ..Want::default() },
+                            None => Want {
+                                some: self.fun.nullable_result,
+                                shared: self.fun.shared_result,
+                                ..Want::default()
+                            },
                         };
                         let v = self.value_want(v, want);
                         quote_spanned!(span=> return #v)

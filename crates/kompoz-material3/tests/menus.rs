@@ -35,7 +35,7 @@ tests!(
     exposed_dropdown_menu_picks_an_option,
     exposed_dropdown_menu_filters_as_you_type,
     library_strings_follow_the_hosts_language_and_local_overrides,
-    overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn,
+    menus_compose_around_them_only_as_they_open_and_check,
     arrow_keys_move_the_focus_through_a_menus_items,
     menus_scale_and_fade_in_from_where_they_meet_their_anchor,
     menu_item_colors_follow_enabled_and_selected,
@@ -688,11 +688,11 @@ fn Anchored(tag: &'static str) {
     );
 }
 
-/// The menu part of C++'s overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn (its field
-/// part is tests/text_field.rs's test of the name; the rest is other WPs' components): a DropdownMenu with a
+/// The menu part of C++'s overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn (whole in
+/// cross_area.rs): a DropdownMenu with a
 /// checkable item and the exposed menu's trailing icon are composed as they turn, not while they scale in, nor
 /// while an item checked fades its container's color.
-fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn() {
+fn menus_compose_around_them_only_as_they_open_and_check() {
     let open = mutable_state_of(false);
     let mark = mutable_state_of(false);
     let composed = Rc::new(Cell::new(0));

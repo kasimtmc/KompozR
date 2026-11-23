@@ -36,7 +36,6 @@ tests!(
     centered_hero_carousel_keeps_a_large_item_between_two_small_ones,
     carousel_items_know_their_size_while_they_are_drawn,
     uncontained_carousel_keeps_its_item_width_and_scrolls_freely,
-    scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose,
     // Compose's behaviour
     carousel_state_is_saved_with_its_item_and_count,
     remember_carousel_state_takes_the_latest_item_count,
@@ -431,32 +430,6 @@ fn uncontained_carousel_keeps_its_item_width_and_scrolls_freely() {
     let end = masks(&rule, "u", &seen);
     let last = end.last().copied().unwrap();
     assert!(near_by(last.0 + last.1, 400.0 - 16.0, 1.0), "{end:?}");
-}
-
-/// The carousel half of the C++ test (its Scaffold and BottomSheetScaffold cases are in scaffold.rs, its
-/// NavigationSuiteScaffoldLayout ones WP8's): Compose measures a carousel item's content in a Box with no minimum size, so content that
-/// doesn't fill keeps its size.
-fn scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose() {
-    let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(|| {
-            let carousel = remember_carousel_state(item_count = || 10);
-            HorizontalMultiBrowseCarousel(
-                carousel,
-                186.dp(),
-                modifier = Modifier.fill_max_width().height(200.dp()),
-                item_spacing = 8.dp(),
-                content = |_: &CarouselItemScope, i: i32| {
-                    if i == 0 {
-                        Box(modifier = Modifier.size_wh(60.dp(), 40.dp()).test_tag("icerik"));
-                    }
-                },
-            );
-        }),
-        IntSize::new(400, 800),
-    );
-    rule.wait_for_idle();
-    let b = bounds(&rule, "icerik");
-    assert!(near(b.width(), 60.0) && near(b.height(), 40.0), "{b:?}");
 }
 
 // ---- Compose's behaviour --------------------------------------------------------------------------------------------

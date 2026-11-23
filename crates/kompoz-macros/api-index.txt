@@ -1139,7 +1139,6 @@ kompoz-material3-adaptive/samples kompozable NavigableListDetailPaneScaffoldSamp
 * kompozable NavigationBar dddddr crates/kompoz-material3/src/navigation_bar.rs
 * kompozable NavigationBarItem rrrdddddd crates/kompoz-material3/src/navigation_bar.rs
 * kompozable NavigationBarItemLayout rrrrrrr crates/kompoz-material3/src/navigation_bar.rs
-kompoz-material3/containers kompozable NavigationBarItemWithBadge - crates/kompoz-material3/tests/containers.rs
 kompoz-material3/navigation_bar kompozable NavigationBarItemWithBadge - crates/kompoz-material3/tests/navigation_bar.rs
 kompoz-material3/navigation_bar kompozable NavigationBarSample - crates/kompoz-material3/tests/navigation_bar.rs
 * kompozable NavigationDrawerItem rrrdddddd crates/kompoz-material3/src/navigation_drawer.rs
@@ -1445,12 +1444,27 @@ kompoz-runtime/macros kompozable RulerLabel r crates/kompoz-runtime/tests/macros
 * super RulerScope - Density
 kompoz/named_forms kompozable RustAnimatedForms rrr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustAnimationForms rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustAppShell - crates/kompoz/tests/named_forms.rs
 kompoz/kotlin kompozable RustBadge rd crates/kompoz/tests/kotlin.rs
+kompoz/named_forms kompozable RustContainerForms rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustDrawn rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustExpressiveForms rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustGestureForms rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustGraphicsFormsMaterial - crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustLayerProperties r crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustLayoutForms - crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustListForms rrr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustMaterialComponents rrrr crates/kompoz/tests/named_forms.rs
+kompoz/kotlin_adaptive kompozable RustNamedPaneScaffolds - crates/kompoz/tests/kotlin_adaptive.rs
 kompoz/named_forms kompozable RustScrollForms r crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustSectionsForms r crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustSeenAndPulled rr crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustSegmentedForms rr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSharedForms r crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustShellSnackbars rr crates/kompoz/tests/named_forms.rs
 kompoz/named_forms kompozable RustSliding r crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustTabsAndFabMenu r crates/kompoz/tests/named_forms.rs
+kompoz/named_forms kompozable RustTextStyles - crates/kompoz/tests/named_forms.rs
 kompoz-material3/bottom_app_bars kompozable SampleButtons - crates/kompoz-material3/tests/bottom_app_bars.rs
 kompoz-material3/time_picker kompozable SampleConfirm rrrrr crates/kompoz-material3/tests/time_picker.rs
 kompoz-material3/floating_toolbar kompozable SampleIcon r crates/kompoz-material3/tests/floating_toolbar.rs
@@ -1580,6 +1594,7 @@ kompoz-material3/tabs kompozable SelectedText r crates/kompoz-material3/tests/ta
 * super SemanticsElement - ModifierNodeElement
 * super SensitiveContentElement - ModifierNodeElement
 * super SensitiveContentNode - ModifierNode
+* fn Shadow ddd crates/kompoz-graphics/src/shadow.rs
 * super ShadowGraphicsLayerElement - ModifierNodeElement
 * super ShadowScope - Density
 * super Shape - ShapeEq
@@ -1974,7 +1989,7 @@ kompoz-material3/scaffold kompozable TopPaddingText r crates/kompoz-material3/te
 * super TouchSelectionObserver - TextDragObserver
 * method Track rddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 * kompozable TrackImpl rrrrrrrrrrr crates/kompoz-material3/src/slider/defaults.rs
-kompoz-material3/button_groups kompozable TrailingArrow r crates/kompoz-material3/tests/button_groups.rs
+kompoz-material3/cross_area kompozable TrailingArrow r crates/kompoz-material3/tests/cross_area.rs
 kompoz-material3/split_buttons kompozable TrailingArrow rrr crates/kompoz-material3/tests/split_buttons.rs
 * method TrailingButton rddddddddr crates/kompoz-material3/src/split_button.rs SplitButtonDefaults
 kompoz-material3/floating_toolbar kompozable TrailingContent - crates/kompoz-material3/tests/floating_toolbar.rs

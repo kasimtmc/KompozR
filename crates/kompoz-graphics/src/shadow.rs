@@ -52,6 +52,18 @@ impl Default for Shadow {
 /// Compose's default shadow color.
 pub const DefaultShadowColor: Color = Color::Black;
 
+/// A text's shadow: of `color`, moved by `offset`, blurred by `blur_radius` (px).
+///
+/// Kotlin: `Shadow(color: Color = Color(0xFF000000), offset: Offset = Offset.Zero, blurRadius: Float = 0.0f)`
+#[kompoz_runtime::named(type)]
+pub fn Shadow(
+    #[default(DefaultShadowColor)] color: Color,
+    #[default(Offset::Zero)] offset: Offset,
+    #[default(0.0)] blur_radius: f32,
+) -> Shadow {
+    Shadow::new(color, offset, blur_radius, 0.0)
+}
+
 /// Between two shadows (Compose's lerp(Shadow, Shadow, fraction)): the color, offset, blur, spread and alpha
 /// along, the brush and blend mode the nearer one's.
 pub fn lerp_shadow(start: &Shadow, stop: &Shadow, fraction: f32) -> Shadow {

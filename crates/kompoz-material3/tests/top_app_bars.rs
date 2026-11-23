@@ -2,8 +2,7 @@
 //! (kompoz_tests.cpp; M15's values and API where the C++ differed, said at each), Compose's behaviour (the state, its
 //! fractions and saver; the scroll behaviors' connections, their remembering, the lazy-list and scroll-state forms,
 //! the deprecated reversed one; the bar's drags and settling; the colors and their copy; the overrides; the
-//! defaults), and the top-bar samples of M15's AppBarSamples.kt, each checked as used (SimpleTopAppBarWithAdaptiveActions
-//! waits for WP8's currentWindowAdaptiveInfo). Density 1: dp are px; the viewport is 400 × 800 unless said.
+//! defaults), and the top-bar samples of M15's AppBarSamples.kt, each checked as used. Density 1: dp are px; the viewport is 400 × 800 unless said.
 
 #![allow(non_snake_case, non_upper_case_globals, deprecated)]
 

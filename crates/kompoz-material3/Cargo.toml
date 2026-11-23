@@ -28,6 +28,8 @@ libc = "0.2"
 writeable = "0.6.4"
 
 [dev-dependencies]
+# (closing: the overlays test's animated vector)
+kompoz-animation-graphics = { path = "../kompoz-animation-graphics" }
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
 # (WP4b: icons)
 kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
@@ -252,4 +254,10 @@ harness = false
 # Compose's behaviour, M15's FloatingActionButtonMenuSample): FloatingActionButtonMenu, ToggleFloatingActionButton.
 [[test]]
 name = "fab_menu"
+harness = false
+
+# The C++ Kompoz's cross-area tests whose components span several areas, whole by name: whole pixels, composing only
+# as components turn, Material's states saved with the process.
+[[test]]
+name = "cross_area"
 harness = false

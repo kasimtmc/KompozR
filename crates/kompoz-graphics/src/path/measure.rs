@@ -703,6 +703,8 @@ pub struct PathMeasure {
 
 impl PathMeasure {
     /// One with no path: no length.
+    ///
+    /// Kotlin: `PathMeasure()`
     pub fn new() -> PathMeasure {
         PathMeasure::default()
     }

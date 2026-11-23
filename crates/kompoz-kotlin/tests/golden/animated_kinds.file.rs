@@ -50,10 +50,7 @@ pub fn EveryTransition(shown: bool) {
                     visible = shown,
                     enter = scale_in(initial_scale = 0.5_f32, transform_origin = TransformOrigin(0_f32, 0_f32))
                         + unveil_in(initial_color = Color::Red)
-                        + expand_vertically(
-                            expand_from = ::core::convert::Into::into(Alignment::Top),
-                            initial_height = |it| it / 2,
-                        )
+                        + expand_vertically(expand_from = Alignment::Top, initial_height = |it| it / 2)
                         + slide_in_horizontally(initial_offset_x = |it| -it)
                         + EnterTransition::None,
                     exit = scale_out(target_scale = 0.5_f32)

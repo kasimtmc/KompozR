@@ -32,7 +32,7 @@ tests!(
     navigation_suite_types_as_compose_1_4,
     navigation_suite_scaffold_with_its_own_items_a_primary_action_and_hiding,
     navigation_suite_items_suit_each_type,
-    scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose,
+    navigation_suite_layouts_leave_the_body_its_own_size,
     navigation_suite_types_by_window_and_their_names,
     navigation_suite_scaffold_layout_places_each_type_and_the_primary_action,
     navigation_suite_scaffold_consumes_the_insets_of_its_navigation_component,
@@ -423,10 +423,10 @@ fn navigation_suite_items_suit_each_type() {
     assert!(bounds(&rule, "suite").width() > 150.0 && text_bounds(&rule, "Kapalı").top > 650.0);
 }
 
-fn scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose() {
-    // The NavigationSuiteScaffoldLayout cases (2, 3, 4) of the C++ test: the body measured in a Box with no
-    // minimum size keeps its own size beside a bar, a rail, or nothing (the Scaffold, BottomSheetScaffold and
-    // carousel cases are theirs).
+fn navigation_suite_layouts_leave_the_body_its_own_size() {
+    // The NavigationSuiteScaffoldLayout cases (2, 3, 4) of C++ scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose
+    // (whole in kompoz-material3's scaffold.rs) and the older overload's: the body measured in a Box with no minimum
+    // size keeps its own size beside a bar, a rail, or nothing.
     let which = mutable_state_of(2);
     let w = which.clone();
     let rule = KompozTestRule::with_viewport(

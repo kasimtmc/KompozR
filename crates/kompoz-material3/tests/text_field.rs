@@ -42,7 +42,7 @@ tests!(
     a_tap_on_a_text_fields_icon_focuses_it,
     provide_text_style_and_text_without_a_direction_follow_the_layout,
     draw_reaches_canvas,
-    overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn,
+    a_fields_label_floats_composing_nothing_around_it,
     fields_of_both_engines_edit_their_text,
     secure_fields_obfuscate_their_text_on_one_line,
     attached_labels_move_between_their_alignments_and_tell_their_progress,
@@ -808,10 +808,10 @@ fn draw_reaches_canvas() {
     assert_eq!(rule.drawn_texts(), vec!["Merhaba".to_string(), "Yaz…".to_string()]);
 }
 
-/// C++ `overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn`, its text field part: a
-/// field's label minimizing as it is focused doesn't compose what is around it on the way (Compose's label
+/// A field's label minimizing (the text field's part of C++ `overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn`,
+/// whose whole port is cross_area.rs', with its label's size on the way checked here): it minimizes as it is focused doesn't compose what is around it on the way (Compose's label
 /// composes itself — its style follows the progress —, nothing above it).
-fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_turn() {
+fn a_fields_label_floats_composing_nothing_around_it() {
     let composed = Rc::new(Cell::new(0));
     let text = mutable_state_of(String::new());
     let (c, t) = (composed.clone(), text.clone());

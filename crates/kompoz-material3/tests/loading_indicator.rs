@@ -2,8 +2,8 @@
 //! ContainedLoadingIndicator, morphing by a progress or on their own, and LoadingIndicatorDefaults — the shapes they
 //! morph through and how far they turn, their sizes and containers, their timing (and that they compose nothing as
 //! they move), what they tell accessibility. The C++ Kompoz's tests by name (kompoz_tests.cpp; the loading indicator
-//! halves of `containers_take_compose_named_arguments` and `graphics_forms_take_compose_named_arguments`, whose rest
-//! is other packages'), and Compose's behaviour.
+//! parts of `containers_take_compose_named_arguments` and `graphics_forms_take_compose_named_arguments` are in both
+//! syntaxes in crates/kompoz/tests/named_forms.rs), and Compose's behaviour.
 //!
 //! The recording canvas keeps a path as drawn before the rotation it is drawn in (its bounds where it lands
 //! unturned): the tests turn its points by the recorded transform (`drawn_points`). The C++ drew its own outlines
@@ -32,8 +32,6 @@ use std::sync::Arc;
 
 tests!(
     loading_indicator_morphs_and_turns_and_grows_into_a_burst,
-    containers_take_compose_named_arguments_loading_indicator,
-    graphics_forms_take_compose_named_arguments_loading_indicator,
     determinate_loading_indicators_morph_through_their_polygons_by_progress,
     loading_indicators_need_two_polygons,
     indeterminate_loading_indicators_morph_every_650_ms_and_turn,
@@ -278,41 +276,8 @@ fn loading_indicator_morphs_and_turns_and_grows_into_a_burst() {
     assert_eq!(range(&rule, "belirsiz"), Some(ProgressBarRangeInfo::Indeterminate));
 }
 
-fn containers_take_compose_named_arguments_loading_indicator() {
-    // The loading indicators' part (its lazy list, badges, segmented list items, extended FAB and bottom app bar are
-    // other packages'): by name. (The C++'s `LoadingIndicator(progress = 0.5f, …)`: M15 takes a lambda.)
-    let rule = KompozTestRule::new(kompozable_lambda!(|| {
-        Column(
-            content = || {
-                IndeterminateLoadingIndicator(modifier = Modifier.size(48.dp()).test_tag("yükleniyor"));
-                LoadingIndicator(progress = || 0.5, modifier = Modifier.test_tag("yarım"));
-            },
-        );
-    }));
-    rule.on_node_with_tag("yükleniyor").assert_exists();
-    rule.on_node_with_tag("yarım").assert_exists().assert_range_info_equals(determinate(0.5));
-}
-
-fn graphics_forms_take_compose_named_arguments_loading_indicator() {
-    // The contained loading indicators' part (the wavy ones are tests/progress.rs', the rest the lower crates'): by
-    // name and by place, 48 dp wide. (The C++'s `ContainedLoadingIndicator(progress = 0.3f, …)`: M15 takes a
-    // lambda.)
-    let rule = KompozTestRule::new(kompozable_lambda!(|| {
-        Column(
-            content = || {
-                ContainedLoadingIndicator(
-                    progress = || 0.3,
-                    container_color = Color::Yellow,
-                    modifier = Modifier.test_tag("kap"),
-                );
-                IndeterminateContainedLoadingIndicator(Modifier.test_tag("dönen"));
-            },
-        );
-    }));
-    let width = |tag: &str| rule.on_node_with_tag(tag).get_unclipped_bounds_in_root().width();
-    assert!(near(width("kap"), 48.0, 0.01) && near(width("dönen"), 48.0, 0.01));
-    assert!(rule.draw().rect_colors.contains(&Color::Yellow));
-}
+// (C++ containers_take_compose_named_arguments and graphics_forms_take_compose_named_arguments: their loading
+// indicators, with the rest of their Material parts, in both syntaxes in crates/kompoz/tests/named_forms.rs)
 
 // ---- Compose's behaviour ------------------------------------------------------------------------------------------
 

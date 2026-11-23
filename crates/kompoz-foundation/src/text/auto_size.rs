@@ -72,6 +72,8 @@ impl dyn TextAutoSize {
     /// `max_font_size`, every size `step_size` apart from the min; with an ellipsis, a size fits where the text
     /// isn't ellipsized. A min above the max is taken as the max. Unspecified sizes, a step under 0.0001 sp or a
     /// negative size panic.
+    ///
+    /// Kotlin: `TextAutoSize.StepBased(minFontSize: TextUnit = 12.sp, maxFontSize: TextUnit = 112.sp, stepSize: TextUnit = 0.25.sp)`
     pub fn step_based(min_font_size: TextUnit, max_font_size: TextUnit, step_size: TextUnit) -> Rc<dyn TextAutoSize> {
         Rc::new(AutoSizeStepBased::new(min_font_size, max_font_size, step_size))
     }

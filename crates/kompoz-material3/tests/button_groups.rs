@@ -1,9 +1,10 @@
 //! Material Expressive's button groups as Compose's material3 (1.5.0-alpha17) has them: the C++ Kompoz's
-//! button_group_grows_the_held_button_and_squeezes_its_neighbours, button_group_puts_what_does_not_fit_into_a_menu,
-//! connected_button_group_rounds_the_outer_ends_and_the_checked_one, expressive_buttons_take_compose_named_arguments
-//! and the ButtonGroup part of layout_is_in_whole_pixels_as_composes (with M15's values where the C++ had its own,
-//! said at each), Compose's behaviour (weights, alignment, the defaults, the overflow indicator, the menu state) and
-//! the 6 samples of M15's ButtonGroupSamples.kt. Density 1 unless said: dp are px.
+//! button_group_grows_the_held_button_and_squeezes_its_neighbours, button_group_puts_what_does_not_fit_into_a_menu
+//! and connected_button_group_rounds_the_outer_ends_and_the_checked_one (with M15's values where the C++ had its own,
+//! said at each; layout_is_in_whole_pixels_as_composes, its ButtonGroup part with it, is whole in cross_area.rs;
+//! expressive_buttons_take_compose_named_arguments is in both syntaxes in crates/kompoz/tests/named_forms.rs),
+//! Compose's behaviour (weights, alignment, the defaults, the overflow indicator, the menu state) and the 6 samples of
+//! M15's ButtonGroupSamples.kt. Density 1 unless said: dp are px.
 
 #![allow(non_snake_case, non_upper_case_globals, deprecated)]
 
@@ -11,7 +12,6 @@
 mod common;
 
 use common::*;
-use kompoz_animation::animate_float_as_state;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_material_icons_extended::Icons;
@@ -22,7 +22,7 @@ use kompoz_test::*;
 use kompoz_ui::graphics_context::CornerRadii;
 use kompoz_ui::input::PointerType;
 use kompoz_ui::platform::LocalLayoutDirection;
-use kompoz_ui::semantics::{Role, SemanticsActions, SemanticsProperties};
+use kompoz_ui::semantics::{Role, SemanticsProperties};
 use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -32,8 +32,6 @@ tests!(
     button_group_grows_the_held_button_and_squeezes_its_neighbours,
     button_group_puts_what_does_not_fit_into_a_menu,
     connected_button_group_rounds_the_outer_ends_and_the_checked_one,
-    expressive_buttons_take_compose_named_arguments,
-    layout_is_in_whole_pixels_as_composes,
     button_group_weights_share_what_is_left,
     button_group_items_align_vertically,
     button_group_defaults_follow_the_tokens,
@@ -419,217 +417,7 @@ fn connected_button_group_rounds_the_outer_ends_and_the_checked_one() {
     assert!(same_corners(look("Gün"), [20.0; 4]) && same_corners(look("Hafta"), [8.0; 4])); // corner by corner, back again
 }
 
-/// The samples' trailing icon (M15's `KeyboardArrowDown` turning over as `checked` animates `rotationZ`): what M15's
-/// samples show where the C++ had `SplitButtonDefaults::TrailingButtonIcon`, which M15 hasn't.
-#[kompozable]
-fn TrailingArrow(checked: bool) {
-    let rotation =
-        animate_float_as_state(if checked { 180.0 } else { 0.0 }, label = "Trailing Icon Rotation".to_string());
-    VectorIcon(
-        Icons::Filled::KeyboardArrowDown(),
-        Some("Localized description".into()),
-        modifier = Modifier.size(SplitButtonDefaults::TrailingIconSize).graphics_layer_block(move |layer| {
-            layer.rotation_z = rotation.value();
-        }),
-    );
-}
-
-fn expressive_buttons_take_compose_named_arguments() {
-    // The C++'s test in Rust's named form, whole. M15 differences: the menu state's `isExpanded` is hidden in M15
-    // (its `is_showing`); M15 has no `SplitButtonDefaults.TrailingButtonIcon` (its samples' turning arrow); M15's
-    // `SliderDefaults.Thumb(state)` is `Thumb(interactionSource, sliderState)` (Rust `StateThumb`), the slot overload
-    // of Slider `SlotSlider`.
-    let last = mutable_state_of(String::new());
-    let bold = mutable_state_of(false);
-    let open = mutable_state_of(false);
-    let volume = mutable_state_of(40.0f32);
-    let price = mutable_state_of(200.0f32..=800.0);
-    let source = MutableInteractionSource::new();
-    let (la, bo, op, vo, pr, so) =
-        (last.clone(), bold.clone(), open.clone(), volume.clone(), price.clone(), source.clone());
-    let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (la, bo, op, vo, pr, so) = (la.clone(), bo.clone(), op.clone(), vo.clone(), pr.clone(), so.clone());
-        Column(move || {
-            let (l1, s1) = (la.clone(), so.clone());
-            ButtonGroupWithoutOverflowIndicator(
-                modifier = Modifier.test_tag("grup"),
-                content = move |group: &ButtonGroupScope| {
-                    let l = l1.clone();
-                    Button(
-                        on_click = move || l.set("oynat".into()),
-                        modifier = group.animate_width(Modifier, &s1).test_tag("oynat"),
-                        interaction_source = Some(s1.clone()),
-                        content = || Text("Oynat"),
-                    );
-                },
-            );
-            let (l2, b2) = (la.clone(), bo.clone());
-            ButtonGroup(
-                overflow_indicator = |menu: &ButtonGroupMenuState| {
-                    let menu = menu.clone();
-                    IconButton(
-                        on_click = move || if menu.is_showing() { menu.dismiss() } else { menu.show() },
-                        modifier = Modifier.test_tag("daha"),
-                        content = || VectorIcon(Icons::Filled::MoreVert(), Some("Daha".into())),
-                    );
-                },
-                modifier = Modifier.width(120.dp()),
-                content = move |items: &ButtonGroupScope| {
-                    let (k, s, b) = (l2.clone(), l2.clone(), b2.clone());
-                    items.clickable_item(on_click = move || k.set("kopyala".into()), label = "Kopyala");
-                    items.toggleable_item(checked = b2.get(), on_checked_change = move |on| b.set(on), label = "Kalın");
-                    items.clickable_item(
-                        on_click = move || s.set("sil".into()),
-                        label = "Sil",
-                        icon = Some(Rc::new(|| VectorIcon(Icons::Filled::Delete(), None)) as Rc<dyn Fn()>),
-                    );
-                },
-            );
-            let b3 = bo.clone();
-            ToggleButton(
-                checked = bo.get(),
-                on_checked_change = move |on| b3.set(on),
-                shapes = ButtonGroupDefaults.connected_leading_button_shapes(),
-                content = || Text("Koyu"),
-            );
-            let (l4, o4) = (la.clone(), op.clone());
-            SplitButtonLayout(
-                leading_button = move || {
-                    let l = l4.clone();
-                    SplitButtonDefaults
-                        .LeadingButton(on_click = move || l.set("kaydet".into()), content = || Text("Kaydet"));
-                },
-                trailing_button = move || {
-                    let (o, checked) = (o4.clone(), o4.get());
-                    SplitButtonDefaults.ToggleableTrailingButton(
-                        checked = checked,
-                        on_checked_change = move |on| o.set(on),
-                        content = move || TrailingArrow(checked),
-                    );
-                },
-            );
-            let (v5, s5) = (vo.clone(), so.clone());
-            SlotSlider(
-                value = vo.get(),
-                on_value_change = move |v| v5.set(v),
-                value_range = 0.0..=100.0,
-                interaction_source = Some(so.clone()),
-                thumb = Some(Rc::new(move |s: SliderState| {
-                    let s6 = s5.clone();
-                    Label(
-                        label = |scope: &dyn TooltipScope| scope.PlainTooltip(content = || Text("x")),
-                        interaction_source = Some(s5.clone()),
-                        content = move || SliderDefaults.StateThumb(s6.clone(), s.clone()),
-                    );
-                }) as Rc<dyn Fn(SliderState)>),
-            );
-            let p7 = pr.clone();
-            RangeSlider(value = pr.get(), on_value_change = move |v| p7.set(v), value_range = 0.0..=1000.0, steps = 19);
-            let stars = remember_slider_state(value = 3.0, steps = 3, value_range = 1.0..=5.0);
-            let hours = remember_range_slider_state(
-                active_range_start = 9.0,
-                active_range_end = 17.0,
-                steps = 23,
-                value_range = 0.0..=24.0,
-            );
-            let last = la.get();
-            Text(format!(
-                "son: {} · {:.0} · {:.0}",
-                if last.is_empty() { "yok".to_string() } else { last },
-                stars.value(),
-                hours.active_range_end()
-            ));
-        });
-    }));
-    rule.on_node_with_text("son: yok · 3 · 17").assert_exists();
-    rule.on_node_with_tag("oynat").perform_click();
-    rule.on_node_with_text("Kaydet").perform_click();
-    rule.on_node_with_text("son: kaydet · 3 · 17").assert_exists();
-    rule.on_node_with_text("Koyu").perform_click();
-    assert!(bold.get());
-    // (M15's group is as tall as the items it shows — none here —: the indicator, placed at its top, reaches over the
-    // toggle button under it, which takes a touch there (Compose's later sibling first). Its click action, then.)
-    rule.on_node_with_tag("daha").perform_semantics_action(SemanticsActions::OnClick);
-    rule.wait_for_idle();
-    // the menu's (nothing of 120 dp fits beside the indicator: all three are in the menu; the row's are composed,
-    // not placed)
-    tap(&rule, shown_bounds(&rule, "Sil").center());
-    rule.on_node_with_text("son: sil · 3 · 17").assert_exists();
-    let _ = (&open, &volume, &price);
-}
-
-fn layout_is_in_whole_pixels_as_composes() {
-    // The C++'s test's Material part (its Box, padding, spacing, weight and text parts are the foundation's; its offset
-    // part is kompoz-foundation's layout_modifiers.rs `offsets_round_to_whole_pixels`): at 2.625 px a dp, a tab row's
-    // tabs share its whole px out as Compose's (each the row's divided, the rest left over); a held button in a group
-    // grows by whole px, its neighbours give up whole px. Bounds here are px.
-    let held = MutableInteractionSource::new();
-    let h = held.clone();
-    let rows = KompozTestRule::new(kompozable_lambda!(move || {
-        let h = h.clone();
-        Column(move || {
-            PrimaryTabRow(
-                0,
-                modifier = Modifier.width(100.dp()),
-                tabs = || {
-                    for i in 0..3 {
-                        TextIconTab(
-                            i == 0,
-                            || {},
-                            modifier = Modifier.test_tag(format!("s{i}")),
-                            text = Some(Rc::new(move || Text(format!("S{i}"))) as Rc<dyn Fn()>),
-                        );
-                    }
-                },
-            );
-            let h = h.clone();
-            ButtonGroupWithoutOverflowIndicator(
-                content = move |group: &ButtonGroupScope| {
-                    let g0 = remember(MutableInteractionSource::new);
-                    let g2 = remember(MutableInteractionSource::new);
-                    Button(
-                        || {},
-                        modifier = group.animate_width(Modifier, &g0).test_tag("g0"),
-                        content = || Text("Önceki"),
-                    );
-                    Button(
-                        || {},
-                        modifier = group.animate_width(Modifier, &h).test_tag("g1"),
-                        interaction_source = Some(h.clone()),
-                        content = || Text("Oynat"),
-                    );
-                    Button(
-                        || {},
-                        modifier = group.animate_width(Modifier, &g2).test_tag("g2"),
-                        content = || Text("Sonraki"),
-                    );
-                },
-            );
-        });
-    }));
-    rows.host().set_density(Density::new(2.625, 1.0));
-    rows.wait_for_idle();
-    let px = |tag: &str| bounds(&rows, tag);
-    let whole = |r: Rect| [r.left, r.top, r.width(), r.height()].iter().all(|v| (v - v.round()).abs() < 1e-3);
-    // 263 px (262.5) in three: 87 each, the rest left over
-    assert!(
-        near(px("s0").width(), 87.0, 1e-3) && near(px("s1").left, 87.0, 1e-3) && near(px("s2").left, 174.0, 1e-3),
-        "{:?}",
-        px("s1")
-    );
-    let (g0, g1, g2) = (px("g0").width(), px("g1").width(), px("g2").width());
-    press(&rows, px("g1").center());
-    rows.advance_time_by(500);
-    // (its natural width a whole px: what it grows by rounded, half of it from each neighbour)
-    let growth = g1 * 0.15;
-    assert!(near(px("g1").width(), g1 + (growth + 0.5).floor(), 1e-3), "{:?} {g1}", px("g1"));
-    assert!(near(px("g0").width(), g0 - (growth / 2.0 + 0.5).floor(), 1e-3));
-    assert!(near(px("g2").width(), g2 - (growth / 2.0 + 0.5).floor(), 1e-3));
-    for tag in ["g0", "g1", "g2", "s0", "s1", "s2"] {
-        assert!(whole(px(tag)), "{tag} not on whole px: {:?}", px(tag));
-    }
-    release(&rows, px("g1").center());
-}
+// (C++ expressive_buttons_take_compose_named_arguments: in both syntaxes in crates/kompoz/tests/named_forms.rs)
 
 // ---- Compose's behaviour ---------------------------------------------------------------------------------------
 

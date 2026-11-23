@@ -671,6 +671,7 @@ dependencies = [
  "icu_decimal",
  "icu_locale_core",
  "kompoz-animation",
+ "kompoz-animation-graphics",
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-graphics",

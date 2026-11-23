@@ -99,6 +99,9 @@ pub(crate) struct FnState {
     pub kompozable: bool,
     /// Its result is nullable (Kotlin's `T?`): a value it returns of a type known not to be is given in `Some`.
     pub nullable_result: bool,
+    /// Its declared result is an interface the API holds as a shared trait object (`fun anchors(): DraggableAnchors<Int>
+    /// = DraggableAnchors { … }`): a value it returns of a type of its own is made one.
+    pub shared_result: Option<expr::Shared>,
 }
 
 /// A loop being written, for `break` and `continue`.
@@ -612,7 +615,11 @@ impl<'a, 'd> Gen<'a, 'd> {
         let info = self.quiet(|g| g.file_fn(f));
         let unit = info.ret == Ty::Unit;
         let restartable = kompozable && !inline && unit && f.result.as_ref().is_none_or(|t| self.ty_of(t) == Ty::Unit);
-        self.fun = FnState { kompozable, nullable_result: info.ret.is_nullable() };
+        let shared_result = f
+            .result
+            .as_ref()
+            .and_then(|t| expr::Shared::of_rust(&self.quiet(|g| g.rust_type(t, types::TypePos::Return)).to_string()));
+        self.fun = FnState { kompozable, nullable_result: info.ret.is_nullable(), shared_result };
         self.scopes = vec![HashMap::new()];
         self.receivers.clear();
         self.frames.clear();
@@ -699,7 +706,11 @@ impl<'a, 'd> Gen<'a, 'd> {
                     let s = self.stmt_expr(e);
                     quote!(#s;)
                 } else {
-                    let want = expr::Want { some: info.ret.is_nullable(), ..Default::default() };
+                    let want = expr::Want {
+                        some: info.ret.is_nullable(),
+                        shared: self.fun.shared_result,
+                        ..Default::default()
+                    };
                     self.value_want(e, want)
                 }
             }

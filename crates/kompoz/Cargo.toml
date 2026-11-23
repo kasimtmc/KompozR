@@ -160,6 +160,12 @@ harness = false
 name = "named_forms"
 harness = false
 
+# The C++ Kompoz's Material Kotlin sources (kompozable_tests.cpp) whole: KotlinHelpers, MaterialForms, SectionsForms,
+# TextStyles, ScrollForms, GraphicsForms' and AppShellForms' Material lines.
+[[test]]
+name = "kotlin_material_sources"
+harness = false
+
 # Enter and exit transitions, AnimatedVisibility, AnimatedContent and Crossfade in Kotlin's syntax.
 [[test]]
 name = "kotlin_animated"

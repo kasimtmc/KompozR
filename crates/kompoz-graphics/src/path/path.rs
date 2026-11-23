@@ -87,6 +87,9 @@ impl PartialEq for Path {
 const ROOT2_OVER2: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
 impl Path {
+    /// An empty path.
+    ///
+    /// Kotlin: `Path()`
     pub fn new() -> Path {
         Path::default()
     }

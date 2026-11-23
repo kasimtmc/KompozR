@@ -27,10 +27,11 @@ pub fn remember_animated_vector_painter(animated_image_vector: AnimatedImageVect
 pub(crate) fn remember_animated_vector_painter_with(
     animated_image_vector: AnimatedImageVector,
     at_end: bool,
-    render: impl Fn(&VectorGroup, &HashMap<String, Rc<dyn VectorConfig>>),
+    render: impl Fn(&VectorGroup, &HashMap<String, Rc<dyn VectorConfig>>) + 'static,
 ) -> VectorPainter {
     let image_vector = animated_image_vector.image_vector();
     let render = Rc::new(render);
+    let (name, root) = (image_vector.name().to_string(), image_vector.clone());
     remember_vector_painter_content(
         image_vector.default_width(),
         image_vector.default_height(),
@@ -40,8 +41,10 @@ pub(crate) fn remember_animated_vector_painter_with(
         tint_color = image_vector.tint_color(),
         tint_blend_mode = image_vector.tint_blend_mode(),
         auto_mirror = true,
-        content = |_, _| {
-            let transition = update_transition(at_end, Some(image_vector.name().to_string()));
+        // (composed in the vector's own composition, as Compose's: its transition's frames compose it, not the
+        // caller)
+        content = move |_, _| {
+            let transition = update_transition(at_end, Some(name.clone()));
             let total_duration = animated_image_vector.total_duration();
             let mut map: Vec<(String, StateVectorConfig)> = Vec::new();
             for target in animated_image_vector.targets() {
@@ -53,7 +56,7 @@ pub(crate) fn remember_animated_vector_painter_with(
             }
             let configs: HashMap<String, Rc<dyn VectorConfig>> =
                 map.into_iter().map(|(name, config)| (name, Rc::new(config) as Rc<dyn VectorConfig>)).collect();
-            render(image_vector.root(), &configs);
+            render(root.root(), &configs);
         },
     )
 }

@@ -1,8 +1,8 @@
 //! Material's cards, chips and badges as Compose's material3 (1.5.0-alpha17) has them: the C++ Kompoz's tests by
 //! name (kompoz_tests.cpp, with M15's values where the C++ followed 1.4), Compose's behaviour (each chip kind's
 //! paddings, heights and colors per state, filter chips toggling, input chips' avatar, cards clicked and raised as
-//! they are pressed, badges' sizes and text), and the M15 samples of CardSamples.kt, ChipSamples.kt and
-//! BadgeSamples.kt.
+//! they are pressed, badges' sizes and text), and the M15 samples of CardSamples.kt and ChipSamples.kt (BadgeSamples.kt's
+//! is in a navigation bar: navigation_bar.rs).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -50,7 +50,6 @@ tests!(
     badged_box_keeps_the_anchors_size_and_baseline,
     card_samples,
     chip_samples,
-    badge_samples,
 );
 
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
@@ -1916,62 +1915,6 @@ fn chip_samples() {
     let flow = bounds(&rule, "ChipGroupReflowSample");
     assert!(flow.height() > 60.0 && line_tops(&rule) > 1, "{flow:?}");
 }
-
-#[kompozable]
-fn NavigationBarItemWithBadge() {
-    // Compose's sample puts each BadgedBox in a NavigationBarItem of a NavigationBar: they wait for WP4b's
-    // navigation bar; the badged boxes in a Row here.
-    Row(
-        horizontal_arrangement = Arrangement::spaced_by(40.dp()),
-        modifier = Modifier.padding(20.dp()),
-        content = || {
-            BadgedBox(
-                || Badge(modifier = Modifier.semantics(|c| c.set_content_description("New notification"))),
-                content = || VectorIcon(Icons::Filled::Star(), Some("Favorite".into())),
-            );
-            for badge_number in ["8", "999+"] {
-                BadgedBox(
-                    move || {
-                        Badge(
-                            content = slot(move || {
-                                named_args!(Text(
-                                    badge_number,
-                                    modifier = Modifier
-                                        .semantics(move |c| c
-                                            .set_content_description(format!("{badge_number} new notifications"))),
-                                ));
-                            }),
-                        );
-                    },
-                    content = || VectorIcon(Icons::Filled::Star(), Some("Favorite".into())),
-                );
-            }
-        },
-    );
-}
-
-fn badge_samples() {
-    let rule = KompozTestRule::new(kompozable_lambda!(|| NavigationBarItemWithBadge()));
-    let dot = rule.on_node_with_content_description("New notification").get_unclipped_bounds_in_root();
-    assert!(near(dot.width(), 6.0, 0.01) && near(dot.height(), 6.0, 0.01));
-    rule.on_node_with_content_description("8 new notifications").assert_exists();
-    let many = rule.on_node_with_content_description("999+ new notifications").get_unclipped_bounds_in_root();
-    let eight = rule.on_node_with_content_description("8 new notifications").get_unclipped_bounds_in_root();
-    assert!(many.width() > eight.width());
-    assert_eq!(rule.on_all_nodes_with_content_description("Favorite").fetch_semantics_nodes().len(), 3);
-    // The long count's badge: its start 12 dp in from the icon's end, its bottom 14 dp below the icon's top.
-    let icons = rule.on_all_nodes_with_content_description("Favorite").fetch_semantics_nodes();
-    let third = icons
-        .iter()
-        .map(|n| n.bounds_in_root())
-        .fold(Rect::new(0.0, 0.0, 0.0, 0.0), |a, b| if b.left > a.left { b } else { a });
-    let canvas = rule.draw();
-    assert!(
-        canvas.rects.iter().any(|r| near(r.left, third.right - 12.0, 0.01) && near(r.bottom, third.top + 14.0, 0.01)),
-        "{third:?}"
-    );
-}
-
 // ---- C++ chips_radio_buttons_and_segments_select: its filter chip ----------------------------------------------
 
 fn chips_radio_buttons_and_segments_select() {

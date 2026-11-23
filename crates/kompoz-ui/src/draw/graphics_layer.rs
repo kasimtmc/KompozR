@@ -133,28 +133,6 @@ impl fmt::Debug for GraphicsLayer {
     }
 }
 
-macro_rules! properties {
-    ($($(#[$doc:meta])* $get:ident, $set:ident: $ty:ty;)*) => {
-        $(
-            $(#[$doc])*
-            pub fn $get(&self) -> $ty {
-                self.data.borrow().properties.$get.clone()
-            }
-            pub fn $set(&self, value: $ty) {
-                let changed = {
-                    let mut d = self.data.borrow_mut();
-                    let changed = d.properties.$get != value;
-                    d.properties.$get = value;
-                    changed
-                };
-                if changed {
-                    self.property_changed();
-                }
-            }
-        )*
-    };
-}
-
 impl GraphicsLayer {
     /// A layer with nothing recorded, turned into pixels by `platform`'s renderer (none: it can't be).
     pub fn new(platform: Option<PlatformHandle>) -> GraphicsLayer {
@@ -171,29 +149,159 @@ impl GraphicsLayer {
         }
     }
 
-    properties! {
-        /// Where `draw_layer` puts it in its scope.
-        top_left, set_top_left: IntOffset;
-        alpha, set_alpha: f32;
-        scale_x, set_scale_x: f32;
-        scale_y, set_scale_y: f32;
-        translation_x, set_translation_x: f32;
-        translation_y, set_translation_y: f32;
-        rotation_x, set_rotation_x: f32;
-        rotation_y, set_rotation_y: f32;
-        rotation_z, set_rotation_z: f32;
-        camera_distance, set_camera_distance: f32;
-        /// What it scales and turns about, px from its top left (unspecified: its middle).
-        pivot_offset, set_pivot_offset: Offset;
-        shadow_elevation, set_shadow_elevation: f32;
-        ambient_shadow_color, set_ambient_shadow_color: Color;
-        spot_shadow_color, set_spot_shadow_color: Color;
-        /// Whether it is cut to its outline.
-        clip, set_clip: bool;
-        render_effect, set_render_effect: Option<RenderEffect>;
-        blend_mode, set_blend_mode: BlendMode;
-        color_filter, set_color_filter: Option<ColorFilter>;
-        compositing_strategy, set_compositing_strategy: CompositingStrategy;
+    /// Where `draw_layer` puts it in its scope.
+    pub fn top_left(&self) -> IntOffset {
+        self.data.borrow().properties.top_left
+    }
+
+    pub fn set_top_left(&self, value: IntOffset) {
+        self.set_property(|p| replaced(&mut p.top_left, value));
+    }
+
+    pub fn alpha(&self) -> f32 {
+        self.data.borrow().properties.alpha
+    }
+
+    pub fn set_alpha(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.alpha, value));
+    }
+
+    pub fn scale_x(&self) -> f32 {
+        self.data.borrow().properties.scale_x
+    }
+
+    pub fn set_scale_x(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.scale_x, value));
+    }
+
+    pub fn scale_y(&self) -> f32 {
+        self.data.borrow().properties.scale_y
+    }
+
+    pub fn set_scale_y(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.scale_y, value));
+    }
+
+    pub fn translation_x(&self) -> f32 {
+        self.data.borrow().properties.translation_x
+    }
+
+    pub fn set_translation_x(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.translation_x, value));
+    }
+
+    pub fn translation_y(&self) -> f32 {
+        self.data.borrow().properties.translation_y
+    }
+
+    pub fn set_translation_y(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.translation_y, value));
+    }
+
+    pub fn rotation_x(&self) -> f32 {
+        self.data.borrow().properties.rotation_x
+    }
+
+    pub fn set_rotation_x(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.rotation_x, value));
+    }
+
+    pub fn rotation_y(&self) -> f32 {
+        self.data.borrow().properties.rotation_y
+    }
+
+    pub fn set_rotation_y(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.rotation_y, value));
+    }
+
+    pub fn rotation_z(&self) -> f32 {
+        self.data.borrow().properties.rotation_z
+    }
+
+    pub fn set_rotation_z(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.rotation_z, value));
+    }
+
+    pub fn camera_distance(&self) -> f32 {
+        self.data.borrow().properties.camera_distance
+    }
+
+    pub fn set_camera_distance(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.camera_distance, value));
+    }
+
+    /// What it scales and turns about, px from its top left (unspecified: its middle).
+    pub fn pivot_offset(&self) -> Offset {
+        self.data.borrow().properties.pivot_offset
+    }
+
+    pub fn set_pivot_offset(&self, value: Offset) {
+        self.set_property(|p| replaced(&mut p.pivot_offset, value));
+    }
+
+    pub fn shadow_elevation(&self) -> f32 {
+        self.data.borrow().properties.shadow_elevation
+    }
+
+    pub fn set_shadow_elevation(&self, value: f32) {
+        self.set_property(|p| replaced(&mut p.shadow_elevation, value));
+    }
+
+    pub fn ambient_shadow_color(&self) -> Color {
+        self.data.borrow().properties.ambient_shadow_color
+    }
+
+    pub fn set_ambient_shadow_color(&self, value: Color) {
+        self.set_property(|p| replaced(&mut p.ambient_shadow_color, value));
+    }
+
+    pub fn spot_shadow_color(&self) -> Color {
+        self.data.borrow().properties.spot_shadow_color
+    }
+
+    pub fn set_spot_shadow_color(&self, value: Color) {
+        self.set_property(|p| replaced(&mut p.spot_shadow_color, value));
+    }
+
+    /// Whether it is cut to its outline.
+    pub fn clip(&self) -> bool {
+        self.data.borrow().properties.clip
+    }
+
+    pub fn set_clip(&self, value: bool) {
+        self.set_property(|p| replaced(&mut p.clip, value));
+    }
+
+    pub fn render_effect(&self) -> Option<RenderEffect> {
+        self.data.borrow().properties.render_effect.clone()
+    }
+
+    pub fn set_render_effect(&self, value: Option<RenderEffect>) {
+        self.set_property(|p| replaced(&mut p.render_effect, value));
+    }
+
+    pub fn blend_mode(&self) -> BlendMode {
+        self.data.borrow().properties.blend_mode
+    }
+
+    pub fn set_blend_mode(&self, value: BlendMode) {
+        self.set_property(|p| replaced(&mut p.blend_mode, value));
+    }
+
+    pub fn color_filter(&self) -> Option<ColorFilter> {
+        self.data.borrow().properties.color_filter
+    }
+
+    pub fn set_color_filter(&self, value: Option<ColorFilter>) {
+        self.set_property(|p| replaced(&mut p.color_filter, value));
+    }
+
+    pub fn compositing_strategy(&self) -> CompositingStrategy {
+        self.data.borrow().properties.compositing_strategy
+    }
+
+    pub fn set_compositing_strategy(&self, value: CompositingStrategy) {
+        self.set_property(|p| replaced(&mut p.compositing_strategy, value));
     }
 
     /// All its properties.
@@ -204,6 +312,14 @@ impl GraphicsLayer {
     pub fn set_properties(&self, properties: GraphicsLayerProperties) {
         self.data.borrow_mut().properties = properties;
         self.property_changed();
+    }
+
+    /// Changes a property by `change` (whether it changed), telling the layout placed with it if it did.
+    fn set_property(&self, change: impl FnOnce(&mut GraphicsLayerProperties) -> bool) {
+        let changed = change(&mut self.data.borrow_mut().properties);
+        if changed {
+            self.property_changed();
+        }
     }
 
     /// Tells the layout placed with it that a property changed.
@@ -544,4 +660,11 @@ impl<'a> ContentDrawScope<'a> {
         }
         layer.keep(picture, size);
     }
+}
+
+/// Puts `value` in `slot`: whether it was another.
+fn replaced<T: PartialEq>(slot: &mut T, value: T) -> bool {
+    let changed = *slot != value;
+    *slot = value;
+    changed
 }

@@ -1,7 +1,7 @@
 //! Material's Scaffold in Kotlin's syntax: the C++ Kompoz's ScaffoldExample (kompozable_tests.cpp's
 //! `composes_scaffold_sample`) and material3 1.5's ScaffoldSamples (its snackbar ones in kotlin_lists_sheets.rs) from a
-//! `.kt` file (kompoz_file!), ScrollForms' app bar and AppBarRow (kompozable_tests.cpp's
-//! `scroll_forms_as_compose_writes_them`; its pull to refresh is in named_forms.rs) and the C++ Kompoz's Scaffold tests
+//! `.kt` file (kompoz_file!) (kompozable_tests.cpp's ScrollForms, its TopAppBar and AppBarRow, is whole in
+//! kotlin_material_sources.rs) and the C++ Kompoz's Scaffold tests
 //! (kompoz_tests.cpp; kompozable_tests.cpp has no source for them) written as a Compose user writes them through
 //! `kompoz!`, each checked as crates/kompoz-material3/tests/scaffold.rs and buttons_and_containers.rs check them (M15's
 //! values; the differences from the C++'s said there). Density 1: dp are px.
@@ -198,23 +198,6 @@ kompoz! {
             }
         }
     }
-
-    // (ScrollForms' app bar: a TopAppBar whose actions are an AppBarRow of two slots, its third item in the menu.
-    // Its AppBarWithSearch is SearchBar.kt's, not on this branch.)
-    @Composable
-    fun ScrollFormsAppBar() {
-        var log by remember { mutableStateOf("") }
-        Column {
-            TopAppBar(title = { Text("belge") }, actions = {
-                AppBarRow(maxItemCount = 2) {
-                    clickableItem(onClick = { log = log + " paylaş" }, icon = { Icon(Icons.Filled.Share, contentDescription = "Paylaş") }, label = "Paylaş")
-                    clickableItem(onClick = {}, icon = { Icon(Icons.Filled.Edit, contentDescription = "Düzenle") }, label = "Düzenle")
-                    clickableItem(onClick = {}, icon = { Icon(Icons.Filled.Delete, contentDescription = "Sil") }, label = "Sil")
-                }
-            })
-            Text("günlük:$log")
-        }
-    }
 }
 
 type Seen = Rc<RefCell<Option<PaddingValues>>>;
@@ -383,21 +366,6 @@ fn center_aligned_bar_clickable_cards_fab_sizes_and_positions() {
     assert_eq!((fab.left, fab.top), (400.0 - 56.0 - 16.0, 800.0 - 16.0 - 56.0));
 }
 
-fn scroll_forms_app_bar_as_compose_writes_it() {
-    let rule = KompozTestRule::with_viewport(ScrollFormsAppBar, IntSize::new(400, 800));
-    // Two slots: the first item and the overflow indicator, the rest in its menu.
-    rule.on_node_with_content_description("Paylaş").assert_exists();
-    rule.on_node_with_content_description("More options").assert_exists();
-    // (measured, then left out: not shown)
-    rule.on_node_with_content_description("Düzenle").assert_is_not_displayed();
-    rule.on_node_with_content_description("Paylaş").perform_click();
-    rule.on_node_with_text("günlük: paylaş").assert_exists();
-    // (the menu: the items left out, by their labels)
-    rule.on_node_with_content_description("More options").perform_click();
-    rule.on_node_with_text("Düzenle").assert_exists();
-    rule.on_node_with_text("Sil").assert_exists();
-}
-
 // ---- kt/scaffold.kt ----------------------------------------------------------------------------------------------
 
 kompoz_file!("tests/kt/scaffold.kt");
@@ -468,7 +436,6 @@ fn main() {
             "center_aligned_bar_clickable_cards_fab_sizes_and_positions",
             center_aligned_bar_clickable_cards_fab_sizes_and_positions,
         ),
-        ("scroll_forms_app_bar_as_compose_writes_it", scroll_forms_app_bar_as_compose_writes_it),
         ("composes_scaffold_sample", composes_scaffold_sample),
         ("simple_scaffold_with_top_bar_sample", simple_scaffold_with_top_bar_sample),
     ]);

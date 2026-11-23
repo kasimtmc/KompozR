@@ -1,7 +1,7 @@
 //! Material's progress indicators in Kotlin's syntax, as a Compose user writes them (kt/progress.kt through
-//! `kompoz_file!`): the progress lines of the C++ Kompoz's MaterialForms and GraphicsForms (kompozable_tests.cpp
-//! `material_forms_as_compose_writes_them`, `graphics_forms_as_compose_writes_them`: what the C++ asserted of them;
-//! the rest of those sources is other packages' tests'), material3 1.5's ProgressIndicatorSamples (determinate,
+//! `kompoz_file!`): the progress lines of the C++ Kompoz's GraphicsForms (kompozable_tests.cpp
+//! `graphics_forms_as_compose_writes_them`, checked in detail; MaterialForms and GraphicsForms' Material lines are
+//! whole in kotlin_material_sources.rs), material3 1.5's ProgressIndicatorSamples (determinate,
 //! endless, wavy, thick, legacy) and the deprecated value forms and the defaults by name; the loading indicators of
 //! the C++'s Containers and GraphicsForms (`containers_as_compose_writes_them`, `graphics_forms_as_compose_writes_them`)
 //! and material3 1.5's LoadingIndicatorSamples, and the loading indicators by name.
@@ -53,12 +53,6 @@ fn near(a: f32, b: f32, tolerance: f32) -> bool {
 
 fn colored(canvas: &RecordingCanvas, color: Color) -> Vec<usize> {
     (0..canvas.paths.len()).filter(|&i| canvas.path_colors[i] == color).collect()
-}
-
-fn material_forms_progress() {
-    // MaterialForms' `LinearProgressIndicator(progress = { 0.4f }, …)`: there, telling 40%.
-    let rule = KompozTestRule::new(MaterialFormsProgress);
-    rule.on_node_with_tag("bar").assert_exists().assert_range_info_equals(determinate(0.4));
 }
 
 fn graphics_forms_progress() {
@@ -269,7 +263,6 @@ fn loading_indicators_by_name() {
 
 fn main() {
     common::run(&[
-        ("material_forms_progress", material_forms_progress),
         ("graphics_forms_progress", graphics_forms_progress),
         ("graphics_forms_shapes", graphics_forms_shapes),
         ("determinate_samples", determinate_samples),
