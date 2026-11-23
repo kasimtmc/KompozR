@@ -331,14 +331,18 @@ impl NavController {
             self.on_graph_created(start_destination_args);
         } else {
             let current = previous.expect("the same graph");
+            // (each entry's hierarchy taken before the nodes are replaced and any entry is given its new destination:
+            // a destination's parent is a weak reference here — Kotlin's a strong one —, the old graphs kept by these
+            // lists meanwhile)
+            let entries = self.0.back_queue.borrow().clone();
+            let hierarchies: Vec<Vec<NavDestination>> =
+                entries.iter().map(|e| e.destination().hierarchy().into_iter().rev().collect()).collect();
             for node in graph.nodes() {
                 // (Kotlin's `nodes.replace(key, newDestination)`: the new graph's nodes in the old one, their parent
-                // the new graph still)
+                // this one, equal to the new graph, see replace_node)
                 current.replace_node(node.id(), node);
             }
-            let entries = self.0.back_queue.borrow().clone();
-            for entry in entries {
-                let hierarchy: Vec<NavDestination> = entry.destination().hierarchy().into_iter().rev().collect();
+            for (entry, hierarchy) in entries.iter().zip(hierarchies) {
                 let mut new_dest: NavDestination = current.as_destination();
                 for old in hierarchy {
                     if old == current.as_destination() && new_dest == graph.as_destination() {

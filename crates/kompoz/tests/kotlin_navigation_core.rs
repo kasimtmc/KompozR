@@ -2,7 +2,7 @@
 //! routes' `toRoute<T>()` and `hasRoute<T>()`, `NavDestination.hierarchy`, `navOptions { popUpTo<T> { saveState =
 //! true } }`, `navDeepLink { uriPattern = … }` and `navDeepLink<T>(basePath)`, an entry's `arguments?.getInt("n")`,
 //! `navigate(route) { … }` and `popBackStack<T>(inclusive = …)`. The controller's destinations are a test
-//! navigator's here (NavHost, which shows them, is stage 13's WP3).
+//! navigator's here (the NavHost showing them: kotlin_nav_host.rs).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -102,7 +102,7 @@ fn controller() -> NavController {
         g.destination(NavDestinationBuilder::new_of::<Shell>(test.clone(), TypeMap::default()));
         g.destination(NavDestinationBuilder::new_of::<Start>(test.clone(), TypeMap::default()));
         g.destination(NavDestinationBuilder::new_of::<Detail>(test.clone(), TypeMap::default()));
-        g.navigation_of::<AccountGraph>(Member { n: 0 }, TypeMap::default(), |account| {
+        g.navigation_of::<AccountGraph>(Member { n: 0 }, |account| {
             let mut m = NavDestinationBuilder::new_of::<Member>(test.clone(), TypeMap::default());
             m.deep_link_of::<Member>("kompoz://member");
             account.destination(m);
@@ -122,8 +122,8 @@ fn stack_of(nav: &NavController) -> Vec<String> {
     nav.back_queue().iter().skip(1).map(|e| e.destination().route().unwrap_or_default()).collect()
 }
 
-/// The forms' text once composed again (the controller isn't read as state here: NavHost's
-/// `currentBackStackEntryAsState` is WP3's).
+/// The forms' text once composed again (the controller's `currentDestination` isn't state: Compose's
+/// `currentBackStackEntryAsState`, kotlin_nav_host.rs, is).
 fn text_of(nav: &NavController) -> KompozTestRule {
     let n = nav.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || NavForms(n.clone())));

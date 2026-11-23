@@ -10,10 +10,24 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# (navigation-compose: NavHost's AnimatedContent and SeekableTransitionState, the destinations' transitions)
+kompoz-animation = { path = "../kompoz-animation" }
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-lifecycle = { path = "../kompoz-lifecycle" }
 # (#[derive(Route)] and #[derive(RouteValue)])
 kompoz-macros = { path = "../kompoz-macros" }
+# (navigation-compose: NavHost's back handler and its predictive back)
+kompoz-navigationevent = { path = "../kompoz-navigationevent" }
 kompoz-runtime = { path = "../kompoz-runtime" }
-# (the host's deep links: DeepLinks)
+# (the host's deep links: DeepLinks; navigation-compose's Modifier, Alignment, Dialog)
 kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+# (navigation-compose's tests: NavHost composed in a test rule's host — its screens' texts, buttons, scrolling lists)
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-test = { path = "../kompoz-test" }
+
+[[test]]
+name = "nav_host"
+harness = false

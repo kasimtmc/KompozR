@@ -11,8 +11,8 @@ mod common;
 
 use common::*;
 use kompoz_animation::{
-    AnimatedContent, AnimatedContentScope, AnimatedContentTransitionScope, AnimatedVisibility, AnimatedVisibilityScope,
-    expand_horizontally, fade_in, fade_out, shrink_horizontally, slide_in_horizontally, slide_out_horizontally,
+    AnimatedVisibility, AnimatedVisibilityScope, expand_horizontally, fade_in, fade_out, shrink_horizontally,
+    slide_in_horizontally, slide_out_horizontally,
 };
 use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_foundation::interaction::MutableInteractionSource;
@@ -21,9 +21,12 @@ use kompoz_graphics::*;
 use kompoz_material_icons_core::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_material3_adaptive::prelude::*;
+use kompoz_navigation::{
+    NavGraphBuilder, NavHost, NavHostEnterTransition, NavHostExitTransition, NavTransitionScope,
+    remember_nav_controller,
+};
 use kompoz_runtime::*;
 use kompoz_test::KompozTestRule;
-use kompoz_ui::back::BackHandler;
 use kompoz_ui::input::{Key, KeyModifiers, PointerType};
 use kompoz_ui::semantics::{Role, SemanticsActions};
 use kompoz_ui::*;
@@ -447,10 +450,8 @@ fn levitate_as_dialog_sample<T: NavigatorContentKey>() -> Rc<dyn ThreePaneScaffo
 
 /// Kotlin: `fun NavigableListDetailPaneScaffoldSample()`
 ///
-/// (androidx.navigation's NavHost and its controller are KompozR's stage 13: the two routes here are a saveable
-/// route state shown by AnimatedContent with the NavHost's slides, each route's state kept by a saveable state
-/// holder as the back stack's entries keep theirs, and the platform's back from the list-detail route pops to the
-/// welcome one as the NavHost's back handler does, registered before the scaffold's so the scaffold's goes first.)
+/// (androidx.navigation's NavHost of its two routes: the platform's back from the list-detail route pops to the
+/// welcome one, the scaffold's back handler — composed after the NavHost's — going first.)
 #[kompozable]
 fn NavigableListDetailPaneScaffoldSample() {
     let welcome_route = "welcome";
@@ -461,7 +462,7 @@ fn NavigableListDetailPaneScaffoldSample() {
     // `navController` handles navigation outside the ListDetailPaneScaffold, and `scaffoldNavigator` handles
     // navigation within it. The "content" of the scaffold uses a custom type which tracks the index of the selected
     // item, which is passed as a type argument to `rememberListDetailPaneScaffoldNavigator`.
-    let nav_controller = remember_saveable(|| mutable_state_of(welcome_route.to_string()));
+    let nav_controller = remember_nav_controller();
     let scaffold_navigator: Navigator = remember_list_detail_pane_scaffold_navigator();
 
     // Back behavior can be customized based on the needs of the app.
@@ -477,27 +478,22 @@ fn NavigableListDetailPaneScaffoldSample() {
     let items = vec!["Item 1", "Item 2", "Item 3"];
     let extra_items = vec!["Extra 1", "Extra 2", "Extra 3"];
 
-    // (the NavHost: its back handler, its entries' saved states, its transitions)
-    let pop = nav_controller.clone();
-    BackHandler(enabled = nav_controller.get() != welcome_route, on_back = move || pop.set(welcome_route.to_string()));
-    let saveable_state_holder = remember_saveable_state_holder();
-    AnimatedContent(
-        nav_controller.get(),
-        transition_spec = move |scope: &AnimatedContentTransitionScope<String>| {
-            if scope.target_state() == list_detail_route {
-                slide_in_horizontally(initial_offset_x = |it| it)
-                    .together_with(slide_out_horizontally(target_offset_x = |it| -it))
-            } else {
-                slide_in_horizontally(initial_offset_x = |it| -it)
-                    .together_with(slide_out_horizontally(target_offset_x = |it| it))
-            }
-        },
-        content = move |_: &AnimatedContentScope, route: String| {
+    let pop_enter: NavHostEnterTransition =
+        Rc::new(|_: &NavTransitionScope| slide_in_horizontally(initial_offset_x = |it| -it));
+    let pop_exit: NavHostExitTransition =
+        Rc::new(|_: &NavTransitionScope| slide_out_horizontally(target_offset_x = |it| it));
+    NavHost(
+        nav_controller = nav_controller.clone(),
+        start_destination = welcome_route,
+        enter_transition = |_: &NavTransitionScope| slide_in_horizontally(initial_offset_x = |it| it),
+        exit_transition = |_: &NavTransitionScope| slide_out_horizontally(target_offset_x = |it| -it),
+        pop_enter_transition = Some(pop_enter),
+        pop_exit_transition = Some(pop_exit),
+        builder = move |graph: &mut NavGraphBuilder| {
             let (index, nav_controller) = (back_behavior_index.clone(), nav_controller.clone());
-            let (scaffold_navigator, coroutine_scope) = (scaffold_navigator.clone(), coroutine_scope.clone());
-            let (items, extra_items) = (items.clone(), extra_items.clone());
-            saveable_state_holder.SaveableStateProvider(&route, || {
-                if route == welcome_route {
+            graph.composable(welcome_route, move |_, _| {
+                let (index, nav_controller) = (index.clone(), nav_controller.clone());
+                {
                     Scaffold(
                         modifier = Modifier.fill_max_size(),
                         content = move |padding_values: PaddingValues| {
@@ -551,14 +547,21 @@ fn NavigableListDetailPaneScaffoldSample() {
                                     );
                                     let nav_controller = nav_controller.clone();
                                     Button(
-                                        on_click = move || nav_controller.set(list_detail_route.to_string()),
+                                        on_click = move || nav_controller.navigate(list_detail_route),
                                         content = || Text("Next"),
                                     );
                                 },
                             );
                         },
                     );
-                } else {
+                }
+            });
+            let (scaffold_navigator, coroutine_scope) = (scaffold_navigator.clone(), coroutine_scope.clone());
+            let (items, extra_items) = (items.clone(), extra_items.clone());
+            graph.composable(list_detail_route, move |_, _| {
+                let (scaffold_navigator, coroutine_scope) = (scaffold_navigator.clone(), coroutine_scope.clone());
+                let (items, extra_items) = (items.clone(), extra_items.clone());
+                {
                     let selected_item = scaffold_navigator.current_destination().and_then(|d| d.content_key);
                     let (list_navigator, list_scope, list_items) =
                         (scaffold_navigator.clone(), coroutine_scope.clone(), items.clone());

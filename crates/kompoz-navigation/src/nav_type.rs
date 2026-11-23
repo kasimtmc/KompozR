@@ -259,6 +259,12 @@ impl NavType {
         NavType(Repr::Shared(Rc::new(imp)))
     }
 
+    /// The `NavType` of a static one of one's own (Kotlin's `object MyType : NavType<T>(…) { … }`, named as a
+    /// constant: `const MyType: NavType = NavType::of_object(&MyTypeImpl);`).
+    pub const fn of_object<N: NavTypeImpl>(imp: &'static N) -> NavType {
+        NavType(Repr::Static(imp))
+    }
+
     /// An enum's (Kotlin's `NavType.EnumType(Class)`): its entries by name, any case.
     #[allow(non_snake_case)]
     pub fn EnumType<E: NavEnum>() -> NavType {

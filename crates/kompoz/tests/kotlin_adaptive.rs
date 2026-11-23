@@ -10,9 +10,7 @@ mod common;
 
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
-// (the samples': a NavHost's back handler as the Kotlin file imports it — androidx.activity.compose.BackHandler —,
-// a scrim's semantics' click, the platform's back key)
-use kompoz::ui::back::BackHandler;
+// (the samples': a scrim's semantics' click, the platform's back key)
 use kompoz::ui::input::{Key, KeyModifiers};
 use kompoz::ui::semantics::SemanticsActions;
 use std::cell::RefCell;

@@ -364,6 +364,10 @@ pub(crate) struct LazySaveableStateHolder {
     wrapped_holder: SaveableStateHolder,
     /// The keys of the items composed before and not now.
     previously_composed_keys: RefCell<HashSet<String>>,
+    /// Whether the layout is leaving the composition (its items with it): those items are kept as they were, as
+    /// Compose's holder saved them as they left (its wrapped holder saving each item's state on its way out, before
+    /// the layout's own save leaves the previously composed ones out).
+    leaving: Cell<bool>,
 }
 
 impl LazySaveableStateHolder {
@@ -381,6 +385,7 @@ impl LazySaveableStateHolder {
             registry,
             wrapped_holder: holder,
             previously_composed_keys: RefCell::new(HashSet::new()),
+            leaving: Cell::new(false),
         }
     }
 
@@ -409,7 +414,9 @@ impl LazySaveableStateHolder {
             DisposableEffect(name.clone(), move || {
                 me.previously_composed_keys.borrow_mut().remove(&name);
                 on_dispose(move || {
-                    me.previously_composed_keys.borrow_mut().insert(name);
+                    if !me.leaving.get() {
+                        me.previously_composed_keys.borrow_mut().insert(name);
+                    }
                 })
             });
         });
@@ -441,5 +448,12 @@ fn LazySaveableStateHolderProvider(content: impl FnOnce(Rc<LazySaveableStateHold
         move || Rc::new(LazySaveableStateHolder::new(parent, None)),
     );
     let registry = holder.registry.clone();
-    ProvideSaveableStateRegistry(&registry, move || content(holder));
+    let h = holder.clone();
+    ProvideSaveableStateRegistry(&registry, move || content(h));
+    // (after the content: told first as all of it leaves — what leaves is told in the reverse of its order —, so the
+    // items leaving with the layout are kept as they were)
+    DisposableEffect(HolderArg(holder.clone()), move || {
+        holder.leaving.set(false);
+        on_dispose(move || holder.leaving.set(true))
+    });
 }

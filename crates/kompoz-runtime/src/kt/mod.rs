@@ -79,8 +79,8 @@ pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 pub use null::{elvis_async, run_async, safe_async, with_async};
 pub use random::{KtShuffle, Random};
 pub use range::{
-    IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to, is_in,
-    range_to, step, to_closed_range, until,
+    IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to,
+    eq_nullable, is_in, range_to, step, to_closed_range, until,
 };
 pub use reflect::{KType, type_of};
 pub use result::KtResult;

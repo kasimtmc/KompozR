@@ -65,8 +65,9 @@ pub use remember::{
 };
 pub use saveable::{
     LocalSaveableStateRegistry, ProvideSaveableStateRegistry, SaveableStateHolder, SaveableStateRegistry,
-    SaveableStateRegistryEntry, Saver, list_saver, map_saver, remember_saveable, remember_saveable_keyed,
-    remember_saveable_keyed_with, remember_saveable_state, remember_saveable_state_holder, remember_saveable_with,
+    SaveableStateRegistryEntry, Saver, WeakSaveableStateHolder, list_saver, map_saver, remember_saveable,
+    remember_saveable_keyed, remember_saveable_keyed_with, remember_saveable_state, remember_saveable_state_holder,
+    remember_saveable_with,
 };
 pub use saved_value::{Saveable, SavedValue};
 pub use snapshot::{

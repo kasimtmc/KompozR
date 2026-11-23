@@ -597,6 +597,26 @@ impl SaveableStateHolder {
         self.registries.borrow_mut().remove(key);
         self.removed.borrow_mut().push(key.to_string());
     }
+
+    /// A weak reference to it (Kotlin's `WeakReference(holder)`: what keeps a key's state to remove later without
+    /// keeping the holder — navigation's entries' ViewModels).
+    pub fn downgrade(&self) -> WeakSaveableStateHolder {
+        WeakSaveableStateHolder { registries: Rc::downgrade(&self.registries), removed: Rc::downgrade(&self.removed) }
+    }
+}
+
+/// A weak reference to a [`SaveableStateHolder`] ([`SaveableStateHolder::downgrade`]).
+#[derive(Clone, Default)]
+pub struct WeakSaveableStateHolder {
+    registries: Weak<RefCell<HashMap<String, Rc<RefCell<Registry>>>>>,
+    removed: Weak<RefCell<Vec<String>>>,
+}
+
+impl WeakSaveableStateHolder {
+    /// The holder, if it is still there (Kotlin's `WeakReference.get()`).
+    pub fn upgrade(&self) -> Option<SaveableStateHolder> {
+        Some(SaveableStateHolder { registries: self.registries.upgrade()?, removed: self.removed.upgrade()? })
+    }
 }
 
 /// The same holder, not the same values.

@@ -51,11 +51,15 @@
 //!   `expressive_buttons_take_compose_named_arguments`, `segmented_buttons_take_compose_named_arguments`,
 //!   `tabs_and_fab_menu_take_compose_named_arguments`, `text_styles_take_compose_named_arguments`,
 //!   `sections_forms_take_compose_named_arguments`.
-//! - C++ `app_shell_forms_take_compose_named_arguments`, its stage-12 part: Compose's key names, SnackbarData's
-//!   visuals, `NavigationSuiteScaffold(navigationItems = { NavigationSuiteItem(…) }, navigationSuiteType =)` (its two
-//!   items switching a state). Its NavController, NavHost, `navOptions { popUpTo<T> { saveState } }`,
-//!   `kompozable<T>(deepLinks =)`, `navigation<T>(startDestination =)`, NavDestination's hierarchy and the deep link
-//!   wait for stage 13; its desktop MenuBar for stage 15/16 (D7).
+//! - C++ `app_shell_forms_take_compose_named_arguments`: Compose's key names, SnackbarData's visuals,
+//!   `NavigationSuiteScaffold(navigationItems = { NavigationSuiteItem(…) }, navigationSuiteType =)`, its NavController
+//!   and NavHost (stage 13 WP3), `navOptions { popUpTo<T> { saveState } }`, `kompozable<T>(deepLinks =)`,
+//!   `navigation<T>(startDestination =)`, NavDestination's hierarchy / `hasRoute<T>()` and the deep link; its desktop
+//!   MenuBar waits for stage 15/16 (D7).
+//! - C++ `navigation_takes_compose_named_arguments` (stage 13 WP3): whole — `NavHost(navController =,
+//!   startDestination =, modifier =, enterTransition = { })` with `composable(route =, deepLinks =)` and
+//!   `navigation(startDestination =, route =)`, `navigate(route) { popUpTo(…) { inclusive }; launchSingleTop }`,
+//!   `BackHandler(enabled =)`, `combinedClickable(onClick =, onLongClick =)`, the entry's destination.
 //! - C++ `gestures_take_compose_named_arguments` (foundation's, no Material; ported nowhere else): draggable,
 //!   dragAndDropTarget (its target made in Rust: Kotlin's `object :` expressions are stage 14's), DraggableAnchors.
 //! - C++ `graphics_forms_take_compose_named_arguments`, its Material part (its stage-11 parts above): the wavy
@@ -1676,22 +1680,39 @@ kompoz! {
         log("${visuals?.message} ${visuals?.actionLabel}")
     }
 
+    fun shellTabs(): NavOptions = navOptions {
+        popUpTo<HomeRoute> { saveState = true }
+        launchSingleTop = true
+    }
+
     @Composable
-    fun AppShell() {
-        var inLogin by remember { mutableStateOf(false) }
+    fun AppShell(onController: (NavHostController) -> Unit) {
+        val nav = rememberNavController()
+        onController(nav)
+        val entry by nav.currentBackStackEntryAsState()
+        val destination = entry?.destination
+        val inLogin = destination?.hierarchy?.any { it.hasRoute<LoginGraph>() } == true
+        val tabs = shellTabs()
         Column {
             NavigationSuiteScaffold(
                 navigationItems = {
-                    NavigationSuiteItem(selected = !inLogin, onClick = { inLogin = false }, icon = { Icon(Icons.Filled.Home, contentDescription = "") },
-                                        label = { Text("Ev") })
-                    NavigationSuiteItem(selected = inLogin, onClick = { inLogin = true }, icon = { Icon(Icons.Filled.Settings, contentDescription = "") },
+                    NavigationSuiteItem(selected = !inLogin, onClick = { nav.navigate(HomeRoute, tabs) },
+                                        icon = { Icon(Icons.Filled.Home, contentDescription = "") }, label = { Text("Ev") })
+                    NavigationSuiteItem(selected = inLogin, onClick = { nav.navigate(LoginGraph, tabs) },
+                                        icon = { Icon(Icons.Filled.Settings, contentDescription = "") },
                                         label = { Text("Giriş") }, badge = { Badge { Text("1") } })
                 },
                 navigationSuiteType = NavigationSuiteType.NavigationRail,
                 modifier = Modifier.weight(1f),
             ) {
-                // (stage 13: the NavHost of the home route and the login graph)
-                Text(if (inLogin) "giriş ekranı" else "ev ekranı")
+                NavHost(navController = nav, startDestination = HomeRoute, modifier = Modifier) {
+                    kompozable<HomeRoute> { Text("ev ekranı") }
+                    navigation<LoginGraph>(startDestination = UsernameRoute(0)) {
+                        kompozable<UsernameRoute>(deepLinks = listOf(navDeepLink<UsernameRoute>("kompoz://username"))) { e ->
+                            Text("kullanıcı ${e.toRoute<UsernameRoute>().attempt}")
+                        }
+                    }
+                }
             }
             Text(if (inLogin) "sekme giriş" else "sekme ev")
         }
@@ -1713,24 +1734,50 @@ fn RustShellSnackbars(snackbars: SnackbarHostState, log: Rc<dyn Fn(String)>) {
     ));
 }
 
+/// The C++ test's typed routes (Compose's `@Serializable` classes: Rust twins, D6).
+#[derive(Route, Clone, PartialEq, Debug)]
+pub struct HomeRoute;
+
+#[derive(Route, Clone, PartialEq, Debug)]
+#[route(name = "login")]
+pub struct LoginGraph;
+
+#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
+#[route(name = "login/username")]
+pub struct UsernameRoute {
+    pub attempt: i32,
+}
+
+/// Kotlin's `UsernameRoute(attempt)`.
+pub fn UsernameRoute(attempt: i32) -> UsernameRoute {
+    UsernameRoute { attempt }
+}
+
 #[kompozable]
-fn RustAppShell() {
-    let in_login = remember(|| mutable_state_of(false));
+fn RustAppShell(on_controller: Rc<dyn Fn(NavHostController)>) {
+    let nav = remember_nav_controller();
+    on_controller(nav.clone());
+    let entry = nav.current_back_stack_entry_as_state().get();
+    let destination = entry.map(|e| e.destination());
+    let in_login = destination.is_some_and(|d| d.hierarchy().iter().any(|h| h.has_route::<LoginGraph>()));
+    let tabs = nav_options(|b| {
+        b.pop_up_to_of::<HomeRoute>(|p| p.set_save_state(true));
+        b.set_launch_single_top(true);
+    });
     Column(move || {
-        let (home, login) = (in_login.clone(), in_login.clone());
-        let on = in_login.get();
+        let (home, login, t) = (nav.clone(), nav.clone(), tabs.clone());
         NavigationSuiteScaffold(
             navigation_items = move || {
-                let (home, login) = (home.clone(), login.clone());
+                let (home, login, t1, t2) = (home.clone(), login.clone(), t.clone(), t.clone());
                 NavigationSuiteItem(
-                    selected = !on,
-                    on_click = move || home.set(false),
+                    selected = !in_login,
+                    on_click = move || home.navigate_options(HomeRoute, Some(t1.clone()), None),
                     icon = || VectorIcon(Icons::Filled::Home(), Some(String::new())),
                     label = slot(|| Text("rust Ev")),
                 );
                 NavigationSuiteItem(
-                    selected = on,
-                    on_click = move || login.set(true),
+                    selected = in_login,
+                    on_click = move || login.navigate_options(LoginGraph, Some(t2.clone()), None),
                     icon = || VectorIcon(Icons::Filled::Settings(), Some(String::new())),
                     label = slot(|| Text("rust Giriş")),
                     badge = slot(|| Badge(content = slot(|| Text("rust 1")))),
@@ -1738,10 +1785,31 @@ fn RustAppShell() {
             },
             navigation_suite_type = NavigationSuiteType::NavigationRail,
             modifier = Modifier.weight(1.0),
-            // (stage 13: the NavHost of the home route and the login graph)
-            content = move || Text(if on { "rust giriş ekranı" } else { "rust ev ekranı" }),
+            content = {
+                let nav = nav.clone();
+                move || {
+                    NavHost_of(
+                        nav_controller = nav.clone(),
+                        start_destination = HomeRoute,
+                        builder = |graph: &mut NavGraphBuilder| {
+                            graph.kompozable_of::<HomeRoute>(|_, _| Text("rust ev ekranı"));
+                            graph.navigation_of::<LoginGraph>(
+                                start_destination = UsernameRoute(0),
+                                builder = |login: &mut NavGraphBuilder| {
+                                    login.kompozable_of::<UsernameRoute>(
+                                        deep_links = vec![nav_deep_link_of::<UsernameRoute>("kompoz://username")],
+                                        content = |_, e: NavBackStackEntry| {
+                                            Text(format!("rust kullanıcı {}", e.to_route::<UsernameRoute>().attempt))
+                                        },
+                                    );
+                                },
+                            );
+                        },
+                    );
+                }
+            },
         );
-        Text(if on { "rust sekme giriş" } else { "rust sekme ev" });
+        Text(if in_login { "rust sekme giriş" } else { "rust sekme ev" });
     });
 }
 
@@ -1773,18 +1841,39 @@ fn app_shell_forms_take_compose_named_arguments() {
     for log in [&kotlin, &rust] {
         assert_eq!(log.borrow().last().unwrap(), "m Geri al");
     }
-    // The navigation suite of its own items, a rail.
+    // navOptions { popUpTo<T> { saveState = true }; launchSingleTop = true }.
+    let tabs = shell_tabs();
+    assert!(tabs.pop_up_to_route_class() == Some(RouteClass::of::<HomeRoute>()) && tabs.should_pop_up_to_save_state());
+    assert!(tabs.should_launch_single_top() && !tabs.should_restore_state());
+    // The navigation suite of its own items, a rail; the NavHost of the home route and the login graph in it.
+    let (kotlin_nav, rust_nav) = (Rc::new(RefCell::new(None)), Rc::new(RefCell::new(None)));
+    let (kn, rn) = (kotlin_nav.clone(), rust_nav.clone());
     let rule = KompozTestRule::with_viewport(
-        kompozable_lambda!(|| {
-            Row(content = || {
-                Box(modifier = Modifier.width(600.dp()), content = || AppShell());
-                Box(modifier = Modifier.width(600.dp()), content = || RustAppShell());
+        kompozable_lambda!(move || {
+            let (kn, rn) = (kn.clone(), rn.clone());
+            Row(content = move || {
+                let (kn, rn) = (kn.clone(), rn.clone());
+                Box(
+                    modifier = Modifier.width(600.dp()),
+                    content = move || {
+                        let kn = kn.clone();
+                        AppShell(move |nav: NavHostController| *kn.borrow_mut() = Some(nav));
+                    },
+                );
+                Box(
+                    modifier = Modifier.width(600.dp()),
+                    content = move || {
+                        let rn = rn.clone();
+                        RustAppShell(Rc::new(move |nav: NavHostController| *rn.borrow_mut() = Some(nav)));
+                    },
+                );
             });
         }),
         IntSize::new(1200, 800),
     );
     rule.wait_for_idle();
-    for prefix in ["", "rust "] {
+    for (prefix, nav) in [("", &kotlin_nav), ("rust ", &rust_nav)] {
+        let nav: NavHostController = nav.borrow().clone().expect("a controller");
         let text = |t: &str| format!("{prefix}{t}");
         assert!(
             rule.on_node_with_text(&text("ev ekranı")).exists() && rule.on_node_with_text(&text("sekme ev")).exists()
@@ -1802,9 +1891,119 @@ fn app_shell_forms_take_compose_named_arguments() {
         rule.wait_for_idle();
         rule.advance_time_by(1000);
         rule.wait_for_idle();
-        assert!(rule.on_node_with_text(&text("giriş ekranı")).exists());
+        assert!(rule.on_node_with_text(&text("kullanıcı 0")).exists());
         assert!(rule.on_node_with_text(&text("sekme giriş")).exists());
+        let now = nav.current_back_stack_entry().expect("one").destination();
+        let hierarchy = now.hierarchy();
+        assert!(hierarchy[1].has_route::<LoginGraph>() && now.has_route::<UsernameRoute>());
+        assert!(nav.handle_deep_link_uri("kompoz://username/3"));
+        rule.wait_for_idle();
+        rule.advance_time_by(1000);
+        rule.wait_for_idle();
+        assert!(rule.on_node_with_text(&text("kullanıcı 3")).exists());
     }
+}
+
+// ---- C++ navigation_takes_compose_named_arguments ------------------------------------------------------------------
+// NavHost(navController =, startDestination =, modifier =, enterTransition = { }) { … } with the graph builder's
+// composable(route =, deepLinks =) and navigation(startDestination =, route =) by name, navigate(route) { popUpTo … }
+// as a block of options, the entry's destination, BackHandler(enabled =) { }, combinedClickable by name.
+
+kompoz! {
+    @Composable
+    fun NavigationForms(onController: (NavHostController) -> Unit, onLongPress: () -> Unit, onBack: () -> Unit) {
+        val nav = rememberNavController()
+        onController(nav)
+        val entry by nav.currentBackStackEntryAsState()
+        Text("rota ${entry?.destination?.route ?: "yok"}", modifier = Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress))
+        BackHandler(enabled = true) { onBack() }
+        NavHost(navController = nav, startDestination = "ev", modifier = Modifier.size(200.dp),
+                enterTransition = { slideInHorizontally { it } }) {
+            composable(route = "ev") { Text("ev") }
+            navigation(startDestination = "a", route = "grup") {
+                composable(route = "a", deepLinks = listOf(navDeepLink { uriPattern = "kompoz://a" })) { Text("a") }
+            }
+        }
+    }
+}
+
+#[kompozable]
+fn RustNavigationForms(
+    on_controller: Rc<dyn Fn(NavHostController)>,
+    on_long_press: Rc<dyn Fn()>,
+    on_back: Rc<dyn Fn()>,
+) {
+    let nav = remember_nav_controller();
+    on_controller(nav.clone());
+    let entry = nav.current_back_stack_entry_as_state().get();
+    Text(
+        format!("rust rota {}", entry.and_then(|e| e.destination().route()).unwrap_or_else(|| "yok".into())),
+        modifier = Modifier.combined_clickable(on_click = || {}, on_long_click = Some(on_long_press.clone())),
+    );
+    BackHandler(enabled = true, on_back = move || on_back());
+    NavHost(
+        nav_controller = nav,
+        start_destination = "ev",
+        modifier = Modifier.size(200.dp()),
+        enter_transition = |_: &NavTransitionScope| slide_in_horizontally(initial_offset_x = |it| it),
+        builder = |graph: &mut NavGraphBuilder| {
+            graph.composable(route = "ev", content = |_, _| Text("rust ev"));
+            graph.navigation(
+                start_destination = "a",
+                route = "grup",
+                builder = |g: &mut NavGraphBuilder| {
+                    g.composable(
+                        route = "a",
+                        deep_links = vec![nav_deep_link(|l| l.set_uri_pattern(Some("kompoz://a".into())))],
+                        content = |_, _| Text("rust a"),
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn navigation_takes_compose_named_arguments() {
+    let (kotlin_nav, rust_nav) = (Rc::new(RefCell::new(None)), Rc::new(RefCell::new(None)));
+    let (long_pressed, backs) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (kn, rn, lp, bk) = (kotlin_nav.clone(), rust_nav.clone(), long_pressed.clone(), backs.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (kn, rn, lp, bk) = (kn.clone(), rn.clone(), lp.clone(), bk.clone());
+        Column(
+            content = move || {
+                let (kn, lp1, bk1) = (kn.clone(), lp.clone(), bk.clone());
+                NavigationForms(
+                    move |nav: NavHostController| *kn.borrow_mut() = Some(nav),
+                    move || lp1.set(lp1.get() + 1),
+                    move || bk1.set(bk1.get() + 1),
+                );
+                let (rn, lp2, bk2) = (rn.clone(), lp.clone(), bk.clone());
+                RustNavigationForms(
+                    Rc::new(move |nav: NavHostController| *rn.borrow_mut() = Some(nav)),
+                    Rc::new(move || lp2.set(lp2.get() + 1)),
+                    Rc::new(move || bk2.set(bk2.get() + 1)),
+                );
+            },
+        );
+    }));
+    rule.wait_for_idle();
+    for (prefix, nav) in [("", &kotlin_nav), ("rust ", &rust_nav)] {
+        let nav: NavHostController = nav.borrow().clone().expect("a controller");
+        let text = |t: &str| format!("{prefix}{t}");
+        assert!(rule.on_node_with_text(&text("ev")).exists());
+        nav.navigate_with("a", |b| {
+            b.pop_up_to("ev", |p| p.set_inclusive(false));
+            b.set_launch_single_top(true);
+        });
+        rule.wait_for_idle();
+        let a = rule.on_node_with_text(&text("a"));
+        assert!(a.exists() && a.get_unclipped_bounds_in_root().width() > 0.0);
+        assert!(rule.on_node_with_text(&text("rota a")).exists());
+        assert_eq!(nav.current_back_stack_entry().and_then(|e| e.destination().route()).as_deref(), Some("a"));
+    }
+    let o = nav_options(|b| b.set_launch_single_top(true));
+    assert!(o.should_launch_single_top() && nav_options(|_| {}).pop_up_to_route().is_none());
+    assert!(long_pressed.get() == 0 && backs.get() == 0);
 }
 
 // ---- C++ text_styles_take_compose_named_arguments ----------------------------------------------------------------
@@ -2482,6 +2681,7 @@ tests![
     segmented_buttons_take_compose_named_arguments,
     tabs_and_fab_menu_take_compose_named_arguments,
     app_shell_forms_take_compose_named_arguments,
+    navigation_takes_compose_named_arguments,
     text_styles_take_compose_named_arguments,
     gestures_take_compose_named_arguments,
     graphics_forms_take_compose_named_arguments,

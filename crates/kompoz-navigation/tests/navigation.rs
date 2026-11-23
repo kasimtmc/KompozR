@@ -1,7 +1,7 @@
 //! Navigation's core as Compose's behaves (navigation-common and navigation-runtime 2.10): routes and deep links
 //! matched, arguments typed, the controller's back stack (nested graphs, popUpTo, launchSingleTop, saved and
-//! restored stacks, deep links), entries' lifecycles, the controller's saved state, typed routes. The non-UI parts of
-//! the C++ Kompoz's navigation tests (kompoz_tests.cpp) by name; their NavHost halves are WP3's (navigation-compose).
+//! restored stacks, deep links), entries' lifecycles, the controller's saved state, typed routes. The C++ Kompoz's
+//! navigation tests (kompoz_tests.cpp) are whole in nav_host.rs, with the NavHost showing their screens.
 //!
 //! The destinations here are a test navigator's (navigation-testing's `TestNavigator`): navigating pushes,
 //! popping pops.
@@ -52,22 +52,19 @@ fn screen(b: &mut NavGraphBuilder, route: &str) {
     b.destination(d);
 }
 
-/// A test destination of `route` with deep links.
-fn screen_with_links(b: &mut NavGraphBuilder, route: &str, links: &[&str]) {
-    let mut d = NavDestinationBuilder::new(test_navigator(b), Some(route.into()));
-    for l in links {
-        d.deep_link(l);
-    }
-    b.destination(d);
-}
+#[derive(Route, Clone, PartialEq, Debug)]
+struct HomeRoute;
 
-/// `T`'s test destination.
-fn typed_screen<T: Route>(b: &mut NavGraphBuilder, deep_link_base: Option<&str>) {
-    let mut d = NavDestinationBuilder::new_of::<T>(test_navigator(b), TypeMap::default());
-    if let Some(base) = deep_link_base {
-        d.deep_link_of::<T>(base);
-    }
-    b.destination(d);
+/// A graph of a home, a list tab (a nested graph) and settings (the C++ tab test's).
+fn tab_graph(nav: &NavController) -> NavGraph {
+    nav.create_graph("home", None, |g| {
+        screen(g, "home");
+        g.navigation("list/all", "list", |list| {
+            screen(list, "list/all");
+            screen(list, "item/{n}");
+        });
+        screen(g, "settings");
+    })
 }
 
 /// The back stack as the C++ tests write it: routes, a graph's in brackets, the root graph left out.
@@ -83,10 +80,6 @@ fn stack_of(nav: &NavController) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn routes(destinations: &[NavDestination]) -> Vec<String> {
-    destinations.iter().map(|d| d.route().unwrap_or_default()).collect()
 }
 
 struct Host {
@@ -297,276 +290,6 @@ fn typed_routes_take_custom_types_defaults_lists_and_serial_names() {
     nav.navigate("Search/q:1");
     let s = nav.current_back_stack_entry().expect("an entry").to_route::<Search>();
     assert_eq!((s.parameters.count, s.page, s.tags.len()), (1, 3, 0));
-}
-
-// ---- C++ Kompoz's type_safe_routes_carry_their_arguments (its controller part) ----
-
-#[derive(Route, Clone, PartialEq, Debug)]
-struct HomeRoute;
-
-#[derive(RouteValue, Clone, Copy, PartialEq, Debug)]
-enum ProfileTab {
-    Posts,
-    Likes,
-}
-
-#[derive(Route, Clone, PartialEq, Debug)]
-struct ProfileRoute {
-    id: String,
-    pro: bool,
-    tab: Option<ProfileTab>,
-    zoom: Option<f64>,
-}
-
-#[derive(Route, Clone, PartialEq, Debug)]
-#[route(name = "login")]
-struct LoginGraph;
-
-#[derive(Route, Clone, PartialEq, Debug)]
-#[route(name = "login/username")]
-struct UsernameRoute {
-    attempt: i32,
-}
-
-#[test]
-fn type_safe_routes_carry_their_arguments() {
-    assert_eq!(generate_route_pattern::<HomeRoute>(&TypeMap::default(), None), "HomeRoute");
-    let pattern = "ProfileRoute/{id}/{pro}?tab={tab}&zoom={zoom}";
-    assert_eq!(generate_route_pattern::<ProfileRoute>(&TypeMap::default(), None), pattern);
-    // (Compose writes a null argument "null"; the C++ left it out)
-    let types: Vec<(String, NavType)> = generate_nav_arguments::<ProfileRoute>(&TypeMap::default())
-        .iter()
-        .map(|a| (a.name(), a.argument().r#type()))
-        .collect();
-    let path =
-        generate_route_with_args(&ProfileRoute { id: "a b/c".into(), pro: true, tab: None, zoom: Some(1.5) }, &types);
-    assert_eq!(path, "ProfileRoute/a%20b%2Fc/true?tab=null&zoom=1.5");
-    assert_eq!(
-        nav_deep_link_of::<ProfileRoute>("kompoz://profile").uri_pattern().as_deref(),
-        Some("kompoz://profile/{id}/{pro}?tab={tab}&zoom={zoom}")
-    );
-    let nav = controller();
-    let graph = nav.create_graph_typed(HomeRoute, None, TypeMap::default(), |b| {
-        typed_screen::<HomeRoute>(b, None);
-        typed_screen::<ProfileRoute>(b, Some("kompoz://profile"));
-        b.navigation_of::<LoginGraph>(UsernameRoute { attempt: 0 }, TypeMap::default(), |login| {
-            typed_screen::<UsernameRoute>(login, None);
-        });
-    });
-    nav.set_graph(graph);
-    assert_eq!(stack_of(&nav), "HomeRoute");
-    assert!(nav.current_destination().expect("one").has_route::<HomeRoute>());
-    nav.navigate(ProfileRoute { id: "a b/c".into(), pro: true, tab: Some(ProfileTab::Likes), zoom: Some(2.25) });
-    let seen = nav.current_back_stack_entry().expect("an entry").to_route::<ProfileRoute>();
-    assert_eq!(seen, ProfileRoute { id: "a b/c".into(), pro: true, tab: Some(ProfileTab::Likes), zoom: Some(2.25) });
-    nav.navigate(ProfileRoute { id: "x".into(), pro: false, tab: None, zoom: None });
-    let seen = nav.current_back_stack_entry().expect("an entry").to_route::<ProfileRoute>();
-    assert_eq!(seen, ProfileRoute { id: "x".into(), pro: false, tab: None, zoom: None });
-    nav.navigate(LoginGraph); // a graph: its start destination
-    assert_eq!(stack_of(&nav), format!("HomeRoute {pattern} {pattern} [login] login/username/{{attempt}}"));
-    assert_eq!(nav.current_back_stack_entry().expect("one").to_route::<UsernameRoute>().attempt, 0);
-    assert!(nav.get_back_stack_entry_of::<LoginGraph>().destination().is_graph());
-    nav.navigate(UsernameRoute { attempt: 2 });
-    assert_eq!(nav.current_back_stack_entry().expect("one").to_route::<UsernameRoute>().attempt, 2);
-    assert_eq!(nav.get_back_stack_entry(UsernameRoute { attempt: 2 }), nav.current_back_stack_entry().expect("one"));
-    assert!(nav.pop_back_stack_of::<LoginGraph>(true, false));
-    assert!(nav.current_destination().expect("one").has_route::<ProfileRoute>());
-    // (Compose's enum arguments are by name)
-    assert!(nav.handle_deep_link_uri("kompoz://profile/derin/false?tab=posts"));
-    assert_eq!(stack_of(&nav), format!("HomeRoute {pattern}"));
-    let seen = nav.current_back_stack_entry().expect("one").to_route::<ProfileRoute>();
-    assert_eq!((seen.id.as_str(), seen.tab, seen.pro), ("derin", Some(ProfileTab::Posts), false));
-    // popUpTo<T> { inclusive } and the hierarchy's hasRoute<T>.
-    nav.navigate(LoginGraph);
-    let in_login =
-        |nav: &NavController| nav.current_destination().hierarchy().iter().any(|d| d.has_route::<LoginGraph>());
-    assert!(in_login(&nav));
-    nav.navigate_with(HomeRoute, |o| o.pop_up_to_of::<HomeRoute>(|p| p.set_inclusive(true)));
-    assert_eq!(stack_of(&nav), "HomeRoute");
-    assert!(!in_login(&nav));
-}
-
-// ---- C++ Kompoz's nested_navigation_graphs_are_entered_by_route_and_left_with_their_screens ----
-
-fn nested_graph(nav: &NavController) -> NavGraph {
-    nav.create_graph("home", None, |g| {
-        screen(g, "home");
-        g.navigation("username", "login", |login| {
-            screen(login, "username");
-            screen(login, "password");
-            login.navigation("code", "verify", |verify| screen(verify, "code"));
-        });
-        screen(g, "profile");
-    })
-}
-
-#[test]
-fn nested_navigation_graphs_are_entered_by_route_and_left_with_their_screens() {
-    let nav = controller();
-    nav.set_graph(nested_graph(&nav));
-    nav.navigate("login"); // its start destination, in an entry of the graph
-    assert_eq!(stack_of(&nav), "home [login] username");
-    assert_eq!(routes(&nav.current_destination().expect("one").hierarchy()), ["username", "login", ""]);
-    assert_eq!(nav.previous_back_stack_entry().expect("one").destination().route().as_deref(), Some("home"));
-    nav.navigate("password"); // in the same graph: in the same entry
-    assert_eq!(stack_of(&nav), "home [login] username password");
-    assert_eq!(nav.previous_back_stack_entry().expect("one").destination().route().as_deref(), Some("username"));
-    assert!(nav.get_back_stack_entry("login").destination().is_graph());
-    nav.navigate("verify");
-    assert_eq!(stack_of(&nav), "home [login] username password [verify] code");
-    assert_eq!(routes(&nav.current_destination().expect("one").hierarchy()), ["code", "verify", "login", ""]);
-    nav.pop_back_stack(); // a graph's last screen: the graph goes with it
-    assert_eq!(stack_of(&nav), "home [login] username password");
-    nav.navigate_with("profile", |o| o.pop_up_to("login", |p| p.set_inclusive(true))); // the whole flow off
-    assert_eq!(stack_of(&nav), "home profile");
-    nav.navigate("password"); // straight to a graph's screen: the graph comes with it
-    assert_eq!(stack_of(&nav), "home profile [login] password");
-    nav.navigate("login"); // the graph's route from inside it: another one
-    assert_eq!(stack_of(&nav), "home profile [login] password [login] username");
-    let stack = nav.back_queue();
-    assert!(stack.len() == 7 && stack[3] != stack[5]);
-    assert!(nav.pop_back_stack_to("password", false, false) && stack_of(&nav) == "home profile [login] password");
-    assert!(nav.pop_back_stack() && stack_of(&nav) == "home profile");
-    assert!(nav.pop_back_stack() && stack_of(&nav) == "home");
-    // (Compose pops the last destination too: the stack is left empty, false — the C++ refused)
-    assert!(!nav.pop_back_stack() && nav.back_queue().is_empty());
-    nav.navigate("home");
-    nav.navigate("login");
-    assert!(nav.pop_back_stack_to("username", true, false) && stack_of(&nav) == "home"); // the graph left without screens goes
-    nav.navigate("login");
-    nav.navigate_with("password", |o| o.pop_up_to("login", |_| {})); // down to the graph's entry, and on in it
-    assert_eq!(stack_of(&nav), "home [login] password");
-    nav.navigate_with("profile", |o| o.pop_up_to("login", |_| {})); // a graph left without screens isn't kept
-    assert_eq!(stack_of(&nav), "home profile");
-    assert_eq!(nav.previous_back_stack_entry().expect("one").destination().route().as_deref(), Some("home"));
-    assert!(nav.navigate_up() && stack_of(&nav) == "home" && !nav.navigate_up());
-}
-
-// ---- C++ Kompoz's deep_links_open_their_destination_with_the_screens_above_it (its controller part) ----
-
-fn deep_link_graph(nav: &NavController) -> NavGraph {
-    nav.create_graph("home", None, |g| {
-        screen(g, "home");
-        g.navigation("list/all", "list", |list| {
-            screen(list, "list/all");
-            screen_with_links(list, "item/{n}", &["kompoz://item/{n}", "https://example.com/items/{n}"]);
-        });
-        screen_with_links(g, "search?q={q}", &["kompoz://search?q={q}"]);
-        screen_with_links(g, "tag/{name}", &["kompoz://tags/{name}"]);
-    })
-}
-
-#[test]
-fn deep_links_open_their_destination_with_the_screens_above_it() {
-    let links = kompoz_ui::platform::DeepLinks::new();
-    links.open("kompoz://item/42"); // the app is opened with it
-    let nav = controller();
-    let destinations = Rc::new(RefCell::new(Vec::new()));
-    let d = destinations.clone();
-    nav.add_on_destination_changed_listener(Rc::new(
-        move |_: &NavController, dest: &NavDestination, args: Option<&SavedState>| {
-            let n = args.map(|a| a.get_string("n").unwrap_or_default()).unwrap_or_default();
-            d.borrow_mut().push(format!("{} {n}", dest.route().unwrap_or_default()));
-        },
-    ));
-    nav.set_deep_links(Some(links.clone()));
-    nav.set_graph(deep_link_graph(&nav));
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n}");
-    assert_eq!(
-        nav.current_back_stack_entry().expect("one").arguments().expect("args").get_string("n").as_deref(),
-        Some("42")
-    );
-    assert!(links.pending().is_none() && nav.deep_link_handled());
-    assert_eq!(destinations.borrow().last().map(String::as_str), Some("item/{n} 42"));
-    assert!(nav.pop_back_stack()); // back leads up
-    assert_eq!(nav.current_destination().expect("one").route().as_deref(), Some("list/all"));
-    assert!(nav.pop_back_stack() && stack_of(&nav) == "home");
-    links.open("HTTPS://example.com/items/7#top"); // sent while it runs; the scheme in any case
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n}");
-    assert_eq!(
-        nav.current_back_stack_entry().expect("one").arguments().expect("args").get_string("n").as_deref(),
-        Some("7")
-    );
-    nav.navigate(NavUri("kompoz://search?q=a%20b%26c")); // from inside the app: on top
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n} search?q={q}");
-    assert_eq!(
-        nav.current_back_stack_entry().expect("one").arguments().expect("args").get_string("q").as_deref(),
-        Some("a b&c")
-    );
-    assert!(!nav.handle_deep_link_uri("kompoz://nothing") && !nav.handle_deep_link_uri("other://item/3"));
-    links.open("kompoz://nothing"); // left for another
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n} search?q={q}");
-    assert_eq!(links.take(|_| true).as_deref(), Some("kompoz://nothing"));
-    assert!(nav.handle_deep_link_uri("item/5")); // a route's path (the web's #fragment)
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n}");
-    assert!(nav.handle_deep_link_uri("list") && stack_of(&nav) == "home [list] list/all"); // a graph: its start
-    assert!(nav.handle_deep_link_uri("home") && stack_of(&nav) == "home");
-    assert!(nav.handle_deep_link_uri("kompoz://tags/a%2Fb%20c%3F")); // decoded once
-    assert_eq!(stack_of(&nav), "home tag/{name}");
-    assert_eq!(
-        nav.current_back_stack_entry().expect("one").arguments().expect("args").get_string("name").as_deref(),
-        Some("a/b c?")
-    );
-    // Its handler goes with it.
-    nav.set_deep_links(None);
-    links.open("kompoz://item/1");
-    assert_eq!(links.pending().as_deref(), Some("kompoz://item/1"));
-}
-
-// ---- C++ Kompoz's a_nested_graph_is_saved_and_restored_as_a_tab (its controller part) ----
-
-fn tab_graph(nav: &NavController) -> NavGraph {
-    nav.create_graph("home", None, |g| {
-        screen(g, "home");
-        g.navigation("list/all", "list", |list| {
-            screen(list, "list/all");
-            screen(list, "item/{n}");
-        });
-        screen(g, "settings");
-    })
-}
-
-#[test]
-fn a_nested_graph_is_saved_and_restored_as_a_tab() {
-    let nav = controller();
-    nav.set_graph(tab_graph(&nav));
-    let tab = |route: &str| {
-        nav.navigate_with(route, |o| {
-            o.pop_up_to("home", |p| p.set_save_state(true));
-            o.set_launch_single_top(true);
-            o.set_restore_state(true);
-        })
-    };
-    let in_list = |nav: &NavController| routes(&nav.current_destination().hierarchy()).iter().any(|r| r == "list");
-    tab("list");
-    nav.navigate("item/7");
-    assert!(in_list(&nav));
-    let graph_id = nav.get_back_stack_entry("list").id();
-    let item_id = nav.current_back_stack_entry().expect("one").id();
-    tab("settings");
-    assert_eq!(stack_of(&nav), "home settings"); // saved, the graph with it
-    assert!(!in_list(&nav));
-    tab("list");
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n}");
-    assert_eq!(nav.get_back_stack_entry("list").id(), graph_id); // the same entries, by id
-    assert_eq!(nav.current_back_stack_entry().expect("one").id(), item_id);
-    assert_eq!(
-        nav.current_back_stack_entry().expect("one").arguments().expect("args").get_string("n").as_deref(),
-        Some("7")
-    );
-    tab("home");
-    tab("home"); // launchSingleTop: still one
-    assert_eq!(stack_of(&nav), "home");
-    nav.navigate("list"); // without restoreState: a new graph
-    nav.navigate("item/8");
-    assert_eq!(stack_of(&nav), "home [list] list/all item/{n}");
-    assert_ne!(nav.get_back_stack_entry("list").id(), graph_id);
-    tab("settings"); // saved in place of the first one
-    assert_eq!(stack_of(&nav), "home settings");
-    // The saved stack, cleared.
-    assert!(nav.clear_back_stack("list"));
-    tab("list");
-    assert_eq!(stack_of(&nav), "home [list] list/all");
 }
 
 // ---- Compose's controller behaviour ----

@@ -245,7 +245,7 @@ impl NavGraphBuilder {
     }
 
     fn graph_navigator(provider: &NavigatorProvider) -> Rc<dyn Navigator> {
-        provider.get_navigator_of::<NavGraphNavigator>()
+        provider.get_navigator(NavGraphNavigator::NAME)
     }
 
     /// A graph of `route` starting at `start_destination` (Kotlin's `NavGraphBuilder(provider, startDestination,
@@ -297,30 +297,6 @@ impl NavGraphBuilder {
     /// Adds `destination` (Kotlin's `addDestination`, `+destination`).
     pub fn add_destination(&mut self, destination: NavDestination) {
         self.destinations.push(destination);
-    }
-
-    /// Adds a nested graph of `route` starting at `start_destination` (Compose's `navigation(startDestination,
-    /// route) { … }`).
-    pub fn navigation(&mut self, start_destination: &str, route: &str, builder: impl FnOnce(&mut NavGraphBuilder)) {
-        let mut nested = NavGraphBuilder::new(&self.provider, start_destination, Some(route));
-        builder(&mut nested);
-        self.destination(nested);
-    }
-
-    /// Adds a nested graph of `T`'s route starting at a typed route's destination (Compose's
-    /// `navigation<T>(startDestination = Start) { … }`).
-    ///
-    /// Kotlin: `navigation<T>(startDestination: Any, typeMap: Map<KType, NavType<*>> = emptyMap(), builder: NavGraphBuilder.() -> Unit)`
-    pub fn navigation_of<T: Route>(
-        &mut self,
-        start_destination: impl IntoStartDestination,
-        type_map: TypeMap,
-        builder: impl FnOnce(&mut NavGraphBuilder),
-    ) {
-        let mut nested =
-            NavGraphBuilder::new_typed(&self.provider, start_destination, Some(RouteClass::of::<T>()), type_map);
-        builder(&mut nested);
-        self.destination(nested);
     }
 
     /// The graph (Kotlin's `build()`).

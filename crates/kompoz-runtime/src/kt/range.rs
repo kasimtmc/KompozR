@@ -420,6 +420,12 @@ pub fn is_in<X: ?Sized, C: KtContains<X> + ?Sized>(value: &X, container: &C) -> 
     container.kt_contains(value)
 }
 
+/// Kotlin's `a == b` of a nullable value and one of another type (`equals` across types: a navigation entry and the
+/// lifecycle owner it is): false when `a` is null, else `a`'s equality with `b`.
+pub fn eq_nullable<A: PartialEq<B>, B: ?Sized>(a: &Option<A>, b: &B) -> bool {
+    a.as_ref().is_some_and(|a| a == b)
+}
+
 /// What `withIndex()` gives (Kotlin's `IndexedValue`): `for ((i, v) in list.withIndex())`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct IndexedValue<T> {

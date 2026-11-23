@@ -731,6 +731,7 @@ dependencies = [
  "kompoz-material-icons-core",
  "kompoz-material-icons-extended",
  "kompoz-material3",
+ "kompoz-navigation",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",
@@ -759,10 +760,15 @@ dependencies = [
 name = "kompoz-navigation"
 version = "0.1.0"
 dependencies = [
+ "kompoz-animation",
  "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
  "kompoz-lifecycle",
  "kompoz-macros",
+ "kompoz-navigationevent",
  "kompoz-runtime",
+ "kompoz-test",
  "kompoz-ui",
 ]
 

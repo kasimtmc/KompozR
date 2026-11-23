@@ -677,13 +677,26 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
         }
         let args: Vec<Ident> = (0..params.len()).map(|i| format_ident!("__a{i}")).collect();
         let ids = pass_ids.then(|| quote!(__kz_ids));
+        // (stage 13 WP3) The method's own type parameters passed on by name: one no parameter fixes — navigation's
+        // `kompozable_of::<T>(…)`, Kotlin's `composable<T> { … }` — isn't inferred.
+        let method_types: Vec<&Ident> = m
+            .sig
+            .generics
+            .params
+            .iter()
+            .filter_map(|g| match g {
+                GenericParam::Type(t) => Some(&t.ident),
+                _ => None,
+            })
+            .collect();
+        let turbofish = (!method_types.is_empty()).then(|| quote!(::<#(#method_types),*>));
         // (through the trait by name: another trait in scope may have a method of the same name)
         let call = match &ext {
             Some(e) => {
                 let t = &e.name;
-                quote!(<#self_ty as #t #impl_tg>::#imp_name(__self, #(#args,)* #ids))
+                quote!(<#self_ty as #t #impl_tg>::#imp_name #turbofish(__self, #(#args,)* #ids))
             }
-            None => quote!(__self.#imp_name(#(#args,)* #ids)),
+            None => quote!(__self.#imp_name #turbofish(#(#args,)* #ids)),
         };
         let built = builder(Spec {
             rt: &rt,
@@ -738,9 +751,9 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
         let inner_call = match &ext {
             Some(e) => {
                 let t = &e.name;
-                quote!(<Self as #t #impl_tg>::#imp_name(__self, #(#all,)* #no_ids))
+                quote!(<Self as #t #impl_tg>::#imp_name #turbofish(__self, #(#all,)* #no_ids))
             }
-            None => quote!(__self.#imp_name(#(#all,)* #no_ids)),
+            None => quote!(__self.#imp_name #turbofish(#(#all,)* #no_ids)),
         };
         items.push(parse_quote! {
             #(#attrs)*

@@ -149,6 +149,14 @@ impl PartialEq for NavBackStackEntry {
 
 impl Eq for NavBackStackEntry {}
 
+/// The entry is the lifecycle owner it gives its content (Kotlin's `entry == LocalLifecycleOwner.current`: the same
+/// object).
+impl PartialEq<Rc<dyn LifecycleOwner>> for NavBackStackEntry {
+    fn eq(&self, other: &Rc<dyn LifecycleOwner>) -> bool {
+        std::ptr::addr_eq(Rc::as_ptr(&self.0), Rc::as_ptr(other))
+    }
+}
+
 impl std::hash::Hash for NavBackStackEntry {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         Rc::as_ptr(&self.0).hash(state);
@@ -168,7 +176,7 @@ impl LifecycleOwner for NavBackStackEntry {
 }
 
 /// A random UUID's text (Kotlin's `UUID.randomUUID().toString()`): version 4.
-fn random_uuid() -> String {
+pub(crate) fn random_uuid() -> String {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
     thread_local! {

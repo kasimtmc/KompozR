@@ -5,11 +5,8 @@
 //
 // What KompozR's Kotlin syntax doesn't take yet stands in Rust beside this file (kotlin_adaptive.rs), as written:
 // the generic `reflowAdaptStrategySample<T>()` and `levitateAsDialogSample<T>()` (generic functions) and the
-// Parcelable `NavItemData` (classes) come with stage 14. androidx.navigation's NavHost and its controller come with
-// stage 13: NavigableListDetailPaneScaffoldSample's two routes are a saveable route state shown by AnimatedContent
-// with the NavHost's slides, each route's state kept by a saveable state holder as the back stack's entries keep
-// theirs, the platform's back from the list-detail route popping to the welcome one as the NavHost's back handler
-// does (registered before the scaffold's, so the scaffold's goes first).
+// Parcelable `NavItemData` (classes) come with stage 14. (The indentation of NavigableListDetailPaneScaffoldSample's
+// two composables is the earlier stand-in's, the source's lines otherwise.)
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Preview
@@ -270,8 +267,7 @@ fun NavigableListDetailPaneScaffoldSample() {
     // and `scaffoldNavigator` handles navigation within it. The "content" of
     // the scaffold uses a custom type which tracks the index of the selected item,
     // which is passed as a type argument to `rememberListDetailPaneScaffoldNavigator`.
-    // (the NavHost's controller: its current route)
-    var navController by rememberSaveable { mutableStateOf(welcomeRoute) }
+    val navController = rememberNavController()
     val scaffoldNavigator = rememberListDetailPaneScaffoldNavigator<NavItemData>()
 
     // Back behavior can be customized based on the needs of the app.
@@ -288,21 +284,15 @@ fun NavigableListDetailPaneScaffoldSample() {
     val items = listOf("Item 1", "Item 2", "Item 3")
     val extraItems = listOf("Extra 1", "Extra 2", "Extra 3")
 
-    // (the NavHost: its back handler, its entries' saved states, its transitions)
-    BackHandler(enabled = navController != welcomeRoute) { navController = welcomeRoute }
-    val saveableStateHolder = rememberSaveableStateHolder()
-    AnimatedContent(
-        targetState = navController,
-        transitionSpec = {
-            if (targetState == listDetailRoute) {
-                slideInHorizontally(initialOffsetX = { it }) togetherWith slideOutHorizontally(targetOffsetX = { -it })
-            } else {
-                slideInHorizontally(initialOffsetX = { -it }) togetherWith slideOutHorizontally(targetOffsetX = { it })
-            }
-        },
-    ) { route ->
-        saveableStateHolder.SaveableStateProvider(route) {
-            if (route == welcomeRoute) {
+    NavHost(
+        navController = navController,
+        startDestination = welcomeRoute,
+        enterTransition = { slideInHorizontally(initialOffsetX = { it }) },
+        exitTransition = { slideOutHorizontally(targetOffsetX = { -it }) },
+        popEnterTransition = { slideInHorizontally(initialOffsetX = { -it }) },
+        popExitTransition = { slideOutHorizontally(targetOffsetX = { it }) },
+    ) {
+        composable(welcomeRoute) {
                 Scaffold(Modifier.fillMaxSize()) { paddingValues ->
                     Column(
                         modifier =
@@ -347,10 +337,11 @@ fun NavigableListDetailPaneScaffoldSample() {
                                     "unintuitive behavior if the device size changes in the middle " +
                                     "of the navigation.",
                         )
-                        Button(onClick = { navController = listDetailRoute }) { Text("Next") }
+                        Button(onClick = { navController.navigate(listDetailRoute) }) { Text("Next") }
                     }
                 }
-            } else {
+        }
+        composable(listDetailRoute) {
                 val selectedItem = scaffoldNavigator.currentDestination?.contentKey
                 NavigableListDetailPaneScaffold(
                     navigator = scaffoldNavigator,
@@ -389,7 +380,6 @@ fun NavigableListDetailPaneScaffoldSample() {
                         }
                     },
                 )
-            }
         }
     }
 }

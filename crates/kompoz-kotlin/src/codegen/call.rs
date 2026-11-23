@@ -1232,7 +1232,16 @@ impl Gen<'_, '_> {
                     // (WP5: a string isn't a shared trait object — `showSnackbar(message)` beside
                     // `showSnackbar(visuals: SnackbarVisuals)`)
                     let string_to_shared = ty == Ty::String && super::expr::Shared::of_rust(&p.ty).is_some();
-                    if (!compatible(&ty, &p.ty()) || string_to_shared) && !may_implement {
+                    // (stage 13 WP3) An object or a constructor call of a class not known here (`Start`,
+                    // `Detail(id = 7)`: an app's own @Serializable route) isn't a string — `NavHost(nav,
+                    // startDestination = Start)` is the typed overload, not the route string's
+                    // — nor a value of a concrete type of the API (`NavHost(nav, Profile, …)` isn't the
+                    // `graph: NavGraph` overload); a trait object's it may be (an app's `object : Shape`)
+                    let object_to_string = ty == Ty::Unknown
+                        && object_like(e)
+                        && (p.ty() == Ty::String
+                            || (matches!(p.ty(), Ty::Named(_, _)) && super::expr::Shared::of_rust(&p.ty).is_none()));
+                    if (!compatible(&ty, &p.ty()) || string_to_shared || object_to_string) && !may_implement {
                         score -= 5;
                         mismatched = true;
                     } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y) {
@@ -1520,10 +1529,14 @@ impl Gen<'_, '_> {
         };
         // (the suspending twin: `<name>_async`, beside it)
         let rust = if twin { format!("{}_async", c.rust) } else { c.rust.clone() };
-        // (a callee taking its type arguments only as a turbofish: `to_route::<Detail>()`; a builder's call, which
-        // the macros rewrite, takes them from its arguments)
+        // (a callee taking its type arguments only as a turbofish: `to_route::<Detail>()`; a builder's method call too, the
+        // macros passing a method's to its builder's entry — `kompozable_of::<Start>(deep_links = …) { … }`)
         let fish = match self.call_type_args.last() {
-            Some(t) if !t.is_empty() && !c.builder && c.item.is_some_and(|i| i.has(crate::index::flags::TURBOFISH)) => {
+            Some(t)
+                if !t.is_empty()
+                    && (!c.builder || matches!(target, Target::Method(_)))
+                    && c.item.is_some_and(|i| i.has(crate::index::flags::TURBOFISH)) =>
+            {
                 quote_spanned!(span=> ::<#(#t),*>)
             }
             _ => quote!(),
@@ -1781,6 +1794,21 @@ impl Gen<'_, '_> {
             let ip = PInfo { ty: inner.trim().to_string(), option: OptionForm::Option, ..p.clone() };
             let v = self.arg_value(a, Some(&ip), transform_wraps);
             return quote_spanned!(span=> ::core::option::Option::Some(#v));
+        }
+        // (stage 13 WP3) A class reference to navigation's route class (`startDestination = NestedWithArg::class`,
+        // `route = Graph::class`): the route's `RouteClass::of::<T>()`, not a ViewModel's KClass
+        if let ArgValue::Expr(Expr { kind: ExprKind::CallableRef { receiver: Some(r), name }, .. }) = a.value
+            && name.name == "class"
+            && let ExprKind::Name(n) = &r.kind
+            && (p.ty.contains("RouteClass") || p.ty.contains("IntoStartDestination"))
+        {
+            let t = ident(&n.name, span);
+            let made = quote_spanned!(span=> RouteClass::of::<#t>());
+            return if plain_type_text(&p.ty).starts_with("Option<") {
+                quote_spanned!(span=> ::core::option::Option::Some(#made))
+            } else {
+                made
+            };
         }
         // (one value to a slice: an array of it, unless it is a list already — `floatArrayOf(8f, 6f)`)
         let a_list = matches!(a.value, ArgValue::Expr(e) if matches!(self.peek_ty(e), Ty::List(_)));
@@ -2304,6 +2332,16 @@ fn takes_any(t: &str) -> bool {
     let type_parameter =
         !t.is_empty() && t.len() <= 2 && t.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
     (t.starts_with("impl") && !t.starts_with("implInto<String>") && !t.starts_with("implFn")) || type_parameter
+}
+
+/// Whether `e` reads as an object or a class's instance by Kotlin's naming: a capitalized name (`Start`) or a call
+/// of one (`Detail(7)`).
+fn object_like(e: &Expr) -> bool {
+    let capitalized = |e: &Expr| matches!(&e.kind, ExprKind::Name(n) if n.name.starts_with(|c: char| c.is_uppercase()));
+    match &e.kind {
+        ExprKind::Call { callee, .. } => capitalized(callee),
+        _ => capitalized(e),
+    }
 }
 
 /// Whether an argument of type `a` may go to a parameter of type `p` (as far as is known).

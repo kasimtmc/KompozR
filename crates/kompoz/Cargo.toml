@@ -313,3 +313,8 @@ harness = false
 [[test]]
 name = "kotlin_resources"
 harness = false
+
+# (stage 13 WP3) The NavHost in Kotlin's syntax: the C++ Navigator and AppShellForms, navigation-compose's samples.
+[[test]]
+name = "kotlin_nav_host"
+harness = false

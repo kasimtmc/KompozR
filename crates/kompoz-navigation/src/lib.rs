@@ -1,7 +1,11 @@
 //! KompozR's navigation (stage 13): androidx.navigation 2.10's common and runtime parts (navigation-common,
-//! navigation-runtime — their non-Android actuals written from the common and Android code), with navigation-compose
-//! (`NavHost`, the composable and dialog navigators) and Navigation 3 to come in this crate (stage 13's WP3 and WP4).
+//! navigation-runtime) and navigation-compose (`NavHost`, the composable and dialog navigators, the graph builder's
+//! `kompozable` / `composable`, `navigation`, `dialog`), their non-Android actuals written from the common and Android
+//! code.
 //!
+//! - The NavHost: [`NavHost`] (and [`NavHost_of`], [`NavHost_graph`]), [`remember_nav_controller`],
+//!   `current_back_stack_entry_as_state`, [`ComposeNavigator`], [`DialogNavigator`], [`DialogHost`],
+//!   [`DefaultNavTransitions`] — see the `compose` module's docs.
 //! - The graph: [`NavDestination`] (route, arguments, deep links, `hierarchy`, `has_route::<T>()`), [`NavGraph`]
 //!   (nodes by id, start destination, nested graphs), built with [`NavGraphBuilder`] / [`NavDestinationBuilder`]
 //!   (`navigation(start, route) { … }`, `create_graph`).
@@ -39,6 +43,7 @@ extern crate self as kompoz_navigation;
 
 mod argument;
 mod builder;
+mod compose;
 mod controller;
 mod deep_link;
 mod destination;
@@ -54,6 +59,7 @@ mod uri;
 
 pub use argument::*;
 pub use builder::*;
+pub use compose::*;
 pub use controller::*;
 pub use deep_link::*;
 pub use destination::*;

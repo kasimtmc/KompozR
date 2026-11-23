@@ -1104,7 +1104,9 @@ impl VisitMut for Transformer {
                 let links = Self::chain(&m.args, &keys);
                 let recv = &m.receiver;
                 let kz_name = format_ident!("__kz_{}", m.method, span = m.method.span());
-                *e = parse_quote_spanned!(span=> #recv.#kz_name() #(#links)* .__call());
+                // (stage 13 WP3) the method's type arguments go to its builder's entry: `g.kompozable_of::<T>(deep_links = …)`
+                let turbofish = &m.turbofish;
+                *e = parse_quote_spanned!(span=> #recv.#kz_name #turbofish() #(#links)* .__call());
             }
             Expr::Async(a) => {
                 self.push_scope([]);

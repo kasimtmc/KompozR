@@ -1002,6 +1002,18 @@ impl Gen<'_, '_> {
                     }
                 };
                 let (at, bt) = (a.ty.clone(), b.ty.clone());
+                // (stage 13 WP3) A nullable value compared with one of another type (`navController.
+                // currentBackStackEntry == LocalLifecycleOwner.current`: Kotlin's `equals`, the entry an owner): the
+                // types' own equality, through the nullable one's value
+                let other_named = |nullable: &Ty, other: &Ty| match (nullable, other) {
+                    (Ty::Nullable(inner), Ty::Named(y, _)) => matches!(&**inner, Ty::Named(x, _) if x != y),
+                    _ => false,
+                };
+                if other_named(&at, &bt) || other_named(&bt, &at) {
+                    let (n, o) = if at.is_nullable() { (a.ts, b.ts) } else { (b.ts, a.ts) };
+                    let ts = quote_spanned!(span=> #kt::eq_nullable(&#n, &#o));
+                    return Out::plain(if eq { ts } else { quote_spanned!(span=> !#ts) }, Ty::Bool);
+                }
                 let (a, b) = (some(a, &bt, rhs_safe), some(b, &at, lhs_safe));
                 let ts = if eq { quote_spanned!(span=> #a == #b) } else { quote_spanned!(span=> #a != #b) };
                 Out::plain(ts, Ty::Bool)

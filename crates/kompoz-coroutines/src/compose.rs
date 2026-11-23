@@ -7,7 +7,8 @@ use crate::flow::{Flow, flow};
 use crate::hot::{AsFlow, StateFlow};
 use kompoz_runtime::{
     DisposableEffect, KompozitionLocal, MutableState, RememberObserver, Snapshot, State, StateKey, group, kompozable,
-    kompozable_block, mutable_state_of, observe_reads, on_dispose, remember, remember_keyed, remember_observer,
+    kompozable_block, mutable_confined_state_of, mutable_state_of, observe_reads, on_dispose, remember, remember_keyed,
+    remember_observer,
 };
 use std::collections::HashSet;
 use std::future::Future;
@@ -126,6 +127,43 @@ impl<T: PartialEq + Clone + Send + Sync + 'static> StateFlow<T> {
     pub fn collect_as_state(&self) -> State<T> {
         group(|| {
             let state = remember_keyed(self.clone(), || mutable_state_of(self.value()));
+            let s = state.clone();
+            let collecting = self.as_flow().collect(move |v| s.set(v));
+            let key = self.clone();
+            kompozable_block!({
+                LaunchedEffect(key, collecting);
+            });
+            State::from(state)
+        })
+    }
+}
+
+impl<T: PartialEq + Clone + 'static> Flow<T> {
+    /// [`collect_as_state`](Flow::collect_as_state) of values that needn't be `Send` or `Sync` (Compose's
+    /// `collectAsState(initial)` of any value: navigation's back stack entries): the state confined to this thread
+    /// (see [`MutableState::new_confined`]).
+    #[track_caller]
+    pub fn collect_as_confined_state(&self, initial: T) -> State<T> {
+        group(|| {
+            let state = remember_keyed(self.clone(), || mutable_confined_state_of(initial));
+            let (flow, s) = (self.clone(), state.clone());
+            let collecting = flow.collect(move |v| s.set(v));
+            let key = self.clone();
+            kompozable_block!({
+                LaunchedEffect(key, collecting);
+            });
+            State::from(state)
+        })
+    }
+}
+
+impl<T: PartialEq + Clone + 'static> StateFlow<T> {
+    /// [`collect_as_state`](StateFlow::collect_as_state) of values that needn't be `Send` or `Sync` (Compose's
+    /// `collectAsState()` of any value): the state confined to this thread (see [`MutableState::new_confined`]).
+    #[track_caller]
+    pub fn collect_as_confined_state(&self) -> State<T> {
+        group(|| {
+            let state = remember_keyed(self.clone(), || mutable_confined_state_of(self.value()));
             let s = state.clone();
             let collecting = self.as_flow().collect(move |v| s.set(v));
             let key = self.clone();

@@ -443,8 +443,9 @@ impl PlatformCallbacks for Recorded {
 
 fn platform_services_open_links_and_long_clicks_are_felt() {
     // The parts of C++'s platform_services_open_links_vibrate_and_hide_the_keyboard and
-    // uri_handler_opens_the_apps_own_links_in_it without text fields and NavHost: clickable texts open a link,
-    // feel, copy and paste; a combined clickable's long click is felt (its haptic feedback on), not when off.
+    // uri_handler_opens_the_apps_own_links_in_it without text fields and NavHost (its NavHost half: kompoz-navigation's
+    // tests/nav_host.rs): clickable texts open a link, feel, copy and paste; a combined clickable's long click is felt
+    // (its haptic feedback on), not when off.
     let value = mutable_state_of(String::new());
     let long_clicks = Rc::new(Cell::new(0));
     let (v, lc) = (value.clone(), long_clicks.clone());

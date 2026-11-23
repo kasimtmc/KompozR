@@ -5,10 +5,8 @@
 //! ScrollForms with TiledRow (`scroll_forms_as_compose_writes_them`), GraphicsForms' Material lines
 //! (`graphics_forms_as_compose_writes_them`: its wavy and contained indicators and MaterialShapes.Heart; its
 //! animation, painter and graphics lines are the lower stages' — its `object : Painter()` an object expression, stage
-//! 14's) and AppShellForms' stage-12 lines (`app_shell_as_compose_writes_it`: its NavigationSuiteScaffold of
-//! NavigationSuiteItems and SnackbarData's visuals; its NavController, NavHost, navOptions and deep links are stage
-//! 13's, its desktop MenuBar stage 15/16's (decision D7)). The other Material sources are whole where their package
-//! put them: NamedHeads, Containers (kotlin_buttons.rs), Settings, AddTextDialog/DialogHost (kotlin_lists_sheets.rs),
+//! 14's). AppShellForms is whole in kotlin_nav_host.rs (`app_shell_as_compose_writes_it`, but its desktop MenuBar:
+//! stage 15/16's, decision D7). The other Material sources are whole where their package put them: NamedHeads, Containers (kotlin_buttons.rs), Settings, AddTextDialog/DialogHost (kotlin_lists_sheets.rs),
 //! ScaffoldExample (kt/scaffold.kt), Inbox, StateForms, AppTheme (kotlin_ported.rs), Themed
 //! (kotlin_material_theme.rs), TextForms and Phone (kt/material_fields.kt), Expressive and Navigation
 //! (kotlin_expressive_buttons.rs), LayoutForms (kotlin_adaptive.rs, kotlin_lookahead.rs, kotlin_grids_pager.rs,
@@ -376,57 +374,6 @@ fn graphics_forms_as_compose_writes_them() {
     assert!(rule.draw().path_colors.contains(&Color::Red));
 }
 
-// ---- AppShellForms' stage-12 lines (kompozable_tests.cpp 3426-3468) ------------------------------------------------
-
-kompoz! {
-    // NavigationSuiteScaffold(navigationItems = { NavigationSuiteItem(…) }, navigationSuiteType =) and
-    // data.visuals.actionLabel. (The source's items navigate a NavController — stage 13's —: here they pick a state,
-    // its NavHost's screens the texts it shows; its MenuBar is stage 15/16's. Its `SnackbarData(message =,
-    // actionLabel =)` was the C++'s struct: Compose's SnackbarData is an interface a host state makes — the data
-    // shown is read from one here.)
-    @Composable
-    fun AppShellForms() {
-        var inAccount by remember { mutableStateOf(false) }
-        val snackbars = remember { SnackbarHostState() }
-        LaunchedEffect(Unit) { snackbars.showSnackbar("m", actionLabel = "Geri al", duration = SnackbarDuration.Indefinite) }
-        val data = snackbars.currentSnackbarData
-        Column {
-            Text("eylem ${data?.visuals?.actionLabel?.length ?: 0}")
-            NavigationSuiteScaffold(
-                navigationItems = {
-                    NavigationSuiteItem(selected = !inAccount, onClick = { inAccount = false },
-                                        icon = { Icon(Icons.Filled.Home, contentDescription = null) }, label = { Text("Kabuk") })
-                    NavigationSuiteItem(selected = inAccount, onClick = { inAccount = true },
-                                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Hesap") })
-                },
-                navigationSuiteType = NavigationSuiteType.NavigationRail,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (inAccount) "hesap 0" else "kabuk ekranı")
-            }
-            Text(if (inAccount) "sekme hesap" else "sekme kabuk")
-        }
-    }
-}
-
-fn app_shell_as_compose_writes_it() {
-    let rule = KompozTestRule::with_viewport(AppShellForms, IntSize::new(600, 800));
-    rule.wait_for_idle();
-    rule.on_node_with_text("kabuk ekranı").assert_exists();
-    rule.on_node_with_text("sekme kabuk").assert_exists();
-    rule.on_node_with_text("eylem 7").assert_exists();
-    rule.on_node_with_text("Hesap").perform_click();
-    rule.wait_for_idle();
-    rule.advance_time_by(1000);
-    rule.wait_for_idle();
-    rule.on_node_with_text("hesap 0").assert_exists();
-    rule.on_node_with_text("sekme hesap").assert_exists();
-    // (a rail: its items one under another at the start)
-    let at = |t: &str| rule.on_node_with_text(t).get_unclipped_bounds_in_root();
-    let (home, account) = (at("Kabuk"), at("Hesap"));
-    assert!(account.top > home.top && home.left < 100.0);
-}
-
 tests![
     kotlin_helpers_through_kompozc,
     material_as_compose_writes_it,
@@ -434,5 +381,4 @@ tests![
     text_styles_as_compose_writes_them,
     scroll_forms_as_compose_writes_them,
     graphics_forms_as_compose_writes_them,
-    app_shell_as_compose_writes_it,
 ];

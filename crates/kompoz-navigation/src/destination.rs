@@ -620,9 +620,15 @@ impl NavGraph {
     /// A graph of the navigator named `navigator_name` (Kotlin's `NavGraph(navGraphNavigator)`: its name is
     /// `"navigation"`).
     pub fn new(navigator_name: impl Into<String>) -> NavGraph {
+        NavGraph::of_kind(navigator_name, NavDestinationKind { class_name: "NavGraph", ..Default::default() })
+    }
+
+    /// A graph of the kind a navigator's graphs are (a subclass of Kotlin's: navigation-compose's `ComposeNavGraph`
+    /// with its transitions).
+    pub fn of_kind(navigator_name: impl Into<String>, kind: NavDestinationKind) -> NavGraph {
         NavGraph(NavDestination::make(
             navigator_name.into(),
-            NavDestinationKind { class_name: "NavGraph", ..Default::default() },
+            kind,
             Some(GraphData {
                 nodes: RefCell::new(BTreeMap::new()),
                 start_dest_id: Cell::new(0),
@@ -658,6 +664,9 @@ impl NavGraph {
     /// Puts `node` in the place of id `id`, its parent as it is (Kotlin's `nodes.replace(key, node)`).
     pub(crate) fn replace_node(&self, id: i32, node: NavDestination) {
         if let Some(slot) = self.data().nodes.borrow_mut().get_mut(&id) {
+            // (its parent this graph: Kotlin's stays the new graph — kept by the node there, a weak reference here
+            // that would end with it —, which equals this one)
+            node.set_parent(Some(self));
             *slot = node;
         }
     }

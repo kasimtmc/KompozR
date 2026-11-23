@@ -22,6 +22,8 @@ kompoz-ui = { path = "../kompoz-ui" }
 [dev-dependencies]
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
 kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
+# (NavigableListDetailPaneScaffoldSample's NavHost)
+kompoz-navigation = { path = "../kompoz-navigation" }
 kompoz-test = { path = "../kompoz-test" }
 
 # The window's size classes and adaptive info (the C++ Kompoz's window size class test by name, window-core's
