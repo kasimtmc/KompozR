@@ -621,7 +621,25 @@ impl LayoutNodeSubcompositionsState {
             }
             children.extend(slot.synced.borrow().iter().cloned());
         }
-        root.ignoring_remeasure_requests(|| root.set_layout_children(children));
+        let changed = root.ignoring_remeasure_requests(|| {
+            let before = root.children();
+            root.set_layout_children(children);
+            let after = root.children();
+            before.len() != after.len() || before.iter().zip(&after).any(|(a, b)| !Rc::ptr_eq(a, b))
+        });
+        // (a slot's composition recomposed on its own, outside the layout's measure — its content read a state —
+        // changed the layouts: measured again, as Compose's virtual node's insertAt/removeAt invalidate its parent;
+        // while measuring, what subcompose gives is measured now)
+        let measuring = matches!(
+            root.layout_state.get(),
+            LayoutState::Measuring
+                | LayoutState::LayingOut
+                | LayoutState::LookaheadMeasuring
+                | LayoutState::LookaheadLayingOut
+        );
+        if changed && !measuring {
+            root.invalidate_measurements();
+        }
     }
 
     /// Composes `slot_id`'s `content` while measuring (Compose's `subcompose`): the slot used before, a

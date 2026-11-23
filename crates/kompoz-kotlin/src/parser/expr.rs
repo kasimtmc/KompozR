@@ -510,6 +510,37 @@ impl<'t> Parser<'t, '_> {
         trailing_lambda: Option<Box<Lambda>>,
         start: Pos,
     ) -> Expr {
+        let mut args = args;
+        // Android's resource functions name their parameters as androidx.compose.ui.res does (`painterResource(id =
+        // R.drawable.x)`, `pluralStringResource(id, count)`); `R.*` is KompozR's `Res` (Compose Multiplatform's), whose
+        // functions call them `resource` and `quantity`.
+        let called = match &callee.kind {
+            ExprKind::Name(n) => Some(n),
+            ExprKind::Member { name, .. } => Some(name),
+            _ => None,
+        };
+        if let Some(n) = called
+            && matches!(
+                n.name.as_str(),
+                "painterResource"
+                    | "imageResource"
+                    | "vectorResource"
+                    | "stringResource"
+                    | "pluralStringResource"
+                    | "stringArrayResource"
+                    | "animatedVectorResource"
+            )
+        {
+            for a in &mut args {
+                if let Some(name) = &mut a.name {
+                    match name.name.as_str() {
+                        "id" => name.name = "resource".into(),
+                        "count" if n.name == "pluralStringResource" => name.name = "quantity".into(),
+                        _ => {}
+                    }
+                }
+            }
+        }
         Expr {
             kind: ExprKind::Call { callee: Box::new(callee), type_args, args, trailing_lambda },
             loc: self.loc_from(start),

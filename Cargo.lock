@@ -517,6 +517,7 @@ dependencies = [
  "kompoz",
  "kompoz-animation",
  "kompoz-animation-graphics",
+ "kompoz-coil",
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-gpu",
@@ -532,6 +533,7 @@ dependencies = [
  "kompoz-navigation",
  "kompoz-navigationevent",
  "kompoz-platform",
+ "kompoz-resources",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",
@@ -559,6 +561,20 @@ dependencies = [
  "kompoz-animation",
  "kompoz-foundation",
  "kompoz-graphics",
+ "kompoz-resources",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-ui",
+]
+
+[[package]]
+name = "kompoz-coil"
+version = "0.1.0"
+dependencies = [
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-material3",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-ui",
@@ -695,6 +711,7 @@ dependencies = [
  "kompoz-material-ripple",
  "kompoz-material3-adaptive",
  "kompoz-material3-adaptive-navigation-suite",
+ "kompoz-resources",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",
@@ -773,6 +790,19 @@ dependencies = [
  "kompoz-text",
  "kompoz-ui",
  "libc",
+]
+
+[[package]]
+name = "kompoz-resources"
+version = "0.1.0"
+dependencies = [
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-macros",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-text",
+ "kompoz-ui",
 ]
 
 [[package]]

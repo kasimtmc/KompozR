@@ -35,6 +35,9 @@ kompoz-material3-adaptive-navigation-suite = { path = "../kompoz-material3-adapt
 kompoz-navigation = { path = "../kompoz-navigation" }
 kompoz-navigationevent = { path = "../kompoz-navigationevent" }
 kompoz-platform = { path = "../kompoz-platform" }
+# (stage 13 WP-R: resources; Coil's AsyncImage)
+kompoz-coil = { path = "../kompoz-coil" }
+kompoz-resources = { path = "../kompoz-resources" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-test = { path = "../kompoz-test", optional = true }
 kompoz-text = { path = "../kompoz-text" }
@@ -304,4 +307,9 @@ harness = false
 # (stage 13 WP2) Navigation's core in Kotlin's syntax (typed routes, navOptions, deep links, arguments).
 [[test]]
 name = "kotlin_navigation_core"
+harness = false
+
+# Compose Multiplatform's resources (Res.*, Android's R.*) in Kotlin's syntax: tests/composeResources.
+[[test]]
+name = "kotlin_resources"
 harness = false

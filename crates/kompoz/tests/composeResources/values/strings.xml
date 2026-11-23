@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="title">Resources</string>
+    <string name="welcome">Welcome, %1$s!</string>
+    <plurals name="items">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
+    <string-array name="days">
+        <item>Monday</item>
+        <item>Tuesday</item>
+    </string-array>
+</resources>

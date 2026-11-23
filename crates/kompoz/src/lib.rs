@@ -43,6 +43,9 @@ pub use kompoz_navigation as navigation;
 // (stage 13: androidx.navigationevent and androidx.navigationevent.compose)
 pub use kompoz_navigationevent as navigationevent;
 pub use kompoz_platform as platform;
+// (stage 13 WP-R: Compose Multiplatform's resources; Coil's AsyncImage)
+pub use kompoz_coil as coil;
+pub use kompoz_resources as resources;
 pub use kompoz_runtime as runtime;
 /// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
 pub use kompoz_runtime::kt;
@@ -150,7 +153,9 @@ pub mod prelude {
     pub use kompoz_navigation::*;
     // (stage 13 WP-E: androidx.navigationevent{,.compose} — NavigationEvent, the dispatcher and its owner, handlers,
     // inputs, NavigationBackHandler, rememberNavigationEventState…)
+    pub use kompoz_coil::prelude::*;
     pub use kompoz_navigationevent::*;
+    pub use kompoz_resources::prelude::*;
     pub use kompoz_runtime::*;
     pub use kompoz_text::*;
     pub use kompoz_ui::*;

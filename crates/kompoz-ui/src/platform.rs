@@ -1387,6 +1387,38 @@ pub fn system_resolver() -> Rc<dyn FontFamilyResolver> {
     FontFamilyResolverImpl::system()
 }
 
+static SYSTEM_THEME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+static SYSTEM_DENSITY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The system's theme as the platform last told a host (skiko's `currentSystemTheme`: what code outside a
+/// composition reads, CMP's `getSystemResourceEnvironment`); light until told.
+pub fn current_system_theme() -> SystemTheme {
+    match SYSTEM_THEME.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => SystemTheme::Dark,
+        2 => SystemTheme::Unknown,
+        _ => SystemTheme::Light,
+    }
+}
+
+/// The screen's density (px a dp) as the platform last told a host; none until told (a headless process).
+pub fn current_system_density() -> Option<f32> {
+    let bits = SYSTEM_DENSITY.load(std::sync::atomic::Ordering::Relaxed);
+    (bits != 0).then(|| f32::from_bits(bits))
+}
+
+pub(crate) fn set_current_system_theme(theme: SystemTheme) {
+    let v = match theme {
+        SystemTheme::Light => 0,
+        SystemTheme::Dark => 1,
+        SystemTheme::Unknown => 2,
+    };
+    SYSTEM_THEME.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn set_current_system_density(density: f32) {
+    SYSTEM_DENSITY.store(density.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Whether the system is in its dark theme (Compose's `isSystemInDarkTheme`): reading it recomposes the reader when
 /// the platform says otherwise.
 pub fn is_system_in_dark_theme() -> bool {

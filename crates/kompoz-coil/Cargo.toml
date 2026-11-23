@@ -1,0 +1,25 @@
+[package]
+name = "kompoz-coil"
+description = "KompozR's AsyncImage (Coil 3's compose layer: AsyncImage, rememberAsyncImagePainter, SubcomposeAsyncImage, the painter's states, cross-fades) on the platform's image loader, with a memory cache of what it loaded"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+kompoz-material3 = { path = "../kompoz-material3" }
+kompoz-test = { path = "../kompoz-test" }
+
+[[test]]
+name = "async_image"
+harness = false

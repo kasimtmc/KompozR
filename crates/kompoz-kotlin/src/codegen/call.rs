@@ -1709,6 +1709,7 @@ impl Gen<'_, '_> {
         if is_keys(p) {
             return self.keys_tuple(all, span);
         }
+        let p = &PInfo { ty: without_lifetimes(&p.ty), ..p.clone() };
         let el = PInfo { ty: element_ty(&p.ty), vararg: false, ..p.clone() };
         // (a collection's elements of one type as Kotlin infers it: `listOf(null, Icons.Outlined.Info)` a list of
         // `ImageVector?`, its value given in `Some`; a list of lists too, and a declared type told — `val icons:
@@ -1783,7 +1784,7 @@ impl Gen<'_, '_> {
         }
         // (one value to a slice: an array of it, unless it is a list already — `floatArrayOf(8f, 6f)`)
         let a_list = matches!(a.value, ArgValue::Expr(e) if matches!(self.peek_ty(e), Ty::List(_)));
-        if p.vararg || (p.ty.trim_start().starts_with("&[") && !a.value.is_lambda() && !a_list) {
+        if p.vararg || (without_lifetimes(&p.ty).trim_start().starts_with("&[") && !a.value.is_lambda() && !a_list) {
             return self.many_value(&[a], p, span);
         }
         if is_keys(p) {
@@ -2267,6 +2268,26 @@ fn keeps_state(c: &Callee) -> bool {
 /// Whether a parameter takes keys (`keys: K`): several arguments are one tuple.
 fn is_keys(p: &PInfo) -> bool {
     matches!(p.rust.as_str(), "keys" | "inputs" | "key1") && p.ty.len() <= 2
+}
+
+/// A type's text without its lifetimes (`&'a [&'a dyn KtToString]` → `&[&dyn KtToString]`): a slice's form, what
+/// its elements are.
+fn without_lifetimes(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut chars = t.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\'' && chars.peek().is_some_and(|n| n.is_alphabetic() || *n == '_') {
+            while chars.peek().is_some_and(|n| n.is_alphanumeric() || *n == '_') {
+                chars.next();
+            }
+            if chars.peek() == Some(&' ') {
+                chars.next();
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The element type of a vararg's or slice's type (`&[ProvidedValue]` → `ProvidedValue`).

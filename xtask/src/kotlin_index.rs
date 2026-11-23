@@ -61,6 +61,9 @@ const API_CRATES: &[&str] = &[
     "kompoz-navigation",
     // (stage 13 WP-E: navigation events)
     "kompoz-navigationevent",
+    // (stage 13 WP-R: resources, Coil's AsyncImage)
+    "kompoz-resources",
+    "kompoz-coil",
     "kompoz-test",
 ];
 

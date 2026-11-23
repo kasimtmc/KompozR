@@ -1,9 +1,10 @@
 // Material's carousels as Compose's samples write them (material3 1.5's CarouselSamples, as written; their
 // @Sampled/@Preview annotations left out). Their local `data class CarouselItem`s are a Rust struct in
 // kotlin_search_carousel.rs (Kotlin's data classes come with stage 14), and their Android resources —
-// `R.drawable.carousel_image_N`, `R.string.carousel_image_N_description`, `painterResource`, `stringResource` —
-// that file's stand-ins until KompozR's resources (stage 13): a 3:2 image of a color of its own, its description
-// "Carousel image N". FadingHorizontalMultiBrowseCarouselSample's object expression is a GenericShape (said there).
+// `R.drawable.carousel_image_N`, `R.string.carousel_image_N_description`, `painterResource(id = …)`,
+// `stringResource(…)` — KompozR's (Compose Multiplatform's): `R.*` is tests/composeResources' `Res` (its images
+// 3:2 ones of a color of their own, its descriptions "Carousel image N", what the samples' own aren't here).
+// FadingHorizontalMultiBrowseCarouselSample's object expression is a GenericShape (said there).
 
 // ---- CarouselSamples.kt ----
 

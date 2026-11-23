@@ -532,6 +532,7 @@ impl KompozHost {
 
     /// Pixels per dp and the font scale (LocalDensity).
     pub fn set_density(&self, density: Density) {
+        set_current_system_density(density.density);
         self.update_environment(|e| {
             e.density = density;
             e.view_configuration = ViewConfiguration::for_density(density);
@@ -555,6 +556,7 @@ impl KompozHost {
 
     /// The system's theme (what `is_system_in_dark_theme` reads).
     pub fn set_system_dark_theme(&self, dark: bool) {
+        set_current_system_theme(if dark { SystemTheme::Dark } else { SystemTheme::Light });
         self.update_environment(|e| e.theme = if dark { SystemTheme::Dark } else { SystemTheme::Light });
     }
 

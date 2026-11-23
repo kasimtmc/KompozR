@@ -22,7 +22,8 @@
 //! `@android:anim/…`), attribute values compiled for their attribute's format; what it refers to otherwise
 //! (`@drawable/…`, `@animator/…`, `@interpolator/…`, `@color/…`, values, theme attributes) the caller's
 //! [`XmlResources`] give ([`AnimatedImageVector::from_animated_vector_xml_with`]). Compose's
-//! `animatedVectorResource` comes with KompozR's resources.
+//! `animatedVectorResource` reads one of KompozR's resources ([`animated_vector_resource`]: a `DrawableResource`
+//! of a generated `Res`, its `@drawable/…` references that `Res`'s).
 
 #![allow(non_upper_case_globals, non_snake_case)]
 
@@ -32,5 +33,5 @@ pub mod vector;
 #[cfg(test)]
 mod tests;
 
-pub use res::remember_animated_vector_painter;
+pub use res::{animated_vector_resource, load_animated_vector_resource, remember_animated_vector_painter};
 pub use vector::{AnimatedImageVector, NoXmlResources, ResourceReference, XmlResourceError, XmlResources};

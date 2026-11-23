@@ -86,6 +86,8 @@ pub enum FontFamily {
 
 impl FontFamily {
     /// A family of these fonts (Compose's FontFamily(vararg fonts)).
+    ///
+    /// Kotlin: `FontFamily(vararg fonts: Font)`
     pub fn new(fonts: impl IntoIterator<Item = Font>) -> FontFamily {
         FontFamily::List(FontListFontFamily::new(fonts))
     }

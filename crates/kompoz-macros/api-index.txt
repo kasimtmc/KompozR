@@ -77,6 +77,9 @@ kompoz-material3-adaptive/pane_scaffolds kompozable Article rr crates/kompoz-mat
 kompoz-material3/containers kompozable AssistChipSample - crates/kompoz-material3/tests/containers.rs
 * kompozable AssistChipWithChipBorder rrddddddddd crates/kompoz-material3/src/chip.rs
 * kompozable AssistChipWithoutArrangement rrddddddddd crates/kompoz-material3/src/chip.rs
+* kompozable AsyncImage rrddddddddddddd crates/kompoz-coil/src/compose.rs
+* super AsyncImagePainter - Painter
+* kompozable AsyncImageWith rrrddddddddd crates/kompoz-coil/src/compose.rs
 * super AutoSizeStepBased - TextAutoSize
 * super AwaitFirstLayoutElement - ModifierNodeElement
 * super AwaitFirstLayoutNode - LayoutAwareModifierNode
@@ -287,6 +290,8 @@ kompoz-runtime/subcomposition kompozable Column rr crates/kompoz-runtime/tests/c
 * super ContentInViewNode - LayoutAwareModifierNode
 * super ContentInViewNode - ModifierNode
 * super ContentPaddingScopeExt - ContentPaddingScope
+* super ContentPainterElement - ModifierNodeElement
+* super ContentPainterNode - ModifierNode
 * fn ContentTransform rrdd crates/kompoz-animation/src/animated_content.rs
 * kompozable ContextMenuArea rddr crates/kompoz-foundation/src/context_menu.rs
 * kompozable ContextMenuDataProvider rr crates/kompoz-foundation/src/context_menu.rs
@@ -314,6 +319,7 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 * kompozable Crossfade rdddr crates/kompoz-animation/src/crossfade.rs
 * method Crossfade dddr crates/kompoz-animation/src/crossfade.rs Transition
 * super CrossfadeBoxPolicy - MeasurePolicy
+* super CrossfadePainter - Painter
 * super CubicBezierEasing - Easing
 * super CursorDragObserver - TextDragObserver
 * kompozable CursorHandle rrr crates/kompoz-foundation/src/text/basic_text_field.rs
@@ -386,6 +392,7 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DefaultNavigationSuiteScaffoldWithPrimaryActionOverride - NavigationSuiteScaffoldWithPrimaryActionOverride
 * kompozable DefaultOpenContextMenu rrrr crates/kompoz-foundation/src/context_menu.rs
 * super DefaultPagerNestedScrollConnection - NestedScrollConnection
+* super DefaultResourceReader - ResourceReader
 * super DefaultScroll2DScope - Scroll2DScope
 * super DefaultScrollConfig - ScrollConfig
 * super DefaultScrollScope - ScrollScope
@@ -1432,6 +1439,7 @@ kompoz-runtime/runtime kompozable ReadsItsImplCallback rrrr crates/kompoz-runtim
 * super ReceiveContentNode - ModifierNode
 * super ReceiveContentTarget - DragAndDropTarget
 * super RecordedOutline - Shape
+* super Recorder - GraphicsContext
 * super RecordingCanvas - GraphicsContext
 * super RectangleShape - Shape
 * super ReferenceToken - AutoCloseable
@@ -1440,6 +1448,7 @@ kompoz-material3/swipe_pull kompozable RefreshTopAppBar rr crates/kompoz-materia
 * super Registry - LifecycleImpl
 * super RemeasurementElement - ModifierNodeElement
 * super RemeasurementNode - ModifierNode
+* super RememberedPainter - RememberObserver
 kompoz-runtime/macros kompozable Remembering r crates/kompoz-runtime/tests/macros.rs
 * super RenderInTransitionOverlayNode - DrawModifierNode
 * super RenderInTransitionOverlayNode - LayoutModifierNode
@@ -1832,6 +1841,11 @@ kompoz-foundation/text_field_value kompozable StringField rr crates/kompoz-found
 * super StyleStateScopeExt - StyleStateScope
 * kompozable StyledFloatingActionButton rrrrrrrrrrr crates/kompoz-material3/src/floating_action_button.rs
 * kompozable StyledLabel rrrrr crates/kompoz-material3/src/navigation_item.rs
+* kompozable SubcomposeAsyncImage rrdddddddddddddd crates/kompoz-coil/src/compose.rs
+* kompozable SubcomposeAsyncImageContent rd crates/kompoz-coil/src/compose.rs
+* kompozable SubcomposeAsyncImageWith rrrdddddddddr crates/kompoz-coil/src/compose.rs
+* super SubcomposeContentPainterElement - ModifierNodeElement
+* super SubcomposeContentPainterNode - ModifierNode
 * kompozable SubcomposeLayout ddr crates/kompoz-ui/src/layout/subcompose.rs
 * super SubcomposeMeasurePolicy - MeasurePolicy
 * super SubcomposeMeasureScope - MeasureScope
@@ -1855,6 +1869,7 @@ kompoz-material3-adaptive/samples kompozable SupportingPaneScaffoldSample - crat
 * super SuspendingBuilderStyle - BuilderStyle
 * super SuspendingPointerInputModifierNode - ModifierNode
 * super SuspendingPointerInputModifierNode - PointerInputModifierNode
+* super SvgPainter - Painter
 * kompozable SwipeToDismissBox rrdddddr crates/kompoz-material3/src/swipe_to_dismiss_box.rs
 * super SwipeToDismissBoxValue - Saveable
 kompoz-material3/swipe_pull kompozable SwipeToDismissListItems - crates/kompoz-material3/tests/swipe_pull.rs
@@ -2100,6 +2115,7 @@ kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/te
 * super UnspecifiedConstraintsNode - LayoutModifierNode
 * super UnspecifiedConstraintsNode - ModifierNode
 kompoz-runtime/runtime kompozable UpdatedReader rr crates/kompoz-runtime/tests/runtime.rs
+* super UseMinConstraints - MeasurePolicy
 * super ValidatingOffsetMapping - MapOffsets
 * kompozable ValueDecorationBox rrrrrrrrrrrrr crates/kompoz-material3/src/internal/text_field_impl.rs
 kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-foundation/tests/text_field_value.rs
@@ -2261,6 +2277,7 @@ kompoz-runtime/macros method add rd crates/kompoz-runtime/tests/macros.rs Steps
 kompoz-material3/theme kompozable animated_by_fast_spatial r crates/kompoz-material3/tests/theme.rs
 * kompozable animated_opacity rrd crates/kompoz-material3/src/snackbar_host.rs
 * kompozable animated_scale rr crates/kompoz-material3/src/snackbar_host.rs
+* kompozable animated_vector_resource r crates/kompoz-animation-graphics/src/res/animated_vector_resources.rs
 * method app_bar_with_search_colors dddddd crates/kompoz-material3/src/search_bar_defaults.rs SearchBarDefaults
 * method append_inline_content rd crates/kompoz-text/src/annotated_string.rs AnnotatedStringBuilder
 * method approach_layout rdr crates/kompoz-ui/src/layout/lookahead.rs Modifier
@@ -2422,6 +2439,7 @@ kompoz-runtime/macros method copy dddd crates/kompoz-runtime/tests/macros.rs Col
 * kompozable default_decay_animation_spec - crates/kompoz-animation/src/spline_decay.rs
 * kompozable default_locale - crates/kompoz-material3/src/calendar_locale.rs
 * method default_min_size dd crates/kompoz-foundation/src/layout/size.rs Modifier as SizeModifiers
+* kompozable default_remember_environment - crates/kompoz-resources/src/environment.rs
 * kompozable derived_media_query r crates/kompoz-ui/src/media_query.rs
 * method dismiss dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method double_click dd crates/kompoz-test/src/input.rs MouseInjectionScope
@@ -2513,6 +2531,7 @@ kompoz-runtime/macros fn first_word rd crates/kompoz-runtime/tests/macros.rs
 * method flow_with_lifecycle rd crates/kompoz-lifecycle/src/repeat.rs Flow as LifecycleFlowExtensions
 * method focus_restorer d crates/kompoz-ui/src/focus/restorer.rs Modifier
 * method focusable dd crates/kompoz-foundation/src/focusable.rs Modifier as FocusableModifiers
+* kompozable font_resource rddd crates/kompoz-resources/src/font.rs
 * method get_or_create_owner rdddd crates/kompoz-lifecycle/src/viewmodel/store_provider.rs ViewModelStoreProvider
 * method get_text_layout_result dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * kompozable get_window_container_height - crates/kompoz-material3/src/search_bar_desktop.rs
@@ -2545,6 +2564,7 @@ kompoz-material3/icon_buttons kompozable icon rr crates/kompoz-material3/tests/i
 * method icon_size_of rd crates/kompoz-material3/src/floating_action_button_menu.rs ToggleFloatingActionButtonDefaults
 * method icon_toggle_button_colors dddddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
 * method icon_toggle_button_vibrant_colors dddddd crates/kompoz-material3/src/icon_button_defaults.rs IconButtonDefaults
+* kompozable image_resource r crates/kompoz-resources/src/image.rs
 * kompozable indicator_line rrr crates/kompoz-material3/src/tab_row.rs
 * method indicator_line rrrdddd crates/kompoz-material3/src/text_field.rs Modifier as IndicatorLineModifiers
 * method indicator_padding rdd crates/kompoz-material3/src/wide_navigation_rail.rs WideNavigationRailItemDefaults
@@ -2659,7 +2679,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method page_right dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method page_up dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
 * method paint rddddd crates/kompoz-ui/src/draw/painter.rs Modifier
-kompoz/kotlin_search_carousel fn painter_resource r crates/kompoz/tests/kotlin_search_carousel.rs
+* kompozable painter_resource r crates/kompoz-resources/src/image.rs
 * method pan_by rd crates/kompoz-foundation/src/gestures/transformable_state.rs {S} as TransformableStateExtensions
 * method pane_expansion_draggable_of rrrrd crates/kompoz-material3-adaptive/src/layout/pane_scaffold.rs {S} as PaneScaffoldScopeDraggable
 * method paste_text dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
@@ -2676,6 +2696,8 @@ kompoz/kotlin_search_carousel fn painter_resource r crates/kompoz/tests/kotlin_s
 * method place_with_layer rrrdr crates/kompoz-ui/src/layout/measure.rs PlacementScope
 * kompozable placeholder_opacity rr crates/kompoz-material3/src/internal/text_field_impl.rs
 * kompozable platform_window_bounds_calculator - crates/kompoz-material3/src/exposed_dropdown_menu_desktop.rs
+* kompozable plural_string_resource rr crates/kompoz-resources/src/strings.rs
+* kompozable plural_string_resource_formatted rrr crates/kompoz-resources/src/strings.rs
 * method pointer_hover_icon rd crates/kompoz-ui/src/input/hover_icon.rs Modifier
 * kompozable popup_properties_for_anchor_type rr crates/kompoz-material3/src/exposed_dropdown_menu_desktop.rs
 * method press d crates/kompoz-test/src/input.rs MouseInjectionScope
@@ -2701,12 +2723,15 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_animated_vector_painter rr crates/kompoz-animation-graphics/src/res/animated_vector_painter.rs
 * kompozable remember_animated_vector_painter_with rrr crates/kompoz-animation-graphics/src/res/animated_vector_painter.rs
 * kompozable remember_app_bar_overflow_state - crates/kompoz-material3/src/app_bar_dsl.rs
+* kompozable remember_async_image_painter rdddddddd crates/kompoz-coil/src/compose.rs
+* kompozable remember_async_image_painter_with rrdddd crates/kompoz-coil/src/compose.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-foundation/src/basic_tooltip.rs
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-material3/src/internal/basic_tooltip.rs
 * kompozable remember_bottom_app_bar_state ddd crates/kompoz-material3/src/bottom_app_bar.rs
 * kompozable remember_bottom_sheet_scaffold_state dd crates/kompoz-material3/src/bottom_sheet_scaffold.rs
 * kompozable remember_carousel_state dr crates/kompoz-material3/src/carousel/carousel_state.rs
 * kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
+* kompozable remember_constraints_size_resolver - crates/kompoz-coil/src/compose.rs
 * kompozable remember_contained_search_bar_state ddddd crates/kompoz-material3/src/search_bar.rs
 * kompozable remember_cursor_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_date_picker_state ddddd crates/kompoz-material3/src/date_picker.rs
@@ -2758,6 +2783,8 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_predictive_back_state - crates/kompoz-material3/src/internal/basic_edge_to_edge_dialog.rs
 * kompozable remember_pull_to_refresh_state - crates/kompoz-material3/src/pulltorefresh.rs
 * kompozable remember_range_slider_state ddddd crates/kompoz-material3/src/slider/state.rs
+* kompozable remember_resource_environment - crates/kompoz-resources/src/environment.rs
+* kompozable remember_resource_state rrr crates/kompoz-resources/src/state.rs
 * method remember_rich_tooltip_position_provider d crates/kompoz-material3/src/tooltip.rs TooltipDefaults
 * kompozable remember_scaffold_transition r crates/kompoz-material3-adaptive/src/layout/three_pane_scaffold_state.rs
 * kompozable remember_scope_lambda R crates/kompoz-material3-adaptive-navigation-suite/src/navigation_suite_scaffold.rs
@@ -2818,6 +2845,8 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * fn repeatable rrdd crates/kompoz-animation/src/spec.rs
 * method request_focus d crates/kompoz-ui/src/focus/requester.rs FocusRequester
 * method request_focus dr crates/kompoz-ui/src/semantics/properties.rs SemanticsConfiguration
+* kompozable request_of r crates/kompoz-coil/src/compose.rs
+* kompozable request_of_with_size_resolver rr crates/kompoz-coil/src/compose.rs
 * method request_scroll_to_item rd crates/kompoz-foundation/src/lazy/grid/state.rs LazyGridState
 * method request_scroll_to_item rd crates/kompoz-foundation/src/lazy/list/state.rs LazyListState
 * method request_scroll_to_item rd crates/kompoz-foundation/src/lazy/staggeredgrid/state.rs LazyStaggeredGridState
@@ -2912,13 +2941,18 @@ kompoz-runtime/macros method size rd crates/kompoz-runtime/tests/macros.rs Modif
 * method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable2d_state.rs {S} as Scrollable2DStateExtensions
 * method stop_scroll d crates/kompoz-foundation/src/gestures/scrollable_state.rs {S} as ScrollableStateExtensions
 * method stop_transformation d crates/kompoz-foundation/src/gestures/transformable_state.rs {S} as TransformableStateExtensions
+* kompozable string_array_resource r crates/kompoz-resources/src/strings.rs
+* kompozable string_resource r crates/kompoz-resources/src/strings.rs
+* kompozable string_resource_formatted rr crates/kompoz-resources/src/strings.rs
 * method styleable dr crates/kompoz-foundation/src/style/modifier.rs Modifier as StyleModifiers
 * method stylus_hover_icon rdd crates/kompoz-ui/src/input/hover_icon.rs Modifier
+* kompozable subcompose_async_image_content rr crates/kompoz-coil/src/compose.rs
 * method suggestion_chip_border rddd crates/kompoz-material3/src/chip.rs SuggestionChipDefaults
 * method suggestion_chip_chip_border ddd crates/kompoz-material3/src/chip.rs SuggestionChipDefaults
 * method suggestion_chip_colors dddddd crates/kompoz-material3/src/chip.rs SuggestionChipDefaults
 * method suggestion_chip_elevation dddddd crates/kompoz-material3/src/chip.rs SuggestionChipDefaults
 * method supporting_text_padding dddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
+* kompozable svg_painter r crates/kompoz-resources/src/image.rs
 * method swipe rrd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method swipe_down ddd crates/kompoz-test/src/input.rs TouchInjectionScope
 * method swipe_left ddd crates/kompoz-test/src/input.rs TouchInjectionScope
@@ -2964,6 +2998,7 @@ kompoz-runtime/macros fn top_app_bar_colors dd crates/kompoz-runtime/tests/macro
 * kompozable update_transition rd crates/kompoz-animation/src/transition.rs
 * kompozable update_transition_of_state rd crates/kompoz-animation/src/transition.rs
 * kompozable value_as_state rrrrrr crates/kompoz-animation/src/animate_as_state.rs
+* kompozable vector_resource r crates/kompoz-resources/src/image.rs
 * fn veil_out ddd crates/kompoz-animation/src/enter_exit.rs
 * method vertical_scroll rddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers
 * method vertical_scroll_with_overscroll rrddd crates/kompoz-foundation/src/scroll.rs Modifier as ScrollModifiers

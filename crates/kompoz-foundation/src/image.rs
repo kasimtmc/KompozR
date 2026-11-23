@@ -29,6 +29,8 @@ pub fn Image(
 }
 
 /// A bitmap as an [`Image`] (Compose's `Image(bitmap, …)`), sampled as `filter_quality` says.
+///
+/// Kotlin: `Image(bitmap: ImageBitmap, contentDescription: String?, modifier: Modifier = Modifier, alignment: Alignment = Alignment.Center, contentScale: ContentScale = ContentScale.Fit, alpha: Float = DefaultAlpha, colorFilter: ColorFilter? = null, filterQuality: FilterQuality = DefaultFilterQuality)`
 #[kompozable]
 #[allow(clippy::too_many_arguments)]
 pub fn BitmapImage(
@@ -49,6 +51,8 @@ pub fn BitmapImage(
 }
 
 /// A vector as an [`Image`] (Compose's `Image(imageVector, …)`), in its own colors unless filtered.
+///
+/// Kotlin: `Image(imageVector: ImageVector, contentDescription: String?, modifier: Modifier = Modifier, alignment: Alignment = Alignment.Center, contentScale: ContentScale = ContentScale.Fit, alpha: Float = DefaultAlpha, colorFilter: ColorFilter? = null)`
 #[kompozable]
 #[allow(clippy::too_many_arguments)]
 pub fn VectorImage(

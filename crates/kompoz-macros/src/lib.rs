@@ -44,6 +44,8 @@ mod api_index;
 mod builder;
 mod known;
 mod kotlin_properties;
+// (stage 13 WP-R: compose_resources!)
+mod resources;
 // (stage 13 WP1: #[derive(Saveable)])
 mod route;
 mod saveable;
@@ -816,4 +818,26 @@ fn declaration(sig: &Signature) -> Signature {
         }
     }
     sig
+}
+
+/// A crate's `composeResources/` directory as its `Res` (Compose Multiplatform's generated `Res` class, made at build
+/// time as CMP's Gradle plugin makes it): `compose_resources!()` reads `composeResources/` of the calling crate;
+/// `compose_resources!(dir = "tests/composeResources", package = "com.example.generated.resources", name = Res,
+/// public = true)` another directory, another package (the files' path in the resources, CMP's
+/// `packageOfResClass`; `<crate>.generated.resources` by default), another name (`nameOfResClass`), a `pub` module
+/// (`publicResClass`; `pub(crate)` by default). It makes a module: `Res::drawable::logo()` (a `DrawableResource`),
+/// `Res::string::…`, `Res::array::…`, `Res::plurals::…`, `Res::font::…`, `Res::read_bytes(path)`,
+/// `Res::get_uri(path)`, `Res::all_drawable_resources()` …; the files are embedded in the program (a file's change
+/// rebuilds it; for a file added or removed to do so too, a build script with
+/// `println!("cargo:rerun-if-changed=composeResources");`).
+#[proc_macro]
+pub fn compose_resources(item: TokenStream) -> TokenStream {
+    let options = parse_macro_input!(item as resources::Options);
+    match resources::expand(options) {
+        Ok(ts) => ts.into(),
+        Err(message) => {
+            let message = format!("kompoz: {message}");
+            quote!(::core::compile_error!(#message);).into()
+        }
+    }
 }

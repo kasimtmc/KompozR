@@ -1,0 +1,25 @@
+[package]
+name = "kompoz-resources"
+description = "KompozR's resources (Compose Multiplatform's components-resources): a composeResources/ directory's drawables (bitmaps, vector drawables, SVGs), fonts, strings, quantity strings and string arrays, picked by language, region, theme and density, read through the Res the compose_resources! macro generates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-macros = { path = "../kompoz-macros" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-test = { path = "../kompoz-test" }
+
+[[test]]
+name = "resources"
+harness = false

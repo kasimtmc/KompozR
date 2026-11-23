@@ -28,6 +28,8 @@ libc = "0.2"
 writeable = "0.6.4"
 
 [dev-dependencies]
+# (its carousel samples' images and descriptions: tests/composeResources)
+kompoz-resources = { path = "../kompoz-resources" }
 # (closing: the overlays test's animated vector)
 kompoz-animation-graphics = { path = "../kompoz-animation-graphics" }
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }

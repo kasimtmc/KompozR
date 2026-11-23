@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kompoz</string>
+    <string name="greeting">Hello, %1$s! You have %2$d new messages.</string>
+    <string name="special">Line\nTab\tUnicode ç kept \\n &amp; &lt;b&gt; <![CDATA[<i>raw</i>]]></string>
+    <string name="only_default">Only in English</string>
+    <string name="multi-part">dashed key</string>
+    <plurals name="messages">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="apples">
+        <item quantity="zero">no apples</item>
+        <item quantity="one">one apple</item>
+        <item quantity="other">%1$d apples</item>
+    </plurals>
+    <string-array name="planets">
+        <item>Mercury</item>
+        <item>Venus</item>
+        <item>Earth</item>
+    </string-array>
+</resources>

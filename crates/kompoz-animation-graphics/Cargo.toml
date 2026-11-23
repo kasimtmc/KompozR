@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 kompoz-animation = { path = "../kompoz-animation" }
 kompoz-graphics = { path = "../kompoz-graphics" }
+# (stage 13 WP-R: animatedVectorResource on the resources)
+kompoz-resources = { path = "../kompoz-resources" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-ui = { path = "../kompoz-ui" }
 
@@ -27,4 +29,10 @@ harness = false
 # rememberAnimatedVectorPainter: the painter played forward and back by its Transition.
 [[test]]
 name = "painter"
+harness = false
+
+# animatedVectorResource: an animated vector drawable of tests/composeResources through its Res, its drawable by
+# reference.
+[[test]]
+name = "animated_vector_resource"
 harness = false

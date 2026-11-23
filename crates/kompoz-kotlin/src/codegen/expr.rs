@@ -581,10 +581,78 @@ impl Gen<'_, '_> {
         Some(path)
     }
 
+    /// Whether `name` (`Res`, Android's `R`) is the generated resources' module here: none of the file's, its
+    /// locals' or receivers' names.
+    fn is_res(&self, name: &str) -> bool {
+        (name == "Res" || name == "R")
+            && !self.is_local(name)
+            && !self.file.vals.contains_key(name)
+            && !self.receivers.iter().any(|r| members_of(&r.ty, name).next().is_some())
+    }
+
+    /// The resource class of the accessors of `receiver` (`Res.drawable`, `R.string`): `DrawableResource`,
+    /// `StringResource`, `StringArrayResource` (`array`), `PluralStringResource` (`plurals`), `FontResource`.
+    pub(crate) fn resource_class(&self, receiver: &Expr) -> Option<&'static str> {
+        let ExprKind::Member { receiver: res, safe: false, name: kind } = &receiver.kind else { return None };
+        let ExprKind::Name(res) = &res.kind else { return None };
+        if !self.is_res(&res.name) {
+            return None;
+        }
+        Some(match kind.name.as_str() {
+            "drawable" => "DrawableResource",
+            "string" => "StringResource",
+            "array" => "StringArrayResource",
+            "plurals" => "PluralStringResource",
+            "font" => "FontResource",
+            _ => return None,
+        })
+    }
+
+    /// A generated resource accessor `e` is: `Res.drawable.logo` (Compose Multiplatform's) or Android's
+    /// `R.drawable.logo` — the crate's `Res` (`compose_resources!`) either way, `Res::drawable::logo()` —, and the
+    /// resource class it gives; `Res.allDrawableResources` … (`Res::all_drawable_resources()`, a map by name).
+    pub(crate) fn resource_accessor(&mut self, e: &Expr) -> Option<Out> {
+        let ExprKind::Member { receiver, safe: false, name } = &e.kind else { return None };
+        let span = self.span(e.loc);
+        if let ExprKind::Name(res) = &receiver.kind
+            && res.name == "Res"
+            && self.is_res(&res.name)
+            && let Some(class) = name.name.strip_prefix("all").and_then(|n| n.strip_suffix('s'))
+            && class.ends_with("Resource")
+        {
+            let mut lower = String::new();
+            for (i, c) in class.chars().enumerate() {
+                if c.is_ascii_uppercase() {
+                    if i > 0 {
+                        lower.push('_');
+                    }
+                    lower.push(c.to_ascii_lowercase());
+                } else {
+                    lower.push(c);
+                }
+            }
+            let f = self.name_ident(&format!("all_{lower}s"), name.loc);
+            return Some(Out::plain(quote_spanned!(span=> Res::#f().clone()), Ty::Unknown));
+        }
+        let class = self.resource_class(receiver)?;
+        let ExprKind::Member { name: kind, .. } = &receiver.kind else { return None };
+        let m = self.name_ident(&kind.name, kind.loc);
+        let f = self.name_ident(&name.name.replace('-', "_"), name.loc);
+        Some(Out::plain(quote_spanned!(span=> Res::#m::#f()), Ty::named(class)))
+    }
+
     /// `a.b` read: a type's constant or entry (`Color.Red` → `Color::Red`), an object's member, a value's property
     /// (`size.width` → `size.width()`), a kt shim's (`s.length` → `KtStr::length(&s)`); `a?.b` through `safe!`.
     fn member(&mut self, receiver: &Expr, safe: bool, name: &Ident, loc: Loc) -> Out {
         let span = self.span(loc);
+        // A generated resource (`Res.drawable.logo`, Android's `R.string.title`): the crate's `Res`'s accessor.
+        if !safe {
+            let e =
+                Expr { kind: ExprKind::Member { receiver: Box::new(receiver.clone()), safe, name: name.clone() }, loc };
+            if let Some(out) = self.resource_accessor(&e) {
+                return out;
+            }
+        }
         // A Material icon (`Icons.Filled.Add`, `Icons.AutoMirrored.Filled.ArrowBack`): the icons crates' function of
         // its theme's module (`Icons::Filled::Add()`), not an item of the index (thousands of them, and more as
         // icon sets join `Icons`' themes).
@@ -1342,6 +1410,9 @@ impl Gen<'_, '_> {
                 }
                 if !*safe && self.icon_theme(receiver).is_some() {
                     return Ty::named("ImageVector");
+                }
+                if !*safe && let Some(class) = self.resource_class(receiver) {
+                    return Ty::named(class);
                 }
                 if let Some(q) = self.qualifier(receiver) {
                     if name.name == "Companion" {

@@ -1151,25 +1151,27 @@ fn rich_tooltips_take_compose_named_arguments() {
 mod carousel_kt {
     use kompoz::prelude::*;
     use kompoz::ui::back::BackHandler;
-    use kompoz::ui::draw::{BitmapPainter, Painter};
-    use std::rc::Rc;
+
+    // The samples' Android resources (`R.drawable.carousel_image_N`, `R.string.carousel_image_N_description`) as
+    // KompozR's (Compose Multiplatform's): tests/composeResources' `Res`, which the Kotlin syntax maps `R.*` to.
+    compose_resources!(dir = "tests/composeResources");
 
     /// The samples' local `data class CarouselItem(val id: Int, @DrawableRes val imageResId: Int, @StringRes val
-    /// contentDescriptionResId: Int)` (and the multi-aspect sample's, with `val mainAxisSize: Dp`): Kotlin's data
-    /// classes come with stage 14. Its properties are getters, as Kotlin's.
-    #[derive(Clone, Copy, PartialEq, Debug)]
+    /// contentDescriptionResId: Int)` (and the multi-aspect sample's, with `val mainAxisSize: Dp`), its resource
+    /// ids CMP's resources: Kotlin's data classes come with stage 14. Its properties are getters, as Kotlin's.
+    #[derive(Clone, PartialEq, Debug)]
     pub struct CarouselItem {
         id: i32,
-        image_res_id: i32,
-        content_description_res_id: i32,
+        image_res_id: DrawableResource,
+        content_description_res_id: StringResource,
         main_axis_size: Dp,
     }
 
     #[named(type)]
     pub fn CarouselItem(
         id: i32,
-        image_res_id: i32,
-        content_description_res_id: i32,
+        image_res_id: DrawableResource,
+        content_description_res_id: StringResource,
         #[default(Dp(0.0))] main_axis_size: Dp,
     ) -> CarouselItem {
         CarouselItem { id, image_res_id, content_description_res_id, main_axis_size }
@@ -1181,88 +1183,15 @@ mod carousel_kt {
         pub fn id(&self) -> i32 {
             self.id
         }
-        pub fn image_res_id(&self) -> i32 {
-            self.image_res_id
+        pub fn image_res_id(&self) -> DrawableResource {
+            self.image_res_id.clone()
         }
-        pub fn content_description_res_id(&self) -> i32 {
-            self.content_description_res_id
+        pub fn content_description_res_id(&self) -> StringResource {
+            self.content_description_res_id.clone()
         }
         pub fn main_axis_size(&self) -> Dp {
             self.main_axis_size
         }
-    }
-
-    /// Android's generated `R` class of the samples' resources (KompozR's resources are stage 13's): its
-    /// `R.drawable.carousel_image_N` and `R.string.carousel_image_N_description` ids.
-    pub struct Resources;
-
-    pub struct Drawables;
-
-    pub struct Strings;
-
-    pub const R: Resources = Resources;
-
-    impl Resources {
-        pub fn drawable(&self) -> Drawables {
-            Drawables
-        }
-        pub fn string(&self) -> Strings {
-            Strings
-        }
-    }
-
-    impl Drawables {
-        pub fn carousel_image_1(&self) -> i32 {
-            1
-        }
-        pub fn carousel_image_2(&self) -> i32 {
-            2
-        }
-        pub fn carousel_image_3(&self) -> i32 {
-            3
-        }
-        pub fn carousel_image_4(&self) -> i32 {
-            4
-        }
-        pub fn carousel_image_5(&self) -> i32 {
-            5
-        }
-    }
-
-    impl Strings {
-        pub fn carousel_image_1_description(&self) -> i32 {
-            1
-        }
-        pub fn carousel_image_2_description(&self) -> i32 {
-            2
-        }
-        pub fn carousel_image_3_description(&self) -> i32 {
-            3
-        }
-        pub fn carousel_image_4_description(&self) -> i32 {
-            4
-        }
-        pub fn carousel_image_5_description(&self) -> i32 {
-            5
-        }
-    }
-
-    /// Compose's `painterResource(id)` for the samples' images: a 3:2 image of a color of its own.
-    #[named]
-    pub fn painter_resource(id: i32) -> Rc<dyn Painter> {
-        let shade = (id * 40) as u8;
-        let pixels: Vec<u8> = (0..60 * 40).flat_map(|_| [shade, 255 - shade, 128, 255]).collect();
-        Rc::new(BitmapPainter::new(
-            ImageBitmap::from_pixels(60, 40, pixels).expect("pixels"),
-            IntOffset::Zero,
-            IntSize::new(60, 40),
-            FilterQuality::Low,
-        ))
-    }
-
-    /// Compose's `stringResource(id)` for the samples' descriptions.
-    pub fn string_resource(id: i32) -> String {
-        format!("Carousel image {id}")
     }
 
     kompoz_file!("tests/kt/carousel.kt");

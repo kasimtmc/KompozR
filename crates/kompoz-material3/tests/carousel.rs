@@ -15,10 +15,10 @@ use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_material3::prelude::*;
+use kompoz_resources::{DrawableResource, StringResource, compose_resources, painter_resource, string_resource};
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas};
 use kompoz_ui::back::BackHandler;
-use kompoz_ui::draw::{BitmapPainter, Painter};
 use kompoz_ui::input::PointerType;
 use kompoz_ui::layout::GraphicsLayerScope;
 use kompoz_ui::platform::LocalLayoutDirection;
@@ -772,43 +772,41 @@ fn multi_aspect_carousels_mask_lazy_grid_items() {
 }
 
 // ---- M15's CarouselSamples.kt ---------------------------------------------------------------------------------------
-// Their images are Android resources (`painterResource(R.drawable.carousel_image_N)`, `stringResource(…)`), which
-// wait for KompozR's resources (stage 13): a painter of a color of the image's own stands for each image, the
-// description is its text. Their local `data class CarouselItem` is a struct here.
+// Their images are Android resources (`painterResource(R.drawable.carousel_image_N)`, `stringResource(…)`): KompozR's
+// (Compose Multiplatform's) here, tests/composeResources' `Res` (its images 3:2 ones of a color of their own, as the
+// samples' photos are images the items crop; its descriptions "Carousel image N"). Their local `data class
+// CarouselItem` is a struct here.
+
+compose_resources!(dir = "tests/composeResources");
 
 /// The samples' `R.drawable.carousel_image_1` … `_5`, `R.string.carousel_image_1_description` … `_5`.
-const CarouselImages: [i32; 5] = [1, 2, 3, 4, 5];
-
-/// The sample's `painterResource(id = …)`: a 3:2 image of a color of its own (as the samples' photos, an intrinsic
-/// size the images are cropped from).
-fn painter_resource(id: i32) -> Rc<dyn Painter> {
-    let shade = (id * 40) as u8;
-    let pixels: Vec<u8> = (0..60 * 40).flat_map(|_| [shade, 255 - shade, 128, 255]).collect();
-    Rc::new(BitmapPainter::new(
-        ImageBitmap::from_pixels(60, 40, pixels).expect("pixels"),
-        IntOffset::Zero,
-        IntSize::new(60, 40),
-        FilterQuality::Low,
-    ))
+fn carousel_images() -> [(DrawableResource, StringResource); 5] {
+    [
+        (Res::drawable::carousel_image_1(), Res::string::carousel_image_1_description()),
+        (Res::drawable::carousel_image_2(), Res::string::carousel_image_2_description()),
+        (Res::drawable::carousel_image_3(), Res::string::carousel_image_3_description()),
+        (Res::drawable::carousel_image_4(), Res::string::carousel_image_4_description()),
+        (Res::drawable::carousel_image_5(), Res::string::carousel_image_5_description()),
+    ]
 }
 
-/// The sample's `stringResource(…)`.
-fn string_resource(id: i32) -> String {
-    format!("Carousel image {id}")
+/// Image `i`'s description, as its string resource says it.
+fn description(i: i32) -> String {
+    format!("Carousel image {i}")
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 struct CarouselItem {
     id: i32,
-    image_res_id: i32,
-    content_description_res_id: i32,
+    image_res_id: DrawableResource,
+    content_description_res_id: StringResource,
 }
 
 fn sample_items() -> Vec<CarouselItem> {
-    CarouselImages
-        .iter()
+    carousel_images()
+        .into_iter()
         .enumerate()
-        .map(|(i, &r)| CarouselItem { id: i as i32, image_res_id: r, content_description_res_id: r })
+        .map(|(i, (image, text))| CarouselItem { id: i as i32, image_res_id: image, content_description_res_id: text })
         .collect()
 }
 
@@ -818,7 +816,7 @@ fn extra_large() -> Arc<dyn Shape> {
 }
 
 fn description_bounds(rule: &KompozTestRule, i: i32) -> Rect {
-    rule.on_node_with_content_description(&string_resource(i)).get_unclipped_bounds_in_root()
+    rule.on_node_with_content_description(&description(i)).get_unclipped_bounds_in_root()
 }
 
 #[kompozable]
@@ -834,7 +832,7 @@ fn HorizontalMultiBrowseCarouselSample() {
         item_spacing = 8.dp(),
         content_padding = PaddingValues::hv(16.dp(), 0.dp()),
         content = move |scope: &CarouselItemScope, i: i32| {
-            let item = items[i as usize];
+            let item = items[i as usize].clone();
             let (s, animation_scope) = (s.clone(), animation_scope.clone());
             let modifier = Modifier.height(205.dp()).fill_max_width().clickable(
                 true,
@@ -848,8 +846,8 @@ fn HorizontalMultiBrowseCarouselSample() {
             kompozable_block!({
                 Image(
                     modifier = scope.mask_clip(modifier, extra_large()),
-                    painter = painter_resource(item.image_res_id),
-                    content_description = Some(string_resource(item.content_description_res_id)),
+                    painter = painter_resource(item.image_res_id.clone()),
+                    content_description = Some(string_resource(item.content_description_res_id.clone())),
                     content_scale = ContentScale::Crop,
                 );
             });
@@ -867,12 +865,12 @@ fn HorizontalUncontainedCarouselSample() {
         item_spacing = 8.dp(),
         content_padding = PaddingValues::hv(16.dp(), 0.dp()),
         content = move |scope: &CarouselItemScope, i: i32| {
-            let item = items[i as usize];
+            let item = items[i as usize].clone();
             kompozable_block!({
                 Image(
                     modifier = scope.mask_clip(Modifier.height(205.dp()), extra_large()),
-                    painter = painter_resource(item.image_res_id),
-                    content_description = Some(string_resource(item.content_description_res_id)),
+                    painter = painter_resource(item.image_res_id.clone()),
+                    content_description = Some(string_resource(item.content_description_res_id.clone())),
                     content_scale = ContentScale::Crop,
                 );
             });
@@ -892,7 +890,7 @@ fn HorizontalCenteredHeroCarouselSample() {
         item_spacing = 8.dp(),
         content_padding = PaddingValues::hv(16.dp(), 0.dp()),
         content = move |scope: &CarouselItemScope, i: i32| {
-            let item = items[i as usize];
+            let item = items[i as usize].clone();
             let (s, animation_scope) = (s.clone(), animation_scope.clone());
             let clipped = scope.mask_clip(Modifier.fill_max_width().height(205.dp()), extra_large());
             kompozable_block!({
@@ -901,8 +899,8 @@ fn HorizontalCenteredHeroCarouselSample() {
                         clipped.clickable(true, Some("Tap to focus".into()), Some(Role::Image), None, move || {
                             named_args!(animation_scope.launch(named_args!(s.animate_scroll_to_item(i))));
                         }),
-                    painter = painter_resource(item.image_res_id),
-                    content_description = Some(string_resource(item.content_description_res_id)),
+                    painter = painter_resource(item.image_res_id.clone()),
+                    content_description = Some(string_resource(item.content_description_res_id.clone())),
                     content_scale = ContentScale::Crop,
                 );
             });
@@ -923,7 +921,7 @@ fn FadingHorizontalMultiBrowseCarouselSample() {
         item_spacing = 8.dp(),
         content_padding = PaddingValues::hv(16.dp(), 0.dp()),
         content = move |scope: &CarouselItemScope, i: i32| {
-            let item = items[i as usize];
+            let item = items[i as usize].clone();
             let scope = scope.clone();
             kompozable_block!({
                 // For item 1 and 4, a stacked item layout clipping two images on their own to the item's mask.
@@ -938,8 +936,8 @@ fn FadingHorizontalMultiBrowseCarouselSample() {
                             let m = scope.mask_border(m, BorderStroke(3.dp(), Color::Magenta), large);
                             Image(
                                 modifier = m,
-                                painter = painter_resource(item.image_res_id),
-                                content_description = Some(string_resource(item.content_description_res_id)),
+                                painter = painter_resource(item.image_res_id.clone()),
+                                content_description = Some(string_resource(item.content_description_res_id.clone())),
                                 content_scale = ContentScale::Crop,
                             );
                             let small: Arc<dyn Shape> = Arc::new(RoundedCornerShape(8.dp()));
@@ -947,8 +945,8 @@ fn FadingHorizontalMultiBrowseCarouselSample() {
                             let m = scope.mask_border(m, BorderStroke(5.dp(), Color::Green), small);
                             Image(
                                 modifier = m,
-                                painter = painter_resource(item.image_res_id),
-                                content_description = Some(string_resource(item.content_description_res_id)),
+                                painter = painter_resource(item.image_res_id.clone()),
+                                content_description = Some(string_resource(item.content_description_res_id.clone())),
                                 content_scale = ContentScale::Crop,
                             );
                         },
@@ -973,8 +971,8 @@ fn FadingHorizontalMultiBrowseCarouselSample() {
                         modifier = m,
                         content = move || {
                             Image(
-                                painter = painter_resource(item.image_res_id),
-                                content_description = Some(string_resource(item.content_description_res_id)),
+                                painter = painter_resource(item.image_res_id.clone()),
+                                content_description = Some(string_resource(item.content_description_res_id.clone())),
                                 modifier = Modifier.fill_max_size(),
                                 content_scale = ContentScale::Crop,
                             );
@@ -1025,10 +1023,10 @@ fn CarouselWithShowAllButtonSample() {
                 this.items(
                     items.len() as i32,
                     item_content = move |i| {
-                        let item = items[i as usize];
+                        let item = items[i as usize].clone();
                         Image(
-                            painter = painter_resource(item.image_res_id),
-                            content_description = Some(string_resource(item.content_description_res_id)),
+                            painter = painter_resource(item.image_res_id.clone()),
+                            content_description = Some(string_resource(item.content_description_res_id.clone())),
                             modifier = Modifier.height(205.dp()).clip(MaterialTheme::shapes().extra_large.clone()),
                             content_scale = ContentScale::Crop,
                         );
@@ -1050,12 +1048,12 @@ fn CarouselWithShowAllButtonSample() {
                     item_spacing = 8.dp(),
                     content_padding = PaddingValues::hv(16.dp(), 0.dp()),
                     content = move |scope: &CarouselItemScope, i: i32| {
-                        let item = items[i as usize];
+                        let item = items[i as usize].clone();
                         kompozable_block!({
                             Image(
                                 modifier = scope.mask_clip(Modifier.height(205.dp()), extra_large()),
-                                painter = painter_resource(item.image_res_id),
-                                content_description = Some(string_resource(item.content_description_res_id)),
+                                painter = painter_resource(item.image_res_id.clone()),
+                                content_description = Some(string_resource(item.content_description_res_id.clone())),
                                 content_scale = ContentScale::Crop,
                             );
                         });
@@ -1101,8 +1099,8 @@ fn MultiAspectCarouselLazyRowSample() {
                         let state = state.clone();
                         let draw_info = remember(move || MultiAspectCarouselItemDrawInfo(i, state));
                         Image(
-                            painter = painter_resource(item.image_res_id),
-                            content_description = Some(string_resource(item.content_description_res_id)),
+                            painter = painter_resource(item.image_res_id.clone()),
+                            content_description = Some(string_resource(item.content_description_res_id.clone())),
                             modifier = carousel.mask_clip(
                                 Modifier.width(*main_axis_size).height(205.dp()),
                                 extra_large(),
@@ -1125,10 +1123,10 @@ fn horizontal_multi_browse_carousel_sample() {
     );
     rule.wait_for_idle();
     for i in 1..=3 {
-        rule.on_node_with_content_description(&string_resource(i)).assert_exists();
+        rule.on_node_with_content_description(&description(i)).assert_exists();
     }
     let before = description_bounds(&rule, 3);
-    rule.on_node_with_content_description(&string_resource(3)).perform_click();
+    rule.on_node_with_content_description(&description(3)).perform_click();
     rule.wait_for_idle();
     assert!(description_bounds(&rule, 3).left < before.left - 100.0, "{before:?}");
     assert_eq!(sample_items()[2].id, 2);
@@ -1173,7 +1171,7 @@ fn fading_horizontal_multi_browse_carousel_sample() {
         IntSize::new(412, 800),
     );
     rule.wait_for_idle();
-    assert_eq!(rule.on_all_nodes_with_content_description(&string_resource(2)).fetch_semantics_nodes().len(), 2);
+    assert_eq!(rule.on_all_nodes_with_content_description(&description(2)).fetch_semantics_nodes().len(), 2);
     rule.on_node_with_text("Image 0").assert_exists();
     let canvas = rule.draw();
     for color in [Color::Red, Color::Magenta, Color::Green] {
@@ -1191,7 +1189,7 @@ fn carousel_with_show_all_button_sample() {
     rule.wait_for_idle();
     assert!(!rule.on_node_with_text("Show all").exists());
     for i in 1..=5 {
-        rule.on_node_with_content_description(&string_resource(i)).assert_exists();
+        rule.on_node_with_content_description(&description(i)).assert_exists();
     }
     assert!(rule.host().back_invoked());
     rule.wait_for_idle();

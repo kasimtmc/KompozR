@@ -24,7 +24,8 @@
 //!   modifier =)`, Material's `PullToRefreshBox(isRefreshing =, onRefresh =, modifier =) { }` (stage 12 WP5, WP2), a
 //!   carousel state with its count last (`rememberCarouselState(itemCount =)`) and `HorizontalMultiBrowseCarousel(state
 //!   =, preferredItemWidth =, modifier =, itemSpacing =) { index -> }` on its item scope and index (stage 12 WP7; the
-//!   C++'s item scope carried the index too: Compose's gives it as the lambda's parameter). (AsyncImage is stage 13's.)
+//!   C++'s item scope carried the index too: Compose's gives it as the lambda's parameter), Coil's `AsyncImage(model =,
+//!   contentDescription =, modifier =, contentScale =)` (stage 13 WP-R).
 //! - C++ 7683 (`animations_take_compose_named_arguments`), its animated values (stage 11 WP1):
 //!   `animateFloatAsState(targetValue =, animationSpec =, label =)`, `animateColorAsState(target, spec)` (C++'s duration
 //!   in milliseconds is Compose's `tween(100)`), `updateTransition(targetState =, label =)` and its
@@ -386,6 +387,7 @@ kompoz! {
                 VerticalScrollbar(adapter = rememberScrollbarAdapter(scroll), modifier = Modifier.fillMaxHeight().testTag("çubuk"))
             }
             PullToRefreshBox(isRefreshing = false, onRefresh = {}, modifier = Modifier.size(50.dp)) { Text("içerik") }
+            AsyncImage(model = "yok.png", contentDescription = "resim", modifier = Modifier.size(10.dp).testTag("resim"), contentScale = ContentScale.Crop)
         }
     }
 }
@@ -443,6 +445,12 @@ fn RustListForms(pages: MutableState<i32>, by_name: MutableState<i32>, item: Rc<
                 modifier = Modifier.size(50.dp()),
                 content = || Text("rust içerik"),
             );
+            AsyncImage(
+                model = "yok.png",
+                content_description = Some("rust resim".into()),
+                modifier = Modifier.size(10.dp()).test_tag("rust resim"),
+                content_scale = ContentScale::Crop,
+            );
         },
     );
 }
@@ -475,6 +483,8 @@ fn lists_pagers_and_scrollbars_take_compose_arguments() {
         assert!(near(header.width(), 300.0) && near(wide.width(), 200.0), "{prefix}: {header:?} {wide:?}");
         assert!(rule.on_node_with_tag(&format!("{prefix}çubuk")).exists());
         assert!(rule.on_node_with_text(&format!("{prefix}içerik")).exists());
+        let image = bounds(&rule, &format!("{prefix}resim"));
+        assert!(near(image.width(), 10.0) && near(image.height(), 10.0), "{prefix}: {image:?}");
     }
     assert_eq!((pages.peek(), by_name.peek(), rust_pages.peek(), rust_by_name.peek()), (4, 1, 4, 1));
     for seen in [&items, &rust_items] {

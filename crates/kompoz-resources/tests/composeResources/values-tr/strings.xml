@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kompoz TR</string>
+    <string name="greeting">Merhaba %1$s! %2$d yeni iletiniz var.</string>
+    <plurals name="messages">
+        <item quantity="one">%1$d ileti</item>
+        <item quantity="other">%1$d ileti</item>
+    </plurals>
+    <string-array name="planets">
+        <item>Merkür</item>
+        <item>Venüs</item>
+        <item>Dünya</item>
+    </string-array>
+</resources>

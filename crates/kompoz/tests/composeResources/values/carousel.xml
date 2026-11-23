@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- material3 samples' carousel resources (their texts as the samples' stand-ins had them). -->
+<resources>
+    <string name="carousel_image_1_description">Carousel image 1</string>
+    <string name="carousel_image_2_description">Carousel image 2</string>
+    <string name="carousel_image_3_description">Carousel image 3</string>
+    <string name="carousel_image_4_description">Carousel image 4</string>
+    <string name="carousel_image_5_description">Carousel image 5</string>
+</resources>

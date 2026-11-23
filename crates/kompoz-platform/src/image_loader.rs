@@ -501,6 +501,54 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// The C++ Kompoz's disk_cache_keeps_the_recently_used_within_its_size: the least recently used go past the
+    /// size; what never fits isn't kept; a replaced entry; the next run finds them, an unfinished write goes, files
+    /// not the cache's stay; removed, cleared; a cache of no size keeps nothing.
+    #[test]
+    fn disk_cache_keeps_the_recently_used_within_its_size() {
+        let dir = temp_dir("cpp");
+        let bytes = |v: u8| vec![v; 300];
+        {
+            let cache = DiskCache::new(dir.clone(), 1000); // each entry is 300 bytes and its key: three fit
+            assert_eq!(cache.get("https://x/a"), None);
+            cache.put("https://x/a", &bytes(1));
+            cache.put("https://x/b", &bytes(2));
+            cache.put("https://x/c", &bytes(3));
+            assert_eq!(cache.get("https://x/a"), Some(bytes(1))); // used: b is now the oldest
+            cache.put("https://x/d", &bytes(4));
+            assert_eq!(cache.get("https://x/b"), None);
+            assert_eq!(cache.get("https://x/c"), Some(bytes(3)));
+            assert_eq!(cache.get("https://x/d"), Some(bytes(4)));
+            assert!(cache.size() <= 1000 && cache.size() > 900, "{}", cache.size());
+            cache.put("https://x/huge", &[5; 2000]); // would never fit: not kept, nothing goes for it
+            assert_eq!(cache.get("https://x/huge"), None);
+            assert_eq!(cache.get("https://x/a"), Some(bytes(1)));
+            cache.put("https://x/a", &bytes(9)); // replaced
+            assert_eq!(cache.get("https://x/a"), Some(bytes(9)));
+        }
+        fs::write(dir.join("0123456789abcdef.12.tmp"), b"a write that never finished").unwrap();
+        fs::write(dir.join("notes.txt"), b"not the cache's").unwrap();
+        {
+            let again = DiskCache::new(dir.clone(), 1000); // the next run finds them
+            assert_eq!(again.get("https://x/a"), Some(bytes(9)));
+            assert_eq!(again.get("https://x/d"), Some(bytes(4)));
+            assert!(!dir.join("0123456789abcdef.12.tmp").exists() && dir.join("notes.txt").exists());
+            again.remove("https://x/a");
+            assert_eq!(again.get("https://x/a"), None);
+            assert_eq!(again.get("https://x/c"), Some(bytes(3)));
+            again.clear();
+            assert_eq!(again.size(), 0);
+            assert_eq!(again.get("https://x/c"), None);
+            assert!(dir.join("notes.txt").exists());
+        }
+        {
+            let none = DiskCache::new(dir.clone(), 0); // keeps nothing
+            none.put("https://x/a", &bytes(1));
+            assert_eq!(none.get("https://x/a"), None);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn keys_sharing_a_file_name_are_told_apart() {
         let dir = temp_dir("keys");
