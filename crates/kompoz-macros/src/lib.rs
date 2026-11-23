@@ -326,8 +326,14 @@ fn restartable_body(rt: &Ts, params: &[Param], body: &Block) -> Result<Ts> {
                 let names: Vec<Ident> = (0..args.inputs.len()).map(|k| format_ident!("__kz_a{k}")).collect();
                 let tys = args.inputs.iter().map(|a| &a.ty);
                 let out = &args.output;
+                let rc = format_ident!("__kz_rc_{}", i.to_string().trim_start_matches("r#"));
                 rebinds.push(quote! {
-                    #[allow(unused_mut)]
+                    // (one `Rc` while its identity stays the same: Compose's memoized lambda is the same instance, so a
+                    // `rememberUpdatedState` of it, or a node keeping it, sees no change when its caller runs again)
+                    let #i = #rt::__private::Memoized::new(#i, #id).remember(|__kz_f| __kz_f);
+                    #[allow(unused_variables)]
+                    let #rc = ::core::clone::Clone::clone(&#i);
+                    #[allow(unused_mut, unused_variables)]
                     let #m #i = {
                         let __kz_f = #i;
                         move |#(#names: #tys),*| #out { __kz_f(#(#names),*) }
@@ -383,7 +389,11 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
         } else {
             HashSet::new()
         };
-        let mut t = Transformer::new(rt.clone(), param_names(&f.sig), known, options.plain.clone(), kept_closures);
+        // (`Rc::new(on_click)` of a kept closure is the one `Rc` it is kept as, `__kz_rc_on_click`: see `Transformer`)
+        let mut names = param_names(&f.sig);
+        names.extend(kept_closures.iter().map(|k| format!("__kz_rc_{}", k.trim_start_matches("r#"))));
+        let mut t = Transformer::new(rt.clone(), names, known, options.plain.clone(), kept_closures)
+            .with_parameter_types(&f.sig);
         t.visit_block_mut(&mut f.block);
     }
 

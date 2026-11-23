@@ -24,8 +24,8 @@ use crate::lazy::layout::{
 use kompoz_animation::MutatePriority;
 use kompoz_graphics::Density;
 use kompoz_runtime::{
-    MutableState, SavedValue, Saver, kompozable, mutable_state_of, named, remember, remember_saveable_keyed_with,
-    remember_saveable_with, without_read_observation,
+    MutableState, SavedValue, Saver, kompozable, mutable_confined_state_of_with_policy, mutable_state_of, named,
+    never_equal_policy, remember, remember_saveable_keyed_with, remember_saveable_with, without_read_observation,
 };
 use std::cell::{Cell, RefCell};
 use std::fmt;
@@ -136,9 +136,9 @@ pub(crate) struct LazyGridStateInner {
     scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses,
     execute_requests_in_high_priority_mode: Cell<bool>,
     scroll_position: LazyGridScrollPosition,
-    /// The last measure's result, its readers told through the counter (Compose's `layoutInfoState`).
-    layout_info: RefCell<Rc<LazyGridMeasureResult>>,
-    layout_info_generation: MutableState<u64>,
+    /// The last measure's result (Compose's `layoutInfoState = mutableStateOf(…, neverEqualPolicy())`; confined: a measure
+    /// result isn't `Send`).
+    layout_info: MutableState<Rc<LazyGridMeasureResult>>,
     /// Whether a measure ran (the result isn't the empty one).
     measured: Cell<bool>,
     internal_interaction_source: MutableInteractionSource,
@@ -223,8 +223,10 @@ impl LazyGridState {
                     first_visible_item_index,
                     first_visible_item_scroll_offset,
                 ),
-                layout_info: RefCell::new(Rc::new(LazyGridMeasureResult::empty())),
-                layout_info_generation: mutable_state_of(0),
+                layout_info: mutable_confined_state_of_with_policy(
+                    Rc::new(LazyGridMeasureResult::empty()),
+                    never_equal_policy(),
+                ),
                 measured: Cell::new(false),
                 internal_interaction_source: MutableInteractionSource::new(),
                 scroll_to_be_consumed: Cell::new(0.0),
@@ -287,20 +289,17 @@ impl LazyGridState {
     /// What the last layout showed (Compose's `layoutInfo`): read, it is a state changing with each layout and
     /// scroll.
     pub fn layout_info(&self) -> LazyGridLayoutInfo {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().layout_info()
+        self.inner.layout_info.with(|result| result.layout_info())
     }
 
     /// The last measure's result (a state read).
     pub(crate) fn measure_result(&self) -> Rc<LazyGridMeasureResult> {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().clone()
+        self.inner.layout_info.get()
     }
 
     fn set_measure_result(&self, result: Rc<LazyGridMeasureResult>) {
-        *self.inner.layout_info.borrow_mut() = result;
+        self.inner.layout_info.set(result);
         self.inner.measured.set(true);
-        self.inner.layout_info_generation.set(self.inner.layout_info_generation.peek().wrapping_add(1));
     }
 
     /// The drags of the grid (Compose's `interactionSource`).
@@ -319,7 +318,7 @@ impl LazyGridState {
 
     /// The density of the last measure.
     pub(crate) fn density(&self) -> Density {
-        without_read_observation(|| self.inner.layout_info.borrow().density)
+        self.inner.layout_info.peek_with(|result| result.density)
     }
 
     /// The items whose keys are known (a state).
@@ -361,7 +360,7 @@ impl LazyGridState {
         if inner.scroll_to_be_consumed.get().abs() > 0.5 {
             let pre_scroll_to_be_consumed = inner.scroll_to_be_consumed.get();
             let int_delta = fast_round_to_int(inner.scroll_to_be_consumed.get());
-            let current = inner.layout_info.borrow().clone();
+            let current = inner.layout_info.peek();
             let mut scrolled_layout_info = current
                 .copy_with_scroll_delta_without_remeasure(int_delta, !inner.has_lookahead_occurred.get())
                 .map(Rc::new);
@@ -390,7 +389,7 @@ impl LazyGridState {
                 }
                 None => {
                     inner.remeasurement.force_remeasure();
-                    let result = inner.layout_info.borrow().clone();
+                    let result = inner.layout_info.peek();
                     self.notify_prefetch_on_scroll(
                         pre_scroll_to_be_consumed - inner.scroll_to_be_consumed.get(),
                         &result,
@@ -551,7 +550,7 @@ impl LazyGridState {
     /// running is cancelled.
     pub fn request_scroll_to_item(&self, index: i32, #[default(0)] scroll_offset: i32) {
         if self.is_scroll_in_progress() {
-            let scope = self.inner.layout_info.borrow().coroutine_scope.clone();
+            let scope = self.inner.layout_info.peek().coroutine_scope.clone();
             if let Some(scope) = scope {
                 let state = self.clone();
                 scope.launch(async move {
@@ -695,7 +694,7 @@ impl LazyGridPrefetchScope for GridPrefetchScope {
                 None => return Vec::new(),
             }
         } else {
-            inner.layout_info.borrow().clone()
+            inner.layout_info.peek()
         };
         let orientation = measure_result.orientation;
         let items_in_line_info = (measure_result.prefetch_info_retriever)(line_index);

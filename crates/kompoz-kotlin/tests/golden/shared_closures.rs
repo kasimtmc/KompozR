@@ -22,7 +22,7 @@ pub fn SharedClosures() {
 pub fn LambdaValues() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let count = remember(|| mutable_state_of(0));
+    let count = remember(|| ::kompoz::runtime::mutable_state_of!(0));
     let on_refresh = {
         let count = ::kompoz::runtime::__private::capture(&count);
         move || {

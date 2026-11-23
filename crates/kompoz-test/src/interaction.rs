@@ -609,6 +609,27 @@ impl<'a> SemanticsNodeInteraction<'a> {
         self
     }
 
+    /// The bounds a touch hits it in, in the root (Compose's `SemanticsNode.touchBoundsInRoot`), px: a node taking
+    /// clicks grown to the minimum touch target (48 dp).
+    #[track_caller]
+    pub fn get_touch_bounds_in_root(&self) -> Rect {
+        self.fetch_semantics_node().touch_bounds_in_root()
+    }
+
+    /// Its touch bounds' width is `expected` (dp) (Compose's `assertTouchWidthIsEqualTo`).
+    #[track_caller]
+    pub fn assert_touch_width_is_equal_to(&self, expected: Dp) -> &Self {
+        self.assert_close("width", self.get_touch_bounds_in_root().width(), expected);
+        self
+    }
+
+    /// Its touch bounds' height is `expected` (dp) (Compose's `assertTouchHeightIsEqualTo`).
+    #[track_caller]
+    pub fn assert_touch_height_is_equal_to(&self, expected: Dp) -> &Self {
+        self.assert_close("height", self.get_touch_bounds_in_root().height(), expected);
+        self
+    }
+
     /// Its top left in the root is (`left`, `top`) dp (Compose's `assertPositionInRootIsEqualTo`).
     #[track_caller]
     pub fn assert_position_in_root_is_equal_to(&self, left: Dp, top: Dp) -> &Self {

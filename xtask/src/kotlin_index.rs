@@ -61,8 +61,29 @@ const API_CRATES: &[&str] = &[
 
 pub fn run(root: &Path, check: bool) -> Result<(), String> {
     let packages = packages(root)?;
-    let api = api_index::render(&api_entries(root, &packages)?);
-    let kotlin = kotlin_index(&packages)?;
+    let (kotlin, supers) = kotlin_index(&packages)?;
+    let mut entries = api_entries(root, &packages)?;
+    // (the API's supertypes, for the macros: a method call whose receiver's written type has none owning a `#[named]`
+    // method of that name keeps its plain call)
+    for (ty, sup) in &supers {
+        let name_ok = |n: &str| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_');
+        if name_ok(ty) && name_ok(sup) {
+            entries.push(Entry {
+                scope: Scope::All,
+                kind: EntryKind::Super,
+                name: ty.clone(),
+                defaults: Vec::new(),
+                memoized: Vec::new(),
+                owner: sup.clone(),
+            });
+        }
+    }
+    // (a name that isn't one — a generic type's text — can't be a receiver's)
+    entries.retain(|e| {
+        e.kind != EntryKind::Super
+            || [&e.name, &e.owner].iter().all(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'))
+    });
+    let api = api_index::render(&entries);
     let files = [(API_INDEX, api), (KOTLIN_INDEX, kotlin)];
     if check {
         let stale: Vec<&str> = files
@@ -486,8 +507,34 @@ impl<'ast> Visit<'ast> for ApiVisitor<'_> {
     }
 
     fn visit_item_impl(&mut self, imp: &'ast ItemImpl) {
+        // (what a type derefs to, of every target: the macros' supertypes, as the Kotlin index's `DEREFS` are of the
+        // API's crates)
+        if let Some((path, _)) = &imp.trait_
+            && path.segments.last().is_some_and(|s| s.ident == "Deref")
+            && let Some(target) = imp.items.iter().find_map(|i| match i {
+                ImplItem::Type(t) if t.ident == "Target" => Some(type_name(&t.ty)),
+                _ => None,
+            })
+        {
+            self.out.push(Entry {
+                scope: self.scope.clone(),
+                kind: EntryKind::Super,
+                name: type_name(&imp.self_ty),
+                defaults: Vec::new(),
+                memoized: Vec::new(),
+                owner: target,
+            });
+        }
         if let Some(ext) = named_trait(&imp.attrs) {
-            let ty = type_name(&imp.self_ty);
+            // (a blanket impl's type, every type of its type parameter: `{S}`)
+            let blanket = imp
+                .generics
+                .type_params()
+                .find(|p| matches!(&*imp.self_ty, Type::Path(t) if t.path.is_ident(&p.ident)));
+            let ty = match blanket {
+                Some(p) => format!("{{{}}}", p.ident),
+                None => type_name(&imp.self_ty),
+            };
             let owner = match ext {
                 Some(t) => format!("{} {ty} as {t}", self.file),
                 None => format!("{} {ty}", self.file),
@@ -837,6 +884,8 @@ struct Scan {
     /// The aliases of trait objects (`type DynTooltipScope<'a> = dyn TooltipScope + 'a`, WP5): a `#[named(trait …)]`
     /// impl of one extends every value of the trait, as a blanket impl does (its methods found through the trait).
     trait_object_aliases: BTreeSet<String>,
+    /// (trait, alias) of those aliases: the macros' supertypes of a trait object's receiver.
+    alias_supers: BTreeSet<(String, String)>,
     /// Kotlin's names of types that Rust names otherwise (a doc line ``Kotlin: `Arrangement.Absolute` `` on
     /// `AbsoluteArrangement`): (Kotlin, Rust).
     types: BTreeSet<(String, String)>,
@@ -849,7 +898,7 @@ struct Scan {
     trait_impls: BTreeSet<(String, String)>,
 }
 
-fn kotlin_index(packages: &[Package]) -> Result<String, String> {
+fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, String)>), String> {
     let mut scan = Scan::default();
     let mut files = Vec::new();
     for p in packages.iter().filter(|p| API_CRATES.contains(&p.name.as_str())) {
@@ -874,7 +923,10 @@ fn kotlin_index(packages: &[Package]) -> Result<String, String> {
     items.sort();
     items.dedup();
     interface_supertypes(&items, &scan.trait_impls, &mut scan.derefs);
-    Ok(render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics))
+    let text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics);
+    let mut supers = scan.derefs;
+    supers.extend(scan.alias_supers);
+    Ok((text, supers))
 }
 
 /// Kotlin's subtyping of an interface the API has as a trait: a type implementing it (`impl Painter for
@@ -1084,6 +1136,13 @@ fn prescan(items: &[Item], scan: &mut Scan) {
             }
             Item::Type(t) if is_pub(&t.vis) && matches!(&*t.ty, Type::TraitObject(_)) => {
                 scan.trait_object_aliases.insert(t.ident.to_string());
+                // (what is of the trait is of the alias: `DynTooltipScope` for a `dyn TooltipScope` receiver)
+                if let Type::TraitObject(o) = &*t.ty
+                    && let Some(TypeParamBound::Trait(tb)) = o.bounds.first()
+                    && let Some(seg) = tb.path.segments.last()
+                {
+                    scan.alias_supers.insert((seg.ident.to_string(), t.ident.to_string()));
+                }
             }
             Item::Type(t) if t.generics.params.is_empty() && is_pub(&t.vis) => {
                 let mut f = FindFn(false);
@@ -1263,6 +1322,13 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                     it.params = params;
                     it.ret = owner.clone();
                     scan.items.push(it);
+                }
+            }
+            // (a type alias's doc line names it as Kotlin does: `type VerticalArrangement = Arrangement<Vertical>` is
+            // Kotlin's `Arrangement.Vertical`)
+            Item::Type(ty) if is_pub(&ty.vis) && !hidden(&ty.attrs) && ty.generics.params.is_empty() => {
+                if let Some(kotlin) = kotlin_doc(&ty.attrs).filter(|d| !d.contains('(')) {
+                    scan.types.insert((kotlin, ty.ident.to_string()));
                 }
             }
             Item::Struct(s) if is_pub(&s.vis) && !hidden(&s.attrs) => {

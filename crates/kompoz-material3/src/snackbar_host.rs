@@ -11,7 +11,10 @@ use kompoz_animation::{Animatable, AnimationSpec};
 use kompoz_coroutines::sync::Mutex;
 use kompoz_coroutines::{LaunchedEffect, delay};
 use kompoz_foundation::prelude::*;
-use kompoz_runtime::{MutableState, State, key, kompozable, mutable_state_of, named, named_args, remember};
+use kompoz_runtime::{
+    MutableState, SnapshotMutationPolicy, State, key, kompozable, mutable_confined_state_of_with_policy,
+    mutable_state_of, named, named_args, remember,
+};
 use kompoz_ui::Modifier;
 use kompoz_ui::platform::{AccessibilityManager, LocalAccessibilityManager};
 use kompoz_ui::semantics::LiveRegionMode;
@@ -35,15 +38,14 @@ struct HostInner {
     /// Only one [`Snackbar`](crate::Snackbar) can be shown at a time. Since a suspending Mutex is a fair queue, this
     /// manages our message queue and we don't have to maintain one.
     mutex: Mutex,
-    /// Compose's `currentSnackbarData` state: the data (not `Send`) beside a state of its version.
-    current: RefCell<Option<Rc<dyn SnackbarData>>>,
-    version: MutableState<u64>,
+    /// Compose's `var currentSnackbarData by mutableStateOf<SnackbarData?>(null)` (confined: the data isn't
+    /// `Send`; equal when the same data, as Kotlin's `==` of its data).
+    current: MutableState<Option<Rc<dyn SnackbarData>>>,
 }
 
 impl HostInner {
     fn set_current(&self, data: Option<Rc<dyn SnackbarData>>) {
-        *self.current.borrow_mut() = data;
-        self.version.set(self.version.peek().wrapping_add(1));
+        self.current.set(data);
     }
 }
 
@@ -79,16 +81,14 @@ impl SnackbarHostState {
         SnackbarHostState {
             inner: Rc::new(HostInner {
                 mutex: Mutex::new(false),
-                current: RefCell::new(None),
-                version: mutable_state_of(0),
+                current: mutable_confined_state_of_with_policy(None, SnapshotMutationPolicy::new(same_data)),
             }),
         }
     }
 
     /// The snackbar being shown by the host, if any (Compose's `currentSnackbarData`, a state read).
     pub fn current_snackbar_data(&self) -> Option<Rc<dyn SnackbarData>> {
-        self.inner.version.get();
-        self.inner.current.borrow().clone()
+        self.inner.current.get()
     }
 
     /// Shows a snackbar of `visuals`, or queues it to be shown, and suspends until it has gone (Compose's

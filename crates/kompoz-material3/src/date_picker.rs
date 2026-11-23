@@ -7,7 +7,6 @@
 //! ([`DatePickerFormatter`]), in the colors of [`DatePickerColors`].
 
 use std::any::Any;
-use std::cell::RefCell;
 use std::fmt;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -31,9 +30,9 @@ use kompoz_graphics::LayoutDirection;
 use kompoz_graphics::vector::ImageVector;
 use kompoz_graphics::{BorderStroke, CircleShape, Color, Dp, IntOffset, IntSize, Shape};
 use kompoz_runtime::{
-    KompozitionLocalProvider, KotlinProperties, MutableState, SavedValue, Saver, State, kompozable, kompozable_block,
-    list_saver, mutable_state_of, named, named_args, remember, remember_keyed, remember_saveable,
-    remember_saveable_with, remember_updated_state,
+    KompozitionLocalProvider, KotlinProperties, MutableState, SavedValue, Saver, SnapshotMutationPolicy, State,
+    kompozable, kompozable_block, list_saver, mutable_confined_state_of_with_policy, mutable_state_of, named,
+    named_args, remember, remember_keyed, remember_saveable, remember_saveable_with, remember_updated_state,
 };
 use kompoz_text::AnnotatedString;
 use kompoz_text::TextStyle;
@@ -373,11 +372,9 @@ pub(crate) struct BaseDatePickerStateImpl {
     pub(crate) year_range: RangeInclusive<i32>,
     pub(crate) locale: CalendarLocale,
     pub(crate) calendar_model: Rc<dyn CalendarModel>,
-    // Compose's `var selectableDates by mutableStateOf(selectableDates)`: KompozR's snapshot states hold `Send`
-    // values, an app's `SelectableDates` needn't be — the value is kept here and a snapshot state of its version
-    // is what readers observe and a new value (another object, Kotlin's `==` of objects) bumps.
-    selectable_dates: RefCell<Rc<dyn SelectableDates>>,
-    selectable_dates_version: MutableState<u64>,
+    /// Compose's `var selectableDates by mutableStateOf(selectableDates)` (confined: an app's `SelectableDates`
+    /// needn't be `Send`; another object is a new value, as Kotlin's `==` of objects).
+    selectable_dates: MutableState<Rc<dyn SelectableDates>>,
     displayed_month: MutableState<CalendarMonth>,
 }
 
@@ -407,23 +404,20 @@ impl BaseDatePickerStateImpl {
             year_range,
             locale,
             calendar_model,
-            selectable_dates: RefCell::new(selectable_dates),
-            selectable_dates_version: mutable_state_of(0),
+            selectable_dates: mutable_confined_state_of_with_policy(
+                selectable_dates,
+                SnapshotMutationPolicy::new(|a, b| std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))),
+            ),
             displayed_month: mutable_state_of(displayed_month),
         }
     }
 
     pub(crate) fn selectable_dates(&self) -> Rc<dyn SelectableDates> {
-        self.selectable_dates_version.get();
-        self.selectable_dates.borrow().clone()
+        self.selectable_dates.get()
     }
 
     pub(crate) fn set_selectable_dates(&self, selectable_dates: Rc<dyn SelectableDates>) {
-        let same = std::ptr::addr_eq(Rc::as_ptr(&self.selectable_dates.borrow()), Rc::as_ptr(&selectable_dates));
-        if !same {
-            *self.selectable_dates.borrow_mut() = selectable_dates;
-            self.selectable_dates_version.set(self.selectable_dates_version.peek() + 1);
-        }
+        self.selectable_dates.set(selectable_dates);
     }
 
     pub(crate) fn displayed_month_millis(&self) -> i64 {

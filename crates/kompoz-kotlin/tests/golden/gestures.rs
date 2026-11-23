@@ -3,8 +3,8 @@
 pub fn Pulled() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let pulled = remember(|| mutable_state_of(Offset::Zero));
-    let panned = remember(|| mutable_state_of(Offset::Zero));
+    let pulled = remember(|| ::kompoz::runtime::mutable_state_of!(Offset::Zero));
+    let panned = remember(|| ::kompoz::runtime::mutable_state_of!(Offset::Zero));
     let drag = remember_draggable2d_state({
         let pulled = ::kompoz::runtime::__private::capture(&pulled);
         move |it| {
@@ -53,8 +53,8 @@ pub fn Pulled() {
 pub fn Zoom() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let scale = remember(|| mutable_state_of(1_f32));
-    let moved = remember(|| mutable_state_of(0_f32));
+    let scale = remember(|| ::kompoz::runtime::mutable_state_of!(1_f32));
+    let moved = remember(|| ::kompoz::runtime::mutable_state_of!(0_f32));
     let state = remember_transformable_state({
         let scale = ::kompoz::runtime::__private::capture(&scale);
         let moved = ::kompoz::runtime::__private::capture(&moved);

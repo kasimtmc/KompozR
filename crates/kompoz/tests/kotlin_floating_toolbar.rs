@@ -11,8 +11,7 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 // (the samples' imports of what the generated code names: TooltipBox's position provider, nestedScroll's connection)
-use kompoz::ui::input::{NestedScrollConnection, PointerType};
-use kompoz::ui::window::PopupPositionProvider;
+use kompoz::ui::input::PointerType;
 
 kompoz_file!("tests/kt/floating_toolbar.kt");
 

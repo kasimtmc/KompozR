@@ -21,8 +21,8 @@ use kompoz_graphics::{
     PathDirection, PathOperation, Rect, Shape, Size,
 };
 use kompoz_runtime::{
-    KompozitionLocalProvider, KotlinProperties, MutableState, derived_state_of, key, kompozable, mutable_state_of,
-    named, named_args, remember, remember_keyed,
+    KompozitionLocalProvider, KotlinProperties, MutableState, derived_state_of, key, kompozable,
+    mutable_confined_state_of, mutable_state_of, named, named_args, remember, remember_keyed,
 };
 use kompoz_ui::Modifier;
 use kompoz_ui::layout::{GraphicsLayerScope, LayoutCoordinates, MeasureScope};
@@ -118,33 +118,13 @@ impl TooltipScope for TooltipScopeImpl {
     }
 }
 
-/// The anchor's coordinates as a state (Compose's `mutableStateOf<LayoutCoordinates?>(null)`: its readers told when
-/// other coordinates are set; coordinates aren't `Send`, so they are kept beside a state of their version).
-#[derive(Clone)]
-pub(crate) struct AnchorBounds {
-    value: Rc<RefCell<Option<LayoutCoordinates>>>,
-    version: MutableState<u64>,
-}
+/// The anchor's coordinates as a state (Compose's `mutableStateOf<LayoutCoordinates?>(null)`; confined:
+/// coordinates aren't `Send`).
+pub(crate) type AnchorBounds = MutableState<Option<LayoutCoordinates>>;
 
-impl AnchorBounds {
-    pub(crate) fn new() -> AnchorBounds {
-        AnchorBounds { value: Rc::new(RefCell::new(None)), version: mutable_state_of(0) }
-    }
-
-    /// The coordinates (a state read).
-    pub(crate) fn get(&self) -> Option<LayoutCoordinates> {
-        self.version.get();
-        self.value.borrow().clone()
-    }
-
-    /// Sets them: their readers are told if they are other coordinates (structural equality, as Compose's).
-    pub(crate) fn set(&self, coordinates: Option<LayoutCoordinates>) {
-        if *self.value.borrow() == coordinates {
-            return;
-        }
-        *self.value.borrow_mut() = coordinates;
-        self.version.set(self.version.peek().wrapping_add(1));
-    }
+/// A new [`AnchorBounds`]: none yet.
+pub(crate) fn new_anchor_bounds() -> AnchorBounds {
+    mutable_confined_state_of(None)
 }
 
 /// Where a tooltip goes around its anchor (Compose's value class `TooltipAnchorPosition`).
@@ -704,7 +684,7 @@ pub fn TooltipBox(
 ) {
     // (Compose's deprecated `updateTransition(state.transition, …)`: `rememberTransition`'s twin)
     let transition = remember_transition(state.transition(), Some("tooltip transition".to_string()));
-    let anchor_bounds = remember(AnchorBounds::new);
+    let anchor_bounds = remember(new_anchor_bounds);
     let (bounds, provider) = (anchor_bounds.clone(), position_provider.clone());
     // (remembered once, as Compose's `remember { TooltipScopeImpl(…) }`: it keeps the first position provider)
     let scope = remember(move || Rc::new(TooltipScopeImpl::new(move || bounds.get(), provider)));

@@ -10,9 +10,8 @@ use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 // (shared by the sections: the window types the Kotlin sources name — Compose's androidx.compose.ui.window imports —
 // and the generated code types with, as a tooltip box's position provider)
-use kompoz::ui::window::{Dialog, DialogProperties, PopupPositionProvider};
+use kompoz::ui::window::{Dialog, DialogProperties};
 // (sheets: what the generated code types nestedScroll's connection with — BottomSheetScaffoldNestedScrollSample's)
-use kompoz::ui::input::NestedScrollConnection;
 
 // ==== lists ==========================================================================================================
 // The C++ Kompoz's `list_items_by_name` (kompozable_tests.cpp 651-670, Settings) and the ListItem line of its
@@ -545,8 +544,19 @@ fn tab_samples() {
     tab_sample(ScrollingTextTabs, "Tab 2", "Scrolling text tab 1 selected", "Scrolling text tab 2 selected");
     tab_sample(FancyTabs, "Tab 2", "Fancy tab 1 selected", "Fancy tab 2 selected");
     tab_sample(FancyIndicatorTabs, "Tab 2", "Fancy indicator tab 1 selected", "Fancy indicator tab 2 selected");
-    // (FancyIndicatorContainerTabs and ScrollingFancyIndicatorContainerTabs: see kt/tabs_dialogs.kt — their
-    // indicator's states hold Animatables, which KompozR's states can't)
+    // (their indicator keeps its Animatables in `mutableStateOf<Animatable<Dp, …>?>(null)` states: confined ones)
+    tab_sample(
+        FancyIndicatorContainerTabs,
+        "Tab 2",
+        "Fancy transition tab 1 selected",
+        "Fancy transition tab 2 selected",
+    );
+    tab_sample(
+        ScrollingFancyIndicatorContainerTabs,
+        "Tab 2",
+        "Scrolling fancy transition tab 1 selected",
+        "Scrolling fancy transition tab 2 selected",
+    );
     // The icon samples: three Favorite icon tabs, each in a tooltip box.
     let icon_samples: [fn() -> KompozTestRule; 2] = [
         || KompozTestRule::with_viewport(PrimaryIconTabs, IntSize::new(400, 800)),

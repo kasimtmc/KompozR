@@ -41,7 +41,11 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
 
 /// A token file, parsed.
 struct TokenFile {
+    /// The object's (or enum's, class's) name: the file's, but where the file holds another
+    /// (`IconButtonTokens.kt`'s `StandardIconButtonTokens`).
     kotlin_name: String,
+    /// The file's name (without `.kt`), as the generated file's header says where it comes from.
+    file_name: String,
     version: Option<String>,
     kind: FileKind,
 }
@@ -112,7 +116,7 @@ fn convert(jar: &Jar) -> Result<BTreeMap<String, String>, String> {
     let mut modules = Vec::new();
     for f in &parsed {
         let module = snake(&f.kotlin_name);
-        let mut s = header(&f.kotlin_name, f.version.as_deref());
+        let mut s = header(&f.file_name, f.version.as_deref());
         match &f.kind {
             FileKind::Enum(entries) => {
                 let _ = writeln!(s, "\n/// Compose's `{}`.", f.kotlin_name);
@@ -152,6 +156,8 @@ fn convert(jar: &Jar) -> Result<BTreeMap<String, String>, String> {
         out.insert(format!("{module}.rs"), s);
         modules.push((module, f.kotlin_name.clone()));
     }
+    // (by module name, as rustfmt orders the `mod`s and `use`s: a file named otherwise than its object sorts by the object)
+    modules.sort();
     out.insert("mod.rs".to_string(), mod_rs(&modules));
     Ok(out)
 }
@@ -229,12 +235,28 @@ fn parse_file(kotlin_name: &str, text: &str) -> Result<TokenFile, String> {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        return Ok(TokenFile { kotlin_name: kotlin_name.to_string(), version, kind: FileKind::Enum(entries) });
+        return Ok(TokenFile {
+            kotlin_name: kotlin_name.to_string(),
+            file_name: kotlin_name.to_string(),
+            version,
+            kind: FileKind::Enum(entries),
+        });
     }
     if let Some(at) = code.find("internal object ") {
         let body = braces(&code[at..]).ok_or("an object without a body")?;
         let members = vals(body)?;
-        return Ok(TokenFile { kotlin_name: kotlin_name.to_string(), version, kind: FileKind::Object(members) });
+        // (the object's own name: IconButtonTokens.kt holds `StandardIconButtonTokens`)
+        let object = code[at + "internal object ".len()..]
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .next()
+            .filter(|n| !n.is_empty())
+            .ok_or("an object without a name")?;
+        return Ok(TokenFile {
+            kotlin_name: object.to_string(),
+            file_name: kotlin_name.to_string(),
+            version,
+            kind: FileKind::Object(members),
+        });
     }
     if let Some(at) = code.find("internal class TypographyTokens(val fontFamily: FontFamily? = null)") {
         let body = braces(&code[at..]).ok_or("a class without a body")?;
@@ -245,6 +267,7 @@ fn parse_file(kotlin_name: &str, text: &str) -> Result<TokenFile, String> {
         let top_level = vals(&rest.replace("internal val ", "val "))?;
         return Ok(TokenFile {
             kotlin_name: kotlin_name.to_string(),
+            file_name: kotlin_name.to_string(),
             version,
             kind: FileKind::TypographyClass { members, top_level },
         });

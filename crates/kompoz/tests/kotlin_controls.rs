@@ -313,23 +313,43 @@ fn slider_with_track_icons_sample() {
 }
 
 fn vertical_sliders() {
-    // VerticalSliderSample's slider (reversed: it grows upwards; the auto-snap off, the state's `onValueChange` and
-    // `onValueChangeFinished` set; a drag sets the value, its end snaps it by an animation) and
-    // VerticalCenteredSliderSample's centered track.
-    let rule = KompozTestRule::new(VerticalSliders);
-    rule.on_node_with_text("0.00").assert_exists();
-    // From the bottom half way up: 142 of 298 px past the slop, the nearest step 50.
-    let b = rule.on_node_with_tag("dikey").get_unclipped_bounds_in_root();
-    let (x, from) = (b.center().x, b.bottom - 2.0);
-    rule.host().pointer_down(Offset::new(x, from), -1, 0, kompoz::ui::input::PointerType::Touch);
-    for i in 1..=10 {
+    // VerticalSliderSample and VerticalCenteredSliderSample as M15 writes them (reversed: they grow upwards; the
+    // auto-snap off, the state's `onValueChange` and `onValueChangeFinished` set; a drag sets the value and cancels
+    // the snap animation running, its end snaps it by an animation kept in a `Job?` state).
+    // (where a drag starts, from the slider's bounds; the values shown at the start, after a drag 148 px up, and after
+    // the two drags below)
+    type From = fn(Rect) -> f32;
+    let samples: [(fn() -> KompozTestRule, From, [&str; 3]); 2] = [
+        (|| KompozTestRule::new(VerticalSliderSample), |b| b.bottom - 2.0, ["0.00", "50.00", "0.00"]),
+        (|| KompozTestRule::new(VerticalCenteredSliderSample), |b| b.center().y, ["0.00", "50.00", "-20.00"]),
+    ];
+    for (make, from, [start, up, end]) in samples {
+        let rule = make();
+        rule.on_node_with_text(start).assert_exists();
+        // Half way up: 142 of 298 px past the slop, the nearest step 50 more.
+        let b = the_slider(&rule).get_unclipped_bounds_in_root();
+        let (x, from) = (b.center().x, from(b));
+        let drag = |rule: &KompozTestRule, by: f32| {
+            rule.host().pointer_down(Offset::new(x, from), -1, 0, kompoz::ui::input::PointerType::Touch);
+            for i in 1..=10 {
+                rule.advance_frame();
+                rule.host().pointer_move(Offset::new(x, from - by / 10.0 * i as f32), -1, 0);
+            }
+            rule.host().pointer_up(Offset::new(x, from - by), -1, 0);
+        };
+        drag(&rule, 148.0);
+        rule.wait_for_idle();
+        rule.on_node_with_text(up).assert_exists();
+        // A press sets where a drag starts: a quarter up, then down past it while the first snap animation runs —
+        // the new drag cancels its job (the value follows the drag alone) and its end snaps it.
+        rule.main_clock().set_auto_advance(false);
+        drag(&rule, 74.0);
         rule.advance_frame();
-        rule.host().pointer_move(Offset::new(x, from - 14.8 * i as f32), -1, 0);
+        drag(&rule, -74.0);
+        rule.main_clock().set_auto_advance(true);
+        rule.wait_for_idle();
+        rule.on_node_with_text(end).assert_exists();
     }
-    rule.host().pointer_up(Offset::new(x, from - 148.0), -1, 0);
-    rule.wait_for_idle();
-    rule.on_node_with_text("50.00").assert_exists();
-    rule.on_node_with_tag("ortalı").assert_exists();
 }
 
 fn range_slider_samples() {

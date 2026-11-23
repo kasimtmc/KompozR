@@ -6,7 +6,7 @@ pub fn AnimatedVectorSample(xml: impl ::core::convert::Into<::std::string::Strin
     let image = remember_keyed(xml.clone(), || {
         ::kompoz::runtime::kt::KtResult::get_or_throw(AnimatedImageVector::from_animated_vector_xml(&xml.clone()))
     });
-    let at_end = remember(|| mutable_state_of(false));
+    let at_end = remember(|| ::kompoz::runtime::mutable_state_of!(false));
     Image(
         painter = ::std::rc::Rc::new(remember_animated_vector_painter(
             image.clone(),

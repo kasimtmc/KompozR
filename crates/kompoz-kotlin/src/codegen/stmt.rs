@@ -273,7 +273,14 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> #t;)
             }
             (Binding::Name(n), PropertyInit::Delegate(d)) => {
+                // (a declared type is what a `mutableStateOf` it is delegated to holds: `mutable_state_of!` reads it)
+                let hint =
+                    p.ty.as_ref()
+                        .filter(|t| !matches!(self.ty_of(t), Ty::Fun(_)))
+                        .map(|t| (self.rust_type(t, super::types::TypePos::Value), self.ty_of(t)));
+                let outer = std::mem::replace(&mut self.state_value, hint);
                 let v = self.value(d);
+                self.state_value = outer;
                 // (its declared type what the delegate holds: `var checkedIndex: Int? by remember { mutableStateOf(null)
                 // }`, Rust told it where `null` alone can't; a declared function type isn't one Rust can name: the
                 // delegate's own)

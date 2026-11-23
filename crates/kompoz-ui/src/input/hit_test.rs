@@ -322,7 +322,7 @@ fn next_pointer(nodes: &[NodeRc], from: usize) -> Option<usize> {
 }
 
 /// The minimum touch target in px (LocalViewConfiguration where the layout was composed).
-fn minimum_touch_target_size(c: &NodeCoordinator) -> Size {
+pub(crate) fn minimum_touch_target_size(c: &NodeCoordinator) -> Size {
     c.layout_node()
         .map_or(Size::new(48.0, 48.0), |n| n.current_value_of(&LocalViewConfiguration).minimum_touch_target_size)
 }

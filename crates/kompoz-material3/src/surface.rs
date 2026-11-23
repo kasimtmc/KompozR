@@ -11,6 +11,7 @@ use crate::color_scheme::content_color_for;
 use crate::content_color::LocalContentColor;
 use crate::interactive_component_size::InteractiveComponentSizeModifiers;
 use crate::internal::child_parent_semantics::ChildParentSemanticsModifiers;
+use crate::internal::shape_util::ClipShape;
 use crate::material_theme::MaterialTheme;
 use crate::ripples::ripple;
 use kompoz_foundation::prelude::*;
@@ -19,7 +20,6 @@ use kompoz_runtime::{KompozitionLocal, KompozitionLocalProvider, kompozable, nam
 use kompoz_ui::Modifier;
 use kompoz_ui::layout::GraphicsLayerScope;
 use kompoz_ui::platform::LocalDensity;
-use std::rc::Rc;
 use std::sync::Arc;
 
 /// The tonal elevation of the surfaces around added up (Compose's LocalAbsoluteTonalElevation): what a surface's
@@ -247,27 +247,6 @@ fn surface(
     };
     let shape_for_clip = ClipShape(shape.clone());
     named_args!(modifier.then(shadow).then(border).background(background_color, shape = shape)).clip(shape_for_clip)
-}
-
-/// A shared shape as a shape (what `Modifier.clip` takes by value), equal as the shape is.
-#[derive(Debug)]
-struct ClipShape(Arc<dyn Shape>);
-
-impl PartialEq for ClipShape {
-    fn eq(&self, other: &Self) -> bool {
-        *self.0 == *other.0
-    }
-}
-
-impl Shape for ClipShape {
-    fn create_outline(
-        &self,
-        size: kompoz_graphics::Size,
-        layout_direction: kompoz_graphics::LayoutDirection,
-        density: &kompoz_graphics::Density,
-    ) -> kompoz_graphics::Outline {
-        self.0.create_outline(size, layout_direction, density)
-    }
 }
 
 /// The background of a surface's color at an elevation (Compose's private `surfaceColorAtElevation`): the

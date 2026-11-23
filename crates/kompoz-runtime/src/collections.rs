@@ -18,6 +18,19 @@ impl<T: Clone + Send + Sync + 'static> SnapshotStateList<T> {
     pub fn new(items: Vec<T>) -> Self {
         SnapshotStateList { state: MutableState::new(items, never_equal_policy()) }
     }
+}
+
+impl<T: Clone + 'static> SnapshotStateList<T> {
+    /// A list confined to this thread: its items needn't be `Send` or `Sync` (Compose's `mutableStateListOf` holds
+    /// any objects; see [`MutableState::new_confined`]).
+    pub fn new_confined(items: Vec<T>) -> Self {
+        SnapshotStateList { state: MutableState::new_confined(items, never_equal_policy()) }
+    }
+
+    /// Whether it is confined to a thread (see [`new_confined`](SnapshotStateList::new_confined)).
+    pub fn is_confined(&self) -> bool {
+        self.state.is_confined()
+    }
 
     /// The items (a copy).
     pub fn to_vec(&self) -> Vec<T> {
@@ -86,6 +99,12 @@ pub fn mutable_state_list_of<T: Clone + Send + Sync + 'static>(
     items: impl IntoIterator<Item = T>,
 ) -> SnapshotStateList<T> {
     SnapshotStateList::new(items.into_iter().collect())
+}
+
+/// `mutableStateListOf(…)` of items that needn't be `Send` or `Sync`: a list confined to this thread (see
+/// [`SnapshotStateList::new_confined`]).
+pub fn mutable_confined_state_list_of<T: Clone + 'static>(items: impl IntoIterator<Item = T>) -> SnapshotStateList<T> {
+    SnapshotStateList::new_confined(items.into_iter().collect())
 }
 
 /// An observable map (Compose's SnapshotStateMap): reading it subscribes, changing it recomposes the readers.

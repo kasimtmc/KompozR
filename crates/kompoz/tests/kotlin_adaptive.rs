@@ -59,7 +59,6 @@ kompoz! {
                             state,
                             LocalMinimumInteractiveComponentSize.current,
                             interactionSource,
-                            state.defaultDragHandleSemantics(),
                         ),
                         interactionSource = interactionSource,
                     )

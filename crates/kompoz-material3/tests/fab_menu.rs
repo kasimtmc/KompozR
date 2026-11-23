@@ -330,10 +330,9 @@ fn toggle_floating_action_button_defaults_go_from_the_fab_to_the_close_button() 
     let m = made.clone();
     let _rule = KompozTestRule::new(kompozable_lambda!(move || {
         *m.borrow_mut() = Some((
-            ToggleFloatingActionButtonDefaults.container_color_by_progress(),
-            ToggleFloatingActionButtonDefaults.icon_color_by_progress(),
-            ToggleFloatingActionButtonDefaults
-                .container_color_by_progress(initial_color = Color::Red, final_color = Color::Blue),
+            ToggleFloatingActionButtonDefaults.container_color(),
+            ToggleFloatingActionButtonDefaults.icon_color(),
+            ToggleFloatingActionButtonDefaults.container_color(initial_color = Color::Red, final_color = Color::Blue),
         ));
     }));
     let (container, icon, given) = made.borrow_mut().take().expect("composed");

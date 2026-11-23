@@ -3,10 +3,12 @@
 pub fn Sliders(bold: bool) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let price = remember(|| mutable_state_of(::core::ops::RangeInclusive::new(200_f32, 800_f32)));
+    let price = remember(|| ::kompoz::runtime::mutable_state_of!(::core::ops::RangeInclusive::new(200_f32, 800_f32)));
     let whole: ::core::ops::RangeInclusive<f32> = ::core::ops::RangeInclusive::new(0_f32, 1000_f32);
     let picked = ::kompoz::runtime::kt::delegate_of::<::core::option::Option<i32>, _>(remember(|| {
-        mutable_state_of(::core::option::Option::None)
+        ::kompoz::runtime::mutable_state_of!(::core::convert::identity::<::core::option::Option<i32>>(
+            ::core::option::Option::None
+        ))
     }));
     let stars =
         remember_slider_state(value = 3_f32, steps = 3, value_range = ::core::ops::RangeInclusive::new(1_f32, 5_f32));

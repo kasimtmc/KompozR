@@ -34,13 +34,13 @@ pub trait KtMutableDelegate: KtDelegate {
     fn set_value(&self, value: Self::Value);
 }
 
-impl<T: Clone + Send + Sync + 'static> KtDelegate for MutableState<T> {
+impl<T: Clone + 'static> KtDelegate for MutableState<T> {
     type Value = T;
     fn get_value(&self) -> T {
         self.get()
     }
 }
-impl<T: Clone + Send + Sync + 'static> KtMutableDelegate for MutableState<T> {
+impl<T: Clone + 'static> KtMutableDelegate for MutableState<T> {
     fn set_value(&self, value: T) {
         self.set(value);
     }

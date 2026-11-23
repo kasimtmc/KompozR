@@ -3,9 +3,7 @@
 //! tooltip is.
 
 use crate::internal::basic_tooltip::{BasicTooltipBox, remember_basic_tooltip_state};
-use crate::tooltip::{
-    AnchorBounds, TooltipAnchorPosition, TooltipDefaults, TooltipScope, TooltipScopeImpl, TooltipState,
-};
+use crate::tooltip::{TooltipAnchorPosition, TooltipDefaults, TooltipScope, TooltipScopeImpl, TooltipState};
 use kompoz_animation::{MutableTransitionState, MutatePriority, MutatorMutex};
 use kompoz_coroutines::LaunchedEffect;
 use kompoz_foundation::gestures::LocalFuture;
@@ -38,7 +36,7 @@ pub fn Label(
         remember_basic_tooltip_state(mutator_mutex = MutatorMutex())
     };
 
-    let anchor_bounds = remember(AnchorBounds::new);
+    let anchor_bounds = remember(crate::tooltip::new_anchor_bounds);
     let (bounds, provider) = (anchor_bounds.clone(), position_provider.clone());
     let scope = remember(move || Rc::new(TooltipScopeImpl::new(move || bounds.get(), provider)));
 

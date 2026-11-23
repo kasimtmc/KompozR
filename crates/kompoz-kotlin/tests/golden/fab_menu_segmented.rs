@@ -3,8 +3,8 @@
 pub fn Segments(pick: i32, bold: bool) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let picked = remember(|| mutable_state_of(pick));
-    let checked = remember(|| mutable_state_of(bold));
+    let picked = remember(|| ::kompoz::runtime::mutable_state_of!(pick));
+    let checked = remember(|| ::kompoz::runtime::mutable_state_of!(bold));
     SingleChoiceSegmentedButtonRow(|this| {
         for i in ::kompoz::runtime::kt::until(0, 2) {
             this.SegmentedButton(
@@ -50,7 +50,7 @@ pub fn Segments(pick: i32, bold: bool) {
 pub fn Menu(open: bool) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let expanded = remember(|| mutable_state_of(open));
+    let expanded = remember(|| ::kompoz::runtime::mutable_state_of!(open));
     let mut items = ::kompoz::runtime::kt::list_of([
         ::kompoz::runtime::kt::to(Icons::Filled::Add(), ::std::string::String::from("Ekle")),
         ::kompoz::runtime::kt::to(Icons::Filled::Edit(), ::std::string::String::from("Düzenle")),
@@ -63,7 +63,7 @@ pub fn Menu(open: bool) {
                 on_checked_change = |it| {
                     ::kompoz::runtime::kt::KtMutableDelegate::set_value(&expanded, it);
                 },
-                container_color = ToggleFloatingActionButtonDefaults.container_color_by_progress(),
+                container_color = ToggleFloatingActionButtonDefaults.container_color(),
                 container_size = ToggleFloatingActionButtonDefaults.container_size_of(80.dp()),
                 content = |this| {
                     let __kz_this = ::core::clone::Clone::clone(this);

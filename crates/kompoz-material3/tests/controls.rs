@@ -603,8 +603,8 @@ fn checkboxes_and_radio_buttons_ripple_and_hover_in_a_40_dp_circle() {
 // ---- C++ chips_radio_buttons_and_segments_select: its radio buttons ---------------------------------------------
 
 fn chips_radio_buttons_and_segments_select() {
-    // The C++ test's radio buttons (rows of a RadioButton and a Text, the button tapped). Its FilterChip is the chips'
-    // (WP1a's tests) and its SingleChoiceSegmentedButtonRow the segmented buttons' (tests/segmented_buttons.rs, same
+    // The C++ test's radio buttons (rows of a RadioButton and a Text, the button tapped). Its FilterChip is
+    // tests/containers.rs' and its SingleChoiceSegmentedButtonRow the segmented buttons' (tests/segmented_buttons.rs, same
     // name).
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
         let selected = remember(|| mutable_state_of("Kahve".to_string()));
@@ -815,10 +815,20 @@ fn controls_keep_48_dp_of_room_only_when_they_take_clicks() {
     assert!(same_rect(bounds(&rule, "kutu"), xywh(12.0, 12.0, 24.0, 24.0)), "{:?}", bounds(&rule, "kutu"));
     assert!(size("sade kutu odası") == (24.0, 24.0) && size("sade radyo odası") == (24.0, 24.0));
     assert_eq!(size("sade anahtar odası"), (52.0, 32.0));
-    // No minimum provided: their own sizes.
+    // Where a touch hits them (Compose's ui-test `touchBoundsInRoot`): those taking clicks their 48 dp room, those
+    // without their own size.
+    rule.on_node_with_tag("kutu").assert_touch_width_is_equal_to(Dp(48.0)).assert_touch_height_is_equal_to(Dp(48.0));
+    assert!(same_rect(rule.on_node_with_tag("kutu").get_touch_bounds_in_root(), xywh(0.0, 0.0, 48.0, 48.0)));
+    rule.on_node_with_tag("anahtar").assert_touch_width_is_equal_to(Dp(52.0)).assert_touch_height_is_equal_to(Dp(48.0));
+    let plain = rule.on_node_with_tag_unmerged("sade kutu odası");
+    assert!(same_rect(plain.get_touch_bounds_in_root(), plain.get_unclipped_bounds_in_root()));
+    // No minimum provided: their own sizes; still touched in 48 dp (Compose's CheckboxTest
+    // `checkBoxTest_MaterialSize_WhenEnforcementDisabled`: the view configuration's minimum touch target).
     room.set(Dp(0.0));
     rule.wait_for_idle();
     assert!(size("kutu odası") == (24.0, 24.0) && size("anahtar odası") == (52.0, 32.0));
+    rule.on_node_with_tag("kutu").assert_width_is_equal_to(Dp(24.0)).assert_touch_width_is_equal_to(Dp(48.0));
+    rule.on_node_with_tag("kutu").assert_touch_height_is_equal_to(Dp(48.0));
 }
 
 fn control_colors_come_from_the_scheme_and_copy_what_is_given() {

@@ -169,6 +169,9 @@ pub mod prelude {
     // (WP1b: toggle_split — the trait a TooltipBox's `positionProvider` is: Kotlin code naming none of it still
     // makes a value of it, `TooltipDefaults.rememberTooltipPositionProvider(…)`, which the generated Rust types)
     pub use kompoz_ui::window::PopupPositionProvider;
+    // (what a scroll behavior's nested scroll connection is — a top app bar's, a floating toolbar's, a sheet's —: the
+    // generated Rust types it, as a Compose app imports `NestedScrollConnection` beside `Modifier.nestedScroll`)
+    pub use kompoz_ui::input::{NestedScrollConnection, NestedScrollSource};
     // (WP1b: fab_segmented — what M15's FloatingActionButtonMenuSample imports: the back handler (CMP's
     // androidx.compose.ui.backhandler.BackHandler), the keys of androidx.compose.ui.input.key, the semantics' custom
     // actions, the focus requester)

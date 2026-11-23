@@ -7,7 +7,7 @@ use crate::text::input::internal::TransformedTextFieldState;
 use crate::text::input::{PlacedAnnotation, TextFieldCharSequence};
 use crate::text::keyboard_options::KeyboardOptions;
 use kompoz_graphics::{Constraints, Density, LayoutDirection};
-use kompoz_runtime::{MutableState, mutable_state_of};
+use kompoz_runtime::{MutableState, SnapshotMutationPolicy, mutable_confined_state_of_with_policy};
 use kompoz_text::{AnnotatedString, FontFamilyResolver, TextDirection, TextLayoutResult, TextMeasurer, TextStyle};
 use kompoz_ui::platform::KeyboardType;
 use std::cell::RefCell;
@@ -60,29 +60,19 @@ fn same_resolver(a: &Rc<dyn FontFamilyResolver>, b: &Rc<dyn FontFamilyResolver>)
     std::ptr::eq(Rc::as_ptr(a) as *const (), Rc::as_ptr(b) as *const ())
 }
 
-/// A value read as a snapshot state whose readers are told only when a new one isn't equivalent to it (Compose's
-/// `mutableStateOf(value, policy)` of a value holding handles a snapshot state can't).
-struct PolicyState<T> {
-    value: RefCell<Option<T>>,
-    version: MutableState<u64>,
+/// Compose's `NonMeasureInputs.mutationPolicy`: equivalent inputs, or none on both sides.
+fn non_measure_inputs_policy(a: &Option<NonMeasureInputs>, b: &Option<NonMeasureInputs>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.equivalent(b),
+        (a, b) => a.is_none() == b.is_none(),
+    }
 }
 
-impl<T: Clone> PolicyState<T> {
-    fn new() -> PolicyState<T> {
-        PolicyState { value: RefCell::new(None), version: mutable_state_of(0) }
-    }
-
-    fn get(&self) -> Option<T> {
-        self.version.get();
-        self.value.borrow().clone()
-    }
-
-    fn set(&self, value: T, equivalent: impl Fn(&T, &T) -> bool) {
-        let same = self.value.borrow().as_ref().is_some_and(|old| equivalent(old, &value));
-        *self.value.borrow_mut() = Some(value);
-        if !same {
-            self.version.set(self.version.peek().wrapping_add(1));
-        }
+/// Compose's `MeasureInputs.mutationPolicy`: equivalent inputs, or none on both sides.
+fn measure_inputs_policy(a: &Option<MeasureInputs>, b: &Option<MeasureInputs>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.equivalent(b),
+        (a, b) => a.is_none() == b.is_none(),
     }
 }
 
@@ -126,8 +116,11 @@ impl Default for CacheRecord {
 /// what it was made from, a new one otherwise. A style differing only in what paints reuses the layout with the
 /// new style.
 pub struct TextFieldLayoutStateCache {
-    non_measure_inputs: PolicyState<NonMeasureInputs>,
-    measure_inputs: PolicyState<MeasureInputs>,
+    /// Compose's `nonMeasureInputs by mutableStateOf(null, NonMeasureInputs.mutationPolicy)` (confined: the inputs
+    /// hold handles that aren't `Send`).
+    non_measure_inputs: MutableState<Option<NonMeasureInputs>>,
+    /// Compose's `measureInputs by mutableStateOf(null, MeasureInputs.mutationPolicy)` (confined).
+    measure_inputs: MutableState<Option<MeasureInputs>>,
     record: RefCell<CacheRecord>,
     text_measurer: RefCell<Option<TextMeasurer>>,
 }
@@ -141,8 +134,14 @@ impl Default for TextFieldLayoutStateCache {
 impl TextFieldLayoutStateCache {
     pub fn new() -> TextFieldLayoutStateCache {
         TextFieldLayoutStateCache {
-            non_measure_inputs: PolicyState::new(),
-            measure_inputs: PolicyState::new(),
+            non_measure_inputs: mutable_confined_state_of_with_policy(
+                None,
+                SnapshotMutationPolicy::new(non_measure_inputs_policy),
+            ),
+            measure_inputs: mutable_confined_state_of_with_policy(
+                None,
+                SnapshotMutationPolicy::new(measure_inputs_policy),
+            ),
             record: RefCell::new(CacheRecord::default()),
             text_measurer: RefCell::new(None),
         }
@@ -166,16 +165,13 @@ impl TextFieldLayoutStateCache {
         soft_wrap: bool,
         keyboard_options: &KeyboardOptions,
     ) {
-        self.non_measure_inputs.set(
-            NonMeasureInputs {
-                text_field_state: text_field_state.clone(),
-                text_style: text_style.clone(),
-                single_line,
-                soft_wrap,
-                is_keyboard_type_phone: keyboard_options.keyboard_type == KeyboardType::Phone,
-            },
-            NonMeasureInputs::equivalent,
-        );
+        self.non_measure_inputs.set(Some(NonMeasureInputs {
+            text_field_state: text_field_state.clone(),
+            text_style: text_style.clone(),
+            single_line,
+            soft_wrap,
+            is_keyboard_type_phone: keyboard_options.keyboard_type == KeyboardType::Phone,
+        }));
     }
 
     /// The inputs from the measure pass, and the layout they make (Compose's `layoutWithNewMeasureInputs`).
@@ -188,13 +184,9 @@ impl TextFieldLayoutStateCache {
         constraints: Constraints,
     ) -> TextLayoutResult {
         let measure = MeasureInputs { density, layout_direction, font_family_resolver, constraints };
-        self.measure_inputs.set(measure.clone(), MeasureInputs::equivalent);
-        let non_measure = self
-            .non_measure_inputs
-            .value
-            .borrow()
-            .clone()
-            .expect("Called layoutWithNewMeasureInputs before updateNonMeasureInputs");
+        self.measure_inputs.set(Some(measure.clone()));
+        let non_measure =
+            self.non_measure_inputs.peek().expect("Called layoutWithNewMeasureInputs before updateNonMeasureInputs");
         self.get_or_compute_layout(&non_measure, &measure)
     }
 

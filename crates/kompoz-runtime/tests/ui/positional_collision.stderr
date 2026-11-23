@@ -1,8 +1,8 @@
 error[E0599]: no method named `__kz_copy` found for struct `Ruler` in the current scope
-  --> tests/ui/positional_collision.rs:17:19
+  --> tests/ui/positional_collision.rs:20:19
    |
- 7 | struct Ruler(i32);
+ 8 | struct Ruler(i32);
    | ------------ method `__kz_copy` not found for this struct
 ...
-17 |     let _ = ruler.copy(2);
+20 |     let _ = other.copy(2);
    |                   ^^^^ method not found in `Ruler`

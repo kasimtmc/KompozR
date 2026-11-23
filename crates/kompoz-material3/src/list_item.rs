@@ -18,6 +18,7 @@ use crate::internal::layout_util::{PlaceableOrZero, SubtractConstraintSafely};
 use crate::internal::provide_content_color_text_style::{
     ProvideContentColorTextStyle, ProvideContentColorTextStyleWithValues,
 };
+use crate::internal::shape_util::ClipShape;
 use crate::list_item_defaults::{
     ListItemColors, ListItemDefaults, ListItemElevation, ListItemShapes, shape_for_interaction,
 };
@@ -30,7 +31,7 @@ use kompoz_foundation::interaction::{
     DragInteraction, FocusInteraction, HoverInteraction, MutableInteractionSource, PressInteraction,
 };
 use kompoz_foundation::prelude::*;
-use kompoz_graphics::{Color, Constraints, Dp, Shape, UnitExt};
+use kompoz_graphics::{Color, Constraints, Dp, UnitExt};
 use kompoz_runtime::{KompozitionLocalProvider, MutableState, kompozable, mutable_state_of, named_args, remember};
 use kompoz_ui::alignment::VerticalAlignment;
 use kompoz_ui::layout::{
@@ -42,9 +43,7 @@ use kompoz_ui::semantics::{Role, SemanticsConfiguration};
 use kompoz_ui::state::ToggleableState;
 use kompoz_ui::{Alignment, Modifier};
 use std::cell::RefCell;
-use std::fmt;
 use std::rc::Rc;
-use std::sync::Arc;
 
 /// A nullable composable slot (Kotlin's `(@Composable () -> Unit)?`).
 type Slot = Option<Rc<dyn Fn()>>;
@@ -1490,33 +1489,6 @@ impl ZIndexLambda for Modifier {
                 named_args!(p.place(&placeable, 0, 0, z_index = z_index.invoke()))
             })
         })
-    }
-}
-
-/// A shared shape as a shape (what `Modifier.clip` takes by value), equal as the shape is.
-#[derive(Debug)]
-struct ClipShape(Arc<dyn Shape>);
-
-impl PartialEq for ClipShape {
-    fn eq(&self, other: &Self) -> bool {
-        *self.0 == *other.0
-    }
-}
-
-impl Shape for ClipShape {
-    fn create_outline(
-        &self,
-        size: kompoz_graphics::Size,
-        layout_direction: kompoz_graphics::LayoutDirection,
-        density: &kompoz_graphics::Density,
-    ) -> kompoz_graphics::Outline {
-        self.0.create_outline(size, layout_direction, density)
-    }
-}
-
-impl fmt::Display for ClipShape {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.0)
     }
 }
 

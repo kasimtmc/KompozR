@@ -6,7 +6,6 @@ use kompoz_graphics::{Density, Dp};
 use kompoz_runtime::kompozable;
 use kompoz_ui::layout::SubcomposeLayout;
 use kompoz_ui::{Alignment, Constraints, Measurable, Modifier};
-use std::rc::Rc;
 
 /// A `Box` whose content is composed with the constraints its parent measures it in (Compose's
 /// `BoxWithConstraints`): `content` gets a [`BoxWithConstraintsScope`] telling them (in px, and its bounds in dp),

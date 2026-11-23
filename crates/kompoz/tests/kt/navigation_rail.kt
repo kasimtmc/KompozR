@@ -301,11 +301,6 @@ fun WideNavigationRailExpandedSample() {
     }
 }
 
-// (WideNavigationRailArrangementsSample is here as M15 writes it, in a comment: it keeps its arrangement in a
-// `mutableStateOf<Arrangement.Vertical>` state, and KompozR's snapshot states hold Send values only (an Arrangement,
-// which may hold a closure, isn't) — a state of a non-Send value for the Kotlin syntax is kompoz-runtime's to add (the
-// closing's decision, as TabSamples' Fancy indicators). Its Rust twin is in kompoz-material3's tests/navigation_rail.rs.)
-/*
 @OptIn(ExperimentalMaterial3Api::class)
 @Preview
 @Composable
@@ -413,7 +408,6 @@ fun WideNavigationRailArrangementsSample() {
         }
     }
 }
-*/
 
 @Preview
 @Sampled

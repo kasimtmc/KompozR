@@ -12,7 +12,6 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 // (what the generated code types the animated FAB samples' tooltip position providers with)
-use kompoz::ui::window::PopupPositionProvider;
 
 // ---- required_arguments_by_name (kompozable_tests.cpp 201-226) -----------------------------------------------------
 

@@ -52,6 +52,14 @@ impl Gen<'_, '_> {
     /// What a Kotlin type is to the generator.
     pub(crate) fn ty_of(&self, t: &Type) -> Ty {
         let base = match &t.kind {
+            TypeKind::Named(segs)
+                if segs.len() > 1
+                    && let Some(rust) = crate::index::rust_type(
+                        &segs.iter().map(|s| s.name.name.as_str()).collect::<Vec<_>>().join("."),
+                    ) =>
+            {
+                Ty::Named(rust.to_string(), Vec::new())
+            }
             TypeKind::Named(segs) => {
                 let last = segs.last().expect("a type has a name");
                 let args: Vec<Ty> = last
@@ -152,6 +160,14 @@ impl Gen<'_, '_> {
     fn named_type(&mut self, segs: &[TypeSegment], loc: Loc) -> TokenStream {
         let span = self.span(loc);
         if segs.len() > 1 && !segs[..segs.len() - 1].iter().all(|s| s.name.name.starts_with(char::is_lowercase)) {
+            // (a nested type Rust names otherwise, by its doc line: `Arrangement.Vertical` → `VerticalArrangement`)
+            let kotlin = segs.iter().map(|s| s.name.name.as_str()).collect::<Vec<_>>().join(".");
+            if let Some(rust) = crate::index::rust_type(&kotlin)
+                && segs.iter().all(|s| s.args.is_empty())
+            {
+                let i = proc_macro2::Ident::new(rust, span);
+                return quote_spanned!(span=> #i);
+            }
             return self.later(loc, "a nested type");
         }
         let last = segs.last().expect("a type has a name");

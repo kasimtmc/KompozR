@@ -310,12 +310,13 @@ pub fn DisposableEffect<K: PartialEq + 'static>(keys: K, effect: impl FnOnce() -
 /// unequal lambda instance does in Compose). The value's type is read where the macro is written, so it must be
 /// known there (`remember_updated_state!(Rc::new(on_tap) as Rc<dyn Fn(Offset)>)`).
 ///
-/// Compose's lambdas are memoized (the same instance while what they capture stays the same); a closure here, or an
-/// `Rc` made anew at each composition (`Rc::new(on_click)` of an `impl Fn` parameter), is a change every time the
-/// composition setting it runs: what reads it in a measure or a drawing runs again then, and a composition that
-/// reads it where it is set (itself, or through a derived state of it) would be composed again at every pass. Read
-/// such a callback in effects and callbacks, as Compose's samples do, or take it as an `Rc<dyn Fn…>` parameter: a
-/// scope restarting by itself is given the same instance again, equal to itself.
+/// Compose's lambdas are memoized (the same instance while what they capture stays the same). In a restartable
+/// composable, `Rc::new(on_click)` of an `impl Fn` parameter is so too: the one `Rc` the composable keeps the closure
+/// as while its identity (what it captures) stays the same, whether the scope restarts by itself or its caller
+/// composes it again. A closure made in the body, or an `Rc` of something else made anew at each composition, is a
+/// change every time the composition setting it runs: what reads it in a measure or a drawing runs again then, and a
+/// composition that reads it where it is set would be composed again at every pass — read such a value in effects
+/// and callbacks, as Compose's samples do.
 ///
 /// ```
 /// # use kompoz_runtime::*;
@@ -343,43 +344,6 @@ macro_rules! __remember_updated_state {
     }};
 }
 
-/// What [`remember_updated_state!`](crate::remember_updated_state) keeps: the latest value, and the state its
-/// readers read. Compose keeps the value in the snapshot state itself; a value here needn't be `Send` (a callback
-/// rarely is) and KompozR's snapshot states hold `Send` values, so it is held beside a state of its changes, whose
-/// reads and writes go through the snapshot system as the value's would (the readers recorded, a derived state's
-/// dependency, told when the composition that set it is applied). The value itself isn't kept per snapshot: only
-/// its composition sets it, on the UI thread, and what reads it there runs after that composition's snapshot is
-/// applied, so it sees what a snapshot state would (a snapshot taken before, and read after, sees the new value).
-struct UpdatedValue<T> {
-    value: std::cell::RefCell<T>,
-    changes: crate::MutableState<u64>,
-    equivalent: Option<fn(&T, &T) -> bool>,
-}
-
-impl<T> UpdatedValue<T> {
-    /// `value`, unless it is equal to the one it has: a change its readers are told of.
-    fn set(&self, value: T) {
-        if self.equivalent.is_some_and(|eq| eq(&self.value.borrow(), &value)) {
-            return;
-        }
-        let old = self.value.replace(value);
-        drop(old);
-        self.changes.set(self.changes.peek().wrapping_add(1));
-    }
-}
-
-impl<T: 'static> crate::StateSource<T> for UpdatedValue<T> {
-    fn with_value(&self, subscribe: bool, f: &mut dyn FnMut(&T)) {
-        if subscribe {
-            self.changes.with(|_| ());
-        }
-        f(&self.value.borrow());
-    }
-    fn identity(&self) -> *const () {
-        self as *const Self as *const ()
-    }
-}
-
 /// [`remember_updated_state!`](crate::remember_updated_state) with the equality its value's type has.
 #[doc(hidden)]
 #[track_caller]
@@ -387,26 +351,24 @@ pub fn remember_updated_state_with<T: Clone + 'static>(
     value: T,
     equivalent: Option<fn(&T, &T) -> bool>,
 ) -> crate::State<T> {
+    // (Compose's `remember { mutableStateOf(newValue) }.apply { value = newValue }`: a state confined to the
+    // composition's thread, as the value needn't be `Send` — a callback rarely is)
     let site = Location::caller();
     let c = Composer::require();
     c.start_group(key_of(site));
-    let holder = match slot_get::<Rc<UpdatedValue<T>>, _>(&c, |h| Some(h.clone())) {
-        Some(h) => {
-            h.set(value);
-            h
+    let state = match slot_get::<crate::MutableState<T>, _>(&c, |s| Some(s.clone())) {
+        Some(s) => {
+            s.set(value);
+            s
         }
         None => {
-            let h = Rc::new(UpdatedValue {
-                value: std::cell::RefCell::new(value),
-                changes: crate::mutable_state_of(0),
-                equivalent,
-            });
-            c.set_remembered(Box::new(h.clone()), None);
-            h
+            let s = crate::MutableState::new_confined(value, crate::state::policy_of(equivalent));
+            c.set_remembered(Box::new(s.clone()), None);
+            s
         }
     };
     c.end_group();
-    crate::State::from_shared(holder)
+    crate::State::from(state)
 }
 
 /// The scope running now composed again at the next frame (an animation's).

@@ -18,7 +18,6 @@ use kompoz::ui::input::PointerType;
 use kompoz::ui::semantics::SemanticsProperties;
 
 // (the samples' TooltipBox types its position provider with the window's trait)
-use kompoz::ui::window::PopupPositionProvider;
 
 kompoz_file!("tests/kt/menus.kt");
 

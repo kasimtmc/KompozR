@@ -38,8 +38,9 @@ use crate::text::selection::{LocalTextSelectionColors, SimpleLayout};
 use kompoz_coroutines::{CoroutineStart, LaunchedEffect, remember_coroutine_scope, snapshot_flow};
 use kompoz_graphics::{Brush, Color, Constraints, Density, Dp, Offset, Rect};
 use kompoz_runtime::{
-    DisposableEffect, MutableState, mutable_state_of, named_args, on_dispose, remember, remember_keyed,
-    remember_saveable_keyed_with, remember_updated_state, without_read_observation,
+    DisposableEffect, MutableState, SnapshotMutationPolicy, mutable_confined_state_of_with_policy, mutable_state_of,
+    named_args, on_dispose, remember, remember_keyed, remember_saveable_keyed_with, remember_updated_state,
+    without_read_observation,
 };
 use kompoz_text::input::{EditProcessor, OffsetMapping, TextFieldValue, VisualTransformation};
 use kompoz_text::{AnnotatedString, FontFamilyResolver, TextLayoutResult, TextOverflow, TextRange, TextStyle};
@@ -58,39 +59,6 @@ use kompoz_ui::text_input::{TextInputService, TextInputSession};
 use kompoz_ui::{MeasureResult, MeasureScope, Modifier};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
-
-// ---------------------------------------------------------------------------------------------------------------
-// A state of a value a snapshot state can't hold
-
-/// A value read as a snapshot state (Compose's `mutableStateOf` of what holds handles KompozR's snapshot states
-/// can't): its readers are told when it is set.
-pub struct ObservedCell<T> {
-    value: RefCell<T>,
-    version: MutableState<u64>,
-}
-
-impl<T: Clone> ObservedCell<T> {
-    pub fn new(value: T) -> ObservedCell<T> {
-        ObservedCell { value: RefCell::new(value), version: mutable_state_of(0) }
-    }
-
-    /// The value, read as a state.
-    pub fn get(&self) -> T {
-        self.version.get();
-        self.value.borrow().clone()
-    }
-
-    /// The value, not observed.
-    pub fn peek(&self) -> T {
-        self.value.borrow().clone()
-    }
-
-    /// Sets it, its readers told.
-    pub fn set(&self, value: T) {
-        *self.value.borrow_mut() = value;
-        self.version.set(self.version.peek().wrapping_add(1));
-    }
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // The state
@@ -121,7 +89,9 @@ pub struct LegacyTextFieldState {
     /// `heightForSingleLineField`).
     height_for_single_line_field: MutableState<Dp>,
     layout_coordinates: RefCell<Option<LayoutCoordinates>>,
-    layout_result: ObservedCell<Option<Rc<TextLayoutResultProxy>>>,
+    /// Compose's `layoutResultState = mutableStateOf<TextLayoutResultProxy?>(null)` (confined: Kotlin's `==` of
+    /// the proxy, its instance).
+    layout_result: MutableState<Option<Rc<TextLayoutResultProxy>>>,
     /// The value's text before it was transformed (Compose's `untransformedText`).
     untransformed_text: RefCell<Option<AnnotatedString>>,
     handle_state: MutableState<HandleState>,
@@ -158,7 +128,13 @@ impl LegacyTextFieldState {
             has_focus: mutable_state_of(false),
             height_for_single_line_field: mutable_state_of(Dp(0.0)),
             layout_coordinates: RefCell::new(None),
-            layout_result: ObservedCell::new(None),
+            layout_result: mutable_confined_state_of_with_policy(
+                None,
+                SnapshotMutationPolicy::new(|a: &Option<Rc<TextLayoutResultProxy>>, b| match (a, b) {
+                    (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                    (a, b) => a.is_none() == b.is_none(),
+                }),
+            ),
             untransformed_text: RefCell::new(None),
             handle_state: mutable_state_of(HandleState::None),
             show_floating_toolbar: mutable_state_of(false),

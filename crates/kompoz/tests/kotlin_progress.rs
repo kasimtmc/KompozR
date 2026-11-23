@@ -76,6 +76,18 @@ fn graphics_forms_progress() {
     assert_eq!(progress_of(&rule), [determinate(0.5), ProgressBarRangeInfo::Indeterminate]);
 }
 
+fn graphics_forms_shapes() {
+    // GraphicsForms' heart (C++'s check: it exists), 20 dp, drawn as its shape's path in red; a turned cookie clipping
+    // what it holds, below it.
+    let rule = KompozTestRule::new(GraphicsFormsShapes);
+    let bounds = rule.on_node_with_tag("kalp").assert_exists().get_unclipped_bounds_in_root();
+    assert!(near(bounds.width(), 20.0, 0.5) && near(bounds.height(), 20.0, 0.5), "{bounds:?}");
+    let canvas = rule.draw();
+    let red = colored(&canvas, Color::Red);
+    assert!(red.len() == 1 && canvas.paths[red[0]].width() <= 20.0, "{red:?}");
+    assert_eq!(rule.on_node_with_tag("kurabiye").get_unclipped_bounds_in_root().top, bounds.bottom);
+}
+
 fn determinate_samples() {
     // Linear, wavy linear, circular, wavy circular, their thick forms and the legacy ones: 10% to start, the
     // slider's value animated to (a spring) as it is set.
@@ -259,6 +271,7 @@ fn main() {
     common::run(&[
         ("material_forms_progress", material_forms_progress),
         ("graphics_forms_progress", graphics_forms_progress),
+        ("graphics_forms_shapes", graphics_forms_shapes),
         ("determinate_samples", determinate_samples),
         ("thick_wavy_samples", thick_wavy_samples),
         ("indeterminate_samples", indeterminate_samples),

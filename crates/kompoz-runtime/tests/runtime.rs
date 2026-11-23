@@ -1601,6 +1601,11 @@ fn a_state_list_is_saved_and_given_back() {
 }
 
 tests!(
+    confined_states_hold_values_that_arent_send,
+    a_confined_state_list_holds_items_that_arent_send,
+    a_snapshot_writing_a_confined_state_applies_on_its_thread_only,
+    a_confined_states_values_are_freed_on_its_thread,
+    an_impl_fn_parameter_is_one_rc_while_its_identity_stays,
     nodes_are_retained_across_recompositions,
     key_keeps_state_with_its_item,
     without_key_state_is_positional,
@@ -1667,4 +1672,164 @@ fn a_shared_state_reads_its_state_from_anywhere() {
     rule.wait_for_idle();
     assert_eq!(rule.names(), ["v=5"]);
     assert!(shared.as_state().get() == 5 && format!("{shared:?}") == "SharedState(5)");
+}
+
+/// Compose's `mutableStateOf` holds any object: `mutable_state_of!` keeps a value that isn't `Send` (an `Rc`, a
+/// `Job`, an `Animatable`) in a state confined to this thread — kept per snapshot as any state, its readers
+/// recomposed when it changes, equal values (Kotlin's `==`: an `Rc`'s instance) changing nothing.
+fn confined_states_hold_values_that_arent_send() {
+    let shared = mutable_state_of!(1);
+    let label = mutable_state_of!(Rc::new("a".to_string()));
+    let optional = mutable_state_of!(None::<Rc<Cell<i32>>>);
+    assert!(!shared.is_confined() && label.is_confined() && optional.is_confined());
+    let runs = Rc::new(Cell::new(0));
+    let (l, r) = (label.clone(), runs.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        r.set(r.get() + 1);
+        Text(format!("label={}", l.get()));
+    }));
+    assert!(rule.has("label=a"));
+    let b = Rc::new("b".to_string());
+    label.set(b.clone());
+    rule.wait_for_idle();
+    assert!(rule.has("label=b") && runs.get() == 2);
+    label.set(b); // the same instance: no change
+    rule.wait_for_idle();
+    assert_eq!(runs.get(), 2);
+    // A snapshot's writes are its own until applied, and dropped with it.
+    let cell = Rc::new(Cell::new(7));
+    let snapshot = Snapshot::take_mutable_snapshot(None, None);
+    snapshot.enter(|| optional.set(Some(cell.clone())));
+    assert!(optional.get().is_none() && snapshot.enter(|| optional.get().is_some()));
+    snapshot.dispose();
+    assert!(optional.get().is_none());
+    Snapshot::with_mutable_snapshot(|| optional.set(Some(cell.clone()))).unwrap();
+    assert_eq!(optional.get().map(|c| c.get()), Some(7));
+    // A policy given: a state of `Rc`s compared by value.
+    let by_value = mutable_state_of!(Rc::new(1), SnapshotMutationPolicy::new(|a: &Rc<i32>, b| a == b));
+    by_value.set(Rc::new(1));
+    assert_eq!(by_value.record_count(), 1);
+}
+
+/// Compose's `mutableStateListOf` holds any objects: a list confined to this thread holds items that aren't `Send`
+/// (`Rc`s), its readers recomposed on each change, a snapshot's changes its own until applied.
+fn a_confined_state_list_holds_items_that_arent_send() {
+    let list = mutable_confined_state_list_of([Rc::new("a".to_string())]);
+    assert!(list.is_confined() && !mutable_state_list_of([1]).is_confined());
+    let l = list.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        for item in l.to_vec() {
+            Text((*item).clone());
+        }
+    }));
+    assert_eq!(rule.names(), ["a"]);
+    list.add(Rc::new("b".to_string()));
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["a", "b"]);
+    let snapshot = Snapshot::take_mutable_snapshot(None, None);
+    snapshot.enter(|| list.remove_at(0));
+    assert!(list.len() == 2 && snapshot.enter(|| list.len()) == 1);
+    assert!(snapshot.apply() == SnapshotApplyResult::Success);
+    snapshot.dispose();
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["b"]);
+}
+
+/// A confined state's values stay on its thread: a snapshot that wrote one can't be applied on another (it would
+/// copy or compare them there) — it panics there; the thread that wrote it applies it.
+fn a_snapshot_writing_a_confined_state_applies_on_its_thread_only() {
+    let state = mutable_confined_state_of(Rc::new(0));
+    let other = mutable_state_of(0);
+    let snapshot = Snapshot::take_mutable_snapshot(None, None);
+    snapshot.enter(|| state.set(Rc::new(1)));
+    // (written meanwhile in the global snapshot: applying compares the values)
+    let one = Rc::new(1);
+    state.set(one.clone());
+    let elsewhere = snapshot.clone();
+    let applied = std::thread::spawn(move || elsewhere.apply()).join();
+    assert!(applied.is_err(), "applied on another thread");
+    // Another thread may still apply a snapshot of shared states only.
+    let shared_only = Snapshot::take_mutable_snapshot(None, None);
+    shared_only.enter(|| other.set(5));
+    let applied = std::thread::spawn(move || shared_only.apply()).join().unwrap();
+    assert!(applied == SnapshotApplyResult::Success && other.get() == 5);
+    snapshot.dispose();
+    assert!(Rc::ptr_eq(&state.get(), &one));
+}
+
+/// What drops a value, and on which thread.
+struct DropTracer(Rc<RefCell<Vec<std::thread::ThreadId>>>);
+impl Clone for DropTracer {
+    fn clone(&self) -> Self {
+        DropTracer(self.0.clone())
+    }
+}
+impl PartialEq for DropTracer {
+    fn eq(&self, _: &Self) -> bool {
+        false
+    }
+}
+impl Drop for DropTracer {
+    fn drop(&mut self) {
+        self.0.borrow_mut().push(std::thread::current().id());
+    }
+}
+
+/// The records of a confined state no one reads any more are freed between frames on its thread, and when its last
+/// handle goes on another thread (a snapshot's list of what it wrote), its values wait there for its thread.
+fn a_confined_states_values_are_freed_on_its_thread() {
+    let drops = Rc::new(RefCell::new(Vec::new()));
+    let me = std::thread::current().id();
+    let tracer = DropTracer(drops.clone());
+    let state = mutable_confined_state_of(tracer.clone());
+    for _ in 0..3 {
+        state.set(tracer.clone());
+        Snapshot::send_apply_notifications();
+    }
+    assert!(state.record_count() <= 2, "{} records", state.record_count());
+    assert!(drops.borrow().iter().all(|t| *t == me));
+    // The last handle in a snapshot dropped on another thread.
+    let snapshot = Snapshot::take_mutable_snapshot(None, None);
+    snapshot.enter(|| state.set(tracer.clone()));
+    drop(state);
+    let before = drops.borrow().len();
+    std::thread::spawn(move || drop(snapshot)).join().unwrap();
+    assert_eq!(drops.borrow().len(), before, "values dropped on another thread");
+    Snapshot::send_apply_notifications();
+    assert!(drops.borrow().len() > before && drops.borrow().iter().all(|t| *t == me));
+}
+
+#[kompozable]
+fn ReadsItsImplCallback(callback: impl Fn() -> i32, tick: i32, runs: Rc<Cell<u32>>, reads: MutableState<i32>) {
+    runs.set(runs.get() + 1);
+    reads.get();
+    // (`Rc::new` of the parameter is the one `Rc` it is kept as while its identity stays the same)
+    let latest = remember_updated_state!(Rc::new(callback) as Rc<dyn Fn() -> i32>);
+    Text(format!("callback {} at {tick}", latest.get()()));
+}
+
+/// An `impl Fn` parameter wrapped in an `Rc` in the body (what a `remember_updated_state!` or a node is given) is
+/// one `Rc` while the closure's identity stays the same — the scope restarting by itself, or its caller composing it
+/// again with a closure capturing the same values (Compose's memoized lambda, the same instance) —: the updated
+/// state read where it is set doesn't change, and composing settles (it used to recompose forever: "never idle");
+/// a closure capturing another value is a new one.
+fn an_impl_fn_parameter_is_one_rc_while_its_identity_stays() {
+    let (tick, value, reads) = (mutable_state_of(0), mutable_state_of(5), mutable_state_of(0));
+    let runs = Rc::new(Cell::new(0));
+    let (t, v, rd, r) = (tick.clone(), value.clone(), reads.clone(), runs.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let v = v.get();
+        ReadsItsImplCallback(move || v, t.get(), r.clone(), rd.clone());
+    }));
+    assert!(rule.has("callback 5 at 0") && runs.get() == 1);
+    reads.set(1); // restarts by itself
+    rule.wait_for_idle();
+    assert_eq!(runs.get(), 2);
+    tick.set(1); // its caller again, the same closure (it captures the same value)
+    rule.wait_for_idle();
+    assert!(rule.has("callback 5 at 1") && runs.get() == 3, "{}", runs.get());
+    value.set(6); // another closure: a change of the state its scope read, which runs it once more (Compose's
+    // composer counts a scope being composed as invalidated "imminently": not again)
+    rule.wait_for_idle();
+    assert!(rule.has("callback 6 at 1") && runs.get() == 5, "{}", runs.get());
 }

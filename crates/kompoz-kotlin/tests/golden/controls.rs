@@ -3,7 +3,7 @@
 pub fn Controls() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let __kz_d1 = remember(|| mutable_state_of(true));
+    let __kz_d1 = remember(|| ::kompoz::runtime::mutable_state_of!(true));
     let checked = __kz_d1.component1();
     let on_checked_change = __kz_d1.component2();
     let stroke_width_px = ::kompoz::runtime::kt::with(LocalDensity.current(), |this: &mut _| {

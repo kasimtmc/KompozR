@@ -592,9 +592,9 @@ fn Rows(state: Option<LazyListState>, tag: String) {
     );
 }
 
-/// Down at `from`, moved over 20 frames to `to`, held there a frame: what the moves started run (a drag's deltas are
-/// taken by its scrollable's coroutine, the pull's snaps by the node's, both dispatched as Compose's: the C++ took
-/// them at once).
+/// Down at `from`, moved over 20 frames to `to`, held there: what the moves started run at the current time
+/// (`runCurrent`: a drag's deltas are taken by its scrollable's coroutine, the pull's snaps by the node's, both
+/// dispatched as Compose's; the C++ took them at once).
 fn pull_to(rule: &KompozTestRule, from: Offset, to: Offset) {
     let h = rule.host();
     h.pointer_down(from, -1, 0, PointerType::Touch);
@@ -602,7 +602,7 @@ fn pull_to(rule: &KompozTestRule, from: Offset, to: Offset) {
         rule.advance_frame();
         h.pointer_move(from + (to - from) * (i as f32 / 20.0), -1, 0);
     }
-    rule.advance_frame();
+    rule.main_clock().run_current();
 }
 
 /// Held 200 ms, up at `at`, settled.

@@ -3,10 +3,10 @@
 #[allow(unused_imports)]
 use super::prelude::*;
 
-/// Compose's `IconButtonTokens`.
-pub(crate) struct IconButtonTokens;
+/// Compose's `StandardIconButtonTokens`.
+pub(crate) struct StandardIconButtonTokens;
 
-impl IconButtonTokens {
+impl StandardIconButtonTokens {
     pub(crate) const DisabledColor: ColorSchemeKeyTokens = ColorSchemeKeyTokens::OnSurface;
     pub(crate) const DisabledOpacity: f32 = 0.38;
     pub(crate) const FocusedColor: ColorSchemeKeyTokens = ColorSchemeKeyTokens::OnSurfaceVariant;

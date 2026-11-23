@@ -15,7 +15,7 @@ use kompoz_foundation::layout::{CustomPaddingValues, WindowInsets};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{Color, Dp, LayoutDirection};
 use kompoz_runtime::{
-    Memoized, MutableState, kompozable, kompozable_block, mutable_state_of, remember, remember_keyed,
+    Memoized, MutableState, kompozable, kompozable_block, mutable_confined_state_of, remember, remember_keyed,
 };
 use kompoz_ui::layout::{Placeable, SubcomposeLayout};
 use kompoz_ui::{Constraints, Measurable, Modifier};
@@ -81,26 +81,15 @@ pub fn Scaffold(
 }
 
 /// The content's padding (Compose's `object : PaddingValues` of ScaffoldLayout): its sides read from `holder`,
-/// which the layout sets as it measures. Compose's holder is a `mutableStateOf(PaddingValues(0.dp))` it sets to
-/// `PaddingValues(top, bottom, start, end)`; KompozR's states hold `Send` values (a `PaddingValues` isn't), so it
-/// holds those four sides (equal when the padding values are: the same structural equality).
+/// which the layout sets as it measures: Compose's `mutableStateOf(PaddingValues(0.dp))` it sets to
+/// `PaddingValues(top, bottom, start, end)` (confined: a `PaddingValues` isn't `Send`).
 struct ScaffoldContentPadding {
-    holder: MutableState<PaddingSides>,
-}
-
-/// The sides of Compose's `PaddingValues(start, top, end, bottom)` the holder is set to.
-#[derive(Clone, Copy, PartialEq, Debug)]
-struct PaddingSides {
-    start: Dp,
-    top: Dp,
-    end: Dp,
-    bottom: Dp,
+    holder: MutableState<PaddingValues>,
 }
 
 impl ScaffoldContentPadding {
     fn padding_holder(&self) -> PaddingValues {
-        let PaddingSides { start, top, end, bottom } = self.holder.get();
-        PaddingValues::new(start, top, end, bottom)
+        self.holder.get()
     }
 }
 
@@ -141,8 +130,7 @@ fn ScaffoldLayout(
     // Remembering and updating a single PaddingValues avoids needing to recompose when the values
     // change
     let (padding_holder, content_padding) = remember(|| {
-        let zero = Dp(0.0);
-        let holder = mutable_state_of(PaddingSides { start: zero, top: zero, end: zero, bottom: zero });
+        let holder = mutable_confined_state_of(PaddingValues::all(Dp(0.0)));
         (holder.clone(), PaddingValues::custom(ScaffoldContentPadding { holder }))
     });
 
@@ -168,7 +156,7 @@ fn ScaffoldLayout(
             let layout_direction = scope.layout_direction();
             let density = scope.density();
 
-            let loose_constraints = Constraints { min_width: 0, min_height: 0, ..constraints };
+            let loose_constraints: Constraints = Constraints { min_width: 0, min_height: 0, ..constraints };
 
             // respect only bottom and horizontal for snackbar and fab
             let left_inset = content_window_insets.get_left(&density, layout_direction);
@@ -186,12 +174,12 @@ fn ScaffoldLayout(
 
             let snackbar_placeable = first(
                 scope.subcompose_shared(ScaffoldLayoutContent::Snackbar, snackbar_content.clone()),
-                loose_constraints.r#offset(-left_inset - right_inset, -bottom_inset),
+                loose_constraints.offset(-left_inset - right_inset, -bottom_inset),
             );
 
             let fab_placeable = first(
                 scope.subcompose_shared(ScaffoldLayoutContent::Fab, fab_content.clone()),
-                loose_constraints.r#offset(-left_inset - right_inset, -bottom_inset),
+                loose_constraints.offset(-left_inset - right_inset, -bottom_inset),
             );
 
             let fab_spacing = density.round_to_px(FabSpacing);
@@ -252,20 +240,20 @@ fn ScaffoldLayout(
 
             // Update the backing state for the content padding before subcomposing the body
             let insets = content_window_insets.as_padding_values_with(density);
-            padding_holder.set(PaddingSides {
-                top: if top_bar_placeable.width() == 0 && top_bar_placeable.height() == 0 {
+            padding_holder.set(PaddingValues::new(
+                insets.calculate_start_padding(layout_direction),
+                if top_bar_placeable.width() == 0 && top_bar_placeable.height() == 0 {
                     insets.calculate_top_padding()
                 } else {
                     density.to_dp(top_bar_placeable.height() as f32)
                 },
-                bottom: if is_bottom_bar_empty {
+                insets.calculate_end_padding(layout_direction),
+                if is_bottom_bar_empty {
                     insets.calculate_bottom_padding()
                 } else {
                     density.to_dp(bottom_bar_placeable.height() as f32)
                 },
-                start: insets.calculate_start_padding(layout_direction),
-                end: insets.calculate_end_padding(layout_direction),
-            });
+            ));
 
             let body_content_placeable = first(
                 scope.subcompose_shared(ScaffoldLayoutContent::MainContent, body_content.clone()),

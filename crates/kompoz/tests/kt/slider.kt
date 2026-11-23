@@ -282,13 +282,11 @@ fun CenteredSliderSample() {
     }
 }
 
-// (M15's VerticalSliderSample and VerticalCenteredSliderSample keep their snap animation's job in a
-// `var animateJob: Job? by remember { mutableStateOf(null) }`: KompozR's snapshot state holds Send values only and a
-// Job isn't one, so they wait. Their sliders as they write them — the auto-snap off, `onValueChange` and
-// `onValueChangeFinished` set on the state, the value snapped by an animation when a change ends, the progress
-// told from what was asked — without keeping the job:)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Preview
+@Sampled
 @Composable
-fun VerticalSliders() {
+fun VerticalSliderSample() {
     val coroutineScope = rememberCoroutineScope()
     val sliderState =
         rememberSliderState(
@@ -299,34 +297,40 @@ fun VerticalSliders() {
         )
     val snapAnimationSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
     var currentValue by rememberSaveable { mutableFloatStateOf(sliderState.value) }
+    var animateJob: Job? by remember { mutableStateOf(null) }
     sliderState.shouldAutoSnap = false
     sliderState.onValueChange = { newValue ->
         currentValue = newValue
         // only update the sliderState instantly if dragging
         if (sliderState.isDragging) {
+            animateJob?.cancel()
             sliderState.value = newValue
         }
     }
     sliderState.onValueChangeFinished = {
-        coroutineScope.launch {
-            animate(
-                initialValue = sliderState.value,
-                targetValue = currentValue,
-                animationSpec = snapAnimationSpec,
-            ) { value, _ ->
-                sliderState.value = value
+        animateJob =
+            coroutineScope.launch {
+                animate(
+                    initialValue = sliderState.value,
+                    targetValue = currentValue,
+                    animationSpec = snapAnimationSpec,
+                ) { value, _ ->
+                    sliderState.value = value
+                }
             }
-        }
     }
-    val centered = rememberSliderState(steps = 9, valueRange = -50f..50f)
     val interactionSource = remember { MutableInteractionSource() }
-    Row(modifier = Modifier.padding(horizontal = 16.dp)) {
-        Text(modifier = Modifier.align(Alignment.CenterVertically), text = "%.2f".format(sliderState.value))
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text(
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            text = "%.2f".format(sliderState.value),
+        )
+        Spacer(Modifier.height(16.dp))
         VerticalSlider(
             state = sliderState,
             modifier =
                 Modifier.height(300.dp)
-                    .testTag("dikey")
+                    .align(Alignment.CenterHorizontally)
                     .progressSemantics(
                         currentValue,
                         sliderState.valueRange.start..sliderState.valueRange.endInclusive,
@@ -342,10 +346,65 @@ fun VerticalSliders() {
             },
             reverseDirection = true,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Preview
+@Sampled
+@Composable
+fun VerticalCenteredSliderSample() {
+    val coroutineScope = rememberCoroutineScope()
+    val sliderState =
+        rememberSliderState(
+            // Only allow multiples of 10. Excluding the endpoints of `valueRange`,
+            // there are 9 steps (10, 20, ..., 90).
+            steps = 9,
+            valueRange = -50f..50f,
+        )
+    val snapAnimationSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    var currentValue by rememberSaveable { mutableFloatStateOf(sliderState.value) }
+    var animateJob: Job? by remember { mutableStateOf(null) }
+    sliderState.shouldAutoSnap = false
+    sliderState.onValueChange = { newValue ->
+        currentValue = newValue
+        // only update the sliderState instantly if dragging
+        if (sliderState.isDragging) {
+            animateJob?.cancel()
+            sliderState.value = newValue
+        }
+    }
+    sliderState.onValueChangeFinished = {
+        animateJob =
+            coroutineScope.launch {
+                animate(
+                    initialValue = sliderState.value,
+                    targetValue = currentValue,
+                    animationSpec = snapAnimationSpec,
+                ) { value, _ ->
+                    sliderState.value = value
+                }
+            }
+    }
+    val interactionSource = remember { MutableInteractionSource() }
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text(
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            text = "%.2f".format(sliderState.value),
+        )
+        Spacer(Modifier.height(16.dp))
         VerticalSlider(
-            state = centered,
-            modifier = Modifier.height(300.dp).testTag("ortalı"),
-            track = { SliderDefaults.CenteredTrack(sliderState = centered) },
+            state = sliderState,
+            modifier =
+                Modifier.height(300.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .progressSemantics(
+                        currentValue,
+                        sliderState.valueRange.start..sliderState.valueRange.endInclusive,
+                        sliderState.steps,
+                    ),
+            interactionSource = interactionSource,
+            track = { SliderDefaults.CenteredTrack(sliderState = sliderState) },
             reverseDirection = true,
         )
     }

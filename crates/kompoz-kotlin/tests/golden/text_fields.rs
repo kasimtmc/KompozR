@@ -4,8 +4,8 @@ pub fn Fields(error: bool) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     let state = remember_text_field_state();
-    let text = remember(|| mutable_state_of(::std::string::String::from("")));
-    let value = remember(|| mutable_state_of(TextFieldValue(::std::string::String::from("ab"))));
+    let text = remember(|| ::kompoz::runtime::mutable_state_of!(::std::string::String::from("")));
+    let value = remember(|| ::kompoz::runtime::mutable_state_of!(TextFieldValue(::std::string::String::from("ab"))));
     let keyboard_controller = LocalSoftwareKeyboardController.current();
     Column(|| {
         TextField(

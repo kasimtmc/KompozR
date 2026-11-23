@@ -16,7 +16,7 @@ use crate::tokens::MotionSchemeKeyTokens;
 use kompoz_animation::{MutableTransitionState, update_transition_of_state};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{BorderStroke, Color, Dp, DpOffset, Shape};
-use kompoz_runtime::{kompozable, mutable_state_of, remember, remember_keyed};
+use kompoz_runtime::{MutableState, kompozable, mutable_confined_state_of, mutable_state_of, remember, remember_keyed};
 use kompoz_ui::Modifier;
 use kompoz_ui::focus::{FocusDirection, FocusManager};
 use kompoz_ui::input::{Key, KeyEvent, KeyEventType, KeyHandler};
@@ -25,14 +25,38 @@ use kompoz_ui::platform::{
     InputMode, InputModeManager, LocalDensity, LocalFocusManager, LocalInputModeManager, LocalInspectionMode,
 };
 use kompoz_ui::window::{Popup, PopupPositionProvider, PopupProperties};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 /// What the popup's key handler reads: the popup's focus manager and input mode manager, set as its content is
-/// composed (Compose for desktop's two `var … by mutableStateOf(null)`; held in a remembered cell here — they are
-/// read only as keys come, never in composition, and KompozR's states hold `Send` values).
-type PopupManagers = Rc<RefCell<(Option<FocusManager>, Option<InputModeManager>)>>;
+/// composed (Compose for desktop's two `var … by mutableStateOf(null)`; confined states: the managers aren't
+/// `Send`).
+#[derive(Clone)]
+struct PopupManagers {
+    focus_manager: MutableState<Option<FocusManager>>,
+    input_mode_manager: MutableState<Option<InputModeManager>>,
+}
+
+impl PopupManagers {
+    fn new() -> PopupManagers {
+        PopupManagers {
+            focus_manager: mutable_confined_state_of(None),
+            input_mode_manager: mutable_confined_state_of(None),
+        }
+    }
+
+    /// The managers as the popup's content was last composed with (Compose's reads as keys come).
+    fn handle_key_event(&self, event: &KeyEvent) -> bool {
+        let (focus_manager, input_mode_manager) = (self.focus_manager.get(), self.input_mode_manager.get());
+        handle_dropdown_on_key_event(event, focus_manager.as_ref(), input_mode_manager.as_ref())
+    }
+
+    /// Set as the popup's content is composed.
+    fn set_current(&self) {
+        self.focus_manager.set(Some(LocalFocusManager.current()));
+        self.input_mode_manager.set(Some(LocalInputModeManager.current()));
+    }
+}
 
 /// A dropdown menu (Compose's `DropdownMenu`, Compose for desktop's actual): while `expanded` (and while it scales
 /// and fades out after), a focusable popup — `properties`' — under its anchor (the layout it is composed in;
@@ -79,19 +103,16 @@ pub fn DropdownMenu(
             )) as Rc<dyn PopupPositionProvider>
         });
 
-        let managers: PopupManagers = remember(|| Rc::new(RefCell::new((None, None))));
+        let managers = remember(PopupManagers::new);
         let keys = managers.clone();
         let content = Rc::new(content);
         Popup(
             on_dismiss_request = on_dismiss_request,
             popup_position_provider = Some(popup_position_provider),
             properties = properties,
-            on_key_event = Some(Rc::new(move |event: &KeyEvent| {
-                let (focus_manager, input_mode_manager) = keys.borrow().clone();
-                handle_dropdown_on_key_event(event, focus_manager.as_ref(), input_mode_manager.as_ref())
-            }) as KeyHandler),
+            on_key_event = Some(Rc::new(move |event: &KeyEvent| keys.handle_key_event(event)) as KeyHandler),
             content = move || {
-                *managers.borrow_mut() = (Some(LocalFocusManager.current()), Some(LocalInputModeManager.current()));
+                managers.set_current();
 
                 let content = content.clone();
                 DropdownMenuContent(
@@ -162,19 +183,16 @@ pub fn DropdownMenuPopup(
         );
 
         let is_inspecting = LocalInspectionMode.current();
-        let managers: PopupManagers = remember(|| Rc::new(RefCell::new((None, None))));
+        let managers = remember(PopupManagers::new);
         let keys = managers.clone();
         let content = Rc::new(content);
         Popup(
             on_dismiss_request = on_dismiss_request,
             popup_position_provider = Some(popup_position_provider),
             properties = properties,
-            on_key_event = Some(Rc::new(move |event: &KeyEvent| {
-                let (focus_manager, input_mode_manager) = keys.borrow().clone();
-                handle_dropdown_on_key_event(event, focus_manager.as_ref(), input_mode_manager.as_ref())
-            }) as KeyHandler),
+            on_key_event = Some(Rc::new(move |event: &KeyEvent| keys.handle_key_event(event)) as KeyHandler),
             content = move || {
-                *managers.borrow_mut() = (Some(LocalFocusManager.current()), Some(LocalInputModeManager.current()));
+                managers.set_current();
 
                 let layer = menu_graphics_layer(
                     is_inspecting,

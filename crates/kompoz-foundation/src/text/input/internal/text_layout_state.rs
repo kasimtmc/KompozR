@@ -12,30 +12,27 @@ use super::transformed_text_field_state::TransformedTextFieldState;
 use crate::relocation::BringIntoViewRequester;
 use crate::text::keyboard_options::KeyboardOptions;
 use kompoz_graphics::{Constraints, Density, Dp, LayoutDirection, Offset, Rect};
-use kompoz_runtime::{MutableState, mutable_state_of};
+use kompoz_runtime::{MutableState, mutable_confined_state_of_with_policy, mutable_state_of, never_equal_policy};
 use kompoz_text::{FontFamilyResolver, TextLayoutResult, TextStyle};
 use kompoz_ui::layout::LayoutCoordinates;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A value read as a snapshot state, changed (and told) at each set even when equal (Compose's
-/// `mutableStateOf(…, neverEqualPolicy())` of a value that isn't a snapshot one).
+/// `mutableStateOf(…, neverEqualPolicy())`; confined: coordinates aren't `Send`).
 struct Observed<T> {
-    value: RefCell<T>,
-    version: MutableState<u64>,
+    state: MutableState<T>,
 }
 
-impl<T: Clone> Observed<T> {
+impl<T: Clone + 'static> Observed<T> {
     fn new(value: T) -> Observed<T> {
-        Observed { value: RefCell::new(value), version: mutable_state_of(0) }
+        Observed { state: mutable_confined_state_of_with_policy(value, never_equal_policy()) }
     }
     fn get(&self) -> T {
-        self.version.get();
-        self.value.borrow().clone()
+        self.state.get()
     }
     fn set(&self, value: T) {
-        *self.value.borrow_mut() = value;
-        self.version.set(self.version.peek().wrapping_add(1));
+        self.state.set(value);
     }
 }
 

@@ -123,8 +123,6 @@ mod filter_chip_tokens;
 #[rustfmt::skip]
 mod floating_toolbar_tokens;
 #[rustfmt::skip]
-mod icon_button_tokens;
-#[rustfmt::skip]
 mod input_chip_tokens;
 #[rustfmt::skip]
 mod large_icon_button_tokens;
@@ -223,6 +221,8 @@ mod split_button_x_large_tokens;
 #[rustfmt::skip]
 mod split_button_x_small_tokens;
 #[rustfmt::skip]
+mod standard_icon_button_tokens;
+#[rustfmt::skip]
 mod standard_menu_tokens;
 #[rustfmt::skip]
 mod standard_motion_tokens;
@@ -308,7 +308,6 @@ pub(crate) use filled_tonal_button_tokens::FilledTonalButtonTokens;
 pub(crate) use filled_tonal_icon_button_tokens::FilledTonalIconButtonTokens;
 pub(crate) use filter_chip_tokens::FilterChipTokens;
 pub(crate) use floating_toolbar_tokens::FloatingToolbarTokens;
-pub(crate) use icon_button_tokens::IconButtonTokens;
 pub(crate) use input_chip_tokens::InputChipTokens;
 pub(crate) use large_icon_button_tokens::LargeIconButtonTokens;
 pub(crate) use linear_progress_indicator_tokens::LinearProgressIndicatorTokens;
@@ -358,6 +357,7 @@ pub(crate) use split_button_medium_tokens::SplitButtonMediumTokens;
 pub(crate) use split_button_small_tokens::SplitButtonSmallTokens;
 pub(crate) use split_button_x_large_tokens::SplitButtonXLargeTokens;
 pub(crate) use split_button_x_small_tokens::SplitButtonXSmallTokens;
+pub(crate) use standard_icon_button_tokens::StandardIconButtonTokens;
 pub(crate) use standard_menu_tokens::StandardMenuTokens;
 pub(crate) use standard_motion_tokens::StandardMotionTokens;
 pub(crate) use state_tokens::StateTokens;

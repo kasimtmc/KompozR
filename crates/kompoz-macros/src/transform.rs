@@ -51,6 +51,26 @@ use syn::visit::{self, Visit};
 use syn::visit_mut::{self, VisitMut};
 use syn::*;
 
+/// `Rc::new(p)` (any path ending `Rc::new`) of the bare name `p`: `p`.
+fn rc_new_of(c: &ExprCall) -> Option<String> {
+    let Expr::Path(f) = &*c.func else { return None };
+    let segs = &f.path.segments;
+    if f.qself.is_some()
+        || segs.len() < 2
+        || segs[segs.len() - 1].ident != "new"
+        || !segs[segs.len() - 1].arguments.is_none()
+        || segs[segs.len() - 2].ident != "Rc"
+        || c.args.len() != 1
+    {
+        return None;
+    }
+    let Some(Expr::Path(a)) = c.args.first() else { return None };
+    if a.qself.is_some() {
+        return None;
+    }
+    a.path.get_ident().map(|i| i.to_string())
+}
+
 pub(crate) fn is_pascal(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_uppercase())
 }
@@ -446,6 +466,9 @@ pub(crate) struct Transformer {
     left: HashSet<String>,
     /// A restartable composable's closure parameters: each kept with its identity, `__kz_id_<name>`.
     kept_closures: HashSet<String>,
+    /// The types the macro sees of the bindings in scope, innermost last (`None`: a binding without a written type),
+    /// as the names a method call on one reaches ([`receiver_heads`]).
+    types: Vec<std::collections::HashMap<String, Option<Vec<String>>>>,
 }
 
 const KEYWORDS: &[&str] = &[
@@ -473,6 +496,7 @@ impl Transformer {
             known,
             left,
             kept_closures,
+            types: vec![Default::default()],
         }
     }
 
@@ -487,6 +511,7 @@ impl Transformer {
             known,
             left: HashSet::new(),
             kept_closures: HashSet::new(),
+            types: vec![Default::default()],
         }
     }
 
@@ -499,13 +524,12 @@ impl Transformer {
     pub(crate) fn transform_lambda(&mut self, e: &mut Expr) {
         match e {
             Expr::Closure(c) => {
-                let mut names = Vec::new();
+                self.push_scope([]);
                 for p in &c.inputs {
-                    pattern_names(p, &mut names);
+                    self.bind_typed(p);
                 }
-                self.scopes.push(names.into_iter().collect());
                 self.visit_expr_mut(&mut c.body);
-                self.scopes.pop();
+                self.pop_scope();
             }
             _ => self.visit_expr_mut(e),
         }
@@ -525,7 +549,63 @@ impl Transformer {
     }
 
     fn bind(&mut self, names: Vec<String>) {
+        let types = self.types.last_mut().unwrap();
+        for n in &names {
+            types.insert(n.clone(), None);
+        }
         self.scopes.last_mut().unwrap().extend(names);
+    }
+
+    /// The bindings `pat` makes, with the type it writes for a name (`s: &dyn StyleScope`), into the innermost scope.
+    fn bind_typed(&mut self, pat: &Pat) {
+        if let Pat::Type(pt) = pat
+            && let Pat::Ident(i) = &*pt.pat
+        {
+            let name = i.ident.to_string();
+            self.scopes.last_mut().unwrap().insert(name.clone());
+            self.types.last_mut().unwrap().insert(name, Some(receiver_heads(&pt.ty)));
+            return;
+        }
+        let mut names = Vec::new();
+        pattern_names(pat, &mut names);
+        self.bind(names);
+    }
+
+    /// The parameters' written types (a `#[kompozable]` function's), as [`bind_typed`] keeps them.
+    pub(crate) fn with_parameter_types(mut self, sig: &Signature) -> Self {
+        for arg in &sig.inputs {
+            if let FnArg::Typed(pt) = arg
+                && let Pat::Ident(i) = &*pt.pat
+                && !matches!(&*pt.ty, Type::ImplTrait(_))
+            {
+                self.types[0].insert(i.ident.to_string(), Some(receiver_heads(&pt.ty)));
+            }
+        }
+        self
+    }
+
+    /// The names a method call on the binding `name` reaches, when its type is written where it is bound.
+    fn binding_heads(&self, name: &str) -> Option<&Vec<String>> {
+        for (scope, types) in self.scopes.iter().zip(&self.types).rev() {
+            if let Some(t) = types.get(name) {
+                return t.as_ref();
+            }
+            if scope.contains(name) {
+                return None;
+            }
+        }
+        None
+    }
+
+    fn push_scope(&mut self, names: impl IntoIterator<Item = String>) {
+        let names: HashSet<String> = names.into_iter().collect();
+        self.types.push(names.iter().map(|n| (n.clone(), None)).collect());
+        self.scopes.push(names);
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+        self.types.pop();
     }
 
     /// The locals a closure or async block captures, with where each is used; and whether it uses what its keys
@@ -546,6 +626,14 @@ impl Transformer {
                 free.called.iter().filter(|n| self.scopes.iter().any(|s| s.contains(*n))).cloned().collect();
             free.used.extend(bound);
         }
+        // (a kept closure's `Rc` goes with it: `Rc::new(p)` is it — see `visit_expr_mut`)
+        let rcs: Vec<String> = free
+            .used
+            .iter()
+            .filter(|n| self.kept_closure(n))
+            .map(|n| format!("__kz_rc_{}", n.trim_start_matches("r#")))
+            .collect();
+        free.used.extend(rcs);
         let mut names: Vec<(String, proc_macro2::Span)> = free
             .used
             .into_iter()
@@ -633,6 +721,18 @@ impl Transformer {
     fn method_rewritten(&self, m: &ExprMethodCall) -> bool {
         let name = m.method.to_string();
         if is_raw(&m.method) || self.left.contains(&name) {
+            return false;
+        }
+        if m.args.iter().any(|a| named_arg(a).is_some()) {
+            return true;
+        }
+        // (a receiver of a type written where it is bound — `s: &dyn StyleScope`, `let c: Constraints = …` — that
+        // owns no `#[named]` method of that name, nor has a supertype that does: its plain method)
+        if let Expr::Path(p) = &*m.receiver
+            && let Some(i) = p.path.get_ident()
+            && let Some(heads) = self.binding_heads(&i.to_string())
+            && !self.known.may_own(&name, heads)
+        {
             return false;
         }
         m.args.iter().any(|a| named_arg(a).is_some())
@@ -775,6 +875,9 @@ impl Transformer {
             "assert_ne",
             "debug_assert",
             "dbg",
+            // (the runtime's macros of a value: `mutable_state_of!(TextFieldValue(text, range))`)
+            "mutable_state_of",
+            "remember_updated_state",
         ];
         // (the kt shims' macros the Kotlin syntax writes — `kt::safe!(a, |it| …)`, `kt::flatten!(…)`,
         // `kt::template!(…)` —: of expressions, whose calls are a composable body's as any)
@@ -812,6 +915,47 @@ fn respanned(tokens: Ts, span: proc_macro2::Span) -> Ts {
         .collect()
 }
 
+/// The names a method call on a value of type `t` reaches: its type's (a path's last segment, a trait object's or
+/// `impl Trait`'s traits), through references and the pointers method calls see through (`Rc`, `Arc`, `Box`, `Pin`):
+/// `&dyn StyleScope` → `StyleScope`; `Rc<dyn DateRangePickerState>` → `Rc`, `DateRangePickerState`.
+fn receiver_heads(t: &Type) -> Vec<String> {
+    fn walk(t: &Type, out: &mut Vec<String>) {
+        match t {
+            Type::Reference(r) => walk(&r.elem, out),
+            Type::Paren(p) => walk(&p.elem, out),
+            Type::Group(g) => walk(&g.elem, out),
+            Type::TraitObject(o) => bounds(&o.bounds, out),
+            Type::ImplTrait(i) => bounds(&i.bounds, out),
+            Type::Path(p) => {
+                let Some(last) = p.path.segments.last() else { return };
+                out.push(last.ident.to_string());
+                if ["Rc", "Arc", "Box", "Pin"].contains(&last.ident.to_string().as_str())
+                    && let PathArguments::AngleBracketed(a) = &last.arguments
+                {
+                    for g in &a.args {
+                        if let GenericArgument::Type(inner) = g {
+                            walk(inner, out);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    fn bounds(b: &Punctuated<TypeParamBound, Token![+]>, out: &mut Vec<String>) {
+        for b in b {
+            if let TypeParamBound::Trait(t) = b
+                && let Some(s) = t.path.segments.last()
+            {
+                out.push(s.ident.to_string());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(t, &mut out);
+    out
+}
+
 /// A closure, or one wrapped with its captures.
 fn last_is_closure(e: &Expr) -> bool {
     match e {
@@ -824,7 +968,7 @@ fn last_is_closure(e: &Expr) -> bool {
 
 impl VisitMut for Transformer {
     fn visit_block_mut(&mut self, b: &mut Block) {
-        self.scopes.push(HashSet::new());
+        self.push_scope([]);
         for stmt in &mut b.stmts {
             match stmt {
                 Stmt::Local(l) => {
@@ -834,45 +978,42 @@ impl VisitMut for Transformer {
                             self.visit_expr_mut(diverge);
                         }
                     }
-                    let mut names = Vec::new();
-                    pattern_names(&l.pat, &mut names);
-                    self.bind(names);
+                    self.bind_typed(&l.pat);
                 }
                 Stmt::Item(_) => {}
                 _ => self.visit_stmt_mut(stmt),
             }
         }
-        self.scopes.pop();
+        self.pop_scope();
     }
 
     fn visit_expr_closure_mut(&mut self, c: &mut ExprClosure) {
-        let mut names = Vec::new();
+        self.push_scope([]);
         for p in &c.inputs {
-            pattern_names(p, &mut names);
+            self.bind_typed(p);
         }
-        self.scopes.push(names.into_iter().collect());
         self.depth += 1;
         self.visit_expr_mut(&mut c.body);
         self.depth -= 1;
-        self.scopes.pop();
+        self.pop_scope();
     }
 
     fn visit_expr_for_loop_mut(&mut self, f: &mut ExprForLoop) {
         self.visit_expr_mut(&mut f.expr);
         let mut names = Vec::new();
         pattern_names(&f.pat, &mut names);
-        self.scopes.push(names.into_iter().collect());
+        self.push_scope(names);
         self.visit_block_mut(&mut f.body);
-        self.scopes.pop();
+        self.pop_scope();
     }
 
     fn visit_expr_if_mut(&mut self, i: &mut ExprIf) {
         self.visit_expr_mut(&mut i.cond);
         let mut names = Vec::new();
         condition_names(&i.cond, &mut names);
-        self.scopes.push(names.into_iter().collect());
+        self.push_scope(names);
         self.visit_block_mut(&mut i.then_branch);
-        self.scopes.pop();
+        self.pop_scope();
         if let Some((_, e)) = &mut i.else_branch {
             self.visit_expr_mut(e);
         }
@@ -882,18 +1023,18 @@ impl VisitMut for Transformer {
         self.visit_expr_mut(&mut w.cond);
         let mut names = Vec::new();
         condition_names(&w.cond, &mut names);
-        self.scopes.push(names.into_iter().collect());
+        self.push_scope(names);
         self.visit_block_mut(&mut w.body);
-        self.scopes.pop();
+        self.pop_scope();
     }
 
     fn visit_arm_mut(&mut self, a: &mut Arm) {
         let mut names = Vec::new();
         pattern_names(&a.pat, &mut names);
-        self.scopes.push(names.into_iter().collect());
+        self.push_scope(names);
         self.visit_pat_mut(&mut a.pat); // (a guard is in the pattern)
         self.visit_expr_mut(&mut a.body);
-        self.scopes.pop();
+        self.pop_scope();
     }
 
     fn visit_stmt_macro_mut(&mut self, m: &mut StmtMacro) {
@@ -907,6 +1048,19 @@ impl VisitMut for Transformer {
     fn visit_expr_mut(&mut self, e: &mut Expr) {
         let rt = self.rt.clone();
         match e {
+            // In a restartable composable's body, `Rc::new(p)` of a kept closure parameter `p` (`Rc::new(on_click) as
+            // Rc<dyn Fn()>`, what a `remember_updated_state!` or a node is given) is the one `Rc` the composable keeps
+            // it as while its identity stays the same (`__kz_rc_p`), as Compose's memoized lambda is one instance: a
+            // fresh `Rc` at every run would be a change each time (a `remember_updated_state!` read where it is set
+            // would compose again and again).
+            Expr::Call(c) if rc_new_of(c).is_some_and(|p| self.kept_closure(&p)) => {
+                let rc = format_ident!(
+                    "__kz_rc_{}",
+                    rc_new_of(c).unwrap().trim_start_matches("r#"),
+                    span = c.args[0].span()
+                );
+                *e = parse_quote_spanned!(c.span()=> ::core::clone::Clone::clone(&#rc));
+            }
             Expr::Call(c) => {
                 let route = self.route(&c.func, &c.args);
                 let plan = self.plan(&c.args, route != Route::Keep);
@@ -953,11 +1107,11 @@ impl VisitMut for Transformer {
                 *e = parse_quote_spanned!(span=> #recv.#kz_name() #(#links)* .__call());
             }
             Expr::Async(a) => {
-                self.scopes.push(HashSet::new());
+                self.push_scope([]);
                 self.depth += 1;
                 self.visit_block_mut(&mut a.block);
                 self.depth -= 1;
-                self.scopes.pop();
+                self.pop_scope();
             }
             Expr::Macro(m) => self.transform_macro(&mut m.mac),
             _ => visit_mut::visit_expr_mut(self, e),

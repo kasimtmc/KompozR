@@ -1148,8 +1148,8 @@ fn FancyAnimatedIndicatorWithModifier(scope: TabIndicatorScope, index: i32, #[de
         MaterialTheme::color_scheme().secondary,
         MaterialTheme::color_scheme().tertiary,
     ];
-    let start_animatable = remember(|| Rc::new(RefCell::new(None::<Animatable<Dp, AnimationVector1D>>)));
-    let end_animatable = remember(|| Rc::new(RefCell::new(None::<Animatable<Dp, AnimationVector1D>>)));
+    let start_animatable = remember(|| mutable_state_of!(None::<Animatable<Dp, AnimationVector1D>>));
+    let end_animatable = remember(|| mutable_state_of!(None::<Animatable<Dp, AnimationVector1D>>));
     let coroutine_scope = remember_coroutine_scope();
     let indicator_color = animate_color_as_state(colors[index as usize % colors.len()], label = String::new());
 
@@ -1157,12 +1157,16 @@ fn FancyAnimatedIndicatorWithModifier(scope: TabIndicatorScope, index: i32, #[de
         .tab_indicator_layout(Modifier, move |m, measurable, constraints, tab_positions| {
             let new_start = tab_positions[index as usize].left();
             let new_end = tab_positions[index as usize].right();
-            let start_anim = start_animatable
-                .borrow_mut()
-                .get_or_insert_with(|| Animatable((new_start, Dp::VectorConverter)))
-                .clone();
-            let end_anim =
-                end_animatable.borrow_mut().get_or_insert_with(|| Animatable((new_end, Dp::VectorConverter))).clone();
+            let start_anim = start_animatable.get().unwrap_or_else(|| {
+                let it = Animatable((new_start, Dp::VectorConverter));
+                start_animatable.set(Some(it.clone()));
+                it
+            });
+            let end_anim = end_animatable.get().unwrap_or_else(|| {
+                let it = Animatable((new_end, Dp::VectorConverter));
+                end_animatable.set(Some(it.clone()));
+                it
+            });
 
             if end_anim.target_value() != new_end {
                 let (anim, spec) = (

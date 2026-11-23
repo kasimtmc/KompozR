@@ -6,9 +6,11 @@ pub fn Picker(
 ) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let expanded = remember(|| mutable_state_of(false));
+    let expanded = remember(|| ::kompoz::runtime::mutable_state_of!(false));
     let picked = ::kompoz::runtime::kt::delegate_of::<::core::option::Option<i32>, _>(remember(|| {
-        mutable_state_of(::core::option::Option::None)
+        ::kompoz::runtime::mutable_state_of!(::core::convert::identity::<::core::option::Option<i32>>(
+            ::core::option::Option::None
+        ))
     }));
     let mut icons = ::kompoz::runtime::kt::list_of([
         ::kompoz::runtime::kt::list_of([

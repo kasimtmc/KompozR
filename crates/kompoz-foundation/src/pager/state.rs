@@ -22,8 +22,8 @@ use crate::lazy::layout::{
 use kompoz_animation::{AnimationSpec, MutatePriority, animate, spring};
 use kompoz_graphics::{Constraints, Density, Dp, Offset};
 use kompoz_runtime::{
-    DerivedState, MutableState, SavedValue, Saver, derived_state_of, kompozable, mutable_state_of, named,
-    remember_saveable_with, without_read_observation,
+    DerivedState, MutableState, SavedValue, Saver, derived_state_of, kompozable, mutable_confined_state_of_with_policy,
+    mutable_state_of, named, never_equal_policy, remember_saveable_with, without_read_observation,
 };
 use kompoz_ui::semantics::CollectionInfo;
 use std::cell::{Cell, RefCell};
@@ -138,8 +138,9 @@ pub(crate) struct PagerStateInner {
     layout_with_measurement: Cell<i32>,
     layout_without_measurement: Cell<i32>,
     pub(crate) prefetching_enabled: Cell<bool>,
-    layout_info: RefCell<Rc<PagerMeasureResult>>,
-    layout_info_generation: MutableState<u64>,
+    /// The last measure's result (Compose's `pagerLayoutInfoState = mutableStateOf(…, neverEqualPolicy())`; confined: a measure
+    /// result isn't `Send`).
+    layout_info: MutableState<Rc<PagerMeasureResult>>,
     measured: Cell<bool>,
     pub(crate) density: Cell<Density>,
     latest_page_size_with_spacing: Cell<i32>,
@@ -253,8 +254,10 @@ impl PagerState {
                 layout_with_measurement: Cell::new(0),
                 layout_without_measurement: Cell::new(0),
                 prefetching_enabled: Cell::new(true),
-                layout_info: RefCell::new(Rc::new(PagerMeasureResult::empty())),
-                layout_info_generation: mutable_state_of(0),
+                layout_info: mutable_confined_state_of_with_policy(
+                    Rc::new(PagerMeasureResult::empty()),
+                    never_equal_policy(),
+                ),
                 measured: Cell::new(false),
                 density: Cell::new(Density::new(1.0, 1.0)),
                 latest_page_size_with_spacing: Cell::new(0),
@@ -356,20 +359,17 @@ impl PagerState {
 
     /// What the last layout showed (Compose's `layoutInfo`; a state).
     pub fn layout_info(&self) -> PagerLayoutInfo {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().layout_info()
+        self.inner.layout_info.with(|result| result.layout_info())
     }
 
     fn set_measure_result(&self, result: Rc<PagerMeasureResult>) {
-        *self.inner.layout_info.borrow_mut() = result;
+        self.inner.layout_info.set(result);
         self.inner.measured.set(true);
-        self.inner.layout_info_generation.set(self.inner.layout_info_generation.peek().wrapping_add(1));
     }
 
     /// The last measure's result (a state read).
     fn measure_result(&self) -> Rc<PagerMeasureResult> {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().clone()
+        self.inner.layout_info.get()
     }
 
     /// The drags of the pager (Compose's `interactionSource`).
@@ -458,7 +458,7 @@ impl PagerState {
             inner.is_last_scroll_backward.set(scroll_delta < 0);
         }
 
-        let current = inner.layout_info.borrow().clone();
+        let current = inner.layout_info.peek();
         let page_count = self.page_count();
         let mut scrolled_layout_info =
             current.copy_with_scroll_delta_without_remeasure(-(scroll_delta as i32), page_count).map(Rc::new);
@@ -709,7 +709,7 @@ impl PagerState {
     /// running is cancelled.
     pub fn request_scroll_to_page(&self, page: i32, #[default(0.0)] page_offset_fraction: f32) {
         if self.is_scroll_in_progress() {
-            let scope = self.inner.layout_info.borrow().coroutine_scope.clone();
+            let scope = self.inner.layout_info.peek().coroutine_scope.clone();
             if let Some(scope) = scope {
                 let state = self.clone();
                 scope.launch(async move {

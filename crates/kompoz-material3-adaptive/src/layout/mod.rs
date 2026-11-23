@@ -47,7 +47,8 @@ pub use pane_motion::{
     PaneScaffoldMotionDataProviderExt,
 };
 pub use pane_scaffold::{
-    PaneScaffoldPaneScope, PaneScaffoldParentData, PaneScaffoldScope, PaneScaffoldTransitionScope, SemanticsProperties,
+    PaneScaffoldPaneScope, PaneScaffoldParentData, PaneScaffoldScope, PaneScaffoldScopeDraggable,
+    PaneScaffoldTransitionScope, SemanticsProperties,
 };
 pub use pane_scaffold_directive::{
     HingePolicy, PaneScaffoldDirective, calculate_pane_scaffold_directive,

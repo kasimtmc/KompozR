@@ -141,6 +141,9 @@ pub struct KompozHost {
     /// The keep check's: on, its two lists (one keeping the nodes that didn't change, one drawing all), and what it
     /// found.
     keep_check: Cell<bool>,
+    /// Whether work without a frame was left when the last pass was done, before the keep check drew (what that
+    /// drawing sets going — an animation's next frame — is a frame's: see `has_pending_work_before_drawing`).
+    pending_before_drawing: Cell<bool>,
     keep_check_lists: RefCell<Option<Box<(DisplayList, DisplayList)>>>,
     keep_check_mismatches: RefCell<Vec<String>>,
     /// Counted up by `invalidate`: the content's scope composes again when it changes.
@@ -235,6 +238,7 @@ impl KompozHost {
             layout_check: Cell::new(false),
             layout_check_mismatches: RefCell::new(Vec::new()),
             keep_check: Cell::new(false),
+            pending_before_drawing: Cell::new(false),
             keep_check_lists: RefCell::new(None),
             keep_check_mismatches: RefCell::new(Vec::new()),
             generation: Rc::new(Cell::new(0)),
@@ -593,10 +597,19 @@ impl KompozHost {
             let rects = self.owner.gesture_exclusion();
             self.platform.get().system_gesture_exclusion(&rects);
         }
-        let redraw = self.owner.take_needs_draw();
+        let mut redraw = self.owner.take_needs_draw();
+        self.pending_before_drawing.set(self.has_pending_work_without_frame());
         if self.keep_check.get() {
             self.check_kept();
             self.owner.take_needs_draw(); // (drawn for the check: no frame asked for by it)
+            // (what that drawing wrote — an animation's redraw signal, Compose's `invalidateDraw` from a draw — is a
+            // frame's to draw, as the platform's drawing's would be: applied now, its readers told, not left as a
+            // write that work without a frame — `run_current` — would wait on)
+            if global_snapshot_changed() {
+                Snapshot::send_apply_notifications();
+                self.owner.snapshot_observer().process_changes();
+                redraw |= self.owner.take_needs_draw();
+            }
         }
         redraw
     }
@@ -679,6 +692,13 @@ impl KompozHost {
             || self.focus.has_pending_invalidation()
             || !self.handle.posted.lock().is_empty()
             || self.handle.invalid.load(Ordering::Acquire)
+    }
+
+    /// [`has_pending_work_without_frame`](Self::has_pending_work_without_frame) as the last pass left it before the
+    /// keep check drew: Compose's `runCurrent` runs what is due without a frame, and a drawing is a frame's — what a
+    /// draw invalidates (a held overscroll stretch asking to be drawn again, say) waits for the next one.
+    pub fn has_pending_work_before_drawing(&self) -> bool {
+        self.pending_before_drawing.get()
     }
 
     /// When the next coroutine timer is due (the platform wakes then), if any.

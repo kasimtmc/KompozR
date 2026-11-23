@@ -12,8 +12,7 @@ use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 // (top app bars: the drags' pointers, the samples' imports of what the generated code names — TooltipBox's position
 // provider, nestedScroll's connection —, a counter of compositions)
-use kompoz::ui::input::{NestedScrollConnection, PointerType};
-use kompoz::ui::window::PopupPositionProvider;
+use kompoz::ui::input::PointerType;
 use std::cell::Cell;
 use std::rc::Rc;
 

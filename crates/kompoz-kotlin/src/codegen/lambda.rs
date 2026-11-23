@@ -243,6 +243,9 @@ impl Gen<'_, '_> {
                             .or_else(|| input_tys.get(k).cloned())
                             .unwrap_or(Ty::Unknown);
                     let annot = match &p.ty {
+                        // (where the callee's parameter says what it takes, Rust's type is that one, whatever Kotlin
+                        // names: `measurable: Measurable` is a `&dyn Measurable` there)
+                        Some(_) if info.inputs.get(first_input + k).is_some() => typed(first_input + k),
                         Some(t) => {
                             let rt = self.rust_type(t, super::types::TypePos::Value);
                             quote_spanned!(span=> : #rt)

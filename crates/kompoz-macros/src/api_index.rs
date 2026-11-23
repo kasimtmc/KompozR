@@ -38,7 +38,13 @@
 //!   `#[default(…)]`, `d` for one with, in upper case (`R`, `D`) for a `#[memoized]` one; `-` for none.
 //! - `owner`: where it is, for readers (the macros don't use it): the file, relative to the workspace root, with
 //!   `/` separators; for a method then a space and the impl's type as written (its last path segment, generics
-//!   left out), and ` as <Trait>` for a `#[named(trait Trait)]` impl.
+//!   left out; `{T}` for an impl of every type of its type parameter `T`, a blanket one), and ` as <Trait>` for a
+//!   `#[named(trait Trait)]` impl. The macros read the type and the trait: a method call whose receiver has a type
+//!   they see (a typed parameter or `let`) that is none of them, nor has one as a supertype (below), keeps its plain
+//!   call.
+//! - `super` lines (`* super VectorPainter - Painter`): the API's supertypes of a type as Kotlin sees them (what it
+//!   derefs to, the traits of the API it implements, a trait's supertraits; the Kotlin index's `DEREFS`), `name` the
+//!   type, `-` for the parameters, `owner` the supertype.
 //!
 //! What is listed: every `#[named]` and `#[kompozable]` function, and every method of a `#[named]` impl that has a
 //! defaulted or `#[memoized]` parameter (the others are plain methods), of every target of every workspace package (`src/`,
@@ -60,6 +66,9 @@ pub enum Kind {
     Kompozable,
     /// A method of a `#[named]` impl.
     Method,
+    /// What a type has the members of besides its own (Kotlin's supertypes: what it derefs to, the API's traits
+    /// it implements, a trait's supertraits): `name` the type, `owner` the supertype.
+    Super,
 }
 
 impl Kind {
@@ -68,6 +77,7 @@ impl Kind {
             Kind::Fn => "fn",
             Kind::Kompozable => "kompozable",
             Kind::Method => "method",
+            Kind::Super => "super",
         }
     }
 
@@ -76,6 +86,7 @@ impl Kind {
             "fn" => Some(Kind::Fn),
             "kompozable" => Some(Kind::Kompozable),
             "method" => Some(Kind::Method),
+            "super" => Some(Kind::Super),
             _ => None,
         }
     }
@@ -198,8 +209,9 @@ pub fn parse(text: &str) -> Result<Vec<Entry>, String> {
             },
         };
         let kind = next("kind")?;
-        let kind = Kind::parse(kind)
-            .ok_or_else(|| format!("api index, line {n}: a kind is `fn`, `kompozable` or `method`, not `{kind}`"))?;
+        let kind = Kind::parse(kind).ok_or_else(|| {
+            format!("api index, line {n}: a kind is `fn`, `kompozable`, `method` or `super`, not `{kind}`")
+        })?;
         let name = next("name")?.to_string();
         if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(format!("api index, line {n}: `{name}` isn't a name"));

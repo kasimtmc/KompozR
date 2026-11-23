@@ -20,6 +20,15 @@ fun GraphicsFormsProgress() {
     }
 }
 
+// GraphicsForms' heart: a material shape (`MaterialShapes.Heart`, an object's member) as a background's shape; one turned.
+@Composable
+fun GraphicsFormsShapes() {
+    Column {
+        Box(modifier = Modifier.size(20.dp).background(Color.Red, MaterialShapes.Heart.toShape()).testTag("kalp"))
+        Box(modifier = Modifier.size(20.dp).clip(MaterialShapes.Cookie9Sided.toShape(startAngle = 90)).background(Color.Blue).testTag("kurabiye"))
+    }
+}
+
 // ---- ProgressIndicatorSamples ----------------------------------------------------------------------------------
 
 @Composable

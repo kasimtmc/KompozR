@@ -11,7 +11,7 @@ use super::three_pane_scaffold_value::PaneScaffoldValue;
 use kompoz_animation::Transition;
 use kompoz_foundation::interaction::MutableInteractionSource;
 use kompoz_graphics::{Density, Dp};
-use kompoz_runtime::SaveableStateHolder;
+use kompoz_runtime::{SaveableStateHolder, named};
 use kompoz_ui::layout::{Measurable, ParentDataModifierNode};
 use kompoz_ui::semantics::SemanticsConfiguration;
 use kompoz_ui::{Modifier, ModifierNode, ModifierNodeElement, node_capabilities};
@@ -74,6 +74,26 @@ pub trait PaneScaffoldScope {
     /// The holder of the panes' saveable state (Compose's `saveableStateHolder`): each pane's kept while it is
     /// hidden.
     fn saveable_state_holder(&self) -> SaveableStateHolder;
+}
+
+/// [`PaneScaffoldScope::pane_expansion_draggable`] with Kotlin's default: no semantics of its own (the default drag
+/// handle semantics then), so Kotlin can leave `semanticsProperties` out — a trait's member has no defaults.
+#[named(trait PaneScaffoldScopeDraggable)]
+impl<S: PaneScaffoldScope + ?Sized> S {
+    /// `modifier` making its layout the drag handle of `state` (Compose's `Modifier.paneExpansionDraggable`, its
+    /// `semanticsProperties` defaulting to `null`).
+    ///
+    /// Kotlin: `paneExpansionDraggable(state: PaneExpansionState, minTouchTargetSize: Dp, interactionSource: MutableInteractionSource, semanticsProperties: (SemanticsPropertyReceiver.() -> Unit)? = null): Modifier`
+    fn pane_expansion_draggable_of(
+        &self,
+        modifier: Modifier,
+        state: PaneExpansionState,
+        min_touch_target_size: Dp,
+        interaction_source: MutableInteractionSource,
+        #[default(None)] semantics_properties: Option<SemanticsProperties>,
+    ) -> Modifier {
+        self.pane_expansion_draggable(modifier, state, min_touch_target_size, interaction_source, semantics_properties)
+    }
 }
 
 /// The transition of a pane scaffold's values (Compose's sealed interface `PaneScaffoldTransitionScope`).

@@ -881,10 +881,13 @@ impl Owner {
             Invalidation::Measurement
         };
         self.relayout_nodes.borrow_mut().add(&root, invalidation);
-        // (in a snapshot never applied: what the measures write again — a lazy list's layout info — is the check's
-        // alone, not a change its readers are told of, which would lay them out again, checked again, for ever)
+        // (in a snapshot applied without telling its readers: what the measures write again — a lazy list's layout
+        // info — is kept, as the nodes laid out again keep what they share with it (the measured items a scroll
+        // without a measure moves), but isn't a change its readers are told of, which would lay them out again,
+        // checked again, for ever)
         let check = kompoz_runtime::Snapshot::take_mutable_snapshot(None, None);
         check.enter(|| self.measure_and_layout());
+        let _ = check.apply_unobserved();
         check.dispose();
         self.on_positioned.borrow_mut().clear();
         self.checking.set(false);

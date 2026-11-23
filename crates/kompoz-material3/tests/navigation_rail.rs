@@ -1000,37 +1000,41 @@ fn wide_navigation_rail_samples() {
     rule.on_node_with_content_description("Collapse rail").assert(kompoz_test::has_state_description("Expanded"));
     assert!(near(item_bounds(&rule, "Home").height(), 56.0, 0.5));
 
-    // WideNavigationRailArrangementsSample (its Rust twin: the arrangement chosen by a state of whether it is
-    // centered — KompozR's snapshot states hold Send values, an Arrangement isn't one): centered in the whole
+    // WideNavigationRailArrangementsSample (its arrangement in a state, as M15 keeps it): centered in the whole
     // height, then at the bottom.
     let rule = KompozTestRule::with_viewport(
         kompozable_lambda!(|| {
             let selected_item = remember(|| mutable_state_of(0usize));
             let state = remember_wide_navigation_rail_state();
-            let is_arrangement_center = remember(|| mutable_state_of(true));
+            let arrangement = remember(|| mutable_state_of!(Arrangement::Center));
             Row(
                 modifier = Modifier.fill_max_width(),
                 content = move || {
                     let expanded = state.target_value() == WideNavigationRailValue::Expanded;
-                    let arrangement =
-                        if is_arrangement_center.get() { Arrangement::Center } else { Arrangement::Bottom };
                     let (header_state, selected_item) = (state.clone(), selected_item.clone());
                     WideNavigationRail(
                         state = Some(state.clone()),
-                        arrangement = arrangement,
+                        arrangement = arrangement.get(),
                         header = slot(move || SampleRailHeader(header_state.clone())),
                         content = move || SampleWideItems(selected_item.clone(), expanded, false),
                     );
-                    let center = is_arrangement_center.clone();
-                    let change_to_string = if center.get() { "Bottom" } else { "Center" };
+                    let is_arrangement_center = arrangement.get() == Arrangement::Center;
+                    let change_to_string = if is_arrangement_center { "Bottom" } else { "Center" };
+                    let arrangement = arrangement.clone();
                     Column(
                         modifier = Modifier.weight(1.0),
                         horizontal_alignment = Alignment::CenterHorizontally,
                         content = move || {
                             Text("Change arrangement to:", modifier = Modifier.padding(16.dp()));
-                            let center = center.clone();
+                            let arrangement = arrangement.clone();
                             Button(
-                                move || center.set(!center.get()),
+                                move || {
+                                    if is_arrangement_center {
+                                        arrangement.set(Arrangement::Bottom)
+                                    } else {
+                                        arrangement.set(Arrangement::Center)
+                                    }
+                                },
                                 modifier = Modifier.padding(4.dp()),
                                 content = move || Text(change_to_string),
                             );

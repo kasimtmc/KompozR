@@ -298,6 +298,7 @@ impl<T: ?Sized> Instance for std::sync::Weak<T> {
 }
 
 pub use crate::remember::remember_updated_state_with;
+pub use crate::state::{StateProbe, StateViaConfined, StateViaShared, policy_of};
 
 /// Whether `a` equals `b` by `eq`; never without one.
 pub fn eq_by<T>(eq: Option<fn(&T, &T) -> bool>, a: &T, b: &T) -> bool {

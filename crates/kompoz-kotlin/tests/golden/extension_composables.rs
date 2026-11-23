@@ -22,7 +22,7 @@ impl TabIndicatorScope {
 pub fn Tabs() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let tab = remember(|| mutable_state_of(0));
+    let tab = remember(|| ::kompoz::runtime::mutable_state_of!(0));
     SecondaryTabRow(
         selected_tab_index = ::kompoz::runtime::kt::KtDelegate::get_value(&tab),
         indicator = ::core::option::Option::Some({
@@ -56,9 +56,11 @@ pub fn Held() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     let held = remember(|| {
-        ::core::convert::identity::<MutableState<::core::option::Option<::std::string::String>>>(mutable_state_of(
-            ::core::option::Option::None,
-        ))
+        ::core::convert::identity::<MutableState<::core::option::Option<::std::string::String>>>(
+            ::kompoz::runtime::mutable_state_of!(::core::convert::identity::<
+                ::core::option::Option<::std::string::String>,
+            >(::core::option::Option::None)),
+        )
     });
     let shown = ::kompoz::runtime::kt::elvis(::kompoz::runtime::kt::KtDelegate::get_value(&held), || {
         ::std::string::String::from("yok")

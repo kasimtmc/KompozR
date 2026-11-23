@@ -608,6 +608,19 @@ fn wide_navigation_rail_samples() {
     rule.on_node_with_text("Is animating: false").assert_exists();
     rule.on_node_with_content_description("Collapse rail").assert_value_equals("Expanded");
     rail_sample_selects(&rule, "Search");
+    // WideNavigationRailArrangementsSample: its arrangement in a `mutableStateOf<Arrangement.Vertical>` state —
+    // centered in the whole height (the three 64 dp items and their 4 dp gaps, 200, from 200), then at the bottom
+    // (inside the 44 dp padding).
+    let rule = KompozTestRule::with_viewport(WideNavigationRailArrangementsSample, IntSize::new(800, 600));
+    let top = rule.on_node_with_text("Home").get_unclipped_bounds_in_root().top;
+    rule.on_node_with_text("Bottom").perform_click();
+    rule.wait_for_idle();
+    let bottom = rule.on_node_with_text("Settings").get_unclipped_bounds_in_root().bottom;
+    rule.on_node_with_text("Center").assert_exists();
+    rule.on_node_with_text("Center").perform_click();
+    rule.wait_for_idle();
+    assert_eq!(rule.on_node_with_text("Home").get_unclipped_bounds_in_root().top, top);
+    assert!(top > 150.0 && bottom > 500.0, "{top} {bottom}");
 }
 
 fn modal_wide_navigation_rail_samples() {

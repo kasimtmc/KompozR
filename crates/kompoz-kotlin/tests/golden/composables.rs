@@ -3,7 +3,7 @@
 pub fn Counter(#[default(0)] start: i32) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let count = remember(|| mutable_state_of(start));
+    let count = remember(|| ::kompoz::runtime::mutable_state_of!(start));
     Column(|| {
         Text(::kompoz::runtime::kt::template!("Count: ", ::kompoz::runtime::kt::KtDelegate::get_value(&count)));
         Button(

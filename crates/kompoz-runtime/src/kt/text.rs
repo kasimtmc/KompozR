@@ -423,7 +423,7 @@ fn identity_hash(p: *const ()) -> i32 {
 }
 
 /// `MutableState(value=…)@hash` (Compose's SnapshotMutableStateImpl): its value read without subscribing.
-impl<T: KtToString + Clone + Send + Sync + 'static> KtToString for MutableState<T> {
+impl<T: KtToString + Clone + 'static> KtToString for MutableState<T> {
     fn kt_write(&self, out: &mut String) {
         out.push_str("MutableState(value=");
         self.peek_with(|v| v.kt_write(out));

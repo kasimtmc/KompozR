@@ -21,8 +21,8 @@ use crate::lazy::layout::{
 use kompoz_animation::MutatePriority;
 use kompoz_graphics::Constraints;
 use kompoz_runtime::{
-    MutableState, SavedValue, Saver, kompozable, mutable_state_of, named, remember_saveable_with,
-    without_read_observation,
+    MutableState, SavedValue, Saver, kompozable, mutable_confined_state_of_with_policy, mutable_state_of, named,
+    never_equal_policy, remember_saveable_with, without_read_observation,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -184,8 +184,9 @@ pub(crate) struct LazyStaggeredGridStateInner {
     /// What the approach scrolls by besides the lookahead's scroll (Compose's `_lazyLayoutScrollDeltaBetweenPasses`).
     scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses,
     pub(crate) scroll_position: LazyStaggeredGridScrollPosition,
-    layout_info: RefCell<Rc<LazyStaggeredGridMeasureResult>>,
-    layout_info_generation: MutableState<u64>,
+    /// The last measure's result (Compose's `layoutInfoState = mutableStateOf(…, neverEqualPolicy())`; confined: a measure
+    /// result isn't `Send`).
+    layout_info: MutableState<Rc<LazyStaggeredGridMeasureResult>>,
     measured: Cell<bool>,
     pub(crate) lane_info: RefCell<LazyStaggeredGridLaneInfo>,
     can_scroll_forward: MutableState<bool>,
@@ -269,8 +270,10 @@ impl LazyStaggeredGridState {
                     initial_first_visible_offsets,
                     fill,
                 ),
-                layout_info: RefCell::new(Rc::new(LazyStaggeredGridMeasureResult::empty())),
-                layout_info_generation: mutable_state_of(0),
+                layout_info: mutable_confined_state_of_with_policy(
+                    Rc::new(LazyStaggeredGridMeasureResult::empty()),
+                    never_equal_policy(),
+                ),
                 measured: Cell::new(false),
                 lane_info: RefCell::new(LazyStaggeredGridLaneInfo::default()),
                 can_scroll_forward: mutable_state_of(false),
@@ -319,19 +322,16 @@ impl LazyStaggeredGridState {
 
     /// What the last layout showed (Compose's `layoutInfo`; a state).
     pub fn layout_info(&self) -> LazyStaggeredGridLayoutInfo {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().layout_info()
+        self.inner.layout_info.with(|result| result.layout_info())
     }
 
     fn measure_result(&self) -> Rc<LazyStaggeredGridMeasureResult> {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().clone()
+        self.inner.layout_info.get()
     }
 
     fn set_measure_result(&self, result: Rc<LazyStaggeredGridMeasureResult>) {
-        *self.inner.layout_info.borrow_mut() = result;
+        self.inner.layout_info.set(result);
         self.inner.measured.set(true);
-        self.inner.layout_info_generation.set(self.inner.layout_info_generation.peek().wrapping_add(1));
     }
 
     /// The drags of the grid (Compose's `interactionSource`).
@@ -372,7 +372,7 @@ impl LazyStaggeredGridState {
         if inner.scroll_to_be_consumed.get().abs() > 0.5 {
             let pre_scroll_to_be_consumed = inner.scroll_to_be_consumed.get();
             let int_delta = fast_round_to_int(inner.scroll_to_be_consumed.get());
-            let current = inner.layout_info.borrow().clone();
+            let current = inner.layout_info.peek();
             let mut scrolled_layout_info = current
                 .copy_with_scroll_delta_without_remeasure(int_delta, !inner.has_lookahead_occurred.get())
                 .map(Rc::new);
@@ -398,7 +398,7 @@ impl LazyStaggeredGridState {
                 }
                 None => {
                     inner.remeasurement.force_remeasure();
-                    let result = inner.layout_info.borrow().clone();
+                    let result = inner.layout_info.peek();
                     self.notify_prefetch(pre_scroll_to_be_consumed - inner.scroll_to_be_consumed.get(), &result);
                 }
             }
@@ -562,7 +562,7 @@ impl LazyStaggeredGridState {
         if position_changed {
             inner.item_animator.reset();
         }
-        let result = inner.layout_info.borrow().clone();
+        let result = inner.layout_info.peek();
         let layout_info = result.layout_info();
         let visible_item = layout_info.find_visible_item(index);
         match visible_item {
@@ -614,7 +614,7 @@ impl LazyStaggeredGridState {
 /// after.
 fn fill_nearest_indices(inner: &LazyStaggeredGridStateInner, item_index: i32, lane_count: usize) -> Vec<i32> {
     let mut indices = vec![0; lane_count];
-    if inner.layout_info.borrow().span_provider.is_full_span(item_index) {
+    if inner.layout_info.peek().span_provider.is_full_span(item_index) {
         indices.fill(item_index);
         return indices;
     }
@@ -679,7 +679,7 @@ impl LazyStaggeredGridState {
     ) -> impl Future<Output = ()> + 'static {
         let state = self.clone();
         async move {
-            let layout_info = state.inner.layout_info.borrow().clone();
+            let layout_info = state.inner.layout_info.peek();
             let num_of_items_to_teleport = 100 * layout_info.slots.sizes.len() as i32;
             let density = layout_info.density;
             let s = state.clone();
@@ -702,7 +702,7 @@ impl LazyStaggeredGridState {
     /// running is cancelled.
     pub fn request_scroll_to_item(&self, index: i32, #[default(0)] scroll_offset: i32) {
         if self.is_scroll_in_progress() {
-            let scope = self.inner.layout_info.borrow().coroutine_scope.clone();
+            let scope = self.inner.layout_info.peek().coroutine_scope.clone();
             if let Some(scope) = scope {
                 let state = self.clone();
                 scope.launch(async move {

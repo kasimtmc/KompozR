@@ -9,8 +9,7 @@ use crate::spatial::{
     OnLayoutRectChangedNode, RectCallback, RelativeLayoutBounds, read_window_size, relative_layout_bounds,
 };
 use kompoz_coroutines::{Job, delay_ms};
-use kompoz_runtime::{MutableState, mutable_state_of, named};
-use std::cell::RefCell;
+use kompoz_runtime::{MutableState, mutable_confined_state_of, named};
 use std::rc::Rc;
 
 /// The spatial modifiers (Compose's `onLayoutRectChanged`, `onVisibilityChanged`, `onFirstVisible` and
@@ -147,33 +146,27 @@ impl ModifierNodeElement for OnLayoutRectChangedElement {
 /// clones).
 #[derive(Clone)]
 pub struct LayoutBoundsHolder {
-    /// Counted up as the bounds change (bounds aren't snapshot values: they know their node).
-    version: MutableState<u64>,
-    bounds: Rc<RefCell<Option<RelativeLayoutBounds>>>,
+    /// Compose's `var bounds: RelativeLayoutBounds? by mutableStateOf(null)` (confined: bounds know their node).
+    bounds: MutableState<Option<RelativeLayoutBounds>>,
 }
 
 impl LayoutBoundsHolder {
     pub fn new() -> LayoutBoundsHolder {
-        LayoutBoundsHolder { version: mutable_state_of(0), bounds: Rc::new(RefCell::new(None)) }
+        LayoutBoundsHolder { bounds: mutable_confined_state_of(None) }
     }
 
     /// The layout's bounds when it was last placed (Compose's `bounds`).
     pub fn bounds(&self) -> Option<RelativeLayoutBounds> {
-        self.version.get();
-        self.bounds.borrow().clone()
+        self.bounds.get()
     }
 
     /// The same without subscribing the reader.
     fn peek(&self) -> Option<RelativeLayoutBounds> {
-        self.bounds.borrow().clone()
+        self.bounds.peek()
     }
 
     fn set(&self, bounds: Option<RelativeLayoutBounds>) {
-        if *self.bounds.borrow() == bounds {
-            return;
-        }
-        *self.bounds.borrow_mut() = bounds;
-        self.version.set(self.version.peek() + 1);
+        self.bounds.set(bounds);
     }
 }
 
@@ -185,7 +178,7 @@ impl Default for LayoutBoundsHolder {
 
 impl PartialEq for LayoutBoundsHolder {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.bounds, &other.bounds)
+        self.bounds == other.bounds
     }
 }
 

@@ -31,6 +31,9 @@ struct Shape {
     kind: Kind,
     defaults: Vec<bool>,
     memoized: bool,
+    /// A method's owner: the type of its impl (`None` for a blanket impl, any type) and the trait of a
+    /// `#[named(trait …)]` one.
+    owner: Option<(Option<String>, Option<String>)>,
 }
 
 impl Shape {
@@ -64,6 +67,8 @@ impl Shape {
 pub(crate) struct Known {
     functions: HashMap<String, Vec<Shape>>,
     methods: HashMap<String, Vec<Shape>>,
+    /// The API's supertypes of each type (the index's `super` lines).
+    supers: HashMap<String, Vec<String>>,
 }
 
 impl Known {
@@ -73,14 +78,50 @@ impl Known {
         let krate = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
         let mut known = Known::default();
         for e in index()?.iter().filter(|e| e.scope.includes(&package, &krate)) {
-            known.add(e.kind, &e.name, e.defaults.clone(), e.has_memoized());
+            if e.kind == Kind::Super {
+                known.supers.entry(e.name.clone()).or_default().push(e.owner.clone());
+                continue;
+            }
+            let owner = (e.kind == Kind::Method).then(|| owner_of(&e.owner));
+            known.add(e.kind, &e.name, e.defaults.clone(), e.has_memoized(), owner);
         }
         Ok(known)
     }
 
-    fn add(&mut self, kind: Kind, name: &str, defaults: Vec<bool>, memoized: bool) {
+    fn add(
+        &mut self,
+        kind: Kind,
+        name: &str,
+        defaults: Vec<bool>,
+        memoized: bool,
+        owner: Option<(Option<String>, Option<String>)>,
+    ) {
         let map = if kind == Kind::Method { &mut self.methods } else { &mut self.functions };
-        map.entry(name.to_string()).or_default().push(Shape { kind, defaults, memoized });
+        map.entry(name.to_string()).or_default().push(Shape { kind, defaults, memoized, owner });
+    }
+
+    /// Whether a receiver of a type whose names are `heads` (its type and what it holds as a pointer: see
+    /// `Transformer::receiver_heads`) may have the `#[named]` method `name`: one of them, or a supertype of one, is
+    /// its owner's type or trait, or the method is a blanket impl's.
+    pub(crate) fn may_own(&self, name: &str, heads: &[String]) -> bool {
+        let mut all: Vec<String> = heads.to_vec();
+        let mut k = 0;
+        while k < all.len() {
+            if let Some(s) = self.supers.get(&all[k]) {
+                for t in s {
+                    if !all.contains(t) {
+                        all.push(t.clone());
+                    }
+                }
+            }
+            k += 1;
+        }
+        self.methods.get(name).is_none_or(|shapes| {
+            shapes.iter().any(|s| match &s.owner {
+                None | Some((None, _)) => true,
+                Some((Some(ty), tr)) => all.contains(ty) || tr.as_ref().is_some_and(|t| all.contains(t)),
+            })
+        })
     }
 
     /// Adds the `#[named]` and `#[kompozable]` functions and `#[named]` impls' methods defined in a body, at any
@@ -127,7 +168,7 @@ impl<'ast> Visit<'ast> for Items<'_> {
             None
         };
         if let Some(kind) = kind {
-            self.0.add(kind, &f.sig.ident.to_string(), defaults(&f.sig), has_memoized(&f.sig));
+            self.0.add(kind, &f.sig.ident.to_string(), defaults(&f.sig), has_memoized(&f.sig), None);
         }
         visit::visit_item_fn(self, f);
     }
@@ -137,13 +178,57 @@ impl<'ast> Visit<'ast> for Items<'_> {
                 if let ImplItem::Fn(m) = item {
                     let (defaults, memoized) = (defaults(&m.sig), has_memoized(&m.sig));
                     if defaults.contains(&true) || memoized {
-                        self.0.add(Kind::Method, &m.sig.ident.to_string(), defaults, memoized);
+                        let generic = i
+                            .generics
+                            .type_params()
+                            .any(|p| matches!(&*i.self_ty, Type::Path(t) if t.path.is_ident(&p.ident)));
+                        let ty = (!generic).then(|| self_type_name(&i.self_ty));
+                        let tr = named_trait_name(&i.attrs);
+                        self.0.add(Kind::Method, &m.sig.ident.to_string(), defaults, memoized, Some((ty, tr)));
                     }
                 }
             }
         }
         visit::visit_item_impl(self, i);
     }
+}
+
+/// A method's owner from its index line's owner field (`<file> <Type>[ as <Trait>]`, `{T}` a blanket impl's type,
+/// `dyn X` a trait object's): the type's name (none for a blanket impl) and the trait.
+fn owner_of(field: &str) -> (Option<String>, Option<String>) {
+    let rest = field.split_once(' ').map_or("", |(_, r)| r);
+    let (ty, tr) = match rest.split_once(" as ") {
+        Some((ty, tr)) => (ty, Some(tr.trim().to_string())),
+        None => (rest, None),
+    };
+    let ty = ty.trim();
+    let ty = (!ty.starts_with('{')).then(|| ty.rsplit(' ').next().unwrap_or(ty).to_string());
+    (ty, tr)
+}
+
+/// The name of an impl's type as the index writes it: its last path segment (a trait object's trait).
+fn self_type_name(t: &Type) -> String {
+    match t {
+        Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default(),
+        Type::Reference(r) => self_type_name(&r.elem),
+        Type::TraitObject(o) => o
+            .bounds
+            .iter()
+            .find_map(|b| match b {
+                TypeParamBound::Trait(t) => t.path.segments.last().map(|s| s.ident.to_string()),
+                _ => None,
+            })
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// The trait of `#[named(trait Name)]`.
+fn named_trait_name(attrs: &[Attribute]) -> Option<String> {
+    let a = attrs.iter().find(|a| a.path().segments.last().is_some_and(|s| s.ident == "named"))?;
+    let tokens = a.meta.require_list().ok()?.tokens.to_string();
+    let rest = tokens.trim().strip_prefix("trait")?;
+    rest.split_whitespace().next().map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '_').to_string())
 }
 
 /// Whether `attrs` hold `#[name]` or `#[name(…)]` (by the path's last segment: `#[kompoz_runtime::named]` too).
@@ -186,6 +271,7 @@ mod tests {
             kind: Kind::Method,
             defaults: p.chars().map(|c| c.eq_ignore_ascii_case(&'d')).collect(),
             memoized: p.contains(['R', 'D']),
+            owner: None,
         };
         // `copy(alpha = …, red = …)`: one or two given in order.
         assert!(shape("dd").rewritten(1, false) && shape("dd").rewritten(2, false));

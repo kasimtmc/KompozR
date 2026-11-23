@@ -27,8 +27,7 @@ use crate::content_color::LocalContentColor;
 use crate::icon_button::{IconButtonColors, IconButtonShapes, IconToggleButtonColors, IconToggleButtonShapes};
 use crate::material_theme::MaterialTheme;
 use crate::shapes::Shapes;
-// (Compose's `StandardIconButtonTokens`, whose file is IconButtonTokens.kt: the token converter names it so)
-use crate::tokens::IconButtonTokens as StandardIconButtonTokens;
+use crate::tokens::StandardIconButtonTokens;
 use crate::tokens::{
     FilledIconButtonTokens, FilledTonalIconButtonTokens, LargeIconButtonTokens, MediumIconButtonTokens,
     OutlinedIconButtonTokens, SmallIconButtonTokens, XLargeIconButtonTokens, XSmallIconButtonTokens,

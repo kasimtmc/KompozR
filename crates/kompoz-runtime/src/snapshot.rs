@@ -152,6 +152,18 @@ pub(crate) trait StateObject: Send + Sync + 'static {
     unsafe fn mergeable(&self, current: *const RecordHead, applied: *const RecordHead) -> bool;
     /// How a record of it is freed.
     fn dropper(&self) -> unsafe fn(*mut RecordHead);
+    /// The thread its values are confined to (a state of a value that isn't `Send + Sync`), if one.
+    fn owner(&self) -> Option<ThreadId>;
+}
+
+/// Panics unless this runs on `owner` (a confined state's values touched elsewhere).
+fn check_owner(owner: Option<ThreadId>, what: &str) {
+    if let Some(owner) = owner {
+        assert!(
+            owner == std::thread::current().id(),
+            "kompoz: {what} a state confined to another thread (one of a value that isn't Send + Sync)"
+        );
+    }
 }
 
 /// The newest record of `object` written at `id` or before and not by a snapshot in `invalid`.
@@ -186,6 +198,8 @@ pub(crate) struct StateCell<T> {
     key: StateKey,
     first: AtomicPtr<RecordHead>,
     equivalent: Option<fn(&T, &T) -> bool>,
+    /// The thread its values are confined to: a state of a value that isn't `Send + Sync` (`None`: T is).
+    owner: Option<ThreadId>,
     _value: PhantomData<T>,
 }
 
@@ -193,11 +207,65 @@ pub(crate) struct StateCell<T> {
 unsafe impl<T: Send + Sync> Send for StateCell<T> {}
 unsafe impl<T: Send + Sync> Sync for StateCell<T> {}
 
+/// A cell as the snapshot system holds it, whatever its value: the system keeps it in lists every thread reaches,
+/// and touches the values of a confined one (its owner set) only on its owner thread — `check_owner` where a value
+/// is copied or compared, the frees deferred to the owner (`Retired::owner`, `ORPHANS`) — so a confined cell is
+/// sound there although its T isn't `Send + Sync`. (A cell of a `Send + Sync` T is one as it is.)
+#[repr(transparent)]
+struct Erased<T>(StateCell<T>);
+
+// SAFETY: see above; the handles of a confined cell (`MutableState<T>`, not Send for such a T) stay on its thread.
+unsafe impl<T> Send for Erased<T> {}
+unsafe impl<T> Sync for Erased<T> {}
+
+/// Records of a confined cell dropped (its last handle) on another thread, freed by their owner.
+struct Orphan {
+    record: *mut RecordHead,
+    drop: unsafe fn(*mut RecordHead),
+    owner: ThreadId,
+}
+// SAFETY: unlinked records no one can reach any more (the cell is gone); freed on their owner thread.
+unsafe impl Send for Orphan {}
+
+static ORPHANS: Mutex<Vec<Orphan>> = Mutex::new(Vec::new());
+
+/// Frees the orphaned records confined to this thread.
+fn free_orphans() {
+    let me = std::thread::current().id();
+    let mine: Vec<Orphan> = {
+        let mut all = ORPHANS.lock();
+        if all.is_empty() {
+            return;
+        }
+        let (mine, others) = std::mem::take(&mut *all).into_iter().partition(|o| o.owner == me);
+        *all = others;
+        mine
+    };
+    for o in mine {
+        // SAFETY: on its owner thread; no one reaches it.
+        unsafe { (o.drop)(o.record) };
+    }
+}
+
 impl<T> Drop for StateCell<T> {
     fn drop(&mut self) {
         // Nothing holds it in a snapshot's writes (they hold it alive) or in the prune list (weakly); its records
         // that were unlinked are in the retired list, freed from there.
         let mut r = *self.first.get_mut();
+        if let Some(owner) = self.owner
+            && owner != std::thread::current().id()
+        {
+            // (a confined cell's last handle dropped elsewhere — a snapshot's write list, say: its values are freed
+            // on their thread)
+            let mut orphans = ORPHANS.lock();
+            while !r.is_null() {
+                // SAFETY: linked records are this cell's; no reader can be left (no Arc).
+                let next = unsafe { (*r).next.load(Relaxed) };
+                orphans.push(Orphan { record: r, drop: drop_record::<T>, owner });
+                r = next;
+            }
+            return;
+        }
         while !r.is_null() {
             // SAFETY: linked records are this cell's, made by new_record::<T>; no reader can be left (no Arc).
             let next = unsafe { (*r).next.load(Relaxed) };
@@ -207,34 +275,58 @@ impl<T> Drop for StateCell<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> StateObject for StateCell<T> {
+impl<T: Clone + 'static> StateObject for Erased<T> {
     fn key(&self) -> StateKey {
-        self.key
+        self.0.key
     }
     fn first(&self) -> &AtomicPtr<RecordHead> {
-        &self.first
+        &self.0.first
     }
     unsafe fn copy_record(&self, r: *const RecordHead, id: i64) -> *mut RecordHead {
+        check_owner(self.0.owner, "a snapshot applied on this thread copies");
         let value = unsafe { &(*(r as *const Record<T>)).value };
         new_record(value.clone(), id)
     }
     unsafe fn mergeable(&self, current: *const RecordHead, applied: *const RecordHead) -> bool {
+        check_owner(self.0.owner, "a snapshot applied on this thread compares");
         let (a, b) = unsafe { (&(*(current as *const Record<T>)).value, &(*(applied as *const Record<T>)).value) };
-        self.equivalent.is_some_and(|eq| eq(a, b))
+        self.0.equivalent.is_some_and(|eq| eq(a, b))
     }
     fn dropper(&self) -> unsafe fn(*mut RecordHead) {
         drop_record::<T>
     }
+    fn owner(&self) -> Option<ThreadId> {
+        self.0.owner
+    }
 }
 
-impl<T: Clone + Send + Sync + 'static> StateCell<T> {
-    pub(crate) fn new(value: T, equivalent: Option<fn(&T, &T) -> bool>) -> Arc<StateCell<T>> {
+impl<T: Clone + 'static> StateCell<T> {
+    /// A cell; `owner`: the thread its values are confined to (`None` only for a `Send + Sync` T).
+    pub(crate) fn new(value: T, equivalent: Option<fn(&T, &T) -> bool>, owner: Option<ThreadId>) -> Arc<StateCell<T>> {
         Arc::new(StateCell {
             key: StateKey::new(),
             first: AtomicPtr::new(new_record(value, PREEXISTING_SNAPSHOT)),
             equivalent,
+            owner,
             _value: PhantomData,
         })
+    }
+
+    pub(crate) fn owner(&self) -> Option<ThreadId> {
+        self.owner
+    }
+
+    /// It as the snapshot system reads it.
+    fn erased(&self) -> &Erased<T> {
+        // SAFETY: `Erased<T>` is a transparent wrapper of `StateCell<T>`.
+        unsafe { &*(self as *const StateCell<T> as *const Erased<T>) }
+    }
+
+    /// It as the snapshot system holds it.
+    fn object(self: &Arc<Self>) -> Arc<dyn StateObject> {
+        // SAFETY: `Erased<T>` is a transparent wrapper of `StateCell<T>` (the same layout); the same allocation.
+        let erased: Arc<Erased<T>> = unsafe { Arc::from_raw(Arc::into_raw(self.clone()) as *const Erased<T>) };
+        erased
     }
 
     pub(crate) fn key(&self) -> StateKey {
@@ -244,12 +336,12 @@ impl<T: Clone + Send + Sync + 'static> StateCell<T> {
     /// Runs `f` with the value the snapshot this thread runs in sees (told to its read observer if `observe`,
     /// and then a dependency of the derived state computing, if one is).
     pub(crate) fn with<R>(self: &Arc<Self>, observe: bool, f: impl FnOnce(&T) -> R) -> R {
-        with_readable(&**self, observe, |r| {
+        check_owner(self.owner, "read");
+        with_readable(self.erased(), observe, |r| {
             if observe && crate::read::collecting_dependencies() {
                 // SAFETY: a record this snapshot reads (see with_readable).
                 let stamp = unsafe { (*r).stamp.load(Acquire) };
-                let object: Arc<dyn StateObject> = self.clone();
-                crate::read::record_dependency(self.key, crate::read::Dependency::State(object, stamp));
+                crate::read::record_dependency(self.key, crate::read::Dependency::State(self.object(), stamp));
             }
             f(unsafe { &(*(r as *const Record<T>)).value })
         })
@@ -257,7 +349,8 @@ impl<T: Clone + Send + Sync + 'static> StateCell<T> {
 
     /// Sets the value, unless it is equivalent to the one it has (its policy).
     pub(crate) fn set(self: &Arc<Self>, value: T) {
-        let this: Arc<dyn StateObject> = self.clone();
+        check_owner(self.owner, "written");
+        let this = self.object();
         write(&this, |current| {
             // SAFETY: `current` is this cell's record, made by new_record::<T>; others may be reading it.
             let current = unsafe { &(*(current as *const Record<T>)).value };
@@ -276,7 +369,8 @@ impl<T: Clone + Send + Sync + 'static> StateCell<T> {
 
     /// Changes the value in place (a copy of it, if this snapshot doesn't have one of its own yet).
     pub(crate) fn update(self: &Arc<Self>, mutate: impl FnOnce(&mut T)) {
-        let this: Arc<dyn StateObject> = self.clone();
+        check_owner(self.owner, "written");
+        let this = self.object();
         write(&this, |current| {
             let current = current as *mut Record<T>;
             Write::Value(Box::new(move |own: Option<*mut RecordHead>, id| match own {
@@ -325,6 +419,8 @@ struct Retired {
     record: *mut RecordHead,
     drop: unsafe fn(*mut RecordHead),
     epoch: i64,
+    /// A confined state's: freed only on this thread.
+    owner: Option<ThreadId>,
 }
 // SAFETY: a record of a Send + Sync value; freed on the UI thread.
 unsafe impl Send for Retired {}
@@ -464,7 +560,7 @@ fn prune(g: &mut Globals, object: &dyn StateObject) {
         } else {
             let link = if previous.is_null() { object.first() } else { unsafe { &(*previous).next } };
             link.store(next, Release);
-            g.retired.push(Retired { record: r, drop: object.dropper(), epoch: g.next_id });
+            g.retired.push(Retired { record: r, drop: object.dropper(), epoch: g.next_id, owner: object.owner() });
         }
         r = next;
     }
@@ -477,19 +573,31 @@ fn collect(g: &mut Globals) {
             prune(g, &*object);
         }
     }
+    free_retired(g, true);
+    for v in g.retired_views.drain(..) {
+        // SAFETY: replaced; the UI thread isn't reading it (between frames), others read under the lock.
+        drop(unsafe { Box::from_raw(v.0) });
+    }
+}
+
+/// Frees the retired records no snapshot can reach any more that may be freed on this thread (a confined state's
+/// only on its owner thread; off the UI thread only those of the states confined to it, as the UI thread may be
+/// reading the others without the lock).
+fn free_retired(g: &mut Globals, ui_thread: bool) {
+    let me = std::thread::current().id();
     let oldest_open = g.open.iter().map(|(id, _)| *id).min().unwrap_or(i64::MAX);
     g.retired.retain(|r| {
-        if r.epoch > oldest_open {
+        let ours = match r.owner {
+            Some(o) => o == me,
+            None => ui_thread,
+        };
+        if r.epoch > oldest_open || !ours {
             return true;
         }
         // SAFETY: unlinked, and every snapshot that could still reach it is closed.
         unsafe { (r.drop)(r.record) };
         false
     });
-    for v in g.retired_views.drain(..) {
-        // SAFETY: replaced; the UI thread isn't reading it (between frames), others read under the lock.
-        drop(unsafe { Box::from_raw(v.0) });
-    }
 }
 
 fn notify(changed: &[StateKey]) {
@@ -900,7 +1008,8 @@ impl Snapshot {
     }
 
     /// Applies the global snapshot: what was written outside any snapshot is told to the apply observers. The
-    /// hosts do it at every frame; on the UI thread it also frees what no one reads any more.
+    /// hosts do it at every frame; on the UI thread it also frees what no one reads any more (on any thread, what
+    /// no one reads of the states confined to it).
     pub fn send_apply_notifications() {
         let mut changed = Vec::new();
         {
@@ -917,8 +1026,13 @@ impl Snapshot {
                 g.next_id += 1;
                 replace_view(&mut g, next); // written from now on: new records
             }
-            if on_ui_thread() && CURRENT.with(|c| c.get().is_null()) && !reading() {
-                collect(&mut g);
+            if CURRENT.with(|c| c.get().is_null()) && !reading() {
+                if on_ui_thread() {
+                    collect(&mut g);
+                } else {
+                    free_retired(&mut g, false); // (the states confined to this thread)
+                }
+                free_orphans();
             }
         }
         notify(&changed);
@@ -952,6 +1066,19 @@ impl MutableSnapshot {
     /// Makes its writes seen by others (the global snapshot's, or its parent's if it was taken in another
     /// mutable snapshot), unless one conflicts. It can't be applied twice.
     pub fn apply(&self) -> SnapshotApplyResult {
+        self.apply_telling(true)
+    }
+
+    /// Applies it without telling the apply observers what it changed: its writes are seen from now on, but no
+    /// reader is invalidated by them (what the layout check does with what its measures write again: the nodes it
+    /// laid out stay as it left them, and so must what they share with the states — a lazy list's measured items —
+    /// without a change that would lay its readers out, and check them, again).
+    #[doc(hidden)]
+    pub fn apply_unobserved(&self) -> SnapshotApplyResult {
+        self.apply_telling(false)
+    }
+
+    fn apply_telling(&self, tell: bool) -> SnapshotApplyResult {
         let s = &self.snapshot.core;
         let mut changed = Vec::new();
         {
@@ -1004,7 +1131,9 @@ impl MutableSnapshot {
             }
             changed.append(&mut st.changed);
         }
-        notify(&changed);
+        if tell {
+            notify(&changed);
+        }
         SnapshotApplyResult::Success
     }
 }

@@ -177,6 +177,10 @@ pub(crate) struct Gen<'a, 'd> {
     /// The element type the next `listOf(…)` written is to have (a declared type's, an outer list's: Kotlin's
     /// inference of a nested list's elements).
     pub expected_elem: Option<Ty>,
+    /// The value type (Rust's, Kotlin's) the next `mutableStateOf(…)` written holds: its type argument, or the declared
+    /// type of the `var` delegated to it (`var job: Job? by remember { mutableStateOf(null) }`) — what
+    /// `mutable_state_of!` reads to choose a thread-safe or a confined state.
+    pub state_value: Option<(TokenStream, Ty)>,
     counter: usize,
 }
 
@@ -208,6 +212,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             peek_scopes: Default::default(),
             peek_receivers: Default::default(),
             expected_elem: None,
+            state_value: None,
             counter: 0,
         }
     }

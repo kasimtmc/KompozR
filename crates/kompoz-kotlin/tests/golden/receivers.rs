@@ -27,7 +27,7 @@ pub fn Animated(seekable: SeekableTransitionState<i32>, deferred: DeferredTransi
         let a = Animatable(0_f32);
         a.clone()
     });
-    let delegated = remember(|| mutable_state_of(Animatable(0_f32)));
+    let delegated = remember(|| ::kompoz::runtime::mutable_state_of!(Animatable(0_f32)));
     let unknown = made_elsewhere();
     LaunchedEffect((), async {
         written.animate_to(1_f32).await;

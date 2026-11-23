@@ -229,10 +229,11 @@ impl CarouselPagerState {
     }
 }
 
-/// Compose's `pageCountState = mutableStateOf(updatedPageCount)`: the latest count function as a state. A function
-/// isn't `Send`, so it is kept beside a state of its version; readers are told when a new function gives another
-/// count than the last one (as KompozR's `PagerState` page count: Compose's state of a lambda changes with each new
-/// lambda, which a fresh Rust closure at every composition would make a write at every composition).
+/// Compose's `pageCountState = mutableStateOf(updatedPageCount)`: the latest count function, kept beside a state of
+/// its generation; readers are told when a new function gives another count than the last one (as KompozR's
+/// `PagerState` page count: Compose's state of a lambda changes with each new lambda — Kotlin keeps a lambda
+/// capturing the same values the same instance — where a fresh Rust closure at every composition would make a state
+/// of the closure a write at every composition, or keep a stale closure under a policy comparing counts).
 #[derive(Clone)]
 pub(crate) struct PageCountState {
     value: Rc<RefCell<Rc<dyn Fn() -> i32>>>,

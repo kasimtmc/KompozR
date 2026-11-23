@@ -44,7 +44,8 @@ use kompoz_graphics::{
 };
 use kompoz_runtime::{
     DerivedState, KompozitionLocalProvider, MutableState, SavedValue, Saver, SharedState, derived_state_of, kompozable,
-    mutable_state_of, named, named_args, remember, remember_keyed, remember_saveable_keyed_with,
+    mutable_confined_state_of, mutable_state_of, named, named_args, remember, remember_keyed,
+    remember_saveable_keyed_with,
 };
 use kompoz_ui::focus::{FocusDirection, FocusRequester};
 use kompoz_ui::input::{FlingFuture, NestedScrollConnection, NestedScrollSource};
@@ -58,7 +59,7 @@ use kompoz_ui::unit::Velocity;
 use kompoz_ui::window::{DialogProperties, Popup, PopupPositionProvider, PopupProperties};
 use kompoz_ui::{Alignment, Constraints, Modifier};
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::fmt;
 use std::future::Future;
 use std::rc::Rc;
@@ -1030,11 +1031,9 @@ struct SearchBarStateInner {
     animation_spec_for_content_fade_in: Arc<dyn AnimationSpec<f32>>,
     animation_spec_for_content_fade_out: Arc<dyn AnimationSpec<f32>>,
     expands_to_full_screen: MutableState<bool>,
-    // (Compose's `collapsedCoords by mutableStateOf(null)`: layout coordinates aren't `Send`, so they are kept
-    // beside a snapshot state counted up when they change, read with them — observed as Compose's state is; set
-    // equal, nothing changes, as its structural policy has it)
-    collapsed_coords: RefCell<Option<LayoutCoordinates>>,
-    collapsed_coords_version: MutableState<u64>,
+    /// Compose's `var collapsedCoords: LayoutCoordinates? by mutableStateOf(null)` (confined: layout coordinates
+    /// aren't `Send`).
+    collapsed_coords: MutableState<Option<LayoutCoordinates>>,
     current_value: DerivedState<SearchBarValue>,
 }
 
@@ -1128,8 +1127,7 @@ impl SearchBarState {
                 animation_spec_for_content_fade_in,
                 animation_spec_for_content_fade_out,
                 expands_to_full_screen: mutable_state_of(false),
-                collapsed_coords: RefCell::new(None),
-                collapsed_coords_version: mutable_state_of(0),
+                collapsed_coords: mutable_confined_state_of(None),
                 current_value,
             }),
         }
@@ -1148,17 +1146,12 @@ impl SearchBarState {
     /// Where the collapsed bar is (Compose's `collapsedCoords`, a state): what the bar of this state sets as it is
     /// placed, what its expanded forms grow from; none until then.
     pub fn collapsed_coords(&self) -> Option<LayoutCoordinates> {
-        self.inner.collapsed_coords_version.get();
-        self.inner.collapsed_coords.borrow().clone()
+        self.inner.collapsed_coords.get()
     }
 
     /// Sets [`collapsed_coords`](SearchBarState::collapsed_coords): its readers are told (if they changed).
     pub fn set_collapsed_coords(&self, coords: Option<LayoutCoordinates>) {
-        if *self.inner.collapsed_coords.borrow() == coords {
-            return;
-        }
-        *self.inner.collapsed_coords.borrow_mut() = coords;
-        self.inner.collapsed_coords_version.set(self.inner.collapsed_coords_version.peek() + 1);
+        self.inner.collapsed_coords.set(coords);
     }
 
     /// How far it is expanded, 0 collapsed to 1 expanded (Compose's `progress`, a state read).
@@ -2752,6 +2745,7 @@ mod tests {
     use crate::text::Text;
     use kompoz_runtime::kompozable_lambda;
     use kompoz_test::KompozTestRule;
+    use std::cell::RefCell;
 
     fn near(a: f32, b: f32) -> bool {
         (a - b).abs() <= 0.5

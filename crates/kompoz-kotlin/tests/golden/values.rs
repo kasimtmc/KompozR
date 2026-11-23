@@ -34,7 +34,7 @@ pub fn Locals() {
         Text(::kompoz::runtime::kt::template!(LocalAccount.current().name(), default_label))
     });
     let saved = remember_saveable_state(&::kompoz::runtime::kt::top_level!(town_saver), || {
-        mutable_state_of(Town(::std::string::String::from("İzmir")))
+        ::kompoz::runtime::mutable_state_of!(Town(::std::string::String::from("İzmir")))
     });
     Text(::kompoz::runtime::kt::KtDelegate::get_value(&saved).name());
     KompozitionLocalProvider(&[LocalOtherFiles.provides(::std::string::String::from("verilen"))], || {

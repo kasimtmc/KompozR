@@ -32,8 +32,9 @@ use crate::{
 use kompoz_coroutines::{CoroutineScope, remember_coroutine_scope};
 use kompoz_graphics::{ContentScale, Density, IntSize, LayoutDirection, Offset, Path, Rect, Shape, Size};
 use kompoz_runtime::{
-    DisposableEffect, MutableState, State, group, kompozable, kompozable_block, mutable_state_of, named, named_args,
-    on_dispose, remember, remember_keyed, remember_observer,
+    DisposableEffect, MutableState, SnapshotMutationPolicy, State, group, kompozable, kompozable_block,
+    mutable_confined_state_of_with_policy, mutable_state_of, named, named_args, on_dispose, remember, remember_keyed,
+    remember_observer,
 };
 use kompoz_ui::draw::{ContentDrawScope, DrawModifierNode, DrawScope, GraphicsLayer};
 use kompoz_ui::layout::{
@@ -118,36 +119,30 @@ impl<T: 'static> Same for State<T> {
     }
 }
 
-/// A snapshot state of a value that can't be one here (holding `Rc`s): read through [`get`](Observed::get), its
-/// readers told when [`set`](Observed::set) changes it (Compose's `mutableStateOf` of an object).
+/// Compose's `mutableStateOf` of an object (holding `Rc`s: a state confined to the UI thread), its policy
+/// Compose's structural equality ([`Same`]: objects by identity).
 pub(crate) struct Observed<T> {
-    value: RefCell<T>,
-    version: MutableState<u64>,
+    state: MutableState<T>,
 }
 
-impl<T: Clone + Same> Observed<T> {
+impl<T: Clone + Same + 'static> Observed<T> {
     pub(crate) fn new(value: T) -> Observed<T> {
-        Observed { value: RefCell::new(value), version: mutable_state_of(0) }
+        Observed { state: mutable_confined_state_of_with_policy(value, SnapshotMutationPolicy::new(T::same)) }
     }
 
     /// Its value (a state read).
     pub(crate) fn get(&self) -> T {
-        let _ = self.version.get();
-        self.value.borrow().clone()
+        self.state.get()
     }
 
     /// Its value, not read as a state.
     pub(crate) fn peek(&self) -> T {
-        self.value.borrow().clone()
+        self.state.peek()
     }
 
     /// Sets it; its readers are told if it is another value.
     pub(crate) fn set(&self, value: T) {
-        if self.value.borrow().same(&value) {
-            return;
-        }
-        *self.value.borrow_mut() = value;
-        self.version.set(self.version.peek().wrapping_add(1));
+        self.state.set(value);
     }
 }
 

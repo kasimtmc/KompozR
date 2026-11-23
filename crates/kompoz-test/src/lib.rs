@@ -250,11 +250,12 @@ impl KompozTestRule {
         for _ in 0..100 {
             self.host.run_due(self.clock.get());
             self.check_frame();
-            if !self.host.has_pending_work_without_frame() {
+            // (what the keep check's drawing set going is the next frame's, as a drawing is a frame's)
+            if !self.host.has_pending_work_before_drawing() {
                 return;
             }
         }
-        panic!("kompoz: wait_for_idle: never idle at the current time");
+        panic!("kompoz: run_current: never idle at the current time");
     }
 
     /// Runs `action` once the host is idle, giving its value (Compose's `runOnIdle`).

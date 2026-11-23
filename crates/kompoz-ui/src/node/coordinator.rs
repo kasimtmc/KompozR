@@ -995,6 +995,78 @@ impl NodeCoordinator {
         self.parent_to_local_rect(rect, clip_bounds)
     }
 
+    /// Its bounds grown to the minimum touch target, in the root's coordinates, cut only where a layer clips them to
+    /// that target around what it holds (Compose's `NodeCoordinator.touchBoundsInRoot`); nothing if a clip leaves
+    /// nothing.
+    pub(crate) fn touch_bounds_in_root(&self) -> Rect {
+        if !self.is_attached() {
+            return Rect::Zero;
+        }
+        let root = self.find_root();
+        let size = self.measured_size.get();
+        let padding = crate::input::hit_test::minimum_touch_target_padding(
+            size,
+            crate::input::hit_test::minimum_touch_target_size(self),
+        );
+        let mut bounds = Rect::new(
+            -padding.width,
+            -padding.height,
+            size.width as f32 + padding.width,
+            size.height as f32 + padding.height,
+        );
+        let mut c = self.rc();
+        while !Rc::ptr_eq(&c, &root) {
+            bounds = c.rect_in_parent_of_touch_target(bounds);
+            if bounds.is_empty() {
+                return Rect::Zero;
+            }
+            let Some(up) = c.wrapped_by() else { break };
+            c = up;
+        }
+        bounds
+    }
+
+    /// [`rect_in_parent`](Self::rect_in_parent) of touch bounds (Compose's `rectInParent(clipBounds = false,
+    /// clipToMinimumTouchTargetSize = true)`): a clipping layer cuts them to its size grown by the minimum touch target
+    /// round what it holds.
+    fn rect_in_parent_of_touch_target(&self, bounds: Rect) -> Rect {
+        let mut bounds = bounds;
+        if let Some(l) = self.layer.borrow().as_ref() {
+            if l.props.clip {
+                let minimum = crate::input::hit_test::minimum_touch_target_size(self);
+                let size = self.measured_size.get();
+                let (width, height) = (size.width as f32, size.height as f32);
+                // (Compose's `calculateMinimumTouchTargetOffset`)
+                let (left, top) =
+                    if bounds.right < 0.0 || bounds.left > width || bounds.bottom < 0.0 || bounds.top > height {
+                        (0.0, 0.0)
+                    } else {
+                        let under_width = (minimum.width - bounds.width()) / 2.0;
+                        let left = if under_width > 0.0 {
+                            bounds.left - under_width
+                        } else {
+                            bounds.left.max(-minimum.width / 2.0)
+                        };
+                        let under_height = (minimum.height - bounds.height()) / 2.0;
+                        let top = if under_height > 0.0 {
+                            bounds.top - under_height
+                        } else {
+                            bounds.top.max(-minimum.height / 2.0)
+                        };
+                        (left, top)
+                    };
+                let right = (width + minimum.width).min(width.max(left + minimum.width));
+                let bottom = (height + minimum.height).min(height.max(top + minimum.height));
+                bounds = bounds.intersect(Rect::new(left, top, right, bottom));
+                if bounds.is_empty() {
+                    return bounds;
+                }
+            }
+            bounds = l.matrix.map_rect(bounds);
+        }
+        bounds.translate(self.position.get().to_offset())
+    }
+
     /// Its bounds `bounds` (its own coordinates) in the coordinator wrapping it (Compose's `rectInParent`).
     pub(crate) fn rect_in_parent(&self, bounds: Rect, clip_bounds: bool) -> Rect {
         let mut bounds = bounds;

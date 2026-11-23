@@ -108,7 +108,8 @@ pub fn DateRangePicker(
         DatePickerModalTokens::RangeSelectionHeaderContainerHeight - HeaderHeightOffset,
         move || {
             let state = content_state.clone();
-            let (on_select, on_month) = (state.clone(), state.clone());
+            let on_select: Rc<dyn DateRangePickerState> = state.clone();
+            let on_month = state.clone();
             SwitchableDateEntryContent(
                 state.selected_start_date_millis(),
                 state.selected_end_date_millis(),
@@ -117,8 +118,7 @@ pub fn DateRangePicker(
                 // Kotlin catches the IllegalArgumentException a state's setSelection may throw and ignores it: a
                 // Rust state refuses a selection by not making it (a panic isn't an exception to catch).
                 Rc::new(move |start_date_millis, end_date_millis| {
-                    // (`r#`: the composable body's rewrite of calls of #[named] methods by name leaves it alone)
-                    on_select.r#set_selection(start_date_millis, end_date_millis)
+                    on_select.set_selection(start_date_millis, end_date_millis)
                 }),
                 Rc::new(move |month_in_millis| on_month.set_displayed_month_millis(month_in_millis)),
                 calendar_model.clone(),

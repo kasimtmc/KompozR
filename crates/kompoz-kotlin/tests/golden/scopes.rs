@@ -27,8 +27,11 @@ impl Modifier {
 pub fn Scopes() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let todos =
-        remember(|| mutable_state_of(::kompoz::runtime::kt::mutable_list_of([::std::string::String::from("bir")])));
+    let todos = remember(|| {
+        ::kompoz::runtime::mutable_state_of!(::kompoz::runtime::kt::mutable_list_of([::std::string::String::from(
+            "bir"
+        )]))
+    });
     let tags = remember(|| mutable_state_list_of([::std::string::String::from("a")]));
     Canvas(
         Modifier

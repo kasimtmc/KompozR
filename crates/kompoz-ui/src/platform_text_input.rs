@@ -17,7 +17,9 @@ use crate::platform::{ImeAction, ImeOptions};
 use crate::text_input::{ContentReceiver, EditCommand, LocalTextInputService, TextInputService, TextInputSession};
 use kompoz_coroutines::{CoroutineScope, CoroutineStart, Job, coroutine_scope, current_job, snapshot_flow};
 use kompoz_graphics::{Offset, Rect};
-use kompoz_runtime::{KompozitionLocal, KompozitionLocalProvider, MutableState, mutable_state_of, remember_keyed};
+use kompoz_runtime::{
+    KompozitionLocal, KompozitionLocalProvider, MutableState, mutable_confined_state_of, remember_keyed,
+};
 use kompoz_text::input::TextFieldValue;
 use kompoz_text::{TextLayoutResult, TextRange};
 use std::cell::RefCell;
@@ -364,19 +366,24 @@ impl<F: Fn(PlatformTextInputMethodRequest, PlatformTextInputSession) -> SessionF
 /// An interceptor in the chain of those around a field (Compose's ChainedPlatformTextInputInterceptor): its
 /// interceptor may change while a session runs (the request is intercepted again by the new one then).
 struct ChainedPlatformTextInputInterceptor {
-    interceptor: RefCell<Rc<dyn PlatformTextInputInterceptor>>,
-    /// Counted up as the interceptor changes (what a running session follows).
-    version: MutableState<u64>,
+    /// Compose's `var interceptor by mutableStateOf(initialInterceptor)` (what a running session follows).
+    interceptor: MutableState<InterceptorRef>,
     parent: Option<Rc<ChainedPlatformTextInputInterceptor>>,
+}
+
+/// An interceptor, equal to itself only (Compose's interceptors have no `equals`).
+#[derive(Clone)]
+struct InterceptorRef(Rc<dyn PlatformTextInputInterceptor>);
+
+impl PartialEq for InterceptorRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 impl ChainedPlatformTextInputInterceptor {
     fn update_interceptor(&self, interceptor: Rc<dyn PlatformTextInputInterceptor>) {
-        let same = Rc::ptr_eq(&*self.interceptor.borrow(), &interceptor);
-        if !same {
-            *self.interceptor.borrow_mut() = interceptor;
-            self.version.set(self.version.peek() + 1);
-        }
+        self.interceptor.set(InterceptorRef(interceptor));
     }
 
     /// A session through this interceptor (and those around it): the session's input method requests go to the
@@ -399,14 +406,12 @@ impl ChainedPlatformTextInputInterceptor {
                                     // The interceptor followed: a new one intercepts the request again.
                                     coroutine_scope(move |scope| async move {
                                         let running: Rc<RefCell<Option<Job>>> = Rc::new(RefCell::new(None));
-                                        let version = me.version.clone();
-                                        let watched = me.clone();
-                                        snapshot_flow(move || version.get())
-                                            .collect(move |_| {
+                                        let interceptor = me.interceptor.clone();
+                                        snapshot_flow(move || interceptor.get())
+                                            .collect(move |InterceptorRef(interceptor)| {
                                                 if let Some(job) = running.borrow_mut().take() {
                                                     job.cancel();
                                                 }
-                                                let interceptor = watched.interceptor.borrow().clone();
                                                 let (request, next) = (request.clone(), parent_session.clone());
                                                 let job = scope.launch(async move {
                                                     interceptor.intercept_start_input_method(request, next).await;
@@ -454,8 +459,7 @@ pub fn InterceptPlatformTextInput(interceptor: Rc<dyn PlatformTextInputIntercept
     let initial = interceptor.clone();
     let chained = remember_keyed(parent.clone(), move || {
         ChainedInterceptorRef(Some(Rc::new(ChainedPlatformTextInputInterceptor {
-            interceptor: RefCell::new(initial),
-            version: mutable_state_of(0),
+            interceptor: mutable_confined_state_of(InterceptorRef(initial)),
             parent: parent.0.clone(),
         })))
     });

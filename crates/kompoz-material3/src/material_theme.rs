@@ -18,7 +18,6 @@ use kompoz_foundation::text::selection::{LocalTextSelectionColors, TextSelection
 use kompoz_graphics::Color;
 use kompoz_runtime::{KompozitionLocal, KompozitionLocalProvider, kompozable, named_args, remember_keyed};
 use std::fmt;
-use std::rc::Rc;
 
 /// The theme the components read (Compose's `MaterialTheme(colorScheme, motionScheme, shapes, typography,
 /// content)`): `content` composed with `color_scheme`, `motion_scheme`, `shapes` and `typography` (each the theme

@@ -136,6 +136,13 @@ impl Gen<'_, '_> {
         if let Some(a) = list.iter().find(|a| a.spread) {
             return Out::plain(self.later(a.loc, "a spread argument (`*array`)"), Ty::Unknown);
         }
+        // (`mutableStateOf<T>(…)`: the value's type, for `mutable_state_of!`)
+        if let (ExprKind::Name(n), Some(TypeArg::Type { ty, .. })) = (&callee.kind, type_args.first())
+            && n.name == "mutableStateOf"
+        {
+            let rust = self.rust_type(ty, super::types::TypePos::Value);
+            self.state_value = Some((rust, self.ty_of(ty)));
+        }
         let out = match &callee.kind {
             ExprKind::Name(n) => self.name_call(n, &list, e.loc),
             ExprKind::Member { receiver, safe, name } => self.member_call(receiver, *safe, name, &list, e.loc),
@@ -475,6 +482,9 @@ impl Gen<'_, '_> {
         if n.name == "rememberUpdatedState" {
             return Some(self.remember_updated_state(n, args, loc));
         }
+        if n.name == "mutableStateOf" && !self.is_local(&n.name) && self.file.function(&n.name).is_none() {
+            return Some(self.mutable_state_of(n, args, loc));
+        }
         let keyed = match n.name.as_str() {
             "remember" => "rememberKeyed",
             "rememberSaveable" => "rememberSaveableKeyed",
@@ -519,6 +529,51 @@ impl Gen<'_, '_> {
         let rt = self.rt().clone();
         let ts = self.identified(quote_spanned!(span=> #rt::remember_updated_state!(#v)), loc, true);
         Out::plain(ts, Ty::Named("State".into(), vec![ty]))
+    }
+
+    /// `mutableStateOf(value)` / `mutableStateOf(value, policy)`: the runtime's `mutable_state_of!` (Compose's state of
+    /// any value: a thread-safe one of a `Send + Sync` value, else one confined to the composition's thread), the
+    /// value written as of the type it is to have when that is known ([`Gen::state_value`]), as the macro reads it.
+    fn mutable_state_of(&mut self, n: &Ident, args: &[ArgRef], loc: Loc) -> Out {
+        let span = self.span(loc);
+        let hint = self.state_value.take();
+        let value = args.iter().find(|a| a.name.is_none_or(|an| an.name == "value"));
+        let policy = args
+            .iter()
+            .find(|a| a.name.is_some_and(|an| an.name == "policy"))
+            .or_else(|| args.iter().filter(|a| a.name.is_none()).nth(1));
+        let Some(value) = value.filter(|_| (1..=2).contains(&args.len())) else {
+            self.error(loc, format!("`{}` takes a value (`value`) and maybe a policy (`policy`)", n.name));
+            return Out::plain(quote!(), Ty::Unknown);
+        };
+        let peeked = match value.value {
+            ArgValue::Expr(e) => self.peek_ty(e),
+            _ => Ty::Unknown,
+        };
+        // (written as for a generic `value: T`: a string literal an owned `String`, as the function took it)
+        let param = PInfo {
+            kotlin: "value".into(),
+            rust: "value".into(),
+            ty: "T".into(),
+            default: PDefault::None,
+            vararg: false,
+            lambda: None,
+            option: OptionForm::No,
+        };
+        let v = self.arg_value(value, Some(&param), false);
+        let (v, ty) = match hint {
+            Some((rust, ty)) => (quote_spanned!(span=> ::core::convert::identity::<#rust>(#v)), ty),
+            None => (v, peeked),
+        };
+        let rt = self.rt().clone();
+        let ts = match policy {
+            Some(p) => {
+                let p = self.loose_arg(p);
+                quote_spanned!(span=> #rt::mutable_state_of!(#v, #p))
+            }
+            None => quote_spanned!(span=> #rt::mutable_state_of!(#v)),
+        };
+        Out::plain(ts, Ty::Named("MutableState".into(), vec![ty]))
     }
 
     /// Keys given as several arguments: one tuple (`LaunchedEffect(a, b)` → `(a, b)`), `Unit` → `()`.

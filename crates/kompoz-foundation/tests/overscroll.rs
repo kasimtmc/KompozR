@@ -814,6 +814,34 @@ fn a_node_that_stops_scrolling_lets_its_stretch_go() {
     assert!(stretches(&rule).is_empty());
 }
 
+/// A lazy list held stretched at its top settles: what is due at the current time runs (`run_current`), nothing
+/// left to do without a frame (stage 12 WP5 saw "never idle at the current time" there).
+fn a_lazy_list_held_stretched_at_its_top_is_idle_at_the_current_time() {
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {
+        LazyColumn(
+            modifier = Modifier.fill_max_size().test_tag("list"),
+            content = |this: &mut LazyListScope| {
+                this.items_list((0..30).collect::<Vec<i32>>(), |v: &i32| {
+                    Box(modifier = Modifier.fill_max_width().height(50.dp()).test_tag(format!("row {v}")));
+                });
+            },
+        );
+    }));
+    let h = rule.host();
+    h.pointer_down(at(200.0, 200.0), -1, 0, PointerType::Touch);
+    for i in 1..=10 {
+        rule.advance_frame();
+        h.pointer_move(at(200.0, 200.0 + 20.0 * i as f32), -1, 0);
+    }
+    // Held: what the moves set going is done at the current time.
+    rule.main_clock().run_current();
+    let stretched = stretch_of(&rule, "list").y;
+    assert!(stretched > 0.005, "{stretched}");
+    rule.main_clock().run_current();
+    h.pointer_up(at(200.0, 400.0), -1, 0);
+    rule.wait_for_idle();
+}
+
 tests!(
     local_overscroll_factory_turns_the_stretch_off,
     scrollable_area_scrolls_clips_and_draws_its_overscroll,
@@ -823,4 +851,5 @@ tests!(
     stretch_holds_while_touched_and_lets_a_fling_go_by,
     overscroll_effect_none_shared_or_halved,
     a_node_that_stops_scrolling_lets_its_stretch_go,
+    a_lazy_list_held_stretched_at_its_top_is_idle_at_the_current_time,
 );

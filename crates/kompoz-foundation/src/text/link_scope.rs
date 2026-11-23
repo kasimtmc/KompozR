@@ -11,7 +11,10 @@ use crate::interaction::{
 use crate::layout::Box;
 use kompoz_coroutines::LaunchedEffect;
 use kompoz_graphics::{Density, IntOffset, Offset, Outline, OutlineShape, Path};
-use kompoz_runtime::{DisposableEffect, MutableState, key, kompozable, mutable_state_of, on_dispose, remember};
+use kompoz_runtime::{
+    DisposableEffect, MutableState, SnapshotStateList, key, kompozable, mutable_confined_state_list_of,
+    mutable_confined_state_of, mutable_state_of, on_dispose, remember, without_read_observation,
+};
 use kompoz_text::{AnnotatedString, Annotation, LinkAnnotation, Range, SpanStyle, TextLayoutResult, TextLinkStyles};
 use kompoz_ui::layout::{Measurable, ParentDataModifierNode};
 use kompoz_ui::platform::{LocalUriHandler, PointerIcon, UriHandler};
@@ -33,14 +36,11 @@ type Annotator = dyn Fn(&mut TextAnnotatorScope);
 pub(crate) struct TextLinkScope {
     /// The text with each styled link's style after it (Compose's `text`), restyled by the annotators.
     text: RefCell<AnnotatedString>,
-    /// The text's last layout (Compose's `textLayoutResult` state).
-    text_layout_result: RefCell<Option<TextLayoutResult>>,
-    /// Bumped when it is laid out anew: what reads the layout reads it, and runs again.
-    layout_generation: MutableState<u64>,
-    /// The styles the links' states add (Compose's `annotators`).
-    annotators: RefCell<Vec<Rc<Annotator>>>,
-    /// Bumped when they change: composing the text reads it.
-    annotators_generation: MutableState<u64>,
+    /// The text's last layout (Compose's `var textLayoutResult: TextLayoutResult? by mutableStateOf(null)`;
+    /// confined: a layout isn't `Send`).
+    text_layout_result: MutableState<Option<TextLayoutResult>>,
+    /// The styles the links' states add (Compose's `annotators = mutableStateListOf<…>()`; confined).
+    annotators: SnapshotStateList<Rc<Annotator>>,
 }
 
 impl TextLinkScope {
@@ -56,23 +56,19 @@ impl TextLinkScope {
         });
         TextLinkScope {
             text: RefCell::new(text),
-            text_layout_result: RefCell::new(None),
-            layout_generation: mutable_state_of(0),
-            annotators: RefCell::new(Vec::new()),
-            annotators_generation: mutable_state_of(0),
+            text_layout_result: mutable_confined_state_of(None),
+            annotators: mutable_confined_state_list_of([]),
         }
     }
 
     /// The text's last layout, read (what reads it runs again when it is laid out anew).
     pub(crate) fn text_layout_result(&self) -> Option<TextLayoutResult> {
-        self.layout_generation.get();
-        self.text_layout_result.borrow().clone()
+        self.text_layout_result.get()
     }
 
     /// The text was laid out anew.
     pub(crate) fn set_text_layout_result(&self, result: &TextLayoutResult) {
-        *self.text_layout_result.borrow_mut() = Some(result.clone());
-        self.layout_generation.update(|g| *g += 1);
+        self.text_layout_result.set(Some(result.clone()));
     }
 
     /// Whether the links' nodes are measured: the layout is of the text it styles (a substitution measured before
@@ -143,8 +139,7 @@ impl TextLinkScope {
     /// The text with the links' states' styles over it (Compose's applyAnnotators): read in composition, so the
     /// text composes again when they change.
     pub(crate) fn apply_annotators(&self) -> AnnotatedString {
-        self.annotators_generation.get();
-        let annotators = self.annotators.borrow().clone();
+        let annotators = self.annotators.to_vec();
         if annotators.is_empty() {
             return self.text.borrow().clone();
         }
@@ -157,13 +152,15 @@ impl TextLinkScope {
     }
 
     fn add_annotator(&self, annotator: Rc<Annotator>) {
-        self.annotators.borrow_mut().push(annotator);
-        self.annotators_generation.update(|g| *g += 1);
+        self.annotators.add(annotator);
     }
 
     fn remove_annotator(&self, annotator: &Rc<Annotator>) {
-        self.annotators.borrow_mut().retain(|a| !Rc::ptr_eq(a, annotator));
-        self.annotators_generation.update(|g| *g += 1);
+        // (Compose's `annotators -= block`: nothing changes when it isn't there)
+        let at = without_read_observation(|| self.annotators.with(|a| a.iter().position(|a| Rc::ptr_eq(a, annotator))));
+        if let Some(at) = at {
+            self.annotators.remove_at(at);
+        }
     }
 }
 

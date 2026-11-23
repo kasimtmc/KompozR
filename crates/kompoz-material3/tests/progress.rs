@@ -450,7 +450,11 @@ fn wavy_progress_waves_in_the_middle_and_keeps_a_gap_to_its_track() {
     assert_eq!(visible.len(), 2); // (the linear track's path only moves)
     let wave = drawn(&still, visible[0]);
     assert!(near(wave.height(), 3.0, 0.05), "{wave:?}"); // half the wave
-    assert!(!custom.host().has_pending_work()); // standing
+    // Standing: its first drawing sets the amplitude it starts at (Compose's cache sets `amplitudeState` as it is
+    // built: a frame more); then nothing moves.
+    custom.wait_for_idle();
+    custom.draw();
+    assert!(!custom.host().has_pending_work());
     // The ring's progress at full amplitude: the star of as many points as 15 dp waves fill (2π·22 / 15 → 9).
     let star = drawn(&still, visible[1]);
     assert!(star.width() > 42.0 && star.width() <= 44.01, "{star:?}");

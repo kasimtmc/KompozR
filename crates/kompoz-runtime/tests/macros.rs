@@ -1080,7 +1080,73 @@ fn each_call_site_is_its_own_identity() {
     assert_eq!(rule.names(), ["2:2", "1:1"]);
 }
 
+// ---- Method calls by name and their receivers' types --------------------------------------------------------------
+
+/// A type with a `#[named]` method of every parameter defaulted (`OutlinedTextFieldDefaults.content_padding()`'s
+/// shape): a positional call of that name in a composable body goes to its builder.
+#[derive(Clone, Copy)]
+struct Paddings;
+
+#[named]
+impl Paddings {
+    fn inset(&self, #[default(1)] start: i32, #[default(2)] end: i32) -> i32 {
+        start * 10 + end
+    }
+}
+
+/// What reaches a `Paddings` through a deref (Kotlin's supertype): its calls of that name are `Paddings`' too.
+struct PaddingsHolder(Paddings);
+
+impl std::ops::Deref for PaddingsHolder {
+    type Target = Paddings;
+    fn deref(&self) -> &Paddings {
+        &self.0
+    }
+}
+
+/// An unrelated trait with a method of the same name taking an argument (foundation's `StyleScope.content_padding`).
+trait InsetScope {
+    fn inset(&self, by: i32) -> i32;
+}
+
+struct InsetCounter(Cell<i32>);
+
+impl InsetScope for InsetCounter {
+    fn inset(&self, by: i32) -> i32 {
+        self.0.set(self.0.get() + by);
+        self.0.get()
+    }
+}
+
+/// The macros rewrite a method call by its name (they can't see a receiver's type in general); where they can — a
+/// receiver bound with its type written: a parameter, a closure's parameter, a `let` — and that type is no owner of
+/// a `#[named]` method of that name, nor has one as a supertype (what it derefs to, a trait's supertraits), the call
+/// stays the plain method's.
+fn method_calls_by_name_keep_the_plain_method_of_a_typed_receiver_of_another_type() {
+    #[kompozable]
+    fn Insetting(scope: &'static dyn InsetScope, out: Rc<RefCell<Vec<i32>>>) {
+        // (the parameter's type, a closure parameter's, a `let`'s: plain calls)
+        out.borrow_mut().push(scope.inset(5));
+        let with = |s: &dyn InsetScope| s.inset(7);
+        out.borrow_mut().push(with(scope));
+        let typed: &dyn InsetScope = scope;
+        out.borrow_mut().push(typed.inset(1));
+        // (an owner, as it is or through a deref: its builder)
+        out.borrow_mut().push(Paddings.inset(3));
+        let holder: PaddingsHolder = PaddingsHolder(Paddings);
+        out.borrow_mut().push(holder.inset(4, 5));
+        let untyped = Paddings;
+        out.borrow_mut().push(untyped.inset(6));
+    }
+    let scope: &'static InsetCounter = Box::leak(Box::new(InsetCounter(Cell::new(0))));
+    let out = Rc::new(RefCell::new(Vec::new()));
+    let o = out.clone();
+    let _rule = Rule::new(kompozable_lambda!(move || Insetting(scope, o.clone())));
+    assert_eq!(*out.borrow(), [5, 12, 13, 32, 45, 62]);
+}
+
 tests!(
+    method_calls_by_name_keep_the_plain_method_of_a_typed_receiver_of_another_type,
     counters_take_named_arguments_and_trailing_closures,
     the_users_scaffold_sample_reads_as_in_kotlin,
     methods_and_factories_take_named_arguments,

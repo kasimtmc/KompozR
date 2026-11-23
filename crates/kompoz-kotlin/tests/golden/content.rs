@@ -34,7 +34,7 @@ pub fn ClipboardButtons() {
     use ::kompoz::runtime::kt::ext::*;
     let clipboard = LocalClipboard.current();
     let scope = remember_coroutine_scope();
-    let pasted = remember(|| mutable_state_of(::std::string::String::from("")));
+    let pasted = remember(|| ::kompoz::runtime::mutable_state_of!(::std::string::String::from("")));
     Column(|| {
         Text(
             "kopyala",

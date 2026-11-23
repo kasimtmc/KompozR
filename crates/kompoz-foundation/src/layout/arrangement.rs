@@ -35,9 +35,13 @@ pub struct Arrangement<A: ArrangementAxis> {
 }
 
 /// A Row's arrangement (Compose's `Arrangement.Horizontal`).
+///
+/// Kotlin: `Arrangement.Horizontal`
 pub type HorizontalArrangement = Arrangement<Horizontal>;
 
 /// A Column's arrangement (Compose's `Arrangement.Vertical`).
+///
+/// Kotlin: `Arrangement.Vertical`
 pub type VerticalArrangement = Arrangement<Vertical>;
 
 /// A custom horizontal arrangement's function: (density, total size, sizes, layout direction, out positions).

@@ -3,9 +3,8 @@
 
 use super::padding::PaddingValues;
 use kompoz_graphics::{Density, Dp, LayoutDirection, Path, UnitExt};
-use kompoz_runtime::{MutableState, mutable_state_of, named, without_read_observation};
+use kompoz_runtime::{MutableState, mutable_confined_state_of, named, without_read_observation};
 use kompoz_ui::platform::{Insets, InsetsKind, LocalDensity, LocalSystemInsets, SystemInsetsHolder};
-use std::cell::RefCell;
 use std::fmt;
 use std::ops::Add;
 use std::rc::Rc;
@@ -649,32 +648,26 @@ impl fmt::Debug for WindowInsetsSides {
 
 /// Insets the app sets as it likes (Compose's MutableWindowInsets): what measures with them is measured again
 /// when they are set. Equal only to itself (its clones).
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct MutableWindowInsets {
-    /// Read to subscribe, counted up on each change (insets aren't snapshot values).
-    version: MutableState<u64>,
-    insets: Rc<RefCell<WindowInsets>>,
+    /// Compose's `var insets by mutableStateOf(initialInsets)` (confined: insets aren't `Send`).
+    insets: MutableState<WindowInsets>,
 }
 
 impl MutableWindowInsets {
     /// Holding `initial_insets` (Compose's default: none).
     pub fn new(initial_insets: WindowInsets) -> MutableWindowInsets {
-        MutableWindowInsets { version: mutable_state_of(0), insets: Rc::new(RefCell::new(initial_insets)) }
+        MutableWindowInsets { insets: mutable_confined_state_of(initial_insets) }
     }
 
     /// The insets it holds now (reading them subscribes the reader).
     pub fn insets(&self) -> WindowInsets {
-        self.version.get();
-        self.insets.borrow().clone()
+        self.insets.get()
     }
 
     /// Holds `insets` from now on: its readers are told.
     pub fn set_insets(&self, insets: WindowInsets) {
-        if *self.insets.borrow() == insets {
-            return;
-        }
-        *self.insets.borrow_mut() = insets;
-        self.version.set(self.version.peek() + 1);
+        self.insets.set(insets);
     }
 
     /// As window insets, to pad or consume by.
@@ -686,12 +679,6 @@ impl MutableWindowInsets {
 impl Default for MutableWindowInsets {
     fn default() -> Self {
         MutableWindowInsets::new(WindowInsets::Zero)
-    }
-}
-
-impl PartialEq for MutableWindowInsets {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.insets, &other.insets)
     }
 }
 

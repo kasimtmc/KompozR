@@ -14,7 +14,6 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::{KompozTestRule, RecordingCanvas};
 use kompoz::ui::input::PointerType;
-use kompoz::ui::window::PopupPositionProvider;
 use std::rc::Rc;
 
 /// A node's bounds in the root, unclipped (px; the rule's density is 1).

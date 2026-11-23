@@ -29,6 +29,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 tests!(
+    chips_radio_buttons_and_segments_select,
     cards_as_compose_1_4,
     chips_as_compose_1_4,
     elevated_chips_cast_a_shadow_and_leading_icon_tabs_sit_side_by_side,
@@ -1969,4 +1970,44 @@ fn badge_samples() {
         canvas.rects.iter().any(|r| near(r.left, third.right - 12.0, 0.01) && near(r.bottom, third.top + 14.0, 0.01)),
         "{third:?}"
     );
+}
+
+// ---- C++ chips_radio_buttons_and_segments_select: its filter chip ----------------------------------------------
+
+fn chips_radio_buttons_and_segments_select() {
+    // The C++ test's FilterChip: off, no leading icon; a click turns it on, its leading check icon ("işaret", 18 dp)
+    // shown and the selection told. (Its radio buttons are tests/controls.rs', its segments tests/segmented_buttons.rs',
+    // the same name.)
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {
+        let chip_on = remember(|| mutable_state_of(false));
+        Column(move || {
+            let c = chip_on.clone();
+            FilterChip(
+                chip_on.get(),
+                move || c.set(!c.get()),
+                || Text("Filtre"),
+                leading_icon = if chip_on.get() {
+                    Some(Rc::new(|| {
+                        VectorIcon(
+                            Icons::Filled::Check(),
+                            Some("işaret".to_string()),
+                            modifier = Modifier.size(18.dp()),
+                        )
+                    }) as Rc<dyn Fn()>)
+                } else {
+                    None
+                },
+            );
+            Text(format!("seçim:{}", if chip_on.get() { " filtre" } else { "" }));
+        });
+    }));
+    rule.on_node_with_text("seçim:").assert_exists();
+    rule.on_node_with_content_description("işaret").assert_does_not_exist();
+    rule.on_node_with_text("Filtre").perform_click();
+    rule.on_node_with_content_description("işaret").assert_exists();
+    rule.on_node_with_text("seçim: filtre").assert_exists();
+    // (M15's chip reads as selected: its toggleable's semantics)
+    rule.on_node_with_text("Filtre").assert(is_selected());
+    let icon = rule.on_node_with(has_content_description("işaret", false, false), true).get_unclipped_bounds_in_root();
+    assert!(near(icon.width(), 18.0, 0.5), "{icon:?}");
 }

@@ -31,8 +31,8 @@ use kompoz_graphics::{
     RoundRect, Size, lerp_color, lerp_dp,
 };
 use kompoz_runtime::{
-    KompozitionLocalProvider, MutableState, kompozable, kompozable_block, mutable_int_state_of, mutable_state_of,
-    named, named_args, remember, remember_keyed,
+    KompozitionLocalProvider, MutableState, kompozable, kompozable_block, mutable_confined_state_of,
+    mutable_int_state_of, mutable_state_of, named, named_args, remember, remember_keyed,
 };
 use kompoz_ui::focus::FocusRequester;
 use kompoz_ui::input::{Key, KeyEvent, KeyEventType};
@@ -159,7 +159,7 @@ fn FloatingActionButtonMenuItemColumn(
     let items_need_vertical_scroll = remember(|| mutable_state_of(false));
     // (Kotlin's `var originalConstraints: Constraints? = null`, a local of each composition both lambdas capture)
     let original_constraints: Rc<Cell<Option<Constraints>>> = Rc::new(Cell::new(None));
-    let stagger_anim: AnimatableState<i32> = remember(AnimatableState::new);
+    let stagger_anim: AnimatableState<i32> = remember(animatable_state);
     let coroutine_scope = remember_coroutine_scope();
     // TODO Load the motionScheme tokens from the component tokens file
     let mut stagger_anim_spec: Arc<dyn FiniteAnimationSpec<i32>> = MotionSchemeKeyTokens::SlowEffects.value();
@@ -215,7 +215,7 @@ fn FloatingActionButtonMenuItemColumn(
                         }));
                     }
                 }
-                None => stagger_anim.set(Animatable((target_item_count, i32::VectorConverter))),
+                None => stagger_anim.set(Some(Animatable((target_item_count, i32::VectorConverter)))),
             }
 
             let placeables: Vec<_> = measurables.iter().map(|measurable| measurable.measure(constraints)).collect();
@@ -332,8 +332,8 @@ fn FloatingActionButtonMenuItemImpl(
     container_color: Color,
     content_color: Color,
 ) {
-    let width_anim: AnimatableState<f32> = remember(AnimatableState::new);
-    let alpha_anim: AnimatableState<f32> = remember(AnimatableState::new);
+    let width_anim: AnimatableState<f32> = remember(animatable_state);
+    let alpha_anim: AnimatableState<f32> = remember(animatable_state);
     // TODO Load the motionScheme tokens from the component tokens file
     let width_spring: Arc<dyn FiniteAnimationSpec<f32>> = MotionSchemeKeyTokens::FastSpatial.value();
     let alpha_spring: Arc<dyn FiniteAnimationSpec<f32>> = MotionSchemeKeyTokens::FastEffects.value();
@@ -374,7 +374,7 @@ fn FloatingActionButtonMenuItemImpl(
                                     }));
                                 }
                             }
-                            None => width_anim.set(Animatable((target, f32::VectorConverter))),
+                            None => width_anim.set(Some(Animatable((target, f32::VectorConverter)))),
                         }
 
                         let temp_alpha_anim = match alpha_anim.get() {
@@ -389,7 +389,7 @@ fn FloatingActionButtonMenuItemImpl(
                             }
                             None => Animatable((target, f32::VectorConverter)),
                         };
-                        alpha_anim.set(temp_alpha_anim.clone());
+                        alpha_anim.set(Some(temp_alpha_anim.clone()));
                         is_visible.set(temp_alpha_anim.value() != 0.0);
                         if is_visible.peek() {
                             p.place_with_layer(&placeable, 0, 0, 0.0, move |layer| {
@@ -446,39 +446,12 @@ fn FloatingActionButtonMenuItemImpl(
 
 /// Compose's `mutableStateOf<Animatable<T, AnimationVector1D>?>(null)`: an animatable held by the composable and set
 /// as it is measured or placed, reading it a state read (so a layout reading it before it is made measures again
-/// once it is). KompozR's snapshot states hold `Send` values and an `Animatable` is the UI thread's: it is kept in a
-/// cell beside a state of its version, read and written with it (an `Animatable` set again is the same one: no
-/// change, as Compose's structural equality of the same instance).
-struct AnimatableState<T: kompoz_animation::AnimationValue> {
-    cell: Rc<RefCell<Option<Animatable<T, AnimationVector1D>>>>,
-    version: MutableState<u64>,
-}
+/// once it is). A state confined to the UI thread (an `Animatable` isn't `Send`).
+type AnimatableState<T> = MutableState<Option<Animatable<T, AnimationVector1D>>>;
 
-impl<T: kompoz_animation::AnimationValue> Clone for AnimatableState<T> {
-    fn clone(&self) -> Self {
-        AnimatableState { cell: self.cell.clone(), version: self.version.clone() }
-    }
-}
-
-impl<T: kompoz_animation::AnimationValue> AnimatableState<T> {
-    fn new() -> AnimatableState<T> {
-        AnimatableState { cell: Rc::new(RefCell::new(None)), version: mutable_state_of(0) }
-    }
-
-    /// The animatable held (a state read).
-    fn get(&self) -> Option<Animatable<T, AnimationVector1D>> {
-        self.version.get();
-        self.cell.borrow().clone()
-    }
-
-    /// Holds `animatable` (a state write unless it is the one held).
-    fn set(&self, animatable: Animatable<T, AnimationVector1D>) {
-        let same = self.cell.borrow().as_ref().is_some_and(|held| *held == animatable);
-        if !same {
-            *self.cell.borrow_mut() = Some(animatable);
-            self.version.set(self.version.peek() + 1);
-        }
-    }
+/// A state holding no animatable yet.
+fn animatable_state<T: kompoz_animation::AnimationValue>() -> AnimatableState<T> {
+    mutable_confined_state_of(None)
 }
 
 thread_local! {
@@ -509,9 +482,7 @@ pub fn ToggleFloatingActionButton(
     checked: bool,
     on_checked_change: impl Fn(bool) + 'static,
     #[default(Modifier)] modifier: Modifier,
-    #[default(ToggleFloatingActionButtonDefaults.container_color_by_progress())] container_color: Rc<
-        dyn Fn(f32) -> Color,
-    >,
+    #[default(ToggleFloatingActionButtonDefaults.container_color())] container_color: Rc<dyn Fn(f32) -> Color>,
     #[default(Alignment::TopEnd)] content_alignment: Alignment,
     #[default(ToggleFloatingActionButtonDefaults.container_size())] container_size: Rc<dyn Fn(f32) -> Dp>,
     #[default(ToggleFloatingActionButtonDefaults.container_corner_radius())] container_corner_radius: Rc<
@@ -664,12 +635,6 @@ impl std::fmt::Debug for ToggleFloatingActionButtonScope {
 ///
 /// Kotlin's overloads `containerSize()` / `containerSize(initialSize, finalSize)` (and the corner radius's and the icon
 /// size's) are [`container_size`](Self::container_size) / [`container_size_of`](Self::container_size_of) here.
-/// `containerColor(initialColor, finalColor)` and `iconColor(…)`, every parameter defaulted, are
-/// [`container_color_by_progress`](Self::container_color_by_progress) and [`icon_color_by_progress`](Self::icon_color_by_progress) (doc-lined: the
-/// Kotlin syntax calls them by Kotlin's names): a `#[named]` method of every parameter defaulted named
-/// `container_color` or `icon_color` would make the macros rewrite every other type's `x.container_color(…)` /
-/// `x.icon_color(…)` call in composable bodies into its builder (their by-name rewrite, which doesn't know the
-/// receiver's type — a closing item), breaking the navigation items' and colors' own methods of those names.
 #[derive(Clone, Copy, Debug)]
 pub struct ToggleFloatingActionButtonDefaults;
 
@@ -679,7 +644,7 @@ impl ToggleFloatingActionButtonDefaults {
     /// (Compose's `containerColor`).
     ///
     /// Kotlin: `containerColor(initialColor: Color = MaterialTheme.colorScheme.primaryContainer, finalColor: Color = MaterialTheme.colorScheme.primary): (Float) -> Color`
-    pub fn container_color_by_progress(
+    pub fn container_color(
         &self,
         #[default(MaterialTheme::color_scheme().primary_container)] initial_color: Color,
         #[default(MaterialTheme::color_scheme().primary)] final_color: Color,
@@ -749,7 +714,7 @@ impl ToggleFloatingActionButtonDefaults {
     /// (Compose's `iconColor`).
     ///
     /// Kotlin: `iconColor(initialColor: Color = MaterialTheme.colorScheme.onPrimaryContainer, finalColor: Color = MaterialTheme.colorScheme.onPrimary): (Float) -> Color`
-    pub fn icon_color_by_progress(
+    pub fn icon_color(
         &self,
         #[default(MaterialTheme::color_scheme().on_primary_container)] initial_color: Color,
         #[default(MaterialTheme::color_scheme().on_primary)] final_color: Color,
@@ -795,7 +760,7 @@ impl Modifier {
     fn animate_icon(
         self,
         checked_progress: Rc<dyn Fn() -> f32>,
-        #[default(ToggleFloatingActionButtonDefaults.icon_color_by_progress())] color: Rc<dyn Fn(f32) -> Color>,
+        #[default(ToggleFloatingActionButtonDefaults.icon_color())] color: Rc<dyn Fn(f32) -> Color>,
         #[default(ToggleFloatingActionButtonDefaults.icon_size())] size: Rc<dyn Fn(f32) -> Dp>,
     ) -> Modifier {
         let measured_progress = checked_progress.clone();

@@ -340,12 +340,6 @@ fun FancyIndicatorTabs() {
     }
 }
 
-// (FancyIndicatorContainerTabs, FancyAnimatedIndicatorWithModifier and ScrollingFancyIndicatorContainerTabs are here
-// as M15 writes them, in comments: the indicator keeps its Animatables in `mutableStateOf<Animatable<Dp, …>?>(null)`
-// states, and KompozR's snapshot states hold Send values only (an Animatable isn't) — a state of a non-Send value
-// for the Kotlin syntax is kompoz-runtime's to add. Their Rust twins are in kompoz-material3's tests/tabs.rs; a
-// composable extension of TabIndicatorScope is tested in kotlin_lists_sheets.rs (IndicatorExtension).)
-/*
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun FancyIndicatorContainerTabs() {
@@ -368,7 +362,6 @@ fun FancyIndicatorContainerTabs() {
         )
     }
 }
-*/
 
 @Composable
 fun FancyIndicator(color: Color, modifier: Modifier = Modifier) {
@@ -382,7 +375,6 @@ fun FancyIndicator(color: Color, modifier: Modifier = Modifier) {
     )
 }
 
-/*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TabIndicatorScope.FancyAnimatedIndicatorWithModifier(
@@ -510,7 +502,6 @@ fun ScrollingFancyIndicatorContainerTabs() {
         )
     }
 }
-*/
 
 @Composable
 fun FancyTab(title: String, onClick: () -> Unit, selected: Boolean) {

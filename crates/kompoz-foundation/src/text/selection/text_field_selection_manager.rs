@@ -14,7 +14,7 @@ use super::layout::{SelectionLayout, get_text_field_selection_layout};
 use super::manager::visible_bounds;
 use super::mode::contains_inclusive;
 use crate::magnifier::MagnifierModifiers;
-use crate::text::core_text_field::{HandleState, LegacyTextFieldState, ObservedCell};
+use crate::text::core_text_field::{HandleState, LegacyTextFieldState};
 use crate::text::input::internal::selection::DefaultCursorThickness;
 use crate::text::long_press_text_drag_observer::{
     Handle, TextDragObserver, detect_down_and_drag_gestures_with_observer,
@@ -46,7 +46,7 @@ pub struct TextFieldSelectionManager {
     on_value_change: RefCell<OnValueChange>,
     state: RefCell<Option<Rc<LegacyTextFieldState>>>,
     /// The field's value (a state: Compose's `valueState`).
-    value_state: ObservedCell<TextFieldValue>,
+    value_state: MutableState<TextFieldValue>,
     visual_transformation: RefCell<VisualTransformation>,
     request_autofill_action: RefCell<Option<Rc<dyn Fn()>>>,
     clipboard: RefCell<Option<Clipboard>>,
@@ -84,7 +84,7 @@ impl TextFieldSelectionManager {
             offset_mapping: RefCell::new(validating_empty_offset_mapping_identity()),
             on_value_change: RefCell::new(Rc::new(|_| {})),
             state: RefCell::new(None),
-            value_state: ObservedCell::new(TextFieldValue::default()),
+            value_state: mutable_state_of!(TextFieldValue::default()),
             visual_transformation: RefCell::new(VisualTransformation::None),
             request_autofill_action: RefCell::new(None),
             clipboard: RefCell::new(None),
@@ -159,9 +159,7 @@ impl TextFieldSelectionManager {
     /// Takes the field's value (its readers told only of another one), its selection the latest.
     pub fn set_value(&self, value: TextFieldValue) {
         let selection = value.selection();
-        if self.value_state.peek() != value {
-            self.value_state.set(value);
-        }
+        self.value_state.set(value);
         self.latest_selection.set(Some(selection));
     }
 

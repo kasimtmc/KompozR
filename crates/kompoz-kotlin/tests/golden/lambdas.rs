@@ -32,7 +32,7 @@ pub fn Drawing(color: Color) {
 pub fn Effects(key: i32) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let ticks = remember(|| mutable_state_of(0));
+    let ticks = remember(|| ::kompoz::runtime::mutable_state_of!(0));
     let scope = remember_coroutine_scope();
     LaunchedEffect(key, async {
         while ::kompoz::runtime::kt::KtDelegate::get_value(&ticks) < 3 {

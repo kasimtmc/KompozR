@@ -3,7 +3,7 @@
 pub fn Groups(source: MutableInteractionSource, bold: bool) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let last = remember(|| mutable_state_of(::std::string::String::from("")));
+    let last = remember(|| ::kompoz::runtime::mutable_state_of!(::std::string::String::from("")));
     ButtonGroupWithoutOverflowIndicator(|this| {
         Button(
             on_click = || {

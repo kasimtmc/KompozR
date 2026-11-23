@@ -18,6 +18,7 @@ use crate::icon_button_defaults::{IconButtonDefaults, IconButtonWidthOption};
 use crate::interactive_component_size::InteractiveComponentSizeModifiers;
 use crate::internal::animated_shape::{as_corner_based_shape, remember_animated_shape};
 use crate::internal::child_parent_semantics::ChildParentSemanticsModifiers;
+use crate::internal::shape_util::ClipShape;
 use crate::ripples::ripple;
 use crate::surface::{ClickableSurface, ToggleableSurface};
 use crate::tokens::MotionSchemeKeyTokens;
@@ -668,27 +669,6 @@ fn SurfaceIconToggleButtonWithShapes(
         Some(interaction_source),
         content,
     );
-}
-
-/// A shared shape as a shape (what `Modifier.clip` takes by value), equal as the shape is.
-#[derive(Debug)]
-struct ClipShape(Arc<dyn Shape>);
-
-impl PartialEq for ClipShape {
-    fn eq(&self, other: &Self) -> bool {
-        *self.0 == *other.0
-    }
-}
-
-impl Shape for ClipShape {
-    fn create_outline(
-        &self,
-        size: kompoz_graphics::Size,
-        layout_direction: kompoz_graphics::LayoutDirection,
-        density: &kompoz_graphics::Density,
-    ) -> kompoz_graphics::Outline {
-        self.0.create_outline(size, layout_direction, density)
-    }
 }
 
 // ---- Colors ----------------------------------------------------------------------------------------------------

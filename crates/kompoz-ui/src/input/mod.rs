@@ -20,7 +20,7 @@
 //! Escape and Back go back).
 
 mod hit_path;
-mod hit_test;
+pub(crate) mod hit_test;
 mod hover_icon;
 mod indirect;
 mod key;

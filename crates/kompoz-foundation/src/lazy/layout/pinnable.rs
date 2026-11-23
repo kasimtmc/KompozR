@@ -4,7 +4,8 @@
 
 use super::key::LazyKey;
 use kompoz_runtime::{
-    DisposableEffect, KompozitionLocalProvider, MutableState, kompozable, mutable_state_of, on_dispose, remember_keyed,
+    DisposableEffect, KompozitionLocalProvider, SnapshotStateList, kompozable, mutable_confined_state_list_of,
+    on_dispose, remember_keyed, without_read_observation,
 };
 use kompoz_ui::layout::{LocalPinnableContainer, PinnableContainer, PinnableContainerRef, PinnedHandle};
 use std::cell::{Cell, RefCell};
@@ -12,22 +13,15 @@ use std::rc::{Rc, Weak};
 
 /// The items pinned in a lazy layout (Compose's LazyLayoutPinnedItemList): observed as a snapshot list is (the
 /// layout measures again as it changes). Clones are the same list.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct LazyLayoutPinnedItemList {
-    items: Rc<RefCell<Vec<PinnedItemRef>>>,
-    /// Changed with the items: what reads them is told.
-    version: MutableState<u64>,
+    /// Compose's `SnapshotStateList()` of the items (confined: the items aren't `Send`).
+    items: SnapshotStateList<PinnedItemRef>,
 }
 
 impl Default for LazyLayoutPinnedItemList {
     fn default() -> Self {
-        LazyLayoutPinnedItemList { items: Rc::new(RefCell::new(Vec::new())), version: mutable_state_of(0) }
-    }
-}
-
-impl PartialEq for LazyLayoutPinnedItemList {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.items, &other.items)
+        LazyLayoutPinnedItemList { items: mutable_confined_state_list_of([]) }
     }
 }
 
@@ -61,35 +55,26 @@ impl LazyLayoutPinnedItemList {
         LazyLayoutPinnedItemList::default()
     }
 
-    fn changed(&self) {
-        self.version.set(self.version.peek().wrapping_add(1));
-    }
-
     fn pin(&self, item: PinnedItemRef) {
-        self.items.borrow_mut().push(item);
-        self.changed();
+        self.items.add(item);
     }
 
+    /// Compose's `items.remove(item)`: nothing changes when it isn't pinned.
     fn release(&self, item: &PinnedItemRef) {
-        let removed = {
-            let mut items = self.items.borrow_mut();
-            items.iter().position(|i| i == item).map(|at| items.remove(at))
-        };
-        if removed.is_some() {
-            self.changed();
+        let at = without_read_observation(|| self.items.with(|items| items.iter().position(|i| i == item)));
+        if let Some(at) = at {
+            self.items.remove_at(at);
         }
     }
 
     /// The pinned items now (a state read).
     pub fn to_list(&self) -> Vec<PinnedItemRef> {
-        self.version.get();
-        self.items.borrow().clone()
+        self.items.to_vec()
     }
 
     /// How many are pinned (a state read).
     pub fn len(&self) -> usize {
-        self.version.get();
-        self.items.borrow().len()
+        self.items.len()
     }
 
     pub fn is_empty(&self) -> bool {

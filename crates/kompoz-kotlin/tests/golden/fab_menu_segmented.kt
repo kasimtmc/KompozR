@@ -3,7 +3,7 @@
 // `FloatingActionButtonMenuItem(…)` inside the menu's; `checkedProgress` read inside a ToggleFloatingActionButton's
 // content, and inside a `graphicsLayer { }` block kept past it (a clone of the scope); a pair's parts typed
 // (`item.first` of `listOf(Icons.Filled.X to "…")` an ImageVector, picking `Icon(imageVector, …)`); the toggleable
-// FAB's defaults by Kotlin's names (`containerColor()` doc-lined to `container_color_by_progress`); a key event's
+// FAB's defaults by Kotlin's names (`containerColor()` is `container_color`); a key event's
 // properties (`it.type`, `it.key`).
 @Composable
 fun Segments(pick: Int, bold: Boolean) {

@@ -68,9 +68,8 @@ impl Morph {
     }
 }
 
-// (WP4b: rail — the navigation items clip their indicator ripples by a shared shape; surface.rs, icon_button.rs and
-// list_item.rs still keep copies of their own, to be moved here)
-/// A shared shape as a shape (what `Modifier.clip` takes by value), equal as the shape is.
+/// A shared shape as a shape (what `Modifier.clip` takes by value), equal as the shape is (surfaces, icon buttons,
+/// list items, the navigation items' indicator ripples); it prints as the shape (a list item's semantics name it).
 #[derive(Debug)]
 pub(crate) struct ClipShape(pub(crate) std::sync::Arc<dyn kompoz_graphics::Shape>);
 
@@ -88,5 +87,11 @@ impl kompoz_graphics::Shape for ClipShape {
         density: &kompoz_graphics::Density,
     ) -> kompoz_graphics::Outline {
         self.0.create_outline(size, layout_direction, density)
+    }
+}
+
+impl std::fmt::Display for ClipShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
     }
 }

@@ -50,7 +50,25 @@ impl<T> Clone for MutableState<T> {
 
 impl<T: Clone + Send + Sync + 'static> MutableState<T> {
     pub fn new(value: T, policy: SnapshotMutationPolicy<T>) -> Self {
-        MutableState { cell: StateCell::new(value, policy.equivalent) }
+        MutableState { cell: StateCell::new(value, policy.equivalent, None) }
+    }
+}
+
+impl<T: Clone + 'static> MutableState<T> {
+    /// A state confined to this thread: its value needn't be `Send` or `Sync` (an `Rc`, a coroutine's `Job`, an
+    /// `Animatable`: what Compose's `mutableStateOf` holds as any object). It is kept per snapshot as any state; the
+    /// state (and every copy of it) can't leave this thread, its values are only ever read, copied, compared and
+    /// dropped here — a snapshot that wrote it must be applied here (it panics elsewhere), and records the snapshot
+    /// system takes out (or a last handle dropped on another thread) are freed when this thread next calls
+    /// [`Snapshot::send_apply_notifications`](crate::Snapshot::send_apply_notifications) (the UI thread does at
+    /// every frame).
+    pub fn new_confined(value: T, policy: SnapshotMutationPolicy<T>) -> Self {
+        MutableState { cell: StateCell::new(value, policy.equivalent, Some(std::thread::current().id())) }
+    }
+
+    /// Whether it is confined to a thread (see [`new_confined`](MutableState::new_confined)).
+    pub fn is_confined(&self) -> bool {
+        self.cell.owner().is_some()
     }
 
     /// The value the snapshot this runs in sees (a copy).
@@ -125,13 +143,13 @@ impl<T> PartialEq for MutableState<T> {
 impl<T> Eq for MutableState<T> {}
 
 /// Formats the value (reading it): `format!("Count: {count}")`.
-impl<T: fmt::Display + Clone + Send + Sync + 'static> fmt::Display for MutableState<T> {
+impl<T: fmt::Display + Clone + 'static> fmt::Display for MutableState<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.with(|v| v.fmt(f))
     }
 }
 
-impl<T: fmt::Debug + Clone + Send + Sync + 'static> fmt::Debug for MutableState<T> {
+impl<T: fmt::Debug + Clone + 'static> fmt::Debug for MutableState<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.peek_with(|v| f.debug_tuple("MutableState").field(v).finish())
     }
@@ -150,6 +168,20 @@ pub fn mutable_state_of_with_policy<T: Clone + Send + Sync + 'static>(
     policy: SnapshotMutationPolicy<T>,
 ) -> MutableState<T> {
     MutableState::new(value, policy)
+}
+
+/// `mutableStateOf(value)` of a value that needn't be `Send` or `Sync`: a state confined to this thread (see
+/// [`MutableState::new_confined`]). [`mutable_state_of!`](crate::mutable_state_of!) picks it for such a value.
+pub fn mutable_confined_state_of<T: PartialEq + Clone + 'static>(value: T) -> MutableState<T> {
+    MutableState::new_confined(value, structural_equality_policy())
+}
+
+/// `mutableStateOf(value, policy)` of a value that needn't be `Send` or `Sync` (see [`mutable_confined_state_of`]).
+pub fn mutable_confined_state_of_with_policy<T: Clone + 'static>(
+    value: T,
+    policy: SnapshotMutationPolicy<T>,
+) -> MutableState<T> {
+    MutableState::new_confined(value, policy)
 }
 
 /// Compose's primitive states; here plain `mutable_state_of` already keeps the value unboxed.
@@ -229,7 +261,7 @@ pub trait StateSource<T>: 'static {
     fn identity(&self) -> *const ();
 }
 
-impl<T: Clone + Send + Sync + 'static> StateSource<T> for MutableState<T> {
+impl<T: Clone + 'static> StateSource<T> for MutableState<T> {
     fn with_value(&self, subscribe: bool, f: &mut dyn FnMut(&T)) {
         if subscribe { self.with(|v| f(v)) } else { self.peek_with(|v| f(v)) }
     }
@@ -253,10 +285,6 @@ impl<T> Clone for State<T> {
 impl<T: Clone + 'static> State<T> {
     pub fn from_source(source: impl StateSource<T>) -> State<T> {
         State { source: std::rc::Rc::new(source) }
-    }
-    /// A state reading a source already shared.
-    pub(crate) fn from_shared(source: std::rc::Rc<dyn StateSource<T>>) -> State<T> {
-        State { source }
     }
     pub fn get(&self) -> T {
         self.with(T::clone)
@@ -292,13 +320,13 @@ impl<T: 'static> PartialEq for State<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> From<MutableState<T>> for State<T> {
+impl<T: Clone + 'static> From<MutableState<T>> for State<T> {
     fn from(state: MutableState<T>) -> State<T> {
         State::from_source(state)
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> From<&MutableState<T>> for State<T> {
+impl<T: Clone + 'static> From<&MutableState<T>> for State<T> {
     fn from(state: &MutableState<T>) -> State<T> {
         State::from_source(state.clone())
     }
@@ -308,4 +336,75 @@ impl<T: fmt::Display + Clone + 'static> fmt::Display for State<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.with(|v| v.fmt(f))
     }
+}
+
+/// `mutableStateOf(value)` / `mutableStateOf(value, policy)` of any value, as Compose's: a thread-safe state
+/// ([`mutable_state_of`]) when the value is `Send + Sync`, else a state confined to this thread
+/// ([`mutable_confined_state_of`]: an `Option<Job>`, an `Option<Animatable<…>>`, an `Rc` of a closure). Without a
+/// policy, new values count as the old one when equal by Kotlin's `==`: the value's `==` if its type has one, else
+/// the same instance for a shared handle (an `Rc`, an `Arc`), else never. The value's type is read where the macro is
+/// written, so it must be known there (`mutable_state_of!(None::<Job>)`).
+///
+/// ```
+/// # use kompoz_runtime::*;
+/// # use std::rc::Rc;
+/// let shared = mutable_state_of!(1);
+/// let confined = mutable_state_of!(Rc::new(1));
+/// assert!(!shared.is_confined() && confined.is_confined());
+/// ```
+#[macro_export]
+macro_rules! __mutable_state_of {
+    ($value:expr $(,)?) => {{
+        #[allow(unused_imports)]
+        use $crate::__private::{
+            EqFallback as _, EqViaInstance as _, EqViaPartialEq as _, StateViaConfined as _, StateViaShared as _,
+        };
+        let __kz_value = $value;
+        let __kz_equivalent = (&&&$crate::__private::EqProbe::of(&__kz_value)).__kz_eq();
+        (&&$crate::__private::StateProbe::of(&__kz_value))
+            .__kz_state(__kz_value, $crate::__private::policy_of(__kz_equivalent))
+    }};
+    ($value:expr, $policy:expr $(,)?) => {{
+        #[allow(unused_imports)]
+        use $crate::__private::{StateViaConfined as _, StateViaShared as _};
+        let __kz_value = $value;
+        (&&$crate::__private::StateProbe::of(&__kz_value)).__kz_state(__kz_value, $policy)
+    }};
+}
+
+/// `(&&StateProbe::of(&v)).__kz_state(v, policy)`: a thread-safe state of a `Send + Sync` value, else a confined one
+/// (what [`mutable_state_of!`](crate::mutable_state_of!) expands to).
+#[doc(hidden)]
+pub struct StateProbe<T>(std::marker::PhantomData<T>);
+
+impl<T> StateProbe<T> {
+    pub fn of(_value: &T) -> Self {
+        StateProbe(std::marker::PhantomData)
+    }
+}
+
+#[doc(hidden)]
+pub trait StateViaShared<T> {
+    fn __kz_state(&self, value: T, policy: SnapshotMutationPolicy<T>) -> MutableState<T>;
+}
+impl<T: Clone + Send + Sync + 'static> StateViaShared<T> for &StateProbe<T> {
+    fn __kz_state(&self, value: T, policy: SnapshotMutationPolicy<T>) -> MutableState<T> {
+        MutableState::new(value, policy)
+    }
+}
+
+#[doc(hidden)]
+pub trait StateViaConfined<T> {
+    fn __kz_state(&self, value: T, policy: SnapshotMutationPolicy<T>) -> MutableState<T>;
+}
+impl<T: Clone + 'static> StateViaConfined<T> for StateProbe<T> {
+    fn __kz_state(&self, value: T, policy: SnapshotMutationPolicy<T>) -> MutableState<T> {
+        MutableState::new_confined(value, policy)
+    }
+}
+
+/// The policy of an equality (none: never equal).
+#[doc(hidden)]
+pub fn policy_of<T>(equivalent: Option<fn(&T, &T) -> bool>) -> SnapshotMutationPolicy<T> {
+    SnapshotMutationPolicy { equivalent }
 }

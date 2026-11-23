@@ -4,11 +4,11 @@
 //! text input API (`establish_text_input_session`, a [`PlatformTextInputMethodRequest`] reading the value the field
 //! last told it), so interceptors and the one-session-at-a-time rule apply to it as to the state-based field.
 
-use crate::text::core_text_field::{LegacyTextFieldState, ObservedCell};
+use crate::text::core_text_field::LegacyTextFieldState;
 use crate::text::selection::text_field_selection_manager::TextFieldSelectionManager;
 use kompoz_coroutines::{CoroutineStart, Job};
 use kompoz_graphics::{Matrix, Offset, Rect};
-use kompoz_runtime::named_args;
+use kompoz_runtime::{MutableState, mutable_state_of, named_args};
 use kompoz_text::input::{EditCommand, OffsetMapping, TextFieldValue};
 use kompoz_text::{TextLayoutResult, TextRange};
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates};
@@ -51,12 +51,12 @@ pub trait LegacyPlatformTextInputNode {
 pub struct LegacyPlatformTextInputServiceAdapter {
     text_input_modifier_node: RefCell<Option<Weak<dyn LegacyPlatformTextInputNode>>>,
     job: RefCell<Option<Job>>,
-    text_field_value: Rc<ObservedCell<TextFieldValue>>,
-    text_layout_result: Rc<ObservedCell<Option<TextLayoutResult>>>,
-    focused_rect_in_root: Rc<ObservedCell<Option<Rect>>>,
-    text_field_rect_in_root: Rc<ObservedCell<Option<Rect>>>,
-    text_clipping_rect_in_root: Rc<ObservedCell<Option<Rect>>>,
-    unclipped_text_offset_in_root: Rc<ObservedCell<Option<Offset>>>,
+    text_field_value: MutableState<TextFieldValue>,
+    text_layout_result: MutableState<Option<TextLayoutResult>>,
+    focused_rect_in_root: MutableState<Option<Rect>>,
+    text_field_rect_in_root: MutableState<Option<Rect>>,
+    text_clipping_rect_in_root: MutableState<Option<Rect>>,
+    unclipped_text_offset_in_root: MutableState<Option<Offset>>,
 }
 
 impl LegacyPlatformTextInputServiceAdapter {
@@ -65,12 +65,12 @@ impl LegacyPlatformTextInputServiceAdapter {
         Rc::new(LegacyPlatformTextInputServiceAdapter {
             text_input_modifier_node: RefCell::new(None),
             job: RefCell::new(None),
-            text_field_value: Rc::new(ObservedCell::new(TextFieldValue::default())),
-            text_layout_result: Rc::new(ObservedCell::new(None)),
-            focused_rect_in_root: Rc::new(ObservedCell::new(None)),
-            text_field_rect_in_root: Rc::new(ObservedCell::new(None)),
-            text_clipping_rect_in_root: Rc::new(ObservedCell::new(None)),
-            unclipped_text_offset_in_root: Rc::new(ObservedCell::new(None)),
+            text_field_value: mutable_state_of!(TextFieldValue::default()),
+            text_layout_result: mutable_state_of!(None::<TextLayoutResult>),
+            focused_rect_in_root: mutable_state_of!(None::<Rect>),
+            text_field_rect_in_root: mutable_state_of!(None::<Rect>),
+            text_clipping_rect_in_root: mutable_state_of!(None::<Rect>),
+            unclipped_text_offset_in_root: mutable_state_of!(None::<Offset>),
         })
     }
 
@@ -199,7 +199,7 @@ impl PlatformTextInputService for LegacyPlatformTextInputServiceAdapter {
 
 /// The editor's state as the input method reads it: the value last told (Compose's skiko adapter's
 /// TextEditorState).
-struct AdapterEditorState(Rc<ObservedCell<TextFieldValue>>);
+struct AdapterEditorState(MutableState<TextFieldValue>);
 
 impl TextEditorState for AdapterEditorState {
     fn text(&self) -> String {
@@ -275,7 +275,7 @@ impl ModifierNodeElement for LegacyAdaptingPlatformTextInputModifier {
             shared: Rc::new(NodeShared {
                 legacy_text_field_state: RefCell::new(self.legacy_text_field_state.clone()),
                 text_field_selection_manager: RefCell::new(self.text_field_selection_manager.clone()),
-                layout_coordinates: ObservedCell::new(None),
+                layout_coordinates: mutable_state_of!(None::<LayoutCoordinates>),
                 handle: RefCell::new(None),
                 session_node: RefCell::new(None),
             }),
@@ -303,7 +303,7 @@ impl PlatformTextInputModifierNode for TextInputSessionNode {}
 struct NodeShared {
     legacy_text_field_state: RefCell<Rc<LegacyTextFieldState>>,
     text_field_selection_manager: RefCell<Rc<TextFieldSelectionManager>>,
-    layout_coordinates: ObservedCell<Option<LayoutCoordinates>>,
+    layout_coordinates: MutableState<Option<LayoutCoordinates>>,
     handle: RefCell<Option<NodeHandle>>,
     session_node: RefCell<Option<DelegatedNode<TextInputSessionNode>>>,
 }

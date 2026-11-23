@@ -6,7 +6,7 @@ pub fn Snackbars() {
     let snackbar_host_state = remember(|| SnackbarHostState());
     let tooltip_state = remember_tooltip_state();
     let scope = remember_coroutine_scope();
-    let count = remember(|| mutable_state_of(0));
+    let count = remember(|| ::kompoz::runtime::mutable_state_of!(0));
     LaunchedEffect((), async {
         snapshot_flow({
             let count = ::kompoz::runtime::__private::capture(&count);

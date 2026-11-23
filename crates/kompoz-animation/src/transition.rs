@@ -30,8 +30,10 @@ use kompoz_coroutines::{CoroutineStart, with_frame_nanos};
 use kompoz_graphics::{Color, Dp, IntOffset, IntSize, Offset, Rect, Size};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::{
-    DerivedState, DisposableEffect, MutableState, State, StateSource, derived_state_of, group, kompozable,
-    kompozable_block, mutable_state_of, named, named_args, on_dispose, remember_keyed, without_read_observation,
+    DerivedState, DisposableEffect, MutableState, SnapshotMutationPolicy, SnapshotStateList, State, StateSource,
+    derived_state_of, group, kompozable, kompozable_block, mutable_confined_state_list_of,
+    mutable_confined_state_of_with_policy, mutable_state_of, named, named_args, on_dispose, remember_keyed,
+    without_read_observation,
 };
 use std::any::Any;
 use std::cell::{Cell, OnceCell, RefCell};
@@ -448,37 +450,32 @@ pub trait AnyTransitionAnimationState {
     fn id(&self) -> *const ();
 }
 
-/// A list a snapshot state's reads stand for (Compose's `mutableStateListOf`, of objects that can't be states here):
-/// read through `get`, its readers told of each change.
-struct ObservedList<T: ?Sized> {
-    items: RefCell<Vec<Rc<T>>>,
-    version: MutableState<u64>,
+/// Compose's `mutableStateListOf` of objects (confined to the UI thread: they hold `Rc`s): read through `get`, its
+/// readers told of each change.
+struct ObservedList<T: ?Sized + 'static> {
+    items: SnapshotStateList<Rc<T>>,
 }
 
-impl<T: ?Sized> ObservedList<T> {
+impl<T: ?Sized + 'static> ObservedList<T> {
     fn new() -> ObservedList<T> {
-        ObservedList { items: RefCell::new(Vec::new()), version: mutable_state_of(0) }
+        ObservedList { items: mutable_confined_state_list_of([]) }
     }
     /// Its items, the read recorded.
     fn get(&self) -> Vec<Rc<T>> {
-        let _ = self.version.get();
-        self.items.borrow().clone()
+        self.items.to_vec()
+    }
+    /// Its items, the read not recorded.
+    fn peek(&self) -> Vec<Rc<T>> {
+        without_read_observation(|| self.items.to_vec())
     }
     fn add(&self, item: Rc<T>) {
-        self.items.borrow_mut().push(item);
-        self.version.set(self.version.peek().wrapping_add(1));
+        self.items.add(item);
     }
+    /// Removes the item of `id` (Compose's `remove(element)`: nothing changes when it isn't there).
     fn remove(&self, id: *const (), id_of: impl Fn(&T) -> *const ()) {
-        let removed = {
-            let mut items = self.items.borrow_mut();
-            let before = items.len();
-            if let Some(i) = items.iter().position(|it| id_of(it) == id) {
-                items.remove(i);
-            }
-            before != items.len()
-        };
-        if removed {
-            self.version.set(self.version.peek().wrapping_add(1));
+        let at = without_read_observation(|| self.items.with(|items| items.iter().position(|it| id_of(it) == id)));
+        if let Some(i) = at {
+            self.items.remove_at(i);
         }
     }
 }
@@ -542,7 +539,7 @@ impl<S: AnimationValue> fmt::Display for Transition<S> {
     /// Compose's `toString`: its animations' values.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("Transition animation values: ")?;
-        for a in self.inner.animations.items.borrow().iter() {
+        for a in self.inner.animations.peek().iter() {
             write!(f, "{}, ", a.label())?;
         }
         Ok(())
@@ -839,7 +836,7 @@ impl<S: AnimationValue> TransitionInner<S> {
             if !self.is_running() {
                 self.update_children_needed.set(true);
             }
-            for a in self.animations.items.borrow().clone() {
+            for a in self.animations.peek() {
                 a.reset_animation();
             }
         }
@@ -866,7 +863,7 @@ impl<S: AnimationValue> TransitionInner<S> {
         self.update_children_needed.set(false);
 
         let mut all_finished = true;
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             if !a.is_finished() {
                 a.on_play_time_changed(scaled_play_time_nanos, scale_to_end);
             }
@@ -874,7 +871,7 @@ impl<S: AnimationValue> TransitionInner<S> {
                 all_finished = false;
             }
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             if !t.is_at_target() {
                 t.on_frame(scaled_play_time_nanos, scale_to_end);
             }
@@ -899,7 +896,7 @@ impl<S: AnimationValue> TransitionInner<S> {
         }
         self.set_play_time_nanos(0);
         self.transition_state.set_is_running(false);
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             t.on_transition_end();
         }
     }
@@ -920,12 +917,12 @@ impl<S: AnimationValue> TransitionInner<S> {
             self.is_seeking.set(true);
             self.segment.set(Segment::new(initial_state, target_state));
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             if t.is_seeking() {
                 t.seek_own_states(play_time_nanos);
             }
         }
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             a.seek_to(play_time_nanos);
         }
         self.last_seeked_time_nanos.set(play_time_nanos);
@@ -944,7 +941,7 @@ impl<S: AnimationValue> TransitionInner<S> {
                 self.update_children_needed.set(true);
             }
             // (each animation made again at the next frame toward its new target value)
-            for a in self.animations.items.borrow().clone() {
+            for a in self.animations.peek() {
                 a.reset_animation();
             }
         }
@@ -956,10 +953,10 @@ impl<S: AnimationValue> TransitionInner<S> {
         }
         self.set_play_time_nanos(play_time_nanos);
         self.update_children_needed.set(false);
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             a.seek_to(play_time_nanos);
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             if !t.is_at_target() {
                 t.seek_animations(play_time_nanos);
             }
@@ -967,37 +964,37 @@ impl<S: AnimationValue> TransitionInner<S> {
     }
 
     fn set_initial_animations(&self, state: &Rc<SeekingAnimationState>) {
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             a.set_initial_value_animation(state);
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             t.set_initial_animations(state);
         }
     }
 
     fn reset_animation_fraction(&self, fraction: f32) {
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             a.reset_animation_value(fraction);
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             t.reset_animation_fraction(fraction);
         }
     }
 
     fn clear_initial_animations(&self) {
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             a.clear_initial_animation();
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             t.clear_initial_animations();
         }
     }
 
     fn update_initial_values(&self) {
-        for a in self.animations.items.borrow().clone() {
+        for a in self.animations.peek() {
             a.update_initial_value();
         }
-        for t in self.transitions.items.borrow().clone() {
+        for t in self.transitions.peek() {
             t.update_initial_values();
         }
     }
@@ -1006,7 +1003,7 @@ impl<S: AnimationValue> TransitionInner<S> {
         self.update_children_needed.set(true);
         if self.is_seeking.get() {
             // (the total duration follows; the animations are put where the last seek was)
-            for a in self.animations.items.borrow().clone() {
+            for a in self.animations.peek() {
                 a.seek_to(self.last_seeked_time_nanos.get());
             }
             self.update_children_needed.set(false);
@@ -1090,10 +1087,9 @@ struct AnimationInner<S, T, V: AnimationVector> {
     /// Changed during composition (may be rolled back with it).
     target_value: MutableState<T>,
     animation_spec: MutableState<Arc<dyn FiniteAnimationSpec<T>>>,
-    /// What animates it from the current state to the target state (Compose's `animation`, a state: its reads are
-    /// the version's).
-    animation: RefCell<Rc<TargetBasedAnimation<T, V>>>,
-    animation_version: MutableState<u64>,
+    /// What animates it from the current state to the target state (Compose's `var animation by mutableStateOf(…)`;
+    /// confined: Kotlin's `==` of the animation, its instance).
+    animation: MutableState<Rc<TargetBasedAnimation<T, V>>>,
     initial_value_state: RefCell<Option<Rc<SeekingAnimationState>>>,
     initial_value_animation: RefCell<Option<Rc<TargetBasedAnimation<T, V>>>>,
     is_finished: MutableState<bool>,
@@ -1161,8 +1157,7 @@ impl<S: AnimationValue, T: AnimationValue, V: AnimationVector> TransitionAnimati
                 label,
                 target_value: mutable_state_of(initial_value.clone()),
                 animation_spec: mutable_state_of(default_spring),
-                animation: RefCell::new(animation),
-                animation_version: mutable_state_of(0),
+                animation: mutable_confined_state_of_with_policy(animation, SnapshotMutationPolicy::new(Rc::ptr_eq)),
                 initial_value_state: RefCell::new(None),
                 initial_value_animation: RefCell::new(None),
                 is_finished: mutable_state_of(true),
@@ -1236,13 +1231,11 @@ impl<S: AnimationValue, T: AnimationValue, V: AnimationVector> AnimationInner<S,
     }
 
     fn animation(&self) -> Rc<TargetBasedAnimation<T, V>> {
-        let _ = self.animation_version.get();
-        self.animation.borrow().clone()
+        self.animation.get()
     }
 
     fn set_animation(&self, animation: TargetBasedAnimation<T, V>) {
-        *self.animation.borrow_mut() = Rc::new(animation);
-        self.animation_version.set(self.animation_version.peek().wrapping_add(1));
+        self.animation.set(Rc::new(animation));
     }
 
     fn new_animation(&self, spec: &(impl AnimationSpec<T> + ?Sized), initial: T, target: T, velocity: V) {
@@ -1484,6 +1477,19 @@ struct DeferredAnimationData<S, T, V: AnimationVector> {
     target_value_by_state: RefCell<TargetValueFn<S, T>>,
 }
 
+/// The same deferred animation data (Kotlin's `==` of the data: its instance).
+#[allow(clippy::type_complexity)]
+fn same_data<S, T, V: AnimationVector>(
+    a: &Option<Rc<DeferredAnimationData<S, T, V>>>,
+    b: &Option<Rc<DeferredAnimationData<S, T, V>>>,
+) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 impl<S: AnimationValue, T: AnimationValue, V: AnimationVector> DeferredAnimationData<S, T, V> {
     fn update_animation_states(
         &self,
@@ -1538,9 +1544,9 @@ struct DeferredAnimationInner<S, T, V: AnimationVector> {
     transition: Weak<TransitionInner<S>>,
     type_converter: TwoWayConverter<T, V>,
     label: String,
-    /// Compose's `data`, a state: its reads are the version's.
-    data: RefCell<Option<Rc<DeferredAnimationData<S, T, V>>>>,
-    data_version: MutableState<u64>,
+    /// Compose's `var data: DeferredAnimationData<T, V>? by mutableStateOf(null)` (confined: Kotlin's `==` of the
+    /// data, its instance).
+    data: MutableState<Option<Rc<DeferredAnimationData<S, T, V>>>>,
 }
 
 /// An animation of a [`Transition`] set up after composition (Compose's library-restricted
@@ -1577,13 +1583,11 @@ impl<S: AnimationValue, T: AnimationValue, V: AnimationVector> DeferredAnimation
 
     /// The animation it set up, once [`animate`](Self::animate) did (a state read).
     pub fn animation(&self) -> Option<TransitionAnimationState<S, T, V>> {
-        let _ = self.inner.data_version.get();
-        self.inner.data.borrow().as_ref().map(|d| d.animation.clone())
+        self.inner.data.with(|data| data.as_ref().map(|d| d.animation.clone()))
     }
 
     fn data(&self) -> Option<Rc<DeferredAnimationData<S, T, V>>> {
-        let _ = self.inner.data_version.get();
-        self.inner.data.borrow().clone()
+        self.inner.data.get()
     }
 
     pub(crate) fn setup_seeking(&self) {
@@ -1648,8 +1652,7 @@ impl<S: AnimationValue, T: AnimationValue, V: AnimationVector> DeferredAnimation
                     transition_spec: RefCell::new(transition_spec.clone()),
                     target_value_by_state: RefCell::new(target_value_by_state.clone()),
                 });
-                *self.inner.data.borrow_mut() = Some(data.clone());
-                self.inner.data_version.set(self.inner.data_version.peek().wrapping_add(1));
+                self.inner.data.set(Some(data.clone()));
                 t.add_animation(animation.inner.clone());
                 data
             }
@@ -2027,15 +2030,14 @@ impl<S: AnimationValue> Transition<S> {
                     transition: weak,
                     type_converter,
                     label,
-                    data: RefCell::new(None),
-                    data_version: mutable_state_of(0),
+                    data: mutable_confined_state_of_with_policy(None, SnapshotMutationPolicy::new(same_data)),
                 }),
             });
             let (t, anim) = (this.clone(), lazy_anim.clone());
             kompozable_block!({
                 DisposableEffect(lazy_anim.clone(), move || {
                     on_dispose(move || {
-                        if let Some(a) = anim.inner.data.borrow().as_ref() {
+                        if let Some(a) = anim.inner.data.peek() {
                             t.remove_animation(Rc::as_ptr(&a.animation.inner) as *const ());
                         }
                     })

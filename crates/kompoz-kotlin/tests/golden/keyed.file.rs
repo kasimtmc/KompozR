@@ -3,7 +3,7 @@
 pub fn Screen(flow: StateFlow<i32>) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let shown = ::kompoz::runtime::key(&(6u32, 18u32), || remember(|| mutable_state_of(true)));
+    let shown = ::kompoz::runtime::key(&(6u32, 18u32), || remember(|| ::kompoz::runtime::mutable_state_of!(true)));
     let value = ::kompoz::runtime::key(&(7u32, 18u32), || flow.collect_as_state());
     ::kompoz::runtime::key(&(8u32, 5u32), || {
         Column(|| {

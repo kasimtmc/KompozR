@@ -3,14 +3,14 @@
 pub fn States() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let count = remember(|| mutable_state_of(0));
+    let count = remember(|| ::kompoz::runtime::mutable_state_of!(0));
     let doubled = remember(|| {
         derived_state_of({
             let count = ::kompoz::runtime::__private::capture(&count);
             move || ::kompoz::runtime::kt::KtDelegate::get_value(&count) * 2
         })
     });
-    let name = remember_saveable(|| mutable_state_of(::std::string::String::from("")));
+    let name = remember_saveable(|| ::kompoz::runtime::mutable_state_of!(::std::string::String::from("")));
     let keyed = remember_keyed(
         (::kompoz::runtime::kt::KtDelegate::get_value(&count), ::kompoz::runtime::kt::KtDelegate::get_value(&name)),
         || ::kompoz::runtime::kt::KtDelegate::get_value(&count) + 1,

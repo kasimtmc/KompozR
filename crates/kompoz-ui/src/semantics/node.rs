@@ -326,8 +326,13 @@ impl SemanticsNode {
         root.local_bounding_box_of(&coordinates, false).translate(root.position_in_root())
     }
 
-    /// The bounds a touch hits it in, in the root (Compose's `touchBoundsInRoot`): its bounds, cut.
+    /// The bounds a touch hits it in, in the root (Compose's `touchBoundsInRoot`): a clickable one's (it has an
+    /// `OnClick` action: Compose's `useMinimumTouchTarget`) grown to the minimum touch target, clipped only by what clips
+    /// it to that target; another's its bounds, cut.
     pub fn touch_bounds_in_root(&self) -> Rect {
+        if self.unmerged_config.contains(crate::semantics::SemanticsActions::OnClick) {
+            return self.bounds_coordinator().touch_bounds_in_root();
+        }
         self.bounds_in_root()
     }
 

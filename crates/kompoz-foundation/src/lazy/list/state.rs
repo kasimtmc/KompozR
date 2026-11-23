@@ -23,8 +23,8 @@ use crate::lazy::layout::{
 use kompoz_animation::MutatePriority;
 use kompoz_graphics::Density;
 use kompoz_runtime::{
-    MutableState, SavedValue, Saver, kompozable, mutable_state_of, named, remember, remember_saveable_keyed_with,
-    remember_saveable_with, without_read_observation,
+    MutableState, SavedValue, Saver, kompozable, mutable_confined_state_of_with_policy, mutable_state_of, named,
+    never_equal_policy, remember, remember_saveable_keyed_with, remember_saveable_with, without_read_observation,
 };
 use std::cell::{Cell, RefCell};
 use std::fmt;
@@ -134,10 +134,9 @@ pub(crate) struct LazyListStateInner {
     scroll_delta_between_passes: LazyLayoutScrollDeltaBetweenPasses,
     execute_requests_in_high_priority_mode: Cell<bool>,
     scroll_position: LazyListScrollPosition,
-    /// The last measure's result, its readers told through the counter (Compose's `layoutInfoState`, a state of the
-    /// result with a never-equal policy).
-    layout_info: RefCell<Rc<LazyListMeasureResult>>,
-    layout_info_generation: MutableState<u64>,
+    /// The last measure's result (Compose's `layoutInfoState = mutableStateOf(EmptyLazyListMeasureResult,
+    /// neverEqualPolicy())`; confined: a measure result isn't `Send`).
+    layout_info: MutableState<Rc<LazyListMeasureResult>>,
     /// Whether a measure ran (the result isn't the empty one).
     measured: Cell<bool>,
     internal_interaction_source: MutableInteractionSource,
@@ -223,8 +222,10 @@ impl LazyListState {
                     first_visible_item_index,
                     first_visible_item_scroll_offset,
                 ),
-                layout_info: RefCell::new(Rc::new(LazyListMeasureResult::empty())),
-                layout_info_generation: mutable_state_of(0),
+                layout_info: mutable_confined_state_of_with_policy(
+                    Rc::new(LazyListMeasureResult::empty()),
+                    never_equal_policy(),
+                ),
                 measured: Cell::new(false),
                 internal_interaction_source: MutableInteractionSource::new(),
                 scroll_to_be_consumed: Cell::new(0.0),
@@ -288,20 +289,17 @@ impl LazyListState {
     /// What the last layout showed (Compose's `layoutInfo`): read, it is a state changing with each layout and
     /// scroll (read it in `derived_state_of` or `snapshot_flow` to be told only of what matters).
     pub fn layout_info(&self) -> LazyListLayoutInfo {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().layout_info()
+        self.inner.layout_info.with(|result| result.layout_info())
     }
 
     /// The last measure's result (a state read).
     pub(crate) fn measure_result(&self) -> Rc<LazyListMeasureResult> {
-        self.inner.layout_info_generation.get();
-        self.inner.layout_info.borrow().clone()
+        self.inner.layout_info.get()
     }
 
     fn set_measure_result(&self, result: Rc<LazyListMeasureResult>) {
-        *self.inner.layout_info.borrow_mut() = result;
+        self.inner.layout_info.set(result);
         self.inner.measured.set(true);
-        self.inner.layout_info_generation.set(self.inner.layout_info_generation.peek().wrapping_add(1));
     }
 
     /// The drags of the list (Compose's `interactionSource`).
@@ -315,7 +313,7 @@ impl LazyListState {
 
     /// The density of the last measure.
     pub(crate) fn density(&self) -> Density {
-        without_read_observation(|| self.inner.layout_info.borrow().density)
+        self.inner.layout_info.peek_with(|result| result.density)
     }
 
     /// The items whose keys are known (a state).
@@ -359,7 +357,7 @@ impl LazyListState {
         if inner.scroll_to_be_consumed.get().abs() > 0.5 {
             let pre_scroll_to_be_consumed = inner.scroll_to_be_consumed.get();
             let int_delta = fast_round_to_int(inner.scroll_to_be_consumed.get());
-            let current = inner.layout_info.borrow().clone();
+            let current = inner.layout_info.peek();
             let mut scrolled_layout_info = current
                 .copy_with_scroll_delta_without_remeasure(int_delta, !inner.has_lookahead_occurred.get())
                 .map(Rc::new);
@@ -533,7 +531,7 @@ impl LazyListState {
     pub fn request_scroll_to_item(&self, index: i32, #[default(0)] scroll_offset: i32) {
         // (a scroll running cancelled)
         if self.is_scroll_in_progress() {
-            let scope = self.inner.layout_info.borrow().coroutine_scope.clone();
+            let scope = self.inner.layout_info.peek().coroutine_scope.clone();
             if let Some(scope) = scope {
                 let state = self.clone();
                 scope.launch(async move {
@@ -666,7 +664,7 @@ impl LazyListPrefetchScope for ListPrefetchScope {
             return LazyLayoutPrefetchState::default().schedule_precomposition(index);
         };
         // (not read: a scroll prefetching doesn't make what scrolls read the result)
-        let last_measure_result = inner.layout_info.borrow().clone();
+        let last_measure_result = inner.layout_info.peek();
         let orientation = last_measure_result.orientation;
         let on_premeasured: Option<Rc<dyn Fn(&dyn PrefetchResultScope)>> = on_prefetch_finished.map(|on_finished| {
             Rc::new(move |result: &dyn PrefetchResultScope| {

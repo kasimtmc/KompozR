@@ -25,6 +25,7 @@ use kompoz_animation::FiniteAnimationSpec;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{BorderStroke, CircleShape, CornerSize, Dp, RoundedCornerShape, Shape};
 use kompoz_runtime::{KompozitionLocalProvider, kompozable, kompozable_block, named, named_args, remember};
+use kompoz_ui::Constraints;
 use kompoz_ui::draw::{DefaultBlendMode, Fill};
 use kompoz_ui::layout::{Layout, measure_policy};
 use kompoz_ui::platform::LocalLayoutDirection;
@@ -74,7 +75,7 @@ pub fn SplitButtonLayout(
             });
         },
         measure_policy = measure_policy(move |scope, measurables, constraints| {
-            let loose_constraints = named_args!(constraints.copy(min_width = 0, min_height = 0));
+            let loose_constraints: Constraints = named_args!(constraints.copy(min_width = 0, min_height = 0));
             let spacing_px = scope.round_to_px(spacing);
 
             let leading_button_placeable = measurables
@@ -88,8 +89,7 @@ pub fn SplitButtonLayout(
                 .find(|m| m.layout_id().is_some_and(|id| id.is(&TrailingButtonLayoutId)))
                 .expect("Collection contains no element matching the predicate.")
                 .measure({
-                    // (`r#offset`: the macros would take `offset` for the `#[named]` modifier of that name)
-                    let offset = loose_constraints.r#offset(-(leading_button_placeable.width() + spacing_px), 0);
+                    let offset = loose_constraints.offset(-(leading_button_placeable.width() + spacing_px), 0);
                     named_args!(offset.copy(
                         min_height = leading_button_placeable.height(),
                         max_height = leading_button_placeable.height(),

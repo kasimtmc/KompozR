@@ -34,8 +34,11 @@ mod state_observer;
 // (WP8: adaptive — an Rc in a transition's state)
 mod thread_bound;
 
+pub use crate::__mutable_state_of as mutable_state_of;
 pub use crate::__remember_updated_state as remember_updated_state;
-pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
+pub use collections::{
+    SnapshotStateList, SnapshotStateMap, mutable_confined_state_list_of, mutable_state_list_of, mutable_state_map_of,
+};
 pub use composer::{
     Composition, Content, Node, PausableComposition, RecompositionStats, RememberObserver, ReusableComposition,
 };
@@ -69,9 +72,10 @@ pub use snapshot::{
     StateKey, WriteObserver, global_snapshot_changed, set_global_write_observer, set_ui_thread, state_changed,
 };
 pub use state::{
-    MutableState, SharedState, SnapshotMutationPolicy, State, StateSource, mutable_double_state_of,
-    mutable_float_state_of, mutable_int_state_of, mutable_long_state_of, mutable_state_of,
-    mutable_state_of_with_policy, never_equal_policy, structural_equality_policy,
+    MutableState, SharedState, SnapshotMutationPolicy, State, StateSource, mutable_confined_state_of,
+    mutable_confined_state_of_with_policy, mutable_double_state_of, mutable_float_state_of, mutable_int_state_of,
+    mutable_long_state_of, mutable_state_of, mutable_state_of_with_policy, never_equal_policy,
+    structural_equality_policy,
 };
 pub use state_observer::{OnChangedExecutor, SnapshotStateObserver};
 pub use thread_bound::ThreadBound;
