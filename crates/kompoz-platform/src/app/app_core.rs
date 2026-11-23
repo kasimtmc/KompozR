@@ -27,6 +27,7 @@ use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{self, Backend, ClearColor, Device, Format, IRect, Surface, Texture, TextureUsage};
 use kompoz_gpu::renderer::RendererBitmaps;
 use kompoz_graphics::{Color, Density, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
+use kompoz_lifecycle::LifecycleState;
 use kompoz_runtime::{Content, MutableState, RecompositionStats, kompozable_lambda, mutable_state_of};
 use kompoz_ui::clipboard::{ClipEntry, ClipMetadata};
 use kompoz_ui::draganddrop::DragAndDropTransferData;
@@ -93,6 +94,22 @@ struct Drawn {
     area: f32,
 }
 
+/// Whether the app's lifecycle follows the app going to the background and back (phones) rather than its window.
+const PHONE: bool = cfg!(any(target_os = "android", target_os = "ios"));
+
+/// The app's lifecycle state on desktops, of its window (CMP's and C++'s mapping): created
+/// while it is minimized or hidden, resumed while it has the focus, started while it is shown without it. (The host
+/// dropped: destroyed.)
+pub fn lifecycle_state_of(focused: bool, minimized: bool, hidden: bool) -> LifecycleState {
+    if minimized || hidden {
+        LifecycleState::Created
+    } else if focused {
+        LifecycleState::Resumed
+    } else {
+        LifecycleState::Started
+    }
+}
+
 /// The app core on platform `P` (C++'s AppCore): made with the app's configuration and content, then
 /// [`start`](AppCore::start)ed; the platform's loop hands it events ([`handle`](AppCore::handle)) and asks it for
 /// frames ([`frame`](AppCore::frame)), pacing them by [`frame_due`](AppCore::frame_due); [`quit`](AppCore::quit) as
@@ -128,6 +145,9 @@ pub struct AppCore<P: Platform> {
     /// The window's size, scale, insets, theme or language changed: read once before the next frame or input.
     metrics_changed: bool,
     focused: bool,
+    /// The window minimized, hidden (with focused: the app's lifecycle on desktops).
+    minimized: bool,
+    hidden: bool,
     /// A microphone and a camera looked for (after the first frame shown).
     media_probed: bool,
     /// The display's refresh interval: frames not shown are paced to it.
@@ -184,6 +204,8 @@ impl<P: Platform> AppCore<P> {
             resize_frames: 0,
             metrics_changed: false,
             focused: true,
+            minimized: false,
+            hidden: false,
             media_probed: false,
             frame_period_ns: 16_666_667,
             last_frame_time: None,
@@ -556,7 +578,21 @@ impl<P: Platform> AppCore<P> {
             Event::FocusGained | Event::FocusLost => {
                 self.focused = matches!(e, Event::FocusGained);
                 host.set_window_focused(self.focused);
+                self.update_lifecycle();
             }
+            Event::Minimized | Event::Maximized => {
+                self.minimized = matches!(e, Event::Minimized);
+                self.update_lifecycle();
+            }
+            Event::Hidden => {
+                self.hidden = true;
+                self.update_lifecycle();
+            }
+            // Phones: the app's lifecycle follows it going to the background and back (paused before the system may
+            // end it: what that saves goes in the saved state), not its window.
+            Event::WillEnterBackground if PHONE => host.set_lifecycle_state(LifecycleState::Started),
+            Event::DidEnterBackground if PHONE => host.set_lifecycle_state(LifecycleState::Created),
+            Event::WillEnterForeground if PHONE => host.set_lifecycle_state(LifecycleState::Started),
             Event::DevicesChanged => self.refresh_media(),
             Event::Resized => {
                 self.resize_frames = 4;
@@ -566,7 +602,16 @@ impl<P: Platform> AppCore<P> {
             Event::DidEnterForeground | Event::Shown | Event::Restored => {
                 if matches!(e, Event::DidEnterForeground) {
                     self.update_metrics(); // (the wallpaper, and so the dynamic colors, may have changed meanwhile)
+                    if PHONE && let Some(host) = &self.host {
+                        host.set_lifecycle_state(LifecycleState::Resumed);
+                    }
                 }
+                match e {
+                    Event::Shown => self.hidden = false,
+                    Event::Restored => self.minimized = false,
+                    _ => {}
+                }
+                self.update_lifecycle();
                 // Back on the screen: all of it drawn again, in case the kept pixels went with the old surface.
                 self.display.invalidate();
                 self.show_frame = true;
@@ -746,10 +791,20 @@ impl<P: Platform> AppCore<P> {
                 self.own_drag.borrow_mut().take();
                 host.platform_drag_ended(action);
             }
-            // (The lifecycle (Hidden, Minimized, Maximized, WillEnter…/DidEnterBackground) comes with
-            // kompoz-lifecycle; AccentChanged, WallpaperChanged, AccessibilityRequest and Wake are the platform's
-            // own: Platform::handled.)
+            // (AccentChanged, WallpaperChanged, AccessibilityRequest and Wake are the platform's own:
+            // Platform::handled; the phones' lifecycle events on desktops: the window's says it.)
             _ => {}
+        }
+    }
+
+    /// The app's lifecycle on desktops (C++'s `updateLifecycle`, CMP's `ComposeContainer.updateLifecycleState`):
+    /// [`lifecycle_state_of`] the window; phones follow the app's background events instead.
+    fn update_lifecycle(&self) {
+        if PHONE {
+            return;
+        }
+        if let Some(host) = &self.host {
+            host.set_lifecycle_state(lifecycle_state_of(self.focused, self.minimized, self.hidden));
         }
     }
 
@@ -1466,5 +1521,29 @@ impl PlatformCallbacks for AppCallbacks {
             *self.own_drag.borrow_mut() = Some(drag.transfer_data.mime_types());
         }
         taken
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lifecycle_state_of;
+    use kompoz_lifecycle::LifecycleState;
+
+    /// The window's state to the app's lifecycle state: minimized or hidden is created whatever the focus; shown,
+    /// focused is resumed, unfocused started.
+    #[test]
+    fn the_windows_state_is_the_apps_lifecycle_state() {
+        let cases = [
+            (true, false, false, LifecycleState::Resumed),
+            (false, false, false, LifecycleState::Started),
+            (true, true, false, LifecycleState::Created),
+            (false, true, false, LifecycleState::Created),
+            (true, false, true, LifecycleState::Created),
+            (false, false, true, LifecycleState::Created),
+            (true, true, true, LifecycleState::Created),
+        ];
+        for (focused, minimized, hidden, expected) in cases {
+            assert_eq!(lifecycle_state_of(focused, minimized, hidden), expected, "{focused} {minimized} {hidden}");
+        }
     }
 }

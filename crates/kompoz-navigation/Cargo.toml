@@ -1,0 +1,14 @@
+[package]
+name = "kompoz-navigation"
+description = "KompozR's navigation (androidx.navigation 2.10 — NavHost, NavController, typed routes, deep links — and Navigation 3: NavDisplay, NavEntry, scenes)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
+kompoz-runtime = { path = "../kompoz-runtime" }

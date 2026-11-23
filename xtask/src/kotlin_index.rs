@@ -56,6 +56,9 @@ const API_CRATES: &[&str] = &[
     // (WP8: adaptive)
     "kompoz-material3-adaptive",
     "kompoz-material3-adaptive-navigation-suite",
+    // (stage 13: lifecycles, navigation)
+    "kompoz-lifecycle",
+    "kompoz-navigation",
     "kompoz-test",
 ];
 
@@ -1318,7 +1321,10 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                             .map(|f| plain_param(&unraw(f.ident.as_ref().expect("named")), &f.ty))
                             .collect(),
                     };
-                    let mut it = base(cx, &v.ident.to_string(), &v.ident.to_string(), "Variant", &owner);
+                    // (an entry's doc line names it as Kotlin does: `Resumed` is `Lifecycle.State`'s `RESUMED`)
+                    let rust = v.ident.to_string();
+                    let kotlin = kotlin_doc(&v.attrs).filter(|d| !d.contains('(')).unwrap_or_else(|| rust.clone());
+                    let mut it = base(cx, &kotlin, &rust, "Variant", &owner);
                     it.params = params;
                     it.ret = owner.clone();
                     scan.items.push(it);
@@ -1868,13 +1874,15 @@ fn receiver_of(first: &Type) -> String {
         Type::Reference(r) => &*r.elem,
         other => other,
     };
-    // (a scope lent as a trait object, `&mut dyn MutableTransformScope`: the trait is the receiver's type)
+    // (a scope lent as a trait object, `&mut dyn MutableTransformScope`: the trait is the receiver's type; so is
+    // lifecycle's `addObserver { source, event -> }`'s, Kotlin's `LifecycleObserver.(source, event) -> Unit`)
     if let Type::TraitObject(object) = inner
         && let Some(TypeParamBound::Trait(t)) = object.bounds.first()
         && let Some(segment) = t.path.segments.last()
     {
         let name = segment.ident.to_string();
-        return if name.ends_with("Scope") { name } else { String::new() };
+        let receiver = name.ends_with("Scope") || name == "LifecycleObserver";
+        return if receiver { name } else { String::new() };
     }
     let Type::Path(p) = inner else { return String::new() };
     let mut name = p.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
@@ -1890,7 +1898,15 @@ fn receiver_of(first: &Type) -> String {
     let scope = ["Scope", "Receiver", "Builder", "Properties", "Transform", "Config"].iter().any(|s| name.ends_with(s))
         || matches!(
             name.as_str(),
-            "Path" | "Placeable" | "SemanticsConfiguration" | "Animatable" | "TextFieldBuffer" | "Segment" | "Density"
+            "Path"
+                | "Placeable"
+                | "SemanticsConfiguration"
+                | "Animatable"
+                | "TextFieldBuffer"
+                | "Segment"
+                | "Density"
+                // (Kotlin's `flow { emit(…) }`: the collector is the block's receiver)
+                | "FlowCollector"
         );
     if scope { name } else { String::new() }
 }

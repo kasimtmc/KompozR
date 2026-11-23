@@ -68,10 +68,11 @@ impl CoroutineContext {
 }
 
 /// The same context (Kotlin compares contexts element by element; here one context is equal to its clones, which
-/// share its elements).
+/// share its elements, and empty ones are equal — Kotlin's one EmptyCoroutineContext: an effect keyed by an empty
+/// context isn't restarted by another empty one).
 impl PartialEq for CoroutineContext {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.elements, &other.elements)
+        Rc::ptr_eq(&self.elements, &other.elements) || (self.is_empty() && other.is_empty())
     }
 }
 
@@ -130,5 +131,23 @@ impl<F: Future> Future for WithContext<F> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
         let _pop = push_context(current_coroutine_context().plus(&self.context));
         self.block.as_mut().poll(cx)
+    }
+}
+
+/// What decides when the coroutines running with it in their context may run (the part of a Kotlin
+/// `CoroutineDispatcher` holding dispatches back: lifecycle's PausingDispatcher): before each poll of such a
+/// coroutine `may_run` is asked with its waker; `false` keeps it waiting — the gate wakes it (that waker) once it
+/// may run. Clones are the same gate.
+#[derive(Clone)]
+pub struct DispatchGate(Rc<dyn Fn(&std::task::Waker) -> bool>);
+
+impl DispatchGate {
+    pub fn new(may_run: impl Fn(&std::task::Waker) -> bool + 'static) -> DispatchGate {
+        DispatchGate(Rc::new(may_run))
+    }
+
+    /// Whether the coroutine of `waker` may run now (if not, the gate keeps `waker` to wake it later).
+    pub fn may_run(&self, waker: &std::task::Waker) -> bool {
+        (self.0)(waker)
     }
 }

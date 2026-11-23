@@ -23,7 +23,7 @@ pub use compose::{
     LaunchedEffect, LocalDispatcher, LocalEffectCoroutineContext, current_effect_coroutine_context, produce_state,
     remember_coroutine_scope, snapshot_flow,
 };
-pub use context::{CoroutineContext, current_coroutine_context, with_context};
+pub use context::{CoroutineContext, DispatchGate, current_coroutine_context, with_context};
 pub use executor::{
     Cancelled, CoroutineScope, CoroutineStart, Deferred, Dispatcher, DisposableHandle, Failure, Job, cancel_current,
     current_job, run_catching, r#yield,

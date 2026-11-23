@@ -3,9 +3,10 @@
 //! Rust one's tags and texts prefixed `rust `), M15's API where the C++'s differs (said at each test).
 //!
 //! - C++ 8100 (`state_forms_take_compose_named_arguments`): its `PaddingValues` forms (all; horizontal, vertical;
-//!   start, top, end, bottom; one by name) and a ViewConfiguration's millis. (Its `kt::PaddingValues(top =, all =)`
-//!   isn't a Compose overload; its Channel's ChannelResult, `produce`/`consumeEach` and list arithmetic are the
-//!   coroutines' and kt shims' — stage 2 and 9's; Lifecycle's names are stage 13's.)
+//!   start, top, end, bottom; one by name), a ViewConfiguration's millis and Lifecycle's names (Kotlin's
+//!   `Lifecycle.State.RESUMED`, `Lifecycle.Event.ON_STOP`: Rust's `LifecycleState::Resumed`, `LifecycleEvent::OnStop`;
+//!   stage 13). (Its `kt::PaddingValues(top =, all =)` isn't a Compose overload; its Channel's ChannelResult,
+//!   `produce`/`consumeEach` and list arithmetic are the coroutines' and kt shims' — stage 2 and 9's.)
 //! - C++ 8136 (`scroll_forms_take_compose_named_arguments`): `overscrollEffect = null` (none) on a LazyRow; Material's
 //!   `Modifier.pullToRefresh(isRefreshing =, state =, onRefresh =)` by name on a Box of `rememberPullToRefreshState()`
 //!   with `PullToRefreshDefaults.Indicator(state =, isRefreshing =, modifier =)` and `PullToRefreshDefaults.IndicatorBox(
@@ -104,6 +105,8 @@ fn sides(p: &PaddingValues) -> [f32; 4] {
 // ---- C++ 8100: PaddingValues forms and a ViewConfiguration's millis ----------------------------------------------
 
 kompoz! {
+    fun lifecycleNames(): Pair<Lifecycle.State, Lifecycle.Event> = Pair(Lifecycle.State.RESUMED, Lifecycle.Event.ON_STOP)
+
     fun paddingForms(): List<PaddingValues> = listOf(
         PaddingValues(4.dp),
         PaddingValues(12.dp, 8.dp),
@@ -138,6 +141,10 @@ fn state_forms_take_compose_named_arguments() {
     }
     let vc = ViewConfiguration::default();
     assert!(vc.long_press_timeout_millis() == 400 && vc.double_tap_timeout_millis() == 300);
+    // Lifecycle's names: Kotlin's nested `Lifecycle.State` / `Lifecycle.Event` and their entries.
+    let (state, event) = lifecycle_names();
+    assert!(state == LifecycleState::Resumed && event == LifecycleEvent::OnStop);
+    assert!(state.name() == "RESUMED" && event.to_string() == "ON_STOP");
 }
 
 // ---- C++ 8136: overscrollEffect = null on a LazyRow ---------------------------------------------------------------

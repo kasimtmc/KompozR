@@ -193,6 +193,13 @@ impl KompozTestRule {
         &self.host
     }
 
+    /// Moves the app's lifecycle (the host's, LocalLifecycleOwner's outside a navigation entry) to `state`, its
+    /// observers told at once (C++'s `rule.host().setLifecycleState`): what the platform does as the window goes to
+    /// the background and back. The rule's host starts resumed.
+    pub fn set_lifecycle_state(&self, state: kompoz_lifecycle::LifecycleState) {
+        self.host.set_lifecycle_state(state);
+    }
+
     /// Composes `content` instead, run until idle.
     pub fn set_content(&self, content: impl Content + 'static) {
         self.host.set_content(content);

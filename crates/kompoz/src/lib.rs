@@ -28,6 +28,8 @@ pub use kompoz_coroutines as coroutines;
 pub use kompoz_foundation as foundation;
 pub use kompoz_gpu as gpu;
 pub use kompoz_graphics as graphics;
+// (stage 13: androidx.lifecycle)
+pub use kompoz_lifecycle as lifecycle;
 pub use kompoz_material_icons_core as material_icons_core;
 // (WP4b: icons)
 pub use kompoz_material_icons_extended as material_icons_extended;
@@ -36,6 +38,8 @@ pub use kompoz_material3 as material3;
 // (WP8: adaptive)
 pub use kompoz_material3_adaptive as material3_adaptive;
 pub use kompoz_material3_adaptive_navigation_suite as material3_adaptive_navigation_suite;
+// (stage 13: androidx.navigation and Navigation 3)
+pub use kompoz_navigation as navigation;
 pub use kompoz_platform as platform;
 pub use kompoz_runtime as runtime;
 /// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
@@ -119,7 +123,8 @@ pub mod Icons {
 /// brushes, paths, images), text (styles, fonts, annotated strings), the UI core (`Modifier`, `Alignment`, `Layout`,
 /// the host's types, the composition locals, `Role`), foundation (Box, Row, Column, BasicText, the modifiers' traits,
 /// gestures, interactions), the ripple node (material-ripple's), Material 3 (`MaterialTheme`, `Text`, `Surface`,
-/// `Icon`, …) and its icons (`Icons`), the app entry (`App`), and the Kotlin syntax's macros.
+/// `Icon`, …) and its icons (`Icons`), lifecycles (`Lifecycle`, `LocalLifecycleOwner`, the lifecycle effects), the app
+/// entry (`App`), and the Kotlin syntax's macros.
 ///
 /// The crates' roots are taken whole (their modules with them); where two of them use a name, the one an app means
 /// is named here: the modules `draw` and `input` are the UI's (`DrawScope`, pointer input), `shape` and `unit`
@@ -129,12 +134,16 @@ pub mod prelude {
     pub use kompoz_coroutines::*;
     pub use kompoz_foundation::prelude::*;
     pub use kompoz_graphics::*;
+    // (stage 13: androidx.lifecycle and androidx.lifecycle.compose — Lifecycle, its states and events, the observers,
+    // LocalLifecycleOwner, the lifecycle effects, collectAsStateWithLifecycle…; navigation's)
+    pub use kompoz_lifecycle::*;
     pub use kompoz_material_ripple::prelude::*;
     pub use kompoz_material3::prelude::*;
     // (WP8: adaptive — androidx.compose.material3.adaptive{,.layout,.navigation}, androidx.window.core.layout,
     // androidx.compose.material3.adaptive.navigationsuite)
     pub use kompoz_material3_adaptive::prelude::*;
     pub use kompoz_material3_adaptive_navigation_suite::prelude::*;
+    // (navigation's names join as its packages add them: `pub use kompoz_navigation::*;`)
     pub use kompoz_runtime::*;
     pub use kompoz_text::*;
     pub use kompoz_ui::*;

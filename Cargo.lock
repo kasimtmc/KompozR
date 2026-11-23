@@ -522,12 +522,14 @@ dependencies = [
  "kompoz-gpu",
  "kompoz-graphics",
  "kompoz-kotlin-macro",
+ "kompoz-lifecycle",
  "kompoz-material-icons-core",
  "kompoz-material-icons-extended",
  "kompoz-material-ripple",
  "kompoz-material3",
  "kompoz-material3-adaptive",
  "kompoz-material3-adaptive-navigation-suite",
+ "kompoz-navigation",
  "kompoz-platform",
  "kompoz-runtime",
  "kompoz-test",
@@ -620,6 +622,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "kompoz-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "kompoz-coroutines",
+ "kompoz-runtime",
+ "kompoz-test",
 ]
 
 [[package]]
@@ -724,12 +735,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompoz-navigation"
+version = "0.1.0"
+dependencies = [
+ "kompoz-lifecycle",
+ "kompoz-runtime",
+]
+
+[[package]]
 name = "kompoz-platform"
 version = "0.1.0"
 dependencies = [
  "kompoz-foundation",
  "kompoz-gpu",
  "kompoz-graphics",
+ "kompoz-lifecycle",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",
@@ -753,6 +773,7 @@ dependencies = [
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-graphics",
+ "kompoz-lifecycle",
  "kompoz-runtime",
  "kompoz-text",
  "kompoz-ui",
@@ -782,6 +803,7 @@ dependencies = [
  "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-graphics",
+ "kompoz-lifecycle",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",

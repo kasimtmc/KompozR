@@ -12,6 +12,32 @@ thread_local! {
     static OBSERVERS: RefCell<Vec<Option<Rc<dyn Fn(StateKey)>>>> = const { RefCell::new(Vec::new()) };
     /// The derived states computing, innermost last (`None`: reads not observed there, which aren't theirs).
     static DEPENDENCIES: RefCell<Vec<Option<Dependencies>>> = const { RefCell::new(Vec::new()) };
+    /// The derived state whose read is being told to the read observers (what a composition's scope tracks of
+    /// it: Compose's `recordDerivedStateValue`).
+    static DERIVED_READ: RefCell<Option<DerivedRead>> = const { RefCell::new(None) };
+}
+
+/// A derived state read: its handle, and the version of the value read.
+pub(crate) type DerivedRead = (Weak<dyn DerivedDependency>, u64);
+
+struct ClearDerivedRead;
+impl Drop for ClearDerivedRead {
+    fn drop(&mut self) {
+        DERIVED_READ.with(|d| d.borrow_mut().take());
+    }
+}
+
+/// Tells the innermost read observer that the derived state `key` was read (as [`record_read`]); a composition
+/// observing it learns the value's version ([`derived_being_read`]).
+pub(crate) fn record_derived_read(key: StateKey, derived: Weak<dyn DerivedDependency>, version: u64) {
+    DERIVED_READ.with(|d| *d.borrow_mut() = Some((derived, version)));
+    let _clear = ClearDerivedRead;
+    record_read(key);
+}
+
+/// The derived state whose read is being told now, if one is.
+pub(crate) fn derived_being_read() -> Option<DerivedRead> {
+    DERIVED_READ.with(|d| d.borrow().clone())
 }
 
 /// Tells the innermost read observer that `key` was read. States call it as they are read (not peeked).
@@ -59,6 +85,18 @@ pub fn without_read_observation<R>(f: impl FnOnce() -> R) -> R {
 /// each change).
 pub(crate) trait DerivedDependency {
     fn validated_version(&self) -> u64;
+    /// The keys of what its last computation read, and of what the derived states it read depend on (Compose's
+    /// record dependencies, nested ones included).
+    fn collect_dependency_keys(&self, out: &mut HashSet<StateKey>);
+}
+
+impl dyn DerivedDependency {
+    /// What it depends on, transitively.
+    pub(crate) fn dependency_keys(&self) -> Vec<StateKey> {
+        let mut keys = HashSet::new();
+        self.collect_dependency_keys(&mut keys);
+        keys.into_iter().collect()
+    }
 }
 
 /// Something a derived state's calculation read, as it was then.
@@ -87,7 +125,7 @@ impl Dependency {
 pub(crate) struct Dependencies {
     pub(crate) list: Vec<Dependency>,
     tracked: HashSet<StateKey>,
-    read: HashSet<StateKey>,
+    pub(crate) read: HashSet<StateKey>,
 }
 
 impl Dependencies {

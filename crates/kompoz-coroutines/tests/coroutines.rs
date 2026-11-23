@@ -1551,6 +1551,10 @@ fn coroutine_contexts_reach_the_block_and_what_it_launches_in_its_scopes() {
     assert_eq!((both.get::<Tag>(), both.get::<i32>()), (Some(Tag("y")), Some(7)));
     assert_eq!(both.minus_key::<Tag>().get::<Tag>(), None);
     assert!(CoroutineContext::new().is_empty() && current_coroutine_context().is_empty());
+    // (equal: a context and its clones; any two empty ones, as Kotlin's one EmptyCoroutineContext — an effect keyed
+    // by `CoroutineContext::new()` isn't restarted at each composition)
+    assert!(both == both.clone() && CoroutineContext::new() == CoroutineContext::new());
+    assert!(both != CoroutineContext::of(Tag("y")) && CoroutineContext::new() != both);
 }
 
 fn a_cancelled_coroutine_scope_cancels_who_awaits_it() {

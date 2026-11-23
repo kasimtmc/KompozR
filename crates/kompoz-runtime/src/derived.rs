@@ -1,12 +1,11 @@
 //! `derived_state_of`: a value computed from states, whose readers recompose only when it changes.
 
 use crate::composer::{Composer, ScopeId};
-use crate::read::{
-    Dependency, DerivedDependency, collect_dependencies, collecting_dependencies, record_read, tell_observer,
-};
+use crate::read::{Dependency, DerivedDependency, collect_dependencies, collecting_dependencies, tell_observer};
 use crate::snapshot::{StateKey, read_epoch};
 use crate::state::{SnapshotMutationPolicy, State, StateSource, structural_equality_policy};
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 /// A value computed from other states. Readers recompose only when the computed value itself changes, not on
@@ -42,6 +41,8 @@ struct Inner<T> {
     value: RefCell<Option<T>>,
     /// What computing it read last (Compose's ResultRecord.dependencies).
     dependencies: RefCell<Vec<Dependency>>,
+    /// Every key its last computation read.
+    read_keys: RefCell<Vec<StateKey>>,
     /// Whether every key it read is among its dependencies (a local's holder isn't: its change reaches it only
     /// through the composition).
     all_tracked: Cell<bool>,
@@ -87,6 +88,7 @@ impl<T: Clone + 'static> Inner<T> {
         let old = self.value.replace(Some(next));
         drop(old);
         self.all_tracked.set(dependencies.all_tracked());
+        *self.read_keys.borrow_mut() = dependencies.read.into_iter().collect();
         *self.dependencies.borrow_mut() = dependencies.list;
         self.validated_at.set(Some(read_epoch()));
         self.computations.set(self.computations.get() + 1);
@@ -160,11 +162,11 @@ impl<T: Clone + 'static> Inner<T> {
             if self.observer.get().is_none() {
                 tell_observer(self.key);
             } else {
+                let this: Weak<dyn DerivedDependency> = self.this.clone();
                 if collecting_dependencies() {
-                    let this: Weak<dyn DerivedDependency> = self.this.clone();
-                    crate::read::record_dependency(self.key, Dependency::Derived(this, self.version.get()));
+                    crate::read::record_dependency(self.key, Dependency::Derived(this.clone(), self.version.get()));
                 }
-                record_read(self.key);
+                crate::read::record_derived_read(self.key, this, self.version.get());
             }
         }
         std::cell::Ref::map(self.value.borrow(), |v| v.as_ref().unwrap())
@@ -177,6 +179,18 @@ impl<T: Clone + 'static> DerivedDependency for Inner<T> {
         self.refresh();
         self.version.get()
     }
+
+    fn collect_dependency_keys(&self, out: &mut HashSet<StateKey>) {
+        out.extend(self.read_keys.borrow().iter().copied());
+        let dependencies = self.dependencies.borrow().clone();
+        for dependency in dependencies {
+            if let Dependency::Derived(derived, _) = dependency
+                && let Some(derived) = derived.upgrade()
+            {
+                derived.collect_dependency_keys(out);
+            }
+        }
+    }
 }
 
 impl<T: Clone + 'static> DerivedState<T> {
@@ -188,6 +202,7 @@ impl<T: Clone + 'static> DerivedState<T> {
             equivalent: policy.equivalent,
             value: RefCell::new(None),
             dependencies: RefCell::new(Vec::new()),
+            read_keys: RefCell::new(Vec::new()),
             all_tracked: Cell::new(false),
             validated_at: Cell::new(None),
             version: Cell::new(0),

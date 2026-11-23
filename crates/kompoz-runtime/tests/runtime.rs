@@ -1602,6 +1602,8 @@ fn a_state_list_is_saved_and_given_back() {
 
 tests!(
     a_state_written_while_composing_reaches_its_readers_further_on_in_the_same_pass,
+    a_derived_state_written_while_composing_reaches_its_readers_further_on_in_the_same_pass,
+    a_derived_states_readers_further_on_skip_when_its_value_stays,
     confined_states_hold_values_that_arent_send,
     a_confined_state_list_holds_items_that_arent_send,
     a_snapshot_writing_a_confined_state_applies_on_its_thread_only,
@@ -1836,6 +1838,70 @@ fn a_state_written_while_composing_reaches_its_readers_further_on_in_the_same_pa
     rule.wait_for_idle();
     assert!(rule.has("before 1") && rule.has("after 1"), "{:?}", rule.names());
     assert_eq!((before.get(), after.get()), (2, 2)); // (the one further on not again: it composed with it)
+}
+
+#[kompozable]
+fn ShowsDerived<T: std::fmt::Display + Clone + 'static>(
+    label: &'static str,
+    derived: DerivedState<T>,
+    runs: Rc<Cell<u32>>,
+) {
+    runs.set(runs.get() + 1);
+    Text(format!("{label} {}", derived.get()));
+}
+
+/// A derived state whose input is written while composing (Compose's `recordWriteOf`: `derivedStates.forEachScopeOf`
+/// the value written): its readers further on are invalidated conditionally at once — composed in the same pass
+/// when its value changed, a derived state of a derived state too —; one composed before the write composes again
+/// with the new value, once.
+fn a_derived_state_written_while_composing_reaches_its_readers_further_on_in_the_same_pass() {
+    let (target, shared) = (mutable_state_of(0), mutable_state_of(0));
+    let (before, after, nested) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (t, sh, b, a, n) = (target.clone(), shared.clone(), before.clone(), after.clone(), nested.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let s = sh.clone();
+        let positive = remember(|| derived_state_of(move || s.get() > 0));
+        let p = positive.clone();
+        let tens = remember(|| derived_state_of(move || if p.get() { 10 } else { 0 }));
+        ShowsDerived("before", positive.clone(), b.clone());
+        SetsShared(t.get(), sh.clone());
+        ShowsDerived("after", positive.clone(), a.clone());
+        ShowsDerived("tens", tens.clone(), n.clone());
+    }));
+    assert!(rule.has("before false") && rule.has("after false") && rule.has("tens 0"));
+    target.set(1);
+    Snapshot::send_apply_notifications();
+    assert!(rule.composition().recompose(0)); // one pass
+    assert!(rule.has("after true"), "{:?}", rule.names()); // further on: in this pass
+    assert!(rule.has("tens 10"), "{:?}", rule.names()); // (through the derived state it reads)
+    assert_eq!((after.get(), nested.get()), (2, 2));
+    rule.wait_for_idle();
+    assert!(rule.has("before true") && rule.has("after true") && rule.has("tens 10"), "{:?}", rule.names());
+    assert_eq!((before.get(), after.get(), nested.get()), (2, 2, 2)); // each once more
+}
+
+/// Readers of a derived state whose input is written while composing, its value the same: invalidated only on the
+/// condition it changed (Compose's conditional scopes, `isInvalidFor`), they are skipped — nor are they composed
+/// again when the pass is applied.
+fn a_derived_states_readers_further_on_skip_when_its_value_stays() {
+    let (target, shared) = (mutable_state_of(0), mutable_state_of(0));
+    let (before, after) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (t, sh, b, a) = (target.clone(), shared.clone(), before.clone(), after.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let s = sh.clone();
+        let non_negative = remember(|| derived_state_of(move || s.get() >= 0));
+        ShowsDerived("before", non_negative.clone(), b.clone());
+        SetsShared(t.get(), sh.clone());
+        ShowsDerived("after", non_negative.clone(), a.clone());
+    }));
+    assert!(rule.has("before true") && rule.has("after true"));
+    target.set(1);
+    Snapshot::send_apply_notifications();
+    assert!(rule.composition().recompose(0));
+    rule.wait_for_idle();
+    assert_eq!(shared.get(), 1);
+    assert!(!rule.composition().has_invalidations());
+    assert_eq!((before.get(), after.get()), (1, 1)); // neither composed again
 }
 
 #[kompozable]

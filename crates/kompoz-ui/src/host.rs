@@ -25,6 +25,7 @@ use crate::window::Overlays;
 use kompoz_coroutines::{CoroutineContext, Dispatcher, LocalDispatcher, LocalEffectCoroutineContext};
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Density, Dp, IntOffset, IntSize, LayoutDirection, Offset};
+use kompoz_lifecycle::{Lifecycle, LifecycleOwner, LifecycleRegistry, LifecycleState, LocalLifecycleOwner};
 use kompoz_runtime::{
     Composition, Content, KompozitionLocalProvider, MutableState, ProvideSaveableStateRegistry, RecompositionStats,
     SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block, mutable_state_of,
@@ -80,6 +81,18 @@ pub fn frame_time_on_beat(last: Option<i64>, now: i64, period: i64) -> i64 {
     match last {
         Some(last) if period > 0 => last + ((now - last + period / 2) / period).max(0) * period,
         _ => now,
+    }
+}
+
+/// The app's lifecycle owner (CMP's `DefaultArchitectureComponentsOwner`'s lifecycle part, C++'s `AppLifecycle`):
+/// the host's, resumed from the start, moved by the platform as its window goes to the background and back.
+struct HostLifecycleOwner {
+    registry: LifecycleRegistry,
+}
+
+impl LifecycleOwner for HostLifecycleOwner {
+    fn lifecycle(&self) -> Lifecycle {
+        self.registry.lifecycle()
     }
 }
 
@@ -171,6 +184,8 @@ pub struct KompozHost {
     idle_work: IdleWorkQueue,
     /// A trackpad's pinch under way (ScaleStart sent, ScaleEnd not yet).
     scaling: Cell<bool>,
+    /// The app's lifecycle owner (LocalLifecycleOwner at the root).
+    lifecycle_owner: Rc<HostLifecycleOwner>,
 }
 
 impl KompozHost {
@@ -187,6 +202,8 @@ impl KompozHost {
         effect_coroutine_context: CoroutineContext,
     ) -> KompozHost {
         let dispatcher = Dispatcher::new();
+        // (what a lifecycle's or a ViewModel's scope launches on: Kotlin's Dispatchers.Main)
+        dispatcher.make_main();
         let owner = Owner::new(dispatcher.clone());
         owner.set_effect_coroutine_context(effect_coroutine_context);
         let root = LayoutNode::new();
@@ -254,7 +271,12 @@ impl KompozHost {
             deep_links: DeepLinks::new(),
             idle_work: IdleWorkQueue::new(),
             scaling: Cell::new(false),
+            lifecycle_owner: Rc::new_cyclic(|me: &std::rc::Weak<HostLifecycleOwner>| HostLifecycleOwner {
+                registry: LifecycleRegistry::new(me.clone()),
+            }),
         };
+        // (resumed from the start, as C++'s and CMP's on a focused window; the platform moves it)
+        host.lifecycle_owner.registry.set_current_state(LifecycleState::Resumed);
         host.semantics_owner().add_listener(autofill);
         let composition = Composition::new(Some(root as Rc<dyn kompoz_runtime::Node>));
         composition.set_content(host.root_content(Rc::new(move || content.compose())));
@@ -285,6 +307,7 @@ impl KompozHost {
         let deep_links = self.deep_links.clone();
         let idle_work = self.idle_work.clone();
         let autofill = self.owner.autofill().map(|a| crate::autofill::AutofillManager(Rc::downgrade(&a)));
+        let lifecycle_owner: Rc<dyn LifecycleOwner> = self.lifecycle_owner.clone();
         move || {
             let env = environment.get();
             let content = content.clone();
@@ -319,6 +342,7 @@ impl KompozHost {
                 LocalIdleWorkQueue.provides(Some(idle_work.clone())),
                 LocalFontFamilyResolver.provides_unequal(resolver),
                 crate::autofill::LocalAutofillManager.provides(autofill.clone()),
+                LocalLifecycleOwner.provides(lifecycle_owner.clone()),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
             let g = generation.get();
@@ -331,6 +355,22 @@ impl KompozHost {
                 })
             })
         }
+    }
+
+    /// The app's lifecycle owner (C++'s `lifecycleOwner()`): what [`LocalLifecycleOwner`] gives outside a navigation
+    /// entry; resumed from the start, the platform moves it ([`set_lifecycle_state`](Self::set_lifecycle_state)).
+    pub fn lifecycle_owner(&self) -> Rc<dyn LifecycleOwner> {
+        self.lifecycle_owner.clone()
+    }
+
+    /// Moves the app's lifecycle to `state`, its observers told at once (C++'s `setLifecycleState`, CMP's
+    /// `setLifecycleState`): the platform's, as its window is focused (`RESUMED`), shown without the focus
+    /// (`STARTED`), hidden or minimized (`CREATED`); a test rule's.
+    ///
+    /// # Panics
+    /// Out of `DESTROYED` (as Compose's LifecycleRegistry).
+    pub fn set_lifecycle_state(&self, state: LifecycleState) {
+        self.lifecycle_owner.registry.set_current_state(state);
     }
 
     /// Composes `content` instead (at the next frame): a generation of its own, so the content's scope (which
@@ -1353,8 +1393,12 @@ impl KompozHost {
 }
 
 impl Drop for KompozHost {
-    /// The composition disposed of (what it holds forgotten), then the tree detached.
+    /// The app's lifecycle destroyed (paused, stopped, destroyed: told while what observes it is still here, as
+    /// CMP's container disposed of), the composition disposed of (what it holds forgotten), then the tree detached.
     fn drop(&mut self) {
+        if self.lifecycle_owner.registry.current_state() != LifecycleState::Destroyed {
+            self.lifecycle_owner.registry.set_current_state(LifecycleState::Destroyed);
+        }
         self.composition.borrow_mut().take();
         if self.root.is_attached() {
             self.root.detach();

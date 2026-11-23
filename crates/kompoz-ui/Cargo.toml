@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-graphics = { path = "../kompoz-graphics" }
+# (the host is the app's lifecycle owner: LocalLifecycleOwner, as CMP's ui is)
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 parking_lot.workspace = true

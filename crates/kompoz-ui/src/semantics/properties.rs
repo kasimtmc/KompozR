@@ -238,57 +238,188 @@ pub struct ContentType {
     pub hints: Vec<&'static str>,
 }
 
-macro_rules! content_types {
-    ($($name:ident = $hint:literal),* $(,)?) => {
-        impl ContentType {
-            $(
-                #[doc = concat!("The `", $hint, "` autofill hint.")]
-                pub fn $name() -> ContentType {
-                    ContentType { hints: vec![$hint] }
-                }
-            )*
-        }
-    };
-}
+// (written out, not made by a macro: the Kotlin index reads them, Kotlin's `ContentType.Username`)
+impl ContentType {
+    /// The `emailAddress` autofill hint.
+    pub fn EmailAddress() -> ContentType {
+        ContentType { hints: vec!["emailAddress"] }
+    }
 
-content_types!(
-    EmailAddress = "emailAddress",
-    Username = "username",
-    Password = "password",
-    NewUsername = "newUsername",
-    NewPassword = "newPassword",
-    PostalAddress = "postalAddress",
-    PostalCode = "postalCode",
-    CreditCardNumber = "creditCardNumber",
-    CreditCardSecurityCode = "creditCardSecurityCode",
-    CreditCardExpirationDate = "creditCardExpirationDate",
-    CreditCardExpirationMonth = "creditCardExpirationMonth",
-    CreditCardExpirationYear = "creditCardExpirationYear",
-    CreditCardExpirationDay = "creditCardExpirationDay",
-    AddressCountry = "addressCountry",
-    AddressRegion = "addressRegion",
-    AddressLocality = "addressLocality",
-    AddressStreet = "streetAddress",
-    AddressAuxiliaryDetails = "extendedAddress",
-    PostalCodeExtended = "extendedPostalCode",
-    PersonFullName = "personName",
-    PersonFirstName = "personGivenName",
-    PersonLastName = "personFamilyName",
-    PersonMiddleName = "personMiddleName",
-    PersonMiddleInitial = "personMiddleInitial",
-    PersonNamePrefix = "personNamePrefix",
-    PersonNameSuffix = "personNameSuffix",
-    PhoneNumber = "phoneNumber",
-    PhoneNumberDevice = "phoneNumberDevice",
-    PhoneCountryCode = "phoneCountryCode",
-    PhoneNumberNational = "phoneNational",
-    Gender = "gender",
-    BirthDateFull = "birthDateFull",
-    BirthDateDay = "birthDateDay",
-    BirthDateMonth = "birthDateMonth",
-    BirthDateYear = "birthDateYear",
-    SmsOtpCode = "smsOTPCode",
-);
+    /// The `username` autofill hint.
+    pub fn Username() -> ContentType {
+        ContentType { hints: vec!["username"] }
+    }
+
+    /// The `password` autofill hint.
+    pub fn Password() -> ContentType {
+        ContentType { hints: vec!["password"] }
+    }
+
+    /// The `newUsername` autofill hint.
+    pub fn NewUsername() -> ContentType {
+        ContentType { hints: vec!["newUsername"] }
+    }
+
+    /// The `newPassword` autofill hint.
+    pub fn NewPassword() -> ContentType {
+        ContentType { hints: vec!["newPassword"] }
+    }
+
+    /// The `postalAddress` autofill hint.
+    pub fn PostalAddress() -> ContentType {
+        ContentType { hints: vec!["postalAddress"] }
+    }
+
+    /// The `postalCode` autofill hint.
+    pub fn PostalCode() -> ContentType {
+        ContentType { hints: vec!["postalCode"] }
+    }
+
+    /// The `creditCardNumber` autofill hint.
+    pub fn CreditCardNumber() -> ContentType {
+        ContentType { hints: vec!["creditCardNumber"] }
+    }
+
+    /// The `creditCardSecurityCode` autofill hint.
+    pub fn CreditCardSecurityCode() -> ContentType {
+        ContentType { hints: vec!["creditCardSecurityCode"] }
+    }
+
+    /// The `creditCardExpirationDate` autofill hint.
+    pub fn CreditCardExpirationDate() -> ContentType {
+        ContentType { hints: vec!["creditCardExpirationDate"] }
+    }
+
+    /// The `creditCardExpirationMonth` autofill hint.
+    pub fn CreditCardExpirationMonth() -> ContentType {
+        ContentType { hints: vec!["creditCardExpirationMonth"] }
+    }
+
+    /// The `creditCardExpirationYear` autofill hint.
+    pub fn CreditCardExpirationYear() -> ContentType {
+        ContentType { hints: vec!["creditCardExpirationYear"] }
+    }
+
+    /// The `creditCardExpirationDay` autofill hint.
+    pub fn CreditCardExpirationDay() -> ContentType {
+        ContentType { hints: vec!["creditCardExpirationDay"] }
+    }
+
+    /// The `addressCountry` autofill hint.
+    pub fn AddressCountry() -> ContentType {
+        ContentType { hints: vec!["addressCountry"] }
+    }
+
+    /// The `addressRegion` autofill hint.
+    pub fn AddressRegion() -> ContentType {
+        ContentType { hints: vec!["addressRegion"] }
+    }
+
+    /// The `addressLocality` autofill hint.
+    pub fn AddressLocality() -> ContentType {
+        ContentType { hints: vec!["addressLocality"] }
+    }
+
+    /// The `streetAddress` autofill hint.
+    pub fn AddressStreet() -> ContentType {
+        ContentType { hints: vec!["streetAddress"] }
+    }
+
+    /// The `extendedAddress` autofill hint.
+    pub fn AddressAuxiliaryDetails() -> ContentType {
+        ContentType { hints: vec!["extendedAddress"] }
+    }
+
+    /// The `extendedPostalCode` autofill hint.
+    pub fn PostalCodeExtended() -> ContentType {
+        ContentType { hints: vec!["extendedPostalCode"] }
+    }
+
+    /// The `personName` autofill hint.
+    pub fn PersonFullName() -> ContentType {
+        ContentType { hints: vec!["personName"] }
+    }
+
+    /// The `personGivenName` autofill hint.
+    pub fn PersonFirstName() -> ContentType {
+        ContentType { hints: vec!["personGivenName"] }
+    }
+
+    /// The `personFamilyName` autofill hint.
+    pub fn PersonLastName() -> ContentType {
+        ContentType { hints: vec!["personFamilyName"] }
+    }
+
+    /// The `personMiddleName` autofill hint.
+    pub fn PersonMiddleName() -> ContentType {
+        ContentType { hints: vec!["personMiddleName"] }
+    }
+
+    /// The `personMiddleInitial` autofill hint.
+    pub fn PersonMiddleInitial() -> ContentType {
+        ContentType { hints: vec!["personMiddleInitial"] }
+    }
+
+    /// The `personNamePrefix` autofill hint.
+    pub fn PersonNamePrefix() -> ContentType {
+        ContentType { hints: vec!["personNamePrefix"] }
+    }
+
+    /// The `personNameSuffix` autofill hint.
+    pub fn PersonNameSuffix() -> ContentType {
+        ContentType { hints: vec!["personNameSuffix"] }
+    }
+
+    /// The `phoneNumber` autofill hint.
+    pub fn PhoneNumber() -> ContentType {
+        ContentType { hints: vec!["phoneNumber"] }
+    }
+
+    /// The `phoneNumberDevice` autofill hint.
+    pub fn PhoneNumberDevice() -> ContentType {
+        ContentType { hints: vec!["phoneNumberDevice"] }
+    }
+
+    /// The `phoneCountryCode` autofill hint.
+    pub fn PhoneCountryCode() -> ContentType {
+        ContentType { hints: vec!["phoneCountryCode"] }
+    }
+
+    /// The `phoneNational` autofill hint.
+    pub fn PhoneNumberNational() -> ContentType {
+        ContentType { hints: vec!["phoneNational"] }
+    }
+
+    /// The `gender` autofill hint.
+    pub fn Gender() -> ContentType {
+        ContentType { hints: vec!["gender"] }
+    }
+
+    /// The `birthDateFull` autofill hint.
+    pub fn BirthDateFull() -> ContentType {
+        ContentType { hints: vec!["birthDateFull"] }
+    }
+
+    /// The `birthDateDay` autofill hint.
+    pub fn BirthDateDay() -> ContentType {
+        ContentType { hints: vec!["birthDateDay"] }
+    }
+
+    /// The `birthDateMonth` autofill hint.
+    pub fn BirthDateMonth() -> ContentType {
+        ContentType { hints: vec!["birthDateMonth"] }
+    }
+
+    /// The `birthDateYear` autofill hint.
+    pub fn BirthDateYear() -> ContentType {
+        ContentType { hints: vec!["birthDateYear"] }
+    }
+
+    /// The `smsOTPCode` autofill hint.
+    pub fn SmsOtpCode() -> ContentType {
+        ContentType { hints: vec!["smsOTPCode"] }
+    }
+}
 
 impl ContentType {
     /// A content type of the platform's hints given.

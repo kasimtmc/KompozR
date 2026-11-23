@@ -140,6 +140,8 @@ impl Default for Dispatcher {
 thread_local! {
     /// The coroutine being polled: its dispatcher and job (innermost last).
     static CURRENT: RefCell<Vec<(Rc<Inner>, Rc<JobState>)>> = const { RefCell::new(Vec::new()) };
+    /// The UI thread's main dispatcher: the one a host made last (see [`Dispatcher::make_main`]).
+    static MAIN: RefCell<Weak<Inner>> = const { RefCell::new(Weak::new()) };
 }
 
 struct PopCurrent;
@@ -171,6 +173,27 @@ impl Dispatcher {
     /// The dispatcher of the coroutine running now.
     pub fn current() -> Dispatcher {
         Dispatcher(current().0)
+    }
+
+    /// Kotlin's `Dispatchers.Main` (and `Dispatchers.Main.immediate`: a KompozR dispatcher runs on the UI thread,
+    /// where what calls this runs): the dispatcher of the coroutine running now, else this thread's main one — the
+    /// one its host made last ([`make_main`](Self::make_main)), while it lives. What a lifecycle's or a ViewModel's
+    /// coroutine scope launches on.
+    ///
+    /// # Panics
+    /// Outside a coroutine on a thread without a host.
+    pub fn main() -> Dispatcher {
+        if let Some((inner, _)) = CURRENT.with(|c| c.borrow().last().cloned()) {
+            return Dispatcher(inner);
+        }
+        MAIN.with(|m| m.borrow().upgrade())
+            .map(Dispatcher)
+            .expect("kompoz: no main dispatcher here (made by a host on the UI thread)")
+    }
+
+    /// Makes it this thread's main dispatcher ([`main`](Self::main)) while it lives: a host's, as it is made.
+    pub fn make_main(&self) {
+        MAIN.with(|m| *m.borrow_mut() = Rc::downgrade(&self.0));
     }
 
     /// Calls `notify` (on the waking thread) whenever a coroutine is woken: the host asks for a frame.
@@ -427,6 +450,20 @@ impl Inner {
             return;
         }
         let waker = self.waker(index, generation);
+        // (a gate in its context holding it back: it waits there, its task kept, until the gate wakes it)
+        if let Some(gate) = job.context.get::<crate::context::DispatchGate>()
+            && !gate.may_run(&waker)
+        {
+            let mut slots = self.slots.borrow_mut();
+            let slot = &mut slots[index as usize];
+            if slot.generation == generation && slot.job.is_some() {
+                slot.task = Some(task);
+                return;
+            }
+            drop(slots);
+            drop(task);
+            return;
+        }
         let mut cx = Context::from_waker(&waker);
         CURRENT.with(|c| c.borrow_mut().push((self.clone(), job.clone())));
         job.running.set(true);
@@ -765,6 +802,12 @@ impl CoroutineScope {
     /// The same, its coroutines run with `context` (Kotlin's `CoroutineScope(context)`).
     pub fn new_with_context(dispatcher: &Dispatcher, context: CoroutineContext) -> CoroutineScope {
         CoroutineScope(ScopeState::new(&dispatcher.0, false, false, context))
+    }
+
+    /// A scope whose coroutines fail on their own (Kotlin's `CoroutineScope(SupervisorJob() + context)`: a
+    /// lifecycle's, a ViewModel's): one failing is reported and cancels none of the others.
+    pub fn new_supervisor(dispatcher: &Dispatcher, context: CoroutineContext) -> CoroutineScope {
+        CoroutineScope(ScopeState::new(&dispatcher.0, false, true, context))
     }
 
     /// What its coroutines run with.

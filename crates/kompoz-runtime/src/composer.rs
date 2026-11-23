@@ -8,7 +8,7 @@
 //! up among those left; whatever is left at the end has left the composition.
 
 use crate::context::{CompositionContext, ContextData, PausedComposition, Recomposer};
-use crate::read::observe_reads;
+use crate::read::{DerivedDependency, observe_reads};
 use crate::snapshot::{ObserverHandle, Snapshot, SnapshotApplyResult, StateKey};
 use parking_lot::Mutex;
 use std::any::Any;
@@ -129,6 +129,9 @@ impl<T> Slab<T> {
     }
     fn try_get(&self, i: u32) -> Option<&T> {
         self.items.get(i as usize).and_then(|x| x.as_ref())
+    }
+    fn try_get_mut(&mut self, i: u32) -> Option<&mut T> {
+        self.items.get_mut(i as usize).and_then(|x| x.as_mut())
     }
 }
 
@@ -276,7 +279,13 @@ struct Scope {
     on_invalidated: Option<Rc<dyn Fn()>>,
     /// States and composition locals read, each with its place among the key's readers.
     reads: Vec<(StateKey, u32)>,
+    /// The derived states it read (made in a composition: their values kept), with the version of the value it
+    /// read (Compose's `trackedDependencies`): a scope invalidated only by them runs again only if one changed.
+    tracked: Vec<(StateKey, Weak<dyn DerivedDependency>, u64)>,
     invalid: bool,
+    /// Invalid only if one of these derived states it read changed (Compose's conditional invalidation: an input
+    /// of theirs written while composing); `None` while it is invalid unconditionally (or valid).
+    invalid_for: Option<Vec<StateKey>>,
     /// Paused (or set) while content was being reused: run again in reuse, its old content's values forgotten
     /// and its nodes reused.
     reuse_on_restart: bool,
@@ -340,6 +349,11 @@ pub(crate) struct ComposerState {
     /// imminent invalidations, its `observationsProcessed`): invalidated at once, composed in the same pass after
     /// the write, so the applied change isn't taken again for them.
     imminent: Vec<(StateKey, ScopeId)>,
+    /// The derived states read here, by what they depend on, transitively (Compose's `derivedStates`): a write of
+    /// one of those while composing invalidates the derived state's readers further on conditionally.
+    derived_states: HashMap<StateKey, HashSet<StateKey>>,
+    /// What each derived state read here depended on when it was last read (to replace it in `derived_states`).
+    derived_dependencies: HashMap<StateKey, Vec<StateKey>>,
     pass: u64,
     frame_time: i64,
     stats: RecompositionStats,
@@ -448,6 +462,8 @@ impl Composer {
                     set_holders: Vec::new(),
                     derived_keys: HashSet::new(),
                     imminent: Vec::new(),
+                    derived_states: HashMap::new(),
+                    derived_dependencies: HashMap::new(),
                     pass: 0,
                     frame_time: 0,
                     stats: RecompositionStats::default(),
@@ -481,6 +497,8 @@ impl Composer {
     }
 
     pub(crate) fn record_read(&self, key: StateKey) {
+        // A derived state being read (one made in a composition).
+        let derived = crate::read::derived_being_read();
         let mut st = self.state.borrow_mut();
         let st = &mut *st;
         let Some(s) = st.current_scope else { return };
@@ -491,9 +509,97 @@ impl Composer {
         let readers = st.readers.entry(key).or_default();
         scope.reads.push((key, readers.scopes.len() as u32));
         readers.scopes.push(Some(s));
+        // Compose's recordReadOf of a DerivedState: the value read tracked by the scope, and what the derived state
+        // depends on mapped to it.
+        if let Some((derived, version)) = derived
+            && scope.group.is_some()
+        {
+            // (what the derived state depends on: its own cells, none of the composer's)
+            let dependencies = derived.upgrade().map(|d| d.dependency_keys()).unwrap_or_default();
+            let scope = st.scopes.get_mut(s.0);
+            scope.tracked.push((key, derived, version));
+            Self::remove_derived(st, key);
+            for dependency in &dependencies {
+                st.derived_states.entry(*dependency).or_default().insert(key);
+            }
+            st.derived_dependencies.insert(key, dependencies);
+        }
+    }
+
+    /// A derived state no longer read here: what it depended on no longer maps to it.
+    fn remove_derived(st: &mut ComposerState, key: StateKey) {
+        let Some(dependencies) = st.derived_dependencies.remove(&key) else { return };
+        for dependency in dependencies {
+            if let Some(set) = st.derived_states.get_mut(&dependency) {
+                set.remove(&key);
+                if set.is_empty() {
+                    st.derived_states.remove(&dependency);
+                }
+            }
+        }
+    }
+
+    /// Marks `s` invalid unconditionally (queued to run again).
+    fn mark_invalid(st: &mut ComposerState, s: ScopeId) {
+        let scope = st.scopes.get_mut(s.0);
+        scope.invalid_for = None;
+        if !scope.invalid {
+            scope.invalid = true;
+            st.invalid.push(s);
+        }
+    }
+
+    /// Marks `s` invalid if the derived state `derived` it read changed (Compose's invalidation with a
+    /// DerivedState instance): checked as it is about to run.
+    fn mark_invalid_for(st: &mut ComposerState, s: ScopeId, derived: StateKey) {
+        let scope = st.scopes.get_mut(s.0);
+        if !scope.invalid {
+            scope.invalid = true;
+            scope.invalid_for = Some(vec![derived]);
+            st.invalid.push(s);
+        } else if let Some(keys) = &mut scope.invalid_for
+            && !keys.contains(&derived)
+        {
+            keys.push(derived);
+        }
+    }
+
+    /// Whether `s`, invalid, is to run: invalid unconditionally, or one of the derived states it was invalidated
+    /// for changed since it read it (Compose's `isInvalidFor`). If not, it is valid again. The derived states are
+    /// brought up to date with nothing of the composer's borrowed (one that changed tells its readers).
+    fn still_invalid(&self, s: ScopeId) -> bool {
+        let tracked: Vec<(Option<Weak<dyn DerivedDependency>>, u64)> = {
+            let st = self.state.borrow();
+            let Some(scope) = st.scopes.try_get(s.0) else { return false };
+            if !scope.invalid {
+                return false;
+            }
+            let Some(keys) = &scope.invalid_for else { return true };
+            keys.iter()
+                .map(|k| match scope.tracked.iter().find(|t| t.0 == *k) {
+                    Some((_, derived, version)) => (Some(derived.clone()), *version),
+                    None => (None, 0),
+                })
+                .collect()
+        };
+        let changed = tracked.into_iter().any(|(derived, version)| {
+            derived.and_then(|d| d.upgrade()).is_none_or(|d| d.validated_version() != version)
+        });
+        let mut st = self.state.borrow_mut();
+        let Some(scope) = st.scopes.try_get_mut(s.0) else { return false };
+        if !scope.invalid {
+            return false;
+        }
+        if scope.invalid_for.is_none() || changed {
+            return true; // (invalidated unconditionally meanwhile: a derived state that changed told its readers)
+        }
+        scope.invalid = false;
+        scope.invalid_for = None;
+        false
     }
 
     fn clear_reads(st: &mut ComposerState, s: ScopeId) {
+        st.scopes.get_mut(s.0).tracked.clear(); // (weak handles: nothing of the app's runs)
         let reads = std::mem::take(&mut st.scopes.get_mut(s.0).reads);
         for (key, slot) in &reads {
             let Some(readers) = st.readers.get_mut(key) else { continue };
@@ -501,6 +607,7 @@ impl Composer {
             readers.holes += 1;
             if readers.holes as usize == readers.scopes.len() {
                 st.readers.remove(key);
+                Self::remove_derived(st, *key);
             } else if readers.holes > 16 && 2 * readers.holes as usize > readers.scopes.len() {
                 // Mostly holes: closed up.
                 readers.scopes.retain(|s| s.is_some());
@@ -525,11 +632,7 @@ impl Composer {
             if let Some(f) = &scope.on_invalidated {
                 Some(f.clone())
             } else {
-                let scope = st.scopes.get_mut(s.0);
-                if !scope.invalid {
-                    scope.invalid = true;
-                    st.invalid.push(s);
-                }
+                Self::mark_invalid(&mut st, s);
                 None
             }
         };
@@ -586,15 +689,34 @@ impl Composer {
     /// the composition hasn't reached yet are invalidated at once — composed later in this pass, seeing the value
     /// written (Compose's imminent invalidation: a scope further on in the composition) —; those it has (composed
     /// or skipped in this pass, running now, or before where it composes) are told when the pass's snapshot is
-    /// applied, and compose again in the next pass. A derived state's readers are told as it is (when applied).
+    /// applied, and compose again in the next pass. The readers further on of a derived state depending on it
+    /// (`derived_states`) are invalidated conditionally (Compose's `derivedStates.forEachScopeOf(value)`): as one
+    /// is about to run, it runs only if the derived value changed (`still_invalid`); the derived state's readers
+    /// behind are told as it changes (when it is next read, or as the pass is applied).
     fn record_write_of(&self, key: StateKey) {
         let mut st = self.state.borrow_mut();
         let st = &mut *st;
         if !st.composing {
             return;
         }
-        let Some(readers) = st.readers.get(&key) else { return };
-        let ahead: Vec<ScopeId> = readers
+        for s in Self::readers_ahead(st, key) {
+            Self::mark_invalid(st, s);
+            st.imminent.push((key, s));
+        }
+        let derived: Vec<StateKey> =
+            st.derived_states.get(&key).map(|d| d.iter().copied().collect()).unwrap_or_default();
+        for d in derived {
+            for s in Self::readers_ahead(st, d) {
+                Self::mark_invalid_for(st, s, d);
+                st.imminent.push((d, s));
+            }
+        }
+    }
+
+    /// The scopes that read `key` further on than where the composition composes now.
+    fn readers_ahead(st: &ComposerState, key: StateKey) -> Vec<ScopeId> {
+        let Some(readers) = st.readers.get(&key) else { return Vec::new() };
+        readers
             .scopes
             .iter()
             .flatten()
@@ -604,15 +726,7 @@ impl Composer {
                     scope.on_invalidated.is_none() && scope.group.is_some_and(|g| Self::is_ahead(st, g))
                 })
             })
-            .collect();
-        for s in ahead {
-            let scope = st.scopes.get_mut(s.0);
-            if !scope.invalid {
-                scope.invalid = true;
-                st.invalid.push(s);
-            }
-            st.imminent.push((key, s));
-        }
+            .collect()
     }
 
     /// Whether the group `g` is further on than where the composition composes now (Compose's `location >=
@@ -968,6 +1082,7 @@ impl Composer {
             st.timed_scopes.retain(|x| x.1 != s);
             let scope = st.scopes.get_mut(s.0);
             scope.invalid = false;
+            scope.invalid_for = None;
             let old = scope.args.take();
             st.garbage.push(Box::new(old));
         }
@@ -1145,11 +1260,21 @@ impl Composer {
         equals: Option<fn(&dyn Any, &dyn Any) -> bool>,
         body: Rc<dyn Fn(&dyn Any)>,
     ) {
-        let s = {
+        let existing = {
             let mut st = self.state.borrow_mut();
             let st = &mut *st;
             let g = Self::begin_group(st, key);
-            match st.groups.get(g.0).scope {
+            (g, st.groups.get(g.0).scope)
+        };
+        // Invalidated only by derived states it read: as valid as before unless one of them changed.
+        if let (_, Some(s)) = existing {
+            self.still_invalid(s);
+        }
+        let s = {
+            let mut st = self.state.borrow_mut();
+            let st = &mut *st;
+            let (g, scope) = existing;
+            match scope {
                 Some(s) => {
                     let scope = st.scopes.get(s.0);
                     if !scope.invalid
@@ -1171,7 +1296,9 @@ impl Composer {
                         args: Some(args),
                         on_invalidated: None,
                         reads: Vec::new(),
+                        tracked: Vec::new(),
                         invalid: false,
+                        invalid_for: None,
                         reuse_on_restart: false,
                     }));
                     st.groups.get_mut(g.0).scope = Some(s);
@@ -1188,7 +1315,8 @@ impl Composer {
             let mut st = self.state.borrow_mut();
             let reusing = st.reusing > 0;
             let scope = st.scopes.get_mut(s.0);
-            scope.invalid = true;
+            scope.invalid = true; // (queued by the next resume: `paused_scopes`)
+            scope.invalid_for = None;
             scope.reuse_on_restart |= reusing;
             st.paused_scopes.push(s);
             return;
@@ -1206,6 +1334,7 @@ impl Composer {
             st.timed_scopes.retain(|t| t.1 != s); // (asked again if still due)
             let scope = st.scopes.get_mut(s.0);
             scope.invalid = false;
+            scope.invalid_for = None;
             let (body, args, g) = (scope.body.clone(), scope.args.clone(), scope.group.expect("an observer run"));
             st.groups.get_mut(g.0).composed_in = st.pass; // (a restarted scope's: composed in this pass)
             Self::enter(st, g);
@@ -1268,7 +1397,9 @@ impl Composer {
             args: None,
             on_invalidated: Some(on_invalidated),
             reads: Vec::new(),
+            tracked: Vec::new(),
             invalid: false,
+            invalid_for: None,
             reuse_on_restart: false,
         }))
     }
@@ -1605,12 +1736,11 @@ impl Composer {
                         best.map(|i| st.invalid.remove(i))
                     };
                     let Some(s) = next else { break };
-                    let still = {
+                    let parked = {
                         let st = self.state.borrow();
-                        st.scopes
-                            .try_get(s.0)
-                            .is_some_and(|x| x.invalid && !x.group.is_some_and(|g| Self::in_parked(&st, g)))
+                        st.scopes.try_get(s.0).is_some_and(|x| x.group.is_some_and(|g| Self::in_parked(&st, g)))
                     };
+                    let still = !parked && self.still_invalid(s);
                     if still {
                         first = false;
                         self.restart(s);
@@ -1766,7 +1896,9 @@ impl Composition {
                     args: Some(Rc::new(())),
                     on_invalidated: None,
                     reads: Vec::new(),
+                    tracked: Vec::new(),
                     invalid: false,
+                    invalid_for: None,
                     reuse_on_restart: false,
                 }));
                 st.groups.get_mut(root.0).scope = Some(s);
@@ -1843,7 +1975,9 @@ impl Composition {
             if let Some(s) = st.groups.get(root.0).scope {
                 Composer::clear_reads(st, s);
                 st.invalid.retain(|x| *x != s);
-                st.scopes.get_mut(s.0).invalid = false;
+                let scope = st.scopes.get_mut(s.0);
+                scope.invalid = false;
+                scope.invalid_for = None;
             }
             st.invalid.clear();
             st.paused_scopes.clear();

@@ -22,6 +22,8 @@ kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 kompoz-kotlin-macro = { path = "../kompoz-kotlin-macro" }
+# (stage 13: lifecycles; navigation)
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
 # (WP4b: icons)
 kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
@@ -30,6 +32,7 @@ kompoz-material3 = { path = "../kompoz-material3" }
 # (WP8: adaptive)
 kompoz-material3-adaptive = { path = "../kompoz-material3-adaptive" }
 kompoz-material3-adaptive-navigation-suite = { path = "../kompoz-material3-adaptive-navigation-suite" }
+kompoz-navigation = { path = "../kompoz-navigation" }
 kompoz-platform = { path = "../kompoz-platform" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-test = { path = "../kompoz-test", optional = true }
@@ -276,4 +279,10 @@ harness = false
 # as a Compose user would; the adaptive-layout and navigation-suite samples from .kt files).
 [[test]]
 name = "kotlin_adaptive"
+harness = false
+
+# (stage 13 WP0) Lifecycles in Kotlin's syntax (the C++ Kompoz's KitchenForms; lifecycle-runtime-compose's samples
+# from a .kt file; the rest of the API as an app writes it).
+[[test]]
+name = "kotlin_lifecycle"
 harness = false

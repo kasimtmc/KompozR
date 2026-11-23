@@ -3,7 +3,8 @@
 //! saved state goes to its file and comes back, frames are paced on the display's beat, the platform's events
 //! reach the host as its input (in px: points and notches turned), KompozR's title bar frames the content while the
 //! platform reports one and what it asks reaches the platform, metrics are read once before input, and the
-//! kept frame reaches swapchain images of every age through only what changed (a swapchain faked over the device).
+//! kept frame reaches swapchain images of every age through only what changed (a swapchain faked over the device),
+//! the window's events move the app's lifecycle (CMP's and C++'s mapping) and dropping the core destroys it.
 //! One device-holding test after another on this thread; without a device they are skipped, unless
 //! `KOMPOZ_GPU_REQUIRED=1`.
 
@@ -15,6 +16,7 @@ use kompoz_gpu::device::{
     PipelineId, Sampler, Surface, Texture, TextureId, TextureUsage,
 };
 use kompoz_graphics::*;
+use kompoz_lifecycle::{LifecycleEvent, LifecycleObserver, LifecycleOwner, LifecycleState};
 use kompoz_platform::headless::{EventQueue, HeadlessPlatform, run_core};
 use kompoz_platform::{
     AppConfig, AppCore, Event, Metrics, MouseButton, Platform, TitleBar, WindowAction, WindowButton,
@@ -753,6 +755,41 @@ fn the_kept_frame_reaches_swapchain_images_of_every_age() {
 
 // ---------------------------------------------------------------------------------------------------------------
 
+/// The app's lifecycle follows the window, as CMP's ComposeContainer and C++'s `updateLifecycle` have it: resumed
+/// while focused, started while shown without the focus, created while minimized or hidden (whatever the focus);
+/// restored and shown again it goes back up; the core dropped (the host gone), it is destroyed — paused, stopped,
+/// destroyed, its observers told each step. A phone's background events don't move a desktop's.
+fn the_windows_events_move_the_apps_lifecycle() {
+    let mut core = started(TestPlatform::new(&[]), 100.0, 100.0, kompozable_lambda!(|| {}));
+    let state = |core: &AppCore<TestPlatform>| core.host().unwrap().lifecycle_owner().lifecycle().current_state();
+    let events = new_log();
+    let e = events.clone();
+    let observer: Rc<dyn LifecycleObserver> =
+        Rc::new(move |_: &dyn LifecycleOwner, event: LifecycleEvent| push(&e, event.name()));
+    core.host().unwrap().lifecycle_owner().lifecycle().add_observer(observer);
+    assert_eq!(state(&core), LifecycleState::Resumed);
+    assert_eq!(taken(&events), ["ON_CREATE", "ON_START", "ON_RESUME"]);
+    let steps = [
+        (Event::FocusLost, LifecycleState::Started),
+        (Event::Minimized, LifecycleState::Created),
+        (Event::FocusGained, LifecycleState::Created), // (minimized: focused or not)
+        (Event::Restored, LifecycleState::Resumed),
+        (Event::Hidden, LifecycleState::Created),
+        (Event::Maximized, LifecycleState::Created), // (still hidden)
+        (Event::Shown, LifecycleState::Resumed),
+        (Event::WillEnterBackground, LifecycleState::Resumed), // (a phone's)
+        (Event::DidEnterBackground, LifecycleState::Resumed),
+        (Event::FocusLost, LifecycleState::Started),
+    ];
+    for (event, expected) in steps {
+        core.handle(&event);
+        assert_eq!(state(&core), expected, "after {event:?}");
+    }
+    taken(&events);
+    drop(core);
+    assert_eq!(taken(&events), ["ON_STOP", "ON_DESTROY"]);
+}
+
 fn main() {
     kompoz_runtime::set_ui_thread();
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
@@ -772,6 +809,7 @@ fn main() {
         ("the_title_bar_frames_the_content_and_asks_the_window", the_title_bar_frames_the_content_and_asks_the_window),
         ("metrics_are_read_once_before_the_next_input_or_frame", metrics_are_read_once_before_the_next_input_or_frame),
         ("the_kept_frame_reaches_swapchain_images_of_every_age", the_kept_frame_reaches_swapchain_images_of_every_age),
+        ("the_windows_events_move_the_apps_lifecycle", the_windows_events_move_the_apps_lifecycle),
     ];
     let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
     let mut failed = 0;

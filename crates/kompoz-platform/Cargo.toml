@@ -13,6 +13,7 @@ workspace = true
 kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
