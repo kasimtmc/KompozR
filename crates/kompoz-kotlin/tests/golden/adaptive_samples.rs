@@ -95,7 +95,7 @@ pub fn Routes(start: impl ::core::convert::Into<::std::string::String>) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     let holder = remember_saveable_state_holder();
-    AnimatedContent(start.clone(), |this, route| {
+    AnimatedContent(start.clone(), |this, route: ::std::string::String| {
         let _ = &this;
         holder.SaveableStateProvider(&route.clone(), || {
             Text(route.clone());

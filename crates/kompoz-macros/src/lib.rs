@@ -544,8 +544,25 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
         let (gi, _, wc) = f.sig.generics.split_for_impl();
         let attrs = &docs;
         let ty = if own_type {
+            // (a generic type — `NavEntry<T>` made by `fn NavEntry<T>(…) -> NavEntry<T>` — hands it out from one of
+            // its instances, `NavEntry<()>`: `NavEntry::__kz_builder()` finds it, the builder's generics its own)
+            let type_args = match &f.sig.output {
+                ReturnType::Type(_, t) => match &**t {
+                    Type::Path(p) => p.path.segments.last().filter(|s| s.ident == name).map(|s| match &s.arguments {
+                        PathArguments::AngleBracketed(a) => {
+                            a.args.iter().filter(|g| matches!(g, GenericArgument::Type(_))).count()
+                        }
+                        _ => 0,
+                    }),
+                    _ => None,
+                },
+                _ => None,
+            }
+            .unwrap_or(0);
+            let units = (0..type_args).map(|_| quote!(()));
+            let instance = if type_args == 0 { quote!(#name) } else { quote!(#name<#(#units),*>) };
             quote! {
-                impl #name {
+                impl #instance {
                     #[doc(hidden)]
                     #vis fn __kz_builder #new_generics () -> #new_type { #new_fn() }
                 }

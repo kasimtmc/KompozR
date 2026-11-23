@@ -153,7 +153,11 @@ impl Gen<'_, '_> {
         let written_inputs: Vec<Option<TokenStream>> = info
             .inputs
             .iter()
-            .map(|t| if info.typed { self.written_type(&self.bind_type_arg(t, span), span) } else { None })
+            .map(|t| {
+                // (a parameter of the reified type argument the call gives: `entry<Profile> { … }`'s `K`)
+                let reified = self.type_arg.is_some() && t.trim() == self.type_param && self.type_param != "T";
+                if info.typed || reified { self.written_type(&self.bind_type_arg(t, span), span) } else { None }
+            })
             .collect();
         let typed = |k: usize| -> TokenStream {
             match written_inputs.get(k).cloned().flatten() {
@@ -245,6 +249,15 @@ impl Gen<'_, '_> {
                     let annot = match &p.ty {
                         // (where the callee's parameter says what it takes, Rust's type is that one, whatever Kotlin
                         // names: `measurable: Measurable` is a `&dyn Measurable` there)
+                        // (unless it isn't written — a generic parameter's, `T` —: Kotlin's, by value, as it names it,
+                        // `{ key: NavKey -> … }` an `Rc<dyn NavKey>`)
+                        Some(t)
+                            if typed(first_input + k).is_empty()
+                                && info.inputs.get(first_input + k).is_some_and(|i| !i.trim().starts_with('&')) =>
+                        {
+                            let rt = self.rust_type(t, super::types::TypePos::Value);
+                            quote_spanned!(span=> : #rt)
+                        }
                         Some(_) if info.inputs.get(first_input + k).is_some() => typed(first_input + k),
                         Some(t) => {
                             let rt = self.rust_type(t, super::types::TypePos::Value);
@@ -501,7 +514,7 @@ impl Gen<'_, '_> {
                 _ => {}
             }
         }
-        if bare == "T"
+        if bare == self.type_param
             && let Some(t) = &self.type_arg
         {
             return t.clone();

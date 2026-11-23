@@ -112,8 +112,12 @@ pub(crate) fn derive(input: DeriveInput, rt: Ts) -> Result<Ts> {
             return Err(Error::new(u.union_token.span(), "kompoz: `#[derive(Saveable)]` is for a struct or an enum"));
         }
     };
+    let descriptor = descriptor_code(&rt, &input.data)?;
     Ok(quote! {
         impl #impl_g #rt::Saveable for #name #ty_g #where_g {
+            fn descriptor() -> #rt::SerialDescriptor {
+                #descriptor
+            }
             fn save(&self) -> #rt::SavedValue {
                 #save
             }
@@ -122,6 +126,42 @@ pub(crate) fn derive(input: DeriveInput, rt: Ts) -> Result<Ts> {
                 #restore
             }
         }
+    })
+}
+
+/// What the type is made of (kotlinx's generated `descriptor`): a struct with named fields a class of its fields (a
+/// field with a default optional, a skipped one left out), a unit struct an object, an enum of unit variants an enum
+/// of their names; a tuple struct or an enum with data a value of its own kind (contextual: read as it is saved).
+fn descriptor_code(rt: &Ts, data: &Data) -> Result<Ts> {
+    let serial_name = quote!(::core::any::type_name::<Self>());
+    Ok(match data {
+        Data::Struct(s) => match &s.fields {
+            Fields::Named(named) => {
+                let mut elements = Vec::new();
+                for f in &named.named {
+                    let o = options(&f.attrs)?;
+                    if o.skip {
+                        continue;
+                    }
+                    let id = f.ident.as_ref().expect("a named field");
+                    let key = o.name.clone().unwrap_or_else(|| id.to_string().trim_start_matches("r#").to_string());
+                    let (ty, optional) = (&f.ty, o.default);
+                    elements.push(quote!(#rt::SerialElement::of::<#ty>(#key, #optional)));
+                }
+                quote!(#rt::SerialDescriptor::class(#serial_name, ::std::vec![#(#elements),*]))
+            }
+            Fields::Unit => quote!(#rt::SerialDescriptor::class(#serial_name, ::std::vec::Vec::new())),
+            Fields::Unnamed(_) => quote!(#rt::SerialDescriptor::new(#serial_name, #rt::SerialKind::Contextual)),
+        },
+        Data::Enum(e) if e.variants.iter().all(|v| matches!(v.fields, Fields::Unit)) => {
+            let mut names = Vec::new();
+            for v in &e.variants {
+                let o = options(&v.attrs)?;
+                names.push(o.name.unwrap_or_else(|| v.ident.to_string()));
+            }
+            quote!(#rt::SerialDescriptor::enumeration(#serial_name, &[#(#names),*]))
+        }
+        _ => quote!(#rt::SerialDescriptor::new(#serial_name, #rt::SerialKind::Contextual)),
     })
 }
 

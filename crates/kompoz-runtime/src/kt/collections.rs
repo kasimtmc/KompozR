@@ -1944,12 +1944,24 @@ pub trait KtMutableList: KtIterable {
     fn remove_first(&mut self) -> Self::Item;
     /// Kotlin: `removeLast(): E`
     fn remove_last(&mut self) -> Self::Item;
+    /// Its first element removed, none if it is empty.
+    /// Kotlin: `removeFirstOrNull(): E?`
+    fn remove_first_or_null(&mut self) -> Option<Self::Item>;
+    /// Its last element removed, none if it is empty.
+    /// Kotlin: `removeLastOrNull(): E?`
+    fn remove_last_or_null(&mut self) -> Option<Self::Item>;
     /// Reverses its elements in place (a `Vec`'s own `reverse` does the same where it is called as a method).
     /// Kotlin: `reverse()`
     fn reverse(&mut self);
 }
 
 impl<T: Clone> KtMutableList for Vec<T> {
+    fn remove_first_or_null(&mut self) -> Option<T> {
+        (!self.is_empty()).then(|| self.remove(0))
+    }
+    fn remove_last_or_null(&mut self) -> Option<T> {
+        self.pop()
+    }
     fn add(&mut self, element: T) -> bool {
         self.push(element);
         true
@@ -2060,6 +2072,17 @@ impl<T: Clone + 'static> SnapshotStateList<T> {
     /// Kotlin: `removeIf(filter: (E) -> Boolean): Boolean`
     pub fn remove_if(&self, filter: impl FnMut(T) -> bool) -> bool {
         self.remove_all(filter)
+    }
+    /// Its last element removed (one change of the list), none if it is empty.
+    /// Kotlin: `removeLastOrNull(): E?`
+    pub fn remove_last_or_null(&self) -> Option<T> {
+        let n = self.len();
+        (n > 0).then(|| self.remove_at(n - 1))
+    }
+    /// Its first element removed, none if it is empty.
+    /// Kotlin: `removeFirstOrNull(): E?`
+    pub fn remove_first_or_null(&self) -> Option<T> {
+        (!self.is_empty()).then(|| self.remove_at(0))
     }
     /// Kotlin: `retainAll(predicate: (E) -> Boolean): Boolean`
     pub fn retain_all(&self, mut predicate: impl FnMut(T) -> bool) -> bool {

@@ -1,0 +1,34 @@
+[package]
+name = "kompoz-navigation3"
+description = "KompozR's Navigation 3 (navigation3-runtime 1.2 and navigation3-ui 1.2, lifecycle-viewmodel-navigation3 2.11): NavKey, NavEntry, the entryProvider DSL, NavBackStack and rememberNavBackStack, entry decorators, deep links, results; scenes, scene strategies, overlays and dialogs, NavDisplay with its transitions and predictive back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-animation = { path = "../kompoz-animation" }
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-lifecycle = { path = "../kompoz-lifecycle" }
+kompoz-navigationevent = { path = "../kompoz-navigationevent" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+# (NavDisplay composed in a test rule's host: its lifecycle owner, its navigation event dispatcher, its dialogs)
+kompoz-test = { path = "../kompoz-test" }
+
+# Navigation 3's runtime and ui: Compose's behaviour tests and its samples, in Rust.
+[[test]]
+name = "navigation3"
+harness = false
+
+# Deep links (navigation3-runtime deeplink): Compose's behaviour and its deep link samples, in Rust.
+[[test]]
+name = "deeplink"
+harness = false

@@ -33,6 +33,8 @@ kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-material3-adaptive = { path = "../kompoz-material3-adaptive" }
 kompoz-material3-adaptive-navigation-suite = { path = "../kompoz-material3-adaptive-navigation-suite" }
 kompoz-navigation = { path = "../kompoz-navigation" }
+# (stage 13 WP4: Navigation 3)
+kompoz-navigation3 = { path = "../kompoz-navigation3" }
 kompoz-navigationevent = { path = "../kompoz-navigationevent" }
 kompoz-platform = { path = "../kompoz-platform" }
 # (stage 13 WP-R: resources; Coil's AsyncImage)
@@ -317,4 +319,10 @@ harness = false
 # (stage 13 WP3) The NavHost in Kotlin's syntax: the C++ Navigator and AppShellForms, navigation-compose's samples.
 [[test]]
 name = "kotlin_nav_host"
+harness = false
+
+# (stage 13 WP4) Navigation 3 in Kotlin's syntax: navigation3-ui's and navigation3-runtime's samples from a .kt file
+# (NavDisplay, entryProvider, rememberNavBackStack, scenes and strategies, decorators).
+[[test]]
+name = "kotlin_navigation3"
 harness = false

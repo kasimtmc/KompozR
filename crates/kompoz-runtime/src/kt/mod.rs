@@ -48,6 +48,8 @@ pub mod random;
 pub mod range;
 // (stage 13: navigation's typeMap keys) kotlin.reflect's typeOf
 pub mod reflect;
+// (WP4: Navigation 3's deep links) Kotlin's Regex, Java's syntax.
+pub mod regex;
 pub mod result;
 pub mod string;
 pub mod text;
@@ -83,6 +85,7 @@ pub use range::{
     eq_nullable, is_in, range_to, step, to_closed_range, until,
 };
 pub use reflect::{KType, type_of};
+pub use regex::{KtToRegex, MatchGroup, MatchGroupCollection, MatchResult, Regex, RegexOption};
 pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};
 pub use text::{KtDisplay, KtToString, to_string};
@@ -102,6 +105,7 @@ pub mod ext {
     pub use super::math::{KtFloat as _, KtNumber as _};
     pub use super::null::KtScope as _;
     pub use super::random::KtShuffle as _;
+    pub use super::regex::KtToRegex as _;
     pub use super::result::KtResult as _;
     pub use super::string::{KtChar as _, KtNullableStr as _, KtStr as _};
     pub use super::text::KtToString as _;

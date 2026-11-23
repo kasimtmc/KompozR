@@ -65,8 +65,9 @@ pub fn Collections(log: impl ::core::ops::Fn(i32) + 'static) {
         ::kompoz::runtime::kt::list_of([::kompoz::runtime::kt::KtNumber::to_float(it)])
     });
     log(::kompoz::runtime::kt::KtNumber::to_int(::kompoz::runtime::kt::KtList::last(&flat)));
-    let sum =
-        ::kompoz::runtime::kt::KtList::fold(&::kompoz::runtime::kt::list_of([1, 2]), 0_f32, |acc, x| acc.clone() + x);
+    let sum = ::kompoz::runtime::kt::KtList::fold(&::kompoz::runtime::kt::list_of([1, 2]), 0_f32, |acc: f32, x| {
+        acc + (x as f32)
+    });
     log(::kompoz::runtime::kt::KtNumber::to_int(sum));
     let mut by_key = ::kompoz::runtime::kt::KtList::associate_with(&::kompoz::runtime::kt::list_of([1, 2]), |it| {
         ::kompoz::runtime::kt::KtNumber::to_double(it)

@@ -256,6 +256,149 @@ pub trait Saveable: Sized {
     fn save(&self) -> SavedValue;
     /// `None` if it can't: then the value is made anew.
     fn restore(saved: &SavedValue) -> Option<Self>;
+    /// What it is made of (kotlinx.serialization's `descriptor` of a serializer): what reads a value of it from
+    /// something else than its saved value needs (Navigation 3's deep link decoder: a key from a link's arguments).
+    /// By default a value of its own kind ([`SerialKind::Contextual`]): its saved value read as it is.
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor::new(std::any::type_name::<Self>(), SerialKind::Contextual)
+    }
+}
+
+/// What kind of value a [`SerialDescriptor`] describes (kotlinx.serialization's `SerialKind`: `PrimitiveKind`,
+/// `StructureKind`, `SerialKind.ENUM` and `CONTEXTUAL`; `PolymorphicKind`'s are [`Contextual`](Self::Contextual)
+/// here, a saved value of its own), and how it is saved: a primitive as its [`SavedValue`]; a class as a map of its
+/// elements by name, an object as an empty map; a list as a list; an enum as its entry's index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SerialKind {
+    Boolean,
+    Byte,
+    Short,
+    Int,
+    Long,
+    Float,
+    Double,
+    Char,
+    String,
+    /// Its entries are its elements (their names).
+    Enum,
+    /// Its fields are its elements.
+    Class,
+    /// A class without fields (Kotlin's `object`).
+    Object,
+    /// Its one element is its items'.
+    List,
+    /// Its two elements are its keys' and values'.
+    Map,
+    /// A value read and written as its type says (Kotlin's contextual and polymorphic serializers).
+    Contextual,
+}
+
+impl SerialKind {
+    /// Whether it is a primitive (kotlinx's `PrimitiveKind`).
+    pub fn is_primitive(self) -> bool {
+        matches!(
+            self,
+            SerialKind::Boolean
+                | SerialKind::Byte
+                | SerialKind::Short
+                | SerialKind::Int
+                | SerialKind::Long
+                | SerialKind::Float
+                | SerialKind::Double
+                | SerialKind::Char
+                | SerialKind::String
+        )
+    }
+}
+
+/// An element of a [`SerialDescriptor`]: a class's field, an enum's entry, a list's items.
+#[derive(Clone, Debug)]
+pub struct SerialElement {
+    /// Its name (a field's, `#[saveable(name = …)]`'s; an entry's; `"0"` for a list's items).
+    pub name: String,
+    /// Whether it may be left out, its default taken (kotlinx's `isElementOptional`).
+    pub optional: bool,
+    /// What it is (a function: descriptors of recursive types are made when asked).
+    pub descriptor: fn() -> SerialDescriptor,
+}
+
+impl SerialElement {
+    /// An element named `name` of `T`'s descriptor.
+    pub fn of<T: Saveable>(name: impl Into<String>, optional: bool) -> SerialElement {
+        SerialElement { name: name.into(), optional, descriptor: T::descriptor }
+    }
+}
+
+impl PartialEq for SerialElement {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.optional == other.optional
+    }
+}
+
+/// What a [`Saveable`] type is made of (kotlinx.serialization's `SerialDescriptor`): its serial name, its kind,
+/// whether it may be null (an `Option`'s) and its elements.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SerialDescriptor {
+    pub serial_name: String,
+    pub kind: SerialKind,
+    /// Whether its values may be null (Kotlin's `isNullable`: an `Option<T>`'s descriptor is `T`'s, nullable).
+    pub nullable: bool,
+    pub elements: Vec<SerialElement>,
+}
+
+impl SerialDescriptor {
+    /// One of `kind`, without elements.
+    pub fn new(serial_name: impl Into<String>, kind: SerialKind) -> SerialDescriptor {
+        SerialDescriptor { serial_name: serial_name.into(), kind, nullable: false, elements: Vec::new() }
+    }
+
+    /// A class of these fields; without fields, an object.
+    pub fn class(serial_name: impl Into<String>, fields: Vec<SerialElement>) -> SerialDescriptor {
+        let kind = if fields.is_empty() { SerialKind::Object } else { SerialKind::Class };
+        SerialDescriptor { serial_name: serial_name.into(), kind, nullable: false, elements: fields }
+    }
+
+    /// An enum of these entries.
+    pub fn enumeration(serial_name: impl Into<String>, entries: &[&str]) -> SerialDescriptor {
+        fn unit() -> SerialDescriptor {
+            SerialDescriptor::new("", SerialKind::Object)
+        }
+        SerialDescriptor {
+            serial_name: serial_name.into(),
+            kind: SerialKind::Enum,
+            nullable: false,
+            elements: entries
+                .iter()
+                .map(|e| SerialElement { name: e.to_string(), optional: false, descriptor: unit })
+                .collect(),
+        }
+    }
+
+    /// The same, nullable (kotlinx's `.nullable`).
+    pub fn nullable(mut self) -> SerialDescriptor {
+        self.nullable = true;
+        self
+    }
+
+    /// Element `index`'s name (kotlinx's `getElementName`).
+    pub fn element_name(&self, index: usize) -> &str {
+        &self.elements[index].name
+    }
+
+    /// Element `index`'s descriptor (kotlinx's `getElementDescriptor`).
+    pub fn element_descriptor(&self, index: usize) -> SerialDescriptor {
+        (self.elements[index].descriptor)()
+    }
+
+    /// Whether element `index` may be left out (kotlinx's `isElementOptional`).
+    pub fn is_element_optional(&self, index: usize) -> bool {
+        self.elements[index].optional
+    }
+
+    /// The index of the element named `name` (kotlinx's `getElementIndex`; `None`: `UNKNOWN_NAME`).
+    pub fn element_index(&self, name: &str) -> Option<usize> {
+        self.elements.iter().position(|e| e.name == name)
+    }
 }
 
 /// A saved value is saved as itself (a value of any saveable kind: Kotlin's `Any` "storable in a Bundle").
@@ -270,6 +413,9 @@ impl Saveable for SavedValue {
 }
 
 impl Saveable for bool {
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor::new("kotlin.Boolean", SerialKind::Boolean)
+    }
     fn save(&self) -> SavedValue {
         SavedValue::Bool(*self)
     }
@@ -279,8 +425,11 @@ impl Saveable for bool {
 }
 
 macro_rules! saveable_ints {
-    ($($t:ty)*) => {$(
+    ($($t:ty => $name:literal $kind:ident)*) => {$(
         impl Saveable for $t {
+            fn descriptor() -> SerialDescriptor {
+                SerialDescriptor::new($name, SerialKind::$kind)
+            }
             fn save(&self) -> SavedValue {
                 SavedValue::Int(*self as i64)
             }
@@ -290,9 +439,23 @@ macro_rules! saveable_ints {
         }
     )*};
 }
-saveable_ints!(i8 i16 i32 i64 isize u8 u16 u32 u64 usize);
+saveable_ints!(
+    i8 => "kotlin.Byte" Byte
+    i16 => "kotlin.Short" Short
+    i32 => "kotlin.Int" Int
+    i64 => "kotlin.Long" Long
+    isize => "kotlin.Long" Long
+    u8 => "kotlin.UByte" Short
+    u16 => "kotlin.UShort" Int
+    u32 => "kotlin.UInt" Long
+    u64 => "kotlin.ULong" Long
+    usize => "kotlin.ULong" Long
+);
 
 impl Saveable for f32 {
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor::new("kotlin.Float", SerialKind::Float)
+    }
     fn save(&self) -> SavedValue {
         SavedValue::Double(*self as f64)
     }
@@ -301,6 +464,9 @@ impl Saveable for f32 {
     }
 }
 impl Saveable for f64 {
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor::new("kotlin.Double", SerialKind::Double)
+    }
     fn save(&self) -> SavedValue {
         SavedValue::Double(*self)
     }
@@ -308,7 +474,25 @@ impl Saveable for f64 {
         saved.as_f64()
     }
 }
+/// A character as a text of it (what a `Bundle` keeps of a `Char`, its own kind).
+impl Saveable for char {
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor::new("kotlin.Char", SerialKind::Char)
+    }
+    fn save(&self) -> SavedValue {
+        SavedValue::String(self.to_string())
+    }
+    fn restore(saved: &SavedValue) -> Option<Self> {
+        let mut chars = saved.as_str()?.chars();
+        let c = chars.next()?;
+        chars.next().is_none().then_some(c)
+    }
+}
+
 impl Saveable for String {
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor::new("kotlin.String", SerialKind::String)
+    }
     fn save(&self) -> SavedValue {
         SavedValue::String(self.clone())
     }
@@ -317,6 +501,14 @@ impl Saveable for String {
     }
 }
 impl<T: Saveable> Saveable for Vec<T> {
+    fn descriptor() -> SerialDescriptor {
+        SerialDescriptor {
+            serial_name: "kotlin.collections.ArrayList".into(),
+            kind: SerialKind::List,
+            nullable: false,
+            elements: vec![SerialElement::of::<T>("0", false)],
+        }
+    }
     fn save(&self) -> SavedValue {
         SavedValue::list(self.iter().map(T::save))
     }
@@ -325,6 +517,9 @@ impl<T: Saveable> Saveable for Vec<T> {
     }
 }
 impl<T: Saveable> Saveable for Option<T> {
+    fn descriptor() -> SerialDescriptor {
+        T::descriptor().nullable()
+    }
     fn save(&self) -> SavedValue {
         SavedValue::list(self.iter().map(T::save))
     }

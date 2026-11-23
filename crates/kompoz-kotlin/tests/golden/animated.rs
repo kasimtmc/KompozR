@@ -41,7 +41,7 @@ pub fn Visibilities(open: bool, count: i32) {
                 }
             },
             label = ::std::string::String::from("count"),
-            content = |this, n| {
+            content = |this, n: i32| {
                 Text(
                     ::kompoz::runtime::kt::template!("sayı ", n),
                     modifier = this.animate_enter_exit(Modifier, enter = fade_in()),
@@ -115,12 +115,12 @@ pub fn Contents(page: i32) {
         content_key = ::core::option::Option::Some({
             let __kz_f2: ::std::rc::Rc<dyn ::core::ops::Fn(&i32) -> SlotKey> = ::std::rc::Rc::new(move |it: &i32| {
                 let it = ::core::clone::Clone::clone(it);
-                ::kompoz::ui::layout::SlotKey::new(it.clone() / 2)
+                ::kompoz::ui::layout::SlotKey::new(it / 2)
             });
             __kz_f2
         }),
-        content = |this, p| {
-            Pane(::core::convert::Into::into(this.clone()), p.clone());
+        content = |this, p: i32| {
+            Pane(::core::convert::Into::into(this.clone()), p);
         },
     );
 }

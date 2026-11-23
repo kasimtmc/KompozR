@@ -123,11 +123,12 @@ pub fn Collections(anim: Animatable<f32, AnimationVector1D>, log: impl ::core::o
             load(it).await > 3
         })
         .await;
-        let sum =
-            ::kompoz::runtime::kt::KtList::fold_async(&::kompoz::runtime::kt::list_of([1, 2]), 0, async |acc, x| {
-                acc.clone() + load(x).await
-            })
-            .await;
+        let sum = ::kompoz::runtime::kt::KtList::fold_async(
+            &::kompoz::runtime::kt::list_of([1, 2]),
+            0,
+            async |acc: i32, x| acc + load(x).await,
+        )
+        .await;
         let mut chars = ::kompoz::runtime::kt::KtStr::map_async(&"ab", async |it| {
             delay(1).await;
             ::kompoz::runtime::kt::KtChar::uppercase_char(it)

@@ -180,6 +180,10 @@ pub(crate) struct Gen<'a, 'd> {
     /// The element type the next `listOf(…)` written is to have (a declared type's, an outer list's: Kotlin's
     /// inference of a nested list's elements).
     pub expected_elem: Option<Ty>,
+    /// The shared trait object (Rust's type text, `Rc<dyn SceneStrategy<T>>`) the elements of the next `listOf(…)`
+    /// written are to be held as: a parameter's `List<SceneStrategy<T>>` given `listOf(DialogSceneStrategy())`,
+    /// Kotlin's values of an interface.
+    pub shared_elem: Option<String>,
     /// The value type (Rust's, Kotlin's) the next `mutableStateOf(…)` written holds: its type argument, or the declared
     /// type of the `var` delegated to it (`var job: Job? by remember { mutableStateOf(null) }`) — what
     /// `mutable_state_of!` reads to choose a thread-safe or a confined state.
@@ -187,6 +191,8 @@ pub(crate) struct Gen<'a, 'd> {
     /// The type arguments of the calls being written, innermost last (`toRoute<Detail>()`): a callee that takes them
     /// only as a turbofish ([`crate::index::flags::TURBOFISH`]) is called with them.
     pub call_type_args: Vec<Vec<TokenStream>>,
+    /// The same type arguments as the generator's types (a reified `entry<Profile> { … }`'s lambda typed by them).
+    pub call_type_tys: Vec<Vec<Ty>>,
     counter: usize,
 }
 
@@ -218,8 +224,10 @@ impl<'a, 'd> Gen<'a, 'd> {
             peek_scopes: Default::default(),
             peek_receivers: Default::default(),
             expected_elem: None,
+            shared_elem: None,
             state_value: None,
             call_type_args: Vec::new(),
+            call_type_tys: Vec::new(),
             counter: 0,
         }
     }

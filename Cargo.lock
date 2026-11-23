@@ -531,6 +531,7 @@ dependencies = [
  "kompoz-material3-adaptive",
  "kompoz-material3-adaptive-navigation-suite",
  "kompoz-navigation",
+ "kompoz-navigation3",
  "kompoz-navigationevent",
  "kompoz-platform",
  "kompoz-resources",
@@ -766,6 +767,21 @@ dependencies = [
  "kompoz-graphics",
  "kompoz-lifecycle",
  "kompoz-macros",
+ "kompoz-navigationevent",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-ui",
+]
+
+[[package]]
+name = "kompoz-navigation3"
+version = "0.1.0"
+dependencies = [
+ "kompoz-animation",
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-lifecycle",
  "kompoz-navigationevent",
  "kompoz-runtime",
  "kompoz-test",

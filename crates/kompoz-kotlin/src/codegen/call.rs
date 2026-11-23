@@ -151,6 +151,14 @@ impl Gen<'_, '_> {
             })
             .collect();
         self.call_type_args.push(turbofish);
+        let tys: Vec<Ty> = type_args
+            .iter()
+            .map(|a| match a {
+                TypeArg::Type { ty, .. } => self.ty_of(ty),
+                TypeArg::Star(_) => Ty::Unknown,
+            })
+            .collect();
+        self.call_type_tys.push(tys);
         let out = match &callee.kind {
             ExprKind::Name(n) => self.name_call(n, &list, e.loc),
             ExprKind::Member { receiver, safe, name } => self.member_call(receiver, *safe, name, &list, e.loc),
@@ -161,6 +169,7 @@ impl Gen<'_, '_> {
             }
         };
         self.call_type_args.pop();
+        self.call_type_tys.pop();
         // (what a generic callee gives, told by its arguments — `remember { Animatable(0f) }`, `with(x) { … }`,
         // `x.run { … }` —: as inference reads the call)
         let out = if out.ty == Ty::Unknown { Out { ty: self.peek_ty(e), ..out } } else { out };
@@ -290,6 +299,13 @@ impl Gen<'_, '_> {
                         let from = self.peek_ty(e);
                         let v = self.value(e);
                         self.kotlin_number(v, &from, to, span)
+                    }
+                    // (an interface's value — `navigateTo: (NavKey) -> Unit` given `Dashboard()` —: the shared trait
+                    // object Rust holds it as)
+                    (ArgValue::Expr(_), Some(Ty::Named(t, targs))) if targs.is_empty() && trait_object(t).is_some() => {
+                        let ptr = trait_object(t).expect("a trait");
+                        let v = self.loose_arg(a);
+                        self.shared_value(v, a, Some(&format!("{ptr}<dyn {t}>")), span)
                     }
                     // (its lambda labeled with its name: `return@f`)
                     _ => self.with_label(&n.name, |me| me.loose_arg(a)),
@@ -1334,6 +1350,21 @@ impl Gen<'_, '_> {
         let bound = mapped.and_then(|m| {
             self.collection_type_arg(c, &m).map(|t| ("T".to_string(), t)).or_else(|| self.direct_type_arg(c, &m))
         });
+        // (a reified type argument a lambda's parameter is of — `entry<Profile> { key -> … }`, its `K` —: the lambda's
+        // parameter typed by it)
+        let bound = bound.or_else(|| {
+            let [t] = self.call_type_tys.last()?.as_slice() else { return None };
+            if *t == Ty::Unknown {
+                return None;
+            }
+            let lambda_inputs = c.params.iter().filter_map(|p| p.lambda.as_ref()).flat_map(|l| l.inputs.iter());
+            let names: Vec<String> =
+                lambda_inputs.map(|i| i.trim().to_string()).filter(|i| is_type_parameter(i)).collect();
+            match names.as_slice() {
+                [n, rest @ ..] if rest.iter().all(|r| r == n) => Some((n.clone(), t.clone())),
+                _ => None,
+            }
+        });
         let (name, bound) = match bound {
             Some((name, t)) => (name, Some(t)),
             None => ("T".to_string(), None),
@@ -1717,6 +1748,42 @@ impl Gen<'_, '_> {
         out
     }
 
+    /// `v` (argument `a`'s value) as the shared trait object `shared` names, if it is one of a concrete type.
+    fn shared_value(&mut self, v: TokenStream, a: &ArgRef, shared: Option<&str>, span: Span) -> TokenStream {
+        let Some(shared) = shared else { return v };
+        let concrete = match a.value {
+            ArgValue::Expr(e) => match self.peek_ty(e) {
+                Ty::Named(n, _) => !matches!(n.as_str(), "Arc" | "Rc" | "Box") && trait_object(&n).is_none(),
+                // (of a type the index doesn't know — a Kotlin class's Rust twin —: an object's name or a
+                // constructor's call, `Home`, `Detail(42)`, is one of its values)
+                Ty::Unknown => match &e.kind {
+                    ExprKind::Name(n) => is_pascal(&n.name),
+                    ExprKind::Call { callee, .. } => matches!(&callee.kind, ExprKind::Name(n) if is_pascal(&n.name)),
+                    _ => false,
+                },
+                _ => false,
+            },
+            _ => false,
+        };
+        if !concrete {
+            return v;
+        }
+        let Some(ty) = self.written_type(shared, span) else { return v };
+        // (made a shared pointer already — a parameter of the trait's object given it —: only coerced)
+        let text = v.to_string().replace(' ', "");
+        if text.starts_with("::std::rc::Rc::new(") || text.starts_with("::std::sync::Arc::new(") {
+            let f = self.fresh("shared", span);
+            return quote_spanned!(span=> { let #f: #ty = #v; #f });
+        }
+        let made = if plain_type_text(shared).starts_with("Arc") {
+            quote_spanned!(span=> ::std::sync::Arc::new(#v))
+        } else {
+            quote_spanned!(span=> ::std::rc::Rc::new(#v))
+        };
+        let f = self.fresh("shared", span);
+        quote_spanned!(span=> { let #f: #ty = #made; #f })
+    }
+
     /// Several arguments to one parameter: a vararg's array (`[a, b]`, `&[a, b]` for a slice), keys' tuple.
     fn many_value(&mut self, all: &[&ArgRef], p: &PInfo, span: Span) -> TokenStream {
         if is_keys(p) {
@@ -1732,8 +1799,17 @@ impl Gen<'_, '_> {
             Some("listOf" | "mutableListOf" | "arrayListOf" | "setOf" | "mutableSetOf")
         );
         let expected = self.expected_elem.take();
+        // (Kotlin's values of an interface — a vararg's `NavKey`s, a list's `SceneStrategy`s —: each concrete one made the
+        // shared trait object Rust holds them as)
+        let shared = if collection { self.shared_elem.take() } else { shared_object(&el.ty) };
         if !collection {
-            let vals: Vec<TokenStream> = all.iter().map(|a| self.arg_value(a, Some(&el), false)).collect();
+            let vals: Vec<TokenStream> = all
+                .iter()
+                .map(|a| {
+                    let v = self.arg_value(a, Some(&el), false);
+                    self.shared_value(v, a, shared.as_deref(), span)
+                })
+                .collect();
             return if p.ty.trim_start().starts_with("&[") {
                 quote_spanned!(span=> &[#(#vals),*])
             } else {
@@ -1772,6 +1848,7 @@ impl Gen<'_, '_> {
                 }
                 _ => v,
             };
+            let v = self.shared_value(v, a, shared.as_deref(), span);
             vals.push(v);
         }
         if p.ty.trim_start().starts_with("&[") {
@@ -2001,7 +2078,21 @@ impl Gen<'_, '_> {
         {
             return self.value_want(e, Want { str_ok: p.takes_str(), any: None, some: true, shared: None });
         }
+        // (a list of an interface's values given `listOf(…)`: its elements held as the trait objects)
+        if list_of_call(e).is_some() {
+            let t = plain_type_text(&p.ty);
+            let t = t.strip_prefix("Option<").unwrap_or(&t);
+            if let Some(elem) = t.strip_prefix("Vec<").and_then(|r| r.strip_suffix('>'))
+                && shared_object(elem).is_some()
+            {
+                let elem = p.ty.trim();
+                let elem = elem.strip_prefix("Option<").and_then(|r| r.strip_suffix('>')).unwrap_or(elem);
+                let elem = elem.trim().strip_prefix("Vec<").and_then(|r| r.strip_suffix('>')).unwrap_or(elem);
+                self.shared_elem = Some(elem.trim().to_string());
+            }
+        }
         let o = self.expr(e);
+        self.shared_elem = None;
         // (a `&mut` held — a receiver lambda's `this` lent mutably — given to a `&mut` parameter: reborrowed,
         // `drawStopIndicator(drawScope = this, …)`)
         if o.kind == OutKind::RefMut && plain_type_text(&p.ty).starts_with("&mut") {
@@ -2321,6 +2412,12 @@ fn without_lifetimes(t: &str) -> String {
 /// The element type of a vararg's or slice's type (`&[ProvidedValue]` → `ProvidedValue`).
 fn element_ty(t: &str) -> String {
     let t = t.trim();
+    // (a vararg taken as `Vec<T>` or `impl IntoIterator<Item = T>`)
+    for (open, close) in [("Vec<", ">"), ("impl IntoIterator<Item = ", ">"), ("impl IntoIterator<Item=", ">")] {
+        if let Some(inner) = t.strip_prefix(open).and_then(|r| r.strip_suffix(close)) {
+            return inner.trim().to_string();
+        }
+    }
     let inner = t.trim_start_matches('&').trim_start_matches('[');
     inner.split(';').next().unwrap_or(inner).trim_end_matches(']').trim().to_string()
 }
@@ -2653,6 +2750,14 @@ pub(crate) fn list_of_call(e: &Expr) -> Option<&[Arg]> {
     let ExprKind::Name(n) = &callee.kind else { return None };
     let maker = matches!(n.name.as_str(), "listOf" | "mutableListOf" | "arrayListOf" | "setOf" | "mutableSetOf");
     (maker && type_args.is_empty()).then_some(args.as_slice())
+}
+
+/// The shared trait object a Rust type's text is (`Rc<dyn NavKey>`, `Arc<dyn Shape>`): its text, spaces as written.
+fn shared_object(ty: &str) -> Option<String> {
+    let t = plain_type_text(ty);
+    let shared = t.starts_with("Rc<dyn") || t.starts_with("Arc<dyn");
+    let closure = t.contains("dynFn") || t.contains("dyn::core::ops::Fn");
+    (shared && !closure).then(|| ty.trim().to_string())
 }
 
 /// Two elements' types as one (Kotlin's common supertype, as far as lists of values go): nullable if either is,

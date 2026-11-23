@@ -67,9 +67,9 @@ pub use saveable::{
     LocalSaveableStateRegistry, ProvideSaveableStateRegistry, SaveableStateHolder, SaveableStateRegistry,
     SaveableStateRegistryEntry, Saver, WeakSaveableStateHolder, list_saver, map_saver, remember_saveable,
     remember_saveable_keyed, remember_saveable_keyed_with, remember_saveable_state, remember_saveable_state_holder,
-    remember_saveable_with,
+    remember_saveable_with, serializer,
 };
-pub use saved_value::{Saveable, SavedValue};
+pub use saved_value::{Saveable, SavedValue, SerialDescriptor, SerialElement, SerialKind};
 pub use snapshot::{
     ApplyObserver, MutableSnapshot, ObserverHandle, ReadObserver, Snapshot, SnapshotApplyConflict, SnapshotApplyResult,
     StateKey, WriteObserver, global_snapshot_changed, set_global_write_observer, set_ui_thread, state_changed,

@@ -10,9 +10,9 @@ pub fn Photo(open: bool) {
             AnimatedContent(
                 target_state = open,
                 label = ::std::string::String::from("photo"),
-                content = |this1, o| {
+                content = |this1, o: bool| {
                     Box(modifier = __kz_this.shared_element(
-                        Modifier.size(if o.clone() { 80.dp() } else { 40.dp() }).test_tag(if o.clone() {
+                        Modifier.size(if o { 80.dp() } else { 40.dp() }).test_tag(if o {
                             ::std::string::String::from("büyük")
                         } else {
                             ::std::string::String::from("küçük")

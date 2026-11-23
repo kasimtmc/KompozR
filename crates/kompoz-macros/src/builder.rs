@@ -197,6 +197,23 @@ fn option_of(ty: &Type) -> Option<&Type> {
 }
 
 /// Whether `ty` names `name` (a type or lifetime parameter).
+/// Whether an `impl` parameter's bounds name the type parameter `name` (`impl BackStackList<T>`).
+fn bounds_mention(bounds: &Punctuated<TypeParamBound, Token![+]>, name: &str) -> bool {
+    struct Finder<'a>(&'a str, bool);
+    impl<'ast> Visit<'ast> for Finder<'_> {
+        fn visit_ident(&mut self, i: &'ast Ident) {
+            if i == self.0 {
+                self.1 = true;
+            }
+        }
+    }
+    let mut f = Finder(name, false);
+    for b in bounds {
+        f.visit_type_param_bound(b);
+    }
+    f.1
+}
+
 fn mentions(ty: &Type, name: &str) -> bool {
     struct Finder<'a>(&'a str, bool);
     impl<'ast> Visit<'ast> for Finder<'_> {
@@ -478,7 +495,21 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
                     })
                     .collect()
             }
-            None if p.bounds().is_some() => Vec::new(),
+            // (an `impl` of a trait of the generics, `impl BackStackList<T>`: the argument's type tells them, by its one
+            // impl of the trait — not `Into`'s, whose blanket impls can't)
+            None if p.bounds().is_some_and(|b| {
+                b.iter().any(|b| {
+                    matches!(b, TypeParamBound::Trait(t)
+                        if t.path.segments.last().is_some_and(|s| s.ident == "Into" || s.ident == "IntoIterator"))
+                })
+            }) =>
+            {
+                Vec::new()
+            }
+            None if p.bounds().is_some() => {
+                let bounds = p.bounds().expect("bounds");
+                generics.iter().filter(|g| g.inferred && !g.lifetime && bounds_mention(bounds, &g.key())).collect()
+            }
             None => generics.iter().filter(|g| g.inferred && mentions(ty, &g.key())).collect(),
         };
         let fixed: Vec<&Generic> = fixed.into_iter().filter(|g| !free_keys.contains(&g.key())).collect();

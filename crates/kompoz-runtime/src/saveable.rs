@@ -9,7 +9,7 @@ use crate::composer::{Boundary, Composer, GroupId, key_of, mix_key, stable_hash}
 use crate::kompozable;
 use crate::local::{KompozitionLocal, provide_here};
 use crate::remember::remember;
-use crate::saved_value::{Saveable, SavedValue};
+use crate::saved_value::{Saveable, SavedValue, SerialDescriptor};
 use crate::state::MutableState;
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
@@ -195,16 +195,23 @@ impl Drop for Entry {
 }
 
 /// How a value is written out and read back, given to `remember_saveable_with` (Compose's `Saver(save,
-/// restore)`): for a type without [`Saveable`], or saved some other way.
+/// restore)`): for a type without [`Saveable`], or saved some other way. It is also what Kotlin's explicit
+/// `KSerializer`s are (`serializer<T>()`: [`Saver::of`], with its type's [`descriptor`](Self::descriptor)).
 pub struct Saver<T> {
     save: Rc<dyn Fn(&T) -> SavedValue>,
     restore: Rc<dyn Fn(&SavedValue) -> Option<T>>,
+    descriptor: fn() -> SerialDescriptor,
 }
 
 impl<T> Clone for Saver<T> {
     fn clone(&self) -> Self {
-        Saver { save: self.save.clone(), restore: self.restore.clone() }
+        Saver { save: self.save.clone(), restore: self.restore.clone(), descriptor: self.descriptor }
     }
+}
+
+/// The descriptor of a saver made of closures: a value of its own kind.
+fn contextual_descriptor<T>() -> SerialDescriptor {
+    SerialDescriptor::new(std::any::type_name::<T>(), crate::SerialKind::Contextual)
 }
 
 impl<T: 'static> Saver<T> {
@@ -212,7 +219,29 @@ impl<T: 'static> Saver<T> {
         save: impl Fn(&T) -> SavedValue + 'static,
         restore: impl Fn(&SavedValue) -> Option<T> + 'static,
     ) -> Self {
-        Saver { save: Rc::new(save), restore: Rc::new(restore) }
+        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor: contextual_descriptor::<T> }
+    }
+
+    /// The same, of the value's described kind (kotlinx's `KSerializer` with its `descriptor`).
+    pub fn with_descriptor(
+        save: impl Fn(&T) -> SavedValue + 'static,
+        restore: impl Fn(&SavedValue) -> Option<T> + 'static,
+        descriptor: fn() -> SerialDescriptor,
+    ) -> Self {
+        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor }
+    }
+
+    /// The saver of a [`Saveable`] type: its own way (Kotlin's `serializer<T>()` of a `@Serializable` type).
+    pub fn of() -> Self
+    where
+        T: Saveable,
+    {
+        Saver::with_descriptor(T::save, T::restore, T::descriptor)
+    }
+
+    /// What its values are made of (kotlinx's `KSerializer.descriptor`).
+    pub fn descriptor(&self) -> SerialDescriptor {
+        (self.descriptor)()
     }
 
     /// Writes `value` out (Compose's `Saver.save`).
@@ -252,6 +281,14 @@ pub fn map_saver<T: 'static>(
     restore: impl Fn(&std::collections::BTreeMap<String, SavedValue>) -> Option<T> + 'static,
 ) -> Saver<T> {
     Saver::new(move |v| SavedValue::map(save(v)), move |s| s.as_map().and_then(&restore))
+}
+
+/// The serializer of a [`Saveable`] type (kotlinx.serialization's `serializer<T>()` of a `@Serializable` type): its
+/// [`Saver`], its descriptor its type's.
+///
+/// Kotlin: `serializer(): KSerializer<T>`
+pub fn serializer<T: Saveable + 'static>() -> Saver<T> {
+    Saver::of()
 }
 
 /// `remember { … }` that a [`SaveableStateHolder`] keeps while the composable is away, and that comes back after
@@ -649,6 +686,9 @@ pub fn remember_saveable_state_holder() -> SaveableStateHolder {
 
 /// A state of a saveable value is saveable.
 impl<T: Saveable + PartialEq + Clone + Send + Sync + 'static> Saveable for MutableState<T> {
+    fn descriptor() -> crate::SerialDescriptor {
+        T::descriptor()
+    }
     fn save(&self) -> SavedValue {
         self.peek_with(T::save)
     }
@@ -660,6 +700,9 @@ impl<T: Saveable + PartialEq + Clone + Send + Sync + 'static> Saveable for Mutab
 /// A state list of saveable values is saveable (Compose's `rememberSaveable { mutableStateListOf(…) }`: its
 /// SnapshotStateList is Parcelable on Android, SnapshotStateList.android.kt), its elements written out.
 impl<T: Saveable + Clone + Send + Sync + 'static> Saveable for crate::SnapshotStateList<T> {
+    fn descriptor() -> crate::SerialDescriptor {
+        Vec::<T>::descriptor()
+    }
     fn save(&self) -> SavedValue {
         self.peek_with(|items| SavedValue::list(items.iter().map(T::save)))
     }

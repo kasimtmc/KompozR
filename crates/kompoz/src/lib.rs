@@ -40,6 +40,8 @@ pub use kompoz_material3_adaptive as material3_adaptive;
 pub use kompoz_material3_adaptive_navigation_suite as material3_adaptive_navigation_suite;
 // (stage 13: androidx.navigation and Navigation 3)
 pub use kompoz_navigation as navigation;
+// (stage 13 WP4: Navigation 3 — androidx.navigation3.runtime, .scene, .ui and lifecycle-viewmodel-navigation3)
+pub use kompoz_navigation3 as navigation3;
 // (stage 13: androidx.navigationevent and androidx.navigationevent.compose)
 pub use kompoz_navigationevent as navigationevent;
 pub use kompoz_platform as platform;
@@ -151,6 +153,10 @@ pub mod prelude {
     // (stage 13: androidx.navigation — NavController, the graph and its builders, NavType, deep links, NavOptions,
     // typed routes: #[derive(Route)])
     pub use kompoz_navigation::*;
+    // (stage 13 WP4: androidx.navigation3.{runtime,scene,ui}, androidx.lifecycle.viewmodel.navigation3 — NavKey, NavEntry,
+    // entryProvider, NavBackStack, rememberNavBackStack, the decorators, scenes, NavDisplay…; deep links stay in
+    // `navigation3::runtime::deeplink`)
+    pub use kompoz_navigation3::*;
     // (stage 13 WP-E: androidx.navigationevent{,.compose} — NavigationEvent, the dispatcher and its owner, handlers,
     // inputs, NavigationBackHandler, rememberNavigationEventState…)
     pub use kompoz_coil::prelude::*;
