@@ -10,6 +10,7 @@ use kompoz_runtime::*;
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 // ---- Values with named, defaulted methods --------------------------------------------------------------------
 
@@ -1109,14 +1110,17 @@ trait InsetScope {
     fn inset(&self, by: i32) -> i32;
 }
 
-struct InsetCounter(Cell<i32>);
+struct InsetCounter(AtomicI32);
 
 impl InsetScope for InsetCounter {
     fn inset(&self, by: i32) -> i32 {
-        self.0.set(self.0.get() + by);
-        self.0.get()
+        self.0.fetch_add(by, Ordering::Relaxed) + by
     }
 }
+
+/// The scope the test below hands its composable (a `'static` one, as a scope a layout gives; a static rather than a
+/// leaked box, which Miri reports).
+static INSET_COUNTER: InsetCounter = InsetCounter(AtomicI32::new(0));
 
 /// The macros rewrite a method call by its name (they can't see a receiver's type in general); where they can — a
 /// receiver bound with its type written: a parameter, a closure's parameter, a `let` — and that type is no owner of
@@ -1138,7 +1142,7 @@ fn method_calls_by_name_keep_the_plain_method_of_a_typed_receiver_of_another_typ
         let untyped = Paddings;
         out.borrow_mut().push(untyped.inset(6));
     }
-    let scope: &'static InsetCounter = Box::leak(Box::new(InsetCounter(Cell::new(0))));
+    let scope: &'static InsetCounter = &INSET_COUNTER;
     let out = Rc::new(RefCell::new(Vec::new()));
     let o = out.clone();
     let _rule = Rule::new(kompozable_lambda!(move || Insetting(scope, o.clone())));
