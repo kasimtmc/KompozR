@@ -33,6 +33,7 @@ use kompoz_lifecycle::{
     SavedStateRegistryController, SavedStateRegistryOwner, SavedStateViewModelFactory, VIEW_MODEL_STORE_OWNER_KEY,
     ViewModelProviderFactory, ViewModelStore, ViewModelStoreOwner,
 };
+use kompoz_navigationevent::{NavigationEventDispatcher, NavigationEventDispatcherOwner};
 use kompoz_runtime::{
     Composition, Content, KompozitionLocalProvider, MutableState, ProvideSaveableStateRegistry, RecompositionStats,
     SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block,
@@ -93,23 +94,26 @@ pub fn frame_time_on_beat(last: Option<i64>, now: i64, period: i64) -> i64 {
 
 /// The app's architecture components (CMP's `DefaultArchitectureComponentsOwner`, C++'s `AppLifecycle` and the
 /// host's ViewModel store): its lifecycle (resumed from the start, moved by the platform as its window goes to the
-/// background and back), its ViewModel store (cleared as it is destroyed: CMP's `setLifecycleState`) and its saved
+/// background and back), its ViewModel store (cleared as it is destroyed: CMP's `setLifecycleState`), its saved
 /// state registry (restored from the state it is made with, its ViewModels' handles enabled; saved into the host's
-/// state).
-struct HostOwner {
-    me: std::rc::Weak<HostOwner>,
+/// state) and its navigation event dispatcher (CMP's `navigationEventDispatcher`: the window's root dispatcher, what
+/// back handlers register with, with the window's inputs — the keys', the platform's back —; back goes to it, or to
+/// a focusable popup's or a dialog's on top).
+struct HostArchitectureComponentsOwner {
+    me: std::rc::Weak<HostArchitectureComponentsOwner>,
     registry: LifecycleRegistry,
     view_model_store: ViewModelStore,
     saved_state_controller: SavedStateRegistryController,
+    navigation: Rc<WindowNavigation>,
 }
 
-impl LifecycleOwner for HostOwner {
+impl LifecycleOwner for HostArchitectureComponentsOwner {
     fn lifecycle(&self) -> Lifecycle {
         self.registry.lifecycle()
     }
 }
 
-impl ViewModelStoreOwner for HostOwner {
+impl ViewModelStoreOwner for HostArchitectureComponentsOwner {
     fn view_model_store(&self) -> ViewModelStore {
         self.view_model_store.clone()
     }
@@ -118,7 +122,7 @@ impl ViewModelStoreOwner for HostOwner {
     }
 }
 
-impl HasDefaultViewModelProviderFactory for HostOwner {
+impl HasDefaultViewModelProviderFactory for HostArchitectureComponentsOwner {
     fn default_view_model_provider_factory(&self) -> Rc<dyn ViewModelProviderFactory> {
         Rc::new(SavedStateViewModelFactory)
     }
@@ -133,22 +137,32 @@ impl HasDefaultViewModelProviderFactory for HostOwner {
     }
 }
 
-impl SavedStateRegistryOwner for HostOwner {
+impl SavedStateRegistryOwner for HostArchitectureComponentsOwner {
     fn saved_state_registry(&self) -> SavedStateRegistry {
         self.saved_state_controller.saved_state_registry()
     }
 }
 
-impl HostOwner {
+impl NavigationEventDispatcherOwner for HostArchitectureComponentsOwner {
+    fn navigation_event_dispatcher(&self) -> NavigationEventDispatcher {
+        self.navigation.owner.dispatcher.clone()
+    }
+}
+
+impl HostArchitectureComponentsOwner {
     /// Made from `saved_state` (what [`save_state`](Self::save_state) wrote), in `INITIALIZED` (CMP's constructor:
-    /// the registry attached and restored), handles enabled (CMP's container's `enableSavedStateHandles()`).
-    fn new(saved_state: Option<&SavedState>) -> Rc<HostOwner> {
-        let owner = Rc::new_cyclic(|me: &std::rc::Weak<HostOwner>| HostOwner {
-            me: me.clone(),
-            registry: LifecycleRegistry::new(me.clone()),
-            view_model_store: ViewModelStore::new(),
-            saved_state_controller: SavedStateRegistryController::create(me.clone()),
-        });
+    /// the registry attached and restored), handles enabled (CMP's container's `enableSavedStateHandles()`); its
+    /// navigation `navigation` (a new window's; the one before's when made again from a saved state: the window's
+    /// dispatcher and inputs aren't saved state, what registered with them stays).
+    fn new(saved_state: Option<&SavedState>, navigation: Rc<WindowNavigation>) -> Rc<HostArchitectureComponentsOwner> {
+        let owner =
+            Rc::new_cyclic(|me: &std::rc::Weak<HostArchitectureComponentsOwner>| HostArchitectureComponentsOwner {
+                me: me.clone(),
+                registry: LifecycleRegistry::new(me.clone()),
+                view_model_store: ViewModelStore::new(),
+                saved_state_controller: SavedStateRegistryController::create(me.clone()),
+                navigation,
+            });
         owner.saved_state_controller.perform_attach();
         owner.saved_state_controller.perform_restore(saved_state);
         owner.enable_saved_state_handles();
@@ -244,10 +258,6 @@ pub struct KompozHost {
     pub focus: Rc<FocusOwner>,
     /// The popups' and dialogs' roots.
     pub overlays: Overlays,
-    /// The window's navigation: its root navigation event dispatcher's owner (CMP's
-    /// `DefaultArchitectureComponentsOwner`'s navigation part), what back handlers register with, and its inputs
-    /// (the keys', the platform's back); back goes to it, or to a focusable popup's or a dialog's on top.
-    navigation: Rc<WindowNavigation>,
     back_router: BackRouter,
     /// The focused editor's input sessions.
     text_input: TextInputService,
@@ -262,10 +272,10 @@ pub struct KompozHost {
     idle_work: IdleWorkQueue,
     /// A trackpad's pinch under way (ScaleStart sent, ScaleEnd not yet).
     scaling: Cell<bool>,
-    /// The app's lifecycle, ViewModel store and saved state registry owner (LocalLifecycleOwner,
-    /// LocalViewModelStoreOwner and LocalSavedStateRegistryOwner at the root): a state, as `restore_state` makes it
-    /// again.
-    architecture: MutableState<Rc<HostOwner>>,
+    /// The app's lifecycle, ViewModel store, saved state registry and navigation event dispatcher owner
+    /// (LocalLifecycleOwner, LocalViewModelStoreOwner, LocalSavedStateRegistryOwner and
+    /// LocalNavigationEventDispatcherOwner at the root): a state, as `restore_state` makes it again.
+    architecture: MutableState<Rc<HostArchitectureComponentsOwner>>,
 }
 
 impl KompozHost {
@@ -343,7 +353,6 @@ impl KompozHost {
             input: RefCell::new(InputState::default()),
             overlays,
             focus,
-            navigation: WindowNavigation::new(),
             back_router: BackRouter::default(),
             text_input: TextInputService::new(platform.clone()),
             media: UiMediaScope::new(),
@@ -352,7 +361,10 @@ impl KompozHost {
             deep_links: DeepLinks::new(),
             idle_work: IdleWorkQueue::new(),
             scaling: Cell::new(false),
-            architecture: mutable_confined_state_of_with_policy(HostOwner::new(None), never_equal_policy()),
+            architecture: mutable_confined_state_of_with_policy(
+                HostArchitectureComponentsOwner::new(None, WindowNavigation::new()),
+                never_equal_policy(),
+            ),
         };
         // (resumed from the start, as C++'s and CMP's on a focused window; the platform moves it)
         host.architecture.peek().set_lifecycle_state(LifecycleState::Resumed);
@@ -377,7 +389,6 @@ impl KompozHost {
         let dispatcher = self.dispatcher.clone();
         let effect_coroutine_context = self.owner.effect_coroutine_context();
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
-        let navigation_event_owner = self.navigation.owner();
         let font_family_resolver = self.font_family_resolver.clone();
         let text_toolbar: Rc<dyn TextToolbar> = Rc::new(PlatformTextToolbar::new(platform.clone()));
         let accessibility_manager: Rc<dyn AccessibilityManager> = Rc::new(DefaultAccessibilityManager);
@@ -416,7 +427,8 @@ impl KompozHost {
                 LocalSoftwareKeyboardController.provides(SoftwareKeyboardController::new(text_input.clone())),
                 LocalPlatform.provides(platform.clone()),
                 LocalFocusManager.provides(focus_manager.clone()),
-                kompoz_navigationevent::LocalNavigationEventDispatcherOwner.provides(navigation_event_owner.clone()),
+                kompoz_navigationevent::LocalNavigationEventDispatcherOwner
+                    .provides(owner.clone() as Rc<dyn NavigationEventDispatcherOwner>),
                 LocalDispatcher.provides(Some(dispatcher.clone())),
                 LocalEffectCoroutineContext.provides(effect_coroutine_context.clone()),
                 LocalIdleWorkQueue.provides(Some(idle_work.clone())),
@@ -591,7 +603,10 @@ impl KompozHost {
         if saved_state.as_map().is_some() {
             let old = self.architecture.peek();
             let state = old.lifecycle().current_state();
-            let restored = HostOwner::new(Some(&SavedState::from_saved_value(saved_state)));
+            let restored = HostArchitectureComponentsOwner::new(
+                Some(&SavedState::from_saved_value(saved_state)),
+                old.navigation.clone(),
+            );
             if state != LifecycleState::Destroyed {
                 restored.set_lifecycle_state(state);
                 old.set_lifecycle_state(LifecycleState::Destroyed);
@@ -1005,12 +1020,23 @@ impl KompozHost {
 
     // ---- Back ----
 
-    /// The app's root navigation event dispatcher (CMP's window's): what [`LocalNavigationEventDispatcherOwner`]
-    /// gives at the root, and what the platform's back is sent to.
+    /// The app's root navigation event dispatcher (CMP's `DefaultArchitectureComponentsOwner`'s): what
+    /// [`LocalNavigationEventDispatcherOwner`] gives at the root, and what the platform's back is sent to.
     ///
     /// [`LocalNavigationEventDispatcherOwner`]: kompoz_navigationevent::LocalNavigationEventDispatcherOwner
-    pub fn navigation_event_dispatcher(&self) -> kompoz_navigationevent::NavigationEventDispatcher {
-        self.navigation.owner.dispatcher.clone()
+    pub fn navigation_event_dispatcher(&self) -> NavigationEventDispatcher {
+        self.architecture.peek().navigation_event_dispatcher()
+    }
+
+    /// The navigation event dispatcher owner at the root (CMP's `DefaultArchitectureComponentsOwner`, its
+    /// `navigationEventDispatcherOwner`): the app's architecture components owner.
+    pub fn navigation_event_dispatcher_owner(&self) -> Rc<dyn NavigationEventDispatcherOwner> {
+        self.architecture.peek()
+    }
+
+    /// The host's window's navigation (its architecture components owner's).
+    fn navigation(&self) -> Rc<WindowNavigation> {
+        self.architecture.peek().navigation.clone()
     }
 
     /// The navigation of the window on top: a focusable popup's or a dialog's, else the host's.
@@ -1019,7 +1045,7 @@ impl KompozHost {
             .top_focusable_popup()
             .and_then(|p| p.popup_spec())
             .and_then(|s| s.navigation.clone())
-            .unwrap_or_else(|| self.navigation.clone())
+            .unwrap_or_else(|| self.navigation())
     }
 
     /// A key event nothing took: Escape or the Back key goes back in the window on top (CMP's
@@ -1530,6 +1556,6 @@ impl Drop for KompozHost {
             self.root.detach();
         }
         // (the handlers left with the composition; the inputs go with the root dispatcher)
-        self.navigation.dispose();
+        self.navigation().dispose();
     }
 }

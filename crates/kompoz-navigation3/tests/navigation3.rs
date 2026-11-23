@@ -307,7 +307,8 @@ fn saveable_state_is_kept_per_entry_until_popped() {
     assert!(shown(&rule, "b 0"));
 }
 
-/// ResultEventBus: an event result to each ResultEffect, a state result conflated; removed, a key's results stop.
+/// ResultEventBus: an event result to each ResultEffect, a state result conflated (by its type, or by a key of its
+/// own); removed, a key's results stop.
 fn results_pass_between_screens() {
     let bus = ResultEventBus();
     let received = log();
@@ -327,6 +328,8 @@ fn results_pass_between_screens() {
                 );
                 let latest = LocalResultEventBus.current().conflate_as_state(0_i32);
                 BasicText(format!("son {}", latest.get()));
+                let keyed = LocalResultEventBus.current().conflate_as_state_of_key("adet", "yok".to_string());
+                BasicText(format!("adet {}", keyed.get()));
             })
         });
         entries[0].Content();
@@ -338,7 +341,11 @@ fn results_pass_between_screens() {
     bus.send_result(9_i32);
     rule.wait_for_idle();
     assert_eq!(taken(&received), ["kedi", "köpek"]);
-    assert!(shown(&rule, "son 9"));
+    assert!(shown(&rule, "son 9") && shown(&rule, "adet yok"));
+    bus.send_result_of_key("adet", "iki".to_string());
+    bus.send_result_of_key("adet", "üç".to_string());
+    rule.wait_for_idle();
+    assert!(shown(&rule, "adet üç") && taken(&received).is_empty());
     bus.remove_result::<String>();
     rule.wait_for_idle();
 }

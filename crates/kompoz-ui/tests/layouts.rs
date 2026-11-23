@@ -341,7 +341,36 @@ fn a_tag_before_a_layout_modifier_that_lays_out_to_nothing_has_no_size() {
     assert_eq!(rule.on_node_with_tag("birleşen").get_unclipped_bounds_in_root().size(), Size::new(56.0, 56.0));
 }
 
+fn a_placement_reading_its_coordinates_is_placed_again_when_an_ancestor_moves() {
+    // Compose's childrenAccessingCoordinatesDuringPlacement: a node reading its coordinates while placing is counted
+    // by every ancestor, so a move however far above it (here an `offset {}` two nodes up) places it again — this
+    // one pins what it holds to the root's left edge.
+    let shift = mutable_state_of(0);
+    let s = shift.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let s = s.clone();
+        Box(modifier = Modifier.offset_px(move |_| IntOffset::new(s.get(), 0)), || {
+            Box(|| {
+                let pinned = Modifier.layout(|scope, measurable, constraints| {
+                    let placeable = measurable.measure(constraints);
+                    scope.layout(placeable.width(), placeable.height(), move |p| {
+                        let at = p.coordinates().map_or(Offset::Zero, |c| c.position_in_root());
+                        p.place(&placeable, -at.x as i32, 0)
+                    })
+                });
+                Box(modifier = pinned.size(10.dp()).test_tag("sabit"));
+            });
+        });
+    }));
+    let left = || rule.on_node_with_tag("sabit").get_unclipped_bounds_in_root().left;
+    assert_eq!(left(), 0.0);
+    shift.set(30);
+    rule.wait_for_idle();
+    assert_eq!(left(), 0.0);
+}
+
 tests!(
+    a_placement_reading_its_coordinates_is_placed_again_when_an_ancestor_moves,
     a_tag_before_a_layout_modifier_that_lays_out_to_nothing_has_no_size,
     layout_coordinates_tell_their_parent_and_map_between_nodes,
     layout_measures_again_only_what_changed,

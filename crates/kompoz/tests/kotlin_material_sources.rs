@@ -10,7 +10,8 @@
 //! ScaffoldExample (kt/scaffold.kt), Inbox, StateForms, AppTheme (kotlin_ported.rs), Themed
 //! (kotlin_material_theme.rs), TextForms and Phone (kt/material_fields.kt), Expressive and Navigation
 //! (kotlin_expressive_buttons.rs), LayoutForms (kotlin_adaptive.rs, kotlin_lookahead.rs, kotlin_grids_pager.rs,
-//! named_forms.rs), Mixed (kotlin_expressive_buttons.rs; its view model and SideLine are stage 13's).
+//! named_forms.rs), Mixed (kotlin_expressive_buttons.rs, whole: its view model and SideLine
+//! since stage 13).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 

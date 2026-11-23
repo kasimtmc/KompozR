@@ -793,11 +793,12 @@ kompoz-material3/carousel kompozable HorizontalMultiBrowseCarouselSample - crate
 * kompozable HorizontalTimePicker rrrr crates/kompoz-material3/src/time_picker.rs
 * kompozable HorizontalUncontainedCarousel rrdddddr crates/kompoz-material3/src/carousel/carousel.rs
 kompoz-material3/carousel kompozable HorizontalUncontainedCarouselSample - crates/kompoz-material3/tests/carousel.rs
+* super HostArchitectureComponentsOwner - HasDefaultViewModelProviderFactory
+* super HostArchitectureComponentsOwner - LifecycleOwner
+* super HostArchitectureComponentsOwner - NavigationEventDispatcherOwner
+* super HostArchitectureComponentsOwner - SavedStateRegistryOwner
+* super HostArchitectureComponentsOwner - ViewModelStoreOwner
 * super HostAutofillManager - SemanticsListener
-* super HostOwner - HasDefaultViewModelProviderFactory
-* super HostOwner - LifecycleOwner
-* super HostOwner - SavedStateRegistryOwner
-* super HostOwner - ViewModelStoreOwner
 kompoz-runtime/runtime kompozable HostReader r crates/kompoz-runtime/tests/runtime.rs
 * super HoverIconElement - ModifierNodeElement
 * super HoverIconModifierNode - ModifierNode

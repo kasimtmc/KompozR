@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-lifecycle"
-description = "KompozR's lifecycles (androidx.lifecycle 2.11: lifecycle-common, lifecycle-runtime, lifecycle-runtime-compose): Lifecycle and its states and events, observers, LifecycleRegistry, repeatOnLifecycle, LocalLifecycleOwner and the lifecycle effects"
+description = "KompozR's lifecycles, saved state and ViewModels (androidx.lifecycle 2.11: lifecycle-common, lifecycle-runtime, lifecycle-runtime-compose, lifecycle-viewmodel, lifecycle-viewmodel-savedstate, lifecycle-viewmodel-compose; androidx.savedstate 1.4): Lifecycle and its states and events, observers, LifecycleRegistry, repeatOnLifecycle, LocalLifecycleOwner and the lifecycle effects; SavedState, SavedStateRegistry and its owner; ViewModel, ViewModelStore, ViewModelProvider, SavedStateHandle, viewModel()"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

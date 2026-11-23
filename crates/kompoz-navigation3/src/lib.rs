@@ -12,7 +12,9 @@
 //!   scene decorator strategies, the scene state, scenes in the navigation event history;
 //! - [`ui`] (androidx.navigation3.ui) — [`NavDisplay`](ui::NavDisplay): scenes animated (a navigation, a pop, a
 //!   predictive back gesture's pop through kompoz-navigationevent), shared elements between scenes,
-//!   [`LocalNavAnimatedContentScope`](ui::LocalNavAnimatedContentScope).
+//!   [`LocalNavAnimatedContentScope`](ui::LocalNavAnimatedContentScope);
+//! - [`viewmodel`] (lifecycle-viewmodel-navigation3, androidx.lifecycle.viewmodel.navigation3) — the decorator giving
+//!   each entry a ViewModel store of its own, cleared as the entry is popped.
 //!
 //! Compose's module split: Navigation 3's artifacts don't depend on Navigation 2's (kompoz-navigation); one crate here
 //! holds its runtime, its ui and lifecycle-viewmodel-navigation3's decorator, a module each (as kompoz-lifecycle holds

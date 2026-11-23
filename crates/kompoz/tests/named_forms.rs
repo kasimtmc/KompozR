@@ -1660,12 +1660,12 @@ fn tabs_and_fab_menu_take_compose_named_arguments() {
     assert!(tab.get() == 1 && rust_tab.get() == 1);
 }
 
-// ---- C++ app_shell_forms_take_compose_named_arguments: its stage-12 part ------------------------------------------
+// ---- C++ app_shell_forms_take_compose_named_arguments ---------------------------------------------------------------
 // Compose's key names, SnackbarData's visuals, NavigationSuiteItem by name and NavigationSuiteScaffold(navigationItems
-// =, navigationSuiteType =, modifier =). Its NavController, NavHost, `navOptions { popUpTo<T> { saveState } }`,
-// `kompozable<T>(deepLinks =)`, `navigation<T>(startDestination =)`, NavDestination's hierarchy / hasRoute<T> and the
-// deep link are stage 13's (the two items switch a state here, the content showing the screen the NavHost would);
-// its desktop MenuBar (Menu, Item, CheckboxItem, RadioButtonItem, Separator, a submenu) is stage 15/16's (D7).
+// =, navigationSuiteType =, modifier =) (stage 12); its NavController, NavHost, `navOptions { popUpTo<T> { saveState
+// } }`, `kompozable<T>(deepLinks =)`, `navigation<T>(startDestination =)`, NavDestination's hierarchy / hasRoute<T> and
+// the deep link (stage 13 WP3). Its desktop MenuBar (Menu, Item, CheckboxItem, RadioButtonItem, Separator, a submenu)
+// is stage 15/16's (D7).
 
 kompoz! {
     fun composeKeys(): List<Key> = listOf(Key.DirectionLeft, Key.MoveEnd, Key.Spacebar)

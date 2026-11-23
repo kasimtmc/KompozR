@@ -4,7 +4,8 @@
 // transitions, BackHandler and combinedClickable by name) and AppShellForms (`app_shell_as_compose_writes_it`:
 // destination.hierarchy.any { it.hasRoute<T>() }, navOptions { popUpTo<T> { saveState = true } }, kompozable<T>(deepLinks
 // =), navigation<T>(startDestination =), NavigationSuiteScaffold, a snackbar's visuals), and navigation-compose's
-// NavigationSamples.kt (2.10.2).
+// NavigationSamples.kt, SizeTransformSample.kt and SharedElementSample.kt (2.10.2; the last two's edits at their
+// sections below).
 //
 // Kotlin's classes are stage 14's: the @Serializable routes (Detail, Start, Shell, AccountGraph, Member, the samples'
 // Profile, Scrollable, Dialog, Dashboard, Nested, NestedWithArg, User, WrappedUUID) and the samples' NavType object
@@ -362,3 +363,278 @@ val phrases =
         "Fight Fire With Fire",
         "Go For Broke",
     )
+
+// ---- navigation-compose's SizeTransformSample.kt ------------------------------------------------------------------
+//
+// SizeTransformComposable and SizeTransformNav as written. The @Serializable objects Collapsed, Expanded, NestedGraph
+// and InnerCollapsed are Rust twins beside this file (kotlin_nav_host.rs: Kotlin's classes are stage 14's).
+
+@Composable
+fun SizeTransformComposable() {
+    val navController = rememberNavController()
+    Box {
+        NavHost(navController, startDestination = Collapsed) {
+            composable<Collapsed>(
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                sizeTransform = {
+                    SizeTransform { initialSize, targetSize ->
+                        keyframes {
+                            durationMillis = 500
+                            IntSize(
+                                initialSize.width,
+                                (initialSize.height + targetSize.height) / 2,
+                            ) at 150
+                        }
+                    }
+                },
+            ) {
+                CollapsedScreen { navController.navigate(Expanded) }
+            }
+            composable<Expanded>(
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                sizeTransform = {
+                    SizeTransform { initialSize, targetSize ->
+                        keyframes {
+                            durationMillis = 500
+                            IntSize(targetSize.width, initialSize.height + 400) at 150
+                        }
+                    }
+                },
+            ) {
+                ExpandedScreen { navController.popBackStack() }
+            }
+        }
+    }
+}
+
+@Composable
+fun SizeTransformNav() {
+    val navController = rememberNavController()
+    Box {
+        NavHost(navController, startDestination = Collapsed) {
+            navigation<NestedGraph>(
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                startDestination = InnerCollapsed::class,
+                sizeTransform = {
+                    SizeTransform { initialSize, targetSize ->
+                        keyframes {
+                            durationMillis = 500
+                            IntSize(
+                                initialSize.width,
+                                (initialSize.height + targetSize.height) / 2,
+                            ) at 150
+                        }
+                    }
+                },
+            ) {
+                composable<InnerCollapsed>(
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                ) {
+                    ExpandedScreen {}
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CollapsedScreen(onNavigate: () -> Unit) {
+    Box(Modifier.clickable { onNavigate() }.size(40.dp).background(Green))
+}
+
+@Composable
+fun ExpandedScreen(onNavigate: () -> Unit) {
+    Box(Modifier.clickable { onNavigate() }.size(500.dp).background(Blue))
+}
+
+private val Blue = Color(0xFF2196F3)
+private val Green = Color(0xFF4CAF50)
+
+// ---- navigation-compose's SharedElementSample.kt ------------------------------------------------------------------
+//
+// AnimatedNav, SharedElementAnimationNav and TopAppBarElement as written. The @Serializable objects Select,
+// SharedElement, TopAppBarShared, RedBox, BlueBox, First, Second and Third are Rust twins beside this file
+// (kotlin_nav_host.rs: Kotlin's classes are stage 14's). The sample's composables RedBox and BlueBox are RedBoxScreen
+// and BlueBoxScreen here: Kotlin keeps a class and a function of one name apart, Rust's twin of the route object and
+// the function would share its value namespace. The sample is androidx.compose.material's (Material 2): its Button,
+// Text and TopAppBar are Material 3's here (M3's TopAppBar, experimental in Compose, needs no @OptIn in KompozR).
+
+@Composable
+fun AnimatedNav() {
+    val navController = rememberNavController()
+    NavHost(navController, startDestination = Select) {
+        composable<Select> {
+            Column {
+                Box(
+                    Modifier.heightIn(min = 48.dp)
+                        .fillMaxWidth()
+                        .clickable(onClick = { navController.navigate(SharedElement) })
+                        .padding(horizontal = 16.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text("AnimationNav")
+                }
+                Box(
+                    Modifier.heightIn(min = 48.dp)
+                        .fillMaxWidth()
+                        .clickable(onClick = { navController.navigate(TopAppBarShared) })
+                        .padding(horizontal = 16.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Text("Top Bar Shared Element")
+                }
+            }
+        }
+        composable<SharedElement> { SharedElementAnimationNav() }
+        composable<TopAppBarShared> { TopAppBarElement() }
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun SharedElementAnimationNav() {
+    val navController = rememberNavController()
+    SharedTransitionLayout {
+        val selectFirst = mutableStateOf(true)
+        NavHost(navController, startDestination = RedBox) {
+            composable<RedBox> {
+                RedBoxScreen(this@SharedTransitionLayout, this, selectFirst) {
+                    navController.navigate(BlueBox)
+                }
+            }
+            composable<BlueBox> {
+                BlueBoxScreen(this@SharedTransitionLayout, this, selectFirst) {
+                    navController.popBackStack()
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun RedBoxScreen(
+    sharedScope: SharedTransitionScope,
+    scope: AnimatedContentScope,
+    selectFirst: MutableState<Boolean>,
+    onNavigate: () -> Unit,
+) {
+    with(sharedScope) {
+        Box(
+            Modifier.sharedBounds(
+                    rememberSharedContentState("name"),
+                    scope,
+                    renderInOverlayDuringTransition = selectFirst.value,
+                )
+                .clickable(
+                    onClick = {
+                        selectFirst.value = !selectFirst.value
+                        onNavigate()
+                    }
+                )
+                .background(Color.Red)
+                .size(100.dp)
+        ) {
+            Text("start", color = Color.White)
+        }
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun BlueBoxScreen(
+    sharedScope: SharedTransitionScope,
+    scope: AnimatedContentScope,
+    selectFirst: MutableState<Boolean>,
+    onPopBack: () -> Unit,
+) {
+    with(sharedScope) {
+        Box(
+            Modifier.offset(180.dp, 180.dp)
+                .sharedBounds(
+                    rememberSharedContentState("name"),
+                    scope,
+                    renderInOverlayDuringTransition = !selectFirst.value,
+                )
+                .clickable(
+                    onClick = {
+                        selectFirst.value = !selectFirst.value
+                        onPopBack()
+                    }
+                )
+                .alpha(0.5f)
+                .background(Color.Blue)
+                .size(180.dp)
+        ) {
+            Text("finish", color = Color.White)
+        }
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun TopAppBarElement() {
+    val navController = rememberNavController()
+    SharedTransitionLayout {
+        NavHost(navController, startDestination = First) {
+            composable<First>(
+                enterTransition = { slideIntoContainer(SlideDirection.Right) },
+                exitTransition = { slideOutOfContainer(SlideDirection.Left) },
+                popExitTransition = { slideOutOfContainer(SlideDirection.Right) },
+            ) {
+                Column {
+                    TopAppBar(
+                        title = { Text("first") },
+                        modifier =
+                            Modifier.sharedElement(
+                                rememberSharedContentState("appBar"),
+                                this@composable,
+                            ),
+                    )
+                    Text("first", color = Color.White)
+                    Button(onClick = { navController.navigate(Second) }) {
+                        Text("Navigate to Second")
+                    }
+                }
+            }
+            composable<Second>(
+                enterTransition = { slideIntoContainer(SlideDirection.Right) },
+                exitTransition = { slideOutOfContainer(SlideDirection.Left) },
+                popExitTransition = { slideOutOfContainer(SlideDirection.Right) },
+            ) {
+                Column {
+                    TopAppBar(
+                        title = { Text("second") },
+                        modifier =
+                            Modifier.sharedElement(
+                                rememberSharedContentState("appBar"),
+                                this@composable,
+                            ),
+                    )
+                    Text("second", color = Color.White)
+                    Button(onClick = { navController.navigate(Third) }) {
+                        Text("Navigate to Third")
+                    }
+                }
+            }
+            composable<Third>(
+                enterTransition = { slideIntoContainer(SlideDirection.Right) },
+                exitTransition = { slideOutOfContainer(SlideDirection.Left) },
+                popExitTransition = { slideOutOfContainer(SlideDirection.Right) },
+            ) {
+                Column {
+                    Text("third", color = Color.White)
+                    Button(onClick = { navController.popBackStack<First>(false) }) {
+                        Text("Pop back to First")
+                    }
+                }
+            }
+        }
+    }
+}

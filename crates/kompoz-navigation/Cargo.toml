@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-navigation"
-description = "KompozR's navigation (androidx.navigation 2.10 — NavHost, NavController, typed routes, deep links — and Navigation 3: NavDisplay, NavEntry, scenes)"
+description = "KompozR's navigation (androidx.navigation 2.10: navigation-common, navigation-runtime, navigation-compose): NavHost, NavController, the navigation graph and its builders, typed routes (#[derive(Route)]), NavType, deep links, NavOptions, back stack entries with their lifecycles, ViewModels and saved state (Navigation 3 is kompoz-navigation3)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

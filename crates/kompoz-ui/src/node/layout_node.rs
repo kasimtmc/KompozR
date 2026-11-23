@@ -517,6 +517,10 @@ impl LayoutNode {
         if child.globally_positioned_observers.get() > 0 {
             self.add_globally_positioned_observers(1);
         }
+        // (Compose's insertAt: a child counting readers of their coordinates while placing is counted here)
+        if child.children_accessing_coordinates_during_placement.get() > 0 {
+            self.add_children_accessing_coordinates(1);
+        }
         if let Some(owner) = self.owner() {
             child.attach(&owner);
         }
@@ -533,6 +537,9 @@ impl LayoutNode {
     fn on_child_removed(self: &Rc<Self>, child: &Rc<LayoutNode>) {
         if child.globally_positioned_observers.get() > 0 {
             self.add_globally_positioned_observers(-1);
+        }
+        if child.children_accessing_coordinates_during_placement.get() > 0 {
+            self.add_children_accessing_coordinates(-1);
         }
         if child.is_attached() {
             child.detach();

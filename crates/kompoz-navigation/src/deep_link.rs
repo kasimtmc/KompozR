@@ -9,11 +9,11 @@
 
 use crate::argument::{NavArguments, missing_required_arguments};
 use crate::nav_type::NavType;
-use crate::regex::{Match, Regex};
 use crate::saved_state::{SavedState, contains, put, put_all};
 use crate::serialization::{Route, TypeMap, generate_route_pattern};
 use crate::uri::{self, NavUri};
 use kompoz_runtime::SavedValue;
+use kompoz_runtime::kt::{MatchResult, Regex, RegexOption};
 use std::cell::OnceCell;
 use std::fmt;
 use std::rc::Rc;
@@ -81,6 +81,11 @@ impl fmt::Debug for NavDeepLink {
     }
 }
 
+/// `pattern` compiled regardless of case (Kotlin's `Regex(pattern, RegexOption.IGNORE_CASE)`).
+fn ignore_case(pattern: &str) -> Regex {
+    Regex::with_option(pattern, RegexOption::IgnoreCase)
+}
+
 /// `literal` escaped for a regular expression (Kotlin's `Regex.escape`).
 fn escape(literal: &str) -> String {
     Regex::escape(literal)
@@ -97,20 +102,38 @@ fn save_wildcard_in_regex(s: &str) -> String {
     }
 }
 
-/// `uri`'s `{name}` parts as arguments, the rest literal, appended to `regex` (Kotlin's `buildRegex`).
+/// Kotlin's `s.substring(start, end)` (UTF-16 units).
+fn kt_substring(s: &str, start: i32, end: Option<i32>) -> String {
+    kompoz_runtime::kt::KtStr::substring(s, start, end)
+}
+
+/// Kotlin's `s.length` (UTF-16 units).
+fn kt_length(s: &str) -> i32 {
+    kompoz_runtime::kt::KtStr::length(s)
+}
+
+/// Group `index`'s text in `result`, if it took part (Kotlin's `result.groups[index]?.value`).
+fn group(result: &MatchResult, index: usize) -> Option<String> {
+    result.groups()[index].as_ref().map(|g| g.value.clone())
+}
+
+/// `uri`'s `{name}` parts as arguments, the rest literal, appended to `regex` (Kotlin's `buildRegex`; indices
+/// Kotlin's, UTF-16 units).
 fn build_regex(uri: &str, args: &mut Vec<String>, regex: &mut String) {
-    let matches = FILL_IN_PATTERN.with(|f| f.find_all(uri));
+    let mut result = FILL_IN_PATTERN.with(|f| f.find(uri, 0));
     let mut append_pos = 0;
-    for m in matches {
-        args.push(m.group(uri, 1).expect("a name").to_string());
-        if m.range.start > append_pos {
-            regex.push_str(&escape(&uri[append_pos..m.range.start]));
+    while let Some(m) = result {
+        args.push(group(&m, 1).expect("a name"));
+        let range = m.range();
+        if range.first() > append_pos {
+            regex.push_str(&escape(&kt_substring(uri, append_pos, Some(range.first()))));
         }
         regex.push_str(PATH_REGEX);
-        append_pos = m.range.end;
+        append_pos = range.last() + 1;
+        result = m.next();
     }
-    if append_pos < uri.len() {
-        regex.push_str(&escape(&uri[append_pos..]));
+    if append_pos < kt_length(uri) {
+        regex.push_str(&escape(&kt_substring(uri, append_pos, None)));
     }
 }
 
@@ -152,8 +175,8 @@ impl NavDeepLink {
             if !SCHEME_PATTERN.with(|s| s.contains_match_in(pattern)) {
                 regex.push_str("http[s]?://");
             }
-            if let Some(end) = PATH_END.with(|p| p.find(pattern)) {
-                build_regex(&pattern[..end.range.start], &mut path_args, &mut regex);
+            if let Some(end) = PATH_END.with(|p| p.find(pattern, 0)) {
+                build_regex(&kt_substring(pattern.as_str(), 0, Some(end.range().first())), &mut path_args, &mut regex);
                 // (Kotlin's `contains(Regex)` finds a match of `.*` in any text, an empty one: no deep link is
                 // exact — 2.10's)
                 is_exact_deep_link =
@@ -213,7 +236,7 @@ impl NavDeepLink {
     }
 
     fn path_pattern(&self) -> Option<&Regex> {
-        self.0.path_pattern.get_or_init(|| self.0.path_regex.as_deref().map(Regex::ignore_case)).as_ref()
+        self.0.path_pattern.get_or_init(|| self.0.path_regex.as_deref().map(ignore_case)).as_ref()
     }
 
     fn is_parameterized_query(&self) -> bool {
@@ -250,16 +273,17 @@ impl NavDeepLink {
             let mut arg_regex = String::new();
             let mut append_pos = 0;
             let mut param = ParamQuery { param_regex: None, arguments: Vec::new() };
-            for m in FILL_IN_PATTERN.with(|f| f.find_all(&query_param)) {
-                param.arguments.push(m.group(&query_param, 1).expect("a name").to_string());
-                if m.range.start > append_pos {
-                    arg_regex.push_str(&escape(&query_param[append_pos..m.range.start]));
+            for m in FILL_IN_PATTERN.with(|f| f.find_all(&query_param, 0)) {
+                param.arguments.push(group(&m, 1).expect("a name"));
+                let range = m.range();
+                if range.first() > append_pos {
+                    arg_regex.push_str(&escape(&kt_substring(query_param.as_str(), append_pos, Some(range.first()))));
                 }
                 arg_regex.push_str(ANY_SYMBOLS_IN_THE_TAIL);
-                append_pos = m.range.end;
+                append_pos = range.last() + 1;
             }
-            if append_pos < query_param.len() {
-                arg_regex.push_str(&escape(&query_param[append_pos..]));
+            if append_pos < kt_length(query_param.as_str()) {
+                arg_regex.push_str(&escape(&kt_substring(query_param.as_str(), append_pos, None)));
             }
             arg_regex.push('$');
             param.param_regex = Some(save_wildcard_in_regex(&arg_regex));
@@ -287,7 +311,7 @@ impl NavDeepLink {
     }
 
     fn fragment_pattern(&self) -> Option<&Regex> {
-        self.0.fragment_pattern.get_or_init(|| self.fragment().map(|f| Regex::ignore_case(&f.1))).as_ref()
+        self.0.fragment_pattern.get_or_init(|| self.fragment().map(|f| ignore_case(&f.1))).as_ref()
     }
 
     fn mime_type_pattern(&self) -> Option<&Regex> {
@@ -341,7 +365,7 @@ impl NavDeepLink {
         let text = deep_link.as_str();
         let result = self.path_pattern()?.match_entire(text)?;
         let state = SavedState::new();
-        if !self.get_matching_path_arguments(text, &result, &state, arguments) {
+        if !self.get_matching_path_arguments(&result, &state, arguments) {
             return None;
         }
         if self.is_parameterized_query() && !self.get_matching_query_arguments(deep_link, &state, arguments) {
@@ -365,7 +389,7 @@ impl NavDeepLink {
         let Some(deep_link) = deep_link else { return state };
         let text = deep_link.as_str();
         let Some(result) = self.path_pattern().and_then(|p| p.match_entire(text)) else { return state };
-        self.get_matching_path_arguments(text, &result, &state, arguments);
+        self.get_matching_path_arguments(&result, &state, arguments);
         if self.is_parameterized_query() {
             self.get_matching_query_arguments(deep_link, &state, arguments);
         }
@@ -377,22 +401,16 @@ impl NavDeepLink {
         let fragment = fragment.unwrap_or_else(|| "null".into());
         let Some(result) = self.fragment_pattern().and_then(|p| p.match_entire(&fragment)) else { return };
         for (index, name) in self.fragment_args().iter().enumerate() {
-            let value = result.group(&fragment, index + 1).map(uri::decode).unwrap_or_default();
+            let value = group(&result, index + 1).as_deref().map(uri::decode).unwrap_or_default();
             if parse_argument(state, name, &value, arguments.get(name)).is_err() {
                 return;
             }
         }
     }
 
-    fn get_matching_path_arguments(
-        &self,
-        text: &str,
-        result: &Match,
-        state: &SavedState,
-        arguments: &NavArguments,
-    ) -> bool {
+    fn get_matching_path_arguments(&self, result: &MatchResult, state: &SavedState, arguments: &NavArguments) -> bool {
         for (index, name) in self.0.path_args.iter().enumerate() {
-            let value = result.group(text, index + 1).map(uri::decode).unwrap_or_default();
+            let value = group(result, index + 1).as_deref().map(uri::decode).unwrap_or_default();
             if parse_argument(state, name, &value, arguments.get(name)).is_err() {
                 // (a value its type can't parse: not a link for this destination)
                 return false;
@@ -465,7 +483,7 @@ fn parse_input_params(inputs: &[String], stored: &ParamQuery, state: &SavedState
         let regex = stored.param_regex.as_deref().map(Regex::new);
         let Some(m) = regex.as_ref().and_then(|r| r.match_entire(input)) else { return false };
         for (index, name) in stored.arguments.iter().enumerate() {
-            let value = m.group(input, index + 1).unwrap_or_default().to_string();
+            let value = group(&m, index + 1).unwrap_or_default();
             let argument = arguments.get(name);
             let _ = if !contains(&temp, name) {
                 parse_argument(&temp, name, &value, argument)
@@ -771,5 +789,60 @@ impl NavDeepLinkRequestBuilder {
     }
     pub fn build(&self) -> NavDeepLinkRequest {
         NavDeepLinkRequest::new(self.uri.clone(), self.action.clone(), self.mime_type.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The patterns deep links make, as kotlin.text.Regex (kompoz-runtime's kt::Regex, Java's syntax) reads them.
+
+    #[test]
+    fn literals_classes_and_quantifiers() {
+        assert!(Regex::new("abc").matches("abc"));
+        assert!(!Regex::new("abc").matches("abcd"));
+        assert!(Regex::new("a.c").matches("abc") && !Regex::new("a.c").matches("a\nc"));
+        assert!(Regex::new("[^/]*").matches("a b") && !Regex::new("[^/]*").matches("a/b"));
+        assert!(Regex::new("^[a-zA-Z]+[+\\w\\-.]*:").contains_match_in("kompoz://x"));
+        assert!(!Regex::new("^[a-zA-Z]+[+\\w\\-.]*:").contains_match_in("item/42"));
+        assert!(Regex::new("^[-\\w*.]+/[-\\w+*.]+$").matches("image/*"));
+        assert!(Regex::new("a{2,3}").matches("aaa") && !Regex::new("a{2,3}").matches("aaaa"));
+        assert!(Regex::new("[\\s\\S]+").matches("a\nb"));
+        assert!(Regex::new("[*]+").matches("**"));
+    }
+
+    #[test]
+    fn groups_take_what_lazy_and_greedy_quantifiers_leave() {
+        let r = Regex::new("^\\Qkompoz://item/\\E([^/]*?|)($|(\\?(.)*)|(#(.)*))");
+        let m = r.match_entire("kompoz://item/42?x=1").expect("a match");
+        assert_eq!(group(&m, 1).as_deref(), Some("42"));
+        assert_eq!(group(&m, 2).as_deref(), Some("?x=1"));
+        let lazy = Regex::new("([\\s\\S]+?)?_([\\s\\S]+?)?$");
+        let m = lazy.match_entire("John_Doe").expect("a match");
+        assert_eq!((group(&m, 1).as_deref(), group(&m, 2).as_deref()), (Some("John"), Some("Doe")));
+        let m = lazy.match_entire("_").expect("a match");
+        assert_eq!((group(&m, 1), group(&m, 2)), (None, None));
+    }
+
+    #[test]
+    fn case_is_ignored_when_asked_and_quoting_is_javas() {
+        assert!(ignore_case("\\Qhttps://example.com/\\E([^/]*?|)").matches("HTTPS://Example.com/7"));
+        assert!(!Regex::new("\\Qhttps\\E").matches("HTTPS"));
+        assert_eq!(escape("a.b"), "\\Qa.b\\E");
+        assert!(Regex::new(&escape("a\\Eb")).matches("a\\Eb"));
+        let all: Vec<_> = FILL_IN_PATTERN.with(|f| f.find_all("a/{x}/{y}", 0)).iter().map(|m| group(m, 1)).collect();
+        assert_eq!(all, [Some("x".to_string()), Some("y".to_string())]);
+        let m = PATH_END.with(|p| p.find("a/b", 0)).expect("the end");
+        assert_eq!((m.range().first(), m.range().last()), (3, 2));
+    }
+
+    #[test]
+    fn arguments_are_found_by_kotlins_indices_past_wide_characters() {
+        // (UTF-16 units, as Kotlin's: a character beyond the BMP counts two)
+        let (mut args, mut regex) = (Vec::new(), String::new());
+        build_regex("😀/{a}/ü{b}", &mut args, &mut regex);
+        assert_eq!(args, ["a", "b"]);
+        assert_eq!(regex, format!("\\Q😀/\\E{PATH_REGEX}\\Q/ü\\E{PATH_REGEX}"));
     }
 }

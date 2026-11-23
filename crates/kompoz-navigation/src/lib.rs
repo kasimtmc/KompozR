@@ -1,7 +1,8 @@
-//! KompozR's navigation (stage 13): androidx.navigation 2.10's common and runtime parts (navigation-common,
+//! KompozR's navigation, as androidx.navigation 2.10's: its common and runtime parts (navigation-common,
 //! navigation-runtime) and navigation-compose (`NavHost`, the composable and dialog navigators, the graph builder's
 //! `kompozable` / `composable`, `navigation`, `dialog`), their non-Android actuals written from the common and Android
-//! code.
+//! code. (Navigation 3 — NavDisplay, NavEntry, scenes — is kompoz-navigation3: Compose's Navigation 3 artifacts don't
+//! depend on these.)
 //!
 //! - The NavHost: [`NavHost`] (and [`NavHost_of`], [`NavHost_graph`]), [`remember_nav_controller`],
 //!   `current_back_stack_entry_as_state`, [`ComposeNavigator`], [`DialogNavigator`], [`DialogHost`],
@@ -12,12 +13,14 @@
 //! - Arguments: [`NavType`] (the built-ins as constants, `NavType::IntType` …; one's own through [`NavTypeImpl`],
 //!   collections through [`CollectionNavType`]), [`NavArgument`], [`nav_argument`]; arguments live in a
 //!   [`SavedState`] ([`BundleGetters`]: `entry.arguments()?.get_int("n")`).
-//! - Deep links: [`NavDeepLink`] (URI patterns matched as Compose's regular expressions, actions, MIME types),
+//! - Deep links: [`NavDeepLink`] (URI patterns made into Compose's regular expressions — Kotlin's `Regex`,
+//!   kompoz-runtime's [`kt::Regex`](kompoz_runtime::kt::Regex) —, actions, MIME types),
 //!   [`nav_deep_link`], [`nav_deep_link_of`], [`NavDeepLinkRequest`], [`NavUri`].
 //! - Options: [`NavOptions`], [`nav_options`] (`pop_up_to(…) { inclusive; save_state }`, `launch_single_top`,
 //!   `restore_state`).
-//! - The back stack: [`NavBackStackEntry`] (a `LifecycleOwner` capped by its host's lifecycle; its arguments,
-//!   `to_route::<T>()`), [`Navigator`], [`NavigatorState`], [`NavigatorProvider`], [`NavGraphNavigator`],
+//! - The back stack: [`NavBackStackEntry`] (a `LifecycleOwner` capped by its host's lifecycle, a
+//!   `ViewModelStoreOwner` whose ViewModels live while it is on the back stack or saved, a `SavedStateRegistryOwner`
+//!   whose ViewModels' `SavedStateHandle`s get its arguments; its arguments, `to_route::<T>()`), [`Navigator`], [`NavigatorState`], [`NavigatorProvider`], [`NavGraphNavigator`],
 //!   [`NavController`] (navigating by route, typed route, deep link or request; popping; saved stacks; deep links the
 //!   host is opened with; its saved state).
 //! - Typed routes: `#[derive(Route)]` on a struct (Compose's `@Serializable` route; its base name the type's name,
@@ -52,7 +55,6 @@ mod java;
 mod nav_type;
 mod navigator;
 mod options;
-mod regex;
 mod saved_state;
 mod serialization;
 mod uri;

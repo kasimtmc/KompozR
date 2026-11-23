@@ -26,8 +26,7 @@
 //! characters (code points), as Java's nodes do on supplementary ones; an index inside a surrogate pair is taken as
 //! the character after it.
 //!
-//! This is kompoz-navigation's (Navigation 2's) crate-private `regex.rs` made public and extended; the two are to be
-//! unified on this one.
+//! Navigation's deep links (kompoz-navigation's NavDeepLink, as Kotlin's `Regex`) are made of it too.
 
 use super::panic_kt;
 use super::range::{KtProgression, until};

@@ -54,8 +54,12 @@ kompoz-foundation       Box/Row/Column/FlowRow/FlexBox/Grid, Layout/SubkompozLay
 kompoz-animation        özellikler, Animatable, animate*AsState, geçişler, AnimatedVisibility/Content,
                         Crossfade, animateContentSize, SharedTransitionLayout
 kompoz-material3        tema, tipografi, şekiller, Material 3 1.4 + Expressive bileşenlerinin hepsi, simgeler
-kompoz-navigation       NavHost, türlü rotalar, derin bağlantılar, iç içe grafikler
-kompoz-lifecycle        Lifecycle, ViewModel, SavedStateHandle
+kompoz-navigation       Navigation 2.10: NavHost, NavController, türlü rotalar, derin bağlantılar, iç içe grafikler
+kompoz-navigation3      Navigation 3: NavDisplay, NavEntry, entryProvider, NavBackStack, sahneler, sonuçlar
+kompoz-navigationevent  geri ve ileri olayları (navigationevent): dağıtıcı, işleyiciler, öngörülü geri hareketi
+kompoz-lifecycle        Lifecycle, ViewModel, SavedStateHandle, kayıtlı durum (savedstate)
+kompoz-resources        Compose Multiplatform kaynakları: Res, resimler, yazı tipleri, dizgiler (compose_resources!)
+kompoz-coil             AsyncImage (Coil 3'ün Compose katmanı)
 kompoz-gpu              çizici çekirdeği + aygıt katmanı: Vulkan (ash), Metal (objc2-metal), WebGPU (web-sys);
                         Slang gölgelendiricilerinden üretilmiş SPIR-V / MSL / WGSL
 kompoz-platform         uygulama çekirdeği (kare döngüsü, olaylar, kendi başlık çubuğumuz) + platformlar:

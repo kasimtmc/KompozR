@@ -14,8 +14,10 @@
 //!
 //! Compose's module split (Compose UI depends on navigationevent; activity-compose's `BackHandler` and
 //! `PredictiveBackHandler`, kompoz-ui's `back`, are built on it). The host (kompoz-ui's) is the root owner, as Compose
-//! for desktop's window is: its root dispatcher gets the platform's back (keys, the back button, gestures) through
-//! its inputs, and is provided as [`LocalNavigationEventDispatcherOwner`].
+//! for desktop's window is (its `DefaultArchitectureComponentsOwner`, the app's lifecycle, ViewModel store and saved
+//! state owner too): its root dispatcher gets the platform's back (keys, the back button, gestures) through its
+//! inputs, and is provided as [`LocalNavigationEventDispatcherOwner`]; a focusable popup or a dialog has a dispatcher
+//! of its own (Android's: a window of its own), back going to the window on top.
 //!
 //! ```no_run
 //! # use kompoz_navigationevent::*;

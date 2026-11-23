@@ -18,13 +18,13 @@
 //!   [`SavedStateHandle`], [`LocalViewModelStoreOwner`], [`view_model`] (Kotlin's `viewModel`),
 //!   [`remember_view_model_store_owner`].
 //!
-//! The host is the app's saved state registry owner and ViewModel store owner too ([`LocalSavedStateRegistryOwner`],
-//! [`LocalViewModelStoreOwner`]): its ViewModels are cleared as it is destroyed, their handles written out with its
-//! state.
-//!
 //! The host (kompoz-ui's) is the app's lifecycle owner, provided as [`LocalLifecycleOwner`]: resumed while its
 //! window has the focus, started while it is shown without it, created while it is hidden or minimized, destroyed
-//! as it goes (what the platform tells it).
+//! as it goes (what the platform tells it). It is the app's saved state registry owner and ViewModel store owner too
+//! ([`LocalSavedStateRegistryOwner`], [`LocalViewModelStoreOwner`]; Compose Multiplatform's
+//! `DefaultArchitectureComponentsOwner`, its navigation event dispatcher owner as well): its ViewModels are cleared
+//! as it is destroyed, their handles written out with its state. A navigation entry (kompoz-navigation's,
+//! kompoz-navigation3's) is these owners for its content.
 //!
 //! ```no_run
 //! # use kompoz_lifecycle::*;

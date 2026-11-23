@@ -6,7 +6,7 @@ use super::nav_key::NavEntryKey;
 use kompoz_coroutines::{BufferOverflow, Channel, Flow, LaunchedEffect};
 use kompoz_runtime::{
     KompozitionLocal, KompozitionLocalProvider, ProvidedValue, SnapshotStateMap, State, kompozable,
-    mutable_confined_state_map_of, mutable_confined_state_of, remember, remember_keyed, remember_updated_state,
+    mutable_confined_state_map_of, remember, remember_keyed, remember_updated_state,
 };
 use std::any::Any;
 use std::future::Future;
@@ -92,22 +92,19 @@ impl ResultEventBus {
         kompoz_runtime::group(|| {
             let bus = self.clone();
             let key = result_key.to_string();
-            let flow = remember_keyed(key.clone(), move || bus.get_result_flow(&key));
-            // (Compose's `flow.collectAsState(defaultValue)`: a state of the latest collected)
-            let state = remember_keyed(flow.clone(), || mutable_confined_state_of(default_value));
-            let s = state.clone();
-            let f = flow.clone();
-            kompoz_runtime::kompozable_block!({
-                LaunchedEffect(flow, async move {
-                    f.collect(move |v: Rc<dyn Any>| {
-                        if let Some(v) = v.downcast_ref::<T>() {
-                            s.set(v.clone());
-                        }
-                    })
-                    .await;
-                });
+            // (Compose's `remember(resultKey) { getResultFlow(resultKey) }`, its values as `T`: Kotlin's unchecked
+            // `as State<T>`, a result of another type a ClassCastException where it is read — here as it comes)
+            let flow = remember_keyed(key.clone(), move || {
+                bus.get_result_flow(&key).map(|v: Rc<dyn Any>| match v.downcast_ref::<T>() {
+                    Some(v) => v.clone(),
+                    None => kompoz_runtime::kt::panic_kt(
+                        "ClassCastException",
+                        &format!("a result cannot be cast to {}", std::any::type_name::<T>()),
+                    ),
+                })
             });
-            State::from(state)
+            // (Compose's `flow.collectAsState(defaultValue)`: results needn't be Send, a confined state)
+            flow.collect_as_confined_state(default_value)
         })
     }
 

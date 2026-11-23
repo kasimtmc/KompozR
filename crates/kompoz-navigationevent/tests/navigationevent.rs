@@ -577,8 +577,45 @@ fn the_hosts_root_owner_takes_back_keys_while_a_handler_is_enabled() {
     assert_eq!(backs.get(), 3);
 }
 
+/// The host's root owner is its architecture components owner (CMP's `DefaultArchitectureComponentsOwner`: the
+/// lifecycle, ViewModel store, saved state registry and navigation event dispatcher owner in one), its dispatcher
+/// the window's; made again from a saved state (`restore_state`), the owner is new and the dispatcher the same,
+/// what registered with it still taking back.
+fn the_hosts_root_owner_is_its_architecture_components_owner() {
+    use kompoz_ui::input::{Key, KeyModifiers};
+    let backs = Rc::new(Cell::new(0));
+    let owners = Rc::new(RefCell::new(Vec::<Rc<dyn NavigationEventDispatcherOwner>>::new()));
+    let (b, o) = (backs.clone(), owners.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let b = b.clone();
+        o.borrow_mut().push(LocalNavigationEventDispatcherOwner.current().expect("the host's owner"));
+        let state = remember_navigation_event_state(NavigationEventInfoNone);
+        NavigationBackHandler(state, on_back_completed = move || b.set(b.get() + 1));
+    }));
+    let host = rule.host();
+    let address = |o: &Rc<dyn NavigationEventDispatcherOwner>| Rc::as_ptr(o) as *const ();
+    let root = owners.borrow().last().cloned().expect("composed");
+    assert_eq!(address(&root), address(&host.navigation_event_dispatcher_owner()));
+    assert_eq!(address(&root), Rc::as_ptr(&host.lifecycle_owner()) as *const ());
+    assert!(root.navigation_event_dispatcher() == host.navigation_event_dispatcher());
+    let dispatcher = host.navigation_event_dispatcher();
+    let bytes = host.save_state();
+    host.restore_state(&bytes);
+    rule.wait_for_idle();
+    let again = owners.borrow().last().cloned().expect("composed");
+    assert_ne!(address(&again), address(&root));
+    assert_eq!(address(&again), address(&host.navigation_event_dispatcher_owner()));
+    assert!(again.navigation_event_dispatcher() == dispatcher && host.navigation_event_dispatcher() == dispatcher);
+    assert!(host.key_down(Key::Escape, KeyModifiers::None));
+    assert_eq!(backs.get(), 1);
+}
+
 fn main() {
     let tests: &[(&str, fn())] = &[
+        (
+            "the_hosts_root_owner_is_its_architecture_components_owner",
+            the_hosts_root_owner_is_its_architecture_components_owner,
+        ),
         (
             "handlers_are_tried_overlay_first_then_the_latest_added",
             handlers_are_tried_overlay_first_then_the_latest_added,

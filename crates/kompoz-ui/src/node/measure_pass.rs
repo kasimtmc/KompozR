@@ -605,7 +605,8 @@ impl LayoutNode {
         self.on_coordinates_used();
     }
 
-    /// Sets one of the two "coordinates read while placing" flags, keeping the parent's count of such children.
+    /// Sets one of the two "coordinates read while placing" flags, keeping its count of such nodes in it (Compose's
+    /// `coordinatesAccessedDuring(Modifier)Placement` setters): itself counted, its ancestors counting it.
     fn set_coordinates_accessed(&self, during_placement: bool, value: bool) {
         let before = self.coordinates_accessed_during_placement.get()
             || self.coordinates_accessed_during_modifier_placement.get();
@@ -616,26 +617,37 @@ impl LayoutNode {
         }
         let after = self.coordinates_accessed_during_placement.get()
             || self.coordinates_accessed_during_modifier_placement.get();
-        if before != after
-            && let Some(p) = self.parent()
-        {
-            let n = p.children_accessing_coordinates_during_placement.get();
-            p.children_accessing_coordinates_during_placement.set(if after { n + 1 } else { n - 1 });
+        if before != after {
+            self.add_children_accessing_coordinates(if after { 1 } else { -1 });
         }
     }
 
-    /// A child that read its coordinates while placing is placed again (Compose's
-    /// `requestLayoutIfCoordinatesAreUsedAndNotifyChildren`).
+    /// Compose's `childrenAccessingCoordinatesDuringPlacement` setter: the count of it and its descendants that
+    /// read their coordinates while placing, its parent counting it while not zero (however deep the reader, a
+    /// move above it reaches it).
+    pub(crate) fn add_children_accessing_coordinates(&self, delta: i32) {
+        let before = self.children_accessing_coordinates_during_placement.get();
+        let after = before + delta;
+        self.children_accessing_coordinates_during_placement.set(after);
+        if (before == 0) != (after == 0)
+            && let Some(p) = self.parent()
+        {
+            p.add_children_accessing_coordinates(if after == 0 { -1 } else { 1 });
+        }
+    }
+
+    /// It and what is in it that read their coordinates while placing are placed again (Compose's
+    /// `requestLayoutIfCoordinatesAreUsedAndNotifyChildren`): one of its coordinators moved.
     pub(crate) fn request_layout_if_coordinates_are_used_and_notify_children(&self) {
         if !self.is_placed.get() || self.children_accessing_coordinates_during_placement.get() <= 0 {
             return;
         }
+        let accessed = self.coordinates_accessed_during_placement.get()
+            || self.coordinates_accessed_during_modifier_placement.get();
+        if accessed && !self.layout_pending.get() {
+            self.request_relayout();
+        }
         for child in self.children() {
-            let accessed = child.coordinates_accessed_during_placement.get()
-                || child.coordinates_accessed_during_modifier_placement.get();
-            if accessed && !child.layout_pending.get() {
-                child.request_relayout();
-            }
             child.request_layout_if_coordinates_are_used_and_notify_children();
         }
     }
