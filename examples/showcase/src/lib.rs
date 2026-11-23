@@ -1,13 +1,14 @@
 //! KompozR's showcase: the C++ Kompoz showcase (~/Projects/kompoz/examples/showcase) ported — its shell (main.cpp:
-//! the drawer, the navigation suite, the app bar, the snackbars) and its Material screen (material/*: 27 sections,
-//! one under another), in Kotlin's syntax: `.kt` files read by `kompoz_file!`, in the C++ showcase's folders and
-//! files (showcase.hpp + common.cpp → `common.kt`, main.cpp → `main.kt`, material/*.cpp → `material/*.kt`).
+//! the drawer, the navigation suite, the app bar, the snackbars, the NavHost of its screens), its Material screen
+//! (material/*: 27 sections, one under another) and its places screen (places/places.cpp), in Kotlin's syntax: `.kt`
+//! files read by `kompoz_file!`, in the C++ showcase's folders and files (showcase.hpp + common.cpp → `common.kt`,
+//! main.cpp → `main.kt`, material/*.cpp → `material/*.kt`, places/places.cpp → `places/places.kt`).
 //!
-//! What Kotlin writes as classes is here in Rust until stage 14 brings Kotlin's classes: the enum classes
-//! (`ColorSource`, `Spot`, `RowReveal`), the data class `Destination`, the two indications the ripple section
-//! provides (Kotlin's `object … : IndicationNodeFactory`), and `onAndroid` (what the C++ checks with `__ANDROID__`).
-//! The other screens (home, list, components, places) come with stage 16 and the NavHost with stage 13: until
-//! then the shell's tabs are a state, and the screens other than Material say so.
+//! What Kotlin writes as classes is here in Rust until stage 14 brings Kotlin's classes: the screens' typed routes
+//! (Kotlin's `@Serializable` objects and data class: [`routes`]), the enum classes (`ColorSource`, `Spot`,
+//! `RowReveal`), the data class `Destination`, the two indications the ripple section provides (Kotlin's `object …
+//! : IndicationNodeFactory`), and `onAndroid` (what the C++ checks with `__ANDROID__`). The other screens (home,
+//! list, components) come with stage 16: until then their routes say so.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -84,14 +85,71 @@ mod navigation {
     use kompoz::ui::input::NestedScrollConnection;
     kompoz::kompoz_file!("src/material/navigation.kt");
 }
+mod places {
+    use super::*;
+    use kompoz::prelude::*;
+    kompoz::kompoz_file!("src/places/places.kt");
+}
 pub use common::*;
 pub use containers::*;
 pub use controls::*;
 pub use main::*;
 pub use material::*;
 pub use navigation::*;
+pub use places::*;
+pub use routes::*;
 pub use sections::*;
 pub use text_fields::*;
+
+/// The screens, as type-safe routes (named, so the addresses read "item/42", "list/all"): the C++ showcase's
+/// `namespace routes` (showcase.hpp). Kotlin writes them as top-level `@Serializable @SerialName("home") object
+/// Home`, … (a package has no namespace of its own: the .kt files name them `Home`, not the C++'s `routes::Home()`);
+/// Rust twins until stage 14 (D6), in a module of their own, seen from every file as Kotlin's package's.
+pub mod routes {
+    use kompoz::prelude::*;
+
+    /// `@Serializable @SerialName("home") object Home`: the home screen.
+    #[derive(Route, Clone, PartialEq, Debug)]
+    #[route(name = "home")]
+    pub struct Home;
+
+    /// `@Serializable @SerialName("list") object ListGraph`: the list and its items, a nested graph.
+    #[derive(Route, Clone, PartialEq, Debug)]
+    #[route(name = "list")]
+    pub struct ListGraph;
+
+    /// `@Serializable @SerialName("list/all") object ListAll`: the list.
+    #[derive(Route, Clone, PartialEq, Debug)]
+    #[route(name = "list/all")]
+    pub struct ListAll;
+
+    /// `@Serializable @SerialName("item") data class Item(val n: Int)`: an item of the list ("item/{n}").
+    #[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
+    #[route(name = "item")]
+    pub struct Item {
+        pub n: i32,
+    }
+
+    /// Kotlin's `Item(n)`.
+    pub fn Item(n: i32) -> Item {
+        Item { n }
+    }
+
+    /// `@Serializable @SerialName("components") object Components`: the components screen.
+    #[derive(Route, Clone, PartialEq, Debug)]
+    #[route(name = "components")]
+    pub struct Components;
+
+    /// `@Serializable @SerialName("material") object Material`: the Material screen.
+    #[derive(Route, Clone, PartialEq, Debug)]
+    #[route(name = "material")]
+    pub struct Material;
+
+    /// `@Serializable @SerialName("places") object Places`: BottomSheetScaffold over a map.
+    #[derive(Route, Clone, PartialEq, Debug)]
+    #[route(name = "places")]
+    pub struct Places;
+}
 
 /// Where the app runs, for what differs (a phone has no hardware keyboard): the C++ showcase's `kOnAndroid`.
 pub const on_android: bool = cfg!(target_os = "android");

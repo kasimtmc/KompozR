@@ -1,7 +1,7 @@
 // The Material screen: its sections, one under another (here and in the other files of material/).
 
 @Composable
-fun MaterialScreen(modifier: Modifier, colorSource: MutableState<ColorSource>) {
+fun MaterialScreen(modifier: Modifier, colorSource: MutableState<ColorSource>, nav: NavController) {
     val scroll = rememberScrollState()
     Column(modifier = modifier.verticalScroll(scroll).padding(20.dp, 8.dp, 20.dp, 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SearchSection()
@@ -25,7 +25,7 @@ fun MaterialScreen(modifier: Modifier, colorSource: MutableState<ColorSource>) {
         SelectionControlsSection()
         TabsSection()
         ListItemSection()
-        DialogsSection()
+        DialogsSection(nav)
         FabMenuSection()
         ShortNavigationBarSection()
         WideNavigationRailSection()

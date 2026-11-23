@@ -2224,10 +2224,13 @@ impl Gen<'_, '_> {
                 return quote_spanned!(span=> ::std::rc::Rc::new(#v));
             }
         }
+        // (lent whole: `&(0.3 + 0.27 * i)`, a vararg's `Any?` of `"%.1f".format(…)`, not `&0.3 + …`)
         if t.starts_with("&mut") {
+            let v = super::cast_operand(v);
             return quote_spanned!(span=> &mut #v);
         }
         if t.starts_with('&') && !t.starts_with("&str") && !t.starts_with("&'static str") {
+            let v = super::cast_operand(v);
             return quote_spanned!(span=> &#v);
         }
         // (a `&str` given a Kotlin `String` value that isn't a literal — a variable, a template's `format!` —: lent,

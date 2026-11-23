@@ -1,7 +1,10 @@
 //! The showcase: each of the Material tab's sections composes (the test rule, in the showcase's theme, its title
-//! there), the shell shows the Material tab when its navigation item is clicked; and run headless as its binary runs
+//! there), the shell shows the Material tab when its navigation item is clicked, the dialogs section's map button
+//! opens the places screen (kept on the Material tab's back stack while another tab is shown), the C++ showcase's
+//! deep links open their screens; and run headless as its binary runs
 //! (`KOMPOZ_HEADLESS=1`, a GPU device: lavapipe, the validation layers' errors failing it where
-//! `KOMPOZ_GPU_VALIDATION=1` turns them on, as CI does), the Material tab shot page by page in every config matches the C++ showcase's pictures
+//! `KOMPOZ_GPU_VALIDATION=1` turns them on, as CI does), the Material tab shot page by page (and the places screen
+//! opened by its deep link) in every config matches the C++ showcase's pictures
 //! (examples/showcase/reference) outside the regions reference/regions.txt lists with their reasons. The drawing
 //! needs a GPU device: without one it is skipped, unless `KOMPOZ_GPU_REQUIRED=1`.
 
@@ -9,7 +12,8 @@
 
 use kompoz::gpu::device::{self, Backend, Surface};
 use kompoz::prelude::*;
-use kompoz::test::KompozTestRule;
+use kompoz::test::{InjectionScope, KompozTestRule};
+use kompoz::ui::input::{Key, KeyModifiers};
 use kompoz::ui::strings::{LocalStrings, Strings};
 use showcase::shots::{self, Config, Showcase};
 use showcase::*;
@@ -46,7 +50,7 @@ kompoz::kompoz! {
                         18 -> SelectionControlsSection()
                         19 -> TabsSection()
                         20 -> ListItemSection()
-                        21 -> DialogsSection()
+                        21 -> DialogsSection(rememberNavController())
                         22 -> FabMenuSection()
                         23 -> ShortNavigationBarSection()
                         24 -> WideNavigationRailSection()
@@ -100,11 +104,64 @@ fn every_section_composes() {
     }
 }
 
+const HOME: &str = "Ana sayfa ekranı KompozR'da 16. aşamada gelir; Material sekmesi hazır.";
+
 /// The shell starts on its first tab (a screen that comes with stage 16); its Material item shows the Material screen.
 fn the_shell_opens_the_material_tab() {
     let rule = KompozTestRule::new(showcase::ShowcaseApp);
-    rule.on_node_with_text("Ana sayfa ekranı KompozR'da 16. aşamada gelir; Material sekmesi hazır.").assert_exists();
+    rule.on_node_with_text(HOME).assert_exists();
     rule.on_all_nodes_with_text("Material").on_first().perform_click();
+    rule.on_node_with_text("SearchBar · SearchBarState").assert_exists();
+    rule.on_node_with_text(HOME).assert_does_not_exist();
+}
+
+/// The dialogs section's "Harita" opens the places screen (C++ containers.cpp:92): its sheet peeking, dragged open,
+/// closed by its button. It is on the Material tab's back stack: the home tab saves it (popUpTo the start with saveState), the
+/// Material tab brings it back (restoreState), and back leads to the Material screen, then home.
+fn the_map_button_opens_the_places_screen() {
+    let rule = KompozTestRule::new(showcase::ShowcaseApp);
+    rule.on_all_nodes_with_text("Material").on_first().perform_click();
+    rule.on_node_with_text("Harita (BottomSheetScaffold)").perform_scroll_to().perform_click();
+    rule.on_node_with_text("Yakındaki yerler").assert_exists();
+    rule.on_node_with_text("Sayfa: kısmen açık").assert_exists();
+    rule.on_node_with_text("SearchBar · SearchBarState").assert_does_not_exist();
+    // (dragged up by its title: its buttons are below the 128 dp it peeks)
+    rule.on_node_with_text("Yakındaki yerler").perform_touch_input(|t| {
+        let y = t.center_y();
+        t.swipe_up_with(y, y - 600.0, 300)
+    });
+    rule.wait_for_idle();
+    rule.on_node_with_text("Sayfa: açık").assert_exists();
+    rule.on_node_with_text("Daralt").perform_click();
+    rule.on_node_with_text("Sayfa: kısmen açık").assert_exists();
+    rule.on_all_nodes_with_text("Ana sayfa").on_first().perform_click();
+    rule.on_node_with_text(HOME).assert_exists();
+    rule.on_node_with_text("Yakındaki yerler").assert_does_not_exist();
+    rule.on_all_nodes_with_text("Material").on_first().perform_click();
+    rule.on_node_with_text("Yakındaki yerler").assert_exists();
+    assert!(rule.host().key_down(Key::Escape, KeyModifiers::default()));
+    rule.wait_for_idle();
+    rule.on_node_with_text("SearchBar · SearchBarState").assert_exists();
+    assert!(rule.host().key_down(Key::Escape, KeyModifiers::default()));
+    rule.wait_for_idle();
+    rule.on_node_with_text(HOME).assert_exists();
+}
+
+/// The C++ showcase's deep links (`showcase kompoz://item/42`): an item of the list graph (its typed route's path
+/// argument), the components, Material and places screens.
+fn deep_links_open_their_screens() {
+    let rule = KompozTestRule::new(showcase::ShowcaseApp);
+    rule.host().open_deep_link("kompoz://item/42");
+    rule.wait_for_idle();
+    rule.on_node_with_text("Öğe 42 ekranı KompozR'da 16. aşamada gelir; Material sekmesi hazır.").assert_exists();
+    rule.host().open_deep_link("kompoz://places");
+    rule.wait_for_idle();
+    rule.on_node_with_text("Yakındaki yerler").assert_exists();
+    rule.host().open_deep_link("kompoz://components");
+    rule.wait_for_idle();
+    rule.on_node_with_text("Bileşenler ekranı KompozR'da 16. aşamada gelir; Material sekmesi hazır.").assert_exists();
+    rule.host().open_deep_link("kompoz://material");
+    rule.wait_for_idle();
     rule.on_node_with_text("SearchBar · SearchBarState").assert_exists();
 }
 
@@ -119,8 +176,8 @@ fn it_draws_as_the_cpp_showcase() {
     for config in Config::all() {
         let dir = out.join(config.name());
         shots::shoot(binary, Showcase::KompozR, config, &dir).unwrap_or_else(|e| panic!("{e}"));
-        let cut = shots::cut(&shots::load_pages(&dir).expect("its pages"), config.scale);
-        comparisons.extend(shots::compare(config, &shots::parts(&cut, config.scale), &reference, &regions, &dir));
+        let (_, parts) = shots::run_parts(&dir, Showcase::KompozR, config.scale).expect("its pages");
+        comparisons.extend(shots::compare(config, &parts, &reference, &regions, &dir));
     }
     let report = shots::report(&comparisons);
     assert!(
@@ -135,6 +192,8 @@ fn main() {
     let mut tests: Vec<(&str, fn())> = vec![
         ("every_section_composes", every_section_composes),
         ("the_shell_opens_the_material_tab", the_shell_opens_the_material_tab),
+        ("the_map_button_opens_the_places_screen", the_map_button_opens_the_places_screen),
+        ("deep_links_open_their_screens", deep_links_open_their_screens),
     ];
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
     match device::create(Backend::Vulkan, Surface::default()) {

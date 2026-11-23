@@ -1,8 +1,11 @@
 # Where KompozR's showcase differs from the C++ Kompoz showcase, and why (showcase::shots, `showcase-shots compare`).
 # A line: `config part x y width height causes…` (dp in the part: `top` the top app bar, `bottom` the navigation bar,
-# `s00`…`s26` the Material tab's sections in order), or `config part height causes…` where the part's height
-# differs. Written by tools/stage12-notes/wp9/regions.py from a comparison after the review below; every cause was
-# looked at section by section (WP9's report), the text causes measured by a run with C++'s text rules.
+# `s00`…`s26` the Material tab's sections in order; `places-top`, `places-map`, `places-sheet`, `places-bottom` the
+# places screen opened by its deep link: its bars, its map, its peeking sheet), or `config part height causes…` where
+# the part's height differs. Written by tools/stage12-notes/wp9/regions.py from a comparison after the review below
+# (the places parts by tools/stage13-notes/closing-a/regions_places.py, stage 13); every cause was looked at section
+# by section (WP9's report, closing A's for the places screen), the text causes measured by a run with C++'s text
+# rules.
 #
 # The causes:
 # T-SPACE   Letter spacing in whole pixels: KompozR sets text as Compose on Android (minikin's LayoutCore rounds a
@@ -35,6 +38,11 @@
 #           the leading icon in onSurface), -SWITCH (the thumb), -SEGMENTED, -CHECKBOX, -TABS, -LIST, -FABMENU (the
 #           toggle FAB inside the menu's padding), -RAIL (the wide rail's header), -TOOLBAR (the vertical toolbar's
 #           FAB at its end, its size).
+# MAP-H     The places screen's map is drawn to its box, a px shorter than the C++ one's (the navigation bar a px
+#           taller: T-PAD): its streets, park and pins, placed by fractions of its height, land a fraction of a px
+#           apart (the sheet's part shows the map above its corners).
+# SHEET-SHADOW Compose's BottomSheetScaffold casts its sheet's 1 dp shadow (sheetShadowElevation =
+#           BottomSheetDefaults.Elevation); the C++ BottomSheetScaffold has no shadow.
 light-1x top 104 29 13 17 T-GLYPH
 light-1x bottom height T-SPACE T-PAD T-GLYPH
 light-1x bottom 149 45 23 10 T-SPACE T-PAD T-GLYPH
@@ -2101,3 +2109,142 @@ dark-2x s26 153 604 14 19 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON M15-SWITCH SH
 dark-2x s26 55 607 18 14 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON M15-SWITCH SHADOW
 dark-2x s26 332 624 16 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON M15-SWITCH SHADOW
 dark-2x s26 373 624 15 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON M15-SWITCH SHADOW
+light-1x places-top 104 29 13 17 T-GLYPH
+light-1x places-map height T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 80 16 85 36 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 56 31 12 8 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 0 87 440 37 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 0 180 440 55 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 122 209 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 0 272 440 35 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 298 318 20 22 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 0 355 440 43 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 188 392 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-map 0 453 440 37 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-1x places-sheet 0 7 440 29 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-1x places-sheet 20 63 351 42 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-1x places-sheet 20 120 164 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-1x places-sheet 150 134 6 2 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-1x places-sheet 47 135 3 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-1x places-sheet 118 135 7 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-1x places-bottom height T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 149 45 23 10 T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 242 45 39 13 T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 357 45 42 10 T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 408 45 3 10 T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 22 46 43 9 T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 78 48 7 7 T-SPACE T-PAD T-GLYPH
+light-1x places-bottom 293 48 14 7 T-SPACE T-PAD T-GLYPH
+dark-1x places-top 104 29 13 17 T-GLYPH
+dark-1x places-map height T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 80 16 85 36 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 56 31 12 8 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 243 87 131 32 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 4 89 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 48 92 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 34 95 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 92 95 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 78 98 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 136 98 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 122 101 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 180 101 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 166 104 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 224 104 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 210 107 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 400 116 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 386 119 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 430 122 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 0 180 440 55 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 122 209 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 0 272 440 35 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 298 318 20 22 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 0 355 440 43 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 188 392 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-map 0 453 440 37 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-1x places-sheet 0 8 27 27 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-sheet 413 8 27 27 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-sheet 20 63 351 42 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-sheet 20 120 164 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-sheet 150 134 6 2 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-sheet 47 135 3 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-sheet 118 135 7 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-1x places-bottom height T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 265 12 20 19 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 375 12 20 20 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 45 13 20 17 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 156 17 18 10 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 149 45 23 10 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 242 45 39 13 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 357 45 42 10 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 408 45 3 10 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 22 46 43 9 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 78 48 7 7 T-SPACE T-PAD T-GLYPH
+dark-1x places-bottom 293 48 14 7 T-SPACE T-PAD T-GLYPH
+light-2x places-top 58 25 82 22 T-GLYPH
+light-2x places-map height T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 36 16 128 36 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 1 87 439 37 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 0 180 440 55 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 122 209 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 0 272 440 35 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 298 319 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 0 355 440 43 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 188 392 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-map 0 453 440 37 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+light-2x places-sheet 0 7 28 29 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 110 7 1 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 184 7 7 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 330 7 1 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 412 7 28 29 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 20 62 352 43 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 20 120 64 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 92 120 90 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 150 134 6 2 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 47 135 3 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-sheet 117 135 8 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+light-2x places-bottom height T-SPACE T-PAD T-GLYPH
+light-2x places-bottom 24 45 60 13 T-SPACE T-PAD T-GLYPH
+light-2x places-bottom 151 45 28 10 T-SPACE T-PAD T-GLYPH
+light-2x places-bottom 244 45 61 13 T-SPACE T-PAD T-GLYPH
+light-2x places-bottom 359 45 51 10 T-SPACE T-PAD T-GLYPH
+dark-2x places-top 58 25 82 22 T-GLYPH
+dark-2x places-map height T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 36 16 128 36 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 232 87 142 32 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 12 94 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 34 95 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 56 97 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 78 98 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 100 100 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 122 101 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 144 103 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 166 104 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 188 106 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 210 107 1 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 386 119 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 408 121 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 430 122 3 1 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 0 180 440 55 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 122 209 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 0 272 440 35 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 298 319 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 0 355 440 43 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 188 392 20 21 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-map 0 453 440 37 T-SPACE T-TRACK T-PAD T-GLYPH MAP-H
+dark-2x places-sheet 0 8 28 28 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 412 8 28 28 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 20 62 352 43 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 20 120 64 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 92 120 90 16 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 150 134 6 2 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 47 135 3 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-sheet 117 135 8 1 T-SPACE T-TRACK T-PAD T-GLYPH M15-BUTTON SHEET-SHADOW MAP-H
+dark-2x places-bottom height T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 265 12 20 19 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 375 12 20 20 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 45 13 20 17 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 156 17 18 10 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 24 45 60 13 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 151 45 28 10 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 244 45 61 13 T-SPACE T-PAD T-GLYPH
+dark-2x places-bottom 359 45 51 10 T-SPACE T-PAD T-GLYPH

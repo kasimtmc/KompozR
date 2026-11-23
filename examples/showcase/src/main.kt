@@ -2,10 +2,11 @@
 // suite, the app bar that scrolls away, the snackbars, the about dialog — around its screens. Turn on the eye in the
 // app bar to see which parts actually run again.
 //
-// Until stage 13 brings the NavHost the tabs are a state (rememberSaveable), and of the screens only the Material
-// one is here (the home, list, components and places screens come with stage 16). The C++ showcase's desktop menu
-// bar (MenuBar: Dosya, Görünüm, Git) comes with the window APIs (stage 15/16); its SystemBarsAppearance (the
-// status bar icons on Android) with stage 15.
+// The screens are routes of a NavHost (Compose's typed routes, the C++ showcase's `routes::` namespace: Kotlin's
+// top-level @Serializable objects, lib.rs's `routes`); of them the Material and places screens are here, the home,
+// list (with its item screen, its LikesViewModel and its scroll-to-top button) and components screens come with
+// stage 16 (their routes show LaterScreen). The C++ showcase's desktop menu bar (MenuBar: Dosya, Görünüm, Git) comes
+// with the window APIs (stage 15/16); its SystemBarsAppearance (the status bar icons on Android) with stage 15.
 
 @Composable
 fun ShowcaseApp() {
@@ -18,9 +19,31 @@ fun ShowcaseApp() {
     }
     val colorSource = rememberSaveable { mutableStateOf(ColorSource.System) }  // Material You where the system has it
     var showRekompozitions by remember { mutableStateOf(false) }
-    // The screen shown: the tab picked (the NavHost's route once stage 13 brings it).
-    var tab by rememberSaveable { mutableStateOf(0) }
-    val goTab: (Int) -> Unit = { i -> tab = i }
+    // The screens are routes of a NavHost; the tabs keep their own back stacks (and scroll
+    // positions), saved while another tab is shown, as Compose's bottom navigation does.
+    val nav = rememberNavController()
+    val entry by nav.currentBackStackEntryAsState()
+    val destination = entry?.destination
+    val route = destination?.route ?: "home"
+    val tab = when {
+        destination?.hierarchy?.any { it.hasRoute<ListGraph>() } == true -> 1
+        destination?.hierarchy?.any { it.hasRoute<Components>() } == true -> 2
+        destination?.hierarchy?.any { it.hasRoute<Material>() } == true -> 3
+        else -> 0
+    }
+    val tabs = navOptions {
+        popUpTo<Home> { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+    val goTab: (Int) -> Unit = { i ->
+        when (i) {
+            0 -> nav.navigate(Home, tabs)
+            1 -> nav.navigate(ListGraph, tabs)
+            2 -> nav.navigate(Components, tabs)
+            else -> nav.navigate(Material, tabs)
+        }
+    }
     val snackbar = remember { SnackbarHostState() }
     var overflow by remember { mutableStateOf(false) }
     // The whole app laid out right to left: the system language's direction at first, then the menu's.
@@ -33,12 +56,12 @@ fun ShowcaseApp() {
     val barScroll = TopAppBarDefaults.enterAlwaysScrollBehavior()
     // A new screen starts with the bar shown; the screen it was on keeps it as it was (after the app was ended
     // too: the screen seen last is saved).
-    var seen by rememberSaveable { mutableStateOf(tab) }
-    LaunchedEffect(tab) {
-        if (seen != tab) {
+    var seen by rememberSaveable { mutableStateOf(route) }
+    LaunchedEffect(route) {
+        if (seen != route) {
             barScroll.state.heightOffset = 0f
             barScroll.state.contentOffset = 0f
-            seen = tab
+            seen = route
         }
     }
     val destinations = listOf("Ana sayfa" to Icons.Filled.Home, "Liste" to Icons.AutoMirrored.Filled.List,
@@ -124,9 +147,9 @@ fun ShowcaseApp() {
             scrollBehavior = barScroll)
     }
 
-    // (The list screen's scroll-to-top button comes with that screen: stage 16.)
+    // (The list screen's scroll-to-top button, the FAB of ListAll, comes with that screen: stage 16.)
     val fab: @Composable () -> Unit = {
-        if (tab == 0) {
+        if (destination?.hasRoute<Home>() == true) {
             ExtendedFloatingActionButton(
                 onClick = {
                     // As Compose apps do: wait for how it went (with an action it stays until answered or closed).
@@ -147,11 +170,30 @@ fun ShowcaseApp() {
 
     val screen: @Composable (PaddingValues) -> Unit = { padding ->
         // Clear of the bars; the keyboard only takes what the bottom bar doesn't already cover.
-        Box(modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-            if (tab == 3) {
-                MaterialScreen(Modifier.fillMaxSize(), colorSource)
-            } else {
-                LaterScreen(destinations[tab].first)
+        NavHost(
+            navController = nav,
+            startDestination = Home,
+            modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(),
+            enterTransition = { fadeIn(animationSpec = tween(220, delayMillis = 60)) },
+            exitTransition = { fadeOut(animationSpec = tween(120)) },
+        ) {
+            composable<Home> { LaterScreen(destinations[0].first) }
+            // The list and its items: a nested graph (its LikesViewModel comes with its screens).
+            navigation<ListGraph>(startDestination = ListAll) {
+                composable<ListAll> { LaterScreen(destinations[1].first) }
+                // Also opened by a link: `showcase kompoz://item/42`, or an Android intent.
+                composable<Item>(deepLinks = listOf(navDeepLink<Item>("kompoz://item"))) { e ->
+                    LaterScreen("Öğe ${e.toRoute<Item>().n}")
+                }
+            }
+            composable<Components>(deepLinks = listOf(navDeepLink { uriPattern = "kompoz://components" })) {
+                LaterScreen(destinations[2].first)
+            }
+            composable<Material>(deepLinks = listOf(navDeepLink { uriPattern = "kompoz://material" })) {
+                MaterialScreen(Modifier.fillMaxSize(), colorSource, nav)
+            }
+            composable<Places>(deepLinks = listOf(navDeepLink { uriPattern = "kompoz://places" })) {
+                PlacesScreen(Modifier.fillMaxSize())
             }
         }
         if (about) {
@@ -213,8 +255,8 @@ fun ShowcaseApp() {
     }
 }
 
-// The screens the C++ showcase has besides Material (home, list, components) come with stage 16: until then their
-// tabs say so.
+// The screens the C++ showcase has besides Material and places (home, list and its items, components) come with
+// stage 16: until then their routes say so.
 @Composable
 fun LaterScreen(name: String) {
     Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {

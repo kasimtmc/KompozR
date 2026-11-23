@@ -3,7 +3,8 @@
 //! ```text
 //! showcase-shots compare [--showcase <binary>] [--out <dir>]
 //!     KompozR's showcase (by default the `showcase` beside this binary) shot into <dir> (target/showcase-shots),
-//!     cut into its bars and sections and compared with examples/showcase/reference: a report (also
+//!     cut into its bars and sections (and its places screen, opened by its deep link, into its bars, map and sheet)
+//!     and compared with examples/showcase/reference: a report (also
 //!     <dir>/report.txt; what differs beside it: <dir>/kompozr/<config>/<part>.diff.png), and a failure if
 //!     anything differs outside the regions reference/regions.txt lists.
 //! showcase-shots reference --cpp <C++ showcase binary> --revision <C++ Kompoz's commit> [--out <dir>]
@@ -56,9 +57,8 @@ fn compare(binary: &Path, out: &Path) -> Result<bool, String> {
     for config in Config::all() {
         let dir = shots_dir.join(config.name());
         shots::shoot(binary, Showcase::KompozR, config, &dir)?;
-        let cut = shots::cut(&shots::load_pages(&dir)?, config.scale);
+        let (cut, parts) = shots::run_parts(&dir, Showcase::KompozR, config.scale)?;
         let _ = cut.content.save(&dir.join("content.png"));
-        let parts = shots::parts(&cut, config.scale);
         comparisons.extend(shots::compare(config, &parts, &reference, &regions, &dir));
     }
     let report = shots::report(&comparisons);
@@ -77,18 +77,17 @@ fn reference(cpp: &Path, revision: &str, out: &Path) -> Result<bool, String> {
     for config in Config::all() {
         let dir = out.join("cpp").join(config.name());
         shots::shoot(cpp, Showcase::Cpp, config, &dir)?;
-        let pages: Vec<_> =
-            shots::load_pages(&dir)?.iter().map(|p| p.without_top(shots::MENU_BAR * config.scale as i32)).collect();
-        let cut = shots::cut(&pages, config.scale);
+        let (cut, parts) = shots::run_parts(&dir, Showcase::Cpp, config.scale)?;
         let _ = cut.content.save(&dir.join("content.png"));
         let to = reference.join(config.name());
         let _ = std::fs::remove_dir_all(&to);
-        shots::save_parts(&shots::parts(&cut, config.scale), &to)?;
+        shots::save_parts(&parts, &to)?;
     }
     let note = format!(
         "C++ Kompoz {revision}: examples/showcase built Release in a separate build directory, shot by \
          `showcase-shots reference` (its menu bar, the top {} dp, cut off; cut into the top app bar, the navigation \
-         bar and the Material tab's sections).\n",
+         bar and the Material tab's sections; its places screen, opened by `showcase kompoz://places`, cut into its bars, its \
+         map and its sheet).\n",
         shots::MENU_BAR
     );
     std::fs::write(reference.join("REVISION"), note).map_err(|e| e.to_string())?;

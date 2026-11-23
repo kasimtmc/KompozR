@@ -56,6 +56,10 @@ pub fn Conversions(
                 );
             });
             Text(::kompoz::runtime::kt::template!(points.size()));
+            Text(::kompoz::runtime::kt::KtStr::format(
+                &"%.1f km · %d dk",
+                &[&(0.3 + 0.27 * (points.size() as f64)), &(4 + 3 * points.size())],
+            ));
         },
     );
 }

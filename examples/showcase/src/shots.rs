@@ -2,7 +2,8 @@
 //! compared with the C++ version's"): both run headless on lavapipe with one `KOMPOZ_SCRIPT` and one environment
 //! (no desktop accent, no wallpaper colors, Turkish, left to right), the Material tab shot page by page — light and
 //! dark, at scales 1 and 2 —, the pages laid end to end and cut into the top app bar, the navigation bar and the
-//! sections ([`cut`], [`parts`]), each told apart from the C++ one's with kompoz-gpu's golden difference (every
+//! sections ([`cut`], [`parts`]) — and the places screen, opened by its deep link in a run of its own and shot once,
+//! cut into its bars, its map and its sheet ([`run_parts`]) —, each told apart from the C++ one's with kompoz-gpu's golden difference (every
 //! channel within 3), and what differs either listed with its reason in `reference/regions.txt` or reported.
 //!
 //! The C++ showcase draws its desktop menu bar (Dosya, Görünüm, Git: a 40 dp strip) above the app; KompozR's comes
@@ -61,6 +62,10 @@ impl Config {
     }
 }
 
+/// The places screen's address: both showcases open an address given on their command line (the C++ showcase's
+/// `showcase kompoz://places`), as its NavHost's deep link.
+pub const PLACES_LINK: &str = "kompoz://places";
+
 /// Which showcase runs a script: positions in the app are the same; the C++ one's are `MENU_BAR` lower in its
 /// window, and KompozR's window is made the app's size first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -92,6 +97,21 @@ pub fn script(config: Config, showcase: Showcase) -> String {
         let _ = write!(s, "wait 6; up {DRAG_X} {}; wait 60; shot {page:02}.png; ", from - DRAG);
     }
     s.push_str("quit");
+    s
+}
+
+/// The script of the places run (the app opened at [`PLACES_LINK`]): the theme switched for a dark one, the screen
+/// shot once its transition and the theme's have settled (`places.png`).
+pub fn places_script(config: Config, showcase: Showcase) -> String {
+    let dy = if showcase == Showcase::Cpp { MENU_BAR } else { 0 };
+    let mut s = String::new();
+    let k = config.scale as i32;
+    let _ = write!(s, "resize {} {}; ", APP_WIDTH * k, (APP_HEIGHT + dy) * k);
+    s.push_str("wait 10; ");
+    if config.dark {
+        let _ = write!(s, "click 316 {}; wait 40; ", 32 + dy);
+    }
+    s.push_str("wait 60; shot places.png; quit");
     s
 }
 
@@ -127,11 +147,19 @@ pub fn write_fontconfig(dir: &Path, fonts: &Path) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-/// Runs `binary` headless with `script` in `dir` (its shots land there), the environment both share, within two
-/// minutes. Its stderr, or why it failed.
-pub fn run(binary: &Path, dir: &Path, script: &str, config: Config, fontconfig: &Path) -> Result<String, String> {
+/// Runs `binary` headless with `args` and `script` in `dir` (its shots land there), the environment both share,
+/// within two minutes. Its stderr, or why it failed.
+pub fn run(
+    binary: &Path,
+    args: &[&str],
+    dir: &Path,
+    script: &str,
+    config: Config,
+    fontconfig: &Path,
+) -> Result<String, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut command = Command::new(binary);
+    command.args(args);
     // (on lavapipe, the CPU's Vulkan, unless the environment names a driver: every machine draws alike)
     if std::env::var_os("VK_DRIVER_FILES").is_none() && std::env::var_os("VK_ICD_FILENAMES").is_none() {
         command.env("VK_DRIVER_FILES", lavapipe().ok_or("no lavapipe (/usr/share/vulkan/icd.d/lvp_icd*.json)")?);
@@ -182,18 +210,21 @@ pub fn run(binary: &Path, dir: &Path, script: &str, config: Config, fontconfig: 
     Ok(stderr)
 }
 
-/// A run of `showcase` (its `binary`) in `config`, its pages shot into `dir` (made anew), on lavapipe, checked for
-/// the validation layers' errors.
+/// The runs of `showcase` (its `binary`) in `config` — the Material tab's pages, then the places screen —, shot into
+/// `dir` (made anew), on lavapipe, checked for the validation layers' errors.
 pub fn shoot(binary: &Path, showcase: Showcase, config: Config, dir: &Path) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let fontconfig = write_fontconfig(dir, &fonts_dir()).map_err(|e| e.to_string())?;
-    let log = run(binary, dir, &script(config, showcase), config, &fontconfig)?;
-    if !log.contains("llvmpipe") {
-        return Err(format!("{}: not drawn on lavapipe:\n{log}", config.name()));
-    }
-    if log.contains("GPU validation") {
-        return Err(format!("{}: validation errors:\n{log}", config.name()));
+    let runs = [(script(config, showcase), Vec::new()), (places_script(config, showcase), vec![PLACES_LINK])];
+    for (script, args) in runs {
+        let log = run(binary, &args, dir, &script, config, &fontconfig)?;
+        if !log.contains("llvmpipe") {
+            return Err(format!("{}: not drawn on lavapipe:\n{log}", config.name()));
+        }
+        if log.contains("GPU validation") {
+            return Err(format!("{}: validation errors:\n{log}", config.name()));
+        }
     }
     Ok(())
 }
@@ -390,6 +421,35 @@ pub fn load_pages(dir: &Path) -> Result<Vec<Picture>, String> {
             Picture::load(&path).ok_or_else(|| format!("no shot {}", path.display()))
         })
         .collect()
+}
+
+/// The places screen's shot of a run in `dir` (`places.png`).
+pub fn load_places(dir: &Path) -> Result<Picture, String> {
+    let path = dir.join("places.png");
+    Picture::load(&path).ok_or_else(|| format!("no shot {}", path.display()))
+}
+
+/// The places screen's sheet: how far it peeks (PlacesScreen's `sheetPeekHeight`), and the rows above it its
+/// shadow may reach, dp.
+pub const PLACES_PEEK: i32 = 128;
+pub const PLACES_SHADOW: i32 = 8;
+
+/// What is compared of `showcase`'s runs shot into `dir` at `scale` (the C++ showcase's pictures without its menu
+/// bar): the Material tab cut ([`cut`]) and its [`parts`], then the places screen's page cut as the first page is,
+/// into `places-top`, `places-map` (the map above the sheet), `places-sheet` (the peeking sheet: the content's last
+/// rows, so that it is compared where it lies — on the navigation bar's top, wherever that is) and `places-bottom`.
+pub fn run_parts(dir: &Path, showcase: Showcase, scale: u32) -> Result<(Cut, Vec<(String, Picture)>), String> {
+    let menu_bar = if showcase == Showcase::Cpp { MENU_BAR * scale as i32 } else { 0 };
+    let pages: Vec<Picture> = load_pages(dir)?.iter().map(|p| p.without_top(menu_bar)).collect();
+    let material = cut(&pages, scale);
+    let mut out = parts(&material, scale);
+    let places = cut(&[load_places(dir)?.without_top(menu_bar)], scale);
+    let sheet_top = places.content.height - (PLACES_PEEK + PLACES_SHADOW) * scale as i32;
+    out.push(("places-top".to_string(), places.top));
+    out.push(("places-map".to_string(), places.content.rows(0, sheet_top)));
+    out.push(("places-sheet".to_string(), places.content.rows(sheet_top, places.content.height)));
+    out.push(("places-bottom".to_string(), places.bottom));
+    Ok((material, out))
 }
 
 /// A run's parts written into `dir` (`top.png`, `bottom.png`, `s00.png` …): the C++ pictures as kept.

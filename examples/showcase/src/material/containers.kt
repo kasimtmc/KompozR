@@ -73,10 +73,8 @@ fun ListItemSection() {
     }
 }
 
-// (The C++ showcase's "Harita (BottomSheetScaffold)" button opens its places screen: the button is here, its
-// screen comes with stage 16 and the NavHost that opens it with stage 13.)
 @Composable
-fun DialogsSection() {
+fun DialogsSection(nav: NavController) {
     val cs = MaterialTheme.colorScheme
     var dialog by remember { mutableStateOf(false) }
     var basicDialog by remember { mutableStateOf(false) }
@@ -95,7 +93,7 @@ fun DialogsSection() {
             FilledTonalButton(onClick = { basicDialog = true }) { Text("BasicAlertDialog") }
             FilledTonalButton(onClick = { sheet = true }) { Text("Alt sayfa") }
             FilledTonalButton(onClick = { longSheet = true }) { Text("Uzun liste") }
-            FilledTonalButton(onClick = { }) { Text("Harita (BottomSheetScaffold)") }
+            FilledTonalButton(onClick = { nav.navigate(Places) }) { Text("Harita (BottomSheetScaffold)") }
             Box {
                 OutlinedButton(onClick = { menu = true }) {
                     Text("Menü")
