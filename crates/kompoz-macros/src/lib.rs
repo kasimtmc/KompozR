@@ -45,6 +45,7 @@ mod builder;
 mod known;
 mod kotlin_properties;
 // (stage 13 WP1: #[derive(Saveable)])
+mod route;
 mod saveable;
 mod transform;
 
@@ -191,6 +192,18 @@ pub fn kotlin_properties(item: TokenStream) -> TokenStream {
 #[proc_macro_derive(Saveable, attributes(saveable))]
 pub fn saveable(item: TokenStream) -> TokenStream {
     saveable::derive(parse_macro_input!(item as DeriveInput), runtime()).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+/// `#[derive(Route)]`: a typed navigation route (Compose's `@Serializable` route class or object; see `route`).
+#[proc_macro_derive(Route, attributes(route))]
+pub fn derive_route(item: TokenStream) -> TokenStream {
+    route::derive_route(parse_macro_input!(item as DeriveInput)).unwrap_or_else(|e| e.to_compile_error()).into()
+}
+
+/// `#[derive(RouteValue)]`: a type a typed route's field can have (an enum's entries by name; see `route`).
+#[proc_macro_derive(RouteValue)]
+pub fn derive_route_value(item: TokenStream) -> TokenStream {
+    route::derive_route_value(parse_macro_input!(item as DeriveInput)).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 /// A closure written as a `#[kompozable]` body: `set_content(kompozable_lambda!(move || App()))`.

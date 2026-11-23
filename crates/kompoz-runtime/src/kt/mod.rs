@@ -46,6 +46,8 @@ pub mod math;
 pub mod null;
 pub mod random;
 pub mod range;
+// (stage 13: navigation's typeMap keys) kotlin.reflect's typeOf
+pub mod reflect;
 pub mod result;
 pub mod string;
 pub mod text;
@@ -80,6 +82,7 @@ pub use range::{
     IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to, is_in,
     range_to, step, to_closed_range, until,
 };
+pub use reflect::{KType, type_of};
 pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};
 pub use text::{KtDisplay, KtToString, to_string};

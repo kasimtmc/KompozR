@@ -184,6 +184,9 @@ pub(crate) struct Gen<'a, 'd> {
     /// type of the `var` delegated to it (`var job: Job? by remember { mutableStateOf(null) }`) — what
     /// `mutable_state_of!` reads to choose a thread-safe or a confined state.
     pub state_value: Option<(TokenStream, Ty)>,
+    /// The type arguments of the calls being written, innermost last (`toRoute<Detail>()`): a callee that takes them
+    /// only as a turbofish ([`crate::index::flags::TURBOFISH`]) is called with them.
+    pub call_type_args: Vec<Vec<TokenStream>>,
     counter: usize,
 }
 
@@ -216,6 +219,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             peek_receivers: Default::default(),
             expected_elem: None,
             state_value: None,
+            call_type_args: Vec::new(),
             counter: 0,
         }
     }

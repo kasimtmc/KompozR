@@ -558,14 +558,21 @@ fn idle_work_runs_between_frames_in_order_as_it_fits() {
 fn deep_links_wait_until_taken_and_the_apps_own_open_in_it() {
     let platform = new_log();
     let log = new_log();
-    let l = log.clone();
+    let (l, opened) = (log.clone(), mutable_state_of(false));
+    let o = opened.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        // (a navigation controller's handler: the app's own item links)
         let links = LocalDeepLinks.current();
-        links.add_handler(1, |uri: &str| uri.starts_with("kompoz://"));
-        let taken = links.take(|link: &str| link.starts_with("kompoz://item/"));
-        push(&l, format!("{taken:?}"));
+        let l2 = l.clone();
+        links.add_handler(1, move |uri: &str| {
+            let mine = uri.starts_with("kompoz://item/");
+            if mine {
+                push(&l2, format!("handled {uri}"));
+            }
+            mine
+        });
         let opener = LocalUriHandler.current();
-        if taken.as_deref() == Some("kompoz://item/42") {
+        if o.get() {
             opener.open_uri("kompoz://item/7");
             opener.open_uri("https://example.org");
         }
@@ -574,13 +581,17 @@ fn deep_links_wait_until_taken_and_the_apps_own_open_in_it() {
     h.set_callbacks(Rc::new(Recorder(platform.clone())));
     h.open_deep_link("other://x"); // (none takes it: it waits)
     rule.wait_for_idle();
-    h.open_deep_link("kompoz://item/42");
+    assert_eq!(h.deep_links().pending().as_deref(), Some("other://x"));
+    h.open_deep_link("kompoz://item/42"); // (sent while it runs: handled as it comes)
+    assert_eq!(taken(&log), ["handled kompoz://item/42"]);
+    // The app's own link goes to it, the other one to the platform.
+    opened.set(true);
     rule.wait_for_idle();
-    let log = taken(&log);
-    assert_eq!(log[..3], ["None", "None", "Some(\"kompoz://item/42\")"]);
-    // The app's own link went to it (taken by the next composition); the other one to the platform.
-    assert_eq!(log[3], "Some(\"kompoz://item/7\")");
+    assert_eq!(taken(&log), ["handled kompoz://item/7"]);
     assert_eq!(taken(&platform), ["open https://example.org"]);
+    // The one waiting is taken by what accepts it.
+    assert_eq!(h.deep_links().take(|link| link.starts_with("kompoz://")), None);
+    assert_eq!(h.deep_links().take(|link| link.starts_with("other://")).as_deref(), Some("other://x"));
     assert_eq!(h.deep_links().pending(), None);
 }
 

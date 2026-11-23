@@ -145,7 +145,9 @@ pub mod prelude {
     // androidx.compose.material3.adaptive.navigationsuite)
     pub use kompoz_material3_adaptive::prelude::*;
     pub use kompoz_material3_adaptive_navigation_suite::prelude::*;
-    // (navigation's names join as its packages add them: `pub use kompoz_navigation::*;`)
+    // (stage 13: androidx.navigation — NavController, the graph and its builders, NavType, deep links, NavOptions,
+    // typed routes: #[derive(Route)])
+    pub use kompoz_navigation::*;
     // (stage 13 WP-E: androidx.navigationevent{,.compose} — NavigationEvent, the dispatcher and its owner, handlers,
     // inputs, NavigationBackHandler, rememberNavigationEventState…)
     pub use kompoz_navigationevent::*;

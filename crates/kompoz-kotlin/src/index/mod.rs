@@ -233,6 +233,9 @@ pub mod flags {
     /// `#[doc(hidden)] async fn <rust>_async` taking its lambdas as async closures: a lambda given to it in a coroutine
     /// may suspend (Kotlin's inline lambdas suspend with their caller), the call then going to the twin, awaited.
     pub const ASYNC_TWIN: u16 = 1 << 9;
+    /// It has a type parameter none of its parameters' types names (`to_route<T: Route>(&self)`, Kotlin's reified
+    /// `toRoute<T>()`): Kotlin's type arguments of a call of it are its turbofish.
+    pub const TURBOFISH: u16 = 1 << 10;
 }
 
 impl Item {

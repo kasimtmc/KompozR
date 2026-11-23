@@ -1534,7 +1534,11 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
         return Vec::new();
     }
     let doc = kotlin_doc(attrs).and_then(|d| kotlin_sig(&d));
-    let kotlin = doc.as_ref().map(|d| d.name.clone()).unwrap_or_else(|| camel(&rust));
+    // (a doc line's reified type parameters — `popUpTo<T>(…)` — aren't the name's)
+    let kotlin = doc
+        .as_ref()
+        .map(|d| d.name.split('<').next().unwrap_or(&d.name).trim().to_string())
+        .unwrap_or_else(|| camel(&rust));
     let has_self = matches!(sig.inputs.first(), Some(FnArg::Receiver(_)));
     let kind = if has_self { "Method" } else { "Function" };
     let mut it = base(cx, &kotlin, &rust, kind, owner);
@@ -1598,6 +1602,25 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
     }
     if sig.constness.is_some() {
         it.flags.insert("CONST");
+    }
+    // (stage 13 WP2) Type parameters no parameter's type names: Kotlin's type arguments are its turbofish
+    // (`toRoute<Detail>()` → `to_route::<Detail>()`).
+    let inputs_text: String = sig.inputs.iter().map(|a| a.to_token_stream().to_string()).collect::<Vec<_>>().join(" ");
+    let named_in_inputs = |t: &str| inputs_text.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == t);
+    // (all of them: a turbofish names each — a function with one inferred from a parameter, `map_of<K, V, I>`, takes
+    // Kotlin's as its result's type)
+    let type_params: Vec<String> = sig
+        .generics
+        .params
+        .iter()
+        .filter_map(|g| match g {
+            syn::GenericParam::Type(t) => Some(t.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    let turbofish = !type_params.is_empty() && type_params.iter().all(|t| !named_in_inputs(t));
+    if turbofish {
+        it.flags.insert("TURBOFISH");
     }
     if has_attr(attrs, "kompozable") {
         it.flags.insert("KOMPOZABLE");

@@ -6,6 +6,8 @@
 //! ones before): one-off events; `try_emit` from any thread. `share_in` and `state_in` share a cold flow as
 //! [`SharingStarted`] says: `Eagerly`, `Lazily`, or `WhileSubscribed`, collecting it only while someone collects
 //! what it is shared as (and a while after the last one left: a configuration change doesn't restart it).
+//! A shared flow of values that aren't `Send` (navigation's back stack entries) stays on its thread, as such a
+//! state flow does.
 
 use crate::executor::{CoroutineScope, CoroutineStart, Job};
 use crate::flow::{BoxFuture, Flow, FlowChildren, flow, race};
@@ -443,7 +445,7 @@ impl<T> PartialEq for SharedFlow<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> SharedFlow<T> {
+impl<T: Clone + 'static> SharedFlow<T> {
     /// The values a new collector gets first.
     pub fn replay_cache(&self) -> Vec<T> {
         self.inner.cell.lock().cache.iter().cloned().collect()
@@ -461,7 +463,7 @@ impl<T> Drop for Unsubscribe<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> AsFlow<T> for SharedFlow<T> {
+impl<T: Clone + 'static> AsFlow<T> for SharedFlow<T> {
     fn as_flow(&self) -> Flow<T> {
         let inner = self.inner.clone();
         flow(move |emit| {
@@ -513,13 +515,13 @@ impl<T> std::ops::Deref for MutableSharedFlow<T> {
     }
 }
 
-impl<T: Clone + Send + 'static> AsFlow<T> for MutableSharedFlow<T> {
+impl<T: Clone + 'static> AsFlow<T> for MutableSharedFlow<T> {
     fn as_flow(&self) -> Flow<T> {
         self.flow.as_flow()
     }
 }
 
-impl<T: Clone + Send + 'static> MutableSharedFlow<T> {
+impl<T: Clone + 'static> MutableSharedFlow<T> {
     pub fn new(replay: usize) -> Self {
         MutableSharedFlow {
             flow: SharedFlow {
@@ -591,7 +593,7 @@ impl<T: 'static> Flow<T> {
     /// A [`SharedFlow`] of its values, collected in `scope` as `started` says, the last `replay` kept.
     pub fn share_in(&self, scope: &CoroutineScope, started: SharingStarted, replay: usize) -> SharedFlow<T>
     where
-        T: Clone + Send,
+        T: Clone,
     {
         let shared = MutableSharedFlow::new(replay);
         let (s, r) = (shared.clone(), shared.clone());

@@ -661,33 +661,32 @@ impl TextToolbar for PlatformTextToolbar {
     }
 }
 
-/// Opens links (Compose's UriHandler): the app's own (those a navigation host answers, see [`DeepLinks`]) in it,
-/// the others by the platform (C++'s `openUri`).
+/// Opens links (Compose's UriHandler): the app's own (those a navigation controller handles, see [`DeepLinks`]) in
+/// it, the others by the platform (C++'s `openUri`).
 #[derive(Clone, PartialEq, Default)]
 pub struct UriHandler(pub(crate) PlatformHandle, pub(crate) DeepLinks);
 
 impl UriHandler {
     pub fn open_uri(&self, uri: &str) {
-        if self.1.answers(uri) {
-            self.1.open(uri);
-        } else {
+        if !self.1.offer(uri) {
             self.0.get().open_uri(uri);
         }
     }
 }
 
 struct DeepLinkState {
-    /// The link the app was opened with or sent, until a navigation host takes it.
+    /// The link the app was opened with or sent that no handler took, until something takes it.
     pending: std::cell::RefCell<Option<String>>,
-    /// Counted up as links come: what takes them reads it, and is composed again when one comes.
-    generation: MutableState<u64>,
-    /// What the navigation hosts in the composition answer, by owner.
+    /// What handles links (the navigation controllers of the composition), by owner, in the order added.
     handlers: std::cell::RefCell<Vec<(usize, Rc<dyn Fn(&str) -> bool>)>>,
 }
 
-/// The links the app is opened with or sent while it runs (C++'s deep links: a URI such as "kompoz://item/42",
-/// or a route's path), for navigation's deep links: the first navigation host with a destination for one takes it.
-/// Provided at the root by the host ([`LocalDeepLinks`]); cheap to clone, equal when the same.
+/// The links the app is opened with or sent while it runs (Android's activity intents: a URI such as
+/// "kompoz://item/42", or a route's path), for navigation's deep links. A navigation controller handles them as
+/// Compose's does an intent's: one waiting when its graph is set (Kotlin's `checkDeepLinkHandled`), and those sent
+/// later as they come (an activity's `onNewIntent` → `handleDeepLink`) through the handler it adds; a link no
+/// handler takes waits for one that will. Provided at the root by the host ([`LocalDeepLinks`]); cheap to clone,
+/// equal when the same.
 #[derive(Clone)]
 pub struct DeepLinks(Rc<DeepLinkState>);
 
@@ -695,47 +694,49 @@ impl DeepLinks {
     pub fn new() -> DeepLinks {
         DeepLinks(Rc::new(DeepLinkState {
             pending: std::cell::RefCell::new(None),
-            generation: mutable_state_of(0),
             handlers: std::cell::RefCell::new(Vec::new()),
         }))
     }
 
-    /// A link to go to (C++'s `openDeepLink`): kept until something takes it; what reads the links is composed
-    /// again.
+    /// A link to go to (C++'s `openDeepLink`): the first handler that takes it does; if none does, it waits.
     pub fn open(&self, link: &str) {
-        *self.0.pending.borrow_mut() = Some(link.to_string());
-        self.0.generation.set(self.0.generation.peek() + 1);
+        if !self.offer(link) {
+            *self.0.pending.borrow_mut() = Some(link.to_string());
+        }
     }
 
-    /// The link waiting, taken, if `accepts` it (C++'s `takeDeepLink`); the caller is composed again when another
-    /// comes.
+    /// Offers `link` to the handlers in turn: whether one took it.
+    pub fn offer(&self, link: &str) -> bool {
+        let handlers: Vec<Rc<dyn Fn(&str) -> bool>> = self.0.handlers.borrow().iter().map(|(_, h)| h.clone()).collect();
+        handlers.iter().any(|h| h(link))
+    }
+
+    /// The link waiting, taken, if `accepts` it (C++'s `takeDeepLink`; what a controller does as its graph is set).
     pub fn take(&self, accepts: impl FnOnce(&str) -> bool) -> Option<String> {
-        self.0.generation.get();
-        let mut pending = self.0.pending.borrow_mut();
-        if pending.as_deref().is_some_and(accepts) { pending.take() } else { None }
+        let waiting = self.0.pending.borrow().clone();
+        match waiting {
+            Some(link) if accepts(&link) => {
+                *self.0.pending.borrow_mut() = None;
+                Some(link)
+            }
+            _ => None,
+        }
     }
 
-    /// The link waiting, if any (read by no one).
+    /// The link waiting, if any.
     pub fn pending(&self) -> Option<String> {
         self.0.pending.borrow().clone()
     }
 
-    /// `owner` (a navigation host) answers the links `accepts` says (C++'s `addDeepLinkHandler`): opening one
-    /// ([`UriHandler::open_uri`]) goes to it rather than to the platform; a later call of the same owner replaces
-    /// it.
-    pub fn add_handler(&self, owner: usize, accepts: impl Fn(&str) -> bool + 'static) {
+    /// `owner` (a navigation controller) handles links with `handle` (whether it took the link): opening one goes to
+    /// it rather than to the platform; a later call of the same owner replaces it.
+    pub fn add_handler(&self, owner: usize, handle: impl Fn(&str) -> bool + 'static) {
         self.remove_handler(owner);
-        self.0.handlers.borrow_mut().push((owner, Rc::new(accepts)));
+        self.0.handlers.borrow_mut().push((owner, Rc::new(handle)));
     }
 
     pub fn remove_handler(&self, owner: usize) {
         self.0.handlers.borrow_mut().retain(|(o, _)| *o != owner);
-    }
-
-    /// Whether a handler answers `uri`.
-    pub fn answers(&self, uri: &str) -> bool {
-        let handlers: Vec<Rc<dyn Fn(&str) -> bool>> = self.0.handlers.borrow().iter().map(|(_, h)| h.clone()).collect();
-        handlers.iter().any(|h| h(uri))
     }
 }
 

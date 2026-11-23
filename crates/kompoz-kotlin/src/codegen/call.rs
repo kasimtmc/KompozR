@@ -143,6 +143,14 @@ impl Gen<'_, '_> {
             let rust = self.rust_type(ty, super::types::TypePos::Value);
             self.state_value = Some((rust, self.ty_of(ty)));
         }
+        let turbofish: Vec<TokenStream> = type_args
+            .iter()
+            .map(|a| match a {
+                TypeArg::Type { ty, .. } => self.rust_type(ty, super::types::TypePos::Value),
+                TypeArg::Star(_) => quote_spanned!(span=> _),
+            })
+            .collect();
+        self.call_type_args.push(turbofish);
         let out = match &callee.kind {
             ExprKind::Name(n) => self.name_call(n, &list, e.loc),
             ExprKind::Member { receiver, safe, name } => self.member_call(receiver, *safe, name, &list, e.loc),
@@ -152,6 +160,7 @@ impl Gen<'_, '_> {
                 Out::plain(quote_spanned!(span=> (#f)(#(#vals),*)), Ty::Unknown)
             }
         };
+        self.call_type_args.pop();
         // (what a generic callee gives, told by its arguments — `remember { Animatable(0f) }`, `with(x) { … }`,
         // `x.run { … }` —: as inference reads the call)
         let out = if out.ty == Ty::Unknown { Out { ty: self.peek_ty(e), ..out } } else { out };
@@ -1127,6 +1136,18 @@ impl Gen<'_, '_> {
         // resolution takes only the applicable overloads — `showSnackbar("…")` isn't `showSnackbar(visuals)`,
         // `SliderDefaults.Track(rangeSliderState)` is the range track, not the deprecated `Track(sliderPositions)` of
         // fewer parameters —; else the best of all, what is known of types being partial)
+        // (stage 13 WP2) A call with type arguments is of an overload taking them as its turbofish when one fits
+        // (`navDeepLink<Member>("…")`, not `navDeepLink { … }`); one without, of another.
+        let typed = self.call_type_args.last().is_some_and(|t| !t.is_empty());
+        let preferred: Vec<&'static crate::index::Item> =
+            items.iter().copied().filter(|i| i.has(crate::index::flags::TURBOFISH) == typed).collect();
+        if !preferred.is_empty() && preferred.len() < items.len() {
+            let found =
+                self.choose_among(&preferred, args, true).or_else(|| self.choose_among(&preferred, args, false));
+            if found.is_some() {
+                return found;
+            }
+        }
         self.choose_among(items, args, true).or_else(|| self.choose_among(items, args, false))
     }
 
@@ -1461,9 +1482,12 @@ impl Gen<'_, '_> {
         };
         if let Some(recv) = lent_mut {
             let reads = |v: &TokenStream| v.clone().into_iter().any(|t| mentions(&t, &recv));
-            if vals.iter().any(|(_, v, lambda)| !lambda && reads(v)) {
+            // (a closure — a lambda default filled in, `popUpTo<T>()`'s `{}` — reads nothing until called: hoisted, it
+            // would lose the higher-ranked type its parameter takes)
+            let closure = |v: &TokenStream| v.to_string().trim_start().starts_with('|');
+            if vals.iter().any(|(_, v, lambda)| !lambda && !closure(v) && reads(v)) {
                 for (_, v, lambda) in vals.iter_mut() {
-                    if *lambda {
+                    if *lambda || closure(v) {
                         continue;
                     }
                     let t = self.fresh("a", span);
@@ -1496,22 +1520,30 @@ impl Gen<'_, '_> {
         };
         // (the suspending twin: `<name>_async`, beside it)
         let rust = if twin { format!("{}_async", c.rust) } else { c.rust.clone() };
+        // (a callee taking its type arguments only as a turbofish: `to_route::<Detail>()`; a builder's call, which
+        // the macros rewrite, takes them from its arguments)
+        let fish = match self.call_type_args.last() {
+            Some(t) if !t.is_empty() && !c.builder && c.item.is_some_and(|i| i.has(crate::index::flags::TURBOFISH)) => {
+                quote_spanned!(span=> ::<#(#t),*>)
+            }
+            _ => quote!(),
+        };
         let ts = match target {
             Target::Path(p, _) => {
                 let p = if twin { renamed_last(p, &rust) } else { p };
-                quote_spanned!(span=> #p(#(#vals),*) #await_)
+                quote_spanned!(span=> #p #fish(#(#vals),*) #await_)
             }
             Target::Method(r) => {
                 let name = ident(&rust, span);
-                quote_spanned!(span=> #r.#name(#(#vals),*) #await_)
+                quote_spanned!(span=> #r.#name #fish(#(#vals),*) #await_)
             }
             Target::Ufcs(t, r) => {
                 let name = ident(&rust, span);
-                quote_spanned!(span=> #t::#name(#r #(, #vals)*) #await_)
+                quote_spanned!(span=> #t::#name #fish(#r #(, #vals)*) #await_)
             }
             Target::MethodFirst(r, first) => {
                 let name = ident(&rust, span);
-                quote_spanned!(span=> #r.#name(#first #(, #vals)*) #await_)
+                quote_spanned!(span=> #r.#name #fish(#first #(, #vals)*) #await_)
             }
         };
         let ts = if hoisted.is_empty() { ts } else { quote_spanned!(span=> { #hoisted #ts }) };

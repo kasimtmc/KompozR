@@ -10,5 +10,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-lifecycle = { path = "../kompoz-lifecycle" }
+# (#[derive(Route)] and #[derive(RouteValue)])
+kompoz-macros = { path = "../kompoz-macros" }
 kompoz-runtime = { path = "../kompoz-runtime" }
+# (the host's deep links: DeepLinks)
+kompoz-ui = { path = "../kompoz-ui" }

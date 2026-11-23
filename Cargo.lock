@@ -742,8 +742,11 @@ dependencies = [
 name = "kompoz-navigation"
 version = "0.1.0"
 dependencies = [
+ "kompoz-coroutines",
  "kompoz-lifecycle",
+ "kompoz-macros",
  "kompoz-runtime",
+ "kompoz-ui",
 ]
 
 [[package]]

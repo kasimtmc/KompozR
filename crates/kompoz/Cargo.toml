@@ -300,3 +300,8 @@ harness = false
 [[test]]
 name = "kotlin_navigation_event"
 harness = false
+
+# (stage 13 WP2) Navigation's core in Kotlin's syntax (typed routes, navOptions, deep links, arguments).
+[[test]]
+name = "kotlin_navigation_core"
+harness = false
