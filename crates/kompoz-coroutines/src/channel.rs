@@ -3,7 +3,8 @@
 //!
 //! `send(value).await` waits while the buffer is full (a rendezvous channel, the default, until a receiver takes
 //! the value); `receive().await` until there is an element. Coroutines resume on the UI thread; any thread may
-//! `try_send`. Nothing panics: `send` says whether it went through, `receive` gives `None` once the channel is
+//! `try_send` to a channel of `Send` elements (one of others — an `Rc`, a value an animation holds — isn't `Send`
+//! itself, as Kotlin's channels carry any object: it stays on its thread). Nothing panics: `send` says whether it went through, `receive` gives `None` once the channel is
 //! closed and empty (Kotlin's receiveCatching).
 //!
 //! A coroutine cancelled while it waits leaves the channel as it was; one cancelled after an element was handed to
@@ -150,13 +151,13 @@ impl<T> PartialEq for Channel<T> {
     }
 }
 
-impl<T: Send + 'static> Default for Channel<T> {
+impl<T: 'static> Default for Channel<T> {
     fn default() -> Self {
         Self::rendezvous()
     }
 }
 
-impl<T: Send + 'static> Channel<T> {
+impl<T: 'static> Channel<T> {
     /// No buffer: a send waits until a receiver takes the element.
     pub const RENDEZVOUS: usize = 0;
     /// Kotlin's default buffer size.
@@ -303,8 +304,8 @@ impl<T: Send + 'static> Channel<T> {
 }
 
 /// Cancels a channel when dropped.
-struct CancelChannel<T: Send + 'static>(Channel<T>);
-impl<T: Send + 'static> Drop for CancelChannel<T> {
+struct CancelChannel<T: 'static>(Channel<T>);
+impl<T: 'static> Drop for CancelChannel<T> {
     fn drop(&mut self) {
         self.0.cancel();
     }
@@ -428,15 +429,15 @@ impl<T> Drop for ReceiveFuture<T> {
 
 /// A channel `producer` sends to from a coroutine in `scope` (Kotlin's produce): closed when it is done,
 /// cancelled if it is.
-pub fn produce<T: Send + 'static, Fut: Future<Output = ()> + 'static>(
+pub fn produce<T: 'static, Fut: Future<Output = ()> + 'static>(
     scope: &CoroutineScope,
     capacity: usize,
     producer: impl FnOnce(Channel<T>) -> Fut,
 ) -> Channel<T> {
     let channel = Channel::new(capacity, BufferOverflow::Suspend);
     let fut = producer(channel.clone());
-    struct Finish<T: Send + 'static>(Channel<T>, bool);
-    impl<T: Send + 'static> Drop for Finish<T> {
+    struct Finish<T: 'static>(Channel<T>, bool);
+    impl<T: 'static> Drop for Finish<T> {
         fn drop(&mut self) {
             if self.1 {
                 self.0.close();

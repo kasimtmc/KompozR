@@ -139,7 +139,7 @@ fn DefaultAnimatedPane(override_scope: AnimatedPaneOverrideScope) {
 
     let scrim = remember_ref::<PaneScrim>(None);
     if let PaneAdaptedValue::Levitated { scrim: levitated, .. } = &pane_value {
-        scrim.set_value(levitated.get());
+        scrim.set_value(levitated.clone());
     }
     if let Some(scrim) = scrim.value() {
         // Display a scrim when the pane gets levitated

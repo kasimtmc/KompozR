@@ -10,7 +10,9 @@ use crate::state::{AnimationState, AnimationValue};
 use crate::suspend::animate_state;
 use crate::vector::{AnimationVector, AnimationVector1D};
 use kompoz_runtime::kt::{KtToString, panic_kt};
-use kompoz_runtime::{KotlinProperties, MutableState, SharedState, State, mutable_state_of, named};
+use kompoz_runtime::{
+    KotlinProperties, MutableState, SharedState, State, mutable_confined_state_of, mutable_state_of, named,
+};
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::future::Future;
@@ -127,7 +129,7 @@ impl<T: AnimationValue, V: AnimationVector> Animatable<T, V> {
                 visibility_threshold,
                 label: label.into(),
                 is_running: mutable_state_of(false),
-                target_value: mutable_state_of(initial_value),
+                target_value: mutable_confined_state_of(initial_value),
                 lower_bound: RefCell::new(None),
                 upper_bound: RefCell::new(None),
                 negative_infinity_bounds,
@@ -198,10 +200,13 @@ impl<T: AnimationValue, V: AnimationVector> Animatable<T, V> {
         self.inner.internal_state.as_state()
     }
 
-    /// Its value as a read-only state shareable across threads (Compose's `asState()`, read by what must be
-    /// `Send + Sync`: a shape drawn by the animated value, say — Compose's shapes read an `Animatable` as they
-    /// make their outline).
-    pub fn as_shared_state(&self) -> SharedState<T> {
+    /// Its value as a read-only state that is `Send + Sync` as the value is (Compose's `asState()`, held by what
+    /// must be `Send + Sync`: a shape drawn by the animated value, say — Compose's shapes read an `Animatable` as
+    /// they make their outline). Its value is read on the thread the animation runs on, as the animation's own.
+    pub fn as_shared_state(&self) -> SharedState<T>
+    where
+        T: Send + Sync,
+    {
         self.inner.internal_state.as_shared_state()
     }
 

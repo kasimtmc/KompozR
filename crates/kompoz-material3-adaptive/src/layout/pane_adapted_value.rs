@@ -5,7 +5,6 @@
 
 use super::pane_scaffold_directive::PaneScaffoldDirective;
 use super::pane_scaffold_role::{DynPaneScaffoldRole, PaneScaffoldRole, ThreePaneScaffoldRole};
-use kompoz_runtime::ThreadBound;
 use kompoz_runtime::kt::KtToString;
 use kompoz_ui::Alignment;
 use std::fmt;
@@ -14,39 +13,17 @@ use std::rc::Rc;
 /// A composable scrim of a levitated pane (Compose's `(@Composable () -> Unit)?`), compared by identity.
 pub type PaneScrim = Option<Rc<dyn Fn()>>;
 
-/// A scrim as an adapted value holds it: bound to the UI thread, so that the value can be a transition's state
-/// (an animation value is `Send + Sync`; Compose's states hold any object, touched on the main thread only).
-#[derive(Clone)]
-pub struct BoundScrim(Option<ThreadBound<Rc<dyn Fn()>>>);
-
-impl BoundScrim {
-    pub(crate) fn new(scrim: PaneScrim) -> BoundScrim {
-        BoundScrim(scrim.map(ThreadBound::new))
-    }
-
-    /// The scrim.
-    pub fn get(&self) -> PaneScrim {
-        self.0.as_ref().map(|s| s.get().clone())
-    }
-
-    fn is_some(&self) -> bool {
-        self.0.is_some()
-    }
-}
-
-/// By identity (Kotlin's `scrim !== other.scrim`).
-impl PartialEq for BoundScrim {
-    fn eq(&self, other: &Self) -> bool {
-        match (&self.0, &other.0) {
-            (Some(a), Some(b)) => Rc::ptr_eq(a.get(), b.get()),
-            (None, None) => true,
-            _ => false,
-        }
+/// Two scrims compared by identity (Kotlin's `scrim !== other.scrim`).
+fn scrim_eq(a: &PaneScrim, b: &PaneScrim) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
     }
 }
 
 /// Kotlin's `toString` of a nullable lambda: `null`, or a lambda's (its class here: `Function0<kotlin.Unit>`).
-fn scrim_text(scrim: &BoundScrim) -> &'static str {
+fn scrim_text(scrim: &PaneScrim) -> &'static str {
     if scrim.is_some() { "Function0<kotlin.Unit>" } else { "null" }
 }
 
@@ -63,7 +40,7 @@ pub enum PaneAdaptedValue {
     Reflowed { reflow_under: DynPaneScaffoldRole },
     /// Levitated over the other panes with `alignment` in the scaffold, `scrim` (if any) blocking the panes under
     /// it (Compose's class `PaneAdaptedValue.Levitated`; make it with [`PaneAdaptedValue::levitated`]).
-    Levitated { alignment: ThreadBound<Alignment>, scrim: BoundScrim },
+    Levitated { alignment: Alignment, scrim: PaneScrim },
 }
 
 impl PaneAdaptedValue {
@@ -80,7 +57,7 @@ impl PaneAdaptedValue {
     ///
     /// Kotlin: `PaneAdaptedValue.Levitated(alignment: Alignment, scrim: (@Composable () -> Unit)? = null)`
     pub fn levitated(alignment: Alignment, scrim: PaneScrim) -> PaneAdaptedValue {
-        PaneAdaptedValue::Levitated { alignment: ThreadBound::new(alignment), scrim: BoundScrim::new(scrim) }
+        PaneAdaptedValue::Levitated { alignment, scrim }
     }
 
     /// The pane it is reflowed under, if reflowed (Compose's internal `Reflowed.reflowUnder`).
@@ -104,7 +81,7 @@ impl PaneAdaptedValue {
     /// The scrim of a levitated pane (Compose's internal `Levitated.scrim`).
     pub(crate) fn levitated_scrim(&self) -> PaneScrim {
         match self {
-            PaneAdaptedValue::Levitated { scrim, .. } => scrim.get(),
+            PaneAdaptedValue::Levitated { scrim, .. } => scrim.clone(),
             _ => None,
         }
     }
@@ -112,7 +89,7 @@ impl PaneAdaptedValue {
     /// The alignment of a levitated pane (Compose's internal `Levitated.alignment`).
     pub(crate) fn levitated_alignment(&self) -> Option<Alignment> {
         match self {
-            PaneAdaptedValue::Levitated { alignment, .. } => Some(alignment.get().clone()),
+            PaneAdaptedValue::Levitated { alignment, .. } => Some(alignment.clone()),
             _ => None,
         }
     }
@@ -129,7 +106,7 @@ impl PartialEq for PaneAdaptedValue {
             (
                 PaneAdaptedValue::Levitated { alignment: a, scrim: s },
                 PaneAdaptedValue::Levitated { alignment: b, scrim: t },
-            ) => a == b && s == t,
+            ) => a == b && scrim_eq(s, t),
             _ => false,
         }
     }
@@ -173,7 +150,7 @@ pub enum AdaptStrategy {
     /// Levitated with `alignment` (over the other panes, like a pop-up or a sheet) when it is the current
     /// destination, hidden otherwise; `scrim` blocks the panes under it (Compose's class `AdaptStrategy.Levitate`;
     /// make it with [`AdaptStrategy::levitate`]).
-    Levitate { alignment: ThreadBound<Alignment>, scrim: BoundScrim },
+    Levitate { alignment: Alignment, scrim: PaneScrim },
 }
 
 impl AdaptStrategy {
@@ -184,7 +161,7 @@ impl AdaptStrategy {
 
     /// Kotlin: `AdaptStrategy.Levitate(alignment: Alignment = Alignment.Center, scrim: (@Composable () -> Unit)? = null)`
     pub fn levitate(alignment: Alignment, scrim: PaneScrim) -> AdaptStrategy {
-        AdaptStrategy::Levitate { alignment: ThreadBound::new(alignment), scrim: BoundScrim::new(scrim) }
+        AdaptStrategy::Levitate { alignment, scrim }
     }
 
     /// The adapted value (Compose's deprecated `adapt()`: always hidden).
@@ -227,7 +204,7 @@ impl PartialEq for AdaptStrategy {
             (
                 AdaptStrategy::Levitate { alignment: a, scrim: s },
                 AdaptStrategy::Levitate { alignment: b, scrim: t },
-            ) => a == b && s == t,
+            ) => a == b && scrim_eq(s, t),
             _ => false,
         }
     }

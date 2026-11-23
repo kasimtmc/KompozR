@@ -123,6 +123,19 @@ impl<K: Ord + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static> S
     pub fn new(entries: BTreeMap<K, V>) -> Self {
         SnapshotStateMap { state: MutableState::new(entries, never_equal_policy()) }
     }
+}
+
+impl<K: Ord + Clone + 'static, V: Clone + 'static> SnapshotStateMap<K, V> {
+    /// A map confined to this thread: its keys and values needn't be `Send` or `Sync` (Compose's
+    /// `mutableStateMapOf` holds any objects; see [`MutableState::new_confined`]).
+    pub fn new_confined(entries: BTreeMap<K, V>) -> Self {
+        SnapshotStateMap { state: MutableState::new_confined(entries, never_equal_policy()) }
+    }
+
+    /// Whether it is confined to a thread (see [`new_confined`](SnapshotStateMap::new_confined)).
+    pub fn is_confined(&self) -> bool {
+        self.state.is_confined()
+    }
 
     pub fn with<R>(&self, f: impl FnOnce(&BTreeMap<K, V>) -> R) -> R {
         self.state.with(f)
@@ -204,4 +217,12 @@ pub fn mutable_state_map_of<K: Ord + Clone + Send + Sync + 'static, V: Clone + S
     entries: impl IntoIterator<Item = (K, V)>,
 ) -> SnapshotStateMap<K, V> {
     SnapshotStateMap::new(entries.into_iter().collect())
+}
+
+/// `mutableStateMapOf(…)` of keys and values that needn't be `Send` or `Sync`: a map confined to this thread (see
+/// [`SnapshotStateMap::new_confined`]).
+pub fn mutable_confined_state_map_of<K: Ord + Clone + 'static, V: Clone + 'static>(
+    entries: impl IntoIterator<Item = (K, V)>,
+) -> SnapshotStateMap<K, V> {
+    SnapshotStateMap::new_confined(entries.into_iter().collect())
 }

@@ -2,7 +2,7 @@
 //! ([`UndoManager`]), an undoable edit ([`TextUndoOperation`]) and how edits are told apart.
 
 use crate::text::input::TextFieldState;
-use kompoz_runtime::{SavedValue, Saver, SnapshotStateList, mutable_state_list_of};
+use kompoz_runtime::{SavedValue, Saver, SnapshotStateList, mutable_confined_state_list_of};
 use kompoz_text::TextRange;
 
 /// Edits made within this many milliseconds of each other may be one undo step (Compose's
@@ -17,13 +17,13 @@ pub fn time_now_millis() -> i64 {
 /// The undo and redo stacks (Compose's internal UndoManager): what is recorded clears the redo stack; the oldest
 /// steps go beyond `capacity`. Snapshot state lists, so their readers hear of changes.
 #[derive(Clone)]
-pub struct UndoManager<T: Clone + Send + Sync + 'static> {
+pub struct UndoManager<T: Clone + 'static> {
     undo_stack: SnapshotStateList<T>,
     redo_stack: SnapshotStateList<T>,
     capacity: usize,
 }
 
-impl<T: Clone + Send + Sync + 'static> UndoManager<T> {
+impl<T: Clone + 'static> UndoManager<T> {
     /// With these stacks and room for `capacity` steps. Panics if they hold more.
     pub fn new(initial_undo_stack: Vec<T>, initial_redo_stack: Vec<T>, capacity: usize) -> UndoManager<T> {
         assert!(
@@ -31,8 +31,8 @@ impl<T: Clone + Send + Sync + 'static> UndoManager<T> {
             "Initial list of undo and redo operations have a size greater than the given capacity."
         );
         UndoManager {
-            undo_stack: mutable_state_list_of(initial_undo_stack),
-            redo_stack: mutable_state_list_of(initial_redo_stack),
+            undo_stack: mutable_confined_state_list_of(initial_undo_stack),
+            redo_stack: mutable_confined_state_list_of(initial_redo_stack),
             capacity,
         }
     }

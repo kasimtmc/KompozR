@@ -17,7 +17,8 @@ use std::sync::{Arc, LazyLock};
 
 /// What `animate_float_as_state` animates with unless told otherwise (Compose's `defaultAnimation`, told apart by
 /// identity: given, the visibility threshold makes the spring).
-static DefaultAnimation: LazyLock<Arc<dyn AnimationSpec<f32>>> = LazyLock::new(|| Arc::new(spring::<f32>()));
+static DefaultAnimation: LazyLock<Arc<dyn AnimationSpec<f32> + Send + Sync>> =
+    LazyLock::new(|| Arc::new(spring::<f32>()));
 
 /// Compose's DefaultFloatVisibilityThreshold.
 const DefaultFloatVisibilityThreshold: f32 = 0.01;
@@ -42,7 +43,7 @@ pub fn animate_float_as_state(
     #[default("FloatAnimation".to_string())] label: String,
     #[default(None)] finished_listener: Option<Rc<dyn Fn(f32)>>,
 ) -> State<f32> {
-    let resolved_anim_spec = if Arc::ptr_eq(&animation_spec, &DefaultAnimation) {
+    let resolved_anim_spec = if Arc::ptr_eq(&animation_spec, &default_animation()) {
         remember_keyed(visibility_threshold.to_bits(), move || {
             let spec: Arc<dyn AnimationSpec<f32>> = Arc::new(SpringSpec::new(
                 spring::<f32>().damping_ratio,

@@ -15,7 +15,7 @@ use kompoz_coroutines::{LaunchedEffect, snapshot_flow};
 use kompoz_graphics::Color;
 use kompoz_runtime::{
     DisposableEffect, MutableState, SideEffect, State, StateSource, group, kompozable, kompozable_block,
-    mutable_state_of, named, on_dispose, remember,
+    mutable_confined_state_of, mutable_state_of, named, on_dispose, remember,
 };
 use kompoz_ui::MotionDurationScale;
 use std::cell::{Cell, RefCell};
@@ -233,7 +233,7 @@ impl<T: AnimationValue, V: AnimationVector> InfiniteTransitionAnimationState<T, 
         InfiniteTransitionAnimationState {
             inner: Rc::new(AnimationInner {
                 transition: Rc::downgrade(&transition.inner),
-                value: mutable_state_of(initial_value.clone()),
+                value: mutable_confined_state_of(initial_value.clone()),
                 initial_value: RefCell::new(initial_value),
                 target_value: RefCell::new(target_value),
                 type_converter,

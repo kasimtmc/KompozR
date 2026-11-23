@@ -107,13 +107,13 @@ impl<T: 'static> LazyListItems<T> for Rc<Vec<T>> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> LazyListItems<T> for SnapshotStateList<T> {
+impl<T: Clone + 'static> LazyListItems<T> for SnapshotStateList<T> {
     fn into_items(self) -> Rc<Vec<T>> {
         Rc::new(self.to_vec())
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> LazyListItems<T> for &SnapshotStateList<T> {
+impl<T: Clone + 'static> LazyListItems<T> for &SnapshotStateList<T> {
     fn into_items(self) -> Rc<Vec<T>> {
         Rc::new(self.to_vec())
     }

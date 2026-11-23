@@ -36,7 +36,7 @@ impl AnimationConstants {
 ///
 /// Implementing one: give the four `vectorize_*d` (one per vector size; [`AnimationVector`] is sealed), `as_any`
 /// and `equals`.
-pub trait AnimationSpec<T>: Send + Sync + 'static {
+pub trait AnimationSpec<T>: 'static {
     #[doc(hidden)]
     fn vectorize_1d(
         &self,
@@ -480,7 +480,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for SpringSpec<T> {
     }
 }
 
-animation_spec_impls!(finite [T: Clone + PartialEq + Send + Sync + 'static] SpringSpec<T>, T);
+animation_spec_impls!(finite [T: Clone + PartialEq + 'static] SpringSpec<T>, T);
 
 /// Compose's `spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium,
 /// visibilityThreshold = null)`.
@@ -923,7 +923,7 @@ impl<T> PartialEq for KeyframesSpec<T> {
     }
 }
 
-animation_spec_impls!(duration_based [T: Clone + Send + Sync + 'static] KeyframesSpec<T>, T);
+animation_spec_impls!(duration_based [T: Clone + 'static] KeyframesSpec<T>, T);
 
 /// Compose's `keyframes { durationMillis = 375; 0.4f at 75 using FastOutSlowInEasing }`:
 /// `keyframes(|k| { k.duration_millis = 375; k.at(0.4, 75).using(FastOutSlowInEasing); })`.
@@ -978,7 +978,7 @@ impl<T> PartialEq for KeyframesWithSplineSpec<T> {
     }
 }
 
-animation_spec_impls!(duration_based [T: Clone + Send + Sync + 'static] KeyframesWithSplineSpec<T>, T);
+animation_spec_impls!(duration_based [T: Clone + 'static] KeyframesWithSplineSpec<T>, T);
 
 /// Compose's `keyframesWithSpline { … }`.
 pub fn keyframes_with_spline<T: Clone>(

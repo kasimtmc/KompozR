@@ -24,8 +24,8 @@ use kompoz_coroutines::{CoroutineStart, Job, catch_cancellation, snapshot_flow};
 use kompoz_graphics::{Density, Dp, IntSize, LayoutDirection, Offset};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::{
-    DerivedState, MutableState, Saveable, Saver, derived_state_of, mutable_float_state_of, mutable_state_of, named,
-    named_args, remember_keyed,
+    DerivedState, MutableState, Saveable, Saver, derived_state_of, mutable_confined_state_of, mutable_float_state_of,
+    named, named_args, remember_keyed,
 };
 use kompoz_ui::input::{
     IndirectPointerEvent, IndirectPointerInputModifierNode, NestedScrollSource, PointerEvent, PointerEventPass,
@@ -42,8 +42,8 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 /// What anchors are keyed by (Kotlin's `T` of an anchored state): compared, cloned, held in states.
-pub trait AnchorKey: Clone + PartialEq + Send + Sync + 'static {}
-impl<T: Clone + PartialEq + Send + Sync + 'static> AnchorKey for T {}
+pub trait AnchorKey: Clone + PartialEq + 'static {}
+impl<T: Clone + PartialEq + 'static> AnchorKey for T {}
 
 /// Kotlin's `coerceIn` of a float: NaN bounds keep the value; a range the wrong way round panics as Kotlin
 /// throws.
@@ -76,7 +76,7 @@ fn kt_max(a: f32, b: f32) -> f32 {
 /// Values and their positions, px (Compose's DraggableAnchors): what an anchored state settles on. Two compare as
 /// their types say ([`DraggableAnchorsEq`]: equal when `PartialEq` says so); shared as `Arc<dyn
 /// DraggableAnchors<T>>`.
-pub trait DraggableAnchors<T>: DraggableAnchorsEq + Send + Sync + 'static {
+pub trait DraggableAnchors<T>: DraggableAnchorsEq + 'static {
     /// How many anchors (Compose's `size`).
     fn size(&self) -> usize;
 
@@ -432,10 +432,10 @@ fn empty_draggable_anchors<T: AnchorKey>() -> Arc<dyn DraggableAnchors<T>> {
 impl<T: AnchorKey> AnchoredDraggableState<T> {
     /// Compose's primary constructor: no anchors yet.
     fn make(initial_value: T) -> AnchoredDraggableState<T> {
-        let current_value = mutable_state_of(initial_value.clone());
+        let current_value = mutable_confined_state_of(initial_value.clone());
         let offset = mutable_float_state_of(f32::NAN);
-        let drag_target = mutable_state_of(None);
-        let anchors = mutable_state_of(empty_draggable_anchors());
+        let drag_target = mutable_confined_state_of(None);
+        let anchors = mutable_confined_state_of(empty_draggable_anchors());
         let target_value = {
             let (current_value, offset, drag_target, anchors) =
                 (current_value.clone(), offset.clone(), drag_target.clone(), anchors.clone());
@@ -452,7 +452,7 @@ impl<T: AnchorKey> AnchoredDraggableState<T> {
             decay_animation_spec: RefCell::new(None),
             drag_mutex: MutatorMutex::new(),
             current_value,
-            settled_value: mutable_state_of(initial_value),
+            settled_value: mutable_confined_state_of(initial_value),
             offset,
             last_velocity: mutable_float_state_of(0.0),
             drag_target,

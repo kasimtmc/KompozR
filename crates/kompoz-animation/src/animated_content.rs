@@ -18,7 +18,7 @@ use crate::vector::AnimationVector2D;
 use crate::{AnimationValue, fade_in, fade_out, scale_in, tween};
 use kompoz_graphics::{IntOffset, IntSize, LayoutDirection};
 use kompoz_runtime::{
-    DisposableEffect, MutableState, SnapshotStateList, State, group, kompozable, mutable_state_list_of,
+    DisposableEffect, MutableState, SnapshotStateList, State, group, kompozable, mutable_confined_state_list_of,
     mutable_state_of, named, on_dispose, remember, remember_keyed,
 };
 use kompoz_ui::layout::{
@@ -721,7 +721,8 @@ fn animated_content_impl<S: AnimationValue>(
         let root_scope = AnimatedContentTransitionScope { root: root.clone(), overrides: None };
         let current = this.current_state();
         let c = current.clone();
-        let currently_visible: SnapshotStateList<S> = remember_keyed(this.clone(), move || mutable_state_list_of([c]));
+        let currently_visible: SnapshotStateList<S> =
+            remember_keyed(this.clone(), move || mutable_confined_state_list_of([c]));
         let pending = this.pending_target_state();
         let content_map: Rc<RefCell<Vec<S>>> =
             remember_keyed((this.clone(), pending.clone()), || Rc::new(RefCell::new(Vec::new())));

@@ -32,12 +32,12 @@ mod snapshot;
 mod state;
 mod state_observer;
 // (WP8: adaptive — an Rc in a transition's state)
-mod thread_bound;
 
 pub use crate::__mutable_state_of as mutable_state_of;
 pub use crate::__remember_updated_state as remember_updated_state;
 pub use collections::{
-    SnapshotStateList, SnapshotStateMap, mutable_confined_state_list_of, mutable_state_list_of, mutable_state_map_of,
+    SnapshotStateList, SnapshotStateMap, mutable_confined_state_list_of, mutable_confined_state_map_of,
+    mutable_state_list_of, mutable_state_map_of,
 };
 pub use composer::{
     Composition, Content, Node, PausableComposition, RecompositionStats, RememberObserver, ReusableComposition,
@@ -78,4 +78,3 @@ pub use state::{
     structural_equality_policy,
 };
 pub use state_observer::{OnChangedExecutor, SnapshotStateObserver};
-pub use thread_bound::ThreadBound;

@@ -75,7 +75,7 @@ impl TransformableState for Rc<dyn TransformableState> {
 }
 
 /// A spring of low stiffness (Compose's `SpringSpec(stiffness = Spring.StiffnessLow)`, the animations' default).
-fn low_spring<T: Clone + PartialEq + Send + Sync + 'static>() -> SpringSpec<T> {
+fn low_spring<T: Clone + PartialEq + 'static>() -> SpringSpec<T> {
     SpringSpec::new(Spring::DampingRatioNoBouncy, Spring::StiffnessLow, None)
 }
 

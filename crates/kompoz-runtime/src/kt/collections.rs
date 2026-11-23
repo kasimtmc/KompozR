@@ -484,7 +484,7 @@ impl<T: KtStep> KtIterable for KtProgression<T> {
     }
 }
 /// Its items as they are when asked (a read that subscribes).
-impl<T: Clone + Send + Sync + 'static> KtIterable for SnapshotStateList<T> {
+impl<T: Clone + 'static> KtIterable for SnapshotStateList<T> {
     type Item = T;
     fn kt_iter(&self) -> impl Iterator<Item = T> {
         self.to_vec().into_iter()
@@ -527,7 +527,7 @@ impl<T: Eq + Hash, S: BuildHasher> KtContains<T> for HashSet<T, S> {
         self.contains(value)
     }
 }
-impl<T: PartialEq + Clone + Send + Sync + 'static> KtContains<T> for SnapshotStateList<T> {
+impl<T: PartialEq + Clone + 'static> KtContains<T> for SnapshotStateList<T> {
     fn kt_contains(&self, value: &T) -> bool {
         self.with(|items| items.contains(value))
     }
@@ -2009,7 +2009,7 @@ impl<T: Clone> KtMutableList for Vec<T> {
 
 /// Kotlin's `MutableList` functions a state list has (Compose's SnapshotStateList is one): taking `&self`, so a
 /// lambda holding the list changes it.
-impl<T: Clone + Send + Sync + 'static> SnapshotStateList<T> {
+impl<T: Clone + 'static> SnapshotStateList<T> {
     /// Kotlin: `size: Int`
     pub fn size(&self) -> i32 {
         self.len() as i32
@@ -2105,7 +2105,7 @@ impl<K: Clone, V: Clone, S> KtMapLike for HashMap<K, V, S> {
     }
 }
 /// Its entries as they are when asked (a read that subscribes).
-impl<K: Ord + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static> KtMapLike for SnapshotStateMap<K, V> {
+impl<K: Ord + Clone + 'static, V: Clone + 'static> KtMapLike for SnapshotStateMap<K, V> {
     type K = K;
     type V = V;
     fn kt_entries(&self) -> Vec<(K, V)> {

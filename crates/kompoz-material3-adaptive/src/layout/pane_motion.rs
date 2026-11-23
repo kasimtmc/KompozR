@@ -20,7 +20,7 @@ use kompoz_ui::Alignment;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 // ---- PaneScaffoldMotionDataProvider ----
 
@@ -159,47 +159,63 @@ pub struct PaneMotionDefaults;
 
 const IntRectVisibilityThreshold: IntRect = IntRect { left: 1, top: 1, right: 1, bottom: 1 };
 
+// (Compose's vals: made once per thread, as a spec holding another — an `Arc<dyn FiniteAnimationSpec<_>>` — isn't
+// `Send + Sync`: specs animate any value)
 impl PaneMotionDefaults {
     /// The bounds' spring (Compose's `AnimationSpec`): damping 0.8, stiffness 380, to within 1 px.
     pub fn AnimationSpec() -> Arc<dyn FiniteAnimationSpec<IntRect>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<IntRect>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(SpringSpec::new(0.8, 380.0, Some(IntRectVisibilityThreshold)))).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<IntRect>> = Arc::new(SpringSpec::new(0.8, 380.0, Some(IntRectVisibilityThreshold)));
+        }
+        SPEC.with(Arc::clone)
     }
 
     /// The same spring started a tenth of its duration later (Compose's `DelayedAnimationSpec`).
     pub fn DelayedAnimationSpec() -> Arc<dyn FiniteAnimationSpec<IntRect>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<IntRect>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(DelayedSpringSpec::new(0.8, 380.0, 0.1, Some(IntRectVisibilityThreshold)))).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<IntRect>> = Arc::new(DelayedSpringSpec::new(0.8, 380.0, 0.1, Some(IntRectVisibilityThreshold)));
+        }
+        SPEC.with(Arc::clone)
     }
 
     /// The visibility's spring (Compose's `VisibilityAnimationSpec`): damping 0.8, stiffness 380.
     pub fn VisibilityAnimationSpec() -> Arc<dyn FiniteAnimationSpec<f32>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<f32>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(SpringSpec::<f32>::new(0.8, 380.0, None))).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<f32>> = Arc::new(SpringSpec::<f32>::new(0.8, 380.0, None));
+        }
+        SPEC.with(Arc::clone)
     }
 
     /// The bounds' spring of an offset (Compose's `OffsetAnimationSpec`).
     pub fn OffsetAnimationSpec() -> Arc<dyn FiniteAnimationSpec<IntOffset>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<IntOffset>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(DerivedOffsetAnimationSpec { bounds_spec: Self::AnimationSpec() })).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<IntOffset>> = Arc::new(DerivedOffsetAnimationSpec { bounds_spec: PaneMotionDefaults::AnimationSpec() });
+        }
+        SPEC.with(Arc::clone)
     }
 
     /// The bounds' spring of a size (Compose's `SizeAnimationSpec`).
     pub fn SizeAnimationSpec() -> Arc<dyn FiniteAnimationSpec<IntSize>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<IntSize>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(DerivedSizeAnimationSpec { bounds_spec: Self::AnimationSpec() })).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<IntSize>> = Arc::new(DerivedSizeAnimationSpec { bounds_spec: PaneMotionDefaults::AnimationSpec() });
+        }
+        SPEC.with(Arc::clone)
     }
 
     /// The delayed spring of an offset (Compose's `DelayedOffsetAnimationSpec`).
     pub fn DelayedOffsetAnimationSpec() -> Arc<dyn FiniteAnimationSpec<IntOffset>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<IntOffset>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(DerivedOffsetAnimationSpec { bounds_spec: Self::DelayedAnimationSpec() })).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<IntOffset>> = Arc::new(DerivedOffsetAnimationSpec { bounds_spec: PaneMotionDefaults::DelayedAnimationSpec() });
+        }
+        SPEC.with(Arc::clone)
     }
 
     /// The delayed spring of a size (Compose's `DelayedSizeAnimationSpec`).
     pub fn DelayedSizeAnimationSpec() -> Arc<dyn FiniteAnimationSpec<IntSize>> {
-        static SPEC: OnceLock<Arc<dyn FiniteAnimationSpec<IntSize>>> = OnceLock::new();
-        SPEC.get_or_init(|| Arc::new(DerivedSizeAnimationSpec { bounds_spec: Self::DelayedAnimationSpec() })).clone()
+        thread_local! {
+            static SPEC: Arc<dyn FiniteAnimationSpec<IntSize>> = Arc::new(DerivedSizeAnimationSpec { bounds_spec: PaneMotionDefaults::DelayedAnimationSpec() });
+        }
+        SPEC.with(Arc::clone)
     }
 }
 
@@ -818,7 +834,7 @@ pub(crate) struct DelayedSpringSpec<T> {
     delayed_ratio: f32,
 }
 
-impl<T: Clone + Send + Sync + 'static> DelayedSpringSpec<T> {
+impl<T: Clone + 'static> DelayedSpringSpec<T> {
     pub(crate) fn new(
         damping_ratio: f32,
         stiffness: f32,

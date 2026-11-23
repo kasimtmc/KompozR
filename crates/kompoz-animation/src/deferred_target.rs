@@ -4,7 +4,7 @@
 
 use crate::{Animatable, AnimationSpec, AnimationValue, AnimationVector, FiniteAnimationSpec, TwoWayConverter, spring};
 use kompoz_coroutines::CoroutineScope;
-use kompoz_runtime::{MutableState, mutable_state_of, named, named_args};
+use kompoz_runtime::{MutableState, mutable_confined_state_of, named, named_args};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -53,7 +53,7 @@ impl<T: AnimationValue, V: AnimationVector> DeferredTargetAnimation<T, V> {
         DeferredTargetAnimation {
             inner: Rc::new(Inner {
                 vector_converter,
-                pending_target: mutable_state_of(None),
+                pending_target: mutable_confined_state_of(None),
                 animatable: RefCell::new(None),
             }),
         }

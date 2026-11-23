@@ -34,9 +34,7 @@ pub use list_detail_pane_scaffold::{
     StateSupportingPaneScaffold, SupportingPaneScaffold, SupportingPaneScaffoldDefaults, SupportingPaneScaffoldRole,
 };
 pub use pane::{AnimatedPaneOverride, AnimatedPaneOverrideScope, AnimatedPaneScope, LocalAnimatedPaneOverride};
-pub use pane_adapted_value::{
-    AdaptStrategy, BoundScrim, PaneAdaptedValue, PaneScrim, ThreePaneScaffoldAdaptStrategies,
-};
+pub use pane_adapted_value::{AdaptStrategy, PaneAdaptedValue, PaneScrim, ThreePaneScaffoldAdaptStrategies};
 pub use pane_expansion_state::{
     PaneExpansionAnchor, PaneExpansionAnchorOffset, PaneExpansionAnchorOffsetDirection, PaneExpansionState,
     PaneExpansionStateKey, PaneExpansionStateKeyProvider, remember_pane_expansion_state,

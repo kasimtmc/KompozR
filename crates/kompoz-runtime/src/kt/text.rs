@@ -453,7 +453,7 @@ impl<T: KtToString + Clone + 'static> KtToString for State<T> {
 }
 
 /// `SnapshotStateList(value=[…])@hash`.
-impl<T: KtToString + Clone + Send + Sync + 'static> KtToString for SnapshotStateList<T> {
+impl<T: KtToString + Clone + 'static> KtToString for SnapshotStateList<T> {
     fn kt_write(&self, out: &mut String) {
         out.push_str("SnapshotStateList(value=");
         self.peek_with(|items| write_list(out, items));
@@ -463,9 +463,7 @@ impl<T: KtToString + Clone + Send + Sync + 'static> KtToString for SnapshotState
 }
 
 /// `SnapshotStateMap(value={…})@hash`.
-impl<K: KtToString + Ord + Clone + Send + Sync + 'static, V: KtToString + Clone + Send + Sync + 'static> KtToString
-    for SnapshotStateMap<K, V>
-{
+impl<K: KtToString + Ord + Clone + 'static, V: KtToString + Clone + 'static> KtToString for SnapshotStateMap<K, V> {
     fn kt_write(&self, out: &mut String) {
         out.push_str("SnapshotStateMap(value=");
         self.peek_with(|map| write_map(out, map));

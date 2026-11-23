@@ -907,10 +907,6 @@ fn menus_scale_and_fade_in_from_where_they_meet_their_anchor() {
     open.set(false);
     rule.advance_frame();
     rule.advance_frame();
-    // (one frame more than opening: the menu's popup content, the same lambda instance — Compose's memoized one —, is
-    // skipped and composed again by the transition state its menu set while composing, which reaches the popup's
-    // composition at the next frame here; see stage12-followups "Closing — core")
-    rule.advance_frame();
     rule.advance_time_by(16);
     let (scale, _, alpha) = layer(&rule);
     assert!(scale < 1.0 && alpha < 1.0, "{scale} {alpha}");

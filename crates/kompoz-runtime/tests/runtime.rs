@@ -1601,6 +1601,7 @@ fn a_state_list_is_saved_and_given_back() {
 }
 
 tests!(
+    a_state_written_while_composing_reaches_its_readers_further_on_in_the_same_pass,
     confined_states_hold_values_that_arent_send,
     a_confined_state_list_holds_items_that_arent_send,
     a_snapshot_writing_a_confined_state_applies_on_its_thread_only,
@@ -1797,6 +1798,44 @@ fn a_confined_states_values_are_freed_on_its_thread() {
     assert_eq!(drops.borrow().len(), before, "values dropped on another thread");
     Snapshot::send_apply_notifications();
     assert!(drops.borrow().len() > before && drops.borrow().iter().all(|t| *t == me));
+}
+
+#[kompozable]
+fn ShowsShared(label: &'static str, shared: MutableState<i32>, runs: Rc<Cell<u32>>) {
+    runs.set(runs.get() + 1);
+    Text(format!("{label} {}", shared.get()));
+}
+
+#[kompozable]
+fn SetsShared(value: i32, shared: MutableState<i32>) {
+    shared.set(value);
+}
+
+/// A state written while composing (a menu setting the transition state its popup's content reads, Compose's
+/// `recordWriteOf`): its readers further on — skippable ones too — are composed in the same pass with what was
+/// written (Compose's imminent invalidations), once; those composed (or skipped) before it in the pass compose
+/// again in the next (Compose's: the next frame).
+fn a_state_written_while_composing_reaches_its_readers_further_on_in_the_same_pass() {
+    let (target, shared) = (mutable_state_of(0), mutable_state_of(0));
+    let (before, after) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (t, sh, b, a) = (target.clone(), shared.clone(), before.clone(), after.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        ShowsShared("before", sh.clone(), b.clone());
+        SetsShared(t.get(), sh.clone());
+        ShowsShared("after", sh.clone(), a.clone());
+    }));
+    assert!(rule.has("before 0") && rule.has("after 0"));
+    assert_eq!((before.get(), after.get()), (1, 1));
+    target.set(1);
+    Snapshot::send_apply_notifications();
+    assert!(rule.composition().recompose(0)); // one pass
+    assert!(rule.has("after 1"), "{:?}", rule.names()); // further on: in this pass
+    assert!(rule.has("before 0"), "{:?}", rule.names()); // skipped before the write: the next pass
+    assert_eq!((before.get(), after.get()), (1, 2));
+    assert!(rule.composition().has_invalidations() || global_snapshot_changed());
+    rule.wait_for_idle();
+    assert!(rule.has("before 1") && rule.has("after 1"), "{:?}", rule.names());
+    assert_eq!((before.get(), after.get()), (2, 2)); // (the one further on not again: it composed with it)
 }
 
 #[kompozable]

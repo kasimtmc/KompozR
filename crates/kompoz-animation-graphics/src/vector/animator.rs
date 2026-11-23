@@ -269,7 +269,7 @@ pub(crate) enum PropertyValuesHolder {
     Path(Arc<PropertyValuesHolder1D<Vec<PathNode>>>),
 }
 
-impl<T: Clone + Send + Sync + 'static> PropertyValuesHolder1D<T> {
+impl<T: Clone + 'static> PropertyValuesHolder1D<T> {
     /// Its keyframes as a keyframes spec over `duration` (Compose's `asKeyframeSpec`): each at its fraction of it
     /// (truncated to a millisecond), eased by its interpolator to the next.
     fn as_keyframe_spec(&self, duration: i32) -> KeyframesSpec<T> {
@@ -327,7 +327,7 @@ pub(crate) struct Timestamp<T> {
     pub(crate) holder: Arc<PropertyValuesHolder1D<T>>,
 }
 
-impl<T: Clone + Send + Sync + 'static> Timestamp<T> {
+impl<T: Clone + 'static> Timestamp<T> {
     /// Its keyframes spec, repeated as it says (an infinite repeat `Int.MAX_VALUE` times).
     fn as_animation_spec(&self) -> Arc<dyn FiniteAnimationSpec<T>> {
         let spec = self.holder.as_keyframe_spec(self.duration_millis);
@@ -358,7 +358,7 @@ pub(crate) enum PropertyState {
 
 /// The spec a property of `timestamps` plays with in a segment (Compose's `createAnimationSpec`): its timestamps'
 /// specs combined, reversed over `overall_duration` going back.
-pub(crate) fn create_animation_spec<T: Clone + Send + Sync + 'static>(
+pub(crate) fn create_animation_spec<T: Clone + 'static>(
     timestamps: &[Timestamp<T>],
     overall_duration: i32,
     segment: &Segment<bool>,

@@ -17,3 +17,6 @@ syn = { version = "3", features = ["full", "visit", "visit-mut", "extra-traits"]
 [workspace.lints.clippy]
 # Closures and observers in Rc/Arc read plainly as they are; naming each one would hide what it is.
 type_complexity = "allow"
+# Animation specs (and anchors) are shared as `Arc<dyn …>` whatever they hold, as Compose's are any objects: a spec
+# of a value that isn't `Send` (or wrapping a shared spec) is an `Arc` that isn't `Send` either, and that's as meant.
+arc_with_non_send_sync = "allow"

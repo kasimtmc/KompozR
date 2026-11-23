@@ -143,7 +143,7 @@ impl<T> KtShuffle for Vec<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> SnapshotStateList<T> {
+impl<T: Clone + 'static> SnapshotStateList<T> {
     /// Kotlin's `MutableList.shuffle(random)` on a state list, as on a `Vec` (one change of the list).
     /// Kotlin: `shuffle(random: Random)`
     pub fn shuffle(&self, random: &Random) {

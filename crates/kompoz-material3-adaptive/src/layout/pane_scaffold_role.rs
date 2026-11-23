@@ -2,7 +2,6 @@
 //! scaffold indexes its panes by) and [`ThreePaneScaffoldRole`] (the three-pane scaffolds' primary, secondary and
 //! tertiary panes).
 
-use kompoz_runtime::ThreadBound;
 use kompoz_runtime::kt::KtToString;
 use std::any::Any;
 use std::fmt;
@@ -24,33 +23,32 @@ impl PartialEq for dyn PaneScaffoldRole {
     }
 }
 
-/// A role a value holds (Compose's `PaneScaffoldRole` references): shared, compared by the role; bound to the UI
-/// thread (a value holding it can be a transition's state, which is `Send + Sync`).
+/// A role a value holds (Compose's `PaneScaffoldRole` references): shared, compared by the role.
 #[derive(Clone, Debug)]
-pub struct DynPaneScaffoldRole(pub ThreadBound<Rc<dyn PaneScaffoldRole>>);
+pub struct DynPaneScaffoldRole(pub Rc<dyn PaneScaffoldRole>);
 
 impl DynPaneScaffoldRole {
     /// The role as a three-pane scaffold's, if it is one (Kotlin's `as? ThreePaneScaffoldRole`).
     pub fn as_three_pane(&self) -> Option<ThreePaneScaffoldRole> {
-        self.0.get().as_any().downcast_ref::<ThreePaneScaffoldRole>().copied()
+        self.0.as_any().downcast_ref::<ThreePaneScaffoldRole>().copied()
     }
 }
 
 impl PartialEq for DynPaneScaffoldRole {
     fn eq(&self, other: &Self) -> bool {
-        self.0.get().role_eq(&**other.0.get())
+        self.0.role_eq(&*other.0)
     }
 }
 
 impl fmt::Display for DynPaneScaffoldRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&**self.0.get(), f)
+        fmt::Display::fmt(&*self.0, f)
     }
 }
 
 impl<R: PaneScaffoldRole> From<R> for DynPaneScaffoldRole {
     fn from(role: R) -> DynPaneScaffoldRole {
-        DynPaneScaffoldRole(ThreadBound::new(Rc::new(role)))
+        DynPaneScaffoldRole(Rc::new(role))
     }
 }
 

@@ -99,7 +99,7 @@ pub trait StyleStateScopeExt: StyleStateScope {
     /// custom state's own function (`playing { … }`) is written with.
     ///
     /// Kotlin: `state(key: StyleStateKey<T>, block: () -> Unit, active: (key: StyleStateKey<T>, state: StyleState) -> Boolean)`
-    fn state_of<T: Clone + PartialEq + Send + Sync + 'static>(
+    fn state_of<T: Clone + PartialEq + 'static>(
         &self,
         key: &StyleStateKey<T>,
         block: impl FnOnce(),

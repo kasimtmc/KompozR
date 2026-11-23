@@ -336,6 +336,10 @@ pub(crate) struct ComposerState {
     /// The derived states made here: they invalidate their readers here as they change, so the change they tell
     /// the apply observers (for their readers elsewhere) isn't taken again.
     derived_keys: HashSet<StateKey>,
+    /// The readers a state written while composing had that the composition hadn't reached yet (Compose's
+    /// imminent invalidations, its `observationsProcessed`): invalidated at once, composed in the same pass after
+    /// the write, so the applied change isn't taken again for them.
+    imminent: Vec<(StateKey, ScopeId)>,
     pass: u64,
     frame_time: i64,
     stats: RecompositionStats,
@@ -404,6 +408,11 @@ impl Composer {
         CURRENT.with(|c| c.borrow().last().cloned())
     }
 
+    /// The composition of id `id`, if this thread composes it now.
+    fn composing(id: u64) -> Option<Rc<Composer>> {
+        CURRENT.with(|c| c.borrow().iter().rev().find(|c| c.id == id).cloned())
+    }
+
     #[track_caller]
     pub(crate) fn require() -> Rc<Composer> {
         Composer::current().expect("kompoz: a composable called outside of a composition")
@@ -438,6 +447,7 @@ impl Composer {
                     parked: Vec::new(),
                     set_holders: Vec::new(),
                     derived_keys: HashSet::new(),
+                    imminent: Vec::new(),
                     pass: 0,
                     frame_time: 0,
                     stats: RecompositionStats::default(),
@@ -544,12 +554,114 @@ impl Composer {
 
     fn take_pending(&self) {
         let keys = std::mem::take(&mut *self.pending.lock());
-        let set_holders = std::mem::take(&mut self.state.borrow_mut().set_holders);
+        let (set_holders, imminent) = {
+            let mut st = self.state.borrow_mut();
+            (std::mem::take(&mut st.set_holders), std::mem::take(&mut st.imminent))
+        };
         for key in keys {
             let derived = self.state.borrow().derived_keys.contains(&key);
-            if !set_holders.contains(&key) && !derived {
-                self.invalidate_readers(key);
+            if set_holders.contains(&key) || derived {
+                continue;
             }
+            if imminent.is_empty() {
+                self.invalidate_readers(key);
+                continue;
+            }
+            let scopes: Vec<ScopeId> = {
+                let st = self.state.borrow();
+                match st.readers.get(&key) {
+                    Some(r) => r.scopes.iter().flatten().copied().collect(),
+                    None => continue,
+                }
+            };
+            for s in scopes {
+                if !imminent.contains(&(key, s)) {
+                    self.invalidate_scope(s);
+                }
+            }
+        }
+    }
+
+    /// A state written while this composition composes (in its snapshot: Compose's `recordWriteOf`): its readers
+    /// the composition hasn't reached yet are invalidated at once — composed later in this pass, seeing the value
+    /// written (Compose's imminent invalidation: a scope further on in the composition) —; those it has (composed
+    /// or skipped in this pass, running now, or before where it composes) are told when the pass's snapshot is
+    /// applied, and compose again in the next pass. A derived state's readers are told as it is (when applied).
+    fn record_write_of(&self, key: StateKey) {
+        let mut st = self.state.borrow_mut();
+        let st = &mut *st;
+        if !st.composing {
+            return;
+        }
+        let Some(readers) = st.readers.get(&key) else { return };
+        let ahead: Vec<ScopeId> = readers
+            .scopes
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|s| {
+                st.scopes.try_get(s.0).is_some_and(|scope| {
+                    scope.on_invalidated.is_none() && scope.group.is_some_and(|g| Self::is_ahead(st, g))
+                })
+            })
+            .collect();
+        for s in ahead {
+            let scope = st.scopes.get_mut(s.0);
+            if !scope.invalid {
+                scope.invalid = true;
+                st.invalid.push(s);
+            }
+            st.imminent.push((key, s));
+        }
+    }
+
+    /// Whether the group `g` is further on than where the composition composes now (Compose's `location >=
+    /// reader.currentGroup`): not composed (nor skipped) in this pass, nor running, and after the current position
+    /// in the composition's order — below a group composing now, among the children it hasn't reached yet, or
+    /// outside the scope restarted now, after it.
+    fn is_ahead(st: &ComposerState, g: GroupId) -> bool {
+        let on_stack = |x: GroupId| st.frames.iter().any(|f| f.group == x);
+        if on_stack(g) || st.groups.get(g.0).composed_in == st.pass {
+            return false; // running, or composed (or skipped) in this pass
+        }
+        let mut path = vec![g];
+        let mut x = st.groups.get(g.0).parent;
+        while let Some(p) = x {
+            if on_stack(p) {
+                return true; // below a group composing now, not reached yet
+            }
+            if st.groups.get(p.0).composed_in == st.pass {
+                return false; // inside what was composed or skipped in this pass
+            }
+            path.push(p);
+            x = st.groups.get(p.0).parent;
+        }
+        // Outside the scope restarted now: after it in the composition's order?
+        let Some(restarted) = st.frames.first().map(|f| f.group) else { return false };
+        let mut other = vec![restarted];
+        let mut x = st.groups.get(restarted.0).parent;
+        while let Some(p) = x {
+            other.push(p);
+            x = st.groups.get(p.0).parent;
+        }
+        // (both paths end at the root group: the first difference from the top is where they part)
+        let (mut a, mut b) = (path.iter().rev().peekable(), other.iter().rev().peekable());
+        let mut parent = None;
+        while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+            if x != y {
+                break;
+            }
+            parent = Some(**x);
+            a.next();
+            b.next();
+        }
+        match (parent, a.next(), b.next()) {
+            (Some(parent), Some(x), Some(y)) => {
+                let children = &st.groups.get(parent.0).children;
+                let index = |c: &GroupId| children.iter().position(|k| k == c);
+                matches!((index(x), index(y)), (Some(i), Some(j)) if i > j)
+            }
+            _ => false,
         }
     }
 
@@ -1095,6 +1207,7 @@ impl Composer {
             let scope = st.scopes.get_mut(s.0);
             scope.invalid = false;
             let (body, args, g) = (scope.body.clone(), scope.args.clone(), scope.group.expect("an observer run"));
+            st.groups.get_mut(g.0).composed_in = st.pass; // (a restarted scope's: composed in this pass)
             Self::enter(st, g);
             (outer, body, args, g)
         };
@@ -1464,7 +1577,13 @@ impl Composer {
             st.composing = true;
             st.pausing = should_pause.clone();
         }
-        let snapshot = Snapshot::take_mutable_snapshot(None, None);
+        let id = self.id;
+        let observer: crate::snapshot::WriteObserver = Arc::new(move |key| {
+            if let Some(c) = Composer::composing(id) {
+                c.record_write_of(key);
+            }
+        });
+        let snapshot = Snapshot::take_mutable_snapshot(None, Some(observer));
         snapshot.enter(|| {
             with_current(self, || {
                 let mut first = true;

@@ -7,7 +7,7 @@ use crate::spec::FiniteAnimationSpec;
 use crate::transition::{Transition, update_transition};
 use crate::{AnimationValue, tween};
 use kompoz_graphics::IntSize;
-use kompoz_runtime::{SnapshotStateList, group, kompozable, mutable_state_list_of, named, remember};
+use kompoz_runtime::{SnapshotStateList, group, kompozable, mutable_confined_state_list_of, named, remember};
 use kompoz_ui::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, PlacementScope, SlotKey, layout_into};
 use kompoz_ui::{Alignment, Constraints, Modifier};
 use std::cell::RefCell;
@@ -82,7 +82,7 @@ fn crossfade_impl<S: AnimationValue>(
     group(move || {
         let current = this.current_state();
         let c = current.clone();
-        let currently_visible: SnapshotStateList<S> = remember(move || mutable_state_list_of([c]));
+        let currently_visible: SnapshotStateList<S> = remember(move || mutable_confined_state_list_of([c]));
         let content_map = remember(|| Rc::new(RefCell::new(Vec::<S>::new())));
         let keys = remember(|| Rc::new(RefCell::new(ContentKeys::<S>::new())));
         keys.borrow_mut().set_key(content_key);

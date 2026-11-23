@@ -31,7 +31,7 @@ use kompoz_graphics::{Color, Dp, IntOffset, IntSize, Offset, Rect, Size};
 use kompoz_runtime::kt::panic_kt;
 use kompoz_runtime::{
     DerivedState, DisposableEffect, MutableState, SnapshotMutationPolicy, SnapshotStateList, State, StateSource,
-    derived_state_of, group, kompozable, kompozable_block, mutable_confined_state_list_of,
+    derived_state_of, group, kompozable, kompozable_block, mutable_confined_state_list_of, mutable_confined_state_of,
     mutable_confined_state_of_with_policy, mutable_state_of, named, named_args, on_dispose, remember_keyed,
     without_read_observation,
 };
@@ -209,8 +209,8 @@ impl<S: AnimationValue> MutableTransitionState<S> {
     pub fn new(initial_state: S) -> MutableTransitionState<S> {
         MutableTransitionState {
             inner: Arc::new(MutableTransitionStateInner {
-                current_state: mutable_state_of(initial_state.clone()),
-                target_state: mutable_state_of(initial_state),
+                current_state: mutable_confined_state_of(initial_state.clone()),
+                target_state: mutable_confined_state_of(initial_state),
                 is_running: mutable_state_of(false),
             }),
         }
@@ -289,9 +289,9 @@ impl<S: AnimationValue> DeferredTransitionState<S> {
     pub fn new(initial_state: S) -> DeferredTransitionState<S> {
         DeferredTransitionState {
             inner: Arc::new(DeferredTransitionStateInner {
-                current_state: mutable_state_of(initial_state.clone()),
-                target_state: mutable_state_of(initial_state),
-                pending_target_state: mutable_state_of(None),
+                current_state: mutable_confined_state_of(initial_state.clone()),
+                target_state: mutable_confined_state_of(initial_state),
+                pending_target_state: mutable_confined_state_of(None),
                 is_running: mutable_state_of(false),
             }),
         }
@@ -558,9 +558,9 @@ impl<S: AnimationValue> Transition<S> {
             transition_state,
             parent_transition,
             label,
-            target_state: mutable_state_of(current.clone()),
-            pending_target_state: mutable_state_of(None),
-            segment: mutable_state_of(Segment::new(current.clone(), current)),
+            target_state: mutable_confined_state_of(current.clone()),
+            pending_target_state: mutable_confined_state_of(None),
+            segment: mutable_confined_state_of(Segment::new(current.clone(), current)),
             play_time_nanos: mutable_state_of(0),
             start_time_nanos: mutable_state_of(AnimationConstants::UnspecifiedTime),
             update_children_needed: mutable_state_of(false),
@@ -1155,15 +1155,15 @@ impl<S: AnimationValue, T: AnimationValue, V: AnimationVector> TransitionAnimati
                 transition: Rc::downgrade(&transition.inner),
                 type_converter,
                 label,
-                target_value: mutable_state_of(initial_value.clone()),
-                animation_spec: mutable_state_of(default_spring),
+                target_value: mutable_confined_state_of(initial_value.clone()),
+                animation_spec: mutable_confined_state_of(default_spring),
                 animation: mutable_confined_state_of_with_policy(animation, SnapshotMutationPolicy::new(Rc::ptr_eq)),
                 initial_value_state: RefCell::new(None),
                 initial_value_animation: RefCell::new(None),
                 is_finished: mutable_state_of(true),
                 reset_snap_value: mutable_state_of(NoReset),
                 use_only_initial_value: Cell::new(false),
-                value: mutable_state_of(initial_value),
+                value: mutable_confined_state_of(initial_value),
                 velocity_vector: Cell::new(initial_velocity_vector),
                 duration_nanos: mutable_state_of(duration),
                 is_seeking: Cell::new(false),

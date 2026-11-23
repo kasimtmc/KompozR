@@ -329,7 +329,7 @@ impl ThreePaneContentMeasurePolicy {
     ) -> ThreePaneContentMeasurePolicy {
         ThreePaneContentMeasurePolicy {
             scaffold_directive: mutable_state_of(scaffold_directive),
-            scaffold_value: mutable_state_of(scaffold_value),
+            scaffold_value: kompoz_runtime::mutable_state_of!(scaffold_value),
             pane_order: mutable_state_of(pane_order),
             pane_expansion_state,
             motion_data_provider,

@@ -1594,6 +1594,7 @@ kompoz-material3/tabs kompozable SelectedText r crates/kompoz-material3/tests/ta
 * super SemanticsElement - ModifierNodeElement
 * super SensitiveContentElement - ModifierNodeElement
 * super SensitiveContentNode - ModifierNode
+kompoz-runtime/runtime kompozable SetsShared rr crates/kompoz-runtime/tests/runtime.rs
 * fn Shadow ddd crates/kompoz-graphics/src/shadow.rs
 * super ShadowGraphicsLayerElement - ModifierNodeElement
 * super ShadowScope - Density
@@ -1633,6 +1634,7 @@ kompoz-material3/tabs kompozable SelectedText r crates/kompoz-material3/tests/ta
 kompoz-material3/navigation_bar kompozable ShortNavigationBarSample - crates/kompoz-material3/tests/navigation_bar.rs
 kompoz-material3/navigation_bar kompozable ShortNavigationBarWithHorizontalItemsSample - crates/kompoz-material3/tests/navigation_bar.rs
 kompoz-runtime/runtime kompozable Shown r crates/kompoz-runtime/tests/runtime.rs
+kompoz-runtime/runtime kompozable ShowsShared rrr crates/kompoz-runtime/tests/runtime.rs
 * kompozable SideEffect r crates/kompoz-runtime/src/remember.rs
 kompoz-material3/bottom_app_bars kompozable SimpleBottomAppBar - crates/kompoz-material3/tests/bottom_app_bars.rs
 kompoz-material3/sheets kompozable SimpleBottomSheetScaffoldSample - crates/kompoz-material3/tests/sheets.rs

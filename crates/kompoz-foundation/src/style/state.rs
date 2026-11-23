@@ -4,7 +4,7 @@
 
 use crate::interaction::{FocusInteraction, HoverInteraction, Interaction, InteractionSource, PressInteraction};
 use kompoz_runtime::{
-    MutableState, SnapshotStateMap, kompozable, mutable_state_map_of, mutable_state_of, remember_keyed,
+    MutableState, SnapshotStateMap, kompozable, mutable_confined_state_map_of, mutable_state_of, remember_keyed,
     without_read_observation,
 };
 use kompoz_ui::state::ToggleableState;
@@ -102,7 +102,7 @@ impl<T> fmt::Debug for StyleStateKey<T> {
 
 static NEXT_KEY: AtomicU64 = AtomicU64::new(1);
 
-impl<T: Clone + PartialEq + Send + Sync + 'static> StyleStateKey<T> {
+impl<T: Clone + PartialEq + 'static> StyleStateKey<T> {
     /// A custom state key whose value is `default_value` where a state doesn't set it (Compose's
     /// `StyleStateKey(defaultValue)`).
     ///
@@ -190,7 +190,7 @@ impl<T> AnyStyleStateKey for CustomKey<T> {
 }
 
 /// The value of a custom state as the snapshot map holds it.
-type CustomValue = Arc<dyn Any + Send + Sync>;
+type CustomValue = Rc<dyn Any>;
 
 /// The state of a component a style reads (Compose's sealed StyleState): whether it is pressed, hovered, focused,
 /// selected, enabled, checked, its tri-state toggle, and custom states by key. What the component's
@@ -270,7 +270,7 @@ impl StyleState {
     /// The value of `key`'s state (Compose's `state[key]`): a custom one's default where it isn't set.
     ///
     /// Kotlin: `get(key: StyleStateKey<T>): T`
-    pub fn get<T: Clone + PartialEq + Send + Sync + 'static>(&self, key: &StyleStateKey<T>) -> T {
+    pub fn get<T: Clone + PartialEq + 'static>(&self, key: &StyleStateKey<T>) -> T {
         match &key.kind {
             KeyKind::Flag { mask, .. } => as_t(self.flag(*mask)),
             KeyKind::Toggle { .. } => as_t(self.tri_state_toggle()),
@@ -346,7 +346,7 @@ impl MutableStyleState {
         MutableStyleState(StyleState {
             inner: Rc::new(StyleStateInner {
                 interaction_source,
-                custom_states: mutable_state_map_of([]),
+                custom_states: mutable_confined_state_map_of([]),
                 custom_keys: RefCell::new(BTreeMap::new()),
                 predefined: mutable_state_of(EnabledStateMask),
             }),
@@ -394,7 +394,7 @@ impl MutableStyleState {
     /// Sets the value of `key`'s state (Compose's `state[key] = value`).
     ///
     /// Kotlin: `set(key: StyleStateKey<T>, value: T)`
-    pub fn set<T: Clone + PartialEq + Send + Sync + 'static>(&self, key: &StyleStateKey<T>, value: T) {
+    pub fn set<T: Clone + PartialEq + 'static>(&self, key: &StyleStateKey<T>, value: T) {
         match &key.kind {
             KeyKind::Flag { mask, .. } => {
                 let v: bool = (&value as &dyn Any).downcast_ref::<bool>().copied().expect("a boolean state");
@@ -411,7 +411,7 @@ impl MutableStyleState {
                 let current = without_read_observation(|| self.0.inner.custom_states.get(&id));
                 let same = current.is_some_and(|v| v.downcast_ref::<T>() == Some(&value));
                 if !same {
-                    let value: CustomValue = Arc::new(value);
+                    let value: CustomValue = Rc::new(value);
                     self.0.inner.custom_states.update(|m| {
                         m.insert(id, value);
                     });
@@ -423,7 +423,7 @@ impl MutableStyleState {
     /// Takes `key`'s state out: a style reads its default again, an interaction no longer updates it (Compose's
     /// `remove`). Panics for a predefined key, as Compose throws.
     #[track_caller]
-    pub fn remove<T: Clone + PartialEq + Send + Sync + 'static>(&self, key: &StyleStateKey<T>) {
+    pub fn remove<T: Clone + PartialEq + 'static>(&self, key: &StyleStateKey<T>) {
         assert!(!key.is_predefined(), "Cannot remove an internal StyleStateKey");
         if let KeyKind::Custom(c) = &key.kind {
             self.0.inner.custom_states.remove(&c.id);

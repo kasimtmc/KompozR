@@ -18,7 +18,7 @@ use crate::vector::{AnimationVector, AnimationVector1D};
 use crate::vectorized::VectorizedAnimationSpec;
 use kompoz_coroutines::{CoroutineScope, cancel_current, coroutine_scope, with_frame_nanos};
 use kompoz_runtime::kt::panic_kt;
-use kompoz_runtime::{MutableState, SnapshotStateObserver, mutable_state_of, named};
+use kompoz_runtime::{MutableState, SnapshotStateObserver, mutable_confined_state_of, mutable_state_of, named};
 use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::future::Future;
@@ -160,8 +160,8 @@ impl<S: AnimationValue> SeekableTransitionState<S> {
     /// A state at `initial_state`.
     pub fn new(initial_state: S) -> SeekableTransitionState<S> {
         let inner = Rc::new_cyclic(|this: &Weak<SeekableInner<S>>| SeekableInner {
-            target_state: mutable_state_of(initial_state.clone()),
-            current_state: mutable_state_of(initial_state.clone()),
+            target_state: mutable_confined_state_of(initial_state.clone()),
+            current_state: mutable_confined_state_of(initial_state.clone()),
             is_running: mutable_state_of(false),
             composed_target_state: RefCell::new(initial_state),
             transition: RefCell::new(None),

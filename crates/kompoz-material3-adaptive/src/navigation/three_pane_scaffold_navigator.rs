@@ -54,9 +54,9 @@ impl KtToString for BackNavigationBehavior {
 
 /// What a content key of a navigator's destinations is: a value saved with the UI's state (Compose's "storable in
 /// a Bundle"), held in snapshot state.
-pub trait NavigatorContentKey: Clone + PartialEq + Saveable + Send + Sync + 'static {}
+pub trait NavigatorContentKey: Clone + PartialEq + Saveable + 'static {}
 
-impl<T: Clone + PartialEq + Saveable + Send + Sync + 'static> NavigatorContentKey for T {}
+impl<T: Clone + PartialEq + Saveable + 'static> NavigatorContentKey for T {}
 
 /// The navigator of a three-pane scaffold (Compose's interface `ThreePaneScaffoldNavigator<T>`): the directive and
 /// state the scaffold lays out by, its value (of the destination history), the history it navigates to and back in.
@@ -330,10 +330,10 @@ impl<T: NavigatorContentKey> DefaultThreePaneScaffoldNavigator<T> {
         initial_adapt_strategies: ThreePaneScaffoldAdaptStrategies,
         initial_is_destination_history_aware: bool,
     ) -> DefaultThreePaneScaffoldNavigator<T> {
-        let destination_history = SnapshotStateList::new(initial_destination_history);
+        let destination_history = SnapshotStateList::new_confined(initial_destination_history);
         let scaffold_directive = mutable_state_of(initial_scaffold_directive);
         let is_destination_history_aware = mutable_state_of(initial_is_destination_history_aware);
-        let adapt_strategies = mutable_state_of(initial_adapt_strategies);
+        let adapt_strategies = kompoz_runtime::mutable_state_of!(initial_adapt_strategies);
         let (h, d, a, s) = (
             destination_history.clone(),
             scaffold_directive.clone(),

@@ -5,14 +5,18 @@ use crate::converter::{TwoWayConverter, VectorConverter};
 use crate::spec::AnimationConstants;
 use crate::vector::{AnimationVector, AnimationVector1D};
 use kompoz_runtime::kt::KtToString;
-use kompoz_runtime::{MutableState, SharedState, State, StateSource, mutable_state_of, named};
+use kompoz_runtime::{
+    MutableState, SharedState, State, StateSource, mutable_confined_state_of, mutable_state_of, named,
+};
 use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
 
-/// The values an animation's state holds: compared to tell changes, shared with other threads' snapshots.
-pub trait AnimationValue: Clone + PartialEq + Send + Sync + 'static {}
-impl<T: Clone + PartialEq + Send + Sync + 'static> AnimationValue for T {}
+/// The values an animation's state holds (what Compose animates: any value): compared to tell changes. They
+/// needn't be `Send` or `Sync` — an animation's states (its value, its target, a transition's states) are snapshot
+/// states confined to the thread that made them ([`mutable_confined_state_of`]), the one its frames run on.
+pub trait AnimationValue: Clone + PartialEq + 'static {}
+impl<T: Clone + PartialEq + 'static> AnimationValue for T {}
 
 struct AnimationStateInner<T, V> {
     type_converter: TwoWayConverter<T, V>,
@@ -50,7 +54,7 @@ impl<T: AnimationValue, V: AnimationVector> AnimationState<T, V> {
             initial_velocity_vector.unwrap_or_else(|| type_converter.create_zero_vector_from(initial_value.clone()));
         AnimationState(Rc::new(AnimationStateInner {
             type_converter,
-            value: mutable_state_of(initial_value),
+            value: mutable_confined_state_of(initial_value),
             velocity_vector: Cell::new(velocity),
             last_frame_time_nanos: Cell::new(last_frame_time_nanos),
             finished_time_nanos: Cell::new(finished_time_nanos),
@@ -160,9 +164,12 @@ impl<T: AnimationValue, V: AnimationVector> AnimationState<T, V> {
         State::from_source(self.clone())
     }
 
-    /// Its value as a read-only state shareable across threads (Compose's state of it, read by what must be
-    /// `Send + Sync`: a shape drawn by it, say).
-    pub fn as_shared_state(&self) -> SharedState<T> {
+    /// Its value as a read-only state that is `Send + Sync` as the value is (Compose's state of it, held by what
+    /// must be `Send + Sync`: a shape drawn by it, say), read on the thread the animation runs on.
+    pub fn as_shared_state(&self) -> SharedState<T>
+    where
+        T: Send + Sync,
+    {
         self.0.value.as_shared_state()
     }
 }
@@ -305,7 +312,7 @@ impl<T: AnimationValue, V: AnimationVector> AnimationScope<T, V> {
             type_converter,
             target_value,
             start_time_nanos,
-            value: mutable_state_of(initial_value),
+            value: mutable_confined_state_of(initial_value),
             velocity_vector: Cell::new(initial_velocity_vector),
             last_frame_time_nanos: Cell::new(last_frame_time_nanos),
             finished_time_nanos: Cell::new(AnimationConstants::UnspecifiedTime),

@@ -535,7 +535,56 @@ fn a_transition_of_a_new_state_snaps_to_it() {
     assert_eq!(seen.get(), 1.0);
 }
 
+/// A scene holding an `Rc` (a name shared, a lambda): not `Send`, as Compose's states and animated values needn't
+/// be.
+#[derive(Clone, PartialEq, Debug)]
+struct Scene {
+    name: Rc<str>,
+    width: f32,
+}
+
+/// Transitions, animatables and animate*AsState animate any value (Compose's: `Clone + PartialEq` here): a
+/// transition's state and an animated value holding an `Rc`, kept in states confined to the UI thread.
+fn transitions_and_animations_take_values_that_arent_send() {
+    let on = mutable_state_of(false);
+    let seen = Rc::new(RefCell::new(String::new()));
+    let (o, s) = (on.clone(), seen.clone());
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let scene = if o.get() {
+            Scene { name: Rc::from("açık"), width: 100.0 }
+        } else {
+            Scene { name: Rc::from("kapalı"), width: 0.0 }
+        };
+        let t = update_transition(scene.clone());
+        let width = t.animate_float(transition_spec = |_| linear(100), target_value_by_state = |s: &Scene| s.width);
+        let converter = TwoWayConverter(
+            |s: Scene| AnimationVector1D(s.width),
+            |v: AnimationVector1D| Scene { name: Rc::from("yolda"), width: v.value },
+        );
+        let spec: Arc<dyn AnimationSpec<Scene>> = Arc::new(TweenSpec::<Scene>::new(200, 0, LinearEasing));
+        let value = animate_value_as_state(scene, converter, animation_spec = spec);
+        *s.borrow_mut() = format!(
+            "{} {} {:.0} {} {:.0}",
+            t.current_state().name,
+            t.target_state().name,
+            width.value(),
+            value.value().name,
+            value.value().width
+        );
+    }));
+    assert_eq!(*seen.borrow(), "kapalı kapalı 0 kapalı 0");
+    on.set(true);
+    rule.advance_frame();
+    // (the virtual clock's 16 ms frames: the change composed at the first, the animations started at the next;
+    // 100 ms rounded up to 7 frames: 6 frames, 96 ms, after the start)
+    rule.advance_time_by(100);
+    assert_eq!(*seen.borrow(), "kapalı açık 96 yolda 48", "{}", seen.borrow());
+    rule.wait_for_idle();
+    assert_eq!(*seen.borrow(), "açık açık 100 açık 100");
+}
+
 tests!(
+    transitions_and_animations_take_values_that_arent_send,
     update_transition_runs_values_together,
     mutable_transition_states_animate_from_where_they_start,
     segments_pick_the_specs,

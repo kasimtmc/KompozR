@@ -126,6 +126,45 @@ fn parents_recompose_before_their_children() {
     assert_eq!(taken(&order), ["parent 3"]);
 }
 
+/// A state one composition writes while composing reaches the compositions recomposed after it in the same frame
+/// (Compose's Recomposer: the compositions observing what a composition modified are composed in that frame,
+/// unless composed in it already): the parent's write reaches its child at once; the child's write reaches the
+/// parent, composed before it, at the next frame.
+fn a_state_a_composition_writes_reaches_the_compositions_after_it_in_the_same_frame() {
+    let (target, down, up) = (mutable_state_of(0), mutable_state_of(0), mutable_state_of(0));
+    let k: Kept = Rc::new(RefCell::new(None));
+    let (t, d, u, kk) = (target.clone(), down.clone(), up.clone(), k.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        d.set(t.get()); // written while composing
+        Text(format!("parent sees {}", u.get()));
+        *kk.borrow_mut() = Some(remember_kompozition_context());
+    }));
+    let root = TestNode::new("child");
+    let child = Composition::with_parent(Some(root.clone()), &kept(&k));
+    let (d, u) = (down.clone(), up.clone());
+    child.set_content(kompozable_lambda!(move || {
+        let v = d.get();
+        u.set(v * 10); // written while composing too, read by the parent
+        Text(format!("child sees {v}"));
+    }));
+    rule.wait_for_idle();
+    assert_eq!(root.names(), ["child sees 0"]);
+    target.set(1);
+    // One frame: the parent, then the child with what the parent wrote.
+    Snapshot::send_apply_notifications();
+    assert!(rule.composition().recompose(0));
+    assert_eq!(root.names(), ["child sees 1"]);
+    assert!(rule.has("parent sees 0"), "{:?}", rule.names());
+    // The next: the parent with what the child wrote.
+    Snapshot::send_apply_notifications();
+    assert!(rule.composition().recompose(16_000_000));
+    assert!(rule.has("parent sees 10"), "{:?}", rule.names());
+    rule.wait_for_idle();
+    assert_eq!(root.names(), ["child sees 1"]);
+    drop(child);
+    drop(rule);
+}
+
 /// Content of the same shape in two child compositions: the keys continue each one's context, and their saveable
 /// values are each their own, saved and given back in the order they were made.
 fn child_compositions_continue_their_parents_keys() {
@@ -485,6 +524,7 @@ fn Item(made: Rc<Cell<i32>>) {
 
 tests!(
     child_composition_sees_its_parents_locals,
+    a_state_a_composition_writes_reaches_the_compositions_after_it_in_the_same_frame,
     parents_recompose_before_their_children,
     child_compositions_continue_their_parents_keys,
     reusable_content_starts_its_state_over_and_reuses_its_nodes,
