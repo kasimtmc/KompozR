@@ -271,13 +271,15 @@ kompoz! {
 /// The C++ test: the bar collapses before the list scrolls up, comes back before it scrolls down.
 fn top_app_bar_enter_always_hides_before_the_list_scrolls() {
     let rule = KompozTestRule::new(EnterAlwaysBar);
+    // (the clock by hand: the checks after a gesture see the bar before it settles)
+    rule.main_clock().set_auto_advance(false);
     assert!(top_near(top_tag(&rule, "row0").top, 64.0));
     // up 40 less Compose's 8 dp touch slop: the bar 32 up, the content with it, the list where it was
     top_slow_drag(&rule, Offset::new(200.0, 400.0), Offset::new(200.0, 360.0), 20);
     assert!(top_near(top_tag(&rule, "row0").top, 64.0 - 32.0));
     assert!((top_text(&rule, "Başlık").center().y - 16.0).abs() <= 1.0);
     top_slow_drag(&rule, Offset::new(200.0, 400.0), Offset::new(200.0, 200.0), 20);
-    rule.wait_for_idle();
+    common::settle(&rule);
     rule.on_node_with_tag("row0").assert_does_not_exist();
     let row = top_tag(&rule, "row5");
     // down: the bar comes back first, the list not scrolling (its rows only 32 lower with the scaffold's padding)
@@ -296,6 +298,8 @@ fn a_collapsing_top_bar_moves_the_content_without_recomposing_it() {
             CollapsingBar(move || composed.set(composed.get() + 1));
         }))
     };
+    // (the clock by hand: the checks after a gesture see the bar before it settles)
+    rule.main_clock().set_auto_advance(false);
     let edge = || {
         let inner = rule.on_node_with_tag("kenar").layout_node().inner_coordinates();
         inner.find_root_coordinates().local_bounding_box_of(&inner, false)
@@ -311,20 +315,22 @@ fn a_collapsing_top_bar_moves_the_content_without_recomposing_it() {
 /// The C++ test: a large bar collapses before the list scrolls up, and expands once the list is back at its top.
 fn large_top_app_bar_exit_until_collapsed() {
     let rule = KompozTestRule::new(LargeBar);
+    // (the clock by hand: the checks after a gesture see the bar before it settles)
+    rule.main_clock().set_auto_advance(false);
     assert!(top_near(top_tag(&rule, "row0").top, 152.0));
     top_slow_drag(&rule, Offset::new(200.0, 500.0), Offset::new(200.0, 440.0), 20);
     assert!(top_near(top_tag(&rule, "row0").top, 152.0 - 52.0)); // the bar 52 up, the list where it was
-    rule.wait_for_idle();
+    common::settle(&rule);
     top_slow_drag(&rule, Offset::new(200.0, 500.0), Offset::new(200.0, 200.0), 20);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(top_near(top_bar(&rule).0.height(), 64.0));
     rule.on_node_with_tag("row0").assert_does_not_exist();
     // Down: the list first, then the bar.
     top_slow_drag(&rule, Offset::new(200.0, 300.0), Offset::new(200.0, 400.0), 20);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(top_near(top_bar(&rule).0.height(), 64.0));
     top_slow_drag(&rule, Offset::new(200.0, 200.0), Offset::new(200.0, 700.0), 20);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(top_near(top_tag(&rule, "row0").top, 152.0) && top_near(top_bar(&rule).0.height(), 152.0));
 }
 
@@ -833,6 +839,8 @@ fn bottom_app_bars_spread_out_and_leave_as_the_content_scrolls_on() {
             IntSize::new(400, 600),
         )
     };
+    // (the clock by hand: the checks after a gesture see the bar before it settles)
+    rule.main_clock().set_auto_advance(false);
     let bar = || bottom_tag(&rule, "çubuk");
     assert!(bottom_same_rect(bar(), Rect::new(0.0, 536.0, 400.0, 600.0)), "{:?}", bar());
     assert!(bottom_near(bottom_tag(&rule, "a").left, 16.0) && bottom_near(bottom_tag(&rule, "b").left, 176.0));
@@ -842,7 +850,7 @@ fn bottom_app_bars_spread_out_and_leave_as_the_content_scrolls_on() {
     let went = 64.0 - bar().height();
     assert!(went > 20.0 && went < 30.5, "{went}");
     bottom_swipe(&rule, Offset::new(200.0, 400.0), Offset::new(200.0, 250.0), 10); // past it: gone
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(bottom_near(bar().height(), 0.0), "{:?}", bar());
     let h = rule.host(); // back a little over half way, held, let go: all the way back
     h.pointer_down(Offset::new(200.0, 300.0), -1, 0, PointerType::Touch);
@@ -856,14 +864,14 @@ fn bottom_app_bars_spread_out_and_leave_as_the_content_scrolls_on() {
     }
     let halfway = 64.0 - bar().height(); // (how far it still is from all the way back)
     h.pointer_up(Offset::new(200.0, 352.0), -1, 0);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(halfway > 5.0 && halfway < 32.0, "{halfway}");
     assert!(bottom_near(bar().height(), 64.0), "{:?}", bar());
     flexible.set(false); // the classic one, 80 dp of it
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(bottom_near(bar().height(), 80.0));
     bottom_swipe(&rule, Offset::new(200.0, 400.0), Offset::new(200.0, 250.0), 10);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(bottom_near(bar().height(), 0.0), "{:?}", bar());
 }
 

@@ -701,6 +701,8 @@ fn animated_forms_take_compose_named_arguments() {
                 Sliding(v.get());
             }
         }));
+        // (the clock by hand: the check on the way sees the slide running)
+        slide.main_clock().set_auto_advance(false);
         vis.set(true);
         slide.advance_frame(); // (composed; the slide starts at the next frame, as Compose's: C++'s a frame earlier)
         slide.advance_time_by(64);

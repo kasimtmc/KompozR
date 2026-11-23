@@ -122,7 +122,7 @@ fn tap_gestures_tap_double_tap_and_long_press() {
     }));
     tap(&rule, at(30.0, 30.0));
     assert!(log.borrow().is_empty()); // could still become a double tap
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["tap 20"]); // local to the element
 
     tap(&rule, at(30.0, 30.0));
@@ -151,7 +151,7 @@ fn tap_gestures_tap_double_tap_and_long_press() {
     // A second tap sooner than the double-tap minimum (40 ms) is none.
     tap(&rule, at(30.0, 30.0));
     tap(&rule, at(32.0, 30.0));
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["tap 20"]);
 
     down_id(&rule, at(30.0, 30.0), 0);
@@ -343,7 +343,7 @@ fn view_configuration_sets_the_gesture_thresholds() {
     tap(&rule, at(50.0, 50.0));
     rule.main_clock().advance_time_by(250);
     tap(&rule, at(50.0, 50.0));
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(200 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["tap", "tap"]);
     tap(&rule, at(50.0, 50.0));
     rule.main_clock().advance_time_by(100);
@@ -954,10 +954,10 @@ fn touch_input_injected_on_a_node_clicks_double_clicks_long_clicks_and_swipes() 
     }));
     let target = rule.on_node_with_tag("dokun");
     target.perform_touch_input(|t| t.click());
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["tap 50"]);
     target.perform_touch_input(|t| t.click_with(at(10.0, 10.0)));
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["tap 10"]);
     target.perform_touch_input(|t| t.double_click());
     rule.wait_for_idle();
@@ -972,7 +972,7 @@ fn touch_input_injected_on_a_node_clicks_double_clicks_long_clicks_and_swipes() 
         assert_eq!(t.current_position(0), Some(at(20.0, 20.0)));
         t.up();
     });
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["tap 20"]);
     // A swipe right across the second one: the drag, less its slop, from where it passed the slop.
     rule.on_node_with_tag("sürükle").perform_touch_input(|t| t.swipe_right());
@@ -1170,7 +1170,7 @@ fn draggable_tells_its_drags() {
     for i in 1..=5 {
         move_id(&rule, at(c.x + 10.0 * i as f32, c.y), 0);
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert!(dragged.get() && *log.borrow() == ["DragStart"] && moved.get() > 0.0, "{:?}", log.borrow());
     up_id(&rule, at(c.x + 50.0, c.y), 0);
     rule.wait_for_idle();

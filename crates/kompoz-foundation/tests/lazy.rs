@@ -589,17 +589,18 @@ fn animate_item_glides_on_removal_and_fades_in_on_insert() {
         }),
         IntSize::new(400, 800),
     );
+    rule.main_clock().set_auto_advance(false);
     assert!(near(bounds(&rule, "item3").top, 100.0));
     items.remove_at(0); // 2, 3, 4 move up by 50
     rule.advance_time_by(112);
     let mid = bounds(&rule, "item3").top;
     assert!(mid > 55.0 && mid < 95.0, "{mid}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(bounds(&rule, "item3").top, 50.0));
     items.add_at(0, 9); // inserted at the top: fades in while the others glide down
     rule.advance_time_by(48);
     assert!(rule.draw().layers >= 1, "the new item draws through an alpha layer");
-    rule.wait_for_idle();
+    settle(&rule);
     let after = rule.draw();
     assert!(after.layers == 0 && near(bounds(&rule, "item3").top, 100.0), "{}", after.layers);
 }
@@ -1550,12 +1551,13 @@ fn scroll_states_tell_whether_they_scroll() {
         }),
         IntSize::new(400, 1200),
     );
+    rule.main_clock().set_auto_advance(false);
     let list_top = bounds(&rule, "liste").top;
     swipe(&rule, at(100.0, list_top + 180.0), at(100.0, list_top + 40.0), 5);
     rule.advance_frame();
     assert!(list.is_scroll_in_progress());
     rule.on_node_with_text("liste kayıyor").assert_exists();
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!list.is_scroll_in_progress() && list.first_visible_item_index() > 3);
     let s = list.clone();
     launch(&scope, async move { s.animate_scroll_to_item(0).await });
@@ -1565,7 +1567,7 @@ fn scroll_states_tell_whether_they_scroll() {
     rule.host().pointer_down(at(100.0, list_top + 100.0), -1, 0, PointerType::Touch);
     rule.advance_frame();
     rule.host().pointer_up(at(100.0, list_top + 100.0), -1, 0);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!list.is_scroll_in_progress());
     let s = list.clone();
     launch(&scope, async move {
@@ -1574,7 +1576,7 @@ fn scroll_states_tell_whether_they_scroll() {
     rule.advance_frame();
     rule.advance_frame();
     assert!(list.is_scroll_in_progress());
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!list.is_scroll_in_progress());
 }
 

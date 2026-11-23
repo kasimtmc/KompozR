@@ -47,6 +47,17 @@ tests!(
     navigation_suite_scaffold_custom_config_sample,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -1064,6 +1075,8 @@ fn navigation_suite_scaffold_state_animates_and_is_saved() {
         IntSize::new(400, 800),
     );
     let s = get(&state);
+    // (the clock by hand: the checks on the way see the bar coming in)
+    rule.main_clock().set_auto_advance(false);
     assert_eq!(
         (s.current_value(), s.target_value(), s.is_animating()),
         (NavigationSuiteScaffoldValue::Hidden, NavigationSuiteScaffoldValue::Hidden, false)
@@ -1090,7 +1103,7 @@ fn navigation_suite_scaffold_state_animates_and_is_saved() {
     let top = bounds(&rule, "nav").top;
     assert!(top < 800.0 && top > 700.0, "{top}");
     assert!(near(bounds(&rule, "içerik").height(), top, 1.0));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(bounds(&rule, "nav").top, 700.0, 0.5));
     assert_eq!(s.current_value(), NavigationSuiteScaffoldValue::Visible);
     drop(rule);
@@ -1111,7 +1124,7 @@ fn navigation_suite_scaffold_state_animates_and_is_saved() {
     let (first, scope) = get(&shown);
     let f = first.clone();
     named_args!(scope.launch(async move { f.snap_to(NavigationSuiteScaffoldValue::Hidden).await }));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert_eq!(first.current_value(), NavigationSuiteScaffoldValue::Hidden);
     let saved_values = registry.perform_save();
     drop(rule);

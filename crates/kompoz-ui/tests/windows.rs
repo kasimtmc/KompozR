@@ -351,11 +351,11 @@ fn predictive_back_handler_follows_the_gesture() {
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["0.2R", "0.6R"]);
     assert!(host.back_invoked());
-    rule.wait_for_idle();
+    rule.advance_time_by(100); // (the closing delay: the clock taken past it, as idling doesn't wait for delays)
     assert_eq!(taken(&log), ["0.2R", "0.6R", "done", "end"]);
     // A press: the flow ends at once.
     assert!(escape(&rule));
-    rule.wait_for_idle();
+    rule.advance_time_by(100); // (the closing delay: the clock taken past it, as idling doesn't wait for delays)
     assert_eq!(taken(&log), ["done", "end"]);
     // Called off: the coroutine is cancelled, its guard runs, the rest doesn't.
     host.back_started(BackEventCompat::default());
@@ -382,7 +382,7 @@ fn predictive_back_handler_follows_the_gesture() {
     enabled.set(false);
     rule.wait_for_idle();
     assert!(host.back_invoked());
-    rule.wait_for_idle();
+    rule.advance_time_by(100); // (the closing delay: the clock taken past it, as idling doesn't wait for delays)
     assert_eq!(taken(&log), ["done", "end"]);
     assert!(escape(&rule));
     assert_eq!(taken(&log), ["outer"]);

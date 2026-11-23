@@ -40,6 +40,17 @@ tests!(
     material_states_come_back_after_the_process_ended,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -500,6 +511,8 @@ fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_tur
     rule.host().pointer_up(field, -1, 0);
     let collapsed = bounds(&rule, "geniş").width();
     let scope = scope_of(&rule);
+    // (the clock by hand: the checks on the way see them turning)
+    rule.main_clock().set_auto_advance(false);
     open.set(true);
     let (rs, ws, ts) = (get(&rail), get(&wide), get(&tip));
     scope.launch(async move { rs.expand().await });
@@ -530,7 +543,7 @@ fn overlays_fields_and_indicators_animate_composing_around_them_only_as_they_tur
     let rs = get(&rail);
     scope.launch(async move { rs.collapse().await });
     get(&tip).dismiss();
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(gone(&rule));
     // A scrollbar hovered (nothing over it now): the same.
     rule.host().pointer_move(center(&rule, "çubuk"), -1, 0);

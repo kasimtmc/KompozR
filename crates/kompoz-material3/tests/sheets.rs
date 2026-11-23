@@ -51,6 +51,17 @@ tests!(
     vertical_drag_handle_sample,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() <= 0.5
 }
@@ -142,11 +153,13 @@ fn bottom_sheet_slides_in_and_closes_by_scrim_drag_and_back() {
             }
         }))
     };
+    // (the clock by hand: the check on the way sees the sheet sliding in)
+    rule.main_clock().set_auto_advance(false);
     for way in 0..3 {
         open.set(true);
         rule.advance_time_by(32);
         let during = top_of(&rule, "content");
-        rule.wait_for_idle();
+        finish_animations(&rule);
         let settled = top_of(&rule, "content");
         assert!(settled < during, "slid up: {during} -> {settled}");
         assert!(settled > 600.0 && settled < 800.0, "resting at the bottom: {settled}");
@@ -155,7 +168,7 @@ fn bottom_sheet_slides_in_and_closes_by_scrim_drag_and_back() {
             1 => swipe(&rule, Offset::new(200.0, settled), Offset::new(200.0, settled + 200.5), 4), // pulled down
             _ => assert!(escape(&rule)),                // back
         }
-        rule.wait_for_idle();
+        finish_animations(&rule);
         assert!(dismissed.get() == way + 1 && !open.get(), "way {way}: {}", dismissed.get());
         rule.on_node_with_tag("content").assert_does_not_exist();
     }
@@ -190,6 +203,8 @@ fn modal_bottom_sheet_state_opens_half_way_and_hides_from_code() {
     };
     rule.wait_for_idle();
     let s = get(&state);
+    // (the clock by hand: the check on the way sees the sheet sliding in)
+    rule.main_clock().set_auto_advance(false);
     // 600 + its handle (48): 648 of the 800 it may take — over half: half way, at 400. (The C++'s sheet had a 28 dp
     // corner below its content and the window's insets around it: 676 of 752, at 300.)
     assert!(s.current_value() == SheetValue::PartiallyExpanded && s.is_visible() && s.has_partially_expanded_state());
@@ -198,20 +213,20 @@ fn modal_bottom_sheet_state_opens_half_way_and_hides_from_code() {
     assert!(near(half, 448.0));
     // Up two thirds of the way: all the way up (to 800 - 648 = 152; the C++'s 300 up).
     slow_drag(&rule, Offset::new(200.0, half - 20.0), Offset::new(200.0, half - 220.5), 20);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(s.current_value() == SheetValue::Expanded && near(top_of(&rule, "içerik"), half - 248.0));
     let ss = s.clone();
     launch(&scope, async move { ss.partial_expand().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(s.current_value() == SheetValue::PartiallyExpanded && near(top_of(&rule, "içerik"), half));
     // Hidden from code and left there: not dismissed.
     let ss = s.clone();
     launch(&scope, async move { ss.hide().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(!s.is_visible() && open.get() && dismissed.get() == 0);
     let ss = s.clone();
     launch(&scope, async move { ss.show().await }); // and back
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(s.current_value() == SheetValue::PartiallyExpanded && near(top_of(&rule, "içerik"), half));
     // From code: hidden, then the caller removes it.
     let (ss, o) = (s.clone(), open.clone());
@@ -219,22 +234,22 @@ fn modal_bottom_sheet_state_opens_half_way_and_hides_from_code() {
         ss.hide().await;
         o.set(false);
     });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(!s.is_visible() && !open.get() && dismissed.get() == 0);
     rule.on_node_with_tag("içerik").assert_does_not_exist();
     open.set(true); // again: it slides in again
     rule.advance_time_by(48);
     assert!(top_of(&rule, "içerik") > half);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(s.current_value() == SheetValue::PartiallyExpanded && near(top_of(&rule, "içerik"), half));
     // Pulled down: hidden, onDismissRequest.
     slow_drag(&rule, Offset::new(200.0, half + 20.0), Offset::new(200.0, half + 260.5), 20);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(dismissed.get() == 1 && !open.get(), "{}", dismissed.get());
     // skipPartiallyExpanded: all the way up at once.
     skip.set(true);
     open.set(true);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let k = get(&skipping);
     assert!(k.current_value() == SheetValue::Expanded && !k.has_partially_expanded_state());
     assert!(near(top_of(&rule, "içerik"), half - 248.0));
@@ -655,10 +670,12 @@ fn bottom_sheet_scaffold_peeks_expands_and_follows_drags() {
     assert!(near(top(), 700.0) && sheet.current_value() == SheetValue::PartiallyExpanded, "{}", top());
     assert!(near(get(&seen).calculate_bottom_padding().0, 100.0) && sheet.has_expanded_state());
     // The sheet takes the touch, not the content under it.
+    // (the clock by hand: the checks on the way see the sheet moving)
+    rule.main_clock().set_auto_advance(false);
     let h = rule.host();
     h.pointer_down(Offset::new(200.0, 750.0), -1, 0, PointerType::Touch);
     h.pointer_up(Offset::new(200.0, 750.0), -1, 0);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert_eq!(content_clicks.get(), 0);
     let s = sheet.clone();
     launch(&scope, async move { s.expand().await });
@@ -667,11 +684,11 @@ fn bottom_sheet_scaffold_peeks_expands_and_follows_drags() {
     }
     assert!(top() < 700.0 && top() > 452.0, "{}", top());
     assert!(sheet.target_value() == SheetValue::Expanded && sheet.current_value() == SheetValue::PartiallyExpanded);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(top(), 452.0) && sheet.current_value() == SheetValue::Expanded && near(sheet.require_offset(), 452.0));
     let s = sheet.clone();
     launch(&scope, async move { s.partial_expand().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(top(), 700.0) && sheet.current_value() == SheetValue::PartiallyExpanded);
     // Dragged up slowly; flung up: all the way.
     h.pointer_down(Offset::new(200.0, 720.0), -1, 0, PointerType::Touch);
@@ -684,27 +701,27 @@ fn bottom_sheet_scaffold_peeks_expands_and_follows_drags() {
     assert!(top() > 599.0 && top() <= 600.0 + touch_slop + 2.0, "{}", top());
     rule.advance_frame();
     h.pointer_up(Offset::new(200.0, 620.0), -1, 0);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     // Let go still moving, slower than the velocity threshold: M15 settles past the sheet's positional threshold (56
     // dp from where the move started; it went 92) on the next anchor, expanded (the C++ went back to the peek, short
     // of half way).
     assert!(near(top(), 452.0) && sheet.current_value() == SheetValue::Expanded, "{}", top());
     let s = sheet.clone();
     launch(&scope, async move { s.partial_expand().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     swipe(&rule, Offset::new(200.0, 720.0), Offset::new(200.0, 669.5), 4);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(top(), 452.0) && sheet.current_value() == SheetValue::Expanded, "{}", top());
     swipe(&rule, Offset::new(200.0, 470.0), Offset::new(200.0, 520.5), 4); // flung down: to the peek, not further
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(top(), 700.0) && sheet.current_value() == SheetValue::PartiallyExpanded, "{}", top());
     swipe(&rule, Offset::new(200.0, 720.0), Offset::new(200.0, 159.5), 10); // no higher than its height
     rule.advance_frame();
     assert!(top() >= 452.0 - 0.5, "{}", top());
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let s = sheet.clone();
     launch(&scope, async move { s.hide().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(top(), 800.0) && sheet.current_value() == SheetValue::Hidden && !sheet.is_visible(), "{}", top());
 }
 

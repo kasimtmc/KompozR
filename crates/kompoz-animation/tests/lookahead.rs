@@ -5,6 +5,8 @@
 
 mod common;
 
+use common::settle;
+
 use kompoz_animation::*;
 use kompoz_coroutines::*;
 use kompoz_foundation::prelude::*;
@@ -106,6 +108,7 @@ fn approach_layout_approaches_the_lookahead_size() {
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(near(width(&rule, "yarım"), 50.0) && lookaheads.borrow().last().is_some_and(|l| l.width == 100));
     // Its first target as it is.
     assert!(near(width(&rule, "canlı"), 100.0) && size.is_idle());
@@ -116,7 +119,7 @@ fn approach_layout_approaches_the_lookahead_size() {
     assert!(near(fresh.update_target(5.0, &scope), 5.0) && fresh.is_idle());
     assert!(near(width(&rule, "sarmal"), 100.0) && near(width(&rule, "taşan"), 80.0));
     approaching.set(false);
-    rule.wait_for_idle();
+    settle(&rule);
     // There: as the lookahead.
     assert!(near(width(&rule, "yarım"), 100.0));
     wide.set(true);
@@ -124,7 +127,7 @@ fn approach_layout_approaches_the_lookahead_size() {
     let mid = width(&rule, "canlı");
     assert!(mid > 110.0 && mid < 190.0 && !size.is_idle(), "{mid}");
     assert!(size.pending_target().is_some_and(|t| near(t.width, 200.0)));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(width(&rule, "canlı"), 200.0) && size.is_idle());
     assert!(size.pending_target().is_some_and(|t| near(t.width, 200.0)));
     assert!(lookaheads.borrow().last().is_some_and(|l| l.width == 200));

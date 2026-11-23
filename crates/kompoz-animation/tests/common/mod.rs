@@ -47,3 +47,14 @@ pub fn near(a: f32, b: f32, tolerance: f32) -> bool {
 pub fn assert_near(a: f32, b: f32, tolerance: f32) {
     assert!(near(a, b, tolerance), "{a} is not within {tolerance} of {b}");
 }
+
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let every animation run its course. The clock's `auto_advance`
+/// is put back as it was after.
+pub fn settle(rule: &kompoz_test::KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}

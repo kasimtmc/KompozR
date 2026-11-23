@@ -27,6 +27,17 @@ use std::rc::Rc;
 
 type Log = Rc<RefCell<Vec<String>>>;
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn new_log() -> Log {
     Rc::new(RefCell::new(Vec::new()))
 }
@@ -482,7 +493,7 @@ fn scrollable_states_hear_the_users_drags() {
     for i in 1..=6 {
         move_to(&rule, Offset::new(start.x, start.y - 10.0 * i as f32));
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert!(*list_log.borrow() == ["DragStart"] && item_log.borrow().is_empty(), "{:?} {:?}", list_log, item_log);
     up(&rule, Offset::new(start.x, start.y - 60.0));
     rule.wait_for_idle();
@@ -905,6 +916,8 @@ fn buttons_animate_composing_around_them_only_as_they_turn() {
     };
     let full = bounds(&rule, "fab").width();
     let round = corner(&rule);
+    // (the clock by hand: the checks on the way see the buttons turning)
+    rule.main_clock().set_auto_advance(false);
     checked.set(true);
     expanded.set(false);
     rule.advance_frame();
@@ -915,7 +928,7 @@ fn buttons_animate_composing_around_them_only_as_they_turn() {
     assert!(composed.get() == before && narrowing < full - 5.0, "{full} {narrowing}");
     // (from round towards the checked shape's 12 dp corners, as it is drawn)
     assert!(near(round, 20.0, 0.01) && morphing < 19.0 && morphing > 12.5, "{round} {morphing}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let narrow = bounds(&rule, "fab").width();
     // (collapsed to its icon: the small FAB's 56 dp square container)
     assert!(narrow < narrowing && composed.get() == before, "{narrow}");

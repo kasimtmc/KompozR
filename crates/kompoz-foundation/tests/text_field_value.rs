@@ -399,6 +399,7 @@ fn app_side_change_resyncs_input_method() {
     key(&rule, Key::Enter, NONE); // the app's action clears the field
     assert_eq!((value.peek().as_str(), p.resyncs()), ("", vec![String::new()]));
     let before = p.shows();
+    rule.main_clock().advance_time_by(300 + 100); // (past the double tap timeout: at once, a double click)
     rule.on_node_with_tag("f").perform_click(); // tapping the focused field brings the keyboard back
     assert_eq!(p.shows(), before + 1);
     // The input method's own action key runs the app's action too.

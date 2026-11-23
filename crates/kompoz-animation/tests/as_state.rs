@@ -86,6 +86,7 @@ fn animated_states_are_read_where_they_are_needed() {
             });
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     rule.draw();
     assert!(!rule.host().has_pending_work() && *drawn.borrow().last().unwrap() == 0.0); // at rest
     on.set(true);
@@ -100,7 +101,7 @@ fn animated_states_are_read_where_they_are_needed() {
     let (x, tint) = (*drawn.borrow().last().unwrap(), *tints.borrow().last().unwrap());
     assert!(x > 20.0 && x < 80.0 && tint != Color::Black && tint != Color::White, "{x} {tint:?}");
     assert!(x_of(&rule, "kayan") > 20.0); // laid out again where it is now
-    rule.wait_for_idle();
+    settle(&rule);
     rule.draw();
     assert!(*drawn.borrow().last().unwrap() == 100.0 && *tints.borrow().last().unwrap() == Color::White);
     assert!(rule.on_node_with_text("100").exists());

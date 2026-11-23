@@ -65,6 +65,8 @@ fn animated_visibility_and_content_as_compose_writes_them() {
     let (o, c) = (open.clone(), count.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || Visibilities(o.get(), c.get())));
     assert!(text_exists(&rule, "sayı 0") && text_exists(&rule, "kapalı") && !text_exists(&rule, "ayrıntılar"));
+    // (the clock by hand: the checks on the way see the animations running)
+    rule.main_clock().set_auto_advance(false);
     open.set(true);
     count.set(1);
     rule.advance_time_by(96);
@@ -73,7 +75,7 @@ fn animated_visibility_and_content_as_compose_writes_them() {
     assert!(bounds(&rule, "sayı 1").top > bounds(&rule, "sayı 0").top);
     let row = bounds(&rule, "satır");
     assert!(row.width() > 1.0 && row.width() < 99.0 && near(row.height(), 40.0, 0.5), "{row:?}");
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(text_exists(&rule, "sayı 1") && !text_exists(&rule, "sayı 0") && text_exists(&rule, "ayrıntılar"));
     assert!(text_exists(&rule, "açık") && !text_exists(&rule, "kapalı"));
     // Down: the other way.
@@ -81,7 +83,7 @@ fn animated_visibility_and_content_as_compose_writes_them() {
     rule.advance_time_by(96);
     assert!(bounds(&rule, "sayı 0").top < bounds(&rule, "sayı 1").top);
     open.set(false);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!text_exists(&rule, "ayrıntılar") && !exists(&rule, "satır") && text_exists(&rule, "kapalı"));
 }
 
@@ -130,6 +132,8 @@ fn every_transition_in_a_kt_file() {
     let s = shown.clone();
     let rule =
         KompozTestRule::with_viewport(kompozable_lambda!(move || EveryTransition(s.get())), IntSize::new(600, 600));
+    // (the clock by hand: the checks on the way see the transitions running)
+    rule.main_clock().set_auto_advance(false);
     shown.set(true);
     rule.advance_frame();
     rule.advance_frame();
@@ -138,14 +142,14 @@ fn every_transition_in_a_kt_file() {
     rule.advance_time_by(160);
     let b = bounds(&rule, "büyüyen");
     assert!(near(b.width(), 75.0, 7.0) && near(b.height(), 37.5, 4.0), "{b:?}"); // from half its size
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(near(bounds(&rule, "kayan").left, 0.0, 0.5) && exists(&rule, "ölçekli"));
     shown.set(false);
     rule.advance_frame();
     rule.advance_time_by(160);
     let b = bounds(&rule, "büyüyen");
     assert!(near(b.width(), 62.5, 7.0), "{b:?}"); // half way to a quarter of its width
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!exists(&rule, "kayan") && !exists(&rule, "büyüyen") && !exists(&rule, "ölçekli"));
 }
 
@@ -153,16 +157,18 @@ fn a_transitions_forms_in_a_kt_file() {
     let step = mutable_state_of(0);
     let s = step.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || OfATransition(s.get())));
+    // (the clock by hand: the checks on the way see the transition running)
+    rule.main_clock().set_auto_advance(false);
     step.set(1);
     rule.advance_time_by(96);
     assert!(exists(&rule, "görünür") && text_exists(&rule, "adım 0") && text_exists(&rule, "adım 1"));
     assert!(text_exists(&rule, "geçiş 1") && !text_exists(&rule, "geçiş 0")); // one key: no crossing
-    rule.wait_for_idle();
+    common::settle(&rule);
     step.set(2);
     rule.advance_time_by(96);
     assert!(text_exists(&rule, "geçiş 1") && text_exists(&rule, "geçiş 2"));
     step.set(0);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!exists(&rule, "görünür") && text_exists(&rule, "adım 0"));
 }
 
@@ -176,18 +182,20 @@ fn sliding_into_the_container_in_a_kt_file() {
     }));
     let scope = scope.borrow().clone().expect("composed");
     let left = |rule: &KompozTestRule, tag: &str| bounds(rule, tag).left - bounds(rule, "kap").left;
+    // (the clock by hand: the checks on the way see the transition running)
+    rule.main_clock().set_auto_advance(false);
     // Seeked half way to 1: from the right edge, half way in; the old one half way out to the left.
     scope.launch(named_args!(state.seek_to(0.5, target_state = 1)));
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(near(left(&rule, "parça 1"), 50.0, 1.0) && near(left(&rule, "parça 0"), -50.0, 1.0));
     scope.launch(state.animate_to());
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!exists(&rule, "parça 0") && near(left(&rule, "parça 1"), 0.0, 0.5));
     // Back: by a ContentTransform made by hand (the old one kept until it is done, the new one under it).
     scope.launch(named_args!(state.animate_to(0)));
     rule.advance_time_by(160);
     assert!(exists(&rule, "parça 1") && exists(&rule, "parça 0"));
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!exists(&rule, "parça 1"));
 }
 
@@ -219,15 +227,17 @@ fn a_content_scope_given_on_in_a_kt_file() {
     let page = mutable_state_of(0);
     let p = page.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || Panes(p.get())));
+    // (the clock by hand: the checks on the way see the slide running)
+    rule.main_clock().set_auto_advance(false);
     // (0 and 1: one key, the content given the new page; 2: another, coming in by its own slide)
     page.set(1);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(exists(&rule, "bölme 1") && !exists(&rule, "bölme 0"));
     page.set(2);
     rule.advance_frame();
     rule.advance_frame();
     assert!(exists(&rule, "bölme 1") && bounds(&rule, "bölme 2").left > 50.0);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!exists(&rule, "bölme 1") && near(bounds(&rule, "bölme 2").left, 0.0, 0.5));
 }
 

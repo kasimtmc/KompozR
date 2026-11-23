@@ -59,11 +59,13 @@ fn animated_values_as_compose_writes_them() {
     rule.on_node_with_text("ölçek 10").assert_exists();
     assert!((width(&rule, "kutu") - 80.0).abs() < 0.5);
     assert_eq!(*seen.borrow().last().unwrap(), (0.0, 0.5, 0.0));
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
     open.set(true);
     rule.advance_time_by(96);
     let w = width(&rule, "kutu");
     assert!(w > 80.0 && w < 200.0, "{w}");
-    rule.wait_for_idle();
+    common::settle(&rule);
     rule.on_node_with_text("ölçek 12").assert_exists();
     assert!((width(&rule, "kutu") - 200.0).abs() < 0.5);
     assert_eq!(*seen.borrow().last().unwrap(), (1.0, 1.0, 1.0));

@@ -41,6 +41,17 @@ tests!(
     button_group_samples,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -170,6 +181,8 @@ fn button_group_grows_the_held_button_and_squeezes_its_neighbours() {
     let (a0, b0, c0) = (at("a"), at("b"), at("c"));
     assert!(near(b0.left - a0.right, 12.0, 0.01) && near(c0.left - b0.right, 12.0, 0.01) && near(a0.left, 0.0, 0.01)); // spaced apart
     assert!(b0.width() < a0.width() && a0.width() < c0.width(), "{a0:?} {b0:?} {c0:?}"); // as wide as their labels
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
 
     press(&rule, b0.center());
     rule.advance_frame();
@@ -212,7 +225,7 @@ fn button_group_grows_the_held_button_and_squeezes_its_neighbours() {
     rule.advance_time_by(500);
 
     rtl.set(true);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(at("a").right, c0.right, 0.01) && at("c").left < at("b").left); // from the right
     press(&rule, at("c").center()); // the last one, on the left now, takes from the middle
     rule.advance_time_by(500);
@@ -394,6 +407,8 @@ fn connected_button_group_rounds_the_outer_ends_and_the_checked_one() {
         corners_of(&rule, tag)
     };
     let (day, week) = (bounds(&rule, "Gün"), bounds(&rule, "Hafta"));
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
     assert!(near(week.left - day.right, 2.0, 0.01)); // connected: 2 dp apart
     assert!(
         same_corners(look("Gün"), [20.0, 8.0, 8.0, 20.0])

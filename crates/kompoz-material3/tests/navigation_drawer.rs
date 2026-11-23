@@ -50,6 +50,17 @@ tests!(
     dismissible_navigation_drawer_sample,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() <= 0.5
 }
@@ -480,6 +491,8 @@ fn modal_drawer_closes_by_its_own_width() {
     // Held part of the way while the window narrows. (M15 keeps a held drawer where the finger has it: the new
     // anchors wait for the drag to end, Compose's `updateAnchors` setting its drag target as a drag holds it; the
     // C++ moved it by the sheet's new width.)
+    // (the clock by hand: the checks while held and on the way see the drawer before it settles)
+    rule.main_clock().set_auto_advance(false);
     let h = rule.host();
     h.pointer_down(Offset::new(150.0, 300.0), -1, 0, PointerType::Touch);
     for i in 1..=5 {
@@ -489,20 +502,28 @@ fn modal_drawer_closes_by_its_own_width() {
     let held = bounds(&rule, "gelen").left;
     h.set_viewport_size(IntSize::new(250, 600));
     rule.advance_frame();
-    assert!(held < open && near(bounds(&rule, "gelen").left, held), "{open} {held} {:?}", bounds(&rule, "gelen"));
+    // (read as the frame laid it out, without the implicit wait: what is due after it — the drag's block restarted
+    // with the new anchors — moves it on, see below)
+    let narrowed = rule.run_without_implicit_wait(|| bounds(&rule, "gelen"));
+    assert!(held < open && near(narrowed.left, held), "{open} {held} {narrowed:?}");
+    // (Compose's DragGestureNode hands the restarted block the drag's current event again — its `drag { while (event
+    // !is DragStopped …) { (event as? DragDelta)?.let(processDelta); event = channel.receive() } }` — so the last
+    // move, 20 px, is applied once more as the anchors change: the C++ and the old harness, reading right after the
+    // frame, never saw it)
+    assert!(near(bounds(&rule, "gelen").left, held - 20.0), "{held} {:?}", bounds(&rule, "gelen"));
     h.pointer_up(Offset::new(50.0, 300.0), -1, 0);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     // Let go: settled on the new anchors (open, 100 of 250 from it), the sheet 250 wide.
     let s = get(&drawer);
     assert!(s.is_open() && near(s.current_offset(), 0.0) && near(open_fraction(&s, 250.0), 1.0));
     h.set_viewport_size(IntSize::new(300, 600));
     launch(&scope, s.snap_to(DrawerValue::Open));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     launch(&scope, s.close());
     rule.advance_time_by(48); // part of the way
     let moving = bounds(&rule, "gelen").left;
     assert!(moving < open && moving > open - 300.0, "{moving}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     // Closed by its own width (300): out of sight, not placed.
     assert!(near(s.current_offset(), -300.0));
     rule.on_node_with_tag("gelen").assert_is_not_displayed();

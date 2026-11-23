@@ -49,6 +49,17 @@ tests!(
     bottom_app_bar_with_overflow,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() <= 0.5
 }
@@ -335,6 +346,8 @@ fn bottom_app_bars_spread_out_and_leave_as_the_content_scrolls_on() {
         )
     };
     let state = || get(&behavior).state();
+    // (the clock by hand: the checks after a gesture see the bar before it settles)
+    rule.main_clock().set_auto_advance(false);
     // Spread out across its 64 dp, 16 dp in from the sides.
     assert!(same_rect(bounds(&rule, "çubuk"), Rect::new(0.0, 536.0, 400.0, 600.0)), "{:?}", bounds(&rule, "çubuk"));
     assert!(near(bounds(&rule, "a").left, 16.0) && near(bounds(&rule, "b").left, 176.0));
@@ -346,7 +359,7 @@ fn bottom_app_bars_spread_out_and_leave_as_the_content_scrolls_on() {
     assert!(went > 20.0 && went < 30.5, "{went}");
     assert!(near(bounds(&rule, "çubuk").height(), 64.0 - went) && near(bounds(&rule, "a").top, 536.0 + went + 8.0));
     swipe(&rule, at(200.0, 400.0), at(200.0, 250.0), 10); // past it: gone
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(state().height_offset(), -64.0) && near(bounds(&rule, "çubuk").height(), 0.0));
     let h = rule.host(); // back a little over half way, held, let go: all the way back
     h.pointer_down(at(200.0, 300.0), -1, 0, PointerType::Touch);
@@ -360,15 +373,15 @@ fn bottom_app_bars_spread_out_and_leave_as_the_content_scrolls_on() {
     }
     let halfway = -state().height_offset();
     h.pointer_up(at(200.0, 352.0), -1, 0);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(halfway > 5.0 && halfway < 32.0, "{halfway}");
     assert!(near(state().height_offset(), 0.0) && near(bounds(&rule, "çubuk").height(), 64.0));
 
     flexible.set(false); // the classic one leaves the same way, 80 dp of it
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(bounds(&rule, "çubuk").height(), 80.0) && near(state().height_offset_limit(), -80.0));
     swipe(&rule, at(200.0, 400.0), at(200.0, 250.0), 10);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(state().height_offset(), -80.0) && near(bounds(&rule, "çubuk").height(), 0.0));
 }
 

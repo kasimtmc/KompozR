@@ -146,7 +146,8 @@ fn builders_suspend_with_the_coroutine() {
     rule.advance_time_by(130);
     // Part way through withLink's lambda (in withStyle's, in buildAnnotatedString's): nothing built yet.
     assert!(texts.borrow().iter().all(|t| t.text() == "abc"));
-    rule.wait_for_idle();
+    // (the effect's delays, 291 ms of them: the clock taken past them, a delay not waited for)
+    rule.advance_time_by(291);
     let built = texts.borrow().iter().find(|t| t.text() != "abc").cloned().expect("the built text");
     assert_eq!(built.text(), "x1yz");
     assert_eq!((spans(&built), links(&built)), (vec![(1, 3)], vec![(2, 3)]));
@@ -212,7 +213,8 @@ fn edits_and_mutations_hold_on_while_suspended() {
     // Part way through tryMutate's lambda: the lock held.
     assert_eq!(*log.borrow(), ["edited abc", "locked"]);
     assert!(!mutex.try_mutate(|| {}));
-    rule.wait_for_idle();
+    // (the rest of tryMutate's `delay(100)`: the clock taken past it, a delay not waited for)
+    rule.advance_time_by(100);
     assert!(mutex.try_mutate(|| {}));
     assert_eq!(*log.borrow(), ["edited abc", "locked", "mutated true"]);
 }
@@ -230,7 +232,8 @@ fn compose_inline_functions_suspend_in_a_kt_file() {
     go.set(true);
     rule.advance_time_by(60);
     assert!(log.borrow().is_empty());
-    rule.wait_for_idle();
+    // (the effect's delays, 120 ms of them: the clock taken past them, a delay not waited for)
+    rule.advance_time_by(120);
     assert_eq!(*log.borrow(), ["linked abc", "size 7.0", "typed 42"]);
     assert_eq!(state.text(), "42");
 }

@@ -240,11 +240,13 @@ fn items_filling_half_the_list_glide_when_reordered_from_a_kt_file() {
     let first = bounds(&rule, "raf 1");
     assert!((first.width() - 100.0).abs() < 0.5 && first.top.abs() < 0.5, "{first:?}");
     assert!((bounds(&rule, "raf 3").top - 100.0).abs() < 0.5);
+    // (the clock by hand: the check on the way sees the items gliding)
+    rule.main_clock().set_auto_advance(false);
     order.set(vec![3, 1, 2]);
     rule.advance_time_by(100);
     let mid = bounds(&rule, "raf 3").top;
     assert!(mid > 10.0 && mid < 90.0, "{mid}");
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(bounds(&rule, "raf 3").top.abs() < 0.5);
     assert!((bounds(&rule, "raf 2").top - 100.0).abs() < 0.5);
 }

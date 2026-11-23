@@ -280,7 +280,14 @@ fn text_field_colors_follow_focus_and_error() {
     assert!(color_of(&focused, "@") == c(0.22) && color_of(&focused, "!") == c(0.24));
     assert!(color_of(&focused, "ipucu") == cs.on_surface_variant && leading.get() == c(0.14));
     assert!(has(&focused.path_colors, c(0.04)) && has(&focused.path_colors, c(0.11)));
-    assert!(has(&focused.path_colors, c(0.07)), "the cursor");
+    // (the cursor blinks, 500 ms on and off from the focus: `settle`'s 600 ms leave it off, and its `delay`s aren't
+    // waited for — seen within a blink, as the password field's below)
+    let mut cursor = has(&focused.path_colors, c(0.07));
+    for _ in 0..4 {
+        rule.advance_time_by(250);
+        cursor |= has(&rule.draw().path_colors, c(0.07));
+    }
+    assert!(cursor, "the cursor");
     // The selection: its highlight.
     key(&rule, Key::A, KeyModifiers::Ctrl);
     assert!(has(&rule.draw().path_colors, c(0.10)));
@@ -293,11 +300,13 @@ fn text_field_colors_follow_focus_and_error() {
     assert!(color_of(&in_error, "ali") == c(0.03) && color_of(&in_error, "Ad") == c(0.19));
     assert!(color_of(&in_error, "ipucu") == c(0.21) && color_of(&in_error, "@") == cs.on_surface_variant);
     assert!(leading.get() == cs.on_surface_variant && trailing.get() == c(0.16));
-    assert!(
-        has(&in_error.path_colors, c(0.06))
-            && has(&in_error.path_colors, c(0.13))
-            && has(&in_error.path_colors, c(0.08))
-    );
+    // (the error cursor, c(0.08), seen within a blink as the focused one above)
+    let mut error_cursor = has(&in_error.path_colors, c(0.08));
+    for _ in 0..4 {
+        rule.advance_time_by(250);
+        error_cursor |= has(&rule.draw().path_colors, c(0.08));
+    }
+    assert!(has(&in_error.path_colors, c(0.06)) && has(&in_error.path_colors, c(0.13)) && error_cursor);
 
     // The one line password field: its cursor and selection.
     tap(&rule, bounds(&rule, "parola").center());

@@ -70,6 +70,17 @@ tests!(
     custom_two_rows_top_app_bar,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() <= 0.5
 }
@@ -193,6 +204,8 @@ fn top_app_bar_enter_always_hides_before_the_list_scrolls() {
         )
     };
     let state = get(&behavior).state();
+    // (the clock by hand: the checks after a gesture see the bar before it snaps)
+    rule.main_clock().set_auto_advance(false);
     assert!(near(state.height_offset_limit(), -64.0) && near(bounds(&rule, "row0").top, 64.0));
     // 2 dp per move: 40 less the touch slop. (Compose's slop is 8 dp and its drag goes on from it: 32 dp; the C++'s
     // went on 30.)
@@ -220,7 +233,7 @@ fn top_app_bar_enter_always_hides_before_the_list_scrolls() {
     );
     // Let go half way after a fling: it settles all the way.
     swipe(&rule, at(200.0, 300.0), at(200.0, 320.0), 2);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(state.height_offset(), 0.0) || near(state.height_offset(), -64.0), "{state:?}");
 }
 
@@ -265,6 +278,8 @@ fn a_collapsing_top_bar_moves_the_content_without_recomposing_it() {
         )
     };
     let state = get(&behavior).state();
+    // (the clock by hand: the checks after a gesture see the bar before it snaps)
+    rule.main_clock().set_auto_advance(false);
     let edge = || content_bounds(&rule, "kenar");
     let before = composed.get();
     assert!(near(get(&seen).calculate_top_padding().value(), 64.0) && near(bounds(&rule, "row0").top, 64.0));

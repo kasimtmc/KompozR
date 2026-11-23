@@ -238,6 +238,8 @@ fn chips_as_compose_1_4() {
     assert_eq!(seen.borrow()["kapalı"], named_args!(cs.on_surface.copy(alpha = 0.38)));
     // A filter chip's check grows in and its room shrinks away; it says it's a checkbox.
     assert!(near(bounds(&rule, "filtre-çip").width(), 72.0, 0.01));
+    // (the clock by hand: the checks on the way see the chip growing and shrinking)
+    rule.main_clock().set_auto_advance(false);
     picked.set(true);
     rule.advance_frame();
     rule.advance_frame();

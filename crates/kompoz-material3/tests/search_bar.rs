@@ -49,6 +49,17 @@ tests!(
     docked_search_bar_scaffold_sample,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() <= 0.5
 }
@@ -543,6 +554,8 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     };
     let s = get(&state);
     let field = || bounds(&rule, "açık"); // the expanded view's
+    // (the clock by hand: the checks on the way see the view growing and shrinking)
+    rule.main_clock().set_auto_advance(false);
     // Part way out of the bar: between its bounds and the window's, the field 8 dp lower as it goes.
     let ss = s.clone();
     launch(&scope, async move { ss.animate_to_expanded().await });
@@ -556,7 +569,7 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     assert!(near(a.top, 100.0 * (1.0 - p) + 8.0 * p), "{a:?} {p}");
     // the results under it, 8 dp more as it goes (and the divider's 1)
     assert!(near(bounds(&rule, "sonuç").top, a.bottom + 8.0 * p + 1.0), "{:?} {a:?}", bounds(&rule, "sonuç"));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let f = field();
     assert!(
         near(f.left, 0.0)
@@ -589,18 +602,18 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     let h = field();
     let view_width = 320.0 + (400.0 - 320.0) * q;
     assert!(near(h.width(), 320.0 + (view_width - 320.0) * s.progress()) && near(h.center().x, 200.0), "{h:?}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(s.current_value() == SearchBarValue::Collapsed && rule.host().overlay_count() == 0);
     // Opened again: whole.
     let ss = s.clone();
     launch(&scope, async move { ss.animate_to_expanded().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(field().left, 0.0) && near(field().width(), 400.0));
     // A bar wider and near the top: the view grows from it the same way.
     let ss = s.clone();
     launch(&scope, async move { ss.snap_to(0.0).await });
     wide.set(true);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let ss = s.clone();
     launch(&scope, async move { ss.animate_to_expanded().await });
     rule.advance_time_by(150);
@@ -609,7 +622,7 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     let view_width = 368.0 + (400.0 - 368.0) * p;
     assert!(near(a.width(), 368.0 + (view_width - 368.0) * p) && near(a.center().x, 200.0), "{a:?}");
     assert!(near(a.top, 10.0 * (1.0 - p) + 8.0 * p), "{a:?}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
 }
 
 /// The C++'s Scaffold of a top bar (and a bottom bar) over a list of 100 rows of 50 dp (`row{i}`), the scroll
@@ -1005,7 +1018,8 @@ fn input_fields_expand_their_state_as_compose_says() {
     launch(&scope, async move { ss.snap_to(0.0).await });
     rule.advance_frame();
     rule.on_node_with_tag("alan").assert_is_focused();
-    rule.wait_for_idle();
+    // (the field's `delay(100)` before it lets the focus go: the clock taken past it, a delay not waited for)
+    rule.main_clock().advance_time_by(100 + 16);
     assert!(rule.host().focused_node().is_none());
     // The keyboard: Tab focuses it without expanding; Down expands; Down again moves on to the results.
     // (the first key turns keyboard mode on; the field's focus callback, as Compose's, reads the mode it was composed

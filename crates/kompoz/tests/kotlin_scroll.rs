@@ -125,6 +125,10 @@ fn a_scrollable_with_its_overscroll_effect_from_a_kt_file() {
     );
     rule.host().pointer_up(Offset::new(100.0, 170.0), -1, 0);
     rule.wait_for_idle();
+    // (the stretch springs back by its draws asking for the next frame, which waiting for idle doesn't wait for, as
+    // Compose's doesn't: the clock advanced until none is drawn — or the drag up would take the stretch back first)
+    let stretched = || rule.draw().layer_stretches.iter().any(|s| s.is_some_and(|s| !s.is_empty()));
+    named_args!(rule.main_clock().advance_time_until(timeout_millis = 3_000, condition = || !stretched()));
     // Up: it scrolls on (reversed: the finger up, forward).
     drag(&rule, Offset::new(100.0, 180.0), Offset::new(100.0, 80.0), 10, 10);
     assert!(seen.get() > 80.0, "{}", seen.get());

@@ -910,6 +910,11 @@ fn ime_nested_scroll_moves_the_keyboard_past_the_end() {
         rule.advance_frame();
         h.pointer_up(Offset::new(200.0, *ys.last().unwrap()), -1, 0);
         rule.wait_for_idle();
+        // (an overscroll stretch left at an end springs back by its draws asking for the next frame, which waiting
+        // for idle doesn't wait for, as Compose's doesn't: the clock advanced until none is drawn — Compose's
+        // `advanceTimeUntil` —, or the next drag would take the stretch back first)
+        let stretched = || rule.draw().layer_stretches.iter().any(|s| s.is_some_and(|s| !s.is_empty()));
+        named_args!(rule.main_clock().advance_time_until(timeout_millis = 3_000, condition = || !stretched()));
     };
     let scroll_to = |value: i32| {
         let s = scroll.clone();

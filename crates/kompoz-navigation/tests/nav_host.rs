@@ -25,6 +25,17 @@ use std::sync::Arc;
 /// The controller a test's NavHost was given (`controller = nav` in the C++ tests).
 type Held = Rc<RefCell<Option<NavController>>>;
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn held() -> Held {
     Rc::new(RefCell::new(None))
 }
@@ -170,16 +181,18 @@ fn nav_host_brings_entries_in_over_going_forward_and_under_going_back() {
         NavHost(nav, "a", modifier = Modifier.fill_max_size(), builder = abc);
     }));
     let nav = nav_of(&h);
+    // (the clock by hand: the checks on the way see the screens crossing)
+    rule.main_clock().set_auto_advance(false);
     nav.navigate("b");
     rule.advance_time_by(300);
     assert_eq!(top_screen(&rule), "ekran b"); // forward: over the one before
-    rule.wait_for_idle();
+    finish_animations(&rule);
     nav.navigate("c");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     nav.pop_back_stack();
     rule.advance_time_by(300);
     assert!(rule.on_node_with_text("ekran b").exists() && top_screen(&rule) == "ekran c"); // back: b comes in under c
-    rule.wait_for_idle();
+    finish_animations(&rule);
     nav.pop_back_stack();
     rule.advance_time_by(300);
     assert_eq!(top_screen(&rule), "ekran b"); // and a under b (one less again, not level with it)

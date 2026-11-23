@@ -378,7 +378,8 @@ fn skip_to_lookahead_size_lays_out_where_it_goes() {
         }),
         IntSize::new(400, 800),
     );
-    rule.wait_for_idle();
+    rule.main_clock().set_auto_advance(false);
+    settle(&rule);
     let width = |tag: &str| bounds(&rule, tag).width();
     wide.set(true);
     for _ in 0..6 {
@@ -389,14 +390,14 @@ fn skip_to_lookahead_size_lays_out_where_it_goes() {
     // (laid out where it goes, sized along the way: the semantics bounds are the layout's, the skipping one's
     // content at its lookahead size)
     assert!(near(width("dış1"), along, 0.5) && near(width("iç1"), 300.0, 0.5), "{} {}", width("dış1"), width("iç1"));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(width("iç0"), 300.0, 0.5) && near(width("iç1"), 300.0, 0.5));
     wide.set(false); // back: laid out at 100 from the start
     for _ in 0..6 {
         rule.advance_frame();
     }
     assert!(near(width("iç1"), 100.0, 0.5) && width("iç0") > 120.0);
-    rule.wait_for_idle();
+    settle(&rule);
     // A moving shared element: the entering content at its own size.
     let _ = rule.draw();
     details.set(true);
@@ -405,7 +406,7 @@ fn skip_to_lookahead_size_lays_out_where_it_goes() {
         let _ = rule.draw();
     }
     assert!(near(width("kart açık"), 300.0, 0.5), "{}", width("kart açık"));
-    rule.wait_for_idle();
+    settle(&rule);
 }
 
 // ---- C++ a_scrolled_lists_places_are_worked_out_where_they_are_asked_for -------------------------------------------
@@ -561,6 +562,7 @@ fn placeholder_size_is_what_the_parent_lays_out() {
             }),
             IntSize::new(400, 800),
         );
+        rule.main_clock().set_auto_advance(false);
         rule.wait_for_idle();
         // (at rest, `a` not shown: laid out at its lookahead size, no approach needed)
         let rest = bounds(&rule, "altında").top;
@@ -576,7 +578,7 @@ fn placeholder_size_is_what_the_parent_lays_out() {
         } else {
             assert!(near(below, a.height(), 0.5), "{below} {a:?}");
         }
-        rule.wait_for_idle();
+        settle(&rule);
         assert!(near(bounds(&rule, "altında").top, 40.0, 0.5));
     }
     // (a placeholder size of a closure)
@@ -801,7 +803,8 @@ fn skip_to_lookahead_position_places_at_once_where_it_goes() {
         }),
         IntSize::new(400, 800),
     );
-    rule.wait_for_idle();
+    rule.main_clock().set_auto_advance(false);
+    settle(&rule);
     assert!(near(bounds(&rule, "atlayan").left, 0.0, 0.5) && near(bounds(&rule, "izleyen").left, 20.0, 0.5));
     right.set(true);
     rule.advance_frame();
@@ -809,7 +812,7 @@ fn skip_to_lookahead_position_places_at_once_where_it_goes() {
     let (skipping, following) = (bounds(&rule, "atlayan").left, bounds(&rule, "izleyen").left);
     assert!(near(skipping, 300.0, 0.5), "{skipping}");
     assert!(following > 60.0 && following < 280.0, "{following}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(bounds(&rule, "atlayan").left, 300.0, 0.5) && near(bounds(&rule, "izleyen").left, 320.0, 0.5));
 }
 

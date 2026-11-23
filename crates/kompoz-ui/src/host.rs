@@ -246,6 +246,8 @@ pub struct KompozHost {
     /// Whether work without a frame was left when the last pass was done, before the keep check drew (what that
     /// drawing sets going — an animation's next frame — is a frame's: see `has_pending_work_before_drawing`).
     pending_before_drawing: Cell<bool>,
+    /// The same, recomposition left out (see `has_pending_work_besides_recomposition_before_drawing`).
+    pending_besides_recomposition_before_drawing: Cell<bool>,
     keep_check_lists: RefCell<Option<Box<(DisplayList, DisplayList)>>>,
     keep_check_mismatches: RefCell<Vec<String>>,
     /// Counted up by `invalidate`: the content's scope composes again when it changes.
@@ -346,6 +348,7 @@ impl KompozHost {
             layout_check_mismatches: RefCell::new(Vec::new()),
             keep_check: Cell::new(false),
             pending_before_drawing: Cell::new(false),
+            pending_besides_recomposition_before_drawing: Cell::new(false),
             keep_check_lists: RefCell::new(None),
             keep_check_mismatches: RefCell::new(Vec::new()),
             generation: Rc::new(Cell::new(0)),
@@ -768,6 +771,7 @@ impl KompozHost {
         }
         let mut redraw = self.owner.take_needs_draw();
         self.pending_before_drawing.set(self.has_pending_work_without_frame());
+        self.pending_besides_recomposition_before_drawing.set(self.has_pending_work_besides_recomposition());
         if self.keep_check.get() {
             self.check_kept();
             self.owner.take_needs_draw(); // (drawn for the check: no frame asked for by it)
@@ -853,8 +857,15 @@ impl KompozHost {
     pub fn has_pending_work_without_frame(&self) -> bool {
         let composition = self.composition.borrow();
         let composing = composition.as_ref().is_some_and(|c| c.has_invalidations());
-        composing
-            || global_snapshot_changed()
+        composing || self.has_pending_work_besides_recomposition()
+    }
+
+    /// What [`has_pending_work_without_frame`](Self::has_pending_work_without_frame) says, scopes waiting to be
+    /// recomposed left out: changes not yet told to their readers, layouts waiting, coroutines woken, tasks posted.
+    /// (Compose recomposes at frames only: a test's idling resource counts recomposition as work a frame does, and
+    /// what isn't laid out as work that needs none.)
+    pub fn has_pending_work_besides_recomposition(&self) -> bool {
+        global_snapshot_changed()
             || self.owner.snapshot_observer().has_pending()
             || self.owner.has_pending_measure_or_layout()
             || self.dispatcher.has_ready()
@@ -868,6 +879,12 @@ impl KompozHost {
     /// draw invalidates (a held overscroll stretch asking to be drawn again, say) waits for the next one.
     pub fn has_pending_work_before_drawing(&self) -> bool {
         self.pending_before_drawing.get()
+    }
+
+    /// [`has_pending_work_besides_recomposition`](Self::has_pending_work_besides_recomposition) as the last pass left
+    /// it before the keep check drew.
+    pub fn has_pending_work_besides_recomposition_before_drawing(&self) -> bool {
+        self.pending_besides_recomposition_before_drawing.get()
     }
 
     /// When the next coroutine timer is due (the platform wakes then), if any.

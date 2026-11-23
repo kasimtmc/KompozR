@@ -547,6 +547,8 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
         )
     };
     let s = sb_get(&state);
+    // (the clock by hand: the checks on the way see the view growing and shrinking)
+    rule.main_clock().set_auto_advance(false);
     let field = || sb_bounds(&rule, "açık");
     let ss = s.clone();
     sb_launch(&rule, async move { ss.animate_to_expanded().await });
@@ -559,7 +561,7 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     assert!(sb_near(a.width(), field_width, 0.5) && sb_near(a.center().x, 200.0, 0.5), "{a:?} {p}");
     assert!(sb_near(a.top, 100.0 * (1.0 - p) + 8.0 * p, 0.5), "{a:?} {p}");
     assert!(sb_near(sb_bounds(&rule, "sonuç").top, a.bottom + 8.0 * p + 1.0, 0.5));
-    rule.wait_for_idle();
+    common::settle(&rule);
     let f = field();
     assert!(
         sb_near(f.left, 0.0, 0.5)
@@ -590,17 +592,17 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     let h = field();
     let view_width = 320.0 + (400.0 - 320.0) * q;
     assert!(sb_near(h.width(), 320.0 + (view_width - 320.0) * q, 0.5) && sb_near(h.center().x, 200.0, 0.5));
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(s.current_value() == SearchBarValue::Collapsed && rule.host().overlay_count() == 0);
     let ss = s.clone();
     sb_launch(&rule, async move { ss.animate_to_expanded().await });
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(sb_near(field().left, 0.0, 0.5) && sb_near(field().width(), 400.0, 0.5));
     // A bar wider and near the top: the view grows from it the same way.
     let ss = s.clone();
     sb_launch(&rule, async move { ss.snap_to(0.0).await });
     wide.set(true);
-    rule.wait_for_idle();
+    common::settle(&rule);
     let ss = s.clone();
     sb_launch(&rule, async move { ss.animate_to_expanded().await });
     rule.advance_time_by(150);
@@ -609,7 +611,7 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
     let view_width = 368.0 + (400.0 - 368.0) * p;
     assert!(sb_near(a.width(), 368.0 + (view_width - 368.0) * p, 0.5) && sb_near(a.center().x, 200.0, 0.5));
     assert!(sb_near(a.top, 10.0 * (1.0 - p) + 8.0 * p, 0.5), "{a:?}");
-    rule.wait_for_idle();
+    common::settle(&rule);
 }
 
 /// C++ `top_search_bar_sits_alone_and_slides_away` in Kotlin: M15's deprecated `TopSearchBar` with
@@ -1012,6 +1014,8 @@ fn tooltips_as_compose_1_4() {
     let h: TipSlot = Default::default();
     let rule = rich_tip_rule(300.0, "Her gece", &h);
     let s = tip_state(&h);
+    // (the clock by hand: the checks on the way see the tooltip coming and going)
+    rule.main_clock().set_auto_advance(false);
     sb_launch(&rule, async move { s.show(MutatePriority::Default).await });
     rule.advance_frame();
     rule.advance_frame();
@@ -1020,7 +1024,7 @@ fn tooltips_as_compose_1_4() {
     let fading = coming.layer_alphas.iter().any(|a| *a > 0.01 && *a < 0.99);
     let growing = coming.transforms.iter().any(|m| m.values[0] > 0.8 && m.values[0] < 0.99);
     assert!(fading && growing, "{:?} {:?}", coming.layer_alphas, coming.transforms);
-    rule.wait_for_idle();
+    common::settle(&rule);
     let card = sb_bounds(&rule, "kart");
     let shown = rule.draw();
     let title_baseline = tip_baseline_of(&shown, "Yedekleme");
@@ -1042,7 +1046,7 @@ fn tooltips_as_compose_1_4() {
     rule.advance_frame();
     rule.advance_frame();
     rule.on_node_with_tag_unmerged("kart").assert_exists();
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!rule.on_node_with_tag_unmerged("kart").exists());
 }
 

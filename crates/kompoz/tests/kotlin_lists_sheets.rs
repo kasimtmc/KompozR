@@ -666,7 +666,7 @@ fn sheets_as_compose_writes_them() {
     rule.wait_for_idle();
     rule.on_node_with_text("Değer: Expanded").assert_exists();
     rule.on_node_with_text("Bildir").perform_click();
-    rule.wait_for_idle_within(1000);
+    rule.wait_for_idle();
     rule.on_node_with_text("Merhaba").assert_exists();
 }
 

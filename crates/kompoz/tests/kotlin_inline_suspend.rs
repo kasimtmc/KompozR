@@ -161,13 +161,17 @@ fn scope_functions_suspend_with_the_coroutine() {
         ScopeFunctions(g.value(), move |s: String| l.borrow_mut().push(s));
     }));
     rule.wait_for_idle();
+    // (the clock by hand: the check on the way sees the animation running)
+    rule.main_clock().set_auto_advance(false);
     go.set(true);
     rule.advance_time_by(60);
     // Part way through `with`'s animation: its lambda is suspended in the coroutine.
     let w = width(&rule, "scoped");
     assert!(w > 10.0 && w < 90.0, "{w}");
     assert!(log.borrow().is_empty());
-    rule.wait_for_idle();
+    // (the animations and the `delay(30)` to their end: the clock advanced until the last is logged, a delay not
+    // waited for)
+    named_args!(rule.main_clock().advance_time_until(timeout_millis = 2_000, condition = || log.borrow().len() == 6));
     assert_eq!(*log.borrow(), ["with 100.0", "half", "let 20.0", "also 5.0", "takeIf true", "run 3"]);
     assert_eq!(width(&rule, "scoped"), 10.0);
 }
@@ -185,7 +189,8 @@ fn collection_functions_suspend_with_the_coroutine() {
     rule.advance_time_by(150);
     // The forEach's lambda suspended between its elements.
     assert_eq!(*log.borrow(), ["each 1"]);
-    rule.wait_for_idle();
+    // (the delays to the end: the clock advanced until the last is logged, a delay not waited for)
+    named_args!(rule.main_clock().advance_time_until(timeout_millis = 2_000, condition = || log.borrow().len() == 12));
     assert_eq!(
         *log.borrow(),
         [
@@ -215,13 +220,16 @@ fn inline_functions_suspend_in_a_kt_file() {
         Stepper(g.value(), t.value(), move |s: String| l.borrow_mut().push(s));
     }));
     rule.wait_for_idle();
+    // (the clock by hand: the check on the way sees the animation running)
+    rule.main_clock().set_auto_advance(false);
     go.set(true);
     rule.advance_time_by(200);
     // The first step done, the second on its way.
     assert_eq!(*log.borrow(), ["at 10.0"]);
     let w = width(&rule, "stepper");
     assert!(w > 10.0 && w < 20.0, "{w}");
-    rule.wait_for_idle();
+    // (the animations and `fetched`'s `delay(50)` to their end: the clock advanced until the last is logged)
+    named_args!(rule.main_clock().advance_time_until(timeout_millis = 2_000, condition = || log.borrow().len() == 4));
     // `missing?.animateTo` skipped, `there?.animateTo` animated, `?:` fetched (suspending).
     assert_eq!(*log.borrow(), ["at 10.0", "at 20.0", "at 30.0", "n 2 40.0"]);
     // Again with a target: `?:`'s right side not run.
@@ -230,7 +238,7 @@ fn inline_functions_suspend_in_a_kt_file() {
     rule.wait_for_idle();
     target.set(Some(5.0));
     go.set(true);
-    rule.wait_for_idle();
+    named_args!(rule.main_clock().advance_time_until(timeout_millis = 2_000, condition = || log.borrow().len() == 4));
     assert_eq!(log.borrow().last().map(String::as_str), Some("n 5 40.0"));
 }
 
@@ -245,6 +253,8 @@ fn generic_results_and_nested_its_are_kotlins() {
     rule.wait_for_idle();
     go.set(true);
     rule.wait_for_idle();
+    // (the coroutines' `delay(10)` and `delay(30)`: the clock taken past them, a delay not waited for)
+    rule.main_clock().advance_time_by(30 + 16);
     // The values typed as Kotlin infers them (their `toInt()` the numbers'); the forEach's `it` in the coroutines it
     // launches (which take none), each delayed by its element.
     assert_eq!(*log.borrow(), ["20 21 40 3 4 3", "run 1", "after 10", "after 30"]);

@@ -296,6 +296,7 @@ fn fields_focused_from_code_may_keep_the_keyboard_down() {
     assert_eq!(shown(), 2);
     rule.host().clear_focus(true);
     rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (past the double tap timeout: at once, a double click)
     tap(&rule, bounds(&rule, "sessiz").center());
     assert_eq!(shown(), 3);
     rule.host().clear_focus(true);
@@ -731,6 +732,7 @@ fn a_click_on_the_focused_field_brings_the_keyboard_back() {
     rule.wait_for_idle();
     assert_eq!(p.sessions_started(), 1);
     let told = p.text_inputs.borrow().len();
+    rule.main_clock().advance_time_by(300 + 100); // (past the double tap timeout: at once, a double click)
     rule.on_node_with_tag("field").perform_click();
     rule.wait_for_idle();
     assert!(
@@ -1111,6 +1113,7 @@ fn the_keyboard_controller_hides_and_shows_a_fields_keyboard() {
     rule.wait_for_idle();
     assert!(p.keyboard_hidden.get() == hidden + 2 && is_focused(&rule, "field"));
     let told = p.text_inputs.borrow().len();
+    rule.main_clock().advance_time_by(300 + 100); // (past the double tap timeout: at once, a double click)
     rule.on_node_with_tag("field").perform_click();
     rule.wait_for_idle();
     assert!(p.text_inputs.borrow().len() > told && p.text_inputs.borrow().last() == Some(&true));
@@ -1278,6 +1281,7 @@ fn output_transformation_formats_what_is_shown() {
     let tel = bounds(&rule, "tel");
     tap(&rule, at(tel.left + 4.0 * 8.0 + 1.0, tel.center().y)); // just past a separator
     assert_eq!(phone.selection(), TextRange::at(3));
+    rule.main_clock().advance_time_by(300 + 100); // (past the double tap timeout: at once, a double click)
     tap(&rule, at(tel.left + 3.0 * 8.0 + 2.0, tel.center().y)); // on the separator
     assert_eq!(phone.selection(), TextRange::at(3));
     type_text(&rule, "0");

@@ -80,17 +80,18 @@ fn animated_visibility_expands_then_disposes_on_exit() {
             Box(modifier = Modifier.size(10.dp()).test_tag("below"));
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(!exists(&rule, "panel"));
     visible.set(true);
     rule.advance_time_by(64);
     let mid = bounds(&rule, "below").top;
     assert!(mid > 0.0 && mid < 100.0, "{mid}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert_near(bounds(&rule, "below").top, 100.0, 0.5);
     visible.set(false);
     rule.advance_time_by(64);
     assert!(exists(&rule, "panel"), "still there while it shrinks");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "panel"));
     assert_near(bounds(&rule, "below").top, 0.0, 0.5);
     assert_eq!(*log.borrow(), ["shown", "gone"]);
@@ -144,6 +145,7 @@ fn transitions_compose_their_caller_as_they_start_and_end() {
             Box(modifier = Modifier.size_wh(100.dp(), 10.dp()).test_tag("alt"));
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     let alphas = |rule: &KompozTestRule| rule.draw().layer_alphas;
     let below = bounds(&rule, "alt").top;
     page.set(1);
@@ -161,7 +163,7 @@ fn transitions_compose_their_caller_as_they_start_and_end() {
     // still on their way)
     rule.advance_time_by(160);
     assert!(!exists(&rule, "sayfa0") && exists(&rule, "kutu"));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "sayfa0") && exists(&rule, "sayfa1") && !exists(&rule, "kutu"));
     assert!(alphas(&rule).is_empty() && near(bounds(&rule, "alt").top, below - 40.0, 0.5));
     assert_eq!(composed.get(), before);
@@ -174,7 +176,7 @@ fn transitions_compose_their_caller_as_they_start_and_end() {
     rule.advance_time_by(96);
     let a = alphas(&rule);
     assert!(exists(&rule, "kutu") && a.len() == 1 && a[0] < 0.7, "{a:?}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "kutu"));
     assert_eq!(composed.get(), before + 2);
 }
@@ -227,6 +229,7 @@ fn animate_enter_exit_gives_children_their_own_transitions() {
             }
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     let alphas = |rule: &KompozTestRule| rule.draw().layer_alphas;
     later.set(true);
     rule.advance_frame();
@@ -244,7 +247,7 @@ fn animate_enter_exit_gives_children_their_own_transitions() {
     assert!(alphas(&rule).is_empty()); // the fade is done
     let y = bounds(&rule, "sayfa").top;
     assert!(y > rest + 1.0 && y < rest + 39.0, "{y}"); // the slide is not
-    rule.wait_for_idle();
+    settle(&rule);
     assert_near(bounds(&rule, "sayfa").top, rest, 0.5);
     // Hidden: the content stays until both are out.
     open.set(false);
@@ -253,11 +256,11 @@ fn animate_enter_exit_gives_children_their_own_transitions() {
     rule.advance_time_by(350);
     let y = bounds(&rule, "sayfa").top;
     assert!(exists(&rule, "perde") && y > rest + 1.0 && y < rest + 39.0, "{y}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "perde") && !exists(&rule, "sayfa"));
     // Shown again half way out: they turn back from where they are.
     open.set(true);
-    rule.wait_for_idle();
+    settle(&rule);
     open.set(false);
     rule.advance_frame();
     rule.advance_time_by(300);
@@ -268,7 +271,7 @@ fn animate_enter_exit_gives_children_their_own_transitions() {
     rule.advance_time_by(48);
     let y = bounds(&rule, "sayfa").top;
     assert!(back <= turned + 4.0 && y > rest && y < back, "{turned} {back} {y}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(exists(&rule, "perde"));
     assert_near(bounds(&rule, "sayfa").top, rest, 0.5);
 }
@@ -303,6 +306,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(!shown.current_state() && !shown.is_idle()); // not there yet
     open.set(true);
     rule.advance_time_by(160);
@@ -311,7 +315,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
     assert!(h > 10.0 && h < 30.0, "{h}");
     assert_near(bounds(&rule, "düz").height(), 40.0, 0.5);
     assert!(!shown.current_state() && !shown.is_idle());
-    rule.wait_for_idle();
+    settle(&rule);
     assert_near(bounds(&rule, "ilk").height(), 40.0, 0.5);
     assert!(shown.current_state() && shown.is_idle());
     // Hidden: still there on the way out, all gone once it says so.
@@ -319,7 +323,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
     rule.advance_time_by(160);
     let h = bounds(&rule, "ilk").height();
     assert!(h > 10.0 && h < 30.0 && shown.current_state() && !shown.is_idle(), "{h}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "ilk") && !shown.current_state() && shown.is_idle());
     // Turned back on the way: not idle though back where it was.
     shown.set_target_state(true);
@@ -334,7 +338,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
         shown.target_state(),
         shown.is_idle()
     );
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(shown.is_idle() && !exists(&rule, "ilk"));
 }
 
@@ -388,6 +392,7 @@ fn leaving_content_takes_no_taps() {
         }),
         IntSize::new(400, 800),
     );
+    rule.main_clock().set_auto_advance(false);
     let (first, second) = (center(&rule, "card0"), center(&rule, "card1"));
     tap(&rule, first);
     rule.advance_frame(); // the list is fading out
@@ -395,7 +400,7 @@ fn leaving_content_takes_no_taps() {
     tap(&rule, second);
     rule.advance_frame();
     assert_eq!(selected.peek(), 0); // the second card, on its way out, didn't take the tap
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(text_exists(&rule, "ayrıntı 0") && !exists(&rule, "card1"));
     // AnimatedVisibility hiding its content: no clicks on the way out either.
     let button = center(&rule, "button");
@@ -403,7 +408,7 @@ fn leaving_content_takes_no_taps() {
     rule.advance_frame();
     assert!(exists(&rule, "button"));
     tap(&rule, button);
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(button_clicks.get(), 0);
 }
 
@@ -415,17 +420,18 @@ fn animated_content_shows_both_while_switching() {
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         AnimatedContent(nn.get(), content = |_, v: i32| Text(format!("n={v}")));
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(text_exists(&rule, "n=1"));
     n.set(2);
     rule.advance_time_by(48);
     assert!(text_exists(&rule, "n=1") && text_exists(&rule, "n=2"));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!text_exists(&rule, "n=1") && text_exists(&rule, "n=2"));
     // Interrupted twice in a row: only the last one stays.
     n.set(3);
     rule.advance_time_by(32);
     n.set(4);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(text_exists(&rule, "n=4") && !text_exists(&rule, "n=3") && !text_exists(&rule, "n=2"));
     assert!(!rule.host().has_pending_work());
 }
@@ -447,17 +453,18 @@ fn animated_content_puts_the_entering_content_by_its_z_index() {
             content = |_, v: i32| Text(format!("n={v}")),
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     let order =
         |rule: &KompozTestRule| rule.draw().texts.into_iter().rfind(|t| t.starts_with("n=")).unwrap_or_default();
     n.set(2);
     rule.advance_time_by(48);
     assert_eq!(order(&rule), "n=2"); // by default the newer content is on top
-    rule.wait_for_idle();
+    settle(&rule);
     z.set(-1.0); // going back: it comes in under the one leaving
     n.set(1);
     rule.advance_time_by(48);
     assert!(text_exists(&rule, "n=1") && text_exists(&rule, "n=2") && order(&rule) == "n=2");
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(order(&rule), "n=1");
 }
 
@@ -467,10 +474,11 @@ fn crossfade_between_states() {
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
         Crossfade(o.get(), content = |v: bool| Text(if v { "açık" } else { "kapalı" }));
     }));
+    rule.main_clock().set_auto_advance(false);
     on.set(true);
     rule.advance_time_by(96);
     assert!(text_exists(&rule, "açık") && text_exists(&rule, "kapalı"));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(text_exists(&rule, "açık") && !text_exists(&rule, "kapalı"));
 }
 
@@ -557,15 +565,16 @@ fn animated_content_picks_its_transition_from_the_states_and_animates_its_size()
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     let last_alpha = |rule: &KompozTestRule| rule.draw().layer_alphas.last().copied().unwrap_or(-1.0);
     n.set(6);
     rule.advance_frame();
     let up = last_alpha(&rule);
-    rule.wait_for_idle();
+    settle(&rule);
     n.set(4);
     rule.advance_frame();
     let down = last_alpha(&rule);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(up > 0.15 && up < 0.4 && down > 0.55 && down < 0.8, "{up} {down}");
     assert_eq!(bounds(&rule, "kutu").width(), 100.0);
     big.set(true);
@@ -580,14 +589,14 @@ fn animated_content_picks_its_transition_from_the_states_and_animates_its_size()
         "{:?}",
         clipped.clips
     );
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(bounds(&rule, "kutu").width() == 300.0 && bounds(&rule, "kutu").height() == 150.0);
     sized.set(false); // no SizeTransform: as big as the contents shown (both, while they cross)
     big.set(false);
     rule.advance_frame();
     rule.advance_frame();
     assert_eq!(bounds(&rule, "kutu").width(), 300.0);
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(bounds(&rule, "kutu").width(), 100.0);
 }
 
@@ -640,6 +649,7 @@ fn animated_content_aligns_its_contents_and_keeps_same_key_content() {
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     let b0 = bounds(&rule, "ortalı");
     assert!(near(b0.width(), 100.0, 0.5) && near(b0.height(), 40.0, 0.5));
     big.set(true);
@@ -655,7 +665,7 @@ fn animated_content_aligns_its_contents_and_keeps_same_key_content() {
     assert_eq!(small.top - bx.top, centered(bx.height(), 40.0));
     assert_eq!(large.left - bx.left, centered(bx.width(), 200.0));
     assert_eq!(large.top - bx.top, centered(bx.height(), 80.0));
-    rule.wait_for_idle();
+    settle(&rule);
     let bx = bounds(&rule, "ortalı");
     let large = bounds(&rule, "büyük");
     assert!(near(bx.width(), 200.0, 0.5) && near(large.left, bx.left, 0.5) && !exists(&rule, "küçük"));
@@ -671,7 +681,7 @@ fn animated_content_aligns_its_contents_and_keeps_same_key_content() {
     rule.advance_frame();
     assert!(text_exists(&rule, "veri 8 (1)") && !text_exists(&rule, "veri 8 (2)"));
     assert!(!text_exists(&rule, "Yükleniyor"));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!text_exists(&rule, "Yükleniyor") && text_exists(&rule, "veri 8 (1)"));
 }
 
@@ -697,6 +707,7 @@ fn animated_content_waits_for_its_childrens_exits() {
             },
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     let rest = bounds(&rule, "sayfa 0").left;
     page.set(1);
     rule.advance_frame();
@@ -706,7 +717,7 @@ fn animated_content_waits_for_its_childrens_exits() {
     rule.advance_time_by(300);
     // The old page's own fade is over; its child still slides out, so it stays.
     assert!(exists(&rule, "sayfa 0") && bounds(&rule, "sayfa 0").left < rest - 1.0);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "sayfa 0") && near(bounds(&rule, "sayfa 1").left, rest, 0.5));
 }
 
@@ -788,6 +799,7 @@ fn row_and_column_forms_go_across_and_down() {
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     shown.set(true);
     state.set_target_state(true);
     rule.advance_time_by(64);
@@ -802,7 +814,7 @@ fn row_and_column_forms_go_across_and_down() {
     // (the plain one expands both ways, from the bottom end)
     let b = bounds(&rule, "düz");
     assert!(b.width() > 1.0 && b.width() < 99.0 && b.height() > 1.0 && b.height() < 39.0, "{b:?}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(state.is_idle() && state.current_state());
     for tag in ["satır", "satır durum", "sütun", "sütun durum", "düz"] {
         let b = bounds(&rule, tag);
@@ -815,7 +827,7 @@ fn row_and_column_forms_go_across_and_down() {
     assert!(b.width() > 1.0 && b.width() < 99.0, "{b:?}");
     let b = bounds(&rule, "sütun durum");
     assert!(b.height() > 1.0 && b.height() < 39.0, "{b:?}");
-    rule.wait_for_idle();
+    settle(&rule);
     for tag in ["satır", "satır durum", "sütun", "sütun durum", "düz"] {
         assert!(!exists(&rule, tag), "{tag}");
     }
@@ -850,6 +862,7 @@ fn a_transitions_forms_follow_it() {
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     let t = transition.borrow().clone().expect("composed");
     step.set(1);
     rule.advance_time_by(96);
@@ -859,15 +872,15 @@ fn a_transitions_forms_follow_it() {
     assert!(t.is_running());
     rule.advance_time_by(160); // the content is there (160), the visibility at 200, the crossfade's at 240
     assert!(t.is_running());
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!t.is_running() && !text_exists(&rule, "adım 0"));
     step.set(2);
     rule.advance_time_by(96);
     assert!(text_exists(&rule, "geçiş 1") && text_exists(&rule, "geçiş 2"));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!text_exists(&rule, "geçiş 1") && exists(&rule, "görünür"));
     step.set(0);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "görünür"));
 }
 
@@ -909,6 +922,7 @@ fn slides_scales_and_sizes_follow_their_lambdas() {
         }),
         IntSize::new(600, 600),
     );
+    rule.main_clock().set_auto_advance(false);
     shown.set(true);
     rule.advance_frame();
     rule.advance_frame(); // (on its way from the frame after the composition: its start)
@@ -923,7 +937,7 @@ fn slides_scales_and_sizes_follow_their_lambdas() {
     let inner = bounds(&rule, "içi");
     assert!(near(inner.left, outer.left, 0.5) && near(inner.top, outer.top, 0.5) && near(inner.width(), 100.0, 0.5));
     assert!(rule.draw().clips.is_empty());
-    rule.wait_for_idle();
+    settle(&rule);
     let b = bounds(&rule, "kayan");
     assert!(near(b.left, 0.0, 0.5) && near(b.top, 0.0, 0.5), "{b:?}");
     shown.set(false);
@@ -934,7 +948,7 @@ fn slides_scales_and_sizes_follow_their_lambdas() {
     // (shrinking across toward the start, a full height)
     let outer = bounds(&rule, "büyüyen");
     assert!(near(outer.width(), 50.0, 7.0) && near(outer.height(), 50.0, 0.5), "{outer:?}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "kayan") && !exists(&rule, "içi") && !exists(&rule, "ölçekli"));
 }
 
@@ -1001,6 +1015,7 @@ fn contents_slide_into_and_out_of_their_container() {
             content = |_, n: i32| Box(modifier = Modifier.size_wh(100.dp(), 40.dp()).test_tag(format!("parça {n}"))),
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     let left = |rule: &KompozTestRule, tag: &str| bounds(rule, tag).left - bounds(rule, "kap").left;
     let top = |rule: &KompozTestRule, tag: &str| bounds(rule, tag).top - bounds(rule, "kap").top;
     n.set(1);
@@ -1010,7 +1025,7 @@ fn contents_slide_into_and_out_of_their_container() {
     assert!(near(left(&rule, "parça 1"), 100.0, 0.5) && near(left(&rule, "parça 0"), 0.0, 0.5));
     rule.advance_time_by(160);
     assert!(near(left(&rule, "parça 1"), 50.0, 7.0) && near(left(&rule, "parça 0"), -50.0, 7.0));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "parça 0") && near(left(&rule, "parça 1"), 0.0, 0.5));
     // Down: from above the container, the old one down out of it.
     n.set(0);
@@ -1019,7 +1034,7 @@ fn contents_slide_into_and_out_of_their_container() {
     assert!(near(top(&rule, "parça 0"), -40.0, 0.5) && near(top(&rule, "parça 1"), 0.0, 0.5));
     rule.advance_time_by(160);
     assert!(near(top(&rule, "parça 0"), -20.0, 4.0) && near(top(&rule, "parça 1"), 20.0, 4.0));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "parça 1"));
 }
 
@@ -1034,12 +1049,13 @@ fn kept_until_the_transitions_finish() {
             content = |_, n: i32| Text(format!("içerik {n}")),
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     n.set(1);
     rule.advance_time_by(240);
     assert!(text_exists(&rule, "içerik 0") && text_exists(&rule, "içerik 1"));
     // (drawn as it is: only the new one fades)
     assert_eq!(rule.draw().layer_alphas.len(), 1);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!text_exists(&rule, "içerik 0"));
 }
 
@@ -1122,6 +1138,7 @@ fn a_deferred_visibility_is_moved_by_hand_then_handed_over() {
             content = |_| Box(modifier = Modifier.size_wh(100.dp(), 40.dp()).test_tag("sürüklenen")),
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     assert_near(bounds(&rule, "sürüklenen").left, 0.0, 0.5);
     state.defer(false);
     drag.set(60);
@@ -1143,7 +1160,7 @@ fn a_deferred_visibility_is_moved_by_hand_then_handed_over() {
     rule.advance_time_by(160);
     let x2 = bounds(&rule, "sürüklenen").left;
     assert!(x2 > x + 20.0, "{x} {x2}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!exists(&rule, "sürüklenen"));
 }
 
@@ -1213,10 +1230,11 @@ fn leaving_content_takes_no_focus_moves() {
             Box(modifier = Modifier.size(20.dp()).test_tag("son").focusable());
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     rule.on_node_with_tag("ilk").request_focus();
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(rule.host().move_focus(kompoz_ui::focus::FocusDirection::Next));
-    rule.wait_for_idle();
+    settle(&rule);
     rule.on_node_with_tag("giden").assert_is_focused();
     rule.on_node_with_tag("ilk").request_focus();
     shown.set(false);

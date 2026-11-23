@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::near;
+use common::{near, settle};
 use kompoz_animation::*;
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
@@ -55,6 +55,7 @@ fn animate_content_size_follows_the_content() {
             );
         }
     }));
+    rule.main_clock().set_auto_advance(false);
     shown.set(true);
     rule.advance_frame();
     // The first size isn't animated.
@@ -72,14 +73,14 @@ fn animate_content_size_follows_the_content() {
     rule.advance_frame();
     let further = bounds(&rule, "box").width();
     assert!(further < back, "{further} after {back}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(bounds(&rule, "box").width(), 100.0, 0.5));
     big.set(true);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(bounds(&rule, "box").width(), 200.0, 0.5));
     // And back from its end.
     big.set(false);
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(bounds(&rule, "box").height(), 100.0, 0.5));
 }
 
@@ -110,6 +111,7 @@ fn animate_content_size_tells_where_it_started_and_aligns_its_content() {
             );
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(finished.borrow().is_empty());
     big.set(true);
     rule.advance_time_by(80);
@@ -125,12 +127,12 @@ fn animate_content_size_tells_where_it_started_and_aligns_its_content() {
     big.set(false);
     rule.advance_frame();
     let turned = bounds(&rule, "kutu").width();
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(finished.borrow().len(), 1, "{:?}", finished.borrow());
     let (from, to) = finished.borrow()[0];
     assert!((from.width as f32 - turned).abs() <= 6.0 && to == IntSize::new(50, 50), "{from:?} → {to:?} ({turned})");
     big.set(true);
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(finished.borrow().last().copied(), Some((IntSize::new(50, 50), IntSize::new(100, 100))));
     // The overload without an alignment: at the top start.
     let r2 = KompozTestRule::new(kompozable_lambda!(|| {
@@ -176,6 +178,7 @@ fn animate_content_size_in_a_lookahead_scope_goes_to_the_lookahead_size() {
             });
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(near(bounds(&rule, "saran").height(), 40.0, 0.5));
     big.set(true);
     measures.borrow_mut().clear();
@@ -184,7 +187,7 @@ fn animate_content_size_in_a_lookahead_scope_goes_to_the_lookahead_size() {
     assert!(mid > 50.0 && mid < 110.0, "{mid}");
     // (what is below it moves with it: the approach of the layout's size)
     assert!(near(bounds(&rule, "altta").top, mid, 0.5));
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(bounds(&rule, "saran").height(), 120.0, 0.5));
     // The content measured at the lookahead constraints throughout: the same constraints each time.
     let seen = measures.borrow();
@@ -288,6 +291,7 @@ fn animate_bounds_glides_to_a_new_place_and_size() {
             },
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     let frames = |n: i32| -> Rect {
         let mut last = None;
         for _ in 0..n {
@@ -332,7 +336,7 @@ fn animate_bounds_glides_to_a_new_place_and_size() {
     assert!(!rule.host().has_pending_work());
     // At 2.625 px a dp: placed at whole px along the way (its offset rounded, as Compose's).
     rule.host().set_density(Density::new(2.625, 1.0));
-    rule.wait_for_idle();
+    settle(&rule);
     right.set(false);
     let at = frames(7);
     let scrolled = scroll.value() as f32;
@@ -395,6 +399,7 @@ fn animate_bounds_takes_a_modifier_between_and_follows_a_scroller_only_when_aske
             });
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert_eq!(bounds(&rule, "dolgulu").size(), Size::new(40.0, 40.0));
     padded.set(true);
     rule.advance_time_by(80);
@@ -404,7 +409,7 @@ fn animate_bounds_takes_a_modifier_between_and_follows_a_scroller_only_when_aske
     assert!(mid.width > 45.0 && mid.width < 75.0, "{mid:?}");
     let inner = bounds(&rule, "dolgu-içi");
     assert!(inner.width() == 40.0 && inner.left > 2.0 && inner.left < 18.0, "{inner:?}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(bounds(&rule, "dolgulu").size(), Size::new(80.0, 80.0));
     assert_eq!(bounds(&rule, "dolgu-içi"), Rect::new(20.0, 20.0, 60.0, 60.0));
     // Scrolled: at once.
@@ -421,7 +426,7 @@ fn animate_bounds_takes_a_modifier_between_and_follows_a_scroller_only_when_aske
     rule.advance_frame();
     let chased = bounds(&rule, "kovalayan").top;
     assert!(chased > chaser_top - 40.0, "{chased} from {chaser_top}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert_eq!(bounds(&rule, "kovalayan").top, chaser_top - 40.0);
     assert!(!rule.host().has_pending_work());
 }
@@ -463,6 +468,7 @@ fn lookahead_animation_visual_debugging_outlines_animations() {
             },
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     rule.advance_frame();
     let canvas = rule.draw();
     // (a white highlight under the outline, 2.5 dp: 5 px wide, then the color, 2.5 px)
@@ -484,10 +490,10 @@ fn lookahead_animation_visual_debugging_outlines_animations() {
     assert!(outlined(&canvas, inactive).is_empty());
     // The dashed path and the diamond.
     assert!(canvas.paths.len() >= 2, "{:?}", canvas.paths);
-    rule.wait_for_idle();
+    settle(&rule);
     // Turned off: nothing.
     enabled.set(false);
-    rule.wait_for_idle();
+    settle(&rule);
     let canvas = rule.draw();
     assert!(outlined(&canvas, inactive).is_empty() && outlined(&canvas, own).is_empty());
 }

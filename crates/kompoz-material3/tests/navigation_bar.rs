@@ -45,6 +45,17 @@ tests!(
     navigation_bar_samples,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -581,13 +592,15 @@ fn labels_shown_only_when_selected_come_up_with_the_icon() {
     assert!(near(icon(0).top, 16.0, 0.01) && near(icon(1).top, 28.0, 0.01), "{:?} {:?}", icon(0), icon(1));
     let canvas = rule.draw();
     assert!(color_of(&canvas, "Bir").is_some() && color_of(&canvas, "İki").is_none(), "{:?}", canvas.texts);
+    // (the clock by hand: the check on the way sees the icon moving up)
+    rule.main_clock().set_auto_advance(false);
     tab.set(1);
     for _ in 0..4 {
         rule.advance_frame();
     }
     let moving = icon(1).top;
     assert!(moving > 16.0 && moving < 28.0, "{moving}"); // on its way up
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(icon(1).top, 16.0, 0.01) && near(icon(0).top, 28.0, 0.01));
     assert!(color_of(&rule.draw(), "İki").is_some());
 }

@@ -38,6 +38,17 @@ tests!(
     floating_action_button_menu_sample,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -140,6 +151,8 @@ fn fab_menu_opens_from_the_bottom_and_its_button_turns_round() {
     assert!(near(button(&rule).0, 16.0, 0.01) && same_color(button(&rule).1, cs.primary_container));
     assert_eq!(progress.get(), 0.0);
     assert!(!shows(&rule, "Belge") && !shows(&rule, "Kişi")); // closed: no items
+    // (the clock by hand: the checks frame by frame see the menu opening and closing)
+    rule.main_clock().set_auto_advance(false);
 
     tap(&rule, fab.center());
     // (frame by frame until the first item shows: Compose's stagger starts a frame after the change, its spring
@@ -152,7 +165,7 @@ fn fab_menu_opens_from_the_bottom_and_its_button_turns_round() {
     assert!(shows(&rule, "Kişi") && !shows(&rule, "Belge"), "the one next to the button first");
     assert!(bounds(&rule, "Kişi").width() < bounds(&rule, "Kişi").height() * 3.0, "widening");
     assert!(progress.get() > 0.0 && progress.get() < 1.0, "{}", progress.get());
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let (radius, color) = button(&rule);
     assert!(near(radius, 28.0, 0.01) && same_color(color, cs.primary) && near(progress.get(), 1.0, 0.01)); // a primary circle
     let (top, middle, bottom) = (bounds(&rule, "Belge"), bounds(&rule, "Fotoğraf"), bounds(&rule, "Kişi"));
@@ -180,7 +193,7 @@ fn fab_menu_opens_from_the_bottom_and_its_button_turns_round() {
     }
     assert!(!shows(&rule, "Belge") && shows(&rule, "Kişi"), "closing from the top");
     assert!(near(bounds(&rule, "Kişi").height(), 56.0, 0.01));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(!shows(&rule, "Kişi") && near(button(&rule).0, 16.0, 0.01));
     let fab_node = rule.on_node_with_content_description("Menü").fetch_semantics_node();
     assert_eq!(fab_node.config().get(SemanticsProperties::ToggleableState), Some(ToggleableState::Off)); // told unchecked

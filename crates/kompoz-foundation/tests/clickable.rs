@@ -344,7 +344,7 @@ fn combined_clickable_long_and_double_clicks() {
     }));
     tap(&rule, at(50.0, 50.0));
     assert!(log.borrow().is_empty()); // waits for a second click
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["click"]);
 
     tap(&rule, at(50.0, 50.0));
@@ -356,7 +356,7 @@ fn combined_clickable_long_and_double_clicks() {
     // Too soon after the first: the second press doesn't count, the first is a click.
     tap(&rule, at(50.0, 50.0));
     tap(&rule, at(50.0, 50.0));
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["click"]);
 
     down(&rule, at(50.0, 50.0));
@@ -414,7 +414,7 @@ fn combined_clickable_without_a_double_click_clicks_at_once_and_keys_long_click(
     assert_eq!(taken(&log), ["double"]);
     key(&rule, Key::Enter);
     assert!(log.borrow().is_empty());
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(300 + 100); // (the double tap timeout: a delay, not waited for by idling)
     assert_eq!(taken(&log), ["click"]); // no second in time
 }
 

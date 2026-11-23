@@ -5,6 +5,13 @@
 //! finders), asserts about them and acts on them ([`SemanticsNodeInteraction`]), and injects touch, mouse and key
 //! input.
 //!
+//! As Compose's, every finder and assertion waits for idle first ([`KompozTestRule::wait_for_idle`]: frames while
+//! the host has frame work — animations, frame awaiters, recomposition, layout — with `auto_advance` on; coroutine
+//! delays aren't waited for): what a test checks is the UI settled. To check a state part way through an animation,
+//! turn the clock's `auto_advance` off and step it (`advance_time_by`, `advance_time_by_frame`); to let a delay
+//! elapse, advance the clock past it. Finders called from inside a frame (a composition, a layout, an effect) panic,
+//! as Compose's synchronization refuses to run on the UI thread.
+//!
 //! ```no_run
 //! # use kompoz_test::*;
 //! # use kompoz_runtime::kompozable_lambda;
@@ -46,6 +53,10 @@ use std::rc::Rc;
 /// One frame of virtual time (C++'s and Compose's test clock: 16 ms).
 pub const FRAME_NANOS: i64 = 16_000_000;
 
+/// How long [`KompozTestRule::wait_for_idle`] waits, in real time, before it gives up (Espresso's master idling
+/// policy's timeout, Compose's on Robolectric).
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// One frame, in milliseconds (Compose's test clock's `frameDelayMillis`).
 const FRAME_MILLIS: i64 = FRAME_NANOS / 1_000_000;
 
@@ -70,9 +81,9 @@ fn timed_out(message: String) -> ! {
 }
 
 /// The rule's virtual clock (Compose's MainTestClock): frames of 16 ms. While [`auto_advance`](Self::auto_advance)
-/// is on (the default), waiting for idle advances it frame by frame until nothing is left to do, and the rule's
-/// `InfiniteAnimationPolicy` cancels infinite animations (they would never let it be idle); off, it moves only when
-/// the test advances it, and infinite animations run.
+/// is on (the default), waiting for idle (and so every finder) advances it frame by frame while the host has frame
+/// work — not to a coroutine's delay —, and the rule's `InfiniteAnimationPolicy` cancels infinite animations (they
+/// would never let it be idle); off, it moves only when the test advances it, and infinite animations run.
 pub struct MainClock<'a> {
     rule: &'a KompozTestRule,
 }
@@ -139,6 +150,10 @@ pub struct KompozTestRule {
     clock: Cell<i64>,
     /// The clock's `auto_advance`, which the rule's infinite animation policy reads too.
     auto_advance: Rc<Cell<bool>>,
+    /// Whether the rule is running a frame or a pass of the host (synchronizing from inside one panics).
+    in_frame: Cell<bool>,
+    /// Whether the finders skip waiting for idle (Compose's test owner's `isImplicitWaitSuppressed`).
+    implicit_wait_suppressed: Cell<bool>,
     /// What injected input left (`perform_touch_input`, `perform_mouse_input`).
     injection: std::cell::RefCell<input::InjectionState>,
 }
@@ -153,7 +168,7 @@ impl KompozTestRule {
     /// tests measured it) unless the test installs another resolver (`host().set_font_family_resolver`).
     pub fn with_viewport(content: impl Content + 'static, viewport: IntSize) -> KompozTestRule {
         let rule = KompozTestRule::host_with(content, viewport);
-        rule.wait_for_idle_within(0);
+        rule.wait_for_idle();
         rule
     }
 
@@ -186,7 +201,14 @@ impl KompozTestRule {
         host.set_viewport_size(viewport);
         host.set_layout_check(true);
         host.set_keep_check(true);
-        KompozTestRule { host, clock: Cell::new(0), auto_advance, injection: Default::default() }
+        KompozTestRule {
+            host,
+            clock: Cell::new(0),
+            auto_advance,
+            in_frame: Cell::new(false),
+            implicit_wait_suppressed: Cell::new(false),
+            injection: Default::default(),
+        }
     }
 
     pub fn host(&self) -> &KompozHost {
@@ -221,48 +243,138 @@ impl KompozTestRule {
         MainClock { rule: self }
     }
 
-    /// Waits until the host is idle (Compose's `waitForIdle`). With the clock's `auto_advance` on: frames of 16 ms
-    /// run until nothing is pending, the coroutine delays due within 2 s waited for too (C++'s `waitForIdle`; Compose
-    /// doesn't wait for delays); infinite animations are cancelled meanwhile, as the rule's policy says. Off: what is
-    /// due at the current time runs — applied changes, composition, layout, effects and the coroutines they wake —
-    /// the clock left where it is (frames come when the test advances it).
+    /// Waits until the host is idle (Compose's `waitForIdle`: its idling strategy's `runUntilIdle` over the
+    /// ComposeIdlingResource's `isIdleNow`). Each round runs what is due at the current time (Compose's
+    /// `runCurrent`: applied changes, composition, layout, effects and the coroutines they wake), then — with the
+    /// clock's `auto_advance` on — advances it frame by frame, up to 100 frames, while the host has work only a
+    /// frame does (coroutines awaiting a frame, animations, scopes asking for one: the frame clock's awaiters;
+    /// changes not yet composed or laid out); it is idle after a round that advanced no frame and left nothing to
+    /// lay out, twice in a row. Coroutine timers (`delay`) aren't waited for, as Compose's aren't: a test waiting
+    /// for one advances the clock to it (`main_clock().advance_time_by`). Infinite animations are cancelled while
+    /// `auto_advance` is on (the rule's `InfiniteAnimationPolicy`), so they never keep it busy. With `auto_advance`
+    /// off, a round runs what is due now and lays it out, the clock left where it is.
+    ///
+    /// Work on worker threads ([`kompoz_coroutines::run_in_background`]) is waited for too, in real time: KompozR's
+    /// own idling resource for its background pool (Compose's tests register theirs). Panics when the host isn't
+    /// idle after 60 s of real time (Espresso's master idling policy), and when called from inside a frame (a
+    /// composition, a layout, an effect, a frame callback): Compose's synchronization can't run on the UI thread.
+    #[track_caller]
     pub fn wait_for_idle(&self) {
-        if self.auto_advance.get() {
-            self.wait_for_idle_within(2000);
-        } else {
-            self.run_current();
+        self.check_not_in_frame();
+        let start = std::time::Instant::now();
+        let mut attempts = 0u32;
+        let mut was_idle = false;
+        loop {
+            if start.elapsed() >= IDLE_TIMEOUT {
+                panic!(
+                    "kompoz: Compose did not get idle after {attempts} attempts in {} seconds (pending: {}).",
+                    IDLE_TIMEOUT.as_secs(),
+                    self.busy_reasons()
+                );
+            }
+            attempts += 1;
+            let idle = self.is_idle_now() && kompoz_coroutines::background_work_in_flight() == 0;
+            if idle && was_idle {
+                return;
+            }
+            if kompoz_coroutines::background_work_in_flight() > 0 {
+                // (what worker threads do takes real time: give it some)
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            was_idle = idle;
         }
     }
 
-    /// The same advancing, delays due within `timer_horizon_millis` waited for.
-    pub fn wait_for_idle_within(&self, timer_horizon_millis: i64) {
-        let horizon = self.clock.get() + timer_horizon_millis * 1_000_000;
-        for _ in 0..2000 {
-            // Work on worker threads takes real time: give it some.
-            if kompoz_coroutines::background_work_in_flight() > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
+    /// One round of [`wait_for_idle`](Self::wait_for_idle) (Compose's ComposeIdlingResource `isIdleNow`): what is
+    /// due runs, then frames while the clock advances on its own and the host has frame work (at most 100); idle if
+    /// no frame was needed and nothing but recomposition (a frame's work) is left.
+    fn is_idle_now(&self) -> bool {
+        self.run_current();
+        let mut frames = 0;
+        while frames < 100 && self.auto_advance.get() && self.host.has_pending_work() {
             self.advance_frame();
-            let next = self.host.next_deadline();
-            if !self.host.has_pending_work() && next.is_none_or(|n| n > horizon) {
-                return;
+            frames += 1;
+        }
+        // (recomposition left is a frame's: with `auto_advance` off it waits for the test's frames, as Compose's
+        // idling resource's `checkLayoutBusy` alone decides then)
+        frames == 0 && !self.host.has_pending_work_besides_recomposition()
+    }
+
+    /// What keeps the host busy, for the timeout's message (Compose's `getDiagnosticMessageIfBusy`).
+    fn busy_reasons(&self) -> &'static str {
+        if self.host.has_pending_work_without_frame() {
+            "pending recompositions or measure/layout"
+        } else if self.host.has_pending_work() {
+            "pending recompositions (frame awaiters): most likely endless frame work that isn't an infinite animation"
+        } else {
+            "work on worker threads"
+        }
+    }
+
+    /// Panics when the rule is running a frame or a pass of the host (a callback of it is calling): Compose's
+    /// synchronization can't be called from the UI thread (its EspressoLink's `runUntilIdle` check).
+    #[track_caller]
+    fn check_not_in_frame(&self) {
+        assert!(
+            !self.in_frame.get(),
+            "Functions that involve synchronization (Assertions, Actions, Synchronization; e.g. assertIsSelected(), \
+             doClick(), runOnIdle()) cannot be run from the main thread. Did you nest such a function inside \
+             runOnIdle {{}}, runOnUiThread {{}} or setContent {{}}?"
+        );
+    }
+
+    /// Runs `block` with the finders and assertions not waiting for idle (Compose's `runWithoutImplicitWait`): they
+    /// see the tree as it is now.
+    pub fn run_without_implicit_wait<R>(&self, block: impl FnOnce() -> R) -> R {
+        struct Restore<'a>(&'a Cell<bool>, bool);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.1);
             }
         }
-        panic!("kompoz: wait_for_idle: never idle");
+        let _restore = Restore(&self.implicit_wait_suppressed, self.implicit_wait_suppressed.replace(true));
+        block()
     }
 
     /// Runs what is due at the current time, the clock not moving (Compose's `runCurrent`, and what its layout passes
-    /// do): passes without a frame until nothing they do is left.
+    /// do): passes without a frame until nothing they do is left. A composition that keeps invalidating itself (it
+    /// writes what it read before: an AnimatedContent's visible list while one content replaces another of its key)
+    /// is left to the frames after two passes that left only that: Compose recomposes at frames only, so what a
+    /// composition writes back is the next frame's there.
+    #[track_caller]
     fn run_current(&self) {
+        self.check_not_in_frame();
+        let mut only_recomposition = 0;
         for _ in 0..100 {
-            self.host.run_due(self.clock.get());
+            self.as_frame(|| self.host.run_due(self.clock.get()));
             self.check_frame();
             // (what the keep check's drawing set going is the next frame's, as a drawing is a frame's)
             if !self.host.has_pending_work_before_drawing() {
                 return;
             }
+            if self.host.has_pending_work_besides_recomposition_before_drawing() {
+                only_recomposition = 0;
+            } else {
+                only_recomposition += 1;
+                if only_recomposition == 2 {
+                    return;
+                }
+            }
         }
         panic!("kompoz: run_current: never idle at the current time");
+    }
+
+    /// Runs `pass` (a frame or a pass of the host) marked as running one.
+    fn as_frame<R>(&self, pass: impl FnOnce() -> R) -> R {
+        struct Restore<'a>(&'a Cell<bool>);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        self.in_frame.set(true);
+        let _restore = Restore(&self.in_frame);
+        pass()
     }
 
     /// Runs `action` once the host is idle, giving its value (Compose's `runOnIdle`).
@@ -297,9 +409,11 @@ impl KompozTestRule {
 
     /// Advances virtual time by one frame and runs it; a difference the layout check or the keep check found
     /// fails.
+    #[track_caller]
     pub fn advance_frame(&self) {
+        self.check_not_in_frame();
         self.clock.set(self.clock.get() + FRAME_NANOS);
-        self.host.frame(self.clock.get());
+        self.as_frame(|| self.host.frame(self.clock.get()));
         self.check_frame();
     }
 
@@ -336,8 +450,16 @@ impl KompozTestRule {
         self.on_node_with(is_root(), false)
     }
 
-    /// The nodes of every window's tree (the host's, its popups'), merged or not.
+    /// The nodes of every window's tree (the host's, its popups'), merged or not, once the host is idle (Compose's
+    /// test owner's `getAllSemanticsNodes`: its `getRoots` waits for idle first, unless in
+    /// [`run_without_implicit_wait`](Self::run_without_implicit_wait)). Every finder's fetch and every assertion
+    /// goes through it: what they see is the UI settled as [`wait_for_idle`](Self::wait_for_idle) leaves it — to
+    /// check a state mid-animation, turn the clock's `auto_advance` off and step it.
+    #[track_caller]
     pub fn all_nodes(&self, use_unmerged_tree: bool) -> Vec<SemanticsNode> {
+        if !self.implicit_wait_suppressed.get() {
+            self.wait_for_idle();
+        }
         self.host.semantics_owner().all_semantics_nodes(!use_unmerged_tree)
     }
 

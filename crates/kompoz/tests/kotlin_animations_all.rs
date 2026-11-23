@@ -61,6 +61,8 @@ fn the_animations_run_their_course() {
     let open = mutable_state_of(false);
     let count = mutable_state_of(0);
     let rule = rule_of(&open, &count);
+    // (the clock by hand: the checks frame by frame see the animations running)
+    rule.main_clock().set_auto_advance(false);
     open.set(true);
     count.set(1);
     let mut widths = Vec::new();
@@ -77,13 +79,13 @@ fn the_animations_run_their_course() {
     assert!(widths.iter().any(|w| *w > 80.5 && *w < 199.5), "{widths:?}");
     assert!(lefts.iter().any(|l| *l < -0.5) && lefts.iter().any(|l| *l > 0.5), "{lefts:?}");
     assert!(both_counts && both_pages);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert_eq!(bounds(&rule, "kutu").left, 0.0);
     assert!(!exists(&rule, "sayı 0") && !exists(&rule, "kapalı") && !tag_exists(&rule, "küçük"));
     // Back: the details shrink away, the counter goes down the other way (its SizeTransform without a clip).
     open.set(false);
     count.set(0);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(exists(&rule, "ölçek 10") && exists(&rule, "sayı 0") && exists(&rule, "kapalı"));
     assert!(!exists(&rule, "ayrıntılar") && tag_exists(&rule, "küçük"));
     assert!((bounds(&rule, "kutu").width() - 80.0).abs() < 0.5);

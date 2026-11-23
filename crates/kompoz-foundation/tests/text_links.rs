@@ -126,7 +126,7 @@ fn link_annotations_open_urls_call_listeners_and_restyle_on_hover_and_press() {
     assert_eq!(platform.cursors.borrow().last(), Some(&PointerIcon::Hand));
     rule.host().pointer_down(at(25.0, 5.0), -1, 0, PointerType::Mouse);
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(color_of(&rule, "site"), BLUE);
     rule.host().pointer_up(at(25.0, 5.0), -1, 0);
     rule.advance_time_by(400);

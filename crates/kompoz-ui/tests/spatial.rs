@@ -71,8 +71,9 @@ fn on_layout_rect_changed_debounces_and_throttles() {
         IntSize::new(400, 450),
     );
     let of = |who: char| told.borrow().iter().filter(|t| t.who == who).cloned().collect::<Vec<_>>();
-    // Laid out (waited for until all is still): each told once, c half in the window.
-    rule.wait_for_idle();
+    // Laid out (the clock taken past the debounce: a delay, which waiting for idle doesn't wait for, as Compose's
+    // doesn't): each told once, c half in the window.
+    rule.advance_time_by(100);
     assert_eq!((of('a').len(), of('b').len(), of('c').len()), (1, 1, 1));
     assert!(of('a')[0].y == 200 && near(of('a')[0].visible, 1.0));
     assert!(of('c')[0].y == 400 && near(of('c')[0].visible, 0.5));
@@ -89,8 +90,8 @@ fn on_layout_rect_changed_debounces_and_throttles() {
     let b = of('b');
     assert!(b.len() == 2 && b[0].y == 300 - 10 && b[1].y == 300 - 80, "{b:?}");
     assert!(of('a').is_empty());
-    // Stopped: a told where it stopped, b its last place once the throttle lets it.
-    rule.wait_for_idle();
+    // Stopped: a told where it stopped, b its last place once the throttle lets it (the clock past both).
+    rule.advance_time_by(100);
     let (a, b) = (of('a'), of('b'));
     assert!(a.len() == 1 && a[0].y == 200 - 120, "{a:?}");
     assert!(b.len() == 3 && b[2].y == 300 - 120, "{b:?}");
@@ -101,7 +102,7 @@ fn on_layout_rect_changed_debounces_and_throttles() {
     set_scroll(&scroll, 130);
     rule.advance_frame();
     shown.set(false);
-    rule.wait_for_idle();
+    rule.advance_time_by(100);
     let (a, b, c) = (of('a'), of('b'), of('c'));
     assert!(a.is_empty());
     assert!(c.len() == 2 && c[1].y == 300 - 130, "{c:?}");
@@ -218,9 +219,9 @@ fn visibility_is_told_as_nodes_come_and_go() {
     set_scroll(&scroll, 450);
     rule.wait_for_idle();
     assert_eq!(logged(), ["üst -", "alt +"]);
-    // "süreli" all in: waiting for the app to settle runs its 300 ms out.
+    // "süreli" all in: told once its 300 ms have run out (the clock taken past them).
     set_scroll(&scroll, 550);
-    rule.wait_for_idle();
+    rule.advance_time_by(316);
     assert_eq!(logged().last().map(String::as_str), Some("süreli +"));
     // In its box's viewport: the box at 500..700 on screen, its item at 750..800: in the window, off the box.
     log.borrow_mut().clear();

@@ -107,6 +107,8 @@ fn an_animatable_animates_in_a_launched_effect() {
         let d = d.clone();
         Grow(g.value(), move || d.set(true));
     }));
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
     go.set(true);
     rule.advance_time_by(150);
     let w = width(&rule, "grow");
@@ -127,11 +129,13 @@ fn an_animatable_of_offsets() {
     let go = mutable_state_of(false);
     let (o, g) = (offset.clone(), go.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || Slide(o.clone(), g.value())));
+    // (the clock by hand: the check on the way sees the animation running)
+    rule.main_clock().set_auto_advance(false);
     go.set(true);
     rule.advance_time_by(80);
     let x = rule.on_node_with_tag("slide").get_unclipped_bounds_in_root().left;
     assert!(x > 20.0 && x < 80.0, "{x}");
-    rule.wait_for_idle();
+    common::settle(&rule);
     let b = rule.on_node_with_tag("slide").get_unclipped_bounds_in_root();
     assert_eq!((b.left, b.top), (100.0, 50.0));
     assert_eq!(offset.peek(), Offset::new(100.0, 50.0));
@@ -244,7 +248,8 @@ fn a_mutator_mutex_in_a_kt_file() {
         let l = l.clone();
         Mutations(move |s: String| l.borrow_mut().push(s));
     }));
-    rule.wait_for_idle();
+    // (the drag's `delay(100)`: the clock taken past it, a delay not waited for)
+    rule.main_clock().advance_time_by(100 + 16);
     // The animation can't interrupt the user's drag: it is cancelled itself.
     assert_eq!(*log.borrow(), ["drag", "drag done"]);
 }

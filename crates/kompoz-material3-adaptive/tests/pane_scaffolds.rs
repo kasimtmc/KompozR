@@ -34,6 +34,17 @@ tests!(
 
 type Slot<T> = Rc<RefCell<Option<T>>>;
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn slot<T>() -> Slot<T> {
     Rc::new(RefCell::new(None))
 }
@@ -137,13 +148,15 @@ fn list_detail_pane_scaffold_shows_one_pane_or_two() {
         KompozTestRule::with_viewport(kompozable_lambda!(move || Cities(n.clone(), s.clone())), IntSize::new(400, 800));
     // Compact: one pane at a time.
     let navigator = get(&nav);
+    // (the clock by hand: the checks on the way see the panes sliding)
+    rule.main_clock().set_auto_advance(false);
     assert!(rule.on_node_with_tag("liste0").exists() && !rule.on_node_with_tag("ayrıntı").exists());
     assert!(!navigator.can_navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange));
     let third = bounds(&rule, "liste3");
     tap(&rule, Offset::new(third.left + 10.0, (third.top + third.bottom) / 2.0));
     rule.advance_time_by(48);
     assert!(text_bounds(&rule, "Ayrıntı 3").left > 10.0, "sliding in from the end");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(!rule.on_node_with_tag("liste0").exists() && near(text_bounds(&rule, "Ayrıntı 3").left, 0.0));
     let current = navigator.current_destination().unwrap();
     assert!(navigator.can_navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange));
@@ -159,7 +172,7 @@ fn list_detail_pane_scaffold_shows_one_pane_or_two() {
         PaneAdaptedValue::Expanded
     );
     launch(&scope, navigator.navigate_back_with(BackNavigationBehavior::PopLatest));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(has_text(&rule, "Ayrıntı 3"));
     // Back: the list again, coming in from the start while the detail leaves. (Compose's leaving pane takes no
     // interaction: its semantics are cleared — the C++ found its old text there.)
@@ -168,7 +181,7 @@ fn list_detail_pane_scaffold_shows_one_pane_or_two() {
     rule.advance_time_by(48);
     assert!(!has_text(&rule, "Ayrıntı 3") && !has_text(&rule, "Seçilmedi"));
     assert!(bounds(&rule, "liste0").left < -10.0);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(rule.on_node_with_tag("liste0").exists() && !rule.on_node_with_tag("ayrıntı").exists());
     assert!(!navigator.can_navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange));
     assert!(!escape(&rule), "nothing to go back to: the platform's back");
@@ -184,19 +197,19 @@ fn list_detail_pane_scaffold_shows_one_pane_or_two() {
     assert!(rule.on_node_with_tag("liste0").exists() && has_text(&rule, "Seçilmedi"));
     assert!(near(bounds(&rule, "ayrıntı").left, 360.0 + 24.0));
     rule.on_node_with_tag("liste2").perform_click();
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(has_text(&rule, "Ayrıntı 2") && rule.on_node_with_tag("liste0").exists());
     launch(&scope, navigator.navigate_to_with(ListDetailPaneScaffoldRole::Detail, Some(4)));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(has_text(&rule, "Ayrıntı 4"));
     // (Both panes stay shown whatever the destination: back by the content — Compose's PopUntilContentChange — to
     // the previous detail, as the C++'s back; the default back has nothing to go back to and clears the history.)
     assert!(!navigator.can_navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange));
     launch(&scope, navigator.navigate_back_with(BackNavigationBehavior::PopUntilContentChange));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(has_text(&rule, "Ayrıntı 2"));
     launch(&scope, navigator.navigate_back_with(BackNavigationBehavior::PopUntilContentChange));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(has_text(&rule, "Seçilmedi") && !navigator.can_navigate_back_with(BackNavigationBehavior::PopLatest));
 }
 
@@ -259,6 +272,8 @@ fn supporting_pane_scaffold_puts_its_supporting_pane_at_the_end_or_slides_it_in(
         IntSize::new(400, 800),
     );
     let navigator = get(&nav);
+    // (the clock by hand: the check on the way sees the pane sliding in)
+    rule.main_clock().set_auto_advance(false);
     // Compact (a medium height: one vertical partition, no reflow): the main pane.
     assert!(rule.on_node_with_tag("ana").exists() && !rule.on_node_with_tag("destek").exists());
     assert!(!navigator.can_navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange));
@@ -266,12 +281,12 @@ fn supporting_pane_scaffold_puts_its_supporting_pane_at_the_end_or_slides_it_in(
     tap(&rule, open.center());
     rule.advance_time_by(48);
     assert!(text_bounds(&rule, "Destek 7").left > 10.0, "sliding in from the end");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(!rule.on_node_with_tag("ana").exists() && near(text_bounds(&rule, "Destek 7").left, 0.0));
     let current = navigator.current_destination().unwrap();
     assert_eq!((current.pane, current.content_key), (SupportingPaneScaffoldRole::Supporting, Some(7)));
     assert!(escape(&rule), "back: the main pane again");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(rule.on_node_with_tag("ana").exists() && !rule.on_node_with_tag("destek").exists());
     assert!(!navigator.can_navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange));
     drop(rule);
@@ -286,7 +301,7 @@ fn supporting_pane_scaffold_puts_its_supporting_pane_at_the_end_or_slides_it_in(
     assert!(rule.on_node_with_tag("ana").exists() && has_text(&rule, "Destek"));
     assert!(near(bounds(&rule, "destek").left, 1000.0 - 360.0) && near(bounds(&rule, "ana").left, 0.0));
     launch(&scope, navigator.navigate_to_with(SupportingPaneScaffoldRole::Supporting, Some(3)));
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(has_text(&rule, "Destek 3") && rule.on_node_with_tag("ana").exists());
     drop(rule);
 

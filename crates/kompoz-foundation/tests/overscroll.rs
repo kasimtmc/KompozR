@@ -53,6 +53,17 @@ fn stretches(rule: &KompozTestRule) -> Vec<(Rect, Offset)> {
         .collect()
 }
 
+/// Waits for idle, then lets frames run until no stretch is drawn: a stretch springs back by its draws asking for
+/// the next frame (Android's EdgeEffect animating as it is drawn), which isn't work idling waits for (Compose's
+/// idling resource counts recompositions, frame awaiters and layouts, not a redraw), so the clock is advanced to
+/// it (Compose's `advanceTimeUntil`).
+fn spring_back(rule: &KompozTestRule) {
+    rule.wait_for_idle();
+    named_args!(
+        rule.main_clock().advance_time_until(timeout_millis = 3_000, condition = || stretches(rule).is_empty())
+    );
+}
+
 /// How far the node tagged `tag` is stretched now (C++'s `stretchOf`): the direction of the stretched layer drawn
 /// over it (hwui's stretch vector: EdgeEffect's damped one, about a sixtieth for a pull of a quarter of the
 /// height); none: zero.
@@ -351,7 +362,7 @@ fn overscroll_stretches_past_the_ends_and_springs_back() {
         rule.advance_frame();
     }
     h.pointer_up(at(200.0, 460.0), -1, 0);
-    rule.wait_for_idle();
+    spring_back(&rule);
     assert!(stretches(&rule).is_empty() && scroll.value() == 0);
     // The mouse doesn't stretch it.
     drag(&rule, at(200.0, 300.0), at(0.0, 200.0), PointerType::Mouse, 10);
@@ -364,7 +375,7 @@ fn overscroll_stretches_past_the_ends_and_springs_back() {
     let end = stretch_of(&rule, "list");
     assert!(end.y < -0.005, "{end:?}");
     h.pointer_up(at(200.0, 400.0), -1, 0);
-    rule.wait_for_idle();
+    spring_back(&rule);
     assert!(stretches(&rule).is_empty());
     // A fling that hits the end bumps it.
     scroll_to(&rule, &scroll, scroll.max_value() - 300);
@@ -380,7 +391,7 @@ fn overscroll_stretches_past_the_ends_and_springs_back() {
         deepest = deepest.min(stretch_of(&rule, "list").y);
     }
     assert!(scroll.value() == scroll.max_value() && deepest < -0.005, "{} {deepest}", scroll.value());
-    rule.wait_for_idle();
+    spring_back(&rule);
     assert!(stretches(&rule).is_empty() && !h.has_pending_work());
 }
 
@@ -565,7 +576,7 @@ fn stretch_holds_while_touched_and_lets_a_fling_go_by() {
     moves(at(200.0, 440.0), at(0.0, -15.0), 3);
     assert!(list() > 0.0);
     h.pointer_up(at(200.0, 425.0), -1, 0);
-    rule.wait_for_idle();
+    spring_back(&rule);
     assert!(list() == 0.0 && scroll.value() == 0, "{} {}", list(), scroll.value());
     // Let go fast moving up (a fling going further than the stretch, Compose's absorbToRelaxIfNeeded not
     // absorbing it): the fling takes the stretch back, then goes on through the content (C++ sprang back).
@@ -709,7 +720,7 @@ fn overscroll_effect_none_shared_or_halved() {
     };
     let let_go = || {
         h.pointer_up(held.get(), -1, 0);
-        rule.wait_for_idle();
+        spring_back(&rule);
     };
     // The one stretched layer's bounds (none if more than one).
     let stretched = || {

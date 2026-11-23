@@ -51,6 +51,17 @@ tests!(
     horizontal_floating_toolbar_as_scaffold_fab_sample,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() <= 0.5
 }
@@ -94,6 +105,16 @@ fn swipe(rule: &KompozTestRule, from: Offset, to: Offset, frames: i32) {
     }
     h.pointer_up(to, -1, 0);
     rule.advance_frame();
+}
+
+/// Lets frames run until no overscroll stretch is drawn (the swipe back at the top stretched the list): a stretch
+/// springs back by its draws asking for the next frame (Android's EdgeEffect), which isn't work waiting for idle
+/// waits for (Compose's idling resource counts recompositions, frame awaiters and layouts, not a redraw), so the
+/// clock is advanced to it (Compose's `advanceTimeUntil`); a swipe while it is still stretched would take the
+/// stretch back first.
+fn spring_back(rule: &KompozTestRule) {
+    let stretched = || rule.draw().layer_stretches.iter().any(|s| s.is_some_and(|s| !s.is_empty()));
+    named_args!(rule.main_clock().advance_time_until(timeout_millis = 3_000, condition = || !stretched()));
 }
 
 /// A drag held still before it is let go (no fling).
@@ -255,6 +276,8 @@ fn floating_toolbar_shows_its_side_actions_when_expanded_and_leaves_on_scroll() 
         )
     };
     let state = || behavior.borrow().clone().expect("composed").state();
+    // (the clock by hand: the checks after a gesture see the toolbar before it settles)
+    page.main_clock().set_auto_advance(false);
     let moved = || bounds(&page, "sayfa"); // an action in it: where the toolbar's offsets put it
     let (shown, beside) = (moved(), bounds(&page, "yan"));
     assert!(near(shown.bottom, 600.0 - 16.0 - 8.0) && near(state().offset_limit(), -(64.0 + 16.0)), "{shown:?}");
@@ -263,7 +286,7 @@ fn floating_toolbar_shows_its_side_actions_when_expanded_and_leaves_on_scroll() 
     let went = -state().offset();
     assert!(went > 5.0 && went < 30.5 && near(moved().top, shown.top + went), "{went} {:?}", moved());
     swipe(&page, Offset::new(200.0, 400.0), Offset::new(200.0, 300.0), 10); // past its limit: gone
-    page.wait_for_idle();
+    finish_animations(&page);
     assert!(near(state().offset(), -80.0) && moved().top >= 600.0 - 0.5, "{} {:?}", state().offset(), moved());
     let side = bounds(&page, "yan");
     assert!(near(side.left, beside.left + 80.0) && near(side.top, beside.top), "{side:?} {beside:?}"); // off the end
@@ -280,7 +303,7 @@ fn floating_toolbar_shows_its_side_actions_when_expanded_and_leaves_on_scroll() 
     }
     let halfway = -state().offset();
     h.pointer_up(Offset::new(200.0, 360.0), -1, 0);
-    page.wait_for_idle();
+    finish_animations(&page);
     assert!(halfway > 5.0 && halfway < 40.0, "{halfway}"); // (not by a fling: there was none)
     assert!(near(state().offset(), 0.0) && same_rect(moved(), shown), "{} {:?}", state().offset(), moved());
 }
@@ -365,6 +388,8 @@ fn fab_toolbars_grow_out_of_their_fab_at_either_end() {
     assert!(same_rect(column, xywh(0.0, 80.0, 80.0, 176.0)), "{column:?}");
     assert!(same_rect(bounds(&rule, "üstteki"), xywh(12.0, 80.0, 56.0, 56.0)));
     assert!(near(bounds(&rule, "c").top, 80.0 + 64.0 + 8.0) && near(bounds(&rule, "d").top, 80.0 + 64.0 + 56.0));
+    // (the clock by hand: the check on the way sees the button growing)
+    rule.main_clock().set_auto_advance(false);
     // Collapsing: half way through the FAB is between 56 and 80, the toolbar's room shrinking towards the FAB.
     expanded.set(false);
     rule.advance_frame();
@@ -372,7 +397,7 @@ fn fab_toolbars_grow_out_of_their_fab_at_either_end() {
     rule.advance_frame();
     let fab = bounds(&rule, "baştaki").width();
     assert!(fab > 56.0 && fab < 80.0, "{fab}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(bounds(&rule, "baştaki").width(), 80.0) && near(bounds(&rule, "üstteki").height(), 80.0));
     assert!(same_rect(bounds(&rule, "yatay"), row), "the layout keeps the expanded room");
 }
@@ -1422,6 +1447,7 @@ fn vertical_floating_toolbar_with_fab_sample() {
     swipe(&rule, Offset::new(100.0, 300.0), Offset::new(100.0, 400.0), 10); // back: expands
     rule.wait_for_idle();
     assert!(near(bounds(&rule, "fab").height(), 80.0), "nothing to scroll back to: stays");
+    spring_back(&rule);
     swipe(&rule, Offset::new(100.0, 400.0), Offset::new(100.0, 300.0), 10);
     swipe(&rule, Offset::new(100.0, 300.0), Offset::new(100.0, 400.0), 10);
     rule.wait_for_idle();

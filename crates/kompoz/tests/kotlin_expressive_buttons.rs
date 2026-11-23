@@ -1036,6 +1036,8 @@ mod fab_segmented {
         assert_eq!(button(&rule), (16.0, cs.primary_container));
         rule.on_node_with_text("seçilen  · kapalı").assert_exists();
         assert!(!kt_shows(&rule, "Belge"));
+        // (the clock by hand: the checks frame by frame see the menu opening)
+        rule.main_clock().set_auto_advance(false);
         kt_tap(&rule, fab.center());
         let mut frames = 0;
         while !kt_shows(&rule, "Kişi") && frames < 30 {
@@ -1045,7 +1047,7 @@ mod fab_segmented {
         // The one next to the button first.
         assert!(kt_shows(&rule, "Kişi") && !kt_shows(&rule, "Belge"));
         rule.on_node_with_text("seçilen  · arada").assert_exists();
-        rule.wait_for_idle();
+        crate::common::settle(&rule);
         let (radius, color) = button(&rule);
         assert!(kt_near(radius, 28.0, 0.01) && color == cs.primary);
         rule.on_node_with_text("seçilen  · açık").assert_exists();
@@ -1055,7 +1057,7 @@ mod fab_segmented {
         rule.on_node_with_text("Fotoğraf").perform_click();
         rule.on_node_with_text("seçilen Fotoğraf · açık").assert_exists();
         rule.on_node_with_tag("fab").perform_click();
-        rule.wait_for_idle();
+        crate::common::settle(&rule);
         assert!(!kt_shows(&rule, "Kişi") && button(&rule).0 == 16.0);
         let fab_node = rule.on_node_with_content_description("Menü").fetch_semantics_node();
         assert_eq!(fab_node.config().get(SemanticsProperties::ToggleableState), Some(ToggleableState::Off));
@@ -1072,6 +1074,8 @@ mod fab_segmented {
     pub fn segmented_buttons_as_compose_1_4() {
         let rule = KompozTestRule::new(kompozable_lambda!(|| TwoSegments()));
         let one = kt_text_bounds(&rule, "Bir");
+        // (the clock by hand: the checks on the way see the animation running)
+        rule.main_clock().set_auto_advance(false);
         assert!(kt_near(kt_text_bounds(&rule, "Iki").center().x, 225.0, 1.0));
         kt_tap(&rule, kt_text_bounds(&rule, "Iki").center());
         rule.advance_frame();
@@ -1079,7 +1083,7 @@ mod fab_segmented {
         rule.advance_frame();
         let sliding = kt_text_bounds(&rule, "Iki").center().x;
         assert!(sliding > 225.5 && sliding < 237.5, "{sliding}");
-        rule.wait_for_idle();
+        crate::common::settle(&rule);
         assert!(kt_near(kt_text_bounds(&rule, "Iki").center().x, 238.0, 1.0));
         assert!(kt_near(kt_text_bounds(&rule, "Bir").center().x, one.center().x, 13.5));
     }

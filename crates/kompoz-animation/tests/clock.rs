@@ -1,7 +1,8 @@
 //! The test rule's clock as Compose's MainTestClock: auto advance (infinite animations cancelled by the rule's
 //! InfiniteAnimationPolicy while it is on; run while it is off), advancing by a time (frames or exact), until a
-//! condition, waiting until a condition, running on idle; the composition's effect context the rule gives (Compose's
-//! Recomposer.effectCoroutineContext).
+//! condition, waiting until a condition, running on idle; finders waiting for idle (Compose's test owner's getRoots),
+//! the delays idling doesn't wait for, synchronizing inside a frame refused; the composition's effect context the
+//! rule gives (Compose's Recomposer.effectCoroutineContext).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -10,6 +11,7 @@ mod common;
 use kompoz_animation::*;
 use kompoz_coroutines::*;
 use kompoz_foundation::prelude::*;
+use kompoz_graphics::*;
 use kompoz_runtime::*;
 use kompoz_test::*;
 use kompoz_ui::{InfiniteAnimationPolicy, Modifier, ModifierNode, ModifierNodeElement, NodeCx};
@@ -126,6 +128,10 @@ fn waiting_until_and_running_on_idle() {
     let k = count.clone();
     named_args!(rule.wait_until(condition = move || k.get() == 2));
     assert_eq!(count.get(), 2);
+    // (Compose's waitForIdle doesn't wait for a coroutine's delay: the third step comes when the clock gets to it —
+    // the C++ rule's idling waited for delays due within 2 s)
+    assert_eq!(rule.run_on_idle(|| count.get()), 2);
+    rule.main_clock().advance_time_by(100);
     assert_eq!(rule.run_on_idle(|| count.get()), 3);
     let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         named_args!(rule.wait_until(condition_description = Some("hiç"), timeout_millis = 50, condition = || false));
@@ -184,6 +190,82 @@ fn effects_and_nodes_run_in_the_rules_effect_context() {
     assert!(rule.host().effect_coroutine_context().get::<InfiniteAnimationPolicy>().is_some());
 }
 
+fn finders_wait_for_idle_as_composes_do() {
+    // Compose's test owner's getRoots → waitForIdle: a finder sees the UI settled — with the clock's auto advance on,
+    // an animation run to its end; off, only what is due now (composed and laid out, no frame).
+    let wide = mutable_state_of(false);
+    let w = wide.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let width = animate_dp_as_state(if w.get() { 200.dp() } else { 100.dp() });
+        Box(modifier = Modifier.width(width.get()).height(10.dp()).test_tag("kutu"));
+    }));
+    let width = |rule: &KompozTestRule| rule.on_node_with_tag("kutu").get_unclipped_bounds_in_root().width();
+    let start = rule.main_clock().current_time();
+    wide.set(true);
+    assert_eq!(width(&rule), 200.0);
+    assert!(rule.main_clock().current_time() > start);
+    // Waiting when idle advances no frame.
+    let now = rule.main_clock().current_time();
+    rule.wait_for_idle();
+    assert_eq!(rule.main_clock().current_time(), now);
+    // Off: what is due now, then the test's frames.
+    rule.main_clock().set_auto_advance(false);
+    wide.set(false);
+    assert_eq!(width(&rule), 200.0);
+    rule.main_clock().advance_time_by(48);
+    let between = width(&rule);
+    assert!(between > 100.0 && between < 200.0, "{between}");
+    // Without the implicit wait (Compose's runWithoutImplicitWait): the tree as it is.
+    rule.main_clock().set_auto_advance(true);
+    assert_eq!(rule.run_without_implicit_wait(|| width(&rule)), between);
+    assert_eq!(width(&rule), 100.0);
+}
+
+fn waiting_for_idle_doesnt_wait_for_delays() {
+    // Compose's ComposeIdlingResource counts frame awaiters, recompositions and layouts, not a coroutine's delay:
+    // the clock gets to it when the test advances it.
+    let done = mutable_state_of(false);
+    let d = done.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let d = d.clone();
+        LaunchedEffect((), async move {
+            delay_ms(5_000).await;
+            d.set(true);
+        });
+    }));
+    let start = rule.main_clock().current_time();
+    rule.wait_for_idle();
+    assert!(!done.get() && rule.main_clock().current_time() == start);
+    rule.main_clock().advance_time_by(5_000);
+    assert!(done.get());
+}
+
+fn synchronizing_inside_a_frame_panics_as_composes_does() {
+    // A finder's wait called from a composition (a frame of the host): Compose's synchronization can't run on the UI
+    // thread (its EspressoLink's message).
+    let holder: Rc<std::cell::RefCell<Option<Rc<KompozTestRule>>>> = Rc::default();
+    let message: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+    let go = mutable_state_of(false);
+    let (h, m, g) = (holder.clone(), message.clone(), go.clone());
+    let rule = Rc::new(KompozTestRule::new(kompozable_lambda!(move || {
+        if g.get()
+            && let Some(rule) = h.borrow().clone()
+        {
+            let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rule.wait_for_idle()));
+            let error = failed.expect_err("synchronized inside a frame");
+            *m.borrow_mut() =
+                error.downcast_ref::<String>().cloned().or_else(|| error.downcast_ref::<&str>().map(|s| s.to_string()));
+        }
+    })));
+    *holder.borrow_mut() = Some(rule.clone());
+    go.set(true);
+    rule.main_clock().advance_time_by_frame();
+    let message = message.borrow().clone().expect("the panic's message");
+    assert!(message.starts_with("Functions that involve synchronization (Assertions, Actions, Synchronization;"));
+    assert!(message.ends_with("Did you nest such a function inside runOnIdle {}, runOnUiThread {} or setContent {}?"));
+    holder.borrow_mut().take();
+}
+
 tests!(
     an_infinite_animation_is_cancelled_while_the_clock_advances_on_its_own,
     with_auto_advance_off_infinite_animations_run_as_the_test_advances,
@@ -191,4 +273,7 @@ tests!(
     time_advances_by_frames_or_exactly,
     waiting_until_and_running_on_idle,
     effects_and_nodes_run_in_the_rules_effect_context,
+    finders_wait_for_idle_as_composes_do,
+    waiting_for_idle_doesnt_wait_for_delays,
+    synchronizing_inside_a_frame_panics_as_composes_does,
 );

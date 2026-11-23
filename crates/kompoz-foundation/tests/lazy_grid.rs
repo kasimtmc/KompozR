@@ -747,6 +747,7 @@ fn grid_scroll_state_tells_whether_it_scrolls() {
         }),
         IntSize::new(400, 1200),
     );
+    rule.main_clock().set_auto_advance(false);
     rule.on_node_with_text("ızgara").assert_exists();
     let s = grid.clone();
     launch(&scope, async move { s.animate_scroll_to_item(30).await });
@@ -754,7 +755,7 @@ fn grid_scroll_state_tells_whether_it_scrolls() {
     rule.advance_frame();
     assert!(grid.is_scroll_in_progress());
     rule.on_node_with_text("ızgara kayıyor").assert_exists();
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(!grid.is_scroll_in_progress() && grid.first_visible_item_index() == 30);
 }
 
@@ -866,13 +867,14 @@ fn grid_items_glide_when_reordered() {
         }),
         IntSize::new(400, 800),
     );
+    rule.main_clock().set_auto_advance(false);
     assert!(same_rect(bounds(&rule, "hücre 3"), 100.0, 50.0, 100.0, 50.0));
     // (3 to the first cell: from (100, 50) to (0, 0) in 200 ms)
     order.set(vec![3, 0, 1, 2]);
     rule.advance_time_by(100);
     let mid = bounds(&rule, "hücre 3");
     assert!(mid.left > 10.0 && mid.left < 90.0 && mid.top > 5.0 && mid.top < 45.0, "{mid:?}");
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(
         same_rect(bounds(&rule, "hücre 3"), 0.0, 0.0, 100.0, 50.0)
             && same_rect(bounds(&rule, "hücre 0"), 100.0, 0.0, 100.0, 50.0)

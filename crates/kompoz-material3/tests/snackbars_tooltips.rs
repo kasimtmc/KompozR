@@ -68,6 +68,17 @@ tests!(
     a_tooltip_composes_around_it_only_as_it_shows_and_goes,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -460,6 +471,8 @@ fn the_host_fades_and_scales_snackbars_and_tells_accessibility() {
     let s = state.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || SnackbarHost(s.clone())));
     let (scope, results) = (scope_of(&rule), Results::default());
+    // (the clock by hand: the checks on the way see the snackbar coming and going)
+    rule.main_clock().set_auto_advance(false);
     show(&scope, &state, &results, "ileti", Some("Tamam"), None, false);
     rule.advance_frame();
     rule.advance_frame();
@@ -468,7 +481,7 @@ fn the_host_fades_and_scales_snackbars_and_tells_accessibility() {
     let growing = coming.transforms.iter().any(|m| m.values[0] > 0.8 && m.values[0] < 0.99);
     let fading = coming.layer_alphas.iter().any(|a| *a > 0.01 && *a < 0.99);
     assert!(growing && fading, "{:?} {:?}", coming.transforms, coming.layer_alphas);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let node = rule.on_node_with_text("ileti").fetch_semantics_node();
     let mut pane = None;
     let mut live = None;
@@ -488,7 +501,7 @@ fn the_host_fades_and_scales_snackbars_and_tells_accessibility() {
     rule.advance_frame();
     assert_eq!(*results.borrow(), [SnackbarResult::Dismissed]);
     rule.on_node_with_text("ileti").assert_exists(); // still going
-    rule.wait_for_idle();
+    finish_animations(&rule);
     rule.on_node_with_text("ileti").assert_does_not_exist();
 }
 
@@ -1330,6 +1343,8 @@ fn the_tooltip_box_grows_and_fades_its_tooltip() {
         }),
         IntSize::new(400, 800),
     );
+    // (the clock by hand: the checks on the way see the tooltip coming and going)
+    rule.main_clock().set_auto_advance(false);
     scope_of(&rule).launch(held(&h).show(MutatePriority::Default));
     rule.advance_frame();
     rule.advance_frame();
@@ -1339,7 +1354,7 @@ fn the_tooltip_box_grows_and_fades_its_tooltip() {
     let growing = coming.transforms.iter().any(|m| m.values[0] > 0.8 && m.values[0] < 0.99);
     let fading = coming.layer_alphas.iter().any(|a| *a > 0.01 && *a < 0.99);
     assert!(growing && fading, "{:?} {:?}", coming.transforms, coming.layer_alphas);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let shown = rule.draw();
     assert!(
         shown.layer_alphas.iter().all(|a| *a >= 0.999) && shown.layer_transforms.iter().all(|t| t.scale_x >= 0.999)
@@ -1350,7 +1365,7 @@ fn the_tooltip_box_grows_and_fades_its_tooltip() {
     rule.advance_frame();
     rule.on_node_with_tag("kart").assert_exists();
     assert!(held(&h).is_visible()); // (its transition still going there)
-    rule.wait_for_idle();
+    finish_animations(&rule);
     rule.on_node_with_tag("kart").assert_does_not_exist();
     assert!(!held(&h).is_visible());
 }
@@ -1696,6 +1711,8 @@ fn tooltips_as_compose_1_4() {
         IntSize::new(400, 800),
     );
     let s = held(&h);
+    // (the clock by hand: the checks on the way see the tooltip coming and going)
+    rule.main_clock().set_auto_advance(false);
     scope_of(&rule).launch(async move { s.show(MutatePriority::Default).await });
     rule.advance_frame();
     rule.advance_frame();
@@ -1704,7 +1721,7 @@ fn tooltips_as_compose_1_4() {
     let fading = coming.layer_alphas.iter().any(|a| *a > 0.01 && *a < 0.99);
     let growing = coming.transforms.iter().any(|m| m.values[0] > 0.8 && m.values[0] < 0.99);
     assert!(fading && growing, "{:?} {:?}", coming.layer_alphas, coming.transforms);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let card = bounds(&rule, "kart");
     let shown = rule.draw();
     let title_baseline = baseline_of(&shown, "Yedekleme");
@@ -1726,7 +1743,7 @@ fn tooltips_as_compose_1_4() {
     rule.advance_frame();
     rule.advance_frame();
     rule.on_node_with_tag_unmerged("kart").assert_exists();
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(!rule.on_node_with_tag_unmerged("kart").exists());
 }
 

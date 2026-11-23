@@ -251,7 +251,9 @@ fn combined_clicks() {
     }));
     let target = rule.on_node_with_tag("combined");
     target.perform_touch_input(|t| t.click());
-    rule.wait_for_idle();
+    // (the click waits out the double tap timeout, 300 ms, for a second one: the clock taken past it, as Compose's
+    // combinedClickable tests do — a delay not waited for)
+    rule.main_clock().advance_time_by(300 + 100);
     assert_eq!(std::mem::take(&mut *log.borrow_mut()), ["click"]);
     target.perform_touch_input(|t| t.double_click());
     rule.wait_for_idle();

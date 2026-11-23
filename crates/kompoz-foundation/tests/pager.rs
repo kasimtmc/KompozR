@@ -1060,7 +1060,7 @@ fn lazy_list_and_pager_states_hear_the_users_drags() {
     for i in 1..=6 {
         h.pointer_move(at(start.x, start.y - 10.0 * i as f32), -1, 0);
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert!(shows(&rule, "liste true sayfa false"));
     assert_eq!(*list_log.borrow(), ["DragStart"]);
     h.pointer_up(at(start.x, start.y - 60.0), -1, 0);
@@ -1071,7 +1071,7 @@ fn lazy_list_and_pager_states_hear_the_users_drags() {
     for i in 1..=6 {
         h.pointer_move(at(page.x - 15.0 * i as f32, page.y), -1, 0);
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert!(shows(&rule, "liste false sayfa true"));
     h.pointer_up(at(page.x - 90.0, page.y), -1, 0);
     rule.wait_for_idle();

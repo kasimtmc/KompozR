@@ -36,3 +36,14 @@ macro_rules! tests {
         }
     };
 }
+
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let every animation run its course. The clock's `auto_advance`
+/// is put back as it was after.
+pub fn settle(rule: &kompoz_test::KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}

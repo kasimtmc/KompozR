@@ -46,13 +46,15 @@ fn animate_content_size_as_compose_writes_it() {
     }));
     // (the tags before the modifier: Compose's semantics bounds are those of the layout the tag wraps)
     assert_eq!(bounds(&rule, "dinleyen").width(), 50.0);
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
     big.set(true);
     rule.advance_time_by(80);
     let mid = bounds(&rule, "dinleyen").width();
     assert!(mid > 55.0 && mid < 95.0, "{mid}");
     let (outer, inner) = (bounds(&rule, "hizalı"), bounds(&rule, "hizalı-iç"));
     assert!((inner.right - outer.right).abs() < 0.5 && (inner.bottom - outer.bottom).abs() < 0.5);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert_eq!(bounds(&rule, "dinleyen").width(), 100.0);
     assert_eq!(finished.borrow().last().copied(), Some((IntSize::new(50, 50), IntSize::new(100, 100))));
 }
@@ -85,16 +87,18 @@ fn animate_bounds_as_compose_writes_it() {
     assert_eq!(bounds(&rule, "kutu").top_left(), Offset::Zero);
     // (at rest: outlined in the inactive color)
     assert!(rule.draw().stroke_colors.contains(&Color::Green));
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
     right.set(true);
     rule.advance_time_by(160);
     let mid = bounds(&rule, "kutu").top_left();
     assert!(mid.x > 0.0 && mid.x < 260.0 && mid.y > 0.0 && mid.y < 160.0, "{mid:?}");
     // (on its way: outlined in its own color, here and at its target)
     assert_eq!(rule.draw().stroke_colors.iter().filter(|c| **c == Color::Blue).count(), 2);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert_eq!(bounds(&rule, "kutu").top_left(), Offset::new(260.0, 160.0));
     debugging.set(false);
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert!(!rule.draw().stroke_colors.contains(&Color::Green));
 }
 
@@ -117,6 +121,8 @@ fn growing_and_gliding_in_a_kt_file() {
     }));
     assert_eq!(bounds(&rule, "büyüyen").width(), 100.0);
     assert_eq!(bounds(&rule, "kayan").top_left(), Offset::Zero);
+    // (the clock by hand: the checks on the way see the animation running)
+    rule.main_clock().set_auto_advance(false);
     big.set(true);
     right.set(true);
     rule.advance_time_by(208);
@@ -124,7 +130,7 @@ fn growing_and_gliding_in_a_kt_file() {
     assert!(grown > 100.0 && grown < 200.0, "{grown}");
     let at = bounds(&rule, "kayan");
     assert!(at.left > 100.0 && at.left < 160.0, "{at:?}");
-    rule.wait_for_idle();
+    common::settle(&rule);
     assert_eq!(bounds(&rule, "büyüyen").width(), 200.0);
     assert_eq!(bounds(&rule, "kayan").top_left(), Offset::new(260.0, 160.0));
 }

@@ -452,7 +452,8 @@ fn when_started_suspends_its_block_below_the_state() {
     rule.advance_time_by(500);
     assert!(taken(&steps).is_empty() && !job.is_completed());
     owner.registry.set_current_state(LifecycleState::Resumed);
-    rule.wait_for_idle();
+    // (the delays left run as the clock gets to them: Compose's waitForIdle doesn't wait for them)
+    rule.advance_time_by(300);
     assert_eq!(taken(&steps), ["step 1", "child 1", "step 2", "child 2", "value 5"]);
     // Destroyed while it waits: the caller cancelled.
     let (o, s) = (owner.clone(), steps.clone());

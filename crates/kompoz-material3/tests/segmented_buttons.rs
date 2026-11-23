@@ -43,6 +43,17 @@ tests!(
     segmented_button_samples,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -128,6 +139,8 @@ fn segmented_buttons_as_compose_1_4() {
     let (two, one) = (text_bounds(&rule, "Iki"), text_bounds(&rule, "Bir"));
     assert!(near(two.center().x, 225.0, 1.0), "{two:?}");
     // Selected: the container at once, the label sliding right, the check growing in.
+    // (the clock by hand: the checks on the way see the selection sliding)
+    rule.main_clock().set_auto_advance(false);
     picked.set(1);
     rule.advance_frame();
     rule.advance_frame();
@@ -139,7 +152,7 @@ fn segmented_buttons_as_compose_1_4() {
     assert!(sliding > 225.5 && sliding < 237.5, "{sliding}");
     // (the scale layer about its bottom start, scaleIn's TransformOrigin(0, 1))
     assert!(c.transforms.iter().any(|m| m.values[0] > 0.01 && m.values[0] < 0.99), "the check grows in");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert!(near(text_bounds(&rule, "Iki").center().x, 238.0, 1.0));
     // The other loses its check at once.
     assert!(near(text_bounds(&rule, "Bir").center().x, one.center().x, 13.5));
@@ -445,6 +458,8 @@ fn a_segmented_buttons_icon_crossfades_with_an_inactive_one() {
     }));
     rule.on_node_with_tag("pasif").assert_exists();
     rule.on_node_with_tag("etkin").assert_does_not_exist();
+    // (the clock by hand: the checks on the way see the icons crossfading)
+    rule.main_clock().set_auto_advance(false);
     active.set(true);
     rule.advance_frame();
     rule.advance_frame();
@@ -452,11 +467,11 @@ fn a_segmented_buttons_icon_crossfades_with_an_inactive_one() {
     // Both while it crossfades.
     rule.on_node_with_tag("pasif").assert_exists();
     rule.on_node_with_tag("etkin").assert_exists();
-    rule.wait_for_idle();
+    finish_animations(&rule);
     rule.on_node_with_tag("pasif").assert_does_not_exist();
     // Without an inactive content: gone at once when it stops being active.
     with_inactive.set(false);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     rule.on_node_with_tag("etkin").assert_exists();
     active.set(false);
     rule.advance_frame();

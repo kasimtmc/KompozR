@@ -2100,6 +2100,11 @@ impl Composer {
     }
 
     fn has_invalidations(&self) -> bool {
+        // (the changes applied sorted to their readers first, as Compose's recomposer does as they come: a change no
+        // scope of it read — a draw's redraw signal — is no work for it)
+        if !self.pending.lock().is_empty() && !self.state.borrow().composing {
+            self.take_pending();
+        }
         !self.pending.lock().is_empty() || !self.state.borrow().invalid.is_empty()
     }
 

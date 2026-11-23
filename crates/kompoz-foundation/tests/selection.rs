@@ -620,12 +620,15 @@ fn dragging_a_handle_shows_the_text_magnifier() {
     let canvas = rule.draw();
     assert!(canvas.layer_transforms.iter().any(|t| near(t.scale_x, 1.25, 0.01) && near(t.translation_y, -42.0, 0.01)));
     // Down to the next line: the magnifier springs there, a frame at a time.
+    // (the clock by hand while it springs: the finder would wait for the spring to end)
+    rule.main_clock().set_auto_advance(false);
     rule.host().pointer_move(at(end.x + 48.0, end.y + 20.0), -1, 0);
     rule.advance_frame();
     rule.advance_frame();
     rule.advance_frame();
     let moving = magnifier_at(&rule).expect("the magnifier");
     assert!(moving.y > 110.0 && moving.y < 130.0, "{moving:?}");
+    rule.main_clock().set_auto_advance(true);
     rule.wait_for_idle();
     let there = magnifier_at(&rule).expect("the magnifier");
     assert!(near(there.y, 130.0, 0.01), "{there:?}");

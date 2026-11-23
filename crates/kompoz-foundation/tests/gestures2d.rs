@@ -655,6 +655,8 @@ fn anchored_draggable_follows_the_finger_and_settles_on_an_anchor() {
     rule.host().scroll(at(x() + 28.0, 28.0), at(0.0, -5.0)); // (the wheel doesn't move it)
     rule.wait_for_idle();
     assert_eq!(s.offset(), 0.0);
+    // (the clock by hand while the animation runs: the drag's finder would wait for it to end)
+    rule.main_clock().set_auto_advance(false);
     let st = s.clone();
     scope.launch(async move { named_args!(st.animate_to(Spot::Middle)).await });
     rule.advance_frame();
@@ -663,6 +665,7 @@ fn anchored_draggable_follows_the_finger_and_settles_on_an_anchor() {
     drag(&[-20.0, -30.0]); // (the user takes over: at once, the animation stopped)
     assert!(!s.is_animation_running());
     up(&rule, at(x() + 28.0, 28.0), 0);
+    rule.main_clock().set_auto_advance(true);
     rule.wait_for_idle();
     assert!(x() == 0.0 && s.current_value() == Spot::Start, "{}", x());
     let st = s.clone();

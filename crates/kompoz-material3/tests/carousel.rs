@@ -105,10 +105,11 @@ fn seen_item(prefix: &'static str, seen: Seen) -> impl Fn(&CarouselItemScope, i3
 fn masks(rule: &KompozTestRule, prefix: &str, seen: &Seen) -> Vec<(f32, f32)> {
     seen.borrow_mut().clear();
     let _: RecordingCanvas = rule.draw();
-    let mut out: Vec<(f32, f32)> = seen
-        .borrow()
-        .iter()
-        .map(|(i, (mask, ..))| (bounds(rule, &format!("{prefix}{i}")).left + mask.left, mask.width()))
+    // (the masks taken out first: the finders wait for idle, whose drawing tells `seen` again)
+    let drawn: Vec<(i32, Rect)> = seen.borrow().iter().map(|(i, (mask, ..))| (*i, *mask)).collect();
+    let mut out: Vec<(f32, f32)> = drawn
+        .into_iter()
+        .map(|(i, mask)| (bounds(rule, &format!("{prefix}{i}")).left + mask.left, mask.width()))
         .filter(|&(x, w)| w < 399.0 && x + w > 0.5 && x < 399.5)
         .collect();
     out.sort_by(|a, b| a.partial_cmp(b).unwrap());

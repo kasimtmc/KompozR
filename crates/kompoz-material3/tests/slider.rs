@@ -400,19 +400,19 @@ fn slider_tells_its_interaction_source_presses_drags_and_hovers() {
     }));
     // A press tells the press (Compose's: the value moves at the tap or at the drag, not at the press).
     rule.host().pointer_down(at(x_of(25.0), 24.0), -1, 0, PointerType::Touch);
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["Press"]);
     rule.on_node_with_text("basılı true sürükleniyor false").assert_exists();
     assert_eq!(value.peek(), 0.0);
     rule.host().pointer_move(at(x_of(25.0) + 3.0, 24.0), -1, 0); // under the touch slop: still a press
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["Press"]);
     let mut x = x_of(30.0);
     while x <= x_of(75.0) {
         rule.host().pointer_move(at(x, 24.0), -1, 0);
         x += 10.0;
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     // Past the slop it drags: the drag is told, the press cancelled (the tap's gesture sees its moves taken).
     assert_eq!(*log.borrow(), ["Press", "Cancel", "DragStart"]);
     rule.on_node_with_text("basılı false sürükleniyor true").assert_exists();
@@ -433,9 +433,9 @@ fn slider_tells_its_interaction_source_presses_drags_and_hovers() {
         rule.host().pointer_move(at(x, 24.0), -1, 0);
         x += 10.0;
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     shown.set(false);
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(taken(&log), ["Press", "Cancel", "DragStart", "DragCancel"]);
     rule.on_node_with_text("basılı false sürükleniyor false").assert_exists();
     rule.host().pointer_up(at(x_of(75.0), 24.0), -1, 0);
@@ -603,7 +603,7 @@ fn range_slider_tells_each_thumbs_source() {
     range.set(50.0..=50.0);
     rule.wait_for_idle();
     rule.host().pointer_down(at(rx(50.0), 24.0), -1, 0, PointerType::Touch);
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(*start_log.borrow(), ["Press"]);
     assert!(end_log.borrow().is_empty());
     let mut d = 5.0;
@@ -611,7 +611,7 @@ fn range_slider_tells_each_thumbs_source() {
         rule.host().pointer_move(at(rx(50.0) - d, 24.0), -1, 0);
         d += 5.0;
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(*start_log.borrow(), ["Press", "Cancel", "DragStart"]);
     assert!(end_log.borrow().is_empty());
     rule.host().pointer_up(at(rx(50.0) - 40.0, 24.0), -1, 0);
@@ -674,7 +674,7 @@ fn slider_thumbs_and_tracks_are_slots_given_its_state() {
     let p = at(slider.left + 5.0 + 190.0 * 0.75, slider.top + 24.0);
     rule.host().pointer_down(p, -1, 0, PointerType::Touch);
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert!(value.peek() == 25.0 && !s.is_dragging() && bounds(&rule, "başparmak").width() == 20.0);
     rule.host().pointer_up(p, -1, 0);
     rule.wait_for_idle();
@@ -780,7 +780,7 @@ fn material3_slider_track_keeps_apart_from_its_bar_thumb() {
     let p = at(m3.left + 150.0, m3.top + 24.0);
     rule.host().pointer_down(p, -1, 0, PointerType::Touch);
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     let held = rule.draw();
     assert!(bars(&held, 2.0, 44.0).iter().any(|r| near(r.top, m3.top + 2.0, 0.01)));
     rule.host().pointer_up(p, -1, 0);
@@ -836,7 +836,7 @@ fn range_slider_thumbs_and_track_are_slots() {
     let p = at(slider.left + 5.0 + 150.0, slider.top + 24.0);
     rule.host().pointer_down(p, -1, 0, PointerType::Touch);
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert_eq!(*thumbs.borrow(), [(20.0, false), (60.0, true)]);
     rule.host().pointer_up(p, -1, 0);
     rule.wait_for_idle();
@@ -959,7 +959,7 @@ fn labels_show_over_their_content_while_held_or_always() {
     let slider = bounds(&rule, "kaydırıcı");
     rule.host().pointer_down(at(slider.left + 100.0, slider.top + 24.0), -1, 0, PointerType::Touch);
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     let value = shown(&rule, "değer").expect("shown while held");
     assert!(near(value.left + 15.0, slider.left + 100.0, 0.5) && value.bottom < slider.top + 4.0, "{value:?}");
     rule.host().pointer_up(at(slider.left + 100.0, slider.top + 24.0), -1, 0);

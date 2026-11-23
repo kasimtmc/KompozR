@@ -143,6 +143,8 @@ fn checkbox_draws_as_compose_1_4() {
         TriStateCheckbox(s.get(), on_click(|| {}), modifier = Modifier.test_tag("kutu"), enabled = e.get());
     }));
     let cs = light_color_scheme();
+    // (the clock by hand: the drawings on the way see the tick turning)
+    rule.main_clock().set_auto_advance(false);
     let drawn = |rule: &KompozTestRule| {
         let canvas = rule.draw();
         let c = bounds(rule, "kutu").center();

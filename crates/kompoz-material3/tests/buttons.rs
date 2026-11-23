@@ -48,6 +48,17 @@ tests!(
     floating_action_button_samples,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 /// A shared shape equal to `shape`.
 fn same(a: &Arc<dyn Shape>, shape: impl Shape) -> bool {
     **a == *(&shape as &dyn Shape)
@@ -371,6 +382,8 @@ fn expressive_fabs_come_in_sizes_and_extended_ones_narrow_to_their_icon() {
     // (the measuring Text draws "Yeni" too: one more in the FAB)
     assert_eq!(rule.drawn_texts().iter().filter(|t| *t == "Yeni").count(), 2);
     rule.on_node_with_content_description("Yeni").assert_has_click_action();
+    // (the clock by hand: the check on the way sees the buttons narrowing)
+    rule.main_clock().set_auto_advance(false);
 
     expanded.set(false);
     rule.advance_frame();
@@ -378,7 +391,7 @@ fn expressive_fabs_come_in_sizes_and_extended_ones_narrow_to_their_icon() {
     rule.advance_frame();
     let narrowing = bounds(&rule, "küçük").width();
     assert!(narrowing < small.width() - 1.0 && narrowing > 57.0, "on its way: {narrowing}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     rule.advance_time_by(2000);
     // Collapsed: square FABs around their icons, the labels gone.
     let (small, medium, large) = (bounds(&rule, "küçük"), bounds(&rule, "orta-uzun"), bounds(&rule, "büyük"));
@@ -1155,6 +1168,8 @@ fn extended_fab_of_text_and_icon_collapses_to_its_icon() {
     // (the label isn't in the FAB's semantics)
     assert_eq!(rule.on_all_nodes_with_text("Yeni ileti").fetch_semantics_nodes().len(), 0);
     rule.on_node_with_tag("fab").assert_has_click_action();
+    // (the clock by hand: the check on the way sees the button narrowing)
+    rule.main_clock().set_auto_advance(false);
     expanded.set(false);
     rule.advance_frame();
     rule.advance_frame();

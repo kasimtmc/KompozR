@@ -939,10 +939,11 @@ fn a_press_in_a_scrollable_shows_after_the_tap_timeout() {
     h.pointer_up(inside, -1, 0);
     rule.wait_for_idle();
     assert!(*list_log.borrow() == ["Press", "Release"] && clicks.get() == 2, "{:?}", list_log.borrow());
-    // Waited for: the press's own deadline wakes it.
+    // Waited for: the press's own deadline wakes it (the clock taken past the tap timeout: a delay, which waiting
+    // for idle doesn't wait for, as Compose's doesn't).
     list_log.borrow_mut().clear();
     h.pointer_down(inside, -1, 0, PointerType::Touch);
-    rule.wait_for_idle();
+    rule.main_clock().advance_time_by(130);
     assert_eq!(*list_log.borrow(), ["Press"]);
     h.pointer_up(inside, -1, 0);
     rule.wait_for_idle();
@@ -1019,7 +1020,7 @@ fn scrollable_states_hear_the_users_drags() {
     for i in 1..=6 {
         h.pointer_move(at(start.x, start.y - 10.0 * i as f32), -1, 0);
     }
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     assert!(rule.on_node_with_text("liste true").exists());
     // Dragged before the tap timeout: the press under it never shows.
     assert!(

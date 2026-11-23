@@ -81,6 +81,7 @@ fn basic_marquee_scrolls_what_doesnt_fit_and_its_copy_follows() {
             },
         );
     }));
+    rule.main_clock().set_auto_advance(false);
     shown.set(true);
     rule.advance_frame();
     let marquee = rule.on_node_with_tag("kayan").get_unclipped_bounds_in_root();

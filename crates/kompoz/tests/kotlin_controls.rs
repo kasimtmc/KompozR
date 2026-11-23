@@ -166,7 +166,7 @@ fn expressive_sliders() {
     rule.on_node_with_tag("değer").assert_does_not_exist();
     rule.on_node_with_tag("ses").perform_touch_input(|t| t.down(t.center()));
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
     rule.on_node_with_tag("değer").assert_exists().assert_text_equals(&["75"]);
     rule.on_node_with_tag("ses").perform_touch_input(|t| t.up());
     rule.advance_frame();
@@ -236,7 +236,7 @@ fn slider_samples() {
 fn hold(rule: &KompozTestRule, node: kompoz::test::SemanticsNodeInteraction<'_>) {
     node.perform_touch_input(|t| t.down(t.center()));
     rule.advance_frame();
-    rule.wait_for_idle_within(0);
+    rule.wait_for_idle();
 }
 
 /// The slider found by its set-progress action.

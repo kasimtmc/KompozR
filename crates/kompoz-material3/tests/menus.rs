@@ -54,6 +54,17 @@ tests!(
 
 type Log = Rc<RefCell<Vec<String>>>;
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn new_log() -> Log {
     Rc::new(RefCell::new(Vec::new()))
 }
@@ -891,13 +902,15 @@ fn menus_scale_and_fade_in_from_where_they_meet_their_anchor() {
             None => (1.0, Offset::Zero, alpha),
         }
     };
+    // (the clock by hand: the checks on the way see the menu scaling and fading)
+    rule.main_clock().set_auto_advance(false);
     open.set(true);
     rule.advance_frame();
     rule.advance_frame();
     rule.advance_time_by(16);
     let (scale, pivot, alpha) = layer(&rule);
     assert!(scale > 0.79 && scale < 1.0 && alpha < 1.0, "{scale} {alpha}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let (menu, anchor) = (bounds(&rule, "menü"), bounds(&rule, "çapa"));
     // Below its anchor: the top edge; across, the middle of the overlap (20 to 120 with 20 to 132).
     let surface_width = menu.width();
@@ -911,18 +924,18 @@ fn menus_scale_and_fade_in_from_where_they_meet_their_anchor() {
     let (scale, _, alpha) = layer(&rule);
     assert!(scale < 1.0 && alpha < 1.0, "{scale} {alpha}");
     rule.on_node_with_text("Bir").assert_exists(); // (on its way out)
-    rule.wait_for_idle();
+    finish_animations(&rule);
     rule.on_node_with_text("Bir").assert_does_not_exist();
     assert_eq!(rule.host().overlay_count(), 0);
     // Above its anchor (no room below): from its bottom edge.
     at_bottom.set(true);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     open.set(true);
     rule.advance_frame();
     rule.advance_frame();
     rule.advance_time_by(16);
     let (scale, pivot, _) = layer(&rule);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let (menu, anchor) = (bounds(&rule, "menü"), bounds(&rule, "çapa"));
     assert!(near(menu.bottom, anchor.top, 0.5), "{menu:?} {anchor:?}");
     assert!(scale < 1.0 && near(pivot.y, menu.height(), 1.0), "{scale} {pivot:?} {menu:?}");
@@ -1633,13 +1646,15 @@ fn items_lay_out_their_icons_and_text() {
     let drawn_in =
         |rule: &KompozTestRule, at: Rect| rule.draw().vector_bounds.iter().filter(|b| at.contains(b.center())).count();
     assert_eq!(drawn_in(&rule, item), 0);
+    // (the clock by hand: the check on the way sees the text moving)
+    rule.main_clock().set_auto_advance(false);
     checked.set(true);
     rule.advance_frame();
     rule.advance_frame();
     rule.advance_time_by(32);
     let moving = text_bounds(&rule, "İşaret");
     assert!(moving.left > unchecked.left && moving.left < unchecked.left + 32.0, "{moving:?}");
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert_eq!(drawn_in(&rule, item), 1);
     let tick = *rule.draw().vector_bounds.iter().find(|b| item.contains(b.center())).unwrap();
     let checked_text = text_bounds(&rule, "İşaret");
@@ -1835,7 +1850,9 @@ fn menus_take_their_properties_shapes_colors_and_paddings() {
         p.set(source.collect_is_pressed_as_state().get());
     }));
     rule.host().pointer_down(item.center(), -1, 0, PointerType::Touch);
-    rule.wait_for_idle();
+    // (in a scrollable menu the press is told after Compose's TapIndicationDelay, 100 ms: the clock taken past it, a
+    // delay not waited for)
+    rule.main_clock().advance_time_by(kompoz_foundation::clickable::TapIndicationDelay + 16);
     probe.wait_for_idle();
     assert!(pressed.get(), "the press told to its source");
     rule.host().pointer_up(item.center(), -1, 0);

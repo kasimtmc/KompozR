@@ -95,6 +95,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
             Box(modifier = Modifier.size_wh((1.0 + w.value()).dp(), 10.dp()).test_tag("geçiş"));
         });
     }));
+    rule.main_clock().set_auto_advance(false);
     assert!(step.current_state() == 0 && !step.is_idle()); // not there yet
     open.set(true);
     rule.advance_time_by(160);
@@ -102,7 +103,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
     let w = width(&rule, "geçiş");
     assert!(w > 30.0 && w < 71.0, "{w}");
     assert!(step.current_state() == 0 && !step.is_idle());
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(near(width(&rule, "geçiş"), 101.0, 0.5) && step.current_state() == 1 && step.is_idle());
     // Turned back on the way: not idle though back where it is going. Adapted: Compose's transition takes the target it
     // was going to (2) as its current state when its target changes (C++ kept 1).
@@ -111,7 +112,7 @@ fn mutable_transition_states_animate_from_where_they_start() {
     step.set_target_state(1);
     rule.advance_frame();
     assert!(step.current_state() == 2 && step.target_state() == 1 && !step.is_idle());
-    rule.wait_for_idle();
+    settle(&rule);
     assert!(step.is_idle() && step.current_state() == 1 && near(width(&rule, "geçiş"), 101.0, 0.5));
 }
 

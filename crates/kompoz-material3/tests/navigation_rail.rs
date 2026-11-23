@@ -43,6 +43,17 @@ tests!(
     navigation_items_animate_composing_nothing_around_them,
 );
 
+/// Waits for idle with the clock advancing on its own (Compose's `mainClock.autoAdvance = true; waitForIdle()`):
+/// what a test stepping the clock by hand does to let the animations run their course; its `auto_advance` put
+/// back after.
+fn finish_animations(rule: &KompozTestRule) {
+    let clock = rule.main_clock();
+    let was = clock.auto_advance();
+    clock.set_auto_advance(true);
+    rule.wait_for_idle();
+    clock.set_auto_advance(was);
+}
+
 fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
@@ -565,6 +576,8 @@ fn wide_navigation_rail_widens_and_puts_the_labels_after_the_icons() {
     ); // 6 dp down
     rule.on_node_with_tag("Gelen").assert(kompoz_test::is_selected());
 
+    // (the clock by hand: the check on the way sees the rail widening)
+    rule.main_clock().set_auto_advance(false);
     let state = get(&rail);
     let st = state.clone();
     launch(&scope, async move { st.expand().await });
@@ -574,7 +587,7 @@ fn wide_navigation_rail_widens_and_puts_the_labels_after_the_icons() {
     let widening = at("ray").width();
     assert!(widening > 97.0 && widening < 219.0, "{widening}"); // on its way
     assert_eq!(state.target_value(), WideNavigationRailValue::Expanded);
-    rule.wait_for_idle();
+    finish_animations(&rule);
     // Expanded: 220 dp, items 56 dp tall from 20 dp in, the label after the icon and the indicator round both.
     // (M15's expanded item is as wide as its indicator and 20 dp, 120 here — `widthStartIcon`; the C++'s items
     // took the rail's whole width.)
@@ -592,12 +605,12 @@ fn wide_navigation_rail_widens_and_puts_the_labels_after_the_icons() {
     );
 
     tap(&rule, at("Giden").center());
-    rule.wait_for_idle();
+    finish_animations(&rule);
     let after = pills(&rule.draw(), cs.secondary_container);
     assert!(selected.get() == 1 && after.len() == 1 && near(after[0].0.top, 180.0, 0.5), "{after:?}");
     let st = state.clone();
     launch(&scope, async move { st.toggle().await });
-    rule.wait_for_idle();
+    finish_animations(&rule);
     assert_eq!(state.current_value(), WideNavigationRailValue::Collapsed);
     assert!(same_rect(at("ray"), 0.0, 0.0, 96.0, 600.0) && same_rect(at("Giden"), 0.0, 192.0, 96.0, 64.0));
 }

@@ -554,10 +554,11 @@ fn nested_styles_add_up_for_the_text() {
     }));
     let c = rule.draw();
     let at = c.texts.iter().position(|t| t == "iç içe").expect("drawn");
-    ComposeFoundationFlags::set_is_inherited_text_style_enabled(false);
     // (the nearer style's color, the farther one's size)
     assert_eq!(c.colors[at], Color::Green);
     assert!(bounds(&rule, "iç içe").height() > bounds(&rule, "düz").height());
+    // (off after the finders: they run what is due, the keep check drawing again)
+    ComposeFoundationFlags::set_is_inherited_text_style_enabled(false);
 }
 
 fn without_the_flag_text_inherits_nothing() {
