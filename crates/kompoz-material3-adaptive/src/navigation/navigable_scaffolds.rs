@@ -4,7 +4,8 @@
 //!
 //! Compose has them in androidMain only (Compose for desktop 1.2.0 has neither: its desktop has no back events);
 //! KompozR's desktop has back (Escape, the back mouse button, a predictive gesture where the platform gives one:
-//! kompoz-ui's `PredictiveBackHandler`), so Android's are ported as they are.
+//! kompoz-ui's `PredictiveBackHandler`, activity-compose's on navigationevent, as Android's), so Android's are ported
+//! as they are.
 
 use super::three_pane_scaffold_navigator::{BackNavigationBehavior, NavigatorContentKey, ThreePaneScaffoldNavigator};
 use crate::layout::{

@@ -259,7 +259,7 @@ fn scales(rule: &KompozTestRule) -> Scales {
 }
 
 fn back_event(touch_x: f32, progress: f32, swipe_edge: kompoz_ui::back::SwipeEdge) -> kompoz_ui::back::BackEventCompat {
-    kompoz_ui::back::BackEventCompat { touch_x, touch_y: 400.0, progress, swipe_edge }
+    kompoz_ui::back::BackEventCompat { touch_x, touch_y: 400.0, progress, swipe_edge, frame_time_millis: 0 }
 }
 
 fn drawer_sheets_follow_the_back_gesture() {

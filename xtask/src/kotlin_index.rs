@@ -59,6 +59,8 @@ const API_CRATES: &[&str] = &[
     // (stage 13: lifecycles, navigation)
     "kompoz-lifecycle",
     "kompoz-navigation",
+    // (stage 13 WP-E: navigation events)
+    "kompoz-navigationevent",
     "kompoz-test",
 ];
 

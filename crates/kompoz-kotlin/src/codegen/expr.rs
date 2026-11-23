@@ -760,6 +760,15 @@ impl Gen<'_, '_> {
             let mi = ident(item.rust, self.span(name.loc));
             return Out::plain(quote_spanned!(span=> #qi.#mi()), Ty::from_rust(item.ret));
         }
+        // (stage 13 WP-E) a nested object Rust names as a type of its own, read as a value: the unit struct is its
+        // value (`NavigationEventInfo.None` → `NavigationEventInfoNone`; the outer one a trait, `Outer::None` isn't
+        // Rust)
+        if is_pascal(&name.name)
+            && let Some(rust) = crate::index::rust_type(&format!("{q}.{}", name.name))
+        {
+            let ri = self.name_ident(rust, name.loc);
+            return Out::plain(quote_spanned!(span=> #ri), Ty::named(rust));
+        }
         if is_pascal(&name.name) || name.name.chars().all(|c| !c.is_lowercase()) {
             let mi = self.name_ident(&name.name, name.loc);
             Out::plain(quote_spanned!(span=> #qi::#mi), Ty::named(q))

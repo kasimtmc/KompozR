@@ -290,7 +290,7 @@ fn back_handlers_most_recent_enabled_wins() {
 }
 
 fn back(progress: f32, edge: SwipeEdge) -> BackEventCompat {
-    BackEventCompat { touch_x: 0.0, touch_y: 0.0, progress, swipe_edge: edge }
+    BackEventCompat { touch_x: 0.0, touch_y: 0.0, progress, swipe_edge: edge, frame_time_millis: 0 }
 }
 
 fn predictive_back_handler_follows_the_gesture() {
@@ -326,12 +326,19 @@ fn predictive_back_handler_follows_the_gesture() {
     let host = rule.host();
     assert!(host.wants_back());
     // A gesture: its steps (not the start) go to the flow; done, the code after it runs.
-    host.back_started(BackEventCompat { touch_x: 10.0, touch_y: 300.0, progress: 0.0, swipe_edge: SwipeEdge::Right });
+    host.back_started(BackEventCompat {
+        touch_x: 10.0,
+        touch_y: 300.0,
+        progress: 0.0,
+        swipe_edge: SwipeEdge::Right,
+        frame_time_millis: 0,
+    });
     host.back_progressed(BackEventCompat {
         touch_x: 20.0,
         touch_y: 300.0,
         progress: 0.2,
         swipe_edge: SwipeEdge::Right,
+        frame_time_millis: 0,
     });
     rule.wait_for_idle();
     host.back_progressed(BackEventCompat {
@@ -339,6 +346,7 @@ fn predictive_back_handler_follows_the_gesture() {
         touch_y: 300.0,
         progress: 0.6,
         swipe_edge: SwipeEdge::Right,
+        frame_time_millis: 0,
     });
     rule.wait_for_idle();
     assert_eq!(*log.borrow(), ["0.2R", "0.6R"]);
@@ -366,14 +374,18 @@ fn predictive_back_handler_follows_the_gesture() {
     host.back_cancelled();
     rule.wait_for_idle();
     assert_eq!(taken(&log), ["end", "0.4L", "end"]);
-    // Disabled during a gesture: it is called off, and back goes to the handler under it.
+    // Disabled during a gesture: the gesture stays its own to its end (Compose's: the dispatcher's handler in
+    // progress gets the gesture's terminal event, enabled or not — the C++ called it off and went on to the handler
+    // under it); the next back goes to the handler under it.
     host.back_started(BackEventCompat::default());
     rule.wait_for_idle();
     enabled.set(false);
     rule.wait_for_idle();
     assert!(host.back_invoked());
     rule.wait_for_idle();
-    assert_eq!(taken(&log), ["end", "outer"]);
+    assert_eq!(taken(&log), ["done", "end"]);
+    assert!(escape(&rule));
+    assert_eq!(taken(&log), ["outer"]);
     // A plain BackHandler takes the gesture only once it is done.
     host.back_started(BackEventCompat::default());
     host.back_progressed(back(0.5, SwipeEdge::Left));

@@ -33,6 +33,7 @@ kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-material3-adaptive = { path = "../kompoz-material3-adaptive" }
 kompoz-material3-adaptive-navigation-suite = { path = "../kompoz-material3-adaptive-navigation-suite" }
 kompoz-navigation = { path = "../kompoz-navigation" }
+kompoz-navigationevent = { path = "../kompoz-navigationevent" }
 kompoz-platform = { path = "../kompoz-platform" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-test = { path = "../kompoz-test", optional = true }
@@ -285,4 +286,11 @@ harness = false
 # from a .kt file; the rest of the API as an app writes it).
 [[test]]
 name = "kotlin_lifecycle"
+harness = false
+
+# (stage 13 WP-E) Back handling in Kotlin's syntax: activity-compose's and navigationevent-compose's samples from a
+# .kt file (BackHandler, PredictiveBackHandler, rememberNavigationEventDispatcherOwner) and navigationevent's
+# composables as an app writes them (NavigationBackHandler, NavigationEventHandler, rememberNavigationEventState).
+[[test]]
+name = "kotlin_navigation_event"
 harness = false

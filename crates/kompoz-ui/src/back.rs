@@ -1,18 +1,30 @@
-//! Back handling (C++'s back handlers; Compose's `BackHandler` and `PredictiveBackHandler` on Android's
-//! OnBackPressedDispatcher): handlers registered by composables, the most recently composed enabled one taking
-//! back; while a focusable popup or a dialog is on top, only the handlers composed in it (then its dismissal). A
-//! back gesture goes to the handler that would take back when it starts: its steps, then its end or its
-//! cancellation.
+//! Back handling, as activity-compose 1.13's (androidx.activity.compose's `BackHandler` and
+//! `PredictiveBackHandler`, on navigationevent's dispatcher): handlers registered with the nearest
+//! `LocalNavigationEventDispatcherOwner`'s dispatcher (the host's, at the root) while composed — the latest
+//! registered enabled one takes back, a focusable popup's or a dialog's (registered as it opens, before its
+//! content's) before the content under it —, enabled while the lifecycle is at least started. A back gesture goes to
+//! the handler that takes back when it starts, through its steps to its end or its cancellation. And androidx's
+//! `BackEventCompat`, the gesture's step as these handlers have it.
+//!
+//! The legacy `OnBackPressedDispatcher` (activity's, which activity-compose falls back to without a navigation event
+//! dispatcher owner) isn't KompozR's: the host always provides an owner.
 
-use kompoz_coroutines::{
-    Channel, CoroutineContext, CoroutineScope, Flow, LocalDispatcher, current_effect_coroutine_context,
+use kompoz_coroutines::{Channel, CoroutineScope, Flow, Job, flow, remember_coroutine_scope};
+use kompoz_lifecycle::{LifecycleStartEffect, LifecycleStartStopEffectScope};
+use kompoz_navigationevent::{
+    LocalNavigationEventDispatcherOwner, NavigationEvent, NavigationEventDispatcher, NavigationEventDispatcherOwner,
+    NavigationEventHandler, NavigationEventHandlerCallbacks, NavigationEventInfo,
 };
-use kompoz_runtime::{DisposableEffect, KompozitionLocal, kompozable, on_dispose, remember};
+use kompoz_runtime::{
+    DisposableEffect, SideEffect, current_composite_key_hash, kompozable, on_dispose, remember_keyed,
+};
 use std::cell::{Cell, RefCell};
 use std::future::Future;
-use std::rc::{Rc, Weak};
+use std::pin::Pin;
+use std::rc::Rc;
 
-/// The edge a back gesture started from (androidx's BackEventCompat.SwipeEdge).
+/// The edge a back gesture started from (androidx's `BackEventCompat.SwipeEdge`, its `EDGE_LEFT`, `EDGE_RIGHT` and
+/// `EDGE_NONE`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum SwipeEdge {
     #[default]
@@ -22,325 +34,351 @@ pub enum SwipeEdge {
     None,
 }
 
-/// A step of a back gesture (androidx's BackEventCompat): where the touch is, how far along it is (0 to 1), the
-/// edge it came from.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+impl SwipeEdge {
+    /// Its navigation event's `swipeEdge` (`NavigationEvent.EDGE_…`).
+    pub fn to_int(self) -> i32 {
+        match self {
+            SwipeEdge::Left => NavigationEvent::EDGE_LEFT,
+            SwipeEdge::Right => NavigationEvent::EDGE_RIGHT,
+            SwipeEdge::None => NavigationEvent::EDGE_NONE,
+        }
+    }
+
+    /// The edge of a navigation event's `swipeEdge`.
+    pub fn from_int(swipe_edge: i32) -> SwipeEdge {
+        match swipe_edge {
+            NavigationEvent::EDGE_LEFT => SwipeEdge::Left,
+            NavigationEvent::EDGE_RIGHT => SwipeEdge::Right,
+            _ => SwipeEdge::None,
+        }
+    }
+}
+
+/// A step of a back gesture (androidx's `BackEventCompat`): where the touch is, how far along it is (0 to 1), the
+/// edge it came from, its frame time (ms). Kotlin reads its fields as properties (`backEvent.progress`).
+#[derive(Clone, Copy, PartialEq, Debug, Default, kompoz_runtime::KotlinProperties)]
 pub struct BackEventCompat {
     pub touch_x: f32,
     pub touch_y: f32,
     pub progress: f32,
     pub swipe_edge: SwipeEdge,
+    pub frame_time_millis: i64,
 }
 
-/// The window a back handler belongs to: a focusable popup's or dialog's (its handlers take back while it is on
-/// top), none for the host's. Equal when it is the same one.
-#[derive(Clone)]
-pub struct BackScope(pub(crate) Rc<()>);
-
-impl BackScope {
-    pub(crate) fn new() -> BackScope {
-        BackScope(Rc::new(()))
+impl BackEventCompat {
+    /// The event as navigationevent has it (Kotlin's `toNavigationEvent()`).
+    pub fn to_navigation_event(&self) -> NavigationEvent {
+        NavigationEvent {
+            touch_x: self.touch_x,
+            touch_y: self.touch_y,
+            progress: self.progress,
+            swipe_edge: self.swipe_edge.to_int(),
+            frame_time_millis: self.frame_time_millis,
+        }
     }
 }
 
-impl PartialEq for BackScope {
+/// Kotlin's `BackEventCompat(navigationEvent)`.
+impl From<NavigationEvent> for BackEventCompat {
+    fn from(event: NavigationEvent) -> Self {
+        BackEventCompat {
+            touch_x: event.touch_x,
+            touch_y: event.touch_y,
+            progress: event.progress,
+            swipe_edge: SwipeEdge::from_int(event.swipe_edge),
+            frame_time_millis: event.frame_time_millis,
+        }
+    }
+}
+
+/// A back handler's info (activity-compose's private `BackHandlerInfo` / `PredictiveBackHandlerInfo`: the owner
+/// and the composition's place).
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct BackHandlerInfo {
+    owner: usize,
+    composite_key: u64,
+    predictive: bool,
+}
+
+impl NavigationEventInfo for BackHandlerInfo {}
+
+type Handler = NavigationEventHandler<BackHandlerInfo>;
+
+/// What a back handler does (activity-compose's internal `BackHandlerCompat`'s members), one place for the
+/// navigation event handler to call; each is given that handler (Kotlin's `isBackEnabled` is its).
+trait BackHandlerCompat: 'static {
+    fn on_back_started(&self, handler: &Handler, event: BackEventCompat) {
+        let _ = (handler, event);
+    }
+    fn on_back_progressed(&self, handler: &Handler, event: BackEventCompat) {
+        let _ = (handler, event);
+    }
+    fn on_back_completed(&self, handler: &Handler);
+    fn on_back_cancelled(&self, handler: &Handler) {
+        let _ = handler;
+    }
+}
+
+/// The navigation event handler of a [`BackHandlerCompat`] (its `navigationEventHandler`).
+struct CompatCallbacks<C>(Rc<C>);
+
+impl<C: BackHandlerCompat> NavigationEventHandlerCallbacks<BackHandlerInfo> for CompatCallbacks<C> {
+    fn on_back_started(&self, handler: &Handler, event: NavigationEvent) {
+        self.0.on_back_started(handler, BackEventCompat::from(event));
+    }
+    fn on_back_progressed(&self, handler: &Handler, event: NavigationEvent) {
+        self.0.on_back_progressed(handler, BackEventCompat::from(event));
+    }
+    fn on_back_completed(&self, handler: &Handler) {
+        self.0.on_back_completed(handler);
+    }
+    fn on_back_cancelled(&self, handler: &Handler) {
+        self.0.on_back_cancelled(handler);
+    }
+}
+
+/// A back handler as composed: what it does and its navigation event handler (disabled until its lifecycle effect
+/// enables it). Equal by identity (it keys the effects).
+struct Composed<C> {
+    compat: Rc<C>,
+    handler: NavigationEventHandler<BackHandlerInfo>,
+}
+
+impl<C> Clone for Composed<C> {
+    fn clone(&self) -> Self {
+        Composed { compat: self.compat.clone(), handler: self.handler.clone() }
+    }
+}
+
+impl<C> PartialEq for Composed<C> {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.compat, &other.compat)
+    }
+}
+
+impl<C: BackHandlerCompat> Composed<C> {
+    fn new(compat: C, info: BackHandlerInfo) -> Composed<C> {
+        let compat = Rc::new(compat);
+        let handler = NavigationEventHandler::new(info, false, CompatCallbacks(compat.clone()));
+        Composed { compat, handler }
+    }
+}
+
+/// The owner's dispatcher (activity-compose's `BackHandlerDispatcherCompat`, its navigation event side), compared
+/// by identity.
+#[derive(Clone, PartialEq)]
+struct DispatcherOf(NavigationEventDispatcher);
+
+/// An owner compared by identity.
+struct SameOwner(Rc<dyn NavigationEventDispatcherOwner>);
+
+impl PartialEq for SameOwner {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl std::fmt::Debug for BackScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "BackScope({:p})", Rc::as_ptr(&self.0))
-    }
+/// The nearest owner.
+///
+/// # Panics
+/// None provided (activity-compose's error, its legacy owner named too).
+#[track_caller]
+fn owner() -> Rc<dyn NavigationEventDispatcherOwner> {
+    LocalNavigationEventDispatcherOwner.current().unwrap_or_else(|| {
+        panic!(
+            "No NavigationEventDispatcherOwner was provided via LocalNavigationEventDispatcherOwner and no \
+             OnBackPressedDispatcherOwner was provided via LocalOnBackPressedDispatcherOwner. Please provide one of \
+             the two."
+        )
+    })
 }
 
-/// The back scope of the focusable popup or dialog being composed (none outside one).
-pub static LocalBackScope: KompozitionLocal<Option<BackScope>> = KompozitionLocal::new(|| None);
-
-/// The host's back dispatcher, as composables reach it (Compose's LocalOnBackPressedDispatcherOwner).
-pub static LocalBackDispatcher: KompozitionLocal<Option<BackDispatcherRef>> = KompozitionLocal::new(|| None);
-
-/// A handle of a host's back dispatcher (weak).
-#[derive(Clone)]
-pub struct BackDispatcherRef(pub(crate) Weak<BackDispatcher>);
-
-impl PartialEq for BackDispatcherRef {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.ptr_eq(&other.0)
-    }
-}
-
-impl BackDispatcherRef {
-    pub fn get(&self) -> Option<Rc<BackDispatcher>> {
-        self.0.upgrade()
-    }
-}
-
-type EventFn = Rc<dyn Fn(BackEventCompat)>;
-
-/// A back handler (androidx's OnBackPressedCallback): what back does while it is enabled, what a gesture's start,
-/// steps and cancellation do, and the window it belongs to.
-pub struct BackCallback {
-    on_back: RefCell<Rc<dyn Fn()>>,
-    on_started: RefCell<Option<EventFn>>,
-    on_progressed: RefCell<Option<EventFn>>,
-    on_cancelled: RefCell<Option<Rc<dyn Fn()>>>,
-    enabled: Cell<bool>,
-    scope: RefCell<Option<BackScope>>,
-}
-
-impl BackCallback {
-    /// A handler of the host's window doing `on_back`.
-    pub fn new(on_back: impl Fn() + 'static) -> Rc<BackCallback> {
-        Rc::new(BackCallback {
-            on_back: RefCell::new(Rc::new(on_back)),
-            on_started: RefCell::new(None),
-            on_progressed: RefCell::new(None),
-            on_cancelled: RefCell::new(None),
-            enabled: Cell::new(true),
-            scope: RefCell::new(None),
-        })
-    }
-    pub fn is_enabled(&self) -> bool {
-        self.enabled.get()
-    }
-    pub fn set_enabled(&self, enabled: bool) {
-        self.enabled.set(enabled);
-    }
-    pub fn set_on_back(&self, on_back: impl Fn() + 'static) {
-        *self.on_back.borrow_mut() = Rc::new(on_back);
-    }
-    /// What a gesture's start, steps and cancellation do (a predictive handler's).
-    pub fn set_gesture(
-        &self,
-        on_started: impl Fn(BackEventCompat) + 'static,
-        on_progressed: impl Fn(BackEventCompat) + 'static,
-        on_cancelled: impl Fn() + 'static,
-    ) {
-        *self.on_started.borrow_mut() = Some(Rc::new(on_started));
-        *self.on_progressed.borrow_mut() = Some(Rc::new(on_progressed));
-        *self.on_cancelled.borrow_mut() = Some(Rc::new(on_cancelled));
-    }
-    /// The window it belongs to (none: the host's).
-    pub fn set_scope(&self, scope: Option<BackScope>) {
-        *self.scope.borrow_mut() = scope;
-    }
-    pub fn scope(&self) -> Option<BackScope> {
-        self.scope.borrow().clone()
-    }
-
-    fn back(&self) {
-        let f = self.on_back.borrow().clone();
-        f();
-    }
-    fn started(&self, event: BackEventCompat) {
-        let f = self.on_started.borrow().clone();
-        if let Some(f) = f {
-            f(event);
-        }
-    }
-    fn progressed(&self, event: BackEventCompat) {
-        let f = self.on_progressed.borrow().clone();
-        if let Some(f) = f {
-            f(event);
-        }
-    }
-    fn cancelled(&self) {
-        let f = self.on_cancelled.borrow().clone();
-        if let Some(f) = f {
-            f();
-        }
-    }
-}
-
-/// The host's back handlers, oldest first, and the one a gesture under way goes to. Nothing is borrowed while a
-/// handler runs.
-#[derive(Default)]
-pub struct BackDispatcher {
-    handlers: RefCell<Vec<Weak<BackCallback>>>,
-    gesture: RefCell<Option<Rc<BackCallback>>>,
-}
-
-impl BackDispatcher {
-    /// Adds a handler (held by its owner: gone with it); the latest added comes first.
-    pub fn add(&self, callback: &Rc<BackCallback>) {
-        self.handlers.borrow_mut().push(Rc::downgrade(callback));
-    }
-
-    /// Removes a handler; a gesture going to it is cancelled.
-    pub fn remove(&self, callback: &Rc<BackCallback>) {
-        let w = Rc::downgrade(callback);
-        self.handlers.borrow_mut().retain(|x| !x.ptr_eq(&w));
-        let gesture = self.gesture.borrow().clone();
-        if gesture.is_some_and(|g| Rc::ptr_eq(&g, callback)) {
-            self.gesture.borrow_mut().take();
-            callback.cancelled();
-        }
-    }
-
-    /// The handler that would take back now (C++'s `backTarget`): the most recent enabled one of `scope`'s window
-    /// (none: the host's).
-    pub fn target(&self, scope: Option<&BackScope>) -> Option<Rc<BackCallback>> {
-        self.handlers.borrow_mut().retain(|w| w.strong_count() > 0);
-        let handlers: Vec<Rc<BackCallback>> = self.handlers.borrow().iter().filter_map(Weak::upgrade).collect();
-        handlers.into_iter().rev().find(|h| h.enabled.get() && h.scope.borrow().as_ref() == scope)
-    }
-
-    /// A gesture started: it goes to the handler that would take back (a gesture never ended is cancelled first).
-    pub fn started(&self, scope: Option<&BackScope>, event: BackEventCompat) {
-        self.cancelled();
-        let target = self.target(scope);
-        *self.gesture.borrow_mut() = target.clone();
-        if let Some(t) = target {
-            t.started(event);
-        }
-    }
-
-    pub fn progressed(&self, event: BackEventCompat) {
-        let gesture = self.gesture.borrow().clone();
-        if let Some(g) = gesture {
-            g.progressed(event);
-        }
-    }
-
-    /// The gesture under way was called off.
-    pub fn cancelled(&self) {
-        let gesture = self.gesture.borrow_mut().take();
-        if let Some(g) = gesture {
-            g.cancelled();
-        }
-    }
-
-    /// The gesture under way ended: whether its handler took back (it is still the one that would; else it is
-    /// cancelled and the caller goes back the plain way).
-    pub(crate) fn gesture_invoked(&self, scope: Option<&BackScope>) -> bool {
-        let Some(g) = self.gesture.borrow_mut().take() else { return false };
-        if self.target(scope).is_some_and(|t| Rc::ptr_eq(&t, &g)) {
-            g.back();
-            return true;
-        }
-        g.cancelled();
-        false
-    }
-
-    /// Back pressed (not a gesture): the handler that would take it runs; whether there was one.
-    pub(crate) fn pressed(&self, scope: Option<&BackScope>) -> bool {
-        match self.target(scope) {
-            Some(t) => {
-                t.back();
-                true
-            }
-            None => false,
-        }
-    }
-}
-
-/// Handles back while `enabled` (Compose's `BackHandler`): the most recently composed enabled handler takes it;
-/// in a focusable popup or a dialog, it belongs to that window.
-#[kompozable]
-pub fn BackHandler(#[default(true)] enabled: bool, on_back: impl Fn() + 'static) {
-    let callback = remember(|| BackCallback::new(|| {}));
-    callback.set_on_back(on_back);
-    callback.set_enabled(enabled);
-    callback.set_scope(LocalBackScope.current());
-    RegisterBackCallback(callback);
-}
-
-/// Registers a handler with the host's dispatcher while it is in the composition.
+/// Registers a composed handler as activity-compose does (`isOnBackPressedLifecycleOrderMaintained`, its default):
+/// added to the dispatcher while composed, enabled as `enabled` says while the lifecycle is at least started.
 #[kompozable(inline)]
-fn RegisterBackCallback(callback: Rc<BackCallback>) {
-    let dispatcher = LocalBackDispatcher.current();
-    DisposableEffect(dispatcher.clone(), move || {
-        let d = dispatcher.and_then(|d| d.get());
-        if let Some(d) = &d {
-            d.add(&callback);
-        }
-        on_dispose(move || {
-            if let Some(d) = d {
-                d.remove(&callback);
-            }
-        })
+fn register<C: BackHandlerCompat>(
+    dispatcher: NavigationEventDispatcher,
+    composed: Composed<C>,
+    enabled: bool,
+    set_enabled: fn(&Composed<C>, bool),
+) {
+    let c = composed.clone();
+    LifecycleStartEffect(
+        (enabled, composed.clone()),
+        effects = move |scope: &LifecycleStartStopEffectScope| {
+            set_enabled(&c, enabled);
+            let c = c.clone();
+            scope.on_stop_or_dispose(move |_| set_enabled(&c, false))
+        },
+    );
+    DisposableEffect((DispatcherOf(dispatcher.clone()), composed.clone()), move || {
+        dispatcher.add_handler(&composed.handler);
+        on_dispose(move || composed.handler.remove())
     });
 }
 
-/// One run of a predictive handler's `on_back` (androidx's OnBackInstance): its coroutine and the channel its
-/// flow reads the gesture's steps from.
-struct PredictiveRun {
-    on_back: RefCell<Rc<dyn Fn(Flow<BackEventCompat>) -> std::pin::Pin<Box<dyn Future<Output = ()>>>>>,
-    scope: RefCell<Option<CoroutineScope>>,
-    steps: RefCell<Option<Channel<BackEventCompat>>>,
-    predictive: Cell<bool>,
+/// A plain back handler (activity-compose's private `ComposeBackHandler`): its `on_back` the latest given.
+struct ComposeBackHandler {
+    current_on_back_completed: RefCell<Rc<dyn Fn()>>,
 }
 
-impl PredictiveRun {
-    fn start(&self, launch_in: &(kompoz_coroutines::Dispatcher, CoroutineContext), gesture: bool) {
-        self.cancel();
-        let steps = Channel::buffered();
-        // (androidx's OnBackInstance launches in the handler's `rememberCoroutineScope`: the effect context)
-        let scope = CoroutineScope::new_with_context(&launch_in.0, launch_in.1.clone());
-        let on_back = self.on_back.borrow().clone();
-        let flow = steps.receive_as_flow();
-        *self.steps.borrow_mut() = Some(steps);
-        *self.scope.borrow_mut() = Some(scope.clone());
-        self.predictive.set(gesture);
-        scope.launch(on_back(flow));
+impl BackHandlerCompat for ComposeBackHandler {
+    fn on_back_completed(&self, _: &Handler) {
+        let f = self.current_on_back_completed.borrow().clone();
+        f();
+    }
+}
+
+/// Handles back presses while `enabled` (Compose's `BackHandler`, activity-compose's): `on_back` runs when back
+/// completes (a press, or a gesture's end). The handler composed last among the enabled ones takes it; it is
+/// enabled only while the lifecycle is at least started. Call it unconditionally and use `enabled` (a conditional
+/// call changes the order of composition).
+///
+/// # Panics
+/// No `LocalNavigationEventDispatcherOwner` (outside a host).
+#[kompozable]
+pub fn BackHandler(#[default(true)] enabled: bool, on_back: impl Fn() + 'static) {
+    let owner = owner();
+    let o = owner.clone();
+    let dispatcher = remember_keyed(SameOwner(owner.clone()), move || o.navigation_event_dispatcher());
+    let composite_key = current_composite_key_hash();
+    let info = BackHandlerInfo { owner: Rc::as_ptr(&owner) as *const () as usize, composite_key, predictive: false };
+    let handler = remember_keyed((DispatcherOf(dispatcher.clone()), composite_key), move || {
+        Composed::new(ComposeBackHandler { current_on_back_completed: RefCell::new(Rc::new(|| {})) }, info)
+    });
+    let h = handler.clone();
+    SideEffect(move || *h.compat.current_on_back_completed.borrow_mut() = Rc::new(on_back));
+    register(dispatcher, handler, enabled, |c, enabled| c.handler.set_is_back_enabled(enabled));
+}
+
+type OnBack = Rc<dyn Fn(Flow<BackEventCompat>) -> Pin<Box<dyn Future<Output = ()>>>>;
+
+/// A predictive back handler (activity-compose's private `ComposePredictiveBackHandler`): one gesture at a time, each
+/// with a channel of its steps and a coroutine of `on_back` collecting them (in the composition's scope); the
+/// gesture's end closes the channel (the collection ends and the coroutine goes on), its cancellation cancels both.
+struct ComposePredictiveBackHandler {
+    scope: CoroutineScope,
+    current_on_back: RefCell<OnBack>,
+    active_channel: RefCell<Option<Channel<BackEventCompat>>>,
+    active_job: RefCell<Option<Job>>,
+    is_predictive_back: Cell<bool>,
+}
+
+impl ComposePredictiveBackHandler {
+    /// Kotlin's overridden `isBackEnabled` setter: disabled with a gesture's coroutine done, what is left of it
+    /// goes.
+    fn set_is_back_enabled(&self, handler: &Handler, value: bool) {
+        let finished = self.active_job.borrow().as_ref().is_some_and(|j| !j.is_active());
+        if !value && handler.is_back_enabled() && finished {
+            self.on_back_cancelled(handler);
+        }
+        handler.set_is_back_enabled(value);
     }
 
-    fn cancel(&self) {
-        if let Some(s) = self.scope.borrow_mut().take() {
-            s.cancel();
+    /// A gesture's run: a fresh channel, and `on_back` launched with its flow (which it must collect).
+    fn launch_new_gesture(&self, handler: &Handler) {
+        let channel = Channel::buffered();
+        let steps = channel.receive_as_flow();
+        *self.active_channel.borrow_mut() = Some(channel);
+        let (handler, on_back) = (handler.clone(), self.current_on_back.borrow().clone());
+        let job = self.scope.launch(async move {
+            if handler.is_back_enabled() {
+                let completed = Rc::new(Cell::new(false));
+                let c = completed.clone();
+                // (Kotlin's `onCompletion { completed = true }`)
+                let progress = flow(move |down| {
+                    let (steps, c) = (steps.clone(), c.clone());
+                    async move {
+                        steps.collect_async(move |v| down.emit(v)).await;
+                        c.set(true);
+                    }
+                });
+                on_back(progress).await;
+                assert!(completed.get(), "You must collect the progress flow");
+            }
+        });
+        *self.active_job.borrow_mut() = Some(job);
+    }
+}
+
+impl BackHandlerCompat for ComposePredictiveBackHandler {
+    fn on_back_started(&self, handler: &Handler, _: BackEventCompat) {
+        // (a gesture before not cleaned up: called off first)
+        self.on_back_cancelled(handler);
+        if handler.is_back_enabled() {
+            self.is_predictive_back.set(true);
+            self.launch_new_gesture(handler);
         }
-        if let Some(c) = self.steps.borrow_mut().take() {
+    }
+
+    fn on_back_progressed(&self, _: &Handler, event: BackEventCompat) {
+        // (not suspending: a full buffer drops the step)
+        if let Some(c) = self.active_channel.borrow().as_ref() {
+            c.try_send(event);
+        }
+    }
+
+    fn on_back_completed(&self, handler: &Handler) {
+        // (a press: delivered through a fresh run)
+        let has_channel = self.active_channel.borrow().is_some();
+        if has_channel && !self.is_predictive_back.get() {
+            self.on_back_cancelled(handler);
+        }
+        if self.active_channel.borrow().is_none() {
+            self.is_predictive_back.set(false);
+            self.launch_new_gesture(handler);
+        }
+        // (closed: the collection ends, completed)
+        if let Some(c) = self.active_channel.borrow().as_ref() {
+            c.close();
+        }
+        self.is_predictive_back.set(false);
+    }
+
+    fn on_back_cancelled(&self, _: &Handler) {
+        let channel = self.active_channel.borrow_mut().take();
+        if let Some(c) = channel {
             c.cancel();
         }
-        self.predictive.set(false);
+        let job = self.active_job.borrow_mut().take();
+        if let Some(j) = job {
+            j.cancel();
+        }
+        self.is_predictive_back.set(false);
     }
 }
 
-/// Handles back with the gesture's progress (Compose's `PredictiveBackHandler`): `on_back` runs in a coroutine
-/// from the gesture's start, its flow the gesture's steps; the gesture done, the flow ends and the coroutine goes
-/// on to its end; called off, the coroutine is cancelled. A plain press runs it with a flow that ends at once.
+/// Handles back with the gesture's progress while `enabled` (Compose's `PredictiveBackHandler`, activity-compose's):
+/// `on_back` runs in a coroutine from the gesture's start, its flow the gesture's steps; the gesture done, the flow
+/// ends and the coroutine goes on to its end; called off, the coroutine is cancelled (its `CancellationException`).
+/// A press runs it with a flow that ends at once. `on_back` must collect the flow. The handler composed last among
+/// the enabled ones takes it; enabled only while the lifecycle is at least started. (A gesture may start in a frame
+/// before an `enabled` change is applied, and still come here; disabled during a gesture, the gesture goes on here.)
+///
+/// # Panics
+/// No `LocalNavigationEventDispatcherOwner` (outside a host).
 #[kompozable]
 pub fn PredictiveBackHandler<Fut: Future<Output = ()> + 'static>(
     #[default(true)] enabled: bool,
     on_back: impl Fn(Flow<BackEventCompat>) -> Fut + 'static,
 ) {
-    let dispatcher = LocalDispatcher.current().expect("kompoz: no dispatcher provided (LocalDispatcher)");
-    let dispatcher = (dispatcher, current_effect_coroutine_context());
-    let run = remember(|| {
-        Rc::new(PredictiveRun {
-            on_back: RefCell::new(Rc::new(|_| Box::pin(async {}))),
-            scope: RefCell::new(None),
-            steps: RefCell::new(None),
-            predictive: Cell::new(false),
-        })
+    let owner = owner();
+    let o = owner.clone();
+    let dispatcher = remember_keyed(SameOwner(owner.clone()), move || o.navigation_event_dispatcher());
+    let scope = remember_coroutine_scope();
+    let composite_key = current_composite_key_hash();
+    let info = BackHandlerInfo { owner: Rc::as_ptr(&owner) as *const () as usize, composite_key, predictive: true };
+    let handler = remember_keyed((DispatcherOf(dispatcher.clone()), composite_key), move || {
+        let state = ComposePredictiveBackHandler {
+            scope,
+            current_on_back: RefCell::new(Rc::new(|_| Box::pin(async {}))),
+            active_channel: RefCell::new(None),
+            active_job: RefCell::new(None),
+            is_predictive_back: Cell::new(false),
+        };
+        Composed::new(state, info)
     });
-    *run.on_back.borrow_mut() = Rc::new(move |flow| Box::pin(on_back(flow)));
-    let callback = remember(|| BackCallback::new(|| {}));
-    let (r, d) = (run.clone(), dispatcher.clone());
-    callback.set_on_back(move || {
-        if !r.predictive.get() {
-            r.start(&d, false);
-        }
-        if let Some(steps) = r.steps.borrow().as_ref() {
-            steps.close();
-        }
-        r.predictive.set(false);
-    });
-    let (r1, r2, r3, d1) = (run.clone(), run.clone(), run.clone(), dispatcher);
-    callback.set_gesture(
-        move |_| r1.start(&d1, true),
-        move |event| {
-            if let Some(steps) = r2.steps.borrow().as_ref() {
-                steps.try_send(event);
-            }
-        },
-        move || r3.cancel(),
-    );
-    callback.set_enabled(enabled);
-    callback.set_scope(LocalBackScope.current());
-    RegisterBackCallback(callback);
-    let r = run.clone();
-    DisposableEffect((), move || on_dispose(move || r.cancel()));
+    let h = handler.clone();
+    SideEffect(move || *h.compat.current_on_back.borrow_mut() = Rc::new(move |flow| Box::pin(on_back(flow))));
+    register(dispatcher, handler, enabled, |c, enabled| c.compat.set_is_back_enabled(&c.handler, enabled));
 }

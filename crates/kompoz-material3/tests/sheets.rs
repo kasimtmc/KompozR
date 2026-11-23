@@ -319,7 +319,13 @@ fn scales(rule: &KompozTestRule) -> Scales {
 }
 
 fn back_event(touch_x: f32, progress: f32) -> kompoz_ui::back::BackEventCompat {
-    kompoz_ui::back::BackEventCompat { touch_x, touch_y: 400.0, progress, swipe_edge: kompoz_ui::back::SwipeEdge::Left }
+    kompoz_ui::back::BackEventCompat {
+        touch_x,
+        touch_y: 400.0,
+        progress,
+        swipe_edge: kompoz_ui::back::SwipeEdge::Left,
+        frame_time_millis: 0,
+    }
 }
 
 fn modal_bottom_sheet_follows_the_back_gesture() {

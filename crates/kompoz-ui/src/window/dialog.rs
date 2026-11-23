@@ -3,13 +3,13 @@
 
 use super::popup::emit_popup_root;
 use super::{PopupKind, PopupSpec};
-use crate::back::BackScope;
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope};
 use crate::modifier::Modifier;
+use crate::navigationevent::{WindowBackHandler, remember_window_navigation};
 use crate::platform::{Insets, InsetsKind, LocalDensity, LocalLayoutDirection, LocalSystemInsets};
 use crate::unit::Constraints;
 use kompoz_graphics::Dp;
-use kompoz_runtime::{kompozable, remember, remember_keyed};
+use kompoz_runtime::{kompozable, remember_keyed};
 use std::rc::Rc;
 
 /// What a dialog does (Compose's DialogProperties): whether back or a press outside its content dismisses it,
@@ -65,13 +65,17 @@ pub fn Dialog(
     #[default(DialogProperties::default())] properties: DialogProperties,
     content: impl Fn() + 'static,
 ) {
-    let back_scope = remember(BackScope::new);
+    let on_dismiss_request: Rc<dyn Fn()> = Rc::new(on_dismiss_request);
+    // (a window of its own, as Android's: back dismisses it as `dismiss_on_back_press` says, its content's handlers
+    // first)
+    let navigation = remember_window_navigation();
+    WindowBackHandler(navigation.clone(), on_dismiss_request.clone(), properties.dismiss_on_back_press);
     let density = LocalDensity.current();
     let insets = LocalSystemInsets.current();
     let spec = Rc::new(PopupSpec {
         kind: PopupKind::Dialog { properties },
-        on_dismiss_request: Rc::new(on_dismiss_request),
-        back_scope: back_scope.clone(),
+        on_dismiss_request,
+        navigation: Some(navigation),
         layout_direction: LocalLayoutDirection.current(),
     });
     let mut margins = Insets::Zero;
@@ -90,7 +94,7 @@ pub fn Dialog(
     }
     let policy: Rc<dyn MeasurePolicy> =
         remember_keyed(margins, move || Rc::new(DialogRootPolicy { margins }) as Rc<dyn MeasurePolicy>);
-    emit_popup_root(spec, Some(back_scope), policy, Modifier.semantics(|c| c.dialog()), (None, None), content);
+    emit_popup_root(spec, policy, Modifier.semantics(|c| c.dialog()), (None, None), content);
 }
 
 /// A dialog root's policy: the window's size, its content measured within the margins and centered in them.

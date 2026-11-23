@@ -936,10 +936,7 @@ pub(crate) fn key_event(host: &KompozHost, event: KeyEvent) -> bool {
     if focus.dispatch_key_event(&event, &mut || false) {
         return true;
     }
-    if event.r#type == KeyEventType::KeyDown && (event.key == Key::Escape || event.key == Key::Back) {
-        return host.back_pressed();
-    }
-    false
+    host.back_key(&event)
 }
 
 /// A rotary scroll along the focused path; whether a node took it.

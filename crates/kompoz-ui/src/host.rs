@@ -2,7 +2,7 @@
 //! ComposeScene, C++'s KompozHost). It knows nothing of windows or GPUs: a platform calls `frame` and `draw`, sends
 //! input and the environment, and gets the callbacks only it can serve.
 
-use crate::back::{BackDispatcher, BackDispatcherRef, BackEventCompat, LocalBackDispatcher};
+use crate::back::BackEventCompat;
 use crate::display_list::DisplayList;
 use crate::draganddrop::{DragAndDropManager, DragAndDropTransferAction, DragAndDropTransferData};
 use crate::focus::{FocusDirection, FocusManager, FocusOwner};
@@ -15,6 +15,7 @@ use crate::input::{
 };
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::media_query::{LocalUiMediaScope, MediaInfo, UiMediaScope};
+use crate::navigationevent::{BackRouter, WindowNavigation};
 use crate::node::{LayoutNode, Owner};
 use crate::platform::*;
 use crate::semantics::{AccessibilityNode, SemanticsAction, SemanticsOwner};
@@ -169,8 +170,11 @@ pub struct KompozHost {
     pub focus: Rc<FocusOwner>,
     /// The popups' and dialogs' roots.
     pub overlays: Overlays,
-    /// The back handlers.
-    pub back: Rc<BackDispatcher>,
+    /// The window's navigation: its root navigation event dispatcher's owner (CMP's
+    /// `DefaultArchitectureComponentsOwner`'s navigation part), what back handlers register with, and its inputs
+    /// (the keys', the platform's back); back goes to it, or to a focusable popup's or a dialog's on top.
+    navigation: Rc<WindowNavigation>,
+    back_router: BackRouter,
     /// The focused editor's input sessions.
     text_input: TextInputService,
     /// What the app runs on (LocalUiMediaScope), and the device as the platform last told it.
@@ -263,7 +267,8 @@ impl KompozHost {
             input: RefCell::new(InputState::default()),
             overlays,
             focus,
-            back: Rc::new(BackDispatcher::default()),
+            navigation: WindowNavigation::new(),
+            back_router: BackRouter::default(),
             text_input: TextInputService::new(platform.clone()),
             media: UiMediaScope::new(),
             media_info: Cell::new(MediaInfo::default()),
@@ -298,7 +303,7 @@ impl KompozHost {
         let dispatcher = self.dispatcher.clone();
         let effect_coroutine_context = self.owner.effect_coroutine_context();
         let focus_manager = FocusManager { owner: Some(Rc::downgrade(&self.focus)) };
-        let back = BackDispatcherRef(Rc::downgrade(&self.back));
+        let navigation_event_owner = self.navigation.owner();
         let font_family_resolver = self.font_family_resolver.clone();
         let text_toolbar: Rc<dyn TextToolbar> = Rc::new(PlatformTextToolbar::new(platform.clone()));
         let accessibility_manager: Rc<dyn AccessibilityManager> = Rc::new(DefaultAccessibilityManager);
@@ -336,7 +341,7 @@ impl KompozHost {
                 LocalSoftwareKeyboardController.provides(SoftwareKeyboardController::new(text_input.clone())),
                 LocalPlatform.provides(platform.clone()),
                 LocalFocusManager.provides(focus_manager.clone()),
-                LocalBackDispatcher.provides(Some(back.clone())),
+                kompoz_navigationevent::LocalNavigationEventDispatcherOwner.provides(navigation_event_owner.clone()),
                 LocalDispatcher.provides(Some(dispatcher.clone())),
                 LocalEffectCoroutineContext.provides(effect_coroutine_context.clone()),
                 LocalIdleWorkQueue.provides(Some(idle_work.clone())),
@@ -781,10 +786,20 @@ impl KompozHost {
         crate::input::pointer_up(self, position, t, pointer_id)
     }
 
-    /// A mouse button pressed or let go with the mouse at `position`.
+    /// A mouse button pressed or let go with the mouse at `position`. The back and forward buttons also make their
+    /// keys (Key::Back, Key::Forward) after the pointer event, as Android's input reader synthesizes them: the Back
+    /// key goes back when nothing takes it. Whether the pointer event (or that key) was taken.
     pub fn mouse_button(&self, position: Offset, time_nanos: i64, button: PointerButton, pressed: bool) -> bool {
         let t = self.event_time(time_nanos);
-        crate::input::mouse_button(self, position, t, button, pressed, None)
+        let consumed = crate::input::mouse_button(self, position, t, button, pressed, None);
+        let key = match button {
+            PointerButton::Back => Key::Back,
+            PointerButton::Forward => Key::Forward,
+            _ => return consumed,
+        };
+        let r#type = if pressed { KeyEventType::KeyDown } else { KeyEventType::KeyUp };
+        let modifiers = self.input.borrow().keyboard_modifiers();
+        self.send_key_event(KeyEvent::new(key, r#type, modifiers)) || consumed
     }
 
     pub fn pointer_cancel(&self) {
@@ -881,52 +896,57 @@ impl KompozHost {
 
     // ---- Back ----
 
-    /// The back scope of the focusable popup or dialog on top, if any.
-    fn top_back_scope(&self) -> Option<crate::back::BackScope> {
-        self.owner.top_focusable_popup().and_then(|p| p.popup_spec()).map(|s| s.back_scope.clone())
+    /// The app's root navigation event dispatcher (CMP's window's): what [`LocalNavigationEventDispatcherOwner`]
+    /// gives at the root, and what the platform's back is sent to.
+    ///
+    /// [`LocalNavigationEventDispatcherOwner`]: kompoz_navigationevent::LocalNavigationEventDispatcherOwner
+    pub fn navigation_event_dispatcher(&self) -> kompoz_navigationevent::NavigationEventDispatcher {
+        self.navigation.owner.dispatcher.clone()
     }
 
-    /// Back pressed (not a gesture): a focusable popup or a dialog on top takes it (its handlers, else its
-    /// dismissal); else the most recent enabled back handler. False if nothing took it (the platform's default:
-    /// leaving the app).
-    pub(crate) fn back_pressed(&self) -> bool {
-        if let Some(taken) = crate::window::popup_back(self) {
-            return taken;
-        }
-        self.back.pressed(None)
+    /// The navigation of the window on top: a focusable popup's or a dialog's, else the host's.
+    fn top_navigation(&self) -> Rc<WindowNavigation> {
+        self.owner
+            .top_focusable_popup()
+            .and_then(|p| p.popup_spec())
+            .and_then(|s| s.navigation.clone())
+            .unwrap_or_else(|| self.navigation.clone())
     }
 
-    /// A back gesture started: it goes to the handler that would take back now (a popup's on top; none there:
-    /// the popup is dismissed when the gesture ends).
+    /// A key event nothing took: Escape or the Back key goes back in the window on top (CMP's
+    /// `BackNavigationEventInput`) if a handler there takes back. Whether it did.
+    pub(crate) fn back_key(&self, event: &KeyEvent) -> bool {
+        self.top_navigation().keys.on_key_event(event)
+    }
+
+    /// A back gesture started (Android's `onBackStarted`): it goes to the handler that takes back now (the
+    /// handlers composed last, a focusable popup's or a dialog's before the content under it), through its steps
+    /// to its end or cancellation. Nothing if nothing takes back (the platform's own gesture). A gesture never
+    /// ended is called off first.
     pub fn back_started(&self, event: BackEventCompat) {
-        let scope = self.top_back_scope();
-        self.back.started(scope.as_ref(), event);
+        self.back_router.started(&self.top_navigation(), event);
     }
 
-    /// A step of the back gesture.
+    /// A step of the back gesture (Android's `onBackProgressed`).
     pub fn back_progressed(&self, event: BackEventCompat) {
-        self.back.progressed(event);
+        self.back_router.progressed(event);
     }
 
-    /// The back gesture was called off.
+    /// The back gesture was called off (Android's `onBackCancelled`).
     pub fn back_cancelled(&self) {
-        self.back.cancelled();
+        self.back_router.cancelled();
     }
 
-    /// Back invoked (a press, or a gesture's end): the gesture's handler if it still takes back, else as a press.
-    /// False if nothing took it.
+    /// Back invoked (Android's `onBackInvoked`: a gesture's end, or the back button): back completed. False if
+    /// nothing takes back (the platform's default: leaving the app).
     pub fn back_invoked(&self) -> bool {
-        let scope = self.top_back_scope();
-        if self.back.gesture_invoked(scope.as_ref()) {
-            return true;
-        }
-        self.back_pressed()
+        self.back_router.invoked(&self.top_navigation())
     }
 
-    /// Whether back would do something (a focusable popup or a dialog on top, or an enabled handler): the
+    /// Whether back would do something (an enabled handler: a focusable popup's or a dialog's, or the app's): the
     /// platform lets the app handle back (Android's predictive back) only then.
     pub fn wants_back(&self) -> bool {
-        self.owner.top_focusable_popup().is_some() || self.back.target(None).is_some()
+        self.top_navigation().platform.is_registered()
     }
 
     // ---- Focus ----
@@ -944,10 +964,6 @@ impl KompozHost {
     /// Takes the focus from where it is (the focus manager's `clear_focus`); whether it was cleared.
     pub fn clear_focus(&self, force: bool) -> bool {
         self.focus.clear_focus(force)
-    }
-
-    pub(crate) fn owner(&self) -> &Rc<Owner> {
-        &self.owner
     }
 
     /// The window info's keyboard modifiers (what key events carry).
@@ -1403,5 +1419,7 @@ impl Drop for KompozHost {
         if self.root.is_attached() {
             self.root.detach();
         }
+        // (the handlers left with the composition; the inputs go with the root dispatcher)
+        self.navigation.dispose();
     }
 }

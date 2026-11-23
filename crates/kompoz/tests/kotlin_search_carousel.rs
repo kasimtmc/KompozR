@@ -572,6 +572,7 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
         touch_y: y,
         progress,
         swipe_edge: edge,
+        frame_time_millis: 0,
     };
     rule.host().back_started(back(10.0, 400.0, 0.0, kompoz::ui::back::SwipeEdge::Left));
     rule.host().back_progressed(back(60.0, 600.0, 0.5, kompoz::ui::back::SwipeEdge::Left));

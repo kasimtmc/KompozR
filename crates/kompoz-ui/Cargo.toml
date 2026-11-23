@@ -14,6 +14,9 @@ kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-graphics = { path = "../kompoz-graphics" }
 # (the host is the app's lifecycle owner: LocalLifecycleOwner, as CMP's ui is)
 kompoz-lifecycle = { path = "../kompoz-lifecycle" }
+# (the host is the app's root navigation event dispatcher owner, back handling is on it: CMP's ui depends on
+# navigationevent)
+kompoz-navigationevent = { path = "../kompoz-navigationevent" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 parking_lot.workspace = true

@@ -215,7 +215,7 @@ impl<T> PartialEq for StateFlow<T> {
     }
 }
 
-impl<T: Clone + PartialEq + Send + 'static> StateFlow<T> {
+impl<T: Clone + PartialEq + 'static> StateFlow<T> {
     pub fn value(&self) -> T {
         self.inner.cell.lock().value.clone()
     }
@@ -232,7 +232,7 @@ impl<T: Clone + PartialEq + Send + 'static> StateFlow<T> {
     }
 }
 
-impl<T: Clone + PartialEq + Send + 'static> AsFlow<T> for StateFlow<T> {
+impl<T: Clone + PartialEq + 'static> AsFlow<T> for StateFlow<T> {
     fn as_flow(&self) -> Flow<T> {
         let inner = self.inner.clone();
         flow(move |emit| {
@@ -285,13 +285,13 @@ impl<T> std::ops::Deref for MutableStateFlow<T> {
     }
 }
 
-impl<T: Clone + PartialEq + Send + 'static> AsFlow<T> for MutableStateFlow<T> {
+impl<T: Clone + PartialEq + 'static> AsFlow<T> for MutableStateFlow<T> {
     fn as_flow(&self) -> Flow<T> {
         self.flow.as_flow()
     }
 }
 
-impl<T: Clone + PartialEq + Send + 'static> MutableStateFlow<T> {
+impl<T: Clone + PartialEq + 'static> MutableStateFlow<T> {
     pub fn new(value: T) -> Self {
         MutableStateFlow {
             flow: StateFlow {

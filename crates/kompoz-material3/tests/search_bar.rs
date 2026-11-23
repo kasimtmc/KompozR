@@ -570,6 +570,7 @@ fn full_screen_search_grows_out_of_its_bar_and_follows_the_back_gesture() {
         touch_y: y,
         progress,
         swipe_edge: edge,
+        frame_time_millis: 0,
     };
     rule.host().back_started(back(10.0, 400.0, 0.0, kompoz_ui::back::SwipeEdge::Left));
     rule.host().back_progressed(back(60.0, 600.0, 0.5, kompoz_ui::back::SwipeEdge::Left));
@@ -1077,6 +1078,7 @@ fn the_search_bar_with_content_follows_the_back_gesture() {
         touch_y: y,
         progress,
         swipe_edge: kompoz_ui::back::SwipeEdge::Left,
+        frame_time_millis: 0,
     };
     // (the flow a predictive back handler collects starts with the first progress, not the start: its first event is
     // where the finger's moves are counted from — the C++ counted from the start)

@@ -899,6 +899,7 @@ fn drawer_sheets_follow_the_back_gesture() {
         touch_y: 400.0,
         progress,
         swipe_edge: SwipeEdge::Left,
+        frame_time_millis: 0,
     };
     // From the drawer's own edge: stretched across and lowered (scaled about the window's edge half way down).
     let host = rule.host();

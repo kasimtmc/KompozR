@@ -20,7 +20,6 @@ pub use desktop_popup::{
 pub use dialog::{Dialog, DialogProperties};
 pub use popup::{AlignmentOffsetPositionProvider, Popup, PopupPositionProvider, PopupProperties};
 
-use crate::back::BackScope;
 use crate::graphics_context::GraphicsContext;
 use crate::host::KompozHost;
 use crate::node::{LayoutNode, Owner};
@@ -33,7 +32,8 @@ use std::rc::{Rc, Weak};
 pub(crate) struct PopupSpec {
     pub(crate) kind: PopupKind,
     pub(crate) on_dismiss_request: Rc<dyn Fn()>,
-    pub(crate) back_scope: BackScope,
+    /// Its window's navigation (a focusable popup's, a dialog's): where back goes while it is on top.
+    pub(crate) navigation: Option<Rc<crate::navigationevent::WindowNavigation>>,
     /// The layout direction where it was composed (its provider's).
     pub(crate) layout_direction: LayoutDirection,
 }
@@ -49,12 +49,6 @@ impl PopupSpec {
         match &self.kind {
             PopupKind::Popup { properties, .. } => properties.focusable,
             PopupKind::Dialog { .. } => true,
-        }
-    }
-    pub(crate) fn dismiss_on_back_press(&self) -> bool {
-        match &self.kind {
-            PopupKind::Popup { properties, .. } => properties.dismiss_on_back_press,
-            PopupKind::Dialog { properties } => properties.dismiss_on_back_press,
         }
     }
     pub(crate) fn dismiss_on_click_outside(&self) -> bool {
@@ -328,23 +322,6 @@ fn dismiss_bounds(root: &Rc<LayoutNode>, spec: &PopupSpec) -> Rect {
         Some(n) if n.is_placed() => n.coordinates().bounds_in_root(),
         _ => Rect::Zero,
     }
-}
-
-/// Back pressed (or a back gesture ended without a handler taking it) with a focusable popup or a dialog on top:
-/// its own handlers first, else its dismissal (if it says so); taken either way (C++'s `defaultKeyAction`
-/// Escape). None if no such popup is on top.
-pub(crate) fn popup_back(host: &KompozHost) -> Option<bool> {
-    let owner = host.owner();
-    let top = owner.top_focusable_popup()?;
-    let spec = top.popup_spec()?;
-    if host.back.pressed(Some(&spec.back_scope)) {
-        return Some(true);
-    }
-    if spec.dismiss_on_back_press() {
-        let dismiss = spec.on_dismiss_request.clone();
-        dismiss();
-    }
-    Some(true)
 }
 
 impl Owner {

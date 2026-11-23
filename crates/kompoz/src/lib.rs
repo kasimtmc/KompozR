@@ -40,6 +40,8 @@ pub use kompoz_material3_adaptive as material3_adaptive;
 pub use kompoz_material3_adaptive_navigation_suite as material3_adaptive_navigation_suite;
 // (stage 13: androidx.navigation and Navigation 3)
 pub use kompoz_navigation as navigation;
+// (stage 13: androidx.navigationevent and androidx.navigationevent.compose)
+pub use kompoz_navigationevent as navigationevent;
 pub use kompoz_platform as platform;
 pub use kompoz_runtime as runtime;
 /// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
@@ -144,6 +146,9 @@ pub mod prelude {
     pub use kompoz_material3_adaptive::prelude::*;
     pub use kompoz_material3_adaptive_navigation_suite::prelude::*;
     // (navigation's names join as its packages add them: `pub use kompoz_navigation::*;`)
+    // (stage 13 WP-E: androidx.navigationevent{,.compose} — NavigationEvent, the dispatcher and its owner, handlers,
+    // inputs, NavigationBackHandler, rememberNavigationEventState…)
+    pub use kompoz_navigationevent::*;
     pub use kompoz_runtime::*;
     pub use kompoz_text::*;
     pub use kompoz_ui::*;
@@ -185,6 +190,9 @@ pub mod prelude {
     // androidx.compose.ui.backhandler.BackHandler), the keys of androidx.compose.ui.input.key, the semantics' custom
     // actions, the focus requester)
     pub use kompoz_ui::back::BackHandler;
+    // (stage 13 WP-E: activity-compose's predictive back handler and androidx.activity's BackEventCompat, as a Compose
+    // app imports them beside BackHandler)
+    pub use kompoz_ui::back::{BackEventCompat, PredictiveBackHandler};
     pub use kompoz_ui::focus::FocusRequester;
     pub use kompoz_ui::input::{Key, KeyEvent, KeyEventType};
     pub use kompoz_ui::semantics::CustomAccessibilityAction;

@@ -3,17 +3,18 @@
 
 use super::{PopupKind, PopupSpec};
 use crate::alignment::Alignment;
-use crate::back::{BackScope, LocalBackScope};
 use crate::input::KeyHandler;
 use crate::layout::{Measurable, MeasurePolicy, MeasureResult, MeasureScope, Placeable};
 use crate::modifier::Modifier;
+use crate::navigationevent::{WindowBackHandler, remember_window_navigation};
 use crate::node::LayoutNode;
 use crate::platform::{LocalDensity, LocalLayoutDirection};
 use crate::unit::Constraints;
 use kompoz_graphics::{IntOffset, IntRect, IntSize, LayoutDirection};
+use kompoz_navigationevent::LocalNavigationEventDispatcherOwner;
 use kompoz_runtime::{
     KompozitionLocalProvider, current_composite_key_hash, current_kompozition_local_map, emit, kompozable,
-    kompozable_block, remember,
+    kompozable_block,
 };
 use std::rc::Rc;
 
@@ -121,17 +122,23 @@ pub fn Popup(
         Some(p) => p,
         None => Rc::new(AlignmentOffsetPositionProvider { alignment, offset }),
     };
-    let back_scope = remember(BackScope::new);
+    let on_dismiss_request: Rc<dyn Fn()> = Rc::new(on_dismiss_request);
+    // (a focusable popup takes all back events while on top: a window of its own, its content's handlers first)
+    let navigation = if properties.focusable {
+        let navigation = remember_window_navigation();
+        WindowBackHandler(navigation.clone(), on_dismiss_request.clone(), properties.dismiss_on_back_press);
+        Some(navigation)
+    } else {
+        None
+    };
     let spec = Rc::new(PopupSpec {
         kind: PopupKind::Popup { provider, properties },
-        on_dismiss_request: Rc::new(on_dismiss_request),
-        back_scope: back_scope.clone(),
+        on_dismiss_request,
+        navigation,
         layout_direction: LocalLayoutDirection.current(),
     });
-    let scope = properties.focusable.then_some(back_scope);
     emit_popup_root(
         spec,
-        scope,
         stack_policy(),
         Modifier.semantics(|c| c.popup()),
         (on_preview_key_event, on_key_event),
@@ -140,12 +147,11 @@ pub fn Popup(
 }
 
 /// Emits a popup's root: its spec, the window root's modifiers (its own root focus target and key node), its
-/// `root_policy` (measured in the window), then `content` in a stack with `content_modifier`, the back scope
-/// provided to it (a focusable one's).
+/// `root_policy` (measured in the window), then `content` in a stack with `content_modifier`, its window's
+/// navigation event dispatcher owner provided to it (a focusable one's).
 #[track_caller]
 pub(crate) fn emit_popup_root(
     spec: Rc<PopupSpec>,
-    back_scope: Option<BackScope>,
     root_policy: Rc<dyn MeasurePolicy>,
     content_modifier: Modifier,
     key_listeners: (Option<KeyHandler>, Option<KeyHandler>),
@@ -157,6 +163,7 @@ pub(crate) fn emit_popup_root(
     let window_root = crate::focus::window_root_modifier_with_keys(key_listeners.0, key_listeners.1)
         .then(crate::layout::window_insets_rulers(crate::platform::LocalSystemInsets.current()));
     let key = current_composite_key_hash();
+    let owner = spec.navigation.as_ref().map(|n| n.owner());
     emit(
         LayoutNode::new,
         move |node: &LayoutNode| {
@@ -169,13 +176,16 @@ pub(crate) fn emit_popup_root(
             node.set_composite_key(key);
             node.note_composed();
         },
-        move || {
-            let values = [LocalBackScope.provides(back_scope)];
-            kompozable_block!({
-                KompozitionLocalProvider(&values, move || {
-                    crate::layout::layout_into(content_modifier, stack_policy(), false, content)
+        move || match owner {
+            Some(owner) => {
+                let values = [LocalNavigationEventDispatcherOwner.provides(owner)];
+                kompozable_block!({
+                    KompozitionLocalProvider(&values, move || {
+                        crate::layout::layout_into(content_modifier, stack_policy(), false, content)
+                    })
                 })
-            })
+            }
+            None => crate::layout::layout_into(content_modifier, stack_policy(), false, content),
         },
     );
 }

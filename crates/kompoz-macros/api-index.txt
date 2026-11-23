@@ -268,6 +268,7 @@ kompoz-runtime/subcomposition kompozable Column rr crates/kompoz-runtime/tests/c
 * kompozable CommonDecorationBox rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/internal/text_field_impl.rs
 * super ComponentRectPositionProvider - PopupPositionProvider
 * super ComposeLifecycleOwner - LifecycleOwner
+* super ComposeNavigationEventDispatcherOwner - NavigationEventDispatcherOwner
 * fn Constraints dddd crates/kompoz-graphics/src/constraints.rs
 * super ConsumeSwipeWithinBottomSheetBoundsNestedScrollConnection - NestedScrollConnection
 * super ConsumedInsetsElement - ModifierNodeElement
@@ -421,6 +422,7 @@ kompoz-material3-adaptive/samples kompozable DetailPaneContent rrrdddr crates/ko
 * kompozable Dialog rdr crates/kompoz-ui/src/window/dialog.rs
 * fn DialogProperties dddd crates/kompoz-ui/src/window/dialog.rs
 * super DialogRootPolicy - MeasurePolicy
+* super DirectNavigationEventInput - NavigationEventInput
 * kompozable DisableCutCopy r crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable DisableSelection r crates/kompoz-foundation/src/text/selection/container.rs
 * kompozable DisableSoftKeyboard r crates/kompoz-material3/src/search_bar.rs
@@ -722,6 +724,7 @@ kompoz-foundation/grid kompozable GridLeaf rrrr crates/kompoz-foundation/tests/g
 * super HandlePositionProvider - PopupPositionProvider
 kompoz-runtime/macros fn Handler dd crates/kompoz-runtime/tests/macros.rs
 * super HarfrustBackend - FontBackend
+* super Hears - NavigationEventInputCallbacks
 * super HeightForSingleLineFieldElement - ModifierNodeElement
 * super HeightForSingleLineFieldNode - LayoutModifierNode
 * super HeightForSingleLineFieldNode - ModifierNode
@@ -1148,12 +1151,17 @@ kompoz/kotlin_adaptive fn NavItemData rd crates/kompoz/tests/kotlin_adaptive.rs
 * kompozable NavigableListDetailPaneScaffold rrrddddd crates/kompoz-material3-adaptive/src/navigation/navigable_scaffolds.rs
 kompoz-material3-adaptive/samples kompozable NavigableListDetailPaneScaffoldSample - crates/kompoz-material3-adaptive/tests/samples.rs
 * kompozable NavigableSupportingPaneScaffold rrrddddd crates/kompoz-material3-adaptive/src/navigation/navigable_scaffolds.rs
+* kompozable NavigationBackHandler rddr crates/kompoz-navigationevent/src/compose/mod.rs
 * kompozable NavigationBar dddddr crates/kompoz-material3/src/navigation_bar.rs
 * kompozable NavigationBarItem rrrdddddd crates/kompoz-material3/src/navigation_bar.rs
 * kompozable NavigationBarItemLayout rrrrrrr crates/kompoz-material3/src/navigation_bar.rs
 kompoz-material3/navigation_bar kompozable NavigationBarItemWithBadge - crates/kompoz-material3/tests/navigation_bar.rs
 kompoz-material3/navigation_bar kompozable NavigationBarSample - crates/kompoz-material3/tests/navigation_bar.rs
 * kompozable NavigationDrawerItem rrrdddddd crates/kompoz-material3/src/navigation_drawer.rs
+* fn NavigationEvent ddddd crates/kompoz-navigationevent/src/event.rs
+* kompozable NavigationEventHandler rdddddd crates/kompoz-navigationevent/src/compose/mod.rs
+* super NavigationEventInfo - DynEq
+* kompozable NavigationForwardHandler rddr crates/kompoz-navigationevent/src/compose/mod.rs
 * kompozable NavigationItem rrrrrrrrrrrrrrrrr crates/kompoz-material3/src/navigation_item.rs
 * kompozable NavigationItemIcon rd crates/kompoz-material3-adaptive-navigation-suite/src/navigation_suite_scaffold.rs
 * kompozable NavigationItemLayout rrrrrrrrrrrr crates/kompoz-material3/src/navigation_item.rs
@@ -1403,7 +1411,6 @@ kompoz-runtime/runtime kompozable ReadsItsImplCallback rrrr crates/kompoz-runtim
 * super RectangleShape - Shape
 kompoz-material3/swipe_pull kompozable RefreshItems r crates/kompoz-material3/tests/swipe_pull.rs
 kompoz-material3/swipe_pull kompozable RefreshTopAppBar rr crates/kompoz-material3/tests/swipe_pull.rs
-* kompozable RegisterBackCallback r crates/kompoz-ui/src/back.rs
 * super Registry - LifecycleImpl
 * super RemeasurementElement - ModifierNodeElement
 * super RemeasurementNode - ModifierNode
@@ -2093,6 +2100,7 @@ kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-fou
 * kompozable WideNavigationRailLayout rrrrrrrrrr crates/kompoz-material3/src/wide_navigation_rail.rs
 * super WideNavigationRailStateImpl - WideNavigationRailState
 * super WideNavigationRailValue - Saveable
+* kompozable WindowBackHandler rrr crates/kompoz-ui/src/navigationevent.rs
 * kompozable WindowButtonView rrrr crates/kompoz-platform/src/app/title_bar.rs
 * kompozable WindowButtons rrrrr crates/kompoz-platform/src/app/title_bar.rs
 * kompozable WindowFrame rrrr crates/kompoz-platform/src/app/title_bar.rs
@@ -2100,6 +2108,7 @@ kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-fou
 * super WindowInsetsRulersElement - ModifierNodeElement
 * super WindowInsetsRulersNode - LayoutModifierNode
 * super WindowInsetsRulersNode - ModifierNode
+* super WindowNavigationEventDispatcherOwner - NavigationEventDispatcherOwner
 * super WithAlignmentLineBlockElement - ModifierNodeElement
 * super WithAlignmentLineBlockNode - ModifierNode
 * super WithAlignmentLineBlockNode - ParentDataModifierNode
@@ -2623,6 +2632,7 @@ kompoz/kotlin_search_carousel fn painter_resource r crates/kompoz/tests/kotlin_s
 kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Slot
 kompoz/kotlin_adaptive kompozable reflow_adapt_strategy_sample - crates/kompoz/tests/kotlin_adaptive.rs
 kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crates/kompoz-material3-adaptive/tests/samples.rs
+* kompozable register rrrr crates/kompoz-ui/src/back.rs
 * method release d crates/kompoz-test/src/input.rs MouseInjectionScope
 * kompozable remember_accessibility_service_state ddd crates/kompoz-material3/src/internal/accessibility_service_state_provider.rs
 * kompozable remember_animated_magnifier_position r crates/kompoz-foundation/src/text/selection/container.rs
@@ -2670,6 +2680,8 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_list_detail_pane_scaffold_navigator_of_any ddd crates/kompoz-material3-adaptive/src/navigation/three_pane_scaffold_navigator.rs
 * kompozable remember_modal_bottom_sheet_state dD crates/kompoz-material3/src/modal_bottom_sheet.rs
 * kompozable remember_movable_content R crates/kompoz-material3-adaptive-navigation-suite/src/navigation_suite_scaffold.rs
+* kompozable remember_navigation_event_dispatcher_owner dd crates/kompoz-navigationevent/src/compose/mod.rs
+* kompozable remember_navigation_event_state rdd crates/kompoz-navigationevent/src/compose/mod.rs
 * kompozable remember_navigation_suite_scaffold_state d crates/kompoz-material3-adaptive-navigation-suite/src/navigation_suite_scaffold.rs
 * kompozable remember_old_scrollbar_adapter r crates/kompoz-foundation/src/scrollbar.rs
 * kompozable remember_on_text_layout r crates/kompoz-foundation/src/text/basic_text.rs
@@ -2734,6 +2746,7 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_vector_painter r crates/kompoz-ui/src/draw/painter.rs
 * kompozable remember_vector_painter_content rrddddddr crates/kompoz-ui/src/draw/vector.rs
 * kompozable remember_wide_navigation_rail_state d crates/kompoz-material3/src/wide_navigation_rail_state.rs
+* kompozable remember_window_navigation - crates/kompoz-ui/src/navigationevent.rs
 * kompozable remember_with_gap_search_bar_state ddddd crates/kompoz-material3/src/search_bar.rs
 * kompozable remembered_spline_based_decay - crates/kompoz-material3/src/floating_toolbar.rs
 * method render_in_shared_transition_scope_overlay rdd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
