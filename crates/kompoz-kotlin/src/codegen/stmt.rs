@@ -372,9 +372,11 @@ impl Gen<'_, '_> {
                 // parameters: `val onRefresh: () -> Unit = { … }` an action's `onClick` and the box's `onRefresh`)
                 let lambda_value = matches!(init, PropertyInit::Value(e) if matches!(e.kind, ExprKind::Lambda(_)));
                 let shared_closure = matches!(&ty, Ty::Fun(f) if f.shared) || lambda_value;
+                let deferred = !mutable && matches!(init, PropertyInit::None);
                 self.declare(&n.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
-                if shared_closure && let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
-                    l.shared_closure = true;
+                if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
+                    l.shared_closure = shared_closure;
+                    l.deferred = deferred;
                 }
                 quote_spanned!(span=> let #m #i #annot #value;)
             }
@@ -470,6 +472,9 @@ impl Gen<'_, '_> {
                             let v = combined(self, read, &l.ty);
                             return quote_spanned!(span=> #kt::KtMutableDelegate::set_value(&#i, #v););
                         }
+                        // (a `val` declared without a value takes its one value here: rustc checks it is given once,
+                        // as Kotlin does)
+                        LocalKind::Val if l.deferred && op == AssignOp::Assign => {}
                         LocalKind::Val | LocalKind::Param | LocalKind::LambdaParam => {
                             self.error(target.loc, format!("`{}` is a `val`: it can't be assigned", n.name));
                             return quote!();

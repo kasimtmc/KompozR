@@ -17,7 +17,9 @@ use kompoz_foundation::layout::{PaddingValues, WindowInsets};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_material_icons_core::Icons;
+use kompoz_material_icons_extended::Icons as ExtendedIcons;
 use kompoz_material3::prelude::*;
+use kompoz_material3_adaptive::{WindowSizeClass, current_window_adaptive_info};
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas, has_text};
 use kompoz_text::{FontWeight, TextOverflow, TextStyle};
@@ -53,6 +55,7 @@ tests!(
     top_app_bar_defaults_as_compose,
     // (M15's AppBarSamples)
     simple_top_app_bar,
+    simple_top_app_bar_with_adaptive_actions,
     simple_top_app_bar_with_subtitle,
     simple_center_aligned_top_app_bar,
     simple_center_aligned_top_app_bar_with_subtitle,
@@ -1320,8 +1323,7 @@ fn top_app_bar_defaults_as_compose() {
 
 // ---- M15's samples ---------------------------------------------------------------------------------------------
 // (as written, in Rust; Kotlin's twins in crates/kompoz/tests/kt/top_app_bars.kt. SimpleTopAppBarWithAdaptiveActions
-// reads material3-adaptive's currentWindowAdaptiveInfo, WP8's: its twins wait in tools/stage12-notes/wp4a/top-pending.rs
-// and top-pending-samples.kt.)
+// reads material3-adaptive's currentWindowAdaptiveInfo: kompoz-material3-adaptive, a dev-dependency here.)
 
 /// The samples' icon buttons, each in a plain tooltip above it (their `TooltipBox(positionProvider =
 /// TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above), tooltip = { PlainTooltip {
@@ -1401,6 +1403,76 @@ fn SimpleTopAppBar() {
                 title = || OneLine("Simple TopAppBar"),
                 navigation_icon = || MenuButton(),
                 actions = || FavoriteButton(),
+            );
+        },
+        content = |inner_padding: PaddingValues| SampleList(inner_padding, None),
+    );
+}
+
+#[kompozable]
+fn SimpleTopAppBarWithAdaptiveActions() {
+    let size_class = current_window_adaptive_info().window_size_class;
+    // Material guidelines state 3 items max in compact, and 5 items max elsewhere.
+    // To test this, try a resizable emulator, or a phone in landscape and portrait orientation.
+    let max_item_count = if size_class.min_width_dp() >= WindowSizeClass::WIDTH_DP_MEDIUM_LOWER_BOUND { 5 } else { 3 };
+    let icons = vec![
+        ExtendedIcons::Filled::Attachment(),
+        ExtendedIcons::Filled::Edit(),
+        ExtendedIcons::Outlined::Star(),
+        ExtendedIcons::Filled::Snooze(),
+        ExtendedIcons::Outlined::MarkEmailUnread(),
+    ];
+    let items = vec!["Attachment", "Edit", "Star", "Snooze", "Mark unread"];
+
+    Scaffold(
+        top_bar = move || {
+            let (icons, items) = (icons.clone(), items.clone());
+            TopAppBar(
+                title = || OneLine("Simple TopAppBar"),
+                navigation_icon = || MenuButton(),
+                actions = move || {
+                    let (icons, items) = (icons.clone(), items.clone());
+                    AppBarRow(
+                        max_item_count = max_item_count,
+                        overflow_indicator = |it: AppBarMenuState| {
+                            TooltipBox(
+                                position_provider =
+                                    TooltipDefaults.remember_tooltip_position_provider(TooltipAnchorPosition::Above),
+                                tooltip = |scope: &dyn TooltipScope| scope.PlainTooltip(content = || Text("Overflow")),
+                                state = remember_tooltip_state(),
+                                content = move || {
+                                    let it = it.clone();
+                                    IconButton(
+                                        on_click = move || it.show(),
+                                        content = || {
+                                            VectorIcon(
+                                                image_vector = Icons::Filled::MoreVert(),
+                                                content_description = Some("Overflow".into()),
+                                            )
+                                        },
+                                    );
+                                },
+                            );
+                        },
+                        content = move |scope: &dyn AppBarRowScope| {
+                            for (index, item) in items.iter().enumerate() {
+                                let icon = icons[index].clone();
+                                let item = item.to_string();
+                                let description = item.clone();
+                                scope.clickable_item(
+                                    || {},
+                                    move || {
+                                        VectorIcon(
+                                            image_vector = icon.clone(),
+                                            content_description = Some(description.clone()),
+                                        )
+                                    },
+                                    item,
+                                );
+                            }
+                        },
+                    );
+                },
             );
         },
         content = |inner_padding: PaddingValues| SampleList(inner_padding, None),
@@ -1804,6 +1876,33 @@ fn simple_top_app_bar() {
     // No scroll behavior: the bar stays as it is.
     assert_eq!(bar(&rule), (Rect::new(0.0, 0.0, 400.0, 64.0), light_color_scheme().surface));
     rule.on_node_with_text("0").assert_does_not_exist();
+}
+
+/// Whether a node of `description` is placed (AppBarRow composes every item and its overflow indicator, placing
+/// only those that show).
+fn placed_with_description(rule: &KompozTestRule, description: &str) -> bool {
+    rule.on_all_nodes_with_content_description(description).fetch_semantics_nodes().iter().any(|n| n.is_placed())
+}
+
+/// 400 dp wide (compact): three slots — M15's AppBarRow keeps the last of `maxItemCount` for the overflow
+/// indicator while items are left over: Attachment, Edit and the indicator, whose menu holds Star, Snooze and Mark
+/// unread. 700 dp (medium): all five, no indicator.
+fn simple_top_app_bar_with_adaptive_actions() {
+    let rule = KompozTestRule::new(SimpleTopAppBarWithAdaptiveActions);
+    assert_small_bar(&rule, "Simple TopAppBar", false, &["Attachment", "Edit", "Overflow"]);
+    for item in ["Star", "Snooze", "Mark unread"] {
+        assert!(!placed_with_description(&rule, item), "{item}");
+    }
+    rule.on_node_with_content_description("Overflow").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Star").assert_exists();
+    rule.on_node_with_text("Snooze").assert_exists();
+    rule.on_node_with_text("Mark unread").assert_exists();
+    let rule = KompozTestRule::with_viewport(SimpleTopAppBarWithAdaptiveActions, IntSize::new(700, 800));
+    for item in ["Attachment", "Edit", "Star", "Snooze", "Mark unread"] {
+        assert!(placed_with_description(&rule, item), "{item}");
+    }
+    assert!(!placed_with_description(&rule, "Overflow"));
 }
 
 fn simple_top_app_bar_with_subtitle() {

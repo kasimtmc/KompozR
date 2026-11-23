@@ -893,10 +893,12 @@ impl Gen<'_, '_> {
                 }
                 let (a, b) = self.typed_operands(lhs, rhs, false);
                 // (a value compared with a nullable one, `index == checkedIndex` of an `Int?`: Kotlin's equality of
-                // the two, the value in `Some`)
-                let some = |o: Out, other: &Ty| {
+                // the two, the value in `Some`; (WP8) a safe call is nullable whatever it reads — `index ==
+                // selectedItem?.index` of a type the index doesn't know —)
+                let (lhs_safe, rhs_safe) = (safe_access(lhs), safe_access(rhs));
+                let some = |o: Out, other: &Ty, other_safe: bool| {
                     let (ts, ty) = (o.ts, o.ty);
-                    if !other.is_nullable() || ty.is_nullable() || ty == Ty::Unknown {
+                    if !(other.is_nullable() || other_safe) || ty.is_nullable() || ty == Ty::Unknown {
                         return ts;
                     }
                     if o.kind == OutKind::StrLit {
@@ -906,7 +908,7 @@ impl Gen<'_, '_> {
                     }
                 };
                 let (at, bt) = (a.ty.clone(), b.ty.clone());
-                let (a, b) = (some(a, &bt), some(b, &at));
+                let (a, b) = (some(a, &bt, rhs_safe), some(b, &at, lhs_safe));
                 let ts = if eq { quote_spanned!(span=> #a == #b) } else { quote_spanned!(span=> #a != #b) };
                 Out::plain(ts, Ty::Bool)
             }
@@ -1854,6 +1856,16 @@ impl Gen<'_, '_> {
             }
         };
         if told == Ty::Unknown { ret } else { fill_unknown(ret, &told) }
+    }
+}
+
+/// Whether `e` is a safe call or read (`a?.b`, `a?.f()`), nullable whatever it gives.
+fn safe_access(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Member { safe, .. } => *safe,
+        ExprKind::Call { callee, .. } => matches!(callee.kind, ExprKind::Member { safe: true, .. }),
+        ExprKind::Paren(inner) => safe_access(inner),
+        _ => false,
     }
 }
 

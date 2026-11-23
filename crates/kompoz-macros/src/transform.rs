@@ -351,6 +351,15 @@ fn make_move(e: &mut Expr) {
     }
 }
 
+/// A name as collected (`Ident::to_string`: a raw one with its `r#`, `r#type`) as an identifier again. (WP8: a
+/// Kotlin parameter named `type` is Rust's `r#type`.)
+fn name_ident(n: &str, span: proc_macro2::Span) -> Ident {
+    match n.strip_prefix("r#") {
+        Some(raw) => Ident::new_raw(raw, span),
+        None => Ident::new(n, span),
+    }
+}
+
 /// Whether a name is written raw (`r#copy`): a call of it is left as written. Not a keyword's (`r#async`, Kotlin's
 /// `async`): Rust can't write that one otherwise, so it says nothing about the call.
 fn is_raw(i: &Ident) -> bool {
@@ -529,6 +538,13 @@ impl Transformer {
             // (where the locals are known, a name in a macro's tokens is one only if it is one)
             free.used.extend(free.raw.iter().cloned());
             free.used.extend(free.called.iter().cloned());
+        } else {
+            // (WP8: where the outer locals aren't known, a name called is still a local closure when it is bound in
+            // the block — `let items = items.clone(); Suite(content = move || items())` —: its identity is the
+            // closure's, as it is in a function's body)
+            let bound: Vec<String> =
+                free.called.iter().filter(|n| self.scopes.iter().any(|s| s.contains(*n))).cloned().collect();
+            free.used.extend(bound);
         }
         let mut names: Vec<(String, proc_macro2::Span)> = free
             .used
@@ -550,7 +566,7 @@ impl Transformer {
         }
         let rt = &self.rt;
         let lets = names.iter().map(|(n, span)| {
-            let i = Ident::new(n, *span);
+            let i = name_ident(n, *span);
             quote_spanned!(*span=> let #i = #rt::__private::capture(&#i);)
         });
         parse_quote!({ #(#lets)* #e })
@@ -562,10 +578,10 @@ impl Transformer {
         let mut list = if uncertain { quote!((#rt::__private::Unequal, ())) } else { quote!(()) };
         for (n, span) in names.iter().rev() {
             let key = if self.kept_closure(n) {
-                let id = format_ident!("__kz_id_{}", n);
+                let id = format_ident!("__kz_id_{}", n.strip_prefix("r#").unwrap_or(n));
                 quote!(#rt::__private::IdKey(#id))
             } else {
-                let i = Ident::new(n, *span);
+                let i = name_ident(n, *span);
                 quote_spanned!(*span=> {
                     #[allow(unused_imports)]
                     use #rt::__private::{KeyViaPartialEq as _, KeyViaInstance as _, KeyFallback as _};

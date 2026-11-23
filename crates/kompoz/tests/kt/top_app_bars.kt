@@ -1,7 +1,5 @@
 // Material's top app bars as Compose's samples write them: material3 1.5's AppBarSamples.kt top-bar samples, as written
-// (their @Sampled/@Preview annotations and KDoc left out). SimpleTopAppBarWithAdaptiveActions reads
-// currentWindowAdaptiveInfo (material3-adaptive, WP8's): it waits for that package
-// (tools/stage12-notes/wp4a/top-pending-samples.kt).
+// (their @Sampled/@Preview annotations and KDoc left out).
 
 @Composable
 fun SimpleTopAppBar() {
@@ -38,6 +36,100 @@ fun SimpleTopAppBar() {
                             Icon(
                                 imageVector = Icons.Filled.Favorite,
                                 contentDescription = "Add to favorites",
+                            )
+                        }
+                    }
+                },
+            )
+        },
+        content = { innerPadding ->
+            LazyColumn(
+                contentPadding = innerPadding,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val list = (0..75).map { it.toString() }
+                items(count = list.size) {
+                    Text(
+                        text = list[it],
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    )
+                }
+            }
+        },
+    )
+}
+
+@Composable
+@Suppress("DEPRECATION") // Move to currentWindowAdaptiveInfoV2 when dependency is updated
+fun SimpleTopAppBarWithAdaptiveActions() {
+    val sizeClass = currentWindowAdaptiveInfo().windowSizeClass
+    // Material guidelines state 3 items max in compact, and 5 items max elsewhere.
+    // To test this, try a resizable emulator, or a phone in landscape and portrait orientation.
+    val maxItemCount =
+        if (sizeClass.minWidthDp >= WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND) {
+            5
+        } else {
+            3
+        }
+    val icons =
+        listOf(
+            Icons.Filled.Attachment,
+            Icons.Filled.Edit,
+            Icons.Outlined.Star,
+            Icons.Filled.Snooze,
+            Icons.Outlined.MarkEmailUnread,
+        )
+    val items = listOf("Attachment", "Edit", "Star", "Snooze", "Mark unread")
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text("Simple TopAppBar", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                navigationIcon = {
+                    TooltipBox(
+                        positionProvider =
+                            TooltipDefaults.rememberTooltipPositionProvider(
+                                TooltipAnchorPosition.Above
+                            ),
+                        tooltip = { PlainTooltip { Text("Menu") } },
+                        state = rememberTooltipState(),
+                    ) {
+                        IconButton(onClick = { /* doSomething() */ }) {
+                            Icon(imageVector = Icons.Filled.Menu, contentDescription = "Menu")
+                        }
+                    }
+                },
+                actions = {
+                    AppBarRow(
+                        maxItemCount = maxItemCount,
+                        overflowIndicator = {
+                            TooltipBox(
+                                positionProvider =
+                                    TooltipDefaults.rememberTooltipPositionProvider(
+                                        TooltipAnchorPosition.Above
+                                    ),
+                                tooltip = { PlainTooltip { Text("Overflow") } },
+                                state = rememberTooltipState(),
+                            ) {
+                                IconButton(onClick = { it.show() }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.MoreVert,
+                                        contentDescription = "Overflow",
+                                    )
+                                }
+                            }
+                        },
+                    ) {
+                        items.forEachIndexed { index, item ->
+                            clickableItem(
+                                onClick = {},
+                                icon = {
+                                    Icon(imageVector = icons[index], contentDescription = item)
+                                },
+                                label = item,
                             )
                         }
                     }

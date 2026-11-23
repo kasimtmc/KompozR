@@ -309,6 +309,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             mut_ref: false,
             used: None,
             lent_ref: None,
+            deferred: false,
         };
         self.scopes.last_mut().expect("a scope").insert(kotlin.to_string(), local);
         rust

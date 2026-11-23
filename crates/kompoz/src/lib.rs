@@ -33,6 +33,9 @@ pub use kompoz_material_icons_core as material_icons_core;
 pub use kompoz_material_icons_extended as material_icons_extended;
 pub use kompoz_material_ripple as material_ripple;
 pub use kompoz_material3 as material3;
+// (WP8: adaptive)
+pub use kompoz_material3_adaptive as material3_adaptive;
+pub use kompoz_material3_adaptive_navigation_suite as material3_adaptive_navigation_suite;
 pub use kompoz_platform as platform;
 pub use kompoz_runtime as runtime;
 /// Kotlin's standard library as the Kotlin syntax needs it (`kompoz_runtime::kt`).
@@ -128,6 +131,10 @@ pub mod prelude {
     pub use kompoz_graphics::*;
     pub use kompoz_material_ripple::prelude::*;
     pub use kompoz_material3::prelude::*;
+    // (WP8: adaptive — androidx.compose.material3.adaptive{,.layout,.navigation}, androidx.window.core.layout,
+    // androidx.compose.material3.adaptive.navigationsuite)
+    pub use kompoz_material3_adaptive::prelude::*;
+    pub use kompoz_material3_adaptive_navigation_suite::prelude::*;
     pub use kompoz_runtime::*;
     pub use kompoz_text::*;
     pub use kompoz_ui::*;

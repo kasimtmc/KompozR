@@ -161,9 +161,11 @@ fun Animated() {
             format!(
                 "8:48: write `a`'s type: KompozR can't tell which `snapTo` it calls {snap_owners} (`{{ a: Type -> … }}`)"
             ),
-            // (a list's, a map's — Kotlin's standard types, the kt shims' — or DraggableAnchors')
+            // (a list's, a map's — Kotlin's standard types, the kt shims' —, DraggableAnchors' or the adaptive pane
+            // scaffolds' orders' and motion data's)
             "9:9: write the type of the value `forEach` is called on: KompozR can't tell which `forEach` it calls \
-             (Kotlin's standard types and `DraggableAnchors` have one) (a `val x: Type = …` of it, then \
+             (Kotlin's standard types, `DraggableAnchors`, `PaneScaffoldHorizontalOrder` and \
+             `PaneScaffoldMotionDataProviderExt` have one) (a `val x: Type = …` of it, then \
              `x.forEach(…)`)"
                 .to_string(),
         ]

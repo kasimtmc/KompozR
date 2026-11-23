@@ -1016,6 +1016,55 @@ fn Remembering(id: i32) {
     Label(format!("{id}:{made}"));
 }
 
+/// (WP8) A parameter named by a keyword (Kotlin's `type`: Rust's `r#type`), captured by closures given to calls
+/// and kept by a restartable composable, with a closure parameter of a keyword's name passed on.
+#[kompozable]
+fn KeywordNamed(r#type: i32, r#move: impl Fn(i32) + 'static) {
+    WithContent(r#type, move || Label(format!("type {type}", type = r#type)));
+    Button(move || r#move(r#type), content = || Label("move"));
+}
+
+fn a_keyword_parameter_is_captured_and_passed_on_raw() {
+    clear_clicks();
+    let n = mutable_state_of(3);
+    let got = Rc::new(Cell::new(0));
+    let (m, g) = (n.clone(), got.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let g = g.clone();
+        KeywordNamed(m.get(), move |t| g.set(t))
+    }));
+    assert_eq!(rule.names(), ["type 3", "button", "move"]);
+    click(0);
+    assert_eq!(got.get(), 3);
+    n.set(4);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["type 4", "button", "move"]);
+}
+
+/// (WP8) Composables called from a plain function through `kompozable_block!`, given a closure that only calls a
+/// local closure of the block: the closure is another one when that local is (its identity keyed by it), so the
+/// restartable callee isn't skipped with the old one.
+#[track_caller]
+fn block_with_content(label: Rc<dyn Fn()>) {
+    kompozable_block!({
+        let label = label.clone();
+        WithContent(1, move || label());
+    })
+}
+
+fn a_closure_calling_a_local_of_a_block_has_its_identity() {
+    let n = mutable_state_of(3);
+    let m = n.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let v = m.get();
+        block_with_content(Rc::new(move || Label(format!("n {v}"))));
+    }));
+    assert_eq!(rule.names(), ["n 3"]);
+    n.set(4);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["n 4"]);
+}
+
 fn each_call_site_is_its_own_identity() {
     let flip = mutable_state_of(false);
     let f = flip.clone();
@@ -1055,4 +1104,6 @@ tests!(
     pascal_case_functions_are_functions_everywhere,
     an_option_parameter_takes_what_it_holds,
     what_a_some_holds_coerces_to_the_parameters_type,
+    a_keyword_parameter_is_captured_and_passed_on_raw,
+    a_closure_calling_a_local_of_a_block_has_its_identity,
 );

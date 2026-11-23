@@ -526,6 +526,8 @@ dependencies = [
  "kompoz-material-icons-extended",
  "kompoz-material-ripple",
  "kompoz-material3",
+ "kompoz-material3-adaptive",
+ "kompoz-material3-adaptive-navigation-suite",
  "kompoz-platform",
  "kompoz-runtime",
  "kompoz-test",
@@ -675,12 +677,49 @@ dependencies = [
  "kompoz-material-icons-core",
  "kompoz-material-icons-extended",
  "kompoz-material-ripple",
+ "kompoz-material3-adaptive",
+ "kompoz-material3-adaptive-navigation-suite",
  "kompoz-runtime",
  "kompoz-test",
  "kompoz-text",
  "kompoz-ui",
  "libc",
  "writeable",
+]
+
+[[package]]
+name = "kompoz-material3-adaptive"
+version = "0.1.0"
+dependencies = [
+ "kompoz-animation",
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-material-icons-core",
+ "kompoz-material-icons-extended",
+ "kompoz-material3",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-text",
+ "kompoz-ui",
+]
+
+[[package]]
+name = "kompoz-material3-adaptive-navigation-suite"
+version = "0.1.0"
+dependencies = [
+ "kompoz-animation",
+ "kompoz-coroutines",
+ "kompoz-foundation",
+ "kompoz-graphics",
+ "kompoz-material-icons-core",
+ "kompoz-material-icons-extended",
+ "kompoz-material3",
+ "kompoz-material3-adaptive",
+ "kompoz-runtime",
+ "kompoz-test",
+ "kompoz-text",
+ "kompoz-ui",
 ]
 
 [[package]]

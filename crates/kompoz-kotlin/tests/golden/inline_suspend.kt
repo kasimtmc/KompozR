@@ -73,7 +73,7 @@ fun Collections(anim: Animatable<Float, AnimationVector1D>, log: (Int) -> Unit) 
         }
         listOf(1, 2).forEach { log(it) }
         listOf(1, 2).forEach { x -> scope.launch { delay(x.toLong()) } }
-        madeElsewhere().forEachIndexed { i, _ -> delay(i.toLong()) }
+        made.forEachIndexed { i, _ -> delay(i.toLong()) }
         log(total + doubled.size + odd.size + sum + chars.size + cached + made.size + if (any) 1 else 0)
     }
 }

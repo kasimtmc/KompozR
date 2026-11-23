@@ -53,6 +53,9 @@ const API_CRATES: &[&str] = &[
     "kompoz-material3",
     // (its icons are the generator's rule, `Icons.<theme>.<name>`, not items: what its `icons!` makes isn't read)
     "kompoz-material-icons-core",
+    // (WP8: adaptive)
+    "kompoz-material3-adaptive",
+    "kompoz-material3-adaptive-navigation-suite",
     "kompoz-test",
 ];
 

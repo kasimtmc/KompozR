@@ -474,6 +474,35 @@ fn simple_top_app_bar() {
     assert_eq!(top_bar(&rule), (Rect::new(0.0, 0.0, 400.0, 64.0), light_color_scheme().surface));
 }
 
+/// Whether a node of `description` is placed (AppBarRow composes every item and its overflow indicator, placing
+/// only those that show).
+fn kt_placed_with_description(rule: &KompozTestRule, description: &str) -> bool {
+    rule.on_all_nodes_with_content_description(description).fetch_semantics_nodes().iter().any(|n| n.is_placed())
+}
+
+/// As crates/kompoz-material3/tests/top_app_bars.rs checks it: compact, Attachment, Edit and the overflow indicator
+/// (M15's AppBarRow keeps the last of `maxItemCount` for it), Star, Snooze and Mark unread in its menu; medium, all
+/// five.
+fn simple_top_app_bar_with_adaptive_actions() {
+    let rule = KompozTestRule::new(SimpleTopAppBarWithAdaptiveActions);
+    rule.on_node_with_text("Simple TopAppBar").assert_exists();
+    for item in ["Attachment", "Edit", "Overflow"] {
+        assert!(kt_placed_with_description(&rule, item), "{item}");
+    }
+    for item in ["Star", "Snooze", "Mark unread"] {
+        assert!(!kt_placed_with_description(&rule, item), "{item}");
+    }
+    rule.on_node_with_content_description("Overflow").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("Snooze").assert_exists();
+    rule.on_node_with_text("Mark unread").assert_exists();
+    let rule = KompozTestRule::with_viewport(SimpleTopAppBarWithAdaptiveActions, IntSize::new(700, 800));
+    for item in ["Attachment", "Edit", "Star", "Snooze", "Mark unread"] {
+        assert!(kt_placed_with_description(&rule, item), "{item}");
+    }
+    assert!(!kt_placed_with_description(&rule, "Overflow"));
+}
+
 fn simple_top_app_bar_with_subtitle() {
     let rule = KompozTestRule::new(SimpleTopAppBarWithSubtitle);
     top_small_sample(&rule, "Simple TopAppBar", false, &["Add to favorites"]);
@@ -992,6 +1021,7 @@ fn main() {
         ("top_app_bar_actions_are_in_a_row_scope", top_app_bar_actions_are_in_a_row_scope),
         // (M15's samples)
         ("simple_top_app_bar", simple_top_app_bar),
+        ("simple_top_app_bar_with_adaptive_actions", simple_top_app_bar_with_adaptive_actions),
         ("simple_top_app_bar_with_subtitle", simple_top_app_bar_with_subtitle),
         ("simple_center_aligned_top_app_bar", simple_center_aligned_top_app_bar),
         ("simple_center_aligned_top_app_bar_with_subtitle", simple_center_aligned_top_app_bar_with_subtitle),

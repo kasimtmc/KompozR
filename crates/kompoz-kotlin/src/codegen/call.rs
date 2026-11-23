@@ -208,7 +208,19 @@ impl Gen<'_, '_> {
             "mapOf" | "mutableMapOf" | "emptyMap" => quote_spanned!(span=> #kt::KtMap<#a0, #a1>),
             "mutableStateOf" => quote_spanned!(span=> MutableState<#a0>),
             "mutableStateListOf" => quote_spanned!(span=> SnapshotStateList<#a0>),
-            _ => return out,
+            // (WP8) An API function of one type parameter its result names (`rememberListDetailPaneScaffoldNavigator<Int>()`:
+            // `Rc<dyn ThreePaneScaffoldNavigator<T>>`): the result typed with the argument — a named builder call
+            // takes no turbofish.
+            _ => match generic_result_of(name, args.len()) {
+                Some(ret) => {
+                    let typed = substitute_type_param(&ret, &a0.to_string());
+                    match typed.parse::<TokenStream>() {
+                        Ok(t) => quote_spanned!(span=> #t),
+                        Err(_) => return out,
+                    }
+                }
+                None => return out,
+            },
         };
         let ts = out.ts;
         Out { ts: quote_spanned!(span=> ::core::convert::identity::<#ty>(#ts)), ty: out.ty, kind: out.kind }
@@ -594,6 +606,9 @@ impl Gen<'_, '_> {
             return Out::plain(quote_spanned!(span=> #qi::#m(#(#vals),*)), Ty::Unknown);
         }
         let recv = self.expr(receiver);
+        // (WP8) A receiver whose expression gives no type, typed as inference reads it (`listOf(4, 5).forEachIndexed
+        // { i, x -> … }`: a list's, not another type's method of that name)
+        let recv = if recv.ty == Ty::Unknown { Out { ty: self.peek_ty(receiver), ..recv } } else { recv };
         if safe {
             let it = self.fresh("it", span);
             let inner_ty = recv.ty.non_null();
@@ -927,7 +942,10 @@ impl Gen<'_, '_> {
     ) -> Out {
         let span = self.span(loc);
         let r = &self.use_receiver(r);
-        let first = items[0].params[0].ty;
+        // (WP8: the overload the arguments fit — `Modifier.preferredWidth(0.5f)` is the proportion's, beside
+        // `preferredWidth(200.dp)` —, the receiver's parameter aside)
+        let item = self.choose_scoped(items, args);
+        let first = item.params[0].ty;
         let first_param_ref = first.starts_with('&');
         let rv = recv.ts;
         // (Kotlin's `Int.toDp()` and `Float.toDp()` are one Rust method taking a float: the number given as one)
@@ -939,9 +957,26 @@ impl Gen<'_, '_> {
         };
         let rv = if first_param_ref { quote_spanned!(span=> &#rv) } else { rv };
         let ri = proc_macro2::Ident::new(&r.rust, span);
-        let c = Callee::from_item(items[0]);
-        let rest = Callee { params: c.params[1..].to_vec(), ..c };
+        let rest = scoped_rest(item);
         self.emit(&rest, Target::MethodFirst(quote!(#ri), rv), args, loc, &name.name)
+    }
+
+    /// The member extension of `items` (an implicit receiver's, their first parameter the extended value) the
+    /// arguments fit best, as `choose_quiet` picks among callees: the applicable ones first; the first when none
+    /// fits (what `emit` then reports).
+    fn choose_scoped(&self, items: &[&'static crate::index::Item], args: &[ArgRef]) -> &'static crate::index::Item {
+        let best = |strict: bool| {
+            let mut best: Option<(i32, &'static crate::index::Item)> = None;
+            for item in items {
+                let Some((score, mismatched)) = self.fit_detail(&scoped_rest(item), args) else { continue };
+                if (strict && mismatched) || best.is_some_and(|(s, _)| score <= s) {
+                    continue;
+                }
+                best = Some((score, item));
+            }
+            best.map(|(_, i)| i)
+        };
+        best(true).or_else(|| best(false)).unwrap_or(items[0])
     }
 
     /// `recv.name(…)` as written: a method the index doesn't know (or a kt shim's Rust finds by its name: Kotlin's
@@ -1491,11 +1526,16 @@ impl Gen<'_, '_> {
             // the macro rewriting the call takes a last unnamed closure for the last parameter — Kotlin's trailing
             // lambda —: `InputChip(selected, onClick, label = { … })` leaving the rest to their defaults)
             let mut last_written = None;
+            // (WP8: a parameter left to the builder's default before one written: the macro rewriting the call counts
+            // positions among all the parameters, so what comes after is named —
+            // `NavigationSuiteScaffoldLayout(navigationSuite = bar, navigationSuiteType = t, content = body)` past its
+            // defaulted `state`, `content` a lambda value rather than one written there)
+            let mut skipped_builder_default = false;
             for (k, p) in c.params.iter().enumerate() {
                 if m.given[k].is_empty() {
                     match &p.default {
                         PDefault::Kotlin(text) => vals.push((None, self.kotlin_default(text, p, loc), false)),
-                        PDefault::Builder => {}
+                        PDefault::Builder => skipped_builder_default = true,
                         PDefault::None if p.vararg => vals.push((None, self.many_value(&[], p, span), false)),
                         PDefault::None => {
                             self.error(loc, format!("`{kotlin}` needs `{}`", p.kotlin));
@@ -1510,7 +1550,12 @@ impl Gen<'_, '_> {
                     let a = m.given[k][0];
                     self.with_label(call_label, |me| me.arg_value(&a, Some(p), transform_wraps))
                 };
-                vals.push((None, v, m.given[k].iter().any(|a| a.value.is_lambda())));
+                let lambda = m.given[k].iter().any(|a| a.value.is_lambda());
+                // (a lambda written for the last parameter is the macro's trailing closure as it is)
+                let trailing = lambda && k + 1 == c.params.len();
+                let name = (transform_wraps && c.builder && skipped_builder_default && !trailing)
+                    .then(|| ident(&p.rust, span));
+                vals.push((name, v, lambda));
                 last_written = Some(k);
             }
             if transform_wraps
@@ -1614,6 +1659,12 @@ impl Gen<'_, '_> {
             let v = match given {
                 Some(t) if unified.is_nullable() && !t.is_nullable() && t != Ty::Unknown => {
                     quote_spanned!(span=> ::core::option::Option::Some(#v))
+                }
+                // (a nested subclass's value among its sealed class's: converted to it)
+                Some(Ty::Named(t, _)) if matches!(&unified, Ty::Named(u, _) if nested_in(&t, u)) => {
+                    let Ty::Named(u, _) = &unified else { unreachable!() };
+                    let u = ident(u, span);
+                    quote_spanned!(span=> ::core::convert::Into::<#u>::into(#v))
                 }
                 _ => v,
             };
@@ -1735,7 +1786,15 @@ impl Gen<'_, '_> {
         // (WP7: search/tooltips) not in a kept closure that moved its capture in — `navigationIcon = {
         // IconButton(onClick = onMenu) { … } }`, a shared slot —, where it is the capture's, cloned as a kept closure
         // is where it is a value)
+        // (WP8) to a shared closure's parameter, `Option<Rc<dyn Fn()>>` — `RadioButton(selected, onClick = onClick)`
+        // —, made one below, as any function value is)
+        let shared_param = {
+            let t = plain_type_text(&p.ty);
+            let t = t.strip_prefix("Option<").unwrap_or(&t).to_string();
+            t.starts_with("Rc<dynFn") || t.starts_with("Arc<dynFn")
+        };
         if transform_wraps
+            && !shared_param
             && let ExprKind::Name(n) = &e.kind
             && self
                 .scopes
@@ -1961,10 +2020,12 @@ impl Gen<'_, '_> {
             return quote_spanned!(span=> &#v);
         }
         // (a `&str` given a Kotlin `String` value that isn't a literal — a variable, a template's `format!` —: lent,
-        // the `&String` coercing)
+        // the `&String` coercing; (WP8) a value of a type not known too — a generic lambda's parameter,
+        // `AnimatedContent(route) { r -> holder.SaveableStateProvider(r) { … } }` —, a `&&str` coercing as well)
         let literal =
             matches!(&e.kind, ExprKind::String(s) if s.parts.iter().all(|p| matches!(p, StringPart::Text { .. })));
-        if t == "&str" && arg_ty.non_null() == Ty::String && !literal {
+        if t == "&str" && matches!(arg_ty.non_null(), Ty::String | Ty::Unknown) && !literal && o_kind != OutKind::StrLit
+        {
             return quote_spanned!(span=> &#v);
         }
         v
@@ -2416,6 +2477,12 @@ fn sam_constructor(ty: &str) -> Option<&'static crate::index::Item> {
     })
 }
 
+/// A member extension's callee without its first parameter (the value it extends, given as the receiver).
+fn scoped_rest(item: &'static crate::index::Item) -> Callee {
+    let c = Callee::from_item(item);
+    Callee { params: c.params[1..].to_vec(), ..c }
+}
+
 /// The arguments of `listOf(…)` (or another of Kotlin's collection makers whose elements' type is inferred).
 pub(crate) fn list_of_call(e: &Expr) -> Option<&[Arg]> {
     let ExprKind::Call { callee, type_args, args, trailing_lambda: None } = &e.kind else { return None };
@@ -2434,8 +2501,21 @@ pub(crate) fn merge_elements(a: Ty, b: Ty) -> Ty {
         (Ty::Nullable(x), y) | (y, Ty::Nullable(x)) => Ty::Nullable(Box::new(merge_elements(*x, y))),
         (Ty::List(x), Ty::List(y)) => Ty::List(Box::new(merge_elements(*x, *y))),
         (Ty::Set(x), Ty::Set(y)) => Ty::Set(Box::new(merge_elements(*x, *y))),
+        // (WP8: a sealed class's value beside its nested subclass's — `PaneExpansionAnchor.Proportion(0f)` and
+        // `PaneExpansionAnchor.Offset.fromStart(240.dp)` —: the sealed class)
+        (Ty::Named(x, _), b @ Ty::Named(..)) if matches!(&b, Ty::Named(y, _) if nested_in(&x, y)) => b,
         (a, _) => a,
     }
+}
+
+/// Whether the Rust type `inner` is a type Kotlin nests in `outer` (`PaneExpansionAnchorOffset`, Kotlin's
+/// `PaneExpansionAnchor.Offset`, in `PaneExpansionAnchor`): a subclass of the sealed class it is in, which Rust
+/// converts to it (`From`).
+pub(crate) fn nested_in(inner: &str, outer: &str) -> bool {
+    inner != outer
+        && crate::index::kotlin_type(inner)
+            .strip_prefix(crate::index::kotlin_type(outer))
+            .is_some_and(|rest| rest.starts_with('.'))
 }
 
 /// `x?.let { name -> { … } }`: a lambda made of a nullable value, or `null` (a nullable slot's argument —
@@ -2465,5 +2545,73 @@ fn lambda_if(e: &Expr) -> bool {
         }
         ExprKind::Paren(inner) => lambda_if(inner),
         _ => false,
+    }
+}
+
+/// (WP8) The result type of the API function `kotlin` when it has one type parameter `T` its result names
+/// (`Rc<dyn ThreePaneScaffoldNavigator<T>>`) and the call gives one type argument: what the argument types.
+fn generic_result_of(kotlin: &str, type_args: usize) -> Option<String> {
+    if type_args != 1 {
+        return None;
+    }
+    let mut results = crate::index::lookup(kotlin).iter().filter(|i| {
+        // (only the result tells its type parameter, and it has no other: the parameters don't name it)
+        i.kind == crate::index::Kind::Function
+                && i.owner.is_empty()
+                && names_type_param(i.ret)
+                && !i.ret.starts_with("impl ")
+                // (a shared trait object of it: what Rust can't infer the parameter of from its use)
+                && i.ret.contains("dyn ")
+                && !i.params.iter().any(|p| p.default == crate::index::Default::None && names_type_param(p.ty))
+                && !i.ret.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| {
+                    w.len() == 1 && w != "T" && w.chars().all(|c| c.is_ascii_uppercase())
+                })
+    });
+    let ret = results.next()?.ret;
+    // (every overload of that name giving the same: an unambiguous result)
+    results.all(|i| i.ret == ret).then(|| ret.to_string())
+}
+
+/// Whether a Rust type names the generic parameter `T` (as a whole word).
+fn names_type_param(ty: &str) -> bool {
+    ty.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| w == "T")
+}
+
+/// `ty` with the word `T` replaced by `arg`.
+fn substitute_type_param(ty: &str, arg: &str) -> String {
+    let mut out = String::new();
+    let mut word = String::new();
+    for c in ty.chars().chain(std::iter::once('\0')) {
+        if c.is_alphanumeric() || c == '_' {
+            word.push(c);
+            continue;
+        }
+        // (the std pointers named as the generated code reaches them)
+        out.push_str(match word.as_str() {
+            "T" => arg,
+            "Rc" => "::std::rc::Rc",
+            "Arc" => "::std::sync::Arc",
+            w => w,
+        });
+        word.clear();
+        if c != '\0' {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod generic_result_tests {
+    use super::{names_type_param, substitute_type_param};
+
+    #[test]
+    fn a_result_naming_its_type_parameter_is_typed_by_the_argument() {
+        assert!(names_type_param("Rc<dyn ThreePaneScaffoldNavigator<T>>"));
+        assert!(!names_type_param("Rc<dyn TooltipState>"));
+        assert_eq!(
+            substitute_type_param("Rc<dyn ThreePaneScaffoldNavigator<T>>", "i32"),
+            "::std::rc::Rc<dyn ThreePaneScaffoldNavigator<i32>>"
+        );
     }
 }

@@ -31,6 +31,8 @@ mod saved_value;
 mod snapshot;
 mod state;
 mod state_observer;
+// (WP8: adaptive — an Rc in a transition's state)
+mod thread_bound;
 
 pub use crate::__remember_updated_state as remember_updated_state;
 pub use collections::{SnapshotStateList, SnapshotStateMap, mutable_state_list_of, mutable_state_map_of};
@@ -72,3 +74,4 @@ pub use state::{
     mutable_state_of_with_policy, never_equal_policy, structural_equality_policy,
 };
 pub use state_observer::{OnChangedExecutor, SnapshotStateObserver};
+pub use thread_bound::ThreadBound;

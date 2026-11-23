@@ -15,6 +15,7 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_material_icons_core::Icons;
 use kompoz_material3::prelude::*;
+use kompoz_material3_adaptive_navigation_suite::{NavigationSuiteScaffoldLayout, NavigationSuiteType};
 use kompoz_runtime::*;
 use kompoz_test::KompozTestRule;
 use kompoz_ui::layout::LayoutCoordinates;
@@ -321,25 +322,29 @@ fn scaffold_and_navigation_bar_leave_the_keyboard_to_ime_padding() {
 }
 
 fn scaffold_bodies_and_carousel_items_leave_content_its_own_size_as_compose() {
-    // The Scaffold and BottomSheetScaffold cases of the C++ test (its NavigationSuiteScaffoldLayout cases are WP8's:
-    // they come with that package; its carousel case is in carousel.rs). Compose measures a scaffold's body with no minimum
-    // size: content that doesn't fill keeps its size.
+    // The Scaffold, BottomSheetScaffold and NavigationSuiteScaffoldLayout cases of the C++ test (its carousel case is in
+    // carousel.rs). Compose measures a scaffold's body with no minimum size (the navigation suite's in a Box of its
+    // own): content that doesn't fill keeps its size.
     let which = mutable_state_of(0);
     let rule = {
         let which = which.clone();
         KompozTestRule::new(kompozable_lambda!(move || {
             let body = || Box(modifier = Modifier.size_wh(60.dp(), 40.dp()).test_tag("icerik"));
+            let bar = || Box(modifier = Modifier.size_wh(80.dp(), 80.dp())); // a bar or a rail
             match which.get() {
                 0 => Scaffold(modifier = Modifier.fill_max_size(), content = move |_: PaddingValues| body()),
-                _ => BottomSheetScaffold(
+                1 => BottomSheetScaffold(
                     sheet_content = || Text("Ayrıntılar"),
                     modifier = Modifier.fill_max_size(),
                     content = move |_: PaddingValues| body(),
                 ),
+                2 => NavigationSuiteScaffoldLayout(bar, NavigationSuiteType::NavigationBar, content = body),
+                3 => NavigationSuiteScaffoldLayout(bar, NavigationSuiteType::NavigationRail, content = body),
+                _ => NavigationSuiteScaffoldLayout(bar, NavigationSuiteType::None, content = body),
             }
         }))
     };
-    for i in 0..=1 {
+    for i in 0..=4 {
         which.set(i);
         rule.wait_for_idle();
         let b = bounds(&rule, "icerik");

@@ -180,7 +180,10 @@ pub fn Collections(anim: Animatable<f32, AnimationVector1D>, log: impl ::core::o
                 }
             });
         });
-        made_elsewhere().for_each_indexed_async(async |i, _| delay(i.to_long()).await).await;
+        ::kompoz::runtime::kt::KtList::for_each_indexed_async(&made, async |i, _| {
+            delay(::kompoz::runtime::kt::KtNumber::to_long(i)).await;
+        })
+        .await;
         log(total
             + ::kompoz::runtime::kt::KtList::size(&doubled)
             + ::kompoz::runtime::kt::KtList::size(&odd)

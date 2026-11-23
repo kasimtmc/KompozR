@@ -1,0 +1,48 @@
+[package]
+name = "kompoz-material3-adaptive"
+description = "KompozR's Material 3 adaptive layouts (androidx.compose.material3.adaptive 1.2.0 and androidx.window's window-core 1.5.0 size classes): the window's size class and posture, the three-pane scaffolds (list-detail, supporting pane) with their directives, values, motion and draggable pane expansion, and their navigators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-animation = { path = "../kompoz-animation" }
+kompoz-coroutines = { path = "../kompoz-coroutines" }
+kompoz-foundation = { path = "../kompoz-foundation" }
+kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-material3 = { path = "../kompoz-material3" }
+kompoz-runtime = { path = "../kompoz-runtime" }
+kompoz-text = { path = "../kompoz-text" }
+kompoz-ui = { path = "../kompoz-ui" }
+
+[dev-dependencies]
+kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
+kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
+kompoz-test = { path = "../kompoz-test" }
+
+# The window's size classes and adaptive info (the C++ Kompoz's window size class test by name, window-core's
+# samples, Compose's behaviour).
+[[test]]
+name = "window"
+harness = false
+
+# The three-pane scaffolds: the C++ Kompoz's list-detail and supporting pane scaffold tests by name, Compose's
+# behaviour of values, directives, strategies, navigators, levitated panes and preferred sizes.
+[[test]]
+name = "pane_scaffolds"
+harness = false
+
+# The pane expansion through its public API: the C++ Kompoz's pane expansion tests by name on the scaffolds (a
+# VerticalDragHandle made draggable), Compose's behaviour of the state's members.
+[[test]]
+name = "pane_expansion"
+harness = false
+
+# The adaptive-layout samples (Compose's ThreePaneScaffoldSample.kt) as written, their behaviour checked.
+[[test]]
+name = "samples"
+harness = false

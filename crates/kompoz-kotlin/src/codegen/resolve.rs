@@ -911,6 +911,10 @@ pub(crate) struct Local {
     /// (Kotlin's lambda holds the object), which that lambda captures (as a receiver lent by reference is, see
     /// `ImplicitReceiver::owned_used`).
     pub lent_ref: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    /// (WP8) A `val` declared without a value (`val title: String`), given one later (`title = …` in each branch):
+    /// Kotlin's definite assignment, Rust's deferred initialization (`let title: String;`), which rustc checks the
+    /// same way.
+    pub deferred: bool,
 }
 
 /// An implicit receiver: an extension function's `self`, a receiver lambda's scope parameter.

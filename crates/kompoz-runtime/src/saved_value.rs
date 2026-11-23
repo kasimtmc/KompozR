@@ -258,6 +258,17 @@ pub trait Saveable: Sized {
     fn restore(saved: &SavedValue) -> Option<Self>;
 }
 
+/// A saved value is saved as itself (a value of any saveable kind: Kotlin's `Any` "storable in a Bundle").
+impl Saveable for SavedValue {
+    fn save(&self) -> SavedValue {
+        self.clone()
+    }
+
+    fn restore(saved: &SavedValue) -> Option<Self> {
+        Some(saved.clone())
+    }
+}
+
 impl Saveable for bool {
     fn save(&self) -> SavedValue {
         SavedValue::Bool(*self)

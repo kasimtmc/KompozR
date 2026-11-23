@@ -9,16 +9,19 @@
 //! cargo xtask kotlin-index --check build it and fail if what is committed differs (CI)
 //! cargo xtask material3-tokens   convert material3's design tokens (its sources jar's tokens/*.kt) to Rust
 //! cargo xtask material3-strings  convert material3's texts (Compose for desktop's l10n) to Rust data
+//! cargo xtask adaptive-strings   convert material3-adaptive's layout texts (Compose for desktop's l10n) likewise
 //! cargo xtask material-icons     convert the material icons' Kotlin (core's) to their crate's data
-//!                                (each of the three with --check: convert and compare where the jar is, else skip)
+//!                                (each of the four with --check: convert and compare where the jar is, else skip)
 //! ```
 //!
 //! Std, and syn to read Rust sources (the workspace's own, already built for its macros): building the workspace
 //! needs none of the tools a task runs, only running it does.
 
 // (the API index's text format, shared with kompoz-macros, which reads it)
+mod adaptive_strings;
 #[path = "../../crates/kompoz-macros/src/api_index.rs"]
 mod api_index;
+mod compose_l10n;
 mod jar;
 mod kotlin_index;
 mod material3_strings;
@@ -34,7 +37,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage: cargo xtask shaders [--check] | cargo xtask wayland [--check] | cargo xtask kotlin-index \
                      [--check] | cargo xtask material3-tokens [--check] | cargo xtask material3-strings [--check] | \
-                     cargo xtask material-icons [--check]";
+                     cargo xtask adaptive-strings [--check] | cargo xtask material-icons [--check]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -49,6 +52,8 @@ fn main() -> ExitCode {
         ["material3-tokens", "--check"] => material3_tokens::run(&workspace(), true),
         ["material3-strings"] => material3_strings::run(&workspace(), false),
         ["material3-strings", "--check"] => material3_strings::run(&workspace(), true),
+        ["adaptive-strings"] => adaptive_strings::run(&workspace(), false),
+        ["adaptive-strings", "--check"] => adaptive_strings::run(&workspace(), true),
         ["material-icons"] => material_icons::run(&workspace(), false),
         ["material-icons", "--check"] => material_icons::run(&workspace(), true),
         ["help" | "--help" | "-h"] => {
