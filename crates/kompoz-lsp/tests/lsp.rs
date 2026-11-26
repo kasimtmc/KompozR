@@ -4,7 +4,7 @@
 //!
 //! The Kotlin's answers are checked with and without rust-analyzer (`--no-rust-analyzer`: the server's own
 //! answers alone). With the toolchain's rust-analyzer (skipped, saying so, when `rust-analyzer --version` doesn't
-//! run): the file clean as it is, an error in the Rust around the Kotlin where it is, rust-analyzer's hover in the
+//! run, unless `KOMPOZ_RUST_ANALYZER_REQUIRED=1`: CI): the file clean as it is, an error in the Rust around the Kotlin where it is, rust-analyzer's hover in the
 //! Rust and none of it inside the Kotlin, its semantic tokens merged with the Kotlin's, rustfmt's edits kept off the
 //! Kotlin, a Kotlin call of the crate's Rust function going to it through rust-analyzer's symbols. One server at a
 //! time (rust-analyzer is big).
@@ -559,6 +559,10 @@ fn rust_analyzer_runs() -> bool {
 #[test]
 fn with_rust_analyzer() {
     if !rust_analyzer_runs() {
+        assert!(
+            std::env::var("KOMPOZ_RUST_ANALYZER_REQUIRED").as_deref() != Ok("1"),
+            "no rust-analyzer (rust-analyzer --version doesn't run) and KOMPOZ_RUST_ANALYZER_REQUIRED=1"
+        );
         println!("skipped: no rust-analyzer (rust-analyzer --version doesn't run)");
         return;
     }

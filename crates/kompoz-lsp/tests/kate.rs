@@ -1,7 +1,7 @@
 //! Kate's Kompoz Rust (`kate/kompoz-rust.xml`) and `kompoz-lsp --kate`.
 //!
 //! The definition, as KSyntaxHighlighting reads it (its command line highlighter, `ksyntaxhighlighter6`: the
-//! check is skipped without it), on `tests/data/kate_sample.rs`: its Rust lines highlighted as Kate's Rust
+//! check is skipped without it, unless `KOMPOZ_KATE_REQUIRED=1`), on `tests/data/kate_sample.rs`: its Rust lines highlighted as Kate's Rust
 //! highlights them alone, and the Kotlin's tokens in the styles below (read back from a theme that gives each
 //! style a color of its own). `kompoz-lsp --kate`: the definition written where Kate reads it, and the server
 //! added to Kate's settings, their other servers and keys kept.
@@ -230,6 +230,10 @@ fn highlighted(tool: &Path, syntax: &str, text: &str, data_home: &Path) -> Vec<P
 #[test]
 fn highlighting() {
     let Some(tool) = highlighter() else {
+        assert!(
+            std::env::var("KOMPOZ_KATE_REQUIRED").as_deref() != Ok("1"),
+            "no ksyntaxhighlighter6 and KOMPOZ_KATE_REQUIRED=1"
+        );
         println!("skipped: no ksyntaxhighlighter6");
         return;
     };

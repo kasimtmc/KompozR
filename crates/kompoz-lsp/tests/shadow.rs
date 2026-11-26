@@ -3,7 +3,7 @@
 //! `Int` is declared); rustc's errors (the shadow's `cargo check`) land on the Kotlin's lines, and a hover inside
 //! the Kotlin is rust-analyzer's of the Rust made of it.
 //!
-//! Skipped (saying so) when `rust-analyzer --version` doesn't run. The server runs without its proxied
+//! Skipped (saying so) when `rust-analyzer --version` doesn't run, unless `KOMPOZ_RUST_ANALYZER_REQUIRED=1` (CI). The server runs without its proxied
 //! rust-analyzer (`--no-rust-analyzer`): the shadow's is the only one. The shadow builds into a target directory kept
 //! under the test's temporary directory (the dependencies built once), offline, two jobs.
 
@@ -190,6 +190,10 @@ fn line_col(text: &str, needle: &str, plus: usize) -> Json {
 #[test]
 fn rustc_errors_on_the_kotlins_lines() {
     if !rust_analyzer_runs() {
+        assert!(
+            std::env::var("KOMPOZ_RUST_ANALYZER_REQUIRED").as_deref() != Ok("1"),
+            "no rust-analyzer (rust-analyzer --version doesn't run) and KOMPOZ_RUST_ANALYZER_REQUIRED=1"
+        );
         println!("skipped: no rust-analyzer (rust-analyzer --version doesn't run)");
         return;
     }

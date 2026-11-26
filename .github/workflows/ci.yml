@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # (by hand: the JetBrains plugin's build too, which downloads the IDEs it is built and verified against)
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -265,3 +267,67 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: The runtime's unsafe code under Miri
         run: cargo miri test -p kompoz-runtime --lib --test runtime --test macros
+
+  # The language server with its tools (KOMPOZ_RUST_ANALYZER_REQUIRED, KOMPOZ_KATE_REQUIRED: a missing one fails
+  # the run instead of skipping): the toolchain's rust-analyzer behind it and behind the shadow project (rustc's
+  # errors on Kotlin lines), KSyntaxHighlighting's command line highlighter for Kate's Kompoz Rust.
+  lsp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-analyzer, rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: ksyntaxhighlighter6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libkf6syntaxhighlighting-tools
+      # (the shadow project's test checks a crate offline: the workspace's dependencies fetched first)
+      - run: cargo fetch
+      - run: cargo test -p kompoz-lsp
+        env:
+          KOMPOZ_RUST_ANALYZER_REQUIRED: "1"
+          KOMPOZ_KATE_REQUIRED: "1"
+
+  # The VS Code extension: its unit and grammar tests, and its package (kept as an artifact; publishing is by hand).
+  vscode:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode-kompozr
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode-kompozr/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kompozr-vscode
+          path: editors/vscode-kompozr/*.vsix
+
+  # The JetBrains plugin (CLion, RustRover): built, tested and verified against the IDEs it downloads (several GB:
+  # by hand only).
+  jetbrains:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/jetbrains-kompozr
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon buildPlugin test verifyPlugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kompozr-jetbrains
+          path: editors/jetbrains-kompozr/build/distributions/*.zip
