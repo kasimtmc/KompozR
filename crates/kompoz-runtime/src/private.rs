@@ -5,6 +5,7 @@ use std::panic::Location;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use crate::composer::{Marker, current_marker, end_to_marker};
 pub use crate::remember::{Memoized, group, restartable};
 
 /// An argument that was given.

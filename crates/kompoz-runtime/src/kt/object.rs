@@ -425,10 +425,24 @@ impl<F: 'static> KtSingleton<F> {
             return f;
         }
         let f: &'static F = Box::leak(Box::new(empty()));
+        // (under Miri: kept reachable from a static, so its leak check sees the object Kotlin keeps for the
+        // program's life as kept, not lost when the thread holding the cell ends)
+        #[cfg(miri)]
+        miri_keep(f as *const F as *const u8);
         let _ = self.0.set(f);
         init(f);
         f
     }
+}
+
+/// The objects [`KtSingleton`] made, reachable from a static (Miri's leak check).
+#[cfg(miri)]
+fn miri_keep(p: *const u8) {
+    struct Kept(Vec<*const u8>);
+    // SAFETY: the pointers are only kept, never read.
+    unsafe impl Send for Kept {}
+    static KEPT: std::sync::Mutex<Kept> = std::sync::Mutex::new(Kept(Vec::new()));
+    KEPT.lock().unwrap_or_else(|e| e.into_inner()).0.push(p);
 }
 
 /// What a suspending member of a Kotlin interface gives in Rust (a trait's `async` method can't be called through a

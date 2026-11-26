@@ -542,16 +542,29 @@ pub fn leave<R>(slot: &Leave<R>, jump: Jump<(), R>) -> ! {
 }
 
 /// The call `f` whose lambda may jump out of it (see [`Leave`]): its value, or `Err` of the jump to do.
+///
+/// In a composition, the call may be a composable's (`Column { if (xs.isEmpty()) return … }`) or its lambda call
+/// composables (`for (x in xs) { Row { if (…) break } }`): as the Compose compiler does around such a jump, the
+/// composer's marker is taken before the call ([`current_marker`](crate::__private::current_marker)) and the groups
+/// the jump left open are ended where it lands ([`end_to_marker`](crate::__private::end_to_marker)), before the code
+/// after the call does the jump.
 #[doc(hidden)]
 pub fn leaving<T, R>(slot: &Leave<R>, f: impl FnOnce() -> T) -> Result<T, Jump<(), R>> {
+    let marker = crate::__private::current_marker();
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => Ok(v),
-        Err(p) if p.is::<Leaving>() => Err(slot.0.take().expect("the jump left")),
+        Err(p) if p.is::<Leaving>() => {
+            if let Some(marker) = marker {
+                crate::__private::end_to_marker(marker);
+            }
+            Err(slot.0.take().expect("the jump left"))
+        }
         Err(p) => std::panic::resume_unwind(p),
     }
 }
 
-/// [`leaving`] in a coroutine: the call's future `f` (its lambdas suspending with it) polled so.
+/// [`leaving`] in a coroutine: the call's future `f` (its lambdas suspending with it) polled so. (No composable is
+/// called in a coroutine: no composer's groups to end.)
 #[doc(hidden)]
 pub async fn leaving_async<T, R>(slot: &Leave<R>, f: impl Future<Output = T>) -> Result<T, Jump<(), R>> {
     let mut f = std::pin::pin!(f);

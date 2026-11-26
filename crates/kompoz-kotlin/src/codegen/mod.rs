@@ -1031,18 +1031,17 @@ impl<'a, 'd> Gen<'a, 'd> {
         let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
         let rust_ty = self.rust_type(t, pos);
         // ((stage 14 FINAL) an inline function's lambda — not `noinline`, not `crossinline` —: run in place, never
-        // kept, so it borrows what it uses: no `'static`)
-        let rust_ty = if inline
-            && !self.fun.kompozable
+        // kept, so it borrows what it uses: no `'static`; (stage 14 JUMP) an inline composable's too, as Compose's
+        // `Column`'s content, which a jump may leave)
+        let borrowed = inline
             && !p.modifiers.has(ModifierKind::Noinline)
             && !p.modifiers.has(ModifierKind::Crossinline)
             && matches!(self.unaliased(t).kind, TypeKind::Function(_))
-            && !self.unaliased(t).nullable
-        {
-            without_static(rust_ty)
-        } else {
-            rust_ty
-        };
+            && !self.unaliased(t).nullable;
+        let rust_ty = if borrowed { without_static(rust_ty) } else { rust_ty };
+        // (in an inline composable's body, a reference to it: what the lambdas it hands to composables capture —
+        // `Box { content() }` —, by a copy, as the macro captures every local)
+        let by_ref = (borrowed && self.fun.kompozable).then(|| quote_spanned!(span=> let #name = &#name;));
         let info = self.quiet(|g| g.param_info(p, inline));
         let default = p.default.as_ref().map(|d| {
             let saved = std::mem::take(&mut self.scopes);
@@ -1068,7 +1067,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             Some(target) if !restartable => Some(quote_spanned!(span=>
                 let #name: #target = ::core::convert::Into::into(#name);
             )),
-            _ => None,
+            _ => by_ref,
         };
         (quote_spanned!(span=> #default #name: #rust_ty), convert)
     }

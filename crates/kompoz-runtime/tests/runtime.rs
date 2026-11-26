@@ -1656,6 +1656,9 @@ tests!(
     remember_saveable_with_a_saver_of_its_own,
     a_state_list_is_saved_and_given_back,
     a_shared_state_reads_its_state_from_anywhere,
+    a_jump_out_of_composable_content_ends_the_groups_it_leaves,
+    a_loop_jump_out_of_composable_content_keeps_the_composition_whole,
+    a_jump_out_of_providers_and_keys_leaves_their_locals,
 );
 
 /// `MutableState::as_shared_state`: a read-only view that is `Send + Sync` as the state is (what a shape or a theme
@@ -1937,4 +1940,164 @@ fn an_impl_fn_parameter_is_one_rc_while_its_identity_stays() {
     // composer counts a scope being composed as invalidated "imminently": not again)
     rule.wait_for_idle();
     assert!(rule.has("callback 6 at 1") && runs.get() == 5, "{}", runs.get());
+}
+
+// ---- Jumps out of composable lambdas (Compose's `currentMarker` / `endToMarker`) ----------------------------------
+
+/// A node whose content runs in its caller's scope (an inline composable, as Compose's `Column`).
+#[kompozable(inline)]
+fn Boxed(name: &'static str, content: impl FnOnce()) {
+    emit(|| TestNode::new(name), |n| n.compositions.set(n.compositions.get() + 1), content);
+}
+
+/// Kotlin's `Box("box") { remember a; CounterView; if (stop) return; remember b; Text("second") }; Text("tail")`,
+/// as the Kotlin syntax writes it: `kt::leave` in the lambda, `kt::leaving` around the call.
+#[kompozable]
+fn LeavesItsBox(stop: bool, count: MutableState<i32>, log: Rc<RefCell<Vec<String>>>) {
+    let slot = &kt::Leave::new();
+    match kt::leaving(slot, || {
+        Boxed("box", || {
+            let la = log.clone();
+            remember_observer(move || Remembered { log: la, name: "a".into() });
+            Text("first");
+            CounterView(count.clone());
+            if stop {
+                kt::leave(slot, kt::Jump::Return(()));
+            }
+            let lb = log.clone();
+            remember_observer(move || Remembered { log: lb, name: "b".into() });
+            Text("second");
+        })
+    }) {
+        Ok(()) => {}
+        Err(kt::Jump::Return(())) => return,
+        Err(_) => unreachable!(),
+    }
+    Text("tail");
+}
+
+/// A `return` out of an inline composable's content (Kotlin's `Column { if (…) return … }`): the groups it left are
+/// ended where it lands, as Compose's `endToMarker` ends them — the node keeps what was composed before the jump, the
+/// values remembered after it are forgotten (and remembered anew when the jump isn't taken again), those before it
+/// kept; the composition stays whole: the parent's calls after it, a scope inside restarting on its own.
+fn a_jump_out_of_composable_content_ends_the_groups_it_leaves() {
+    let stop = mutable_state_of(false);
+    let count = mutable_state_of(0);
+    let log = Rc::new(RefCell::new(Vec::<String>::new()));
+    reset(&COUNTER_RUNS);
+    let (s, c, l) = (stop.clone(), count.clone(), log.clone());
+    let rule = Rule::new(kompozable_lambda!(move || {
+        LeavesItsBox(s.get(), c.clone(), l.clone());
+        Text("sibling");
+    }));
+    assert_eq!(rule.names(), ["box", "first", "count=0", "second", "tail", "sibling"]);
+    assert_eq!(*log.borrow(), ["+a", "+b"]);
+    log.borrow_mut().clear();
+
+    stop.set(true);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["box", "first", "count=0", "sibling"]);
+    assert_eq!(rule.root.find("box").unwrap().child_names(), ["first", "count=0"]);
+    assert_eq!(*log.borrow(), ["-b"]);
+    log.borrow_mut().clear();
+
+    // (the scope before the jump runs again on its own; then the parent again, jumping again)
+    count.set(1);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["box", "first", "count=1", "sibling"]);
+    assert_eq!(runs(&COUNTER_RUNS), 2);
+    stop.set(true);
+    count.set(2);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["box", "first", "count=2", "sibling"]);
+    assert!(log.borrow().is_empty());
+
+    stop.set(false);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["box", "first", "count=2", "second", "tail", "sibling"]);
+    assert_eq!(*log.borrow(), ["+b"]); // `a` kept all along
+    assert!(!rule.composition().has_invalidations());
+}
+
+/// Kotlin's `for (i in 0 until n) { Box("row") { if (i >= limit) break; if (i == skip) continue; Text("r$i") } }`.
+#[kompozable]
+fn BreaksItsRows(n: i32, limit: i32, skip: i32) {
+    for i in 0..n {
+        let slot = &kt::Leave::<()>::new();
+        match kt::leaving(slot, || {
+            Boxed("row", || {
+                if i >= limit {
+                    kt::leave(slot, kt::Jump::Loop(0));
+                }
+                if i == skip {
+                    kt::leave(slot, kt::Jump::Loop(1));
+                }
+                Text(format!("r{i}"));
+            })
+        }) {
+            Ok(()) => {}
+            Err(kt::Jump::Loop(0)) => break,
+            Err(kt::Jump::Loop(1)) => continue,
+            Err(_) => unreachable!(),
+        }
+    }
+    Text("end");
+}
+
+/// `break`/`continue` out of a node's content in a loop: the node the jump left keeps what it composed (none here),
+/// the loop goes on or stops where Kotlin's does, and as the limit changes the rows come and go positionally.
+fn a_loop_jump_out_of_composable_content_keeps_the_composition_whole() {
+    let limit = mutable_state_of(2);
+    let skip = mutable_state_of(-1);
+    let (l, s) = (limit.clone(), skip.clone());
+    let rule = Rule::new(kompozable_lambda!(move || BreaksItsRows(4, l.get(), s.get())));
+    assert_eq!(rule.names(), ["row", "r0", "row", "r1", "row", "end"]);
+    limit.set(3);
+    skip.set(1);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["row", "r0", "row", "row", "r2", "row", "end"]);
+    limit.set(1);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["row", "r0", "row", "end"]);
+    limit.set(4);
+    skip.set(-1);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["row", "r0", "row", "r1", "row", "r2", "row", "r3", "end"]);
+}
+
+/// A jump out of what provides composition locals and reuses content (`CompositionLocalProvider`, `key`,
+/// `ReusableContent`, nested node contents): where it lands the locals provided and the reuse begun inside are left
+/// too, the code after the call reading the locals of its own place.
+fn a_jump_out_of_providers_and_keys_leaves_their_locals() {
+    let stop = mutable_state_of(true);
+    let s = stop.clone();
+    let rule = Rule::new(kompozable_lambda!(move || {
+        let slot = &kt::Leave::<()>::new();
+        let stop = s.get();
+        let r = kt::leaving(slot, || {
+            Boxed("outer", || {
+                KompozitionLocalProvider(&[LocalName.provides("inner".into())], || {
+                    key(&7, || {
+                        ReusableContent(stop, || {
+                            Boxed("inner", || {
+                                Text(format!("in {}", LocalName.current()));
+                                if stop {
+                                    kt::leave(slot, kt::Jump::Loop(0));
+                                }
+                                Text("rest");
+                            });
+                        });
+                    });
+                });
+            });
+        });
+        Text(format!("left={} at {}", r.is_err(), LocalName.current()));
+    }));
+    assert_eq!(rule.names(), ["outer", "inner", "in inner", "left=true at default"]);
+    stop.set(false);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["outer", "inner", "in inner", "rest", "left=false at default"]);
+    stop.set(true);
+    rule.wait_for_idle();
+    assert_eq!(rule.names(), ["outer", "inner", "in inner", "left=true at default"]);
 }

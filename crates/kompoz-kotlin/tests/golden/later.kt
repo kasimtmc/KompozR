@@ -5,10 +5,6 @@ fun stillTranslated(x: Int) = x + 1
 
 fun inferred(x: Int) = unknownFunction(x)
 
-@Composable
-fun Rows(xs: List<String>) {
-    Column {
-        if (xs.isEmpty()) return
-        Text(xs.first())
-    }
+fun reset(count: MutableState<Int>?) {
+    count?.value = 0
 }

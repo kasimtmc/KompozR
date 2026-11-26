@@ -623,6 +623,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn dates_count_and_print_as_java_does() {
         let date = LocalDate::of(2023, 4, 15);
         assert_eq!(date.to_string(), "2023-04-15");
@@ -643,6 +644,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn instants_in_zones_as_java_has_them() {
         // 2023-04-15T10:15:30.120Z, a Saturday.
         let instant = Instant::of_epoch_milli(1_681_553_730_120);

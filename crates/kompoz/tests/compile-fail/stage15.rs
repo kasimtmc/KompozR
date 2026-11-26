@@ -3,12 +3,8 @@
 use kompoz::prelude::*;
 
 kompoz! {
-    @Composable
-    fun Rows(xs: List<String>) {
-        Column {
-            if (xs.isEmpty()) return
-            Text(xs.first())
-        }
+    fun reset(count: MutableState<Int>?) {
+        count?.value = 0
     }
 }
 

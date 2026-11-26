@@ -599,6 +599,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn times_are_written_in_the_locale() {
         let pm = at(2023, 4, 15, 15, 30, 0);
         assert_eq!(utc_format("hh:mm a", JavaLocale::US).format(pm), "03:30 PM");
@@ -612,6 +613,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn dates_are_written_in_the_locale() {
         let day = at(2023, 4, 15, 10, 15, 30);
         let us = utc_format("EEE, d MMM yyyy HH:mm:ss Z", JavaLocale::US);
@@ -628,6 +630,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn zones_are_named_as_cldr_names_them() {
         let berlin = TimeZone::get_time_zone("Europe/Berlin");
         if berlin.id() != "Europe/Berlin" {
@@ -640,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn dates_are_read_back() {
         let us = utc_format("hh:mm a", JavaLocale::US);
         assert_eq!(us.parse("03:30 PM"), at(1970, 1, 1, 15, 30, 0));
@@ -662,6 +666,7 @@ mod tests {
     /// TimePickerSamples' confirm button in Rust's syntax: today at the time picked, written by
     /// `SimpleDateFormat("hh:mm a", locale)` (in one zone given: other tests change the default one meanwhile).
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn the_samples_time_written_in_rust() {
         let formatter = utc_format("hh:mm a", JavaLocale::US);
         let cal = Calendar::get_instance_in(TimeZone::get_time_zone("UTC"));
@@ -683,6 +688,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn patterns_are_checked() {
         let refused =
             std::panic::catch_unwind(|| SimpleDateFormat::with_locale("hh:mm b", JavaLocale::US)).unwrap_err();

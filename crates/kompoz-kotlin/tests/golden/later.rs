@@ -5,4 +5,4 @@ pub fn still_translated(x: i32) -> i32 {
     ::kompoz::runtime::named_args!({ x + 1 })
 }
 // error 6:5: write `inferred`'s return type: its expression's type isn't one KompozR can tell (`fun inferred(…): Type = …`)
-// error 10:5: a jump out of a lambda of a composable call, or of one calling composables (Compose ends the composition's groups it leaves; KompozR's jump leaves them open) isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
+// error 9:5: an assignment through `?.` isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)

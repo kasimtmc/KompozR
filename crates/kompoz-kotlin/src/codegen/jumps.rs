@@ -29,9 +29,16 @@
 //! ```
 //!
 //! (in a coroutine `kt::leaving_async(&slot, async { call }).await`). Kotlin allows it out of an inline function's
-//! lambda only: one the callee keeps (`onClick`), a coroutine's (`launch { }`), is an error, as Kotlin's. Out of a
-//! composable call, or a lambda calling composables, it is not translated: Compose ends the groups of the composition
-//! a jump leaves (the compiler's `endToMarker`), which unwinding past the composer doesn't.
+//! lambda only: one the callee keeps (`onClick`), a coroutine's (`launch { }`), is an error, as Kotlin's.
+//!
+//! Out of a composable call (`Column { if (xs.isEmpty()) return … }`, `key(k) { … }`, the file's own inline
+//! composables), or a lambda calling composables (`for (x in xs) { Row { if (…) break } }`, `return@Column`), the
+//! groups the jump leaves are ended where it lands, as Compose's compiler ends them (`currentMarker` before the call,
+//! `endToMarker` at the jump): `kt::leaving` takes the composer's marker before the call and ends the groups opened
+//! since when a jump comes out of it (the composer's `end_to_marker`: each group ended as at its end, what it didn't
+//! call this time leaving the composition — the values remembered after the jump forgotten, as Compose trims them).
+//! There the slot is a reference (`let slot = &kt::Leave::new();`), which the lambdas a `#[kompozable]` body hands to
+//! composables capture by a copy, as they capture every local.
 
 use super::expr::Out;
 use super::stmt::Tail;
@@ -246,14 +253,10 @@ impl Gen<'_, '_> {
             return out;
         }
         let span = self.span(loc);
-        if self.control.kompozable_calls > composables {
-            out.ts = self.later(
-                loc,
-                "a jump out of a lambda of a composable call, or of one calling composables (Compose ends the \
-                 composition's groups it leaves; KompozR's jump leaves them open)",
-            );
-            return out;
-        }
+        // (a composable call, or one whose lambdas call composables: `kt::leaving` ends the groups the jump leaves,
+        // `endToMarker`; the slot a reference, which the lambdas a `#[kompozable]` body hands to composables capture
+        // as they capture every local, by a copy)
+        let composing = self.control.kompozable_calls > composables;
         let kt = self.kt(span);
         let slot = proc_macro2::Ident::new(&slot, span);
         let mut arms = Vec::new();
@@ -272,11 +275,12 @@ impl Gen<'_, '_> {
             quote_spanned!(span=> #kt::Leave::<()>::new())
         };
         let call = out.ts;
+        let (new, at) = if composing { (quote_spanned!(span=> &#new), quote!(#slot)) } else { (new, quote!(&#slot)) };
         let caught = if self.in_async && self.awaits > awaits {
             let a = self.awaited(None, loc);
-            quote_spanned!(span=> #kt::leaving_async(&#slot, async { #call }) #a)
+            quote_spanned!(span=> #kt::leaving_async(#at, async { #call }) #a)
         } else {
-            quote_spanned!(span=> #kt::leaving(&#slot, || #call))
+            quote_spanned!(span=> #kt::leaving(#at, || #call))
         };
         out.ts = quote_spanned!(span=> {
             let #slot = #new;

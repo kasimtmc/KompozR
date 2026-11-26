@@ -6,7 +6,8 @@
 //! same lines expected. Then the package's other forms as they run: local and anonymous functions, callable
 //! references, a `var` lambdas share, jumps out of inline lambdas, an inline function's suspending twin, a coroutine's
 //! `catch (e: CancellationException)`; (stage 14 FINAL) jumps out of any inline function's lambda (the API's, the
-//! file's own `inline fun` through its `try`/`finally`, in a coroutine too).
+//! file's own `inline fun` through its `try`/`finally`, in a coroutine too); (stage 14 JUMP) jumps out of the lambdas
+//! of composable calls, the groups they leave ended as Compose's `endToMarker` ends them.
 //!
 //! Kotlin's exceptions are Rust's unwinding panics (`kt::Throwable`): these tests, as every program using Kotlin's
 //! `try`, need `panic = "unwind"` (Rust's default).
@@ -908,6 +909,168 @@ fn jumps_out_of_inline_lambdas() {
     line(&rule, "çık", "çık defg ab null 4 erken [finally] sonuna [sonra, finally] 20 0 6 106");
 }
 
+// ---- (stage 14 JUMP) jumps out of composable lambdas ------------------------------------------------------------
+
+kompoz! {
+    // Jumps out of the lambdas of composable calls, as Compose ends the groups they leave (`endToMarker`): a `return`
+    // out of `Column`'s content (later.kt's old `Rows`), `break`/`continue` of a loop out of a `Row`'s, a
+    // `return@Column` out of a `Row` inside it, a `return` with a value out of `key`'s and the file's own inline
+    // composable's; what the lambda remembered after the jump forgotten, what it remembered before kept.
+    @Composable
+    fun Rows(xs: List<String>) {
+        Column {
+            if (xs.isEmpty()) return
+            Text(xs.first())
+        }
+    }
+
+    @Composable
+    fun Cut(xs: List<String>, limit: Int) {
+        Column {
+            for ((i, x) in xs.withIndex()) {
+                Row {
+                    if (i >= limit) break
+                    if (x == "iki") continue
+                    Text("satır $x")
+                }
+            }
+            Text("kesildi")
+        }
+    }
+
+    @Composable
+    fun Labeled(xs: List<String>) {
+        Column {
+            Row {
+                if (xs.size > 1) return@Column
+                Text("tek")
+            }
+            Text("çok değil")
+        }
+        Text("etiket sonu")
+    }
+
+    @Composable
+    inline fun Framed(content: @Composable () -> Unit) {
+        Box { content() }
+    }
+
+    @Composable
+    fun Keyed(xs: List<String>): Int {
+        for (x in xs) {
+            key(x) {
+                Framed {
+                    if (x.isEmpty()) return -1
+                    Text("anahtar $x")
+                }
+            }
+        }
+        return xs.size
+    }
+
+    @Composable
+    fun Counted(stop: Boolean) {
+        Column {
+            var before by remember { mutableStateOf(0) }
+            Button(onClick = { before++ }) { Text("önce $before") }
+            if (stop) return
+            var after by remember { mutableStateOf(0) }
+            Button(onClick = { after++ }) { Text("sonra $after") }
+        }
+    }
+
+    @Kompozable
+    fun ComposableJumps() {
+        var items by remember { mutableStateOf(listOf<String>()) }
+        var limit by remember { mutableStateOf(2) }
+        var stop by remember { mutableStateOf(false) }
+        Column {
+            Button(onClick = { items = if (items.isEmpty()) listOf("bir", "iki", "üç", "") else listOf() }) {
+                Text("Değiştir")
+            }
+            Button(onClick = { limit = if (limit == 2) 4 else 2 }) { Text("Sınır") }
+            Button(onClick = { stop = !stop }) { Text("Dur") }
+            Rows(items)
+            Cut(items, limit)
+            Labeled(items)
+            val n = Keyed(items)
+            Text("anahtarlar $n")
+            Counted(stop)
+            Text("son")
+        }
+    }
+}
+
+/// The texts shown, in the tree's order.
+fn texts(rule: &KompozTestRule) -> Vec<String> {
+    use kompoz::ui::semantics::SemanticsProperties;
+    rule.all_nodes(true)
+        .iter()
+        .filter_map(|n| Some(n.config().get(SemanticsProperties::Text)?.first()?.text().to_string()))
+        .collect()
+}
+
+fn jumps_out_of_composable_lambdas() {
+    let rule = KompozTestRule::new(ComposableJumps);
+    rule.wait_for_idle();
+    let empty = [
+        "Değiştir",
+        "Sınır",
+        "Dur",
+        "kesildi",
+        "tek",
+        "çok değil",
+        "etiket sonu",
+        "anahtarlar 0",
+        "önce 0",
+        "sonra 0",
+        "son",
+    ];
+    assert_eq!(texts(&rule), empty);
+    rule.on_node_with_text("Değiştir").perform_click();
+    rule.wait_for_idle();
+    // (`Rows` shows the first; `Cut` stops at the limit and skips "iki"; `Labeled` leaves its Column; `Keyed` leaves
+    // at the empty item with -1, the items before it shown)
+    let full = [
+        "Değiştir",
+        "Sınır",
+        "Dur",
+        "bir",
+        "satır bir",
+        "kesildi",
+        "etiket sonu",
+        "anahtar bir",
+        "anahtar iki",
+        "anahtar üç",
+        "anahtarlar -1",
+        "önce 0",
+        "sonra 0",
+        "son",
+    ];
+    assert_eq!(texts(&rule), full);
+    rule.on_node_with_text("Sınır").perform_click();
+    rule.wait_for_idle();
+    assert!(texts(&rule).contains(&"satır üç".to_string()), "{:?}", texts(&rule));
+    assert!(texts(&rule).contains(&"satır ".to_string()), "{:?}", texts(&rule));
+    rule.on_node_with_text("Değiştir").perform_click();
+    rule.wait_for_idle();
+    assert_eq!(texts(&rule), empty);
+
+    // What `Counted` remembered after its `return` is forgotten while it returns there, what it remembered before
+    // is kept.
+    rule.on_node_with_text("önce 0").perform_click();
+    rule.on_node_with_text("sonra 0").perform_click();
+    rule.on_node_with_text("sonra 1").perform_click();
+    rule.wait_for_idle();
+    assert!(texts(&rule).ends_with(&["önce 1".to_string(), "sonra 2".to_string(), "son".to_string()]));
+    rule.on_node_with_text("Dur").perform_click();
+    rule.wait_for_idle();
+    assert!(texts(&rule).ends_with(&["önce 1".to_string(), "son".to_string()]), "{:?}", texts(&rule));
+    rule.on_node_with_text("Dur").perform_click();
+    rule.wait_for_idle();
+    assert!(texts(&rule).ends_with(&["önce 1".to_string(), "sonra 0".to_string(), "son".to_string()]));
+}
+
 fn main() {
     common::run(&[
         ("class_properties_by_delegates_and_accessors", class_properties_by_delegates_and_accessors),
@@ -928,5 +1091,6 @@ fn main() {
         ("smart_casts_in_chains", smart_casts_in_chains),
         ("exception_hierarchies", exception_hierarchies),
         ("jumps_out_of_inline_lambdas", jumps_out_of_inline_lambdas),
+        ("jumps_out_of_composable_lambdas", jumps_out_of_composable_lambdas),
     ]);
 }

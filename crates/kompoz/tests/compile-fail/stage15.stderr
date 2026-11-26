@@ -1,5 +1,5 @@
-error: kompoz: a jump out of a lambda of a composable call, or of one calling composables (Compose ends the composition's groups it leaves; KompozR's jump leaves them open) isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
- --> tests/compile-fail/stage15.rs:8:9
+error: kompoz: an assignment through `?.` isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
+ --> tests/compile-fail/stage15.rs:7:9
   |
-8 |         Column {
-  |         ^^^^^^
+7 |         count?.value = 0
+  |         ^^^^^

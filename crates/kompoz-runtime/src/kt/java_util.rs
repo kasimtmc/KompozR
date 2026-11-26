@@ -1618,6 +1618,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn julian_dates_before_the_cutover() {
         assert_eq!(julian_from_days(GREGORIAN_CUTOVER_DAY - 1), (1582, 10, 4));
         assert_eq!(days_from_julian(1582, 10, 4), GREGORIAN_CUTOVER_DAY - 1);
@@ -1629,6 +1630,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn fields_are_resolved_as_javas() {
         // 2023-04-15 (a Saturday) 10:15 UTC.
         let cal = calendar_at(millis(2023, 4, 15, 10, 15), utc());
@@ -1664,6 +1666,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn a_calendar_not_lenient_refuses_what_isnt_a_time() {
         let cal = calendar_at(millis(2023, 2, 10, 0, 0), utc());
         cal.set_is_lenient(false);
@@ -1683,6 +1686,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn adding_carries_and_clamps() {
         let cal = calendar_at(millis(2023, 1, 31, 12, 0), utc());
         cal.add(Calendar::MONTH, 1);
@@ -1697,6 +1701,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn zones_by_id_and_offsets() {
         assert_eq!(TimeZone::get_time_zone("GMT+3").id(), "GMT+03:00");
         assert_eq!(TimeZone::get_time_zone("GMT-0830").raw_offset(), -(8 * 60 + 30) * 60_000);
@@ -1737,6 +1742,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn dates_print_as_javas() {
         let date = Date::of_millis(millis(2023, 4, 15, 10, 15) + 30_000);
         TimeZone::set_default(Some(TimeZone::get_time_zone("GMT+03:00")));
@@ -1748,6 +1754,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "a random UUID reads the real-time clock, which Miri's isolation forbids")]
     fn uuids_as_javas() {
         let text = "0f0e0d0c-0b0a-0908-0706-050403020100";
         let uuid = UUID::from_string(text);

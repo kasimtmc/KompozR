@@ -392,6 +392,19 @@ pub(crate) struct Composer {
     pub(crate) recomposer: Rc<Recomposer>,
 }
 
+/// Where a composition was when it was taken ([`current_marker`](crate::__private::current_marker), Compose's
+/// `Composer.currentMarker`): what [`end_to_marker`](crate::__private::end_to_marker) ends the groups opened since
+/// down to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Marker {
+    composer: u64,
+    /// How many groups were open.
+    depth: usize,
+    scope: Option<ScopeId>,
+    locals: usize,
+    reusing: u32,
+}
+
 /// A group of a composition: where saveable positions are counted from (a registry's provider).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Boundary {
@@ -930,6 +943,53 @@ impl Composer {
         };
         if let Some((node, children)) = update {
             node.set_children(&children);
+        }
+    }
+
+    // ---- Markers (jumps out of composable lambdas) ----
+
+    /// Where the composition is now (Compose's `currentMarker`): the group composing and what goes with it — the
+    /// restartable scope running, the composition locals provided, how deep in reused content.
+    pub(crate) fn current_marker(&self) -> Marker {
+        let st = self.state.borrow();
+        Marker {
+            composer: self.id,
+            depth: st.frames.len(),
+            scope: st.current_scope,
+            locals: st.locals.len(),
+            reusing: st.reusing,
+        }
+    }
+
+    /// Ends the groups opened since `marker` was taken (Compose's `endToMarker`), each as its own end would: what it
+    /// didn't call this time leaves the composition (the values it remembered after the jump forgotten), a node it
+    /// emitted is told its children, a restartable scope's run is over (its group ended, the scope around it the
+    /// current one again); the locals provided and the reuse begun since are left too. What a jump out of a lambda
+    /// of a composable call does, where it lands: the calls it left (an inline composable's group, a node's, a
+    /// `key`'s, a `ReusableContent`'s, a remember's) never reached their ends.
+    pub(crate) fn end_to_marker(&self, marker: Marker) {
+        loop {
+            {
+                let mut st = self.state.borrow_mut();
+                if !st.composing || st.frames.len() <= marker.depth {
+                    break;
+                }
+                let g = st.frames.last().expect("a frame").group;
+                if st.groups.get(g.0).scope.is_some() {
+                    st.stats.scopes_run += 1; // (a restartable scope's run, left)
+                }
+            }
+            self.end_group();
+        }
+        let mut st = self.state.borrow_mut();
+        if !st.composing {
+            return;
+        }
+        st.current_scope = marker.scope;
+        st.reusing = marker.reusing;
+        if st.locals.len() > marker.locals {
+            let dropped = st.locals.split_off(marker.locals);
+            st.garbage.push(Box::new(dropped));
         }
     }
 
@@ -2192,5 +2252,26 @@ impl Composer {
         };
         drop((after, side));
         self.apply_changes();
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Markers: what a jump out of a composable lambda ends (Compose's compiler API `currentMarker`/`endToMarker`)
+
+/// Where the composition composing on this thread is (Compose's `Composer.currentMarker`), to end the groups opened
+/// from now on with [`end_to_marker`] when a jump leaves them; none outside a composition (or outside its groups).
+pub fn current_marker() -> Option<Marker> {
+    let c = Composer::current()?;
+    c.in_group().then(|| c.current_marker())
+}
+
+/// Ends the groups of `marker`'s composition opened since it was taken (Compose's `Composer.endToMarker`): where a
+/// jump out of a lambda of a composable call (Kotlin's `return`, `break`, `continue`, `return@label` out of an inline
+/// lambda: `Column { if (xs.isEmpty()) return … }`) lands, the calls it left never reached their ends. Each group
+/// ends as at its own end (what it didn't call this time leaves the composition); a composition no longer composing
+/// (or not this thread's) is left as it is.
+pub fn end_to_marker(marker: Marker) {
+    if let Some(c) = Composer::composing(marker.composer) {
+        c.end_to_marker(marker);
     }
 }

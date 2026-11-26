@@ -534,6 +534,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn posix_rules_switch_on_their_days() {
         let berlin = PosixRule::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap();
         let utc = |y, m, d, h: i64| days_from_civil(y, m, d) * 86_400 + h * 3600;
@@ -552,6 +553,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn wall_times_take_javas_offsets() {
         let ny = ZoneRules {
             transitions: Vec::new(),
@@ -570,6 +572,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "reads the system's zoneinfo, which Miri's isolation forbids")]
     fn the_systems_zones_are_read() {
         // (where the system has its zoneinfo database)
         let Some(berlin) = load("Europe/Berlin") else { return };
