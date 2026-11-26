@@ -55,6 +55,16 @@ pub trait DrawModifierNode {
     fn draw(&mut self, scope: &mut ContentDrawScope);
     /// Its layout's size changed (Compose's `onMeasureResultChanged`).
     fn on_measure_result_changed(&mut self) {}
+    /// Redraws it (Compose's `DrawModifierNode.invalidateDraw()`): a node of Kotlin's `Modifier.Node` class (a node
+    /// of Rust's has its [`NodeHandle::invalidate_draw`](crate::NodeHandle::invalidate_draw)).
+    fn invalidate_draw(&self)
+    where
+        Self: Sized + crate::ModifierNodeBase,
+    {
+        if let Some(h) = self.modifier_node_impl().handle() {
+            h.invalidate_draw();
+        }
+    }
 }
 
 /// Where drawing happens (Compose's DrawScope): the context, where the scope is in it and its size, the layout

@@ -4,6 +4,9 @@
 //! vertical drag handle), and the M15 samples of BottomSheetSamples.kt and DragHandleSamples.kt.
 
 #![allow(non_snake_case, non_upper_case_globals)]
+// (the C++ tests' and alpha17 samples' rememberModalBottomSheetState / rememberStandardBottomSheetState, deprecated
+// by material3 1.5.0-alpha20, whose rememberBottomSheetState is ported: kept as they are written)
+#![allow(deprecated)]
 
 #[path = "../../kompoz-foundation/tests/common/mod.rs"]
 mod common;
@@ -14,6 +17,7 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_material_icons_core::Icons;
 use kompoz_material3::prelude::*;
+use kompoz_runtime::kt::set_of;
 use kompoz_runtime::*;
 use kompoz_test::{KompozTestRule, RecordingCanvas};
 use kompoz_ui::focus::FocusRequester;
@@ -40,6 +44,7 @@ tests!(
     a_bottom_sheet_scaffolds_padding_follows_the_sheet_without_recomposing,
     sheet_states_start_where_told_and_refuse_what_they_skip,
     sheet_states_save_their_value,
+    remembered_bottom_sheet_states_settle_at_their_enabled_values,
     bottom_sheet_defaults_follow_the_tokens,
     drag_handles_expand_collapse_and_dismiss_the_sheet,
     sheets_are_at_most_their_maximum_width,
@@ -979,41 +984,146 @@ fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
 }
 
 fn sheet_states_start_where_told_and_refuse_what_they_skip() {
-    let state = SheetState(false, || 56.0, || 125.0);
-    assert!(state.current_value() == SheetValue::Hidden && state.target_value() == SheetValue::Hidden);
+    use SheetValue::{Expanded, Hidden, PartiallyExpanded};
+    let all = || set_of([Hidden, PartiallyExpanded, Expanded]);
+    let state = SheetState(all(), || 56.0, || 125.0);
+    assert!(state.current_value() == Hidden && state.target_value() == Hidden);
     assert!(!state.is_visible() && !state.is_animation_running() && !state.has_expanded_state());
     assert_eq!(state, state.clone());
-    assert!(state != SheetState(false, || 56.0, || 125.0));
-    let expanded = named_args!(SheetState(true, || 56.0, || 125.0, initial_value = SheetValue::Expanded));
-    assert_eq!(expanded.current_value(), SheetValue::Expanded);
-    // Kotlin's `require`s: a value it skips can't be where it starts.
+    assert!(state != SheetState(all(), || 56.0, || 125.0));
+    let expanded = named_args!(SheetState(set_of([Hidden, Expanded]), || 56.0, || 125.0, initial_value = Expanded));
+    assert_eq!(expanded.current_value(), Expanded);
+    // Kotlin's `require`s (material3 1.5.0-alpha20): Expanded is enabled, and where it starts is.
+    let message = panic_message(|| drop(SheetState(set_of([Hidden, PartiallyExpanded]), || 0.0, || 0.0)));
+    assert!(message.unwrap().contains("Expanded must be one of the enabled values."));
     let message = panic_message(|| {
-        drop(named_args!(SheetState(true, || 0.0, || 0.0, initial_value = SheetValue::PartiallyExpanded)))
+        drop(named_args!(SheetState(set_of([Hidden, Expanded]), || 0.0, || 0.0, initial_value = PartiallyExpanded)))
     });
-    assert!(message.unwrap().contains("must not be set to PartiallyExpanded if skipPartiallyExpanded"));
-    let message = panic_message(|| drop(named_args!(SheetState(false, || 0.0, || 0.0, skip_hidden_state = true))));
-    assert!(message.unwrap().contains("must not be set to Hidden if skipHiddenState"));
+    assert!(message.unwrap().contains("The initial value must be one of the enabled values."));
+    // The deprecated constructor of what it skips: the set of the values it doesn't.
+    #[allow(deprecated)]
+    {
+        let message = panic_message(|| {
+            drop(named_args!(SheetStateSkipping(true, || 0.0, || 0.0, initial_value = PartiallyExpanded)))
+        });
+        assert!(message.unwrap().contains("The initial value must be one of the enabled values."));
+        let message =
+            panic_message(|| drop(named_args!(SheetStateSkipping(false, || 0.0, || 0.0, skip_hidden_state = true))));
+        assert!(message.unwrap().contains("The initial value must be one of the enabled values."));
+        let skipping = named_args!(SheetStateSkipping(true, || 0.0, || 0.0, initial_value = Expanded));
+        assert_eq!(skipping.current_value(), Expanded);
+    }
     // Read before it was laid out: Kotlin's IllegalStateException.
     let message = panic_message(|| {
-        let _ = SheetState(false, || 0.0, || 0.0).require_offset();
+        let _ = SheetState(all(), || 0.0, || 0.0).require_offset();
     });
     assert!(message.unwrap().contains("The offset was read before being initialized"));
 }
 
 fn sheet_states_save_their_value() {
-    let saver = SheetState::Saver(true, || 56.0, || 125.0, |_| true, false);
-    let half = named_args!(SheetState(false, || 56.0, || 125.0, initial_value = SheetValue::PartiallyExpanded));
+    use SheetValue::{Expanded, Hidden, PartiallyExpanded};
+    let saver = SheetState::Saver(set_of([Hidden, PartiallyExpanded, Expanded]), || 56.0, || 125.0, |_| true);
+    let half = named_args!(SheetState(
+        set_of([Hidden, PartiallyExpanded, Expanded]),
+        || 56.0,
+        || 125.0,
+        initial_value = PartiallyExpanded
+    ));
     let saved = saver.save(&half);
-    // A half way value restored by a state that skips it: expanded.
-    let restored = saver.restore(&saved).expect("restored");
-    assert_eq!(restored.current_value(), SheetValue::Expanded);
-    let keeping = SheetState::Saver(false, || 56.0, || 125.0, |_| true, false);
-    assert_eq!(keeping.restore(&saved).unwrap().current_value(), SheetValue::PartiallyExpanded);
+    assert_eq!(saver.restore(&saved).expect("restored").current_value(), PartiallyExpanded);
+    // A half way value restored by a state that skips it: Kotlin's IllegalArgumentException (material3
+    // 1.5.0-alpha20 restores the saved value as it is, alpha17 made it expanded).
+    #[allow(deprecated)]
+    let skipping = SheetState::SaverSkipping(true, || 56.0, || 125.0, |_| true, false);
+    let message = panic_message(std::panic::AssertUnwindSafe(move || drop(skipping.restore(&saved))));
+    assert!(message.unwrap().contains("The initial value must be one of the enabled values."));
     for value in SheetValue::ENTRIES {
         assert_eq!(SheetValue::restore(&value.save()), Some(value));
     }
     assert_eq!(SheetValue::restore(&SavedValue::Int(3)), None);
-    assert_eq!(format!("{:?}", SheetValue::PartiallyExpanded), "PartiallyExpanded");
+    assert_eq!(format!("{:?}", PartiallyExpanded), "PartiallyExpanded");
+}
+
+/// material3 1.5.0-alpha20's `rememberBottomSheetState(initialValue, enabledValues, confirmValueChange)`: where it
+/// starts, the values it settles at (its sheet's anchors), the vetoes; the modal sheet's default state of it (hidden
+/// to start with, every value), the scaffold's (partially expanded, never hidden); saved and restored.
+fn remembered_bottom_sheet_states_settle_at_their_enabled_values() {
+    use SheetValue::{Expanded, Hidden, PartiallyExpanded};
+    let (all, skipping, vetoing, scope) =
+        (slot::<SheetState>(), slot::<SheetState>(), slot::<SheetState>(), slot::<CoroutineScope>());
+    let which = mutable_state_of(0);
+    let rule = {
+        let (all, skipping, vetoing, scope, which) =
+            (all.clone(), skipping.clone(), vetoing.clone(), scope.clone(), which.clone());
+        KompozTestRule::new(kompozable_lambda!(move || {
+            *scope.borrow_mut() = Some(remember_coroutine_scope());
+            let a = remember_bottom_sheet_state(initial_value = Hidden);
+            let k = remember_bottom_sheet_state(initial_value = Hidden, enabled_values = set_of([Hidden, Expanded]));
+            let v = remember_bottom_sheet_state(
+                initial_value = Hidden,
+                confirm_value_change = |value: SheetValue| value != Expanded,
+            );
+            *all.borrow_mut() = Some(a.clone());
+            *skipping.borrow_mut() = Some(k.clone());
+            *vetoing.borrow_mut() = Some(v.clone());
+            let state = match which.get() {
+                0 => a,
+                1 => k,
+                _ => v,
+            };
+            ModalBottomSheet(
+                on_dismiss_request = || {},
+                sheet_state = Some(state),
+                content = || Box(modifier = Modifier.fill_max_width().height(600.dp()).test_tag("içerik")),
+            );
+        }))
+    };
+    rule.wait_for_idle();
+    // Every value enabled: half way first (648 of 800 tall: over half).
+    let a = get(&all);
+    assert!(a.current_value() == PartiallyExpanded && a.has_partially_expanded_state() && a.has_expanded_state());
+    let s = a.clone();
+    launch(&scope, async move { s.hide().await });
+    rule.wait_for_idle();
+    assert!(!a.is_visible());
+    // Without PartiallyExpanded: all the way up at once, no half way anchor.
+    which.set(1);
+    rule.wait_for_idle();
+    let k = get(&skipping);
+    assert!(k.current_value() == Expanded && !k.has_partially_expanded_state());
+    // A veto of Expanded: it stops half way, and stays there when told to expand.
+    which.set(2);
+    rule.wait_for_idle();
+    let v = get(&vetoing);
+    assert_eq!(v.current_value(), PartiallyExpanded);
+    let s = v.clone();
+    launch(&scope, async move { s.expand().await });
+    rule.wait_for_idle();
+    assert_eq!(v.current_value(), PartiallyExpanded);
+    // The scaffold's default: partially expanded, never hidden (hide refused: IllegalStateException).
+    let standard = slot::<BottomSheetScaffoldState>();
+    let rule = {
+        let standard = standard.clone();
+        KompozTestRule::new(kompozable_lambda!(move || {
+            let state = remember_bottom_sheet_scaffold_state();
+            *standard.borrow_mut() = Some(state.clone());
+            BottomSheetScaffold(
+                sheet_content = || Box(modifier = Modifier.fill_max_width().height(300.dp())),
+                scaffold_state = Some(state),
+                content = |_: PaddingValues| {},
+            );
+        }))
+    };
+    rule.wait_for_idle();
+    let sheet = get(&standard).bottom_sheet_state.clone();
+    assert!(sheet.current_value() == PartiallyExpanded && sheet.is_visible());
+    let mut hide = Box::pin(sheet.hide());
+    let message = panic_message(std::panic::AssertUnwindSafe(move || {
+        let waker = std::task::Waker::noop();
+        let _ = std::future::Future::poll(hide.as_mut(), &mut std::task::Context::from_waker(waker));
+    }));
+    assert!(message.unwrap().contains("skipHiddenState"));
+    drop(rule);
 }
 
 fn bottom_sheet_defaults_follow_the_tokens() {

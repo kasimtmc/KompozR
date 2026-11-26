@@ -55,7 +55,9 @@ pub use layout::{
     MeasurePolicy, MeasureResult, MeasureScope, MultiMeasureLayout, Placeable, PlacementScope, PrecomposedSlotHandle,
     SubcomposeLayout, SubcomposeLayoutState, SubcomposeMeasureScope, SubcomposeSlotReusePolicy, measure_policy,
 };
-pub use modifier::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, NodeKind};
+pub use modifier::{
+    Modifier, ModifierNode, ModifierNodeBase, ModifierNodeElement, ModifierNodeImpl, NodeCx, NodeHandle, NodeKind,
+};
 pub use motion_duration_scale::MotionDurationScale;
 pub use node::LayoutNode;
 pub use unit::Constraints;

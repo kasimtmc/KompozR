@@ -430,6 +430,76 @@ fun RippleSection() {
     }
 }
 
+/**
+ * The ripple section's flat state layer (the C++'s `Indication.Kind.StateLayer`): instead of the ripple, the content color laid over the component, at
+ * Material's state-layer alphas (0.16 pressed, 0.10 focused, 0.08 hovered).
+ */
+object FlatStateLayer : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode =
+        FlatStateLayerNode(interactionSource)
+
+    override fun hashCode(): Int = -1
+
+    override fun equals(other: Any?) = other === this
+}
+
+/** The node of [FlatStateLayer]: it counts its source's presses, focuses and hovers, and draws the strongest. */
+private class FlatStateLayerNode(private val interactionSource: InteractionSource) :
+    Modifier.Node(), DrawModifierNode, CompositionLocalConsumerModifierNode {
+    private var alpha = 0f
+
+    override fun onAttach() {
+        coroutineScope.launch {
+            var presses = 0
+            var focuses = 0
+            var hovers = 0
+            interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is PressInteraction.Press -> presses++
+                    is PressInteraction.Release -> presses--
+                    is PressInteraction.Cancel -> presses--
+                    is FocusInteraction.Focus -> focuses++
+                    is FocusInteraction.Unfocus -> focuses--
+                    is HoverInteraction.Enter -> hovers++
+                    is HoverInteraction.Exit -> hovers--
+                }
+                val shown =
+                    if (presses > 0) 0.16f else if (focuses > 0) 0.10f else if (hovers > 0) 0.08f else 0f
+                if (alpha != shown) {
+                    alpha = shown
+                    invalidateDraw()
+                }
+            }
+        }
+    }
+
+    override fun ContentDrawScope.draw() {
+        drawContent()
+        if (alpha > 0f) {
+            drawRect(color = currentValueOf(LocalContentColor).copy(alpha = alpha))
+        }
+    }
+}
+
+/**
+ * No indication at all for a subtree, `LocalIndication provides NoIndication` (the C++'s `LocalIndication provides
+ * false`): its nodes draw the content alone.
+ */
+object NoIndication : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode = NoIndicationNode()
+
+    override fun hashCode(): Int = -1
+
+    override fun equals(other: Any?) = other === this
+}
+
+/** The node of [NoIndication]: the content as it is. */
+private class NoIndicationNode : Modifier.Node(), DrawModifierNode {
+    override fun ContentDrawScope.draw() {
+        drawContent()
+    }
+}
+
 // Semantics: what accessibility services (TalkBack) read — a row as one, five star icons as
 // one sentence, a decoration not at all.
 @Composable

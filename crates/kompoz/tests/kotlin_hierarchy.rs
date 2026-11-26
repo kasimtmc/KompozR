@@ -6,7 +6,8 @@
 //! `companion_objects_implementing_interfaces`, `sealed_classes_with_class_cases`,
 //! `inner_classes_of_generic_data_classes_and_with_cpp_bases` — its C++ base a Rust one here — and the class parts of
 //! `classes_as_kotlin_writes_them`), ported by name: the same Kotlin through `kompoz!`, the same lines expected (one
-//! following Compose's state where the C++ Kompoz's differs: `interfaces_as_kotlin_writes_them`'s after `Seç`).
+//! following Compose's state where the C++ Kompoz's differs: `interfaces_as_kotlin_writes_them`'s after `Seç`); and
+//! (stage 14 M3NODE) a class of `Modifier.Node` drawing, attached and detached as Compose's nodes are.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -1546,6 +1547,101 @@ fn closing_pass_classes_and_types() {
     assert_eq!(squares(), "true false true");
 }
 
+// ---- Modifier.Node classes (stage 14 M3NODE) ----------------------------------------------------------------------
+
+// (Kotlin's imports of them)
+use kompoz::ui::draw::{ContentDrawScope, DrawModifierNode};
+use kompoz::ui::modifier::CompositionLocalConsumerModifierNode;
+
+kompoz! {
+    // A node of one's own (Compose's DefaultDebugIndication's shape): a class of `Modifier.Node` drawing what its
+    // interaction source says over its content, in the content color where it is; attached and detached with its
+    // layout; made by an indication of the user's (a data class: a new one, unequal, makes a new node).
+    class MarkLog {
+        var text = ""
+        fun add(s: String) {
+            text += s
+        }
+    }
+
+    data class Marking(val log: MarkLog) : IndicationNodeFactory {
+        override fun create(interactionSource: InteractionSource): DelegatableNode = MarkNode(interactionSource, log)
+    }
+
+    private class MarkNode(private val source: InteractionSource, private val log: MarkLog) :
+        Modifier.Node(), DrawModifierNode, CompositionLocalConsumerModifierNode {
+        private var pressed = false
+
+        override fun onAttach() {
+            log.add("bağlandı:" + isAttached + " ")
+            coroutineScope.launch {
+                source.interactions.collect { interaction ->
+                    when (interaction) {
+                        is PressInteraction.Press -> pressed = true
+                        is PressInteraction.Release, is PressInteraction.Cancel -> pressed = false
+                    }
+                    invalidateDraw()
+                }
+            }
+        }
+
+        override fun onDetach() {
+            log.add("ayrıldı ")
+        }
+
+        override fun ContentDrawScope.draw() {
+            drawContent()
+            log.add("çizdi ")
+            if (pressed) {
+                drawRect(color = currentValueOf(LocalContentColor).copy(alpha = 0.5f), size = this@draw.size / 2f)
+            }
+        }
+    }
+
+    @Composable
+    fun MarkedBox(log: MarkLog, shown: Boolean) {
+        if (shown) {
+            // (a source of its own: the indication's node made with the clickable, not at the first press as for none)
+            val source = remember { MutableInteractionSource() }
+            CompositionLocalProvider(LocalContentColor provides Color.Blue) {
+                Box(Modifier.size(40.dp).testTag("işaret").clickable(interactionSource = source, indication = Marking(log)) { })
+            }
+        }
+    }
+}
+
+fn modifier_node_classes_draw_attach_and_detach() {
+    use kompoz::ui::input::PointerType;
+    let log = MarkLog();
+    let shown = mutable_state_of(true);
+    let rule = {
+        let (log, shown) = (log.clone(), shown.clone());
+        KompozTestRule::new(kompozable_lambda!(move || MarkedBox(log.clone(), shown.get())))
+    };
+    rule.wait_for_idle();
+    // (attached once, its scope usable; drawn over its content, nothing more while not pressed)
+    assert!(log.text().starts_with("bağlandı:true "), "{}", log.text());
+    assert!(log.text().contains("çizdi "));
+    let half = Color::new(0.0, 0.0, 1.0, 0.5);
+    assert!(!rule.draw().rect_colors.contains(&half));
+    // Pressed: its coroutine saw the press, redrew it with the content color at half alpha, over a quarter of it.
+    let h = rule.host();
+    h.pointer_down(Offset::new(10.0, 10.0), -1, 0, PointerType::Touch);
+    rule.wait_for_idle();
+    let canvas = rule.draw();
+    let at = canvas.rect_colors.iter().position(|c| *c == half).expect("the pressed overlay");
+    assert_eq!((canvas.rects[at].width(), canvas.rects[at].height()), (20.0, 20.0));
+    h.pointer_up(Offset::new(10.0, 10.0), -1, 0);
+    rule.wait_for_idle();
+    assert!(!rule.draw().rect_colors.contains(&half));
+    // Gone with its layout: detached once (its scope cancelled after).
+    assert!(!log.text().contains("ayrıldı"));
+    shown.set(false);
+    rule.wait_for_idle();
+    assert_eq!(log.text().matches("ayrıldı ").count(), 1);
+    assert_eq!(log.text().matches("bağlandı").count(), 1);
+}
+
 fn main() {
     common::run(&[
         ("sealed_classes_and_is", sealed_classes_and_is),
@@ -1572,5 +1668,6 @@ fn main() {
         ("api_bases_of_the_second_kind", api_bases_of_the_second_kind),
         ("object_members_and_secondary_constructors", object_members_and_secondary_constructors),
         ("closing_pass_classes_and_types", closing_pass_classes_and_types),
+        ("modifier_node_classes_draw_attach_and_detach", modifier_node_classes_draw_attach_and_detach),
     ]);
 }

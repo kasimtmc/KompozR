@@ -2318,6 +2318,20 @@ impl Gen<'_, '_> {
         }
         let span = self.span(a.loc);
         let Some(p) = p else { return self.loose_arg(a) };
+        // ((stage 14 M3NODE) a parameter of the receiver's type parameter, a shared trait object there —
+        // `LocalIndication provides NoIndication`, `T` an `Rc<dyn Indication>` —, given a value of a class of the
+        // user's: its shared object)
+        if let ArgValue::Expr(e) = &a.value
+            && is_type_parameter(p.ty.trim())
+            && let Some(to) = self.owner_arg.clone()
+            && super::hierarchy::api_shared(&to).is_some()
+        {
+            let from = self.peek_ty(e);
+            if self.coerces(&from, &to) {
+                let v = self.value(e);
+                return self.coerce(v, &from, &to, span);
+            }
+        }
         // ((stage 14 WPB) a callable reference given a function's parameter: its parameters' types tell which overload)
         if let ArgValue::Expr(Expr { kind: ExprKind::CallableRef { .. }, .. }) = a.value
             && let Some(l) = &p.lambda

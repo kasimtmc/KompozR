@@ -8,6 +8,9 @@
 //! content_its_own_size_as_compose in scaffold.rs.) M15's values where the C++ had its own, said where they differ.
 
 #![allow(non_snake_case, non_upper_case_globals)]
+// (material3 1.5.0-alpha20 deprecates rememberModalBottomSheetState / rememberStandardBottomSheetState, which the
+// C++ sources and the alpha17 samples here call: Kotlin warns of them as Rust does, allowed here)
+#![allow(deprecated)]
 
 #[path = "../../kompoz-foundation/tests/common/mod.rs"]
 mod common;

@@ -6,6 +6,7 @@ pub(crate) mod chain;
 pub(crate) mod diff;
 mod local;
 mod node;
+mod node_base;
 
 pub use local::{ModifierLocal, ModifierLocalMap, ModifierLocalModifierNode, modifier_local_of};
 pub use node::{
@@ -13,6 +14,9 @@ pub use node::{
     TraversalDecision,
 };
 pub(crate) use node::{NodeCell, NodeRc, dispatch_for_kind, traverse_descendants_of};
+pub use node_base::{
+    CompositionLocalConsumerModifierNode, ModifierNodeBase, ModifierNodeImpl, attach_node_base, detach_node_base,
+};
 
 use std::any::{Any, TypeId};
 use std::fmt;

@@ -1389,8 +1389,12 @@ impl Gen<'_, '_> {
                 // of the value's class — the other a value of it equal to it —, null equal to null)
                 let any = |t: &Ty| super::hierarchy::is_any(&t.non_null());
                 if any(&at) != any(&bt) && at != Ty::Unknown && bt != Ty::Unknown {
+                    let value_is_this = matches!((if any(&at) { rhs } else { lhs }).kind, ExprKind::This { .. });
                     let ((v, vt), (o, ot)) = if any(&at) { ((b.ts, bt), (a.ts, at)) } else { ((a.ts, at), (b.ts, bt)) };
-                    let v = if vt.is_nullable() {
+                    // ((stage 14 M3NODE) `other === this`: the object lent, `self`)
+                    let v = if value_is_this && v.to_string() == "self" {
+                        quote_spanned!(span=> ::core::option::Option::Some(#v))
+                    } else if vt.is_nullable() {
                         quote_spanned!(span=> ::core::option::Option::as_ref(&#v))
                     } else {
                         quote_spanned!(span=> ::core::option::Option::Some(&#v))
@@ -2352,11 +2356,20 @@ impl Gen<'_, '_> {
                 if self.exception_type(&n.name) {
                     return Ty::named("Throwable");
                 }
-                if let Some(t) = self
-                    .receiver_values()
-                    .iter()
-                    .find_map(|(r, value)| members_of(r, &n.name).next().map(|i| owner_arg_ret(value, i.ret)))
-                {
+                if let Some(t) = self.receiver_values().iter().find_map(|(r, value)| {
+                    members_of(r, &n.name).next().map(|i| {
+                        let t = owner_arg_ret(value, i.ret);
+                        // ((stage 14 M3NODE) a generic method's own type parameter, told by its arguments:
+                        // `currentValueOf(LocalContentColor)` a `Color`)
+                        if t.is_vague() || matches!(&t, Ty::Named(n, a) if a.is_empty() && n.len() == 1) {
+                            let g = self.generic_ret(i, type_args, args, trailing);
+                            if g != Ty::Unknown && !g.is_vague() {
+                                return g;
+                            }
+                        }
+                        t
+                    })
+                }) {
                     return t;
                 }
                 match n.name.as_str() {

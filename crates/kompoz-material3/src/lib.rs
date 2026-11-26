@@ -350,17 +350,18 @@ pub use tab_row::{
 #[allow(deprecated)]
 pub use tab_row::{ScrollableTabRow, TabRow};
 // (WP5: sheets)
-pub use bottom_sheet_scaffold::{
-    BottomSheetScaffold, BottomSheetScaffoldState, remember_bottom_sheet_scaffold_state,
-    remember_standard_bottom_sheet_state,
-};
+#[allow(deprecated)]
+pub use bottom_sheet_scaffold::remember_standard_bottom_sheet_state;
+pub use bottom_sheet_scaffold::{BottomSheetScaffold, BottomSheetScaffoldState, remember_bottom_sheet_scaffold_state};
 pub use drag_handle::{
     DragHandleColors, DragHandleShapes, DragHandleSizes, VerticalDragHandle, VerticalDragHandleDefaults,
 };
-pub use modal_bottom_sheet::{
-    ModalBottomSheet, ModalBottomSheetDefaults, ModalBottomSheetProperties, remember_modal_bottom_sheet_state,
-};
-pub use sheet_defaults::{BottomSheet, BottomSheetDefaults, SheetState, SheetValue};
+#[allow(deprecated)]
+pub use modal_bottom_sheet::remember_modal_bottom_sheet_state;
+pub use modal_bottom_sheet::{ModalBottomSheet, ModalBottomSheetDefaults, ModalBottomSheetProperties};
+#[allow(deprecated)]
+pub use sheet_defaults::SheetStateSkipping;
+pub use sheet_defaults::{BottomSheet, BottomSheetDefaults, SheetState, SheetValue, remember_bottom_sheet_state};
 pub use switch::{Switch, SwitchColors, SwitchDefaults};
 pub use text::{LocalTextStyle, ProvideTextStyle, Text, TextColorProducer};
 pub use text_field::{IndicatorLineModifiers, StringTextField, TextField, ValueTextField};

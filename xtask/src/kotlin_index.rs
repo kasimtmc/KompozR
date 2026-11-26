@@ -1509,6 +1509,14 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                             .collect();
                         // (the second kind: a class that is a struct of another name than the trait's, its
                         // constructor's parameters `(name: Type, …)`, the trait's associated types)
+                        // ((stage 14) a nested class, `Modifier.Node`: the trait is the class, Kotlin's qualified name
+                        // a type the trait is, as a nested interface's is)
+                        let name = if name.contains('.') {
+                            scan.types.insert((name.clone(), via.clone()));
+                            via.clone()
+                        } else {
+                            name
+                        };
                         let value = if name != via { name.clone() } else { String::new() };
                         let params = rest
                             .split_once('(')

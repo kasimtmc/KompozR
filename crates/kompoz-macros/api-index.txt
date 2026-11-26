@@ -1857,7 +1857,8 @@ kompoz-navigation3/navigation3 kompozable SharedCats r crates/kompoz-navigation3
 * super SharedTransitionScopeRootModifierNode - ModifierNode
 * super SharedTransitionScopeRootModifierNode - ObserverModifierNode
 * super SheetScrollScope - ScrollScope
-* fn SheetState rrrddd crates/kompoz-material3/src/sheet_defaults.rs
+* fn SheetState rrrdd crates/kompoz-material3/src/sheet_defaults.rs
+* fn SheetStateSkipping rrrddd crates/kompoz-material3/src/sheet_defaults.rs
 * super SheetValue - Saveable
 * super SheetWindowInsets - CustomWindowInsets
 * kompozable ShortNavigationBar dddddr crates/kompoz-material3/src/short_navigation_bar.rs
@@ -2941,6 +2942,7 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_basic_tooltip_state ddd crates/kompoz-material3/src/internal/basic_tooltip.rs
 * kompozable remember_bottom_app_bar_state ddd crates/kompoz-material3/src/bottom_app_bar.rs
 * kompozable remember_bottom_sheet_scaffold_state dd crates/kompoz-material3/src/bottom_sheet_scaffold.rs
+* kompozable remember_bottom_sheet_state rdD crates/kompoz-material3/src/sheet_defaults.rs
 * kompozable remember_carousel_state dr crates/kompoz-material3/src/carousel/carousel_state.rs
 * kompozable remember_component_rect_position_provider ddd crates/kompoz-ui/src/window/desktop_popup.rs
 * kompozable remember_constraints_size_resolver - crates/kompoz-coil/src/compose.rs
@@ -3021,7 +3023,7 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_selection_state - crates/kompoz-foundation/src/text/selection/state.rs
 * method remember_shared_content_state rd crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
 * kompozable remember_shared_entry_in_scene_nav_entry_decorator r crates/kompoz-navigation3/src/scene/state.rs
-* kompozable remember_sheet_state drdddd crates/kompoz-material3/src/sheet_defaults.rs
+* kompozable remember_sheet_state drddd crates/kompoz-material3/src/sheet_defaults.rs
 * kompozable remember_slider_state dddd crates/kompoz-material3/src/slider/state.rs
 * kompozable remember_snap_fling_behavior r crates/kompoz-foundation/src/gestures/snapping/snap_fling_behavior.rs
 * method remember_snap_fling_behavior rd crates/kompoz-material3/src/date_picker.rs DatePickerDefaults

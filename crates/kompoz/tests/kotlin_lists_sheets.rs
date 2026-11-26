@@ -3,6 +3,9 @@
 //! material3's samples of them from `.kt` files (kompoz_file!).
 
 #![allow(non_snake_case, non_upper_case_globals)]
+// (material3 1.5.0-alpha20 deprecates rememberModalBottomSheetState / rememberStandardBottomSheetState, which the
+// C++ sources and the alpha17 samples here call: Kotlin warns of them as Rust does, allowed here)
+#![allow(deprecated)]
 
 mod common;
 

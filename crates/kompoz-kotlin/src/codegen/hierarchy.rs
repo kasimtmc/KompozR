@@ -1272,6 +1272,32 @@ impl Gen<'_, '_> {
                 }
                 SuperKind::Base(b) => {
                     items.extend(self.base_items(d, *b, place, &chain, &own_members, span));
+                    // ((stage 14 M3NODE) a class of `Modifier.Node`: the node a modifier's chain holds of it too —
+                    // attached and detached through its base's part, the capabilities of the interfaces it lists)
+                    if b.rust == "ModifierNodeBase" && place != Place::Enum {
+                        let ui = respan(self.cx.paths.ui.clone(), span);
+                        let implemented: Vec<&str> = ancestors
+                            .iter()
+                            .filter_map(|x| match &x.kind {
+                                SuperKind::Api(n) => Some(n.as_str()),
+                                _ => None,
+                            })
+                            .flat_map(super::object_expr::api_chain)
+                            .collect();
+                        let caps = super::object_expr::self_accessors("ModifierNode", &implemented, span);
+                        out.extend(quote_spanned! {span=>
+                            #allow
+                            impl #g_decl #ui::ModifierNode for #name #g_use {
+                                fn on_attach(&mut self, cx: &#ui::NodeCx) { #ui::modifier::attach_node_base(self, cx) }
+                                fn on_detach(&mut self, cx: &#ui::NodeCx) { #ui::modifier::detach_node_base(self, cx) }
+                                fn on_reset(&mut self) { #ui::ModifierNodeBase::on_reset(self) }
+                                fn should_auto_invalidate(&self) -> bool {
+                                    #ui::ModifierNodeBase::should_auto_invalidate(self)
+                                }
+                                #(#caps)*
+                            }
+                        });
+                    }
                 }
                 SuperKind::Api(t) => {
                     items.extend(self.api_overrides(d, t, &a.args, place, &own_members, span));
@@ -1280,8 +1306,16 @@ impl Gen<'_, '_> {
                     // interface (`as_overlay_scene(self: Rc<Self>)`) given it)
                     let g_impl = with_params(g_decl, &nothings[&ancestor_key(a)], span);
                     let as_self = format!("as_{}", type_snake(t));
+                    let implemented: Vec<&str> = ancestors
+                        .iter()
+                        .filter_map(|x| match &x.kind {
+                            SuperKind::Api(n) => Some(n.as_str()),
+                            _ => None,
+                        })
+                        .flat_map(super::object_expr::api_chain)
+                        .collect();
                     for st in super::object_expr::api_chain(t).into_iter().skip(1) {
-                        if matches!(st, "DynEq" | "ShapeEq")
+                        if super::object_expr::blanket_supertrait(st)
                             || ancestors.iter().any(|x| matches!(&x.kind, SuperKind::Api(n) if n == st))
                         {
                             continue;
@@ -1293,6 +1327,7 @@ impl Gen<'_, '_> {
                         };
                         let str_ = self.ancestor_trait(&sa, false, span);
                         let mut its = self.api_overrides(d, st, &sa.args, place, &own_members, span);
+                        its.extend(super::object_expr::self_accessors(st, &implemented, span));
                         if let Some(item) = index::ITEMS
                             .iter()
                             .find(|i| i.via == st && i.rust == as_self && i.receiver == index::Receiver::Value)
@@ -3195,6 +3230,13 @@ impl Gen<'_, '_> {
     /// class where the class is (its enum), a class's value where an interface or an open class it is is (its
     /// shared object).
     pub(crate) fn coerces(&self, from: &Ty, to: &Ty) -> bool {
+        // ((stage 14 M3NODE) a class's value where the API takes a boxed trait object of an interface or base it is:
+        // `Box<dyn ModifierNode>` of a `Modifier.Node` class)
+        if api_boxed(&to.non_null()).is_some()
+            && let Ty::Named(f, _) = from.non_null()
+        {
+            return self.user_class_rust(&f).is_some_and(|c| !c.is_dyn() && c.shape != Shape::Interface);
+        }
         // (a value of a type of its own where Kotlin's `Any` is: the shared object)
         if is_any(&to.non_null()) {
             return !matches!(from.non_null(), Ty::Unknown | Ty::Unit | Ty::Fun(_) | Ty::Nullable(_))
@@ -3229,6 +3271,7 @@ impl Gen<'_, '_> {
         let to = to.non_null();
         is_any(&to)
             || api_shared(&to).is_some()
+            || api_boxed(&to).is_some()
             || matches!(&to, Ty::Named(n, a) if !a.is_empty() && self.out_mappable(n))
             || matches!(&to, Ty::Named(n, _)
                 if self.user_class_rust(n).is_some_and(|c| c.inherit == Inherit::Sealed && c.shape != Shape::Companion)
@@ -3250,7 +3293,11 @@ impl Gen<'_, '_> {
             return self.out_coerce(v, from, to, span);
         }
         let Ty::Named(t, _) = to.non_null() else { return v };
-        let v = if api_shared(&to.non_null()).is_some() {
+        let v = if api_boxed(&to.non_null()).is_some() {
+            let tt = self.rust_of_ty(&to.non_null(), span);
+            let f = self.fresh("boxed", span);
+            quote_spanned!(span=> { let #f: #tt = ::std::boxed::Box::new(#v); #f })
+        } else if api_shared(&to.non_null()).is_some() {
             let tt = self.rust_of_ty(&to.non_null(), span);
             let f = self.fresh("shared", span);
             let ptr =
@@ -3380,6 +3427,16 @@ pub(crate) fn api_shared(t: &Ty) -> Option<String> {
     let [Ty::Named(n, _)] = a.as_slice() else { return None };
     (n != "KtObject" && (index::base(n).is_some_and(|b| b.value.is_empty()) || trait_object(n).is_some()))
         .then(|| n.clone())
+}
+
+/// (stage 14 M3NODE) The API's trait a type is the boxed trait object of (`Box<dyn ModifierNode>`), if it is.
+pub(crate) fn api_boxed(t: &Ty) -> Option<String> {
+    let Ty::Named(p, a) = t else { return None };
+    if p != "Box" {
+        return None;
+    }
+    let [Ty::Named(n, _)] = a.as_slice() else { return None };
+    (n != "KtObject" && trait_object(n).is_some()).then(|| n.clone())
 }
 
 /// Whether a type is Kotlin's `Any` (`Rc<dyn kt::KtObject>`).

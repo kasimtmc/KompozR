@@ -48,6 +48,52 @@ pub(crate) fn api_chain(iface: &str) -> Vec<&str> {
         .collect()
 }
 
+/// (stage 14 M3NODE) A trait's methods asking for the object as another trait it is (`Indication.as_node_factory(&self)
+/// -> Option<&dyn IndicationNodeFactory>`, `ModifierNode.as_draw(&mut self) -> Option<&mut dyn DrawModifierNode>`:
+/// Kotlin's `is IndicationNodeFactory` of the object), for those of `implemented` (the API traits the object is):
+/// each given the object.
+pub(crate) fn self_accessors(tr: &str, implemented: &[&str], span: Span) -> Vec<TokenStream> {
+    let mut out = Vec::new();
+    for i in crate::index::ITEMS
+        .iter()
+        .filter(|i| i.via == tr && i.owner.is_empty() && i.kind == crate::index::Kind::Method && i.params.is_empty())
+    {
+        let (mutable, rest) = match i.ret.trim().strip_prefix("Option<") {
+            Some(r) => match r.trim_start().strip_prefix("&mut dyn ") {
+                Some(r) => (true, r),
+                None => match r.trim_start().strip_prefix("&dyn ") {
+                    Some(r) => (false, r),
+                    None => continue,
+                },
+            },
+            None => continue,
+        };
+        let path = rest.trim_end().trim_end_matches('>').trim();
+        let name = path.rsplit("::").next().unwrap_or(path);
+        if path.contains('<') || !implemented.contains(&name) {
+            continue;
+        }
+        let want = if mutable { crate::index::Receiver::RefMut } else { crate::index::Receiver::Ref };
+        if i.receiver != want {
+            continue;
+        }
+        let m = ident(i.rust, span);
+        let t = ident(name, span);
+        out.push(if mutable {
+            quote_spanned!(span=> fn #m(&mut self) -> ::core::option::Option<&mut dyn #t> { ::core::option::Option::Some(self) })
+        } else {
+            quote_spanned!(span=> fn #m(&self) -> ::core::option::Option<&dyn #t> { ::core::option::Option::Some(self) })
+        });
+    }
+    out
+}
+
+/// (stage 14 M3NODE) The API's comparing supertraits every `PartialEq` type has by a blanket impl (an object's
+/// equality its own `PartialEq`): never implemented by a class.
+pub(crate) fn blanket_supertrait(tr: &str) -> bool {
+    matches!(tr, "DynEq" | "ShapeEq" | "IndicationEq")
+}
+
 impl Gen<'_, '_> {
     /// The interface an object expression implements: its Rust name, whether it is the user's.
     fn object_interface(&self, supers: &[SuperType]) -> Option<(String, bool)> {
@@ -463,9 +509,10 @@ impl Gen<'_, '_> {
                 });
             }
             // (the comparing supertraits every `PartialEq` type has by a blanket impl: the object's, below)
-            if matches!(*tr, "DynEq" | "ShapeEq") {
+            if blanket_supertrait(tr) {
                 continue;
             }
+            its.extend(self_accessors(tr, &chain, span));
             let n = crate::index::generics(tr).map_or(0, |g| g.len());
             let ta: Vec<&TokenStream> = targs.iter().take(n).collect();
             let tri = proc_macro2::Ident::new(tr, span);

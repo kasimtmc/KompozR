@@ -1,20 +1,25 @@
 //! Material's modal bottom sheet, as Compose's ModalBottomSheet.kt with Compose for desktop's actual
 //! (ModalBottomSheet.skiko.kt): a [`BottomSheet`] in a dialog over the whole window, over a [`Scrim`] dismissing it,
 //! opening as it is composed; its properties ([`ModalBottomSheetProperties`], [`ModalBottomSheetDefaults`]) and
-//! its state ([`remember_modal_bottom_sheet_state`]).
+//! its state ([`remember_modal_bottom_sheet_state`], deprecated by material3 1.5.0-alpha20 for
+//! [`remember_bottom_sheet_state`](crate::remember_bottom_sheet_state)).
+
+// (the deprecated rememberModalBottomSheetState is defined here)
+#![allow(deprecated)]
 
 use crate::color_scheme::content_color_for;
 use crate::internal::strings::{Strings, get_string};
 use crate::scrim::Scrim;
 use crate::sheet_defaults::{
     BottomSheet, BottomSheetDefaults, SheetState, SheetValue, default_drag_handle, launch_invoking_on_completion,
-    remember_sheet_state,
+    remember_bottom_sheet_state, remember_sheet_state,
 };
 use crate::tokens::MotionSchemeKeyTokens;
 use kompoz_animation::{AnimationSpec, animate_float_as_state};
 use kompoz_coroutines::{LaunchedEffect, remember_coroutine_scope};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{Color, Density, Dp, LayoutDirection, Shape};
+use kompoz_runtime::kt::set_of;
 use kompoz_runtime::{Memoized, derived_state_of, kompozable, named, named_args, remember, remember_keyed};
 use kompoz_ui::window::{Dialog, DialogProperties};
 use kompoz_ui::{Alignment, Modifier};
@@ -23,7 +28,7 @@ use std::sync::Arc;
 
 /// A modal bottom sheet (Compose's `ModalBottomSheet`): an alternative to inline menus or simple dialogs, a
 /// [`BottomSheet`] (of `modifier`, `sheet_state` — None: a remembered
-/// [`remember_modal_bottom_sheet_state`] —, `sheet_max_width`, `sheet_gestures_enabled`, `shape`,
+/// [`remember_bottom_sheet_state`] hidden to start with, material3 1.5.0-alpha20's default —, `sheet_max_width`, `sheet_gestures_enabled`, `shape`,
 /// `container_color`, `content_color` — None: the container's content color —, `tonal_elevation`, `drag_handle`,
 /// `content_window_insets` and `content`) in a dialog over the whole window, at its top center, over a [`Scrim`]
 /// of `scrim_color` faded in while the sheet goes anywhere but hidden. It shows itself once it has an expanded
@@ -51,7 +56,7 @@ pub fn ModalBottomSheet(
 ) {
     let sheet_state = match sheet_state {
         Some(sheet_state) => sheet_state,
-        None => remember_modal_bottom_sheet_state(),
+        None => remember_bottom_sheet_state(initial_value = SheetValue::Hidden),
     };
     let content_color = content_color.unwrap_or_else(|| content_color_for(container_color));
     let scope = remember_coroutine_scope();
@@ -185,8 +190,10 @@ impl ModalBottomSheetDefaults {
 }
 
 /// A modal bottom sheet's state, hidden to start with, saved and restored (Compose's
-/// `rememberModalBottomSheetState`): `skip_partially_expanded`, it never stops half way; `confirm_value_change`
-/// may veto a change (a new closure, by what it captures, makes a new state, as a new key does in Compose).
+/// `rememberModalBottomSheetState`, deprecated by material3 1.5.0-alpha20): `skip_partially_expanded`, it never
+/// stops half way; `confirm_value_change` may veto a change (a new closure, by what it captures, makes a new state,
+/// as a new key does in Compose). [`remember_bottom_sheet_state`] of `Hidden` and the values it doesn't skip.
+#[deprecated(note = "Use rememberBottomSheetState with Hidden initial value")]
 #[kompozable]
 pub fn remember_modal_bottom_sheet_state(
     #[default(false)] skip_partially_expanded: bool,
@@ -194,12 +201,20 @@ pub fn remember_modal_bottom_sheet_state(
     #[memoized]
     confirm_value_change: impl Fn(SheetValue) -> bool + 'static,
 ) -> SheetState {
+    use SheetValue::{Expanded, Hidden, PartiallyExpanded};
+    let enabled_values = if skip_partially_expanded {
+        set_of([Hidden, Expanded])
+    } else {
+        set_of([Hidden, PartiallyExpanded, Expanded])
+    };
+    // (Compose: `rememberBottomSheetState(…)`, rememberSheetState of the same arguments: here of the closure's
+    // identity as this function's memoized parameter carries it)
     let id = confirm_value_change.id();
     let confirm: Rc<dyn Fn(SheetValue) -> bool> = Rc::new(confirm_value_change.into_value());
     remember_sheet_state(
-        skip_partially_expanded = skip_partially_expanded,
+        enabled_values = enabled_values,
         confirm_value_change = Memoized::new(confirm, id),
-        initial_value = SheetValue::Hidden,
+        initial_value = Hidden,
     )
 }
 

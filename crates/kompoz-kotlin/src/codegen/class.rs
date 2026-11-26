@@ -1239,11 +1239,20 @@ impl Gen<'_, '_> {
             // (a generic class's value of its own type parameters: what its members' `T` is inside it)
             let params: Vec<Ty> = index::generics(&cx.owner).unwrap_or_default().iter().map(|p| Ty::named(p)).collect();
             let value = Ty::Named(cx.owner.clone(), params);
+            // ((stage 14 M3NODE) labeled with the class's name too: `this@Node` in a member extension, whose own
+            // `this` is its receiver)
+            let mut labels = vec![label.to_string()];
+            if let Some(c) = self.user_class_rust(&cx.owner) {
+                let k = c.kotlin.rsplit('.').next().unwrap_or(&c.kotlin).to_string();
+                if k != label {
+                    labels.push(k);
+                }
+            }
             self.receivers.push(ImplicitReceiver {
                 rust: "self".into(),
                 ty: cx.owner.clone(),
                 value: value.clone(),
-                labels: vec![label.to_string()],
+                labels,
                 depth: 0,
                 by_ref: false,
                 by_mut: false,
@@ -1251,6 +1260,33 @@ impl Gen<'_, '_> {
             });
             self.declare("this", "self".into(), LocalKind::Param, value);
         }
+    }
+
+    /// (stage 14 M3NODE) The result type of the API's method a member function overrides, where it is a boxed trait
+    /// object (`Box<dyn ModifierNode>` of `IndicationNodeFactory.create`): Rust's text.
+    pub(crate) fn api_boxed_result(&mut self, cx: &MemberCx, f: &Function) -> Option<String> {
+        if !super::hierarchy::is_override(&f.modifiers) {
+            return None;
+        }
+        let d = self.decl_of(&cx.owner)?;
+        let ext = usize::from(f.receiver.is_some());
+        for a in self.ancestors(&d) {
+            let t = match &a.kind {
+                super::hierarchy::SuperKind::Api(t) => t.clone(),
+                super::hierarchy::SuperKind::Base(b) => b.rust.to_string(),
+                _ => continue,
+            };
+            for tr in super::object_expr::api_chain(&t) {
+                let found = index::lookup(&f.name.name)
+                    .iter()
+                    .find(|i| i.via == tr && i.kind == index::Kind::Method && i.params.len() == f.params.len() + ext);
+                if let Some(i) = found {
+                    let r = i.ret.trim();
+                    return (r.starts_with("Box<dyn ") && !r.contains("Fn")).then(|| r.to_string());
+                }
+            }
+        }
+        None
     }
 
     /// A member function's result type as the index's text.
@@ -2590,7 +2626,11 @@ impl Gen<'_, '_> {
             None => None,
         };
         let suspend = f.is_suspend();
-        let ret_text = self.member_ret_text(f, cx);
+        // ((stage 14 M3NODE) an override of the API's method giving a boxed trait object Kotlin writes as an interface
+        // its class is — `override fun create(…): DelegatableNode = Node(…)` of an `IndicationNodeFactory`, Rust's
+        // `Box<dyn ModifierNode>` —: the API's type, the value boxed)
+        let api_boxed = self.api_boxed_result(cx, f);
+        let ret_text = api_boxed.clone().unwrap_or_else(|| self.member_ret_text(f, cx));
         let ret_ty = Ty::from_rust(&ret_text);
         let unit = ret_ty == Ty::Unit;
         self.fun = FnState {
@@ -2622,7 +2662,16 @@ impl Gen<'_, '_> {
                 owned_used: ext_owned.clone(),
             });
             let i = proc_macro2::Ident::new("__kz_ext", span);
-            params.push(quote_spanned!(span=> #i: &#rust_ty));
+            // ((stage 14 M3NODE) a drawing object Rust lends mutably, `override fun ContentDrawScope.draw()` of a
+            // `DrawModifierNode`: `&mut`, as the trait's method takes it)
+            if self.lent_mut(r) {
+                if let Some(x) = self.receivers.last_mut() {
+                    x.by_mut = true;
+                }
+                params.push(quote_spanned!(span=> #i: &mut #rust_ty));
+            } else {
+                params.push(quote_spanned!(span=> #i: &#rust_ty));
+            }
         }
         for p in &f.params {
             let (tokens, convert) = self.param(p, false, false);
@@ -2631,6 +2680,10 @@ impl Gen<'_, '_> {
         }
         let generics = self.fn_generics(f, span);
         let ret = match &f.result {
+            _ if api_boxed.is_some() => {
+                let rt: TokenStream = respan(ret_text.parse().unwrap_or_default(), span);
+                quote_spanned!(span=> -> #rt)
+            }
             Some(t) if self.ty_of(t) != Ty::Unit => {
                 let rt = self.rust_type(t, TypePos::Return);
                 quote_spanned!(span=> -> #rt)

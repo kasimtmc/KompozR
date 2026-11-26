@@ -879,9 +879,9 @@ fun DetailScreen(backStackString: String, sourceTab: String) {
 
 // ---- AnimatedOverlaySamples.kt ----
 // (KompozR's: its keys `NavKey`s where the sample's strategy takes `Any` — a `SceneStrategy<Any>` given a back stack
-// of `NavKey`s, Kotlin's variance of the display's `T`, which Rust's types don't have —, and material3 1.5.0-alpha17's
-// `rememberModalBottomSheetState()` where the sample's newer material3 has `rememberBottomSheetState(initialValue =
-// SheetValue.Hidden)`, the same hidden modal sheet state)
+// of `NavKey`s, Kotlin's variance of the display's `T` (`List<NavKey>` is a `List<Any>`), which Rust's types don't
+// have: the back stack would have to be one of `Any` (`Rc<dyn KtObject>`, compared by its class's `equals`) for the
+// display's `T` to be `Any`)
 
 @Serializable private object Landing : NavKey
 
@@ -935,7 +935,7 @@ private class AnimatedBottomSheetSceneStrategy() : SceneStrategy<NavKey> {
             lateinit var sheetState: SheetState
 
             override val content: @Composable (() -> Unit) = {
-                sheetState = rememberModalBottomSheetState()
+                sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden)
                 val minHeight = LocalWindowInfo.current.containerSize.height * 0.2 // 50% height
                 ModalBottomSheet(
                     onDismissRequest = onBack,

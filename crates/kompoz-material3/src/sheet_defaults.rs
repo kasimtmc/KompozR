@@ -1,10 +1,14 @@
 //! Material's bottom sheets' common parts, as Compose's SheetDefaults.kt: the sheet itself in the composition
 //! ([`BottomSheet`]: no dialog window, no scrim), its state ([`SheetState`], [`SheetValue`]), the defaults
 //! ([`BottomSheetDefaults`]: shapes, colors, elevation, insets, the peek height and maximum width, the drag
-//! handle), and what [`ModalBottomSheet`](crate::ModalBottomSheet) and
+//! handle), the remembered state ([`remember_bottom_sheet_state`], with the state's set of enabled values: material3
+//! 1.5.0-alpha20's, the rest of this crate being 1.5.0-alpha17's), and what [`ModalBottomSheet`](crate::ModalBottomSheet) and
 //! [`BottomSheetScaffold`](crate::BottomSheetScaffold) share: the drag handle in its tooltip, the nested scroll
 //! connection moving the sheet before (and after) what scrolls in it, the predictive back scaling, and the
 //! vertical scaling covering a bouncy opening's overshoot.
+
+// (the deprecated SheetStateSkipping and Saver overload are defined here)
+#![allow(deprecated)]
 
 use crate::color_scheme::content_color_for;
 use crate::internal::back_handler::{PredictiveBack, PredictiveBackHandler};
@@ -25,7 +29,7 @@ use kompoz_foundation::gestures::{
 };
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{Color, Density, Dp, Offset, Shape, lerp};
-use kompoz_runtime::kt::panic_kt;
+use kompoz_runtime::kt::{KtSet, panic_kt, set_of};
 use kompoz_runtime::{
     DerivedState, Memoized, Saveable, SavedValue, Saver, SideEffect, derived_state_of, kompozable, kompozable_block,
     kompozable_lambda, named, named_args, remember, remember_keyed, remember_saveable_keyed_with,
@@ -49,7 +53,7 @@ use SheetValue::{Expanded, Hidden, PartiallyExpanded};
 /// A bottom sheet in the composition itself (Compose's `BottomSheet`): unlike [`ModalBottomSheet`]
 /// (crate::ModalBottomSheet), no dialog window of its own, no scrim, the rest of the screen not blocked — drawn
 /// where it is placed (in a Box, say), sharing its parent's input. `state` (None: a remembered
-/// [`remember_modal_bottom_sheet_state`](crate::remember_modal_bottom_sheet_state)) says where it is; it opens,
+/// [`remember_bottom_sheet_state`] hidden to start with, material3 1.5.0-alpha20's default) says where it is; it opens,
 /// moves and hides by the theme's motion; dragged, flung, or its drag handle clicked, it settles on its anchors
 /// (hidden below, half way when taller than half its room, expanded at its height) — `on_dismiss_request` called
 /// when it ends hidden. Back (`back_handler_enabled`) scales it down with a predictive back gesture, then takes a
@@ -77,7 +81,7 @@ pub fn BottomSheet(
 ) {
     let state = match state {
         Some(state) => state,
-        None => crate::modal_bottom_sheet::remember_modal_bottom_sheet_state(),
+        None => remember_bottom_sheet_state(initial_value = Hidden),
     };
     let content_color = content_color.unwrap_or_else(|| content_color_for(container_color));
     let motion_scheme = MaterialTheme::motion_scheme();
@@ -233,7 +237,7 @@ pub(crate) fn BottomSheetImpl(
 ) {
     let state = match state {
         Some(state) => state,
-        None => crate::modal_bottom_sheet::remember_modal_bottom_sheet_state(),
+        None => remember_bottom_sheet_state(initial_value = Hidden),
     };
     let content_color = content_color.unwrap_or_else(|| content_color_for(container_color));
     let bottom_sheet_pane_title = get_string(Strings::BottomSheetPaneTitle);
@@ -563,13 +567,12 @@ pub struct SheetState {
 }
 
 struct SheetStateInner {
-    skip_partially_expanded: bool,
+    enabled_values: KtSet<SheetValue>,
     positional_threshold: Rc<dyn Fn() -> f32>,
     // (Compose's internal `velocityThreshold`: kept, read by nothing in the library, as in Compose)
     #[allow(dead_code)]
     velocity_threshold: Rc<dyn Fn() -> f32>,
     confirm_value_change: Rc<dyn Fn(SheetValue) -> bool>,
-    skip_hidden_state: bool,
     target_value: DerivedState<SheetValue>,
     anchored_draggable_motion_spec: RefCell<Arc<dyn AnimationSpec<f32>>>,
     anchored_draggable_state: AnchoredDraggableState<SheetValue>,
@@ -589,16 +592,41 @@ impl fmt::Debug for SheetState {
     }
 }
 
-/// A sheet's state (Compose's `SheetState(skipPartiallyExpanded, positionalThreshold, velocityThreshold,
-/// initialValue = Hidden, confirmValueChange = { true }, skipHiddenState = false)`): `skip_partially_expanded`,
-/// it never stops half way (expanding all the way, hiding to hidden if it can); `positional_threshold` (px) how
-/// far from the start of a move it must be dragged to settle on the next value, `velocity_threshold` (px/s) how
-/// fast a fling must be to go on to the next one anyway; `initial_value` where it starts; `confirm_value_change`
-/// may veto a change; `skip_hidden_state`, it never hides (expanding, and stopping half way if it can).
+/// A sheet's state (Compose's `SheetState(enabledValues, positionalThreshold, velocityThreshold, initialValue =
+/// Hidden, confirmValueChange = { true })`, material3 1.5.0-alpha20): `enabled_values` the values it can settle at
+/// (each one it has an anchor for, when its sheet's size allows); `positional_threshold` (px) how far from the start
+/// of a move it must be dragged to settle on the next value, `velocity_threshold` (px/s) how fast a fling must be to
+/// go on to the next one anyway; `initial_value` where it starts; `confirm_value_change` may veto a change.
 ///
-/// Panics (Kotlin's IllegalArgumentException) for an `initial_value` it skips.
+/// Panics (Kotlin's IllegalArgumentException) when `enabled_values` lacks [`Expanded`](SheetValue::Expanded) or
+/// `initial_value`.
 #[named(type)]
 pub fn SheetState(
+    enabled_values: KtSet<SheetValue>,
+    positional_threshold: impl Fn() -> f32 + 'static,
+    velocity_threshold: impl Fn() -> f32 + 'static,
+    #[default(Hidden)] initial_value: SheetValue,
+    #[default(|_| true)] confirm_value_change: impl Fn(SheetValue) -> bool + 'static,
+) -> SheetState {
+    SheetState::new(
+        enabled_values,
+        Rc::new(positional_threshold),
+        Rc::new(velocity_threshold),
+        initial_value,
+        Rc::new(confirm_value_change),
+    )
+}
+
+/// A sheet's state of the values it skips (Compose's deprecated `SheetState(skipPartiallyExpanded,
+/// positionalThreshold, velocityThreshold, initialValue = Hidden, confirmValueChange = { true }, skipHiddenState =
+/// false)`, material3 1.5.0-alpha20): [`SheetState()`](fn@SheetState) of [`Expanded`](SheetValue::Expanded), and
+/// [`PartiallyExpanded`](SheetValue::PartiallyExpanded) unless `skip_partially_expanded`, and
+/// [`Hidden`](SheetValue::Hidden) unless `skip_hidden_state`.
+///
+/// Kotlin: `SheetState(skipPartiallyExpanded: Boolean, positionalThreshold: () -> Float, velocityThreshold: () -> Float, initialValue: SheetValue = Hidden, confirmValueChange: (SheetValue) -> Boolean = { true }, skipHiddenState: Boolean = false)`
+#[deprecated(note = "Use the primary constructor that takes a set of enabled values.")]
+#[named]
+pub fn SheetStateSkipping(
     skip_partially_expanded: bool,
     positional_threshold: impl Fn() -> f32 + 'static,
     velocity_threshold: impl Fn() -> f32 + 'static,
@@ -607,36 +635,47 @@ pub fn SheetState(
     #[default(false)] skip_hidden_state: bool,
 ) -> SheetState {
     SheetState::new(
-        skip_partially_expanded,
+        enabled_values_skipping(skip_partially_expanded, skip_hidden_state),
         Rc::new(positional_threshold),
         Rc::new(velocity_threshold),
         initial_value,
         Rc::new(confirm_value_change),
-        skip_hidden_state,
     )
+}
+
+/// The values of a sheet skipping what it is told to (Kotlin's `buildSet { add(Expanded); if
+/// (!skipPartiallyExpanded) add(PartiallyExpanded); if (!skipHiddenState) add(Hidden) }`).
+pub(crate) fn enabled_values_skipping(skip_partially_expanded: bool, skip_hidden_state: bool) -> KtSet<SheetValue> {
+    let mut values = KtSet::new();
+    values.add(Expanded);
+    if !skip_partially_expanded {
+        values.add(PartiallyExpanded);
+    }
+    if !skip_hidden_state {
+        values.add(Hidden);
+    }
+    values
+}
+
+/// Every value of a sheet (Kotlin's default `setOf(Hidden, PartiallyExpanded, Expanded)`).
+pub(crate) fn all_sheet_values() -> KtSet<SheetValue> {
+    set_of([Hidden, PartiallyExpanded, Expanded])
 }
 
 impl SheetState {
     /// [`SheetState()`](fn@SheetState) of shared closures.
     pub(crate) fn new(
-        skip_partially_expanded: bool,
+        enabled_values: KtSet<SheetValue>,
         positional_threshold: Rc<dyn Fn() -> f32>,
         velocity_threshold: Rc<dyn Fn() -> f32>,
         initial_value: SheetValue,
         confirm_value_change: Rc<dyn Fn(SheetValue) -> bool>,
-        skip_hidden_state: bool,
     ) -> SheetState {
-        if skip_partially_expanded && initial_value == PartiallyExpanded {
-            panic_kt(
-                "IllegalArgumentException",
-                "The initial value must not be set to PartiallyExpanded if skipPartiallyExpanded is set to true.",
-            );
+        if !enabled_values.contains(Expanded) {
+            panic_kt("IllegalArgumentException", "Expanded must be one of the enabled values.");
         }
-        if skip_hidden_state && initial_value == Hidden {
-            panic_kt(
-                "IllegalArgumentException",
-                "The initial value must not be set to Hidden if skipHiddenState is set to true.",
-            );
+        if !enabled_values.contains(initial_value) {
+            panic_kt("IllegalArgumentException", "The initial value must be one of the enabled values.");
         }
         let confirm = confirm_value_change.clone();
         #[allow(deprecated)]
@@ -658,11 +697,10 @@ impl SheetState {
         };
         SheetState {
             inner: Rc::new(SheetStateInner {
-                skip_partially_expanded,
+                enabled_values,
                 positional_threshold,
                 velocity_threshold,
                 confirm_value_change,
-                skip_hidden_state,
                 target_value,
                 anchored_draggable_motion_spec: RefCell::new(BottomSheetAnimationSpec()),
                 anchored_draggable_state,
@@ -727,7 +765,7 @@ impl SheetState {
     pub fn partial_expand(&self) -> impl Future<Output = ()> + 'static {
         let state = self.clone();
         async move {
-            if state.inner.skip_partially_expanded {
+            if state.skip_partially_expanded() {
                 panic_kt(
                     "IllegalStateException",
                     "Attempted to animate to partial expanded when skipPartiallyExpanded was enabled. Set \
@@ -759,7 +797,7 @@ impl SheetState {
     pub fn hide(&self) -> impl Future<Output = ()> + 'static {
         let state = self.clone();
         async move {
-            if state.inner.skip_hidden_state {
+            if state.skip_hidden_state() {
                 panic_kt(
                     "IllegalStateException",
                     "Attempted to animate to hidden when skipHiddenState was enabled. Set skipHiddenState to false \
@@ -868,14 +906,16 @@ impl SheetState {
         *self.inner.hide_motion_spec.borrow_mut() = spec;
     }
 
-    /// Whether it skips the partially expanded value (Compose's internal `skipPartiallyExpanded`).
+    /// Whether it skips the partially expanded value: not one of its enabled values (Compose's internal
+    /// `skipPartiallyExpanded`, material3 1.5.0-alpha20).
     pub(crate) fn skip_partially_expanded(&self) -> bool {
-        self.inner.skip_partially_expanded
+        !self.inner.enabled_values.contains(PartiallyExpanded)
     }
 
-    /// Whether it skips the hidden value (Compose's internal `skipHiddenState`).
+    /// Whether it skips the hidden value: not one of its enabled values (Compose's internal `skipHiddenState`,
+    /// material3 1.5.0-alpha20).
     pub(crate) fn skip_hidden_state(&self) -> bool {
-        self.inner.skip_hidden_state
+        !self.inner.enabled_values.contains(Hidden)
     }
 
     /// Its positional threshold, px (Compose's internal `positionalThreshold`).
@@ -888,46 +928,62 @@ impl SheetState {
         (self.inner.confirm_value_change)(value)
     }
 
-    /// The default saver of a sheet's state (Compose's `SheetState.Saver(skipPartiallyExpanded,
-    /// positionalThreshold, velocityThreshold, confirmValueChange, skipHiddenState)`): its current value saved, a
-    /// state of it (expanded for a half way one it skips) restored.
+    /// The default saver of a sheet's state (Compose's `SheetState.Saver(enabledValues, positionalThreshold,
+    /// velocityThreshold, confirmValueChange)`, material3 1.5.0-alpha20): its current value saved, a state of it
+    /// restored.
     pub fn Saver(
+        enabled_values: KtSet<SheetValue>,
+        positional_threshold: impl Fn() -> f32 + 'static,
+        velocity_threshold: impl Fn() -> f32 + 'static,
+        confirm_value_change: impl Fn(SheetValue) -> bool + 'static,
+    ) -> Saver<SheetState> {
+        SheetState::saver_of(
+            enabled_values,
+            Rc::new(positional_threshold),
+            Rc::new(velocity_threshold),
+            Rc::new(confirm_value_change),
+        )
+    }
+
+    /// The default saver of a sheet's state of the values it skips (Compose's deprecated
+    /// `SheetState.Saver(skipPartiallyExpanded, positionalThreshold, velocityThreshold, confirmValueChange,
+    /// skipHiddenState)`, material3 1.5.0-alpha20): [`Saver`](Self::Saver) of the values
+    /// [`SheetStateSkipping`](fn@SheetStateSkipping) has.
+    ///
+    /// Kotlin: `Saver(skipPartiallyExpanded: Boolean, positionalThreshold: () -> Float, velocityThreshold: () -> Float, confirmValueChange: (SheetValue) -> Boolean, skipHiddenState: Boolean): Saver<SheetState, SheetValue>`
+    #[deprecated(note = "Use the Saver that takes a set of enabled values.")]
+    pub fn SaverSkipping(
         skip_partially_expanded: bool,
         positional_threshold: impl Fn() -> f32 + 'static,
         velocity_threshold: impl Fn() -> f32 + 'static,
         confirm_value_change: impl Fn(SheetValue) -> bool + 'static,
         skip_hidden_state: bool,
     ) -> Saver<SheetState> {
-        SheetState::saver_of(
-            skip_partially_expanded,
-            Rc::new(positional_threshold),
-            Rc::new(velocity_threshold),
-            Rc::new(confirm_value_change),
-            skip_hidden_state,
+        SheetState::Saver(
+            enabled_values_skipping(skip_partially_expanded, skip_hidden_state),
+            positional_threshold,
+            velocity_threshold,
+            confirm_value_change,
         )
     }
 
     /// [`Saver`](Self::Saver) of shared closures.
     pub(crate) fn saver_of(
-        skip_partially_expanded: bool,
+        enabled_values: KtSet<SheetValue>,
         positional_threshold: Rc<dyn Fn() -> f32>,
         velocity_threshold: Rc<dyn Fn() -> f32>,
         confirm_value_change: Rc<dyn Fn(SheetValue) -> bool>,
-        skip_hidden_state: bool,
     ) -> Saver<SheetState> {
         Saver::new(
             |state: &SheetState| state.current_value().save(),
             move |saved| {
                 let saved_value = SheetValue::restore(saved)?;
-                let new_value =
-                    if skip_partially_expanded && saved_value == PartiallyExpanded { Expanded } else { saved_value };
                 Some(SheetState::new(
-                    skip_partially_expanded,
+                    enabled_values.clone(),
                     positional_threshold.clone(),
                     velocity_threshold.clone(),
-                    new_value,
+                    saved_value,
                     confirm_value_change.clone(),
-                    skip_hidden_state,
                 ))
             },
         )
@@ -1210,15 +1266,36 @@ impl NestedScrollConnection for ConsumeSwipeWithinBottomSheetBoundsNestedScrollC
 // ---------------------------------------------------------------------------------------------------------------
 // rememberSheetState
 
-/// A sheet's state, saved and restored by [`SheetState::Saver`], made again when `skip_partially_expanded`,
-/// `confirm_value_change` (by its identity) or `skip_hidden_state` change (Compose's internal
-/// `rememberSheetState`); its thresholds `positional_threshold` and `velocity_threshold` in this density.
+/// A sheet's state for a [`BottomSheet`], a [`ModalBottomSheet`](crate::ModalBottomSheet) or a
+/// [`BottomSheetScaffold`](crate::BottomSheetScaffold), saved and restored (Compose's `rememberBottomSheetState`,
+/// material3 1.5.0-alpha20): at `initial_value` to start with; `enabled_values` the values it can settle at (each
+/// one it gets an anchor for); `confirm_value_change` may veto a change (a new closure, by what it captures, makes a
+/// new state, as a new key does in Compose).
+#[kompozable]
+pub fn remember_bottom_sheet_state(
+    initial_value: SheetValue,
+    #[default(all_sheet_values())] enabled_values: KtSet<SheetValue>,
+    #[default(|_| true)]
+    #[memoized]
+    confirm_value_change: impl Fn(SheetValue) -> bool + 'static,
+) -> SheetState {
+    let id = confirm_value_change.id();
+    let confirm: Rc<dyn Fn(SheetValue) -> bool> = Rc::new(confirm_value_change.into_value());
+    remember_sheet_state(
+        enabled_values = enabled_values,
+        confirm_value_change = Memoized::new(confirm, id),
+        initial_value = initial_value,
+    )
+}
+
+/// A sheet's state, saved and restored by [`SheetState::Saver`], made again when `enabled_values` or
+/// `confirm_value_change` (by its identity) change (Compose's internal `rememberSheetState`, material3
+/// 1.5.0-alpha20); its thresholds `positional_threshold` and `velocity_threshold` in this density.
 #[kompozable]
 pub(crate) fn remember_sheet_state(
-    #[default(false)] skip_partially_expanded: bool,
+    #[default(all_sheet_values())] enabled_values: KtSet<SheetValue>,
     confirm_value_change: Memoized<Rc<dyn Fn(SheetValue) -> bool>>,
     #[default(Hidden)] initial_value: SheetValue,
-    #[default(false)] skip_hidden_state: bool,
     #[default(BottomSheetDefaults::PositionalThreshold)] positional_threshold: Dp,
     #[default(BottomSheetDefaults::VelocityThreshold)] velocity_threshold: Dp,
 ) -> SheetState {
@@ -1228,20 +1305,18 @@ pub(crate) fn remember_sheet_state(
     let confirm_id = confirm_value_change.id();
     let confirm_value_change = confirm_value_change.into_value();
     let saver = SheetState::saver_of(
-        skip_partially_expanded,
+        enabled_values.clone(),
         positional_threshold_to_px.clone(),
         velocity_threshold_to_px.clone(),
         confirm_value_change.clone(),
-        skip_hidden_state,
     );
-    remember_saveable_keyed_with((skip_partially_expanded, confirm_id, skip_hidden_state), &saver, move || {
+    remember_saveable_keyed_with((enabled_values.clone(), confirm_id), &saver, move || {
         SheetState::new(
-            skip_partially_expanded,
+            enabled_values,
             positional_threshold_to_px,
             velocity_threshold_to_px,
             initial_value,
             confirm_value_change,
-            skip_hidden_state,
         )
     })
 }

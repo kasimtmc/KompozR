@@ -1,7 +1,11 @@
 //! Material's bottom sheet scaffold, as Compose's BottomSheetScaffold.kt: a screen with a standard (persistent)
 //! bottom sheet peeking out below its content ([`BottomSheetScaffold`]), an optional top bar and a snackbar host,
 //! and its state ([`BottomSheetScaffoldState`], [`remember_bottom_sheet_scaffold_state`],
-//! [`remember_standard_bottom_sheet_state`]).
+//! [`remember_standard_bottom_sheet_state`], deprecated by material3 1.5.0-alpha20 for
+//! [`remember_bottom_sheet_state`](crate::remember_bottom_sheet_state)).
+
+// (the deprecated rememberStandardBottomSheetState is defined here)
+#![allow(deprecated)]
 
 use crate::color_scheme::content_color_for;
 use crate::content_color::LocalContentColor;
@@ -10,8 +14,8 @@ use crate::internal::strings::{Strings, get_string};
 use crate::material_theme::MaterialTheme;
 use crate::sheet_defaults::{
     BottomSheetDefaults, ConsumeSwipeWithinBottomSheetBoundsNestedScrollConnection, DragHandleWithTooltip,
-    SheetModifiers, SheetState, SheetValue, default_drag_handle, remember_sheet_state, remembered_default_spatial_spec,
-    remembered_positional_threshold,
+    SheetModifiers, SheetState, SheetValue, default_drag_handle, remember_bottom_sheet_state, remember_sheet_state,
+    remembered_default_spatial_spec, remembered_positional_threshold,
 };
 use crate::snackbar_host::{SnackbarHost, SnackbarHostState};
 use crate::surface::Surface;
@@ -21,7 +25,7 @@ use kompoz_foundation::gestures::{
 };
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::{Color, Dp, Shape};
-use kompoz_runtime::kt::panic_kt;
+use kompoz_runtime::kt::{panic_kt, set_of};
 use kompoz_runtime::{
     KompozitionLocalProvider, KotlinProperties, Memoized, SideEffect, kompozable, kompozable_block, named, named_args,
     remember, remember_keyed,
@@ -134,8 +138,8 @@ pub fn BottomSheetScaffoldState(
     BottomSheetScaffoldState { bottom_sheet_state, snackbar_host_state }
 }
 
-/// A bottom sheet scaffold's state of `bottom_sheet_state` (None: a remembered
-/// [`remember_standard_bottom_sheet_state`]) and `snackbar_host_state` (None: one remembered), remembered while
+/// A bottom sheet scaffold's state of `bottom_sheet_state` (None: a remembered [`remember_bottom_sheet_state`]
+/// partially expanded to start with, never hidden: material3 1.5.0-alpha20's default) and `snackbar_host_state` (None: one remembered), remembered while
 /// they are the same (Compose's `rememberBottomSheetScaffoldState`).
 #[kompozable]
 pub fn remember_bottom_sheet_scaffold_state(
@@ -144,7 +148,10 @@ pub fn remember_bottom_sheet_scaffold_state(
 ) -> BottomSheetScaffoldState {
     let bottom_sheet_state = match bottom_sheet_state {
         Some(state) => state,
-        None => remember_standard_bottom_sheet_state(),
+        None => remember_bottom_sheet_state(
+            initial_value = PartiallyExpanded,
+            enabled_values = set_of([PartiallyExpanded, Expanded]),
+        ),
     };
     let snackbar_host_state = match snackbar_host_state {
         Some(state) => state,
@@ -156,9 +163,11 @@ pub fn remember_bottom_sheet_scaffold_state(
     })
 }
 
-/// A standard bottom sheet's state, saved and restored (Compose's `rememberStandardBottomSheetState`): at
-/// `initial_value` to start with; `confirm_value_change` may veto a change (a new closure, by what it captures,
-/// makes a new state); `skip_hidden_state`, it never hides.
+/// A standard bottom sheet's state, saved and restored (Compose's `rememberStandardBottomSheetState`, deprecated by
+/// material3 1.5.0-alpha20): at `initial_value` to start with; `confirm_value_change` may veto a change (a new
+/// closure, by what it captures, makes a new state); `skip_hidden_state`, it never hides.
+/// [`remember_bottom_sheet_state`] of the values it doesn't skip.
+#[deprecated(note = "Use rememberBottomSheetState with PartiallyExpanded initial value")]
 #[kompozable]
 pub fn remember_standard_bottom_sheet_state(
     #[default(PartiallyExpanded)] initial_value: SheetValue,
@@ -167,12 +176,19 @@ pub fn remember_standard_bottom_sheet_state(
     confirm_value_change: impl Fn(SheetValue) -> bool + 'static,
     #[default(true)] skip_hidden_state: bool,
 ) -> SheetState {
+    let enabled_values = if skip_hidden_state {
+        set_of([PartiallyExpanded, Expanded])
+    } else {
+        set_of([Hidden, PartiallyExpanded, Expanded])
+    };
+    // (Compose: `rememberBottomSheetState(…)`, rememberSheetState of the same arguments: here of the closure's
+    // identity as this function's memoized parameter carries it)
     let id = confirm_value_change.id();
     let confirm: Rc<dyn Fn(SheetValue) -> bool> = Rc::new(confirm_value_change.into_value());
     remember_sheet_state(
+        enabled_values = enabled_values,
         confirm_value_change = Memoized::new(confirm, id),
         initial_value = initial_value,
-        skip_hidden_state = skip_hidden_state,
     )
 }
 
