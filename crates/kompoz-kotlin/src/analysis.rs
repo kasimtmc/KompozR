@@ -151,6 +151,62 @@ impl Analysis {
     }
 }
 
+/// The declarations of a Kotlin text (its offset 0 at `base`) read without translating it: what a language server
+/// shows of a text (its outline, a member's header in a hover, where to go to it) — [`Analysis::declarations`]'s,
+/// and the properties classes declare in their primary constructors (`Note.title` of
+/// `data class Note(val title: String)`, kind [`DeclKind::Property`], after their class's other members).
+pub fn declarations_of(text: &str, base: crate::pos::Pos) -> Vec<Declaration> {
+    let mut diags = crate::diag::Diagnostics::default();
+    let tokens = crate::lexer::lex(text, base, &mut diags);
+    let file = crate::parser::parse(&tokens, &mut diags);
+    let mut out = declarations(&file, text);
+    let mut properties = Vec::new();
+    for d in &file.decls {
+        constructor_properties(d, "", text, &mut properties);
+    }
+    out.extend(properties);
+    out
+}
+
+/// The primary constructors' properties of `d` and the classes nested in it (`outer`: the Kotlin name it is in).
+fn constructor_properties(d: &Decl, outer: &str, text: &str, out: &mut Vec<Declaration>) {
+    let qualified = |name: &str| if outer.is_empty() { name.to_string() } else { format!("{outer}.{name}") };
+    let body = match d {
+        Decl::Class(c) => {
+            let class = qualified(&c.name.name);
+            for p in c.primary_constructor.iter().flat_map(|k| &k.params) {
+                let Some(m) = p.property else { continue };
+                let written = header(text, p.param.loc.start.offset, p.param.loc.end.offset);
+                let keyword = if m == Mutability::Var { "var" } else { "val" };
+                let detail = if written.split_whitespace().any(|w| w == keyword) {
+                    written
+                } else {
+                    format!("{keyword} {written}")
+                };
+                out.push(Declaration {
+                    kotlin: format!("{class}.{}", p.param.name.name),
+                    rust: names::snake(&p.param.name.name),
+                    kind: DeclKind::Property,
+                    name: p.param.name.loc,
+                    range: p.param.loc,
+                    detail,
+                });
+            }
+            (&c.body, class)
+        }
+        Decl::Object(o) => {
+            let name = o.name.as_ref().map_or("Companion", |n| n.name.as_str());
+            (&o.body, qualified(name))
+        }
+        _ => return,
+    };
+    for m in &body.0.members {
+        if let Member::Decl(inner) = m {
+            constructor_properties(inner, &body.1, text, out);
+        }
+    }
+}
+
 /// The declarations of `file` (whose text is `text`), with the Rust names the generator gives them.
 pub(crate) fn declarations(file: &File, text: &str) -> Vec<Declaration> {
     let mut out = Vec::new();

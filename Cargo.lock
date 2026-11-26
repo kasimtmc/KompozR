@@ -655,6 +655,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompoz-lsp"
+version = "0.1.0"
+dependencies = [
+ "kompoz-kotlin",
+ "proc-macro2",
+]
+
+[[package]]
 name = "kompoz-macros"
 version = "0.1.0"
 dependencies = [

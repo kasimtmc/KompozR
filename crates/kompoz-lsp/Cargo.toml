@@ -1,0 +1,22 @@
+[package]
+name = "kompoz-lsp"
+description = "KompozR's language server: the Kotlin syntax (kompoz! { … } blocks, .kt files) read by kompoz-kotlin, the Rust around it by the toolchain's rust-analyzer, behind one server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "kompoz_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kompoz-lsp"
+path = "src/main.rs"
+
+[dependencies]
+kompoz-kotlin = { path = "../kompoz-kotlin" }
+proc-macro2.workspace = true

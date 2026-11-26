@@ -493,6 +493,94 @@ fn pos_at(src: &str, offset: usize) -> Pos {
     Pos::start(line, column)
 }
 
+// ---- One file's Kotlin, for an editor ----------------------------------------------------------------------------
+
+/// The Kotlin of one Rust source, found as the scan finds it (see [`kotlin_in`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RustFileKotlin {
+    /// Each `kompoz!` invocation's text: byte offsets from just after its opening delimiter to just before its
+    /// closing one (what the macro reads), in order.
+    pub blocks: Vec<std::ops::Range<usize>>,
+    /// Each `kompoz_file!("…")`: the `.kt` file's path as written (relative to the crate's directory), and the
+    /// byte range of its string literal.
+    pub kt_files: Vec<(String, std::ops::Range<usize>)>,
+}
+
+/// The `kompoz!` blocks and `kompoz_file!` calls of a Rust source's text (as rustc reads it: no byte order mark, LF
+/// line ends) — the scan's own reading, so a language server sees exactly the Kotlin the macros and the module table
+/// see: comments, strings and `macro_rules!` definitions don't hold invocations, an unclosed block isn't one. The
+/// line and column of an offset are [`pos_in`]'s.
+pub fn kotlin_in(src: &str) -> RustFileKotlin {
+    let toks = lex(src);
+    let close = matching(&toks);
+    let kind = |i: usize| toks.get(i).map(|t| &t.kind);
+    let ident = |i: usize| match kind(i) {
+        Some(TokKind::Ident) => Some(&src[toks[i].start..toks[i].end]),
+        _ => None,
+    };
+    let mut out = RustFileKotlin::default();
+    let mut i = 0;
+    while i < toks.len() {
+        let bang_group = kind(i + 1) == Some(&TokKind::Punct('!')) && matches!(kind(i + 2), Some(TokKind::Open(_)));
+        match ident(i) {
+            Some("macro_rules") if ident(i + 2).is_some() && kind(i + 1) == Some(&TokKind::Punct('!')) => {
+                if matches!(kind(i + 3), Some(TokKind::Open(_))) {
+                    i = close[i + 3].saturating_add(1);
+                    continue;
+                }
+            }
+            Some("kompoz") if bang_group => {
+                // (closed by its own kind of delimiter, the others not counted: Kotlin being written — `f((x)` —
+                // is still the block's, its mistake the Kotlin's to report)
+                let Some(TokKind::Open(open)) = kind(i + 2) else { unreachable!() };
+                let closer = match open {
+                    '{' => '}',
+                    '(' => ')',
+                    _ => ']',
+                };
+                let mut depth = 0usize;
+                let mut c = None;
+                for (j, t) in toks.iter().enumerate().skip(i + 2) {
+                    match t.kind {
+                        TokKind::Open(o) if o == *open => depth += 1,
+                        TokKind::Close if src[t.start..].starts_with(closer) => {
+                            depth -= 1;
+                            if depth == 0 {
+                                c = Some(j);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let Some(c) = c else { break };
+                out.blocks.push(toks[i + 2].end..toks[c].start);
+                i = c + 1;
+                continue;
+            }
+            Some("kompoz_file") if bang_group => {
+                let c = close[i + 2];
+                if c == i + 4
+                    && let Some(TokKind::Str(name)) = kind(i + 3)
+                {
+                    out.kt_files.push((name.clone(), toks[i + 3].start..toks[i + 3].end));
+                }
+                i = c.saturating_add(1);
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The line and column (characters, 1-based) of a byte offset of `src` (offset 0: a translation's base, as the
+/// scan gives a `kompoz!` block's).
+pub fn pos_in(src: &str, offset: usize) -> Pos {
+    pos_at(src, offset)
+}
+
 // ---- The lexer -------------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -854,6 +942,18 @@ mod tests {
         let t = scan(&c.0, Some("demo_app"), None);
         let s = &t.sources[0];
         assert_eq!((s.text.as_str(), s.base.line, s.base.column), ("\n  a\n", 2, 10));
+    }
+
+    #[test]
+    fn one_files_kotlin_for_an_editor() {
+        let src = "macro_rules! m { () => { kompoz! { no } } }\n// kompoz! { no }\nconst S: &str = \"kompoz! { no }\";\n\
+                   kompoz! {\n    fun A() { f((x) }\n}\nkompoz_file!(\"src/ui.kt\");\nkompoz::kompoz!(fun B())\nkompoz! { open";
+        let found = kotlin_in(src);
+        let texts: Vec<&str> = found.blocks.iter().map(|b| &src[b.clone()]).collect();
+        assert_eq!(texts, ["\n    fun A() { f((x) }\n", "fun B()"]);
+        assert_eq!(found.kt_files.len(), 1);
+        assert_eq!((found.kt_files[0].0.as_str(), &src[found.kt_files[0].1.clone()]), ("src/ui.kt", "\"src/ui.kt\""));
+        assert_eq!(pos_in(src, found.blocks[0].start), Pos::start(4, 10));
     }
 
     #[test]

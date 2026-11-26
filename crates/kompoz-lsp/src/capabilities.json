@@ -1,0 +1,107 @@
+{
+  "positionEncoding": "utf-16",
+  "textDocumentSync": {
+    "openClose": true,
+    "change": 2,
+    "save": {}
+  },
+  "completionProvider": {
+    "triggerCharacters": [
+      ":",
+      ".",
+      "'",
+      "("
+    ],
+    "resolveProvider": false,
+    "completionItem": {
+      "labelDetailsSupport": false
+    }
+  },
+  "hoverProvider": true,
+  "signatureHelpProvider": {
+    "triggerCharacters": [
+      "(",
+      ",",
+      "<"
+    ]
+  },
+  "declarationProvider": true,
+  "definitionProvider": true,
+  "typeDefinitionProvider": true,
+  "implementationProvider": true,
+  "referencesProvider": true,
+  "documentHighlightProvider": true,
+  "documentSymbolProvider": true,
+  "codeActionProvider": true,
+  "codeLensProvider": {
+    "resolveProvider": true
+  },
+  "workspaceSymbolProvider": true,
+  "documentFormattingProvider": true,
+  "documentRangeFormattingProvider": false,
+  "documentOnTypeFormattingProvider": {
+    "firstTriggerCharacter": ".",
+    "moreTriggerCharacter": [
+      "=",
+      "<",
+      ">",
+      "{",
+      "(",
+      "|",
+      "+"
+    ]
+  },
+  "renameProvider": {
+    "prepareProvider": true
+  },
+  "foldingRangeProvider": true,
+  "selectionRangeProvider": true,
+  "callHierarchyProvider": true,
+  "inlayHintProvider": {
+    "resolveProvider": false
+  },
+  "workspace": {
+    "workspaceFolders": {
+      "supported": true,
+      "changeNotifications": true
+    },
+    "fileOperations": {
+      "willRename": {
+        "filters": [
+          {
+            "scheme": "file",
+            "pattern": {
+              "glob": "**/*.rs",
+              "matches": "file"
+            }
+          },
+          {
+            "scheme": "file",
+            "pattern": {
+              "glob": "**",
+              "matches": "folder"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "experimental": {
+    "externalDocs": true,
+    "hoverRange": true,
+    "joinLines": true,
+    "matchingBrace": true,
+    "moveItem": true,
+    "onEnter": true,
+    "openCargoToml": true,
+    "parentModule": true,
+    "childModules": true,
+    "runnables": {
+      "kinds": [
+        "cargo"
+      ]
+    },
+    "ssr": true,
+    "workspaceSymbolScopeKindFiltering": true
+  }
+}

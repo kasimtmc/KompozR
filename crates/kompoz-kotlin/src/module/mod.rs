@@ -19,7 +19,7 @@ mod rust_items;
 mod scan;
 
 pub use rust_items::rust_items;
-pub use scan::{cached, scan};
+pub use scan::{RustFileKotlin, cached, kotlin_in, pos_in, scan};
 
 use crate::pos::Pos;
 use std::path::PathBuf;
