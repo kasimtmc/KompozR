@@ -277,14 +277,14 @@ impl SavedStateHandle {
     /// Kotlin: `saved(serializer: KSerializer<T>, key: String, init: () -> T)`
     pub fn saved_with<T: Clone + 'static>(
         &self,
-        serializer: Saver<T>,
+        serializer: impl kompoz_runtime::IntoSaver<T>,
         key: &str,
         init: impl FnOnce() -> T + 'static,
     ) -> SavedStateDelegate<T> {
         let (register, load) = (self.clone(), self.clone());
         SavedStateDelegate::new(
             key.to_string(),
-            serializer,
+            serializer.into_saver(),
             init,
             move |key, provider| register.set_saved_state_provider(key, provider),
             move |key| load.get::<SavedState>(key),

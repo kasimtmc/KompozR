@@ -5,10 +5,9 @@
 //
 // Rust beside this file (kotlin_adaptive.rs), as written: the samples' `private data class NavItemData(…) :
 // Parcelable` — android.os's Parcel and Parcelable.Creator: stage 15, the Android platform —, saved as a desktop
-// navigator's keys are (Saveable); and the generic `reflowAdaptStrategySample<T>()` and `levitateAsDialogSample<T>()`,
-// whose `T` needs the navigator's bound (`NavigatorContentKey`), which the Kotlin syntax doesn't tell from a generic
-// call yet. (The indentation of NavigableListDetailPaneScaffoldSample's two composables is the earlier stand-in's,
-// the source's lines otherwise.)
+// navigator's keys are (Saveable). The generic `reflowAdaptStrategySample<T>()` and `levitateAsDialogSample<T>()` are
+// as written, their `T` bounded as the navigator's function bounds it (`NavigatorContentKey`). (The indentation of
+// NavigableListDetailPaneScaffoldSample's two composables is the earlier stand-in's, the source's lines otherwise.)
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Preview
@@ -665,3 +664,57 @@ private val PaneExpansionAnchors =
         PaneExpansionAnchor.Offset.fromEnd(240.dp),
         PaneExpansionAnchor.Proportion(1f),
     )
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Preview
+@Sampled
+@Composable
+fun <T> reflowAdaptStrategySample(): ThreePaneScaffoldNavigator<T> =
+    rememberListDetailPaneScaffoldNavigator<T>(
+        adaptStrategies =
+            ListDetailPaneScaffoldDefaults.adaptStrategies(
+                extraPaneAdaptStrategy =
+                    AdaptStrategy.Reflow(reflowUnder = ListDetailPaneScaffoldRole.Detail)
+            )
+    )
+
+/**
+ * This sample shows how to create a [ThreePaneScaffoldNavigator] that will show the extra pane as a
+ * modal dialog when the extra pane is the current destination. The dialog will be centered in the
+ * scaffold, with a scrim that clicking on it will dismiss the dialog.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Preview
+@Sampled
+@Composable
+fun <T> levitateAsDialogSample(): ThreePaneScaffoldNavigator<T> {
+    val coroutineScope = rememberCoroutineScope()
+    val scaffoldDirective = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
+    var navigator: ThreePaneScaffoldNavigator<T>? = null
+    val onClick: () -> Unit = { coroutineScope.launch { navigator?.navigateBack() } }
+    navigator =
+        rememberListDetailPaneScaffoldNavigator<T>(
+            scaffoldDirective = scaffoldDirective,
+            adaptStrategies =
+                SupportingPaneScaffoldDefaults.adaptStrategies(
+                    extraPaneAdaptStrategy =
+                        AdaptStrategy.Levitate(
+                                alignment = Alignment.Center,
+                                scrim = {
+                                    LevitatedPaneScrim(
+                                        Modifier.semantics {
+                                            contentDescription = "Scrim"
+                                            this.onClick("Dismiss the extra pane") {
+                                                onClick()
+                                                true
+                                            }
+                                        },
+                                        onClick = onClick,
+                                    )
+                                },
+                            )
+                            .onlyIfSinglePane(scaffoldDirective)
+                ),
+        )
+    return navigator
+}

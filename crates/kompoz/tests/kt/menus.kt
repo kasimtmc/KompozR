@@ -1,7 +1,7 @@
 // Material's menus in a Kotlin file of their own (kompoz_file!): material3 1.5's MenuSamples.kt and
 // ExposedDropdownMenuSamples.kt as Compose writes them — test tags added to find them. GroupedMenuSample's
 // DropdownMenuButtonGroup (a ButtonGroup, WP1b's) as written; ExposedDropdownMenuSamples' local functions (local
-// extensions too) as written, but for one non-local return (said there).
+// extensions too, a non-local return out of `let`'s lambda inside `buildAnnotatedString`'s) as written.
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.example.menus
@@ -495,20 +495,13 @@ fun MultiAutocompleteExposedDropdownMenuSample() {
  */
 private fun List<String>.filteredBy(text: CharSequence): List<AnnotatedString> {
     fun underlineSubsequence(needle: CharSequence, haystack: String): AnnotatedString? {
-        // (KompozR: the sample's `haystack.indexOf(…).let { if (it < 0) return null else i = it }` returns from the
-        // function out of `let`'s lambda inside `buildAnnotatedString`'s, which the Kotlin syntax doesn't translate
-        // — its non-local returns leave `forEach`/`forEachIndexed`/`repeat` lambdas —: the miss noted, `null` after)
-        var found = true
-        val underlined = buildAnnotatedString {
+        return buildAnnotatedString {
             var i = 0
             for (char in needle) {
                 val start = i
-                val at = haystack.indexOf(char, startIndex = i, ignoreCase = true)
-                if (at < 0) {
-                    found = false
-                    break
+                haystack.indexOf(char, startIndex = i, ignoreCase = true).let {
+                    if (it < 0) return null else i = it
                 }
-                i = at
                 append(haystack.substring(start, i))
                 withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
                     append(haystack[i])
@@ -517,7 +510,6 @@ private fun List<String>.filteredBy(text: CharSequence): List<AnnotatedString> {
             }
             append(haystack.substring(i, haystack.length))
         }
-        return if (found) underlined else null
     }
     return this.mapNotNull { option -> underlineSubsequence(text, option) }
 }

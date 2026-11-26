@@ -26,6 +26,7 @@ pub mod lexer;
 pub mod module;
 pub mod parser;
 pub mod pos;
+mod refine;
 
 pub use diag::{Diagnostic, Diagnostics, Note, Severity};
 pub use pos::{Loc, OneSpan, Pos, SpanMap};
@@ -116,7 +117,8 @@ pub fn translate(text: &str, base: Pos, spans: &dyn SpanMap, opts: &Options) -> 
     let mut diags = Diagnostics::default();
     let mut tokens = lexer::lex(text, base, &mut diags);
     imports::rename_imported_jvm_classes(&mut tokens);
-    let file = parser::parse(&tokens, &mut diags);
+    let mut file = parser::parse(&tokens, &mut diags);
+    refine::state_collections(&mut file);
     let cx = codegen::Context {
         spans,
         paths: &opts.paths,

@@ -80,6 +80,17 @@ impl<D: KtMutableDelegate + ?Sized> KtMutableDelegate for Rc<D> {
     }
 }
 
+/// Kotlin's `ReadOnlyProperty { _, _ -> value }`: a delegate giving one value, made before (what `val items by
+/// handle.saveable(saver) { mutableStateListOf() }` holds: viewmodel-compose's `PropertyDelegateProvider`'s).
+pub struct KtValue<T>(pub T);
+
+impl<T: Clone> KtDelegate for KtValue<T> {
+    type Value = T;
+    fn get_value(&self) -> T {
+        self.0.clone()
+    }
+}
+
 /// Kotlin's `by lazy { … }`: the value made the first time it is read, kept after. Copies share it (one value).
 pub struct KtLazy<T> {
     inner: Rc<LazyInner<T>>,

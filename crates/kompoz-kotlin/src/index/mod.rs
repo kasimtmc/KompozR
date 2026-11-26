@@ -55,7 +55,7 @@
 mod generated;
 pub mod overlay;
 
-pub use generated::{ALIASES, BASES, DEREFS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
+pub use generated::{ALIASES, BASES, DEREFS, FN_BOUNDS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -236,6 +236,16 @@ pub struct Base {
     pub params: &'static [&'static str],
     /// The trait's associated types, Kotlin's type parameters in their order (`Value`: `NavType<T>`'s `T`).
     pub assoc: &'static [&'static str],
+}
+
+/// (stage 14 FINAL) A generic function's type parameters with their trait bounds (Rust's text, `+`-joined: empty for
+/// none), in order: what a Kotlin type parameter given to it as a type argument needs (`rememberListDetailPaneScaffold
+/// Navigator<T>()`'s `T: NavigatorContentKey`). Empty for one without bounds.
+pub fn fn_bounds(item: &Item) -> &'static [(&'static str, &'static str)] {
+    FN_BOUNDS
+        .iter()
+        .find(|(k, m, o, r, _)| *k == item.krate && *m == item.module && *o == item.owner && *r == item.rust)
+        .map_or(&[], |e| e.4)
 }
 
 /// The base class a Kotlin name is: the translation's crate's (the overlay's) or the API's.

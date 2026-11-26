@@ -369,7 +369,11 @@ impl Gen<'_, '_> {
                                         _ => None,
                                     };
                                     let outer = std::mem::replace(&mut self.control.expected_fn, expected);
-                                    let o = self.expr(e);
+                                    // ((stage 14 FINAL) a generic call's result bound by the declared type)
+                                    let o = match &declared {
+                                        Some((d, _)) => self.expecting(e, &d.clone(), |g| g.expr(e)),
+                                        None => self.expr(e),
+                                    };
                                     self.control.expected_fn = outer;
                                     self.expected_elem = None;
                                     o
@@ -486,7 +490,8 @@ impl Gen<'_, '_> {
                         }
                         Ty::Unknown
                     }
-                    "remember" | "rememberSaveable" => match trailing_lambda {
+                    // ((stage 14 FINAL) a saved state's: `handle.saveable { mutableStateOf(true) }`)
+                    "remember" | "rememberSaveable" | "saveable" => match trailing_lambda {
                         Some(l) => match l.body.stmts.last() {
                             Some(Stmt { kind: StmtKind::Expr(e), .. }) => self.delegate_ty(e),
                             _ => Ty::Unknown,
@@ -666,6 +671,8 @@ impl Gen<'_, '_> {
                     Ty::Named(n, _) if n == "SnapshotStateList" => {
                         quote_spanned!(span=> #r.set(#((#idx) as usize,)* #v);)
                     }
+                    // ((stage 14 FINAL) a state map: its own `put`, taking `&self`)
+                    Ty::Named(n, _) if n == "SnapshotStateMap" => quote_spanned!(span=> #r.put(#(#idx,)* #v);),
                     _ => quote_spanned!(span=> #kt::KtMutableList::set(&mut #r, #(#idx,)* #v);),
                 }
             }
@@ -834,21 +841,35 @@ impl Gen<'_, '_> {
                     }
                     return self.loop_jump_tokens(t, false, None, span);
                 }
-                match (label, self.lambdas.last()) {
-                    (None, Some(_)) => {
-                        // ((stage 14 WPB) out of an inline lambda written as a loop: `jumps`)
-                        self.control.escaped = true;
-                        return self.later(e.loc, "a `return` from inside a lambda (Kotlin's non-local return)");
-                    }
-                    (Some(l), _) => {
-                        let ok = self.lambdas.last().is_some_and(|c| c.labels.contains(&l.name));
-                        if !ok {
-                            self.control.escaped = true;
-                            return self
-                                .later(e.loc, &format!("`return@{}` out of more than the lambda it is in", l.name));
+                // (the lambda it returns from: the function, depth 0, or the one labeled)
+                let depth = match label {
+                    None => 0,
+                    Some(l) => match self.lambdas.iter().rposition(|c| c.labels.contains(&l.name)) {
+                        Some(j) => j + 1,
+                        None => {
+                            self.error(e.loc, format!("no lambda labeled `{}` around it", l.name));
+                            return quote_spanned!(span=> ::core::unreachable!());
                         }
-                    }
-                    (None, None) => {}
+                    },
+                };
+                if depth < self.lambdas.len() {
+                    // ((stage 14 WPB) out of an inline lambda written as a loop: `jumps`)
+                    self.control.escaped = true;
+                    // ((stage 14 FINAL) out of any inline function's lambda: `jumps`)
+                    let want = match depth {
+                        0 => Want {
+                            some: self.fun.nullable_result,
+                            shared: self.fun.shared_result,
+                            result: true,
+                            ..Want::default()
+                        },
+                        d => self.lambdas[d - 1].result,
+                    };
+                    let v = value.as_ref().map(|v| self.value_want(v, want));
+                    return match self.leave_return(depth, v, e.loc) {
+                        Some(ts) => ts,
+                        None => self.later(e.loc, "a `return` out of a lambda no call around it lands"),
+                    };
                 }
                 match value {
                     Some(v) => {
@@ -861,7 +882,25 @@ impl Gen<'_, '_> {
                                 ..Want::default()
                             },
                         };
+                        // ((stage 14 FINAL) a nullable local `var` returned where the result isn't: Kotlin's smart cast
+                        // of it after a non-null value was assigned (`navigator = remember…(); return navigator`),
+                        // which its compiler proved)
+                        let smart_cast = self.lambdas.is_empty()
+                            && !self.fun.nullable_result
+                            && self
+                                .fun
+                                .result
+                                .as_ref()
+                                .is_some_and(|r| !r.is_nullable() && *r != Ty::Unit && !r.is_vague())
+                            && matches!(&v.kind, ExprKind::Name(n)
+                                if self.local(&n.name).is_some_and(|l| l.ty.is_nullable() && matches!(l.kind, LocalKind::Var | LocalKind::Delegated)));
                         let v = self.value_want(v, want);
+                        let v = if smart_cast {
+                            let kt = self.kt(span);
+                            quote_spanned!(span=> #kt::not_null(#v))
+                        } else {
+                            v
+                        };
                         self.return_tokens(Some(v), span)
                     }
                     None => self.return_tokens(None, span),
@@ -876,8 +915,13 @@ impl Gen<'_, '_> {
                     Some(l) => self.loops.iter().rposition(|x| x.label.as_deref() == Some(l.name.as_str())),
                 };
                 let Some(t) = target.filter(|t| *t >= inside) else {
-                    if target.is_some() {
+                    if let Some(t) = target {
                         self.control.escaped = true;
+                        // ((stage 14 FINAL) out of an inline function's lambda: `jumps`)
+                        return match self.leave_loop(t, is_break, label.as_ref(), e.loc) {
+                            Some(ts) => ts,
+                            None => self.later(e.loc, "a `break`/`continue` out of a lambda no call around it lands"),
+                        };
                     }
                     return match label {
                         Some(l) => {

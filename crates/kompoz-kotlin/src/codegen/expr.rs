@@ -325,7 +325,14 @@ impl Gen<'_, '_> {
             },
             ExprKind::Super { .. } => Out::plain(self.later(e.loc, "`super`"), Ty::Unknown),
             ExprKind::Call { callee, type_args, args, trailing_lambda } => {
-                let mut o = self.call(e, callee, type_args, args, trailing_lambda.as_deref());
+                // ((stage 14 FINAL) one taking a lambda: where a jump out of it lands, `jumps`)
+                let takes_lambda =
+                    trailing_lambda.is_some() || args.iter().any(|a| matches!(a.value.kind, ExprKind::Lambda(_)));
+                let mut o = if takes_lambda {
+                    self.leaving_call(e.loc, |g| g.call(e, callee, type_args, args, trailing_lambda.as_deref()))
+                } else {
+                    self.call(e, callee, type_args, args, trailing_lambda.as_deref())
+                };
                 // (what the call's own reading of its type leaves unknown, the expression's may tell)
                 if o.ty.is_vague() {
                     let p = self.peek_ty(e);

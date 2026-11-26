@@ -4,13 +4,6 @@ use kompoz::prelude::*;
 
 kompoz! {
     sealed class Problem(val code: Int) : IllegalStateException("kod $code")
-
-    fun firstLong(words: List<String>): String = buildString {
-        for (w in words) {
-            if (w.length > 3) return w
-            append(w)
-        }
-    }
 }
 
 fn main() {}

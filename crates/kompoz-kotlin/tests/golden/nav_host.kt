@@ -11,9 +11,7 @@
 // KompozR has Material 3, whose Button (`containerColor`, M2's `backgroundColor`), HorizontalDivider (M2's Divider)
 // and TextField they use here (and `Color.LightGray` the source's static import `LightGray`); their strings are
 // tests/navResources' (`R.string.*`). NavigationSamples' `@Serializable class User` and `@Serializable class
-// WrappedUUID` (plain classes, not data classes, as route and route value) are Rust beside the test's copy of this
-// file (crates/kompoz/tests/kotlin_nav_host.rs): the Kotlin syntax derives a route for a `@Serializable` data class or
-// object only.
+// WrappedUUID` (plain classes as a route and a route's value), its `object UUIDSerializer : KSerializer<UUID>`.
 
 package androidx.navigation.compose.samples
 
@@ -384,8 +382,20 @@ object WrappedUUIDNavType : NavType<WrappedUUID>(isNullableAllowed = false) {
     override fun serializeAsValue(value: WrappedUUID): String = Uri.encode(value.uuid.toString())
 }
 
-// (the sample's `object UUIDSerializer : KSerializer<UUID>`, WrappedUUID's `@Serializable(with = …)`: KompozR's
-// routes keep a UUID by its own NavType, the typeMap's above)
+@Serializable class User(val id: WrappedUUID)
+
+@Serializable class WrappedUUID(@Serializable(with = UUIDSerializer::class) val uuid: UUID)
+
+object UUIDSerializer : KSerializer<UUID> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("UUID", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): UUID = UUID.fromString(decoder.decodeString())
+
+    override fun serialize(encoder: Encoder, value: UUID) {
+        encoder.encodeString(value.toString())
+    }
+}
 
 private val phrases =
     listOf(

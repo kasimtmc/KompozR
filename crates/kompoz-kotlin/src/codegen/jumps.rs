@@ -12,7 +12,28 @@
 //! There, `return@forEach` is the loop's `continue`, `return` and `return@outer` are the function's and the outer
 //! lambda's own, and `break`/`continue` are the Kotlin loop's around it (labeled for Rust when it isn't). A `try` body's
 //! jumps leave its closure the same way (`exceptions`).
+//!
+//! Out of the lambda of any other inline function — the API's (`let`, `run`, `also`, `buildAnnotatedString`,
+//! `withStyle`, `Snapshot.withMutableSnapshot`…), the kt shims', the file's own `inline fun`s — a jump is written as
+//! Kotlin's inlining makes it behave: the rest of the callee doesn't run (its `finally` blocks do), the code after the
+//! call does the jump. The lambda keeps the jump and leaves the callee's frames by unwinding (`kt::leave`, no panic),
+//! the call is caught where it is written:
+//!
+//! ```text
+//! { let __kz_leave3_9 = kt::Leave::new();
+//!   match kt::leaving(&__kz_leave3_9, || s.let_(|it| if it < 0 { kt::leave(&__kz_leave3_9, kt::Jump::Return(None)) } else { … })) {
+//!       Ok(v) => v,
+//!       Err(kt::Jump::Return(x)) => return x,
+//!       Err(kt::Jump::Loop(0)) => break,
+//!       … } }
+//! ```
+//!
+//! (in a coroutine `kt::leaving_async(&slot, async { call }).await`). Kotlin allows it out of an inline function's
+//! lambda only: one the callee keeps (`onClick`), a coroutine's (`launch { }`), is an error, as Kotlin's. Out of a
+//! composable call, or a lambda calling composables, it is not translated: Compose ends the groups of the composition
+//! a jump leaves (the compiler's `endToMarker`), which unwinding past the composer doesn't.
 
+use super::expr::Out;
 use super::stmt::Tail;
 use super::{Gen, LoopCx};
 use crate::ast::*;
@@ -142,6 +163,133 @@ impl Gen<'_, '_> {
                 #rt::named_args!(#kz_types { #body })
             }
         }
+    }
+
+    // ---- Jumps out of an inline function's lambda (see the module's doc) ------------------------------------------
+
+    /// Whether the lambdas written from depth `depth` in may be jumped out of (each an inline function's); an error
+    /// where one isn't.
+    fn leavable(&mut self, depth: usize, what: &str, loc: Loc) -> bool {
+        if self.lambdas[depth..].iter().all(|l| l.inline) {
+            return true;
+        }
+        self.error(
+            loc,
+            format!(
+                "{what} isn't allowed here: it would leave a lambda its callee keeps or runs in a coroutine of its own \
+                 (Kotlin jumps out of an inline function's lambda only)"
+            ),
+        );
+        false
+    }
+
+    /// `return v` (`v` none: `return`) out of the lambdas written from depth `depth` in: the function's (`depth` 0)
+    /// or the lambda's at `depth - 1` (`return@label`), landing at the innermost call of that depth (see the module's
+    /// doc); none where there is none.
+    pub(crate) fn leave_return(&mut self, depth: usize, v: Option<TokenStream>, loc: Loc) -> Option<TokenStream> {
+        let span = self.span(loc);
+        if !self.leavable(depth, "`return`", loc) {
+            return Some(quote_spanned!(span=> ::core::unreachable!()));
+        }
+        let f = self.control.leaves.iter_mut().rev().find(|f| f.lambdas == depth)?;
+        f.returned = true;
+        let slot = proc_macro2::Ident::new(&f.slot, span);
+        let kt = self.kt(span);
+        let v = v.unwrap_or_else(|| quote_spanned!(span=> ()));
+        Some(quote_spanned!(span=> #kt::leave(&#slot, #kt::Jump::Return(#v))))
+    }
+
+    /// `break`/`continue` of the loop at index `t` of the loops, out of the lambdas written inside it (see the
+    /// module's doc); none where no call lands it.
+    pub(crate) fn leave_loop(
+        &mut self,
+        t: usize,
+        is_break: bool,
+        label: Option<&Ident>,
+        loc: Loc,
+    ) -> Option<TokenStream> {
+        let span = self.span(loc);
+        let depth = self.lambdas.iter().take_while(|l| l.loops <= t).count();
+        let what = if is_break { "`break`" } else { "`continue`" };
+        if !self.leavable(depth, what, loc) {
+            return Some(quote_spanned!(span=> ::core::unreachable!()));
+        }
+        let f = self.control.leaves.iter_mut().rev().find(|f| f.lambdas == depth && f.loops > t)?;
+        let key = (t, is_break, label.cloned());
+        let n = match f.jumps.iter().position(|j| j.0 == key.0 && j.1 == key.1) {
+            Some(n) => n,
+            None => {
+                f.jumps.push(key);
+                f.jumps.len() - 1
+            }
+        } as u32;
+        let slot = proc_macro2::Ident::new(&f.slot, span);
+        let kt = self.kt(span);
+        Some(quote_spanned!(span=> #kt::leave(&#slot, #kt::Jump::Loop(#n))))
+    }
+
+    /// A call taking lambdas (`write` writes it): caught where it is written when a jump out of a lambda lands at it
+    /// (see the module's doc).
+    pub(crate) fn leaving_call(&mut self, loc: Loc, write: impl FnOnce(&mut Self) -> Out) -> Out {
+        let slot = format!("__kz_leave{}_{}", loc.start.line, loc.start.column);
+        self.control.leaves.push(super::exceptions::LeaveFrame {
+            lambdas: self.lambdas.len(),
+            loops: self.loops.len(),
+            slot: slot.clone(),
+            ..Default::default()
+        });
+        let composables = self.control.kompozable_calls;
+        let awaits = self.awaits;
+        let mut out = write(self);
+        let frame = self.control.leaves.pop().expect("its frame");
+        if !frame.returned && frame.jumps.is_empty() {
+            return out;
+        }
+        let span = self.span(loc);
+        if self.control.kompozable_calls > composables {
+            out.ts = self.later(
+                loc,
+                "a jump out of a lambda of a composable call, or of one calling composables (Compose ends the \
+                 composition's groups it leaves; KompozR's jump leaves them open)",
+            );
+            return out;
+        }
+        let kt = self.kt(span);
+        let slot = proc_macro2::Ident::new(&slot, span);
+        let mut arms = Vec::new();
+        if frame.returned {
+            let ret = self.return_tokens(Some(quote_spanned!(span=> __kz_x)), span);
+            arms.push(quote_spanned!(span=> #kt::Jump::Return(__kz_x) => #ret,));
+        }
+        for (n, (t, is_break, label)) in frame.jumps.iter().enumerate() {
+            let n = n as u32;
+            let j = self.loop_jump_tokens(*t, *is_break, label.as_ref(), span);
+            arms.push(quote_spanned!(span=> #kt::Jump::Loop(#n) => #j,));
+        }
+        let new = if frame.returned {
+            quote_spanned!(span=> #kt::Leave::new())
+        } else {
+            quote_spanned!(span=> #kt::Leave::<()>::new())
+        };
+        let call = out.ts;
+        let caught = if self.in_async && self.awaits > awaits {
+            let a = self.awaited(None, loc);
+            quote_spanned!(span=> #kt::leaving_async(&#slot, async { #call }) #a)
+        } else {
+            quote_spanned!(span=> #kt::leaving(&#slot, || #call))
+        };
+        out.ts = quote_spanned!(span=> {
+            let #slot = #new;
+            match #caught {
+                ::core::result::Result::Ok(__kz_v) => __kz_v,
+                ::core::result::Result::Err(__kz_j) => match __kz_j {
+                    #(#arms)*
+                    #[allow(unreachable_patterns)]
+                    _ => ::core::unreachable!(),
+                },
+            }
+        });
+        out
     }
 
     /// The index of the loop a lambda written as a loop labeled `label` is (`return@forEach`'s).

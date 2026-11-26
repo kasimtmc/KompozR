@@ -1575,7 +1575,7 @@ pub fn NavHostPreview() {
     });
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
-#[::kompoz::runtime::kompozable]
+#[::kompoz::runtime::kompozable(types(User(r), WrappedUUID(r)))]
 pub fn ThirdPartySerializableType() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
@@ -1657,7 +1657,7 @@ impl WrappedUUIDNavType {
         use ::kompoz::runtime::kt::ext::*;
         let key: ::std::string::String = ::core::convert::Into::into(key);
         let _ = (&bundle, &key);
-        ::kompoz::runtime::named_args!({
+        ::kompoz::runtime::named_args!(types(WrappedUUID(r)), {
             ::core::option::Option::Some(WrappedUUID(UUID::from_string(&::kompoz::runtime::kt::not_null(
                 bundle.get_string(&key.clone()),
             ))))
@@ -1668,7 +1668,7 @@ impl WrappedUUIDNavType {
         use ::kompoz::runtime::kt::ext::*;
         let value: ::std::string::String = ::core::convert::Into::into(value);
         let _ = (&value,);
-        ::kompoz::runtime::named_args!({ WrappedUUID(UUID::from_string(&value.clone())) })
+        ::kompoz::runtime::named_args!(types(WrappedUUID(r)), { WrappedUUID(UUID::from_string(&value.clone())) })
     }
     pub fn serialize_as_value(&self, value: WrappedUUID) -> ::std::string::String {
         #[allow(unused_imports)]
@@ -1739,6 +1739,348 @@ impl NavTypeImpl for WrappedUUIDNavType {
             self,
             ::kompoz::runtime::kt::not_null(::core::option::Option::map(value, ::core::clone::Clone::clone)),
         )
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzUser {
+    id: ::kompoz::runtime::kt::KtVal<WrappedUUID>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone, Route, RouteValue)]
+# [route (class (id : WrappedUUID))]
+pub struct User {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzUser>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn User(id: WrappedUUID) -> User {
+    User::__kz_new(id)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl User {
+    #[doc(hidden)]
+    pub fn __kz_new(id: WrappedUUID) -> User {
+        let __kz_this = User { __kz_this: ::std::rc::Rc::new(__KzUser { id: ::kompoz::runtime::kt::KtVal::new() }) };
+        __kz_this.__kz_init(id);
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self, id: WrappedUUID) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        self.__kz_this.id.init(::core::clone::Clone::clone(&id));
+        ::kompoz::runtime::named_args!({})
+    }
+    pub fn id(&self) -> WrappedUUID {
+        self.__kz_this.id.get()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl User {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for User {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for User {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for User {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for User {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "User",
+            ::std::rc::Rc::as_ptr(&self.__kz_this) as *const (),
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for User {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for User {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::Saveable for User {
+    fn descriptor() -> ::kompoz::runtime::SerialDescriptor {
+        ::kompoz::runtime::SerialDescriptor::class(
+            ::core::any::type_name::<Self>(),
+            ::std::vec![::kompoz::runtime::SerialElement::of::<WrappedUUID>("id", false)],
+        )
+    }
+    fn save(&self) -> ::kompoz::runtime::SavedValue {
+        ::kompoz::runtime::SavedValue::map::<&str>([("id", ::kompoz::runtime::Saveable::save(&self.id()))])
+    }
+    #[allow(unused_variables, clippy::question_mark)]
+    fn restore(__kz_saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
+        let __kz_map = __kz_saved.as_map()?;
+        ::core::option::Option::Some(User(<WrappedUUID as ::kompoz::runtime::Saveable>::restore(__kz_map.get("id")?)?))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl User {
+    #[allow(dead_code)]
+    pub fn serializer() -> ::kompoz::runtime::Saver<Self> {
+        ::kompoz::runtime::serializer::<Self>()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzWrappedUUID {
+    uuid: ::kompoz::runtime::kt::KtVal<UUID>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone, RouteValue)]
+pub struct WrappedUUID {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzWrappedUUID>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn WrappedUUID(uuid: UUID) -> WrappedUUID {
+    WrappedUUID::__kz_new(uuid)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl WrappedUUID {
+    #[doc(hidden)]
+    pub fn __kz_new(uuid: UUID) -> WrappedUUID {
+        let __kz_this = WrappedUUID {
+            __kz_this: ::std::rc::Rc::new(__KzWrappedUUID { uuid: ::kompoz::runtime::kt::KtVal::new() }),
+        };
+        __kz_this.__kz_init(uuid);
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self, uuid: UUID) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        self.__kz_this.uuid.init(uuid);
+        ::kompoz::runtime::named_args!({})
+    }
+    pub fn uuid(&self) -> UUID {
+        self.__kz_this.uuid.get()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl WrappedUUID {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for WrappedUUID {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for WrappedUUID {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for WrappedUUID {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for WrappedUUID {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "WrappedUUID",
+            ::std::rc::Rc::as_ptr(&self.__kz_this) as *const (),
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for WrappedUUID {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for WrappedUUID {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::Saveable for WrappedUUID {
+    fn descriptor() -> ::kompoz::runtime::SerialDescriptor {
+        ::kompoz::runtime::SerialDescriptor::class(
+            ::core::any::type_name::<Self>(),
+            ::std::vec![::kompoz::runtime::SerialElement::of::<UUID>("uuid", false)],
+        )
+    }
+    fn save(&self) -> ::kompoz::runtime::SavedValue {
+        ::kompoz::runtime::SavedValue::map::<&str>([(
+            "uuid",
+            ::kompoz::runtime::IntoSaver::into_saver(<KSerializer<_> as ::core::convert::From<UUIDSerializer>>::from(
+                UUIDSerializer {},
+            ))
+            .save(&self.uuid()),
+        )])
+    }
+    #[allow(unused_variables, clippy::question_mark)]
+    fn restore(__kz_saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
+        let __kz_map = __kz_saved.as_map()?;
+        ::core::option::Option::Some(WrappedUUID(
+            ::kompoz::runtime::IntoSaver::<UUID>::into_saver(<KSerializer<_> as ::core::convert::From<
+                UUIDSerializer,
+            >>::from(UUIDSerializer {}))
+            .restore(__kz_map.get("uuid")?)?,
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl WrappedUUID {
+    #[allow(dead_code)]
+    pub fn serializer() -> ::kompoz::runtime::Saver<Self> {
+        ::kompoz::runtime::serializer::<Self>()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzUUIDSerializer {
+    descriptor: ::kompoz::runtime::kt::KtVal<SerialDescriptor>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(
+    :: core :: clone :: Clone,
+    :: core :: marker :: Copy,
+    :: core :: cmp :: PartialEq,
+    :: core :: cmp :: Eq,
+    :: core :: hash :: Hash,
+    :: core :: default :: Default,
+)]
+pub struct UUIDSerializer {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl UUIDSerializer {
+    #[doc(hidden)]
+    fn __kz_state() -> &'static __KzUUIDSerializer {
+        ::std::thread_local! { static __KZ_STATE : :: kompoz :: runtime :: kt :: KtSingleton < __KzUUIDSerializer > = const { :: kompoz :: runtime :: kt :: KtSingleton :: new () } ; }
+        __KZ_STATE.with(|s| {
+            s.get(
+                || __KzUUIDSerializer { descriptor: ::kompoz::runtime::kt::KtVal::new() },
+                |_| UUIDSerializer {}.__kz_init(),
+            )
+        })
+    }
+    #[doc(hidden)]
+    fn __kz_init(&self) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({
+            Self::__kz_state().descriptor.init(PrimitiveSerialDescriptor("UUID", PrimitiveKind::STRING));
+        })
+    }
+    pub fn descriptor(&self) -> SerialDescriptor {
+        Self::__kz_state().descriptor.get()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl UUIDSerializer {
+    pub fn deserialize(&self, decoder: Decoder) -> UUID {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let _ = (&decoder,);
+        ::kompoz::runtime::named_args!({ UUID::from_string(&decoder.decode_string()) })
+    }
+    pub fn serialize(&self, encoder: Encoder, value: UUID) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let _ = (&encoder, &value);
+        ::kompoz::runtime::named_args!({
+            encoder.encode_string(::kompoz::runtime::kt::to_string(&value));
+        })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for UUIDSerializer {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "UUIDSerializer",
+            Self::__kz_state() as *const __KzUUIDSerializer as *const (),
+        ));
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for UUIDSerializer {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for UUIDSerializer {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::convert::From<UUIDSerializer> for KSerializer<UUID> {
+    fn from(o: UUIDSerializer) -> KSerializer<UUID> {
+        KSerializer::new(o)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl KSerializerImpl for UUIDSerializer {
+    type Value = UUID;
+    fn descriptor(&self) -> SerialDescriptor {
+        UUIDSerializer::descriptor(self)
+    }
+    fn deserialize(&self, decoder: &Decoder) -> UUID {
+        UUIDSerializer::deserialize(self, ::core::clone::Clone::clone(decoder))
+    }
+    fn serialize(&self, encoder: &Encoder, value: &UUID) {
+        UUIDSerializer::serialize(self, ::core::clone::Clone::clone(encoder), ::core::clone::Clone::clone(value))
     }
 }
 ::std::thread_local! { # [allow (non_snake_case , non_upper_case_globals , unused_parens , unused_braces , unused_mut , while_true , clippy :: all)] static phrases : :: std :: vec :: Vec < :: std :: string :: String > = { # [allow (unused_imports)] use :: kompoz :: runtime :: kt :: ext :: * ; :: kompoz :: runtime :: named_args ! (:: kompoz :: runtime :: kt :: list_of ([:: std :: string :: String :: from ("Easy As Pie") , :: std :: string :: String :: from ("Wouldn't Harm a Fly") , :: std :: string :: String :: from ("No-Brainer") , :: std :: string :: String :: from ("Keep On Truckin'") , :: std :: string :: String :: from ("An Arm and a Leg") , :: std :: string :: String :: from ("Down To Earth") , :: std :: string :: String :: from ("Under the Weather") , :: std :: string :: String :: from ("Up In Arms") , :: std :: string :: String :: from ("Cup Of Joe") , :: std :: string :: String :: from ("Not the Sharpest Tool in the Shed") , :: std :: string :: String :: from ("Ring Any Bells?") , :: std :: string :: String :: from ("Son of a Gun") , :: std :: string :: String :: from ("Hard Pill to Swallow") , :: std :: string :: String :: from ("Close But No Cigar") , :: std :: string :: String :: from ("Beating a Dead Horse") , :: std :: string :: String :: from ("If You Can't Stand the Heat, Get Out of the Kitchen") , :: std :: string :: String :: from ("Cut To The Chase") , :: std :: string :: String :: from ("Heads Up") , :: std :: string :: String :: from ("Goody Two-Shoes") , :: std :: string :: String :: from ("Fish Out Of Water") , :: std :: string :: String :: from ("Cry Over Spilt Milk") , :: std :: string :: String :: from ("Elephant in the Room") , :: std :: string :: String :: from ("There's No I in Team") , :: std :: string :: String :: from ("Poke Fun At") , :: std :: string :: String :: from ("Talk the Talk") , :: std :: string :: String :: from ("Know the Ropes") , :: std :: string :: String :: from ("Fool's Gold") , :: std :: string :: String :: from ("It's Not Brain Surgery") , :: std :: string :: String :: from ("Fight Fire With Fire") , :: std :: string :: String :: from ("Go For Broke")])) } ; }

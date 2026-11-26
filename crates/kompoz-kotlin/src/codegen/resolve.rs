@@ -78,7 +78,7 @@ impl Ty {
             Ty::Named(n, _) => {
                 matches!(
                     n.as_str(),
-                    "Dp" | "TextUnit" | "Offset" | "Size" | "IntSize" | "IntOffset" | "Constraints" | "Color"
+                    "Dp" | "TextUnit" | "Offset" | "Size" | "IntSize" | "IntOffset" | "Constraints" | "Color" | "UUID"
                 )
             }
             _ => false,
@@ -133,6 +133,10 @@ impl Ty {
         match self {
             Ty::List(t) | Ty::Set(t) | Ty::Range(t) | Ty::ClosedRange(t) => (**t).clone(),
             Ty::Named(n, a) if n == "SnapshotStateList" => a.first().cloned().unwrap_or(Ty::Unknown),
+            // ((stage 14 FINAL) a state map: its entries, as a map's)
+            Ty::Named(n, a) if n == "SnapshotStateMap" && a.len() == 2 => {
+                Ty::Pair(Box::new(a[0].clone()), Box::new(a[1].clone()))
+            }
             // (a Rust `Result` is Kotlin's `Result<T>`: what `getOrThrow()` gives)
             Ty::Named(n, a) if n == "Result" => a.first().cloned().unwrap_or(Ty::Unknown),
             Ty::Map(k, v) => Ty::Pair(k.clone(), v.clone()),
@@ -177,6 +181,8 @@ impl Ty {
             Ty::String => &["KtStr", "KtScope"],
             Ty::Nullable(t) if t.is_string() => &["KtNullableStr", "KtScope"],
             Ty::Map(_, _) => &["KtMapExt", "KtScope"],
+            // ((stage 14 FINAL) a state map: Kotlin's MutableMap functions are its own; its reads are a map's)
+            Ty::Named(n, _) if n == "SnapshotStateMap" => &["KtMapExt", "KtScope"],
             Ty::Char => &["KtChar", "KtScope"],
             Ty::Float | Ty::Double => &["KtFloat", "KtNumber", "KtScope"],
             Ty::Int | Ty::Long | Ty::OtherInt => &["KtNumber", "KtScope"],

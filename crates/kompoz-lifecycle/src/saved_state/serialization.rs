@@ -4,7 +4,7 @@
 
 use super::{SavedState, SavedStateProvider, SavedStateRegistryOwner};
 use kompoz_runtime::kt::{KtDelegate, KtMutableDelegate};
-use kompoz_runtime::{Saveable, SavedValue, Saver};
+use kompoz_runtime::{IntoSaver, Saveable, SavedValue, Saver};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -31,8 +31,8 @@ pub fn encode_to_saved_state<T: Saveable>(value: &T) -> SavedState {
 /// `value` as a saved state, written by `serializer` (Compose's `encodeToSavedState(serializer, value)`).
 ///
 /// Kotlin: `encodeToSavedState(serializer, value)`
-pub fn encode_to_saved_state_with<T: 'static>(serializer: &Saver<T>, value: &T) -> SavedState {
-    from_saved_value(serializer.save(value))
+pub fn encode_to_saved_state_with<T: 'static>(serializer: impl IntoSaver<T>, value: &T) -> SavedState {
+    from_saved_value(serializer.into_saver().save(value))
 }
 
 /// `value` as a saved state, written by `serializer` with `configuration` in effect (Compose's
@@ -40,7 +40,7 @@ pub fn encode_to_saved_state_with<T: 'static>(serializer: &Saver<T>, value: &T) 
 ///
 /// Kotlin: `encodeToSavedState(serializer: SerializationStrategy<T>, value: T, configuration: SavedStateConfiguration)`
 pub fn encode_to_saved_state_configured<T: 'static>(
-    serializer: &Saver<T>,
+    serializer: impl IntoSaver<T>,
     value: &T,
     configuration: &super::SavedStateConfiguration,
 ) -> SavedState {
@@ -69,7 +69,8 @@ pub fn decode_from_saved_state<T: Saveable>(saved_state: &SavedState) -> T {
 ///
 /// Kotlin: `decodeFromSavedState(deserializer, savedState)`
 #[track_caller]
-pub fn decode_from_saved_state_with<T: 'static>(deserializer: &Saver<T>, saved_state: &SavedState) -> T {
+pub fn decode_from_saved_state_with<T: 'static>(deserializer: impl IntoSaver<T>, saved_state: &SavedState) -> T {
+    let deserializer = deserializer.into_saver();
     decode(saved_state, |v| deserializer.restore(v))
 }
 
@@ -80,7 +81,7 @@ pub fn decode_from_saved_state_with<T: 'static>(deserializer: &Saver<T>, saved_s
 /// Kotlin: `decodeFromSavedState(deserializer: DeserializationStrategy<T>, savedState: SavedState, configuration: SavedStateConfiguration)`
 #[track_caller]
 pub fn decode_from_saved_state_configured<T: 'static>(
-    deserializer: &Saver<T>,
+    deserializer: impl IntoSaver<T>,
     saved_state: &SavedState,
     configuration: &super::SavedStateConfiguration,
 ) -> T {

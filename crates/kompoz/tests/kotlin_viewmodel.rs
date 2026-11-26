@@ -11,14 +11,6 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 
-// ---- what stays Rust ------------------------------------------------------------------------------------------
-
-/// The codec samples' `class UUIDSerializer : KSerializer<UUID>` (a UUID's text, as a string): a Saver, KompozR's
-/// explicit serializer (kotlinx.serialization's KSerializer/Encoder/Decoder and java.util.UUID aren't the API's).
-pub fn UUIDSerializer() -> Saver<String> {
-    Saver::new(|uuid: &String| SavedValue::from(uuid.as_str()), |v| v.as_str().map(str::to_string))
-}
-
 kompoz_file!("tests/kt/viewmodel.kt");
 
 // ---- tests ----------------------------------------------------------------------------------------------------------
@@ -103,15 +95,35 @@ fn lifecycle_viewmodel_compose_samples() {
 }
 
 /// savedstate's codec samples: a `@Serializable` class encoded into a SavedState and
-/// decoded from one written by hand, with an explicit serializer too; a saved state read back.
+/// decoded from one written by hand, with an explicit serializer too (a `KSerializer<UUID>` of the sample's own); a
+/// saved state read back.
 fn savedstate_samples() {
     let saved = encode();
     assert!(saved.read(|r| r.get_int("id") == 123 && r.get_string("name") == "foo"));
     assert_eq!(decode(), User { id: 123, name: "foo".into() });
-    assert_eq!(encode_with_explicit_serializer().read(|r| r.get_string("")), "0f0e0d0c-0b0a-0908-0706-050403020100");
-    assert_eq!(decode_with_explicit_serializer(), "0f0e0d0c-0b0a-0908-0706-050403020100");
+    // (the samples' `class UUIDSerializer : KSerializer<UUID>`: a random UUID written as its text, read back)
+    let text = encode_with_explicit_serializer().read(|r| r.get_string(""));
+    assert_eq!(UUID::from_string(&text).to_string(), text);
+    assert_eq!(decode_with_explicit_serializer().to_string(), uuid_saved_text());
     assert_eq!(user_name(user_saved_state()), "foo");
     assert_eq!(user_name(SavedState::new()), "?");
+}
+
+/// LifecycleViewModelSamples' SnapshotStateViewModel (lifecycle-viewmodel-compose 2.11): its state list, state map
+/// and flag saved by the handle (`handle.saveable(key, saver = listSaver(…))`, `by handle.saveable(saver) { … }`,
+/// `by handle.saveable { mutableStateOf(true) }`), given back to the ViewModel made from what the handle saved.
+fn snapshot_state_view_model() {
+    let handle = SavedStateHandle::new();
+    let vm = SelectionViewModel(handle.clone());
+    assert_eq!(selections_changed(vm.clone()), "elma=true, armut=false false");
+    let saved = handle.saved_state_provider().save_state();
+    let again = SelectionViewModel(SavedStateHandle::create_handle(Some(&saved), None));
+    assert_eq!(again.report(), "elma=true, armut=false false");
+    // (a handle of nothing saved: made anew)
+    assert_eq!(SelectionViewModel(SavedStateHandle::new()).report(), " true");
+    // (the samples themselves: their classes declared, as Compose's are)
+    SnapshotStateViewModel();
+    SnapshotStateViewModelWithDelegates();
 }
 
 fn main() {
@@ -119,5 +131,6 @@ fn main() {
         ("classes_as_kotlin_writes_them", classes_as_kotlin_writes_them),
         ("lifecycle_viewmodel_compose_samples", lifecycle_viewmodel_compose_samples),
         ("savedstate_samples", savedstate_samples),
+        ("snapshot_state_view_model", snapshot_state_view_model),
     ]);
 }

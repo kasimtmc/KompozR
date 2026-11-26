@@ -1656,6 +1656,11 @@ impl Gen<'_, '_> {
         let bound = mapped.and_then(|m| {
             self.collection_type_arg(c, &m).map(|t| ("T".to_string(), t)).or_else(|| self.direct_type_arg(c, &m))
         });
+        // ((stage 14 FINAL) the type the call is to have: its result `T`, `Saver<T>` — its lambdas' parameters of it
+        // written with it, Rust inferring it only from the arguments after them)
+        let from_expected = bound.is_none();
+        let bound = bound.or_else(|| self.expected_type_arg(c, loc));
+        let from_expected = from_expected && bound.is_some();
         // (a reified type argument a lambda's parameter is of — `entry<Profile> { key -> … }`, its `K` —: the lambda's
         // parameter typed by it)
         let bound = bound.or_else(|| {
@@ -1677,8 +1682,10 @@ impl Gen<'_, '_> {
         };
         let saved_name = std::mem::replace(&mut self.type_param, name);
         let saved = std::mem::replace(&mut self.type_arg, bound);
+        let saved_written = std::mem::replace(&mut self.type_arg_written, from_expected);
         let saved_scope = std::mem::replace(&mut self.layout_scope_callee, layout_scope_of(c));
         let out = self.emit_bound(c, target, args, loc, kotlin);
+        self.type_arg_written = saved_written;
         self.type_arg = saved;
         self.type_param = saved_name;
         self.layout_scope_callee = saved_scope;
@@ -1741,6 +1748,32 @@ impl Gen<'_, '_> {
                 ArgValue::Lambda(_) | ArgValue::Sam { .. } => None,
             }
         })
+    }
+
+    /// A generic callee's type parameter its result is (`T`) or holds (`Saver<T>`), bound by the type the call at
+    /// `loc` is to have ([`Gen::expected`]: taken by the first call there whose result fits it).
+    fn expected_type_arg(&mut self, c: &Callee, loc: Loc) -> Option<(String, Ty)> {
+        let (at, want) = self.expected.clone()?;
+        if loc.start.offset < at.start.offset || loc.end.offset > at.end.offset || want.is_vague() {
+            return None;
+        }
+        let ret = plain_type_text(c.item?.ret);
+        let ret = ret.trim();
+        let bound = if is_type_parameter(ret) {
+            Some((ret.to_string(), want))
+        } else {
+            let (outer, inner) = ret.strip_suffix('>')?.split_once('<')?;
+            match &want {
+                Ty::Named(n, a) if n == outer.trim() && is_type_parameter(inner) && a.len() == 1 => {
+                    Some((inner.trim().to_string(), a[0].clone()))
+                }
+                _ => None,
+            }
+        };
+        if bound.is_some() {
+            self.expected = None;
+        }
+        bound
     }
 
     /// The element type of the collection a generic callee's `T` comes from (`items: impl LazyListItems<T>`, `Vec<T>`,
@@ -2238,6 +2271,17 @@ impl Gen<'_, '_> {
 
     /// An argument's value for a parameter `p` (none known: as it is).
     fn arg_value(&mut self, a: &ArgRef, p: Option<&PInfo>, transform_wraps: bool) -> TokenStream {
+        // ((stage 14 FINAL) a call given to a parameter of the bound type parameter, `saver: Saver<T>`: of that type,
+        // for its own generic result)
+        if let (ArgValue::Expr(e @ Expr { kind: ExprKind::Call { .. }, .. }), Some(p)) = (&a.value, p)
+            && self.type_arg.as_ref().is_some_and(|t| !t.is_vague())
+            && p.lambda.is_none()
+            && plain_type_text(&p.ty).split(|c: char| !c.is_alphanumeric()).any(|w| w == self.type_param)
+        {
+            let span = self.span(e.loc);
+            let bound = self.bind_type_arg(&plain_type_text(&p.ty), span);
+            self.expected = Some((e.loc, Ty::from_rust(&bound)));
+        }
         let span = self.span(a.loc);
         let Some(p) = p else { return self.loose_arg(a) };
         // ((stage 14 WPB) a callable reference given a function's parameter: its parameters' types tell which overload)

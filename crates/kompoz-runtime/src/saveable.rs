@@ -200,12 +200,12 @@ impl Drop for Entry {
 pub struct Saver<T> {
     save: Rc<dyn Fn(&T) -> SavedValue>,
     restore: Rc<dyn Fn(&SavedValue) -> Option<T>>,
-    descriptor: fn() -> SerialDescriptor,
+    descriptor: Rc<dyn Fn() -> SerialDescriptor>,
 }
 
 impl<T> Clone for Saver<T> {
     fn clone(&self) -> Self {
-        Saver { save: self.save.clone(), restore: self.restore.clone(), descriptor: self.descriptor }
+        Saver { save: self.save.clone(), restore: self.restore.clone(), descriptor: self.descriptor.clone() }
     }
 }
 
@@ -219,7 +219,7 @@ impl<T: 'static> Saver<T> {
         save: impl Fn(&T) -> SavedValue + 'static,
         restore: impl Fn(&SavedValue) -> Option<T> + 'static,
     ) -> Self {
-        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor: contextual_descriptor::<T> }
+        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor: Rc::new(contextual_descriptor::<T>) }
     }
 
     /// The same, of the value's described kind (kotlinx's `KSerializer` with its `descriptor`).
@@ -228,7 +228,17 @@ impl<T: 'static> Saver<T> {
         restore: impl Fn(&SavedValue) -> Option<T> + 'static,
         descriptor: fn() -> SerialDescriptor,
     ) -> Self {
-        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor }
+        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor: Rc::new(descriptor) }
+    }
+
+    /// The same, its descriptor a serializer object's (kotlinx's `KSerializer.descriptor` of a class of one's own:
+    /// [`KSerializer`](crate::KSerializer)).
+    pub fn with_descriptor_of(
+        save: impl Fn(&T) -> SavedValue + 'static,
+        restore: impl Fn(&SavedValue) -> Option<T> + 'static,
+        descriptor: impl Fn() -> SerialDescriptor + 'static,
+    ) -> Self {
+        Saver { save: Rc::new(save), restore: Rc::new(restore), descriptor: Rc::new(descriptor) }
     }
 
     /// The saver of a [`Saveable`] type: its own way (Kotlin's `serializer<T>()` of a `@Serializable` type).
@@ -267,12 +277,21 @@ impl<T: 'static> Saver<T> {
     }
 }
 
-/// A saver writing a list (Compose's listSaver).
-pub fn list_saver<T: 'static>(
-    save: impl Fn(&T) -> Vec<SavedValue> + 'static,
-    restore: impl Fn(&[SavedValue]) -> Option<T> + 'static,
+/// A saver writing a list (Compose's listSaver): `save` gives the value's parts, each saveable (`SavedValue`s, or
+/// values of one saveable type: Kotlin's `List<Saveable>`), `restore` makes the value again from them.
+///
+/// Kotlin: `listSaver(save: SaverScope.(value: Original) -> List<Saveable>, restore: (list: List<Saveable>) -> Original?)`
+pub fn list_saver<T: 'static, S: Saveable + 'static>(
+    save: impl Fn(&T) -> Vec<S> + 'static,
+    restore: impl Fn(&[S]) -> Option<T> + 'static,
 ) -> Saver<T> {
-    Saver::new(move |v| SavedValue::list(save(v)), move |s| s.as_list().and_then(&restore))
+    Saver::new(
+        move |v| SavedValue::list(save(v).iter().map(Saveable::save)),
+        move |s| {
+            let parts: Option<Vec<S>> = s.as_list()?.iter().map(S::restore).collect();
+            restore(&parts?)
+        },
+    )
 }
 
 /// A saver writing a map (Compose's mapSaver).

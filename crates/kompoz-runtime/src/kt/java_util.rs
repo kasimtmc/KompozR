@@ -246,6 +246,9 @@ pub struct TimeZone {
 }
 
 static DEFAULT_ZONE: RwLock<Option<TimeZone>> = RwLock::new(None);
+/// The system's zone, read once (until a `set_default(None)` reads it again). Kept apart from the set one, so a
+/// first read racing a `set_default` on another thread can't overwrite it.
+static SYSTEM_ZONE: RwLock<Option<TimeZone>> = RwLock::new(None);
 
 impl TimeZone {
     /// The zone of an ID (Java's `TimeZone.getTimeZone`): an IANA zone (`America/New_York`, `UTC`), or a custom
@@ -284,11 +287,14 @@ impl TimeZone {
         if let Some(set) = DEFAULT_ZONE.read().unwrap_or_else(|e| e.into_inner()).clone() {
             return set;
         }
+        if let Some(system) = SYSTEM_ZONE.read().unwrap_or_else(|e| e.into_inner()).clone() {
+            return system;
+        }
         let zone = match zoneinfo::system_zone() {
             Some((id, rules)) => TimeZone { id: id.into(), rules, custom: false },
             None => TimeZone::gmt(),
         };
-        *DEFAULT_ZONE.write().unwrap_or_else(|e| e.into_inner()) = Some(zone.clone());
+        *SYSTEM_ZONE.write().unwrap_or_else(|e| e.into_inner()) = Some(zone.clone());
         zone
     }
 
@@ -296,6 +302,9 @@ impl TimeZone {
     ///
     /// Kotlin: `TimeZone.setDefault(zone: TimeZone?)`
     pub fn set_default(zone: Option<TimeZone>) {
+        if zone.is_none() {
+            *SYSTEM_ZONE.write().unwrap_or_else(|e| e.into_inner()) = None;
+        }
         *DEFAULT_ZONE.write().unwrap_or_else(|e| e.into_inner()) = zone;
     }
 

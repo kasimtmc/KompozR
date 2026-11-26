@@ -102,6 +102,30 @@ fun f(xs: List<Int>) {
 }
 
 #[test]
+fn jumps_out_of_lambdas_kotlin_doesnt_inline() {
+    // ((stage 14 FINAL) out of an inline function's lambda a jump is translated; out of one its callee keeps, or a
+    // coroutine's, it is an error as Kotlin's)
+    let text = "\
+@Composable
+fun B(n: Int) {
+    Button(onClick = { if (n > 1) return }) { Text(\"a\") }
+    val scope = rememberCoroutineScope()
+    for (i in 0 until n) { scope.launch { if (i > 1) break } }
+    n.let { if (it > 1) return }
+}
+";
+    assert_eq!(
+        diagnose(text),
+        [
+            "3:35: `return` isn't allowed here: it would leave a lambda its callee keeps or runs in a coroutine of its own \
+             (Kotlin jumps out of an inline function's lambda only)",
+            "5:54: `break` isn't allowed here: it would leave a lambda its callee keeps or runs in a coroutine of its own \
+             (Kotlin jumps out of an inline function's lambda only)",
+        ]
+    );
+}
+
+#[test]
 fn top_level_vals_have_their_values_types_or_written_ones() {
     assert_eq!(
         diagnose(

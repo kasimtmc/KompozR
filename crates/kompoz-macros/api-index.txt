@@ -969,6 +969,7 @@ kompoz-foundation/overscroll kompozable Items - crates/kompoz-foundation/tests/o
 kompoz-runtime/macros kompozable Items rdr crates/kompoz-runtime/tests/macros.rs
 kompoz-runtime/runtime kompozable Items r crates/kompoz-runtime/tests/runtime.rs
 kompoz-ui/layouts kompozable Items r crates/kompoz-ui/tests/layouts.rs
+* super KSerializer - IntoSaver
 * super KeepScreenOnElement - ModifierNodeElement
 * super KeepScreenOnNode - ModifierNode
 kompoz-runtime/runtime kompozable Keeper - crates/kompoz-runtime/tests/runtime.rs
@@ -1699,6 +1700,7 @@ kompoz-runtime/runtime kompozable SavedChecks r crates/kompoz-runtime/tests/runt
 * super SavedStateViewModelFactory - ViewModelProviderFactory
 kompoz-runtime/runtime kompozable SavedText r crates/kompoz-runtime/tests/runtime.rs
 * super SavedValue - Saveable
+* super Saver - IntoSaver
 * kompozable Scaffold dddddddddr crates/kompoz-material3/src/scaffold.rs
 kompoz-runtime/macros kompozable Scaffold dddr crates/kompoz-runtime/tests/macros.rs
 * super ScaffoldContentPadding - CustomPaddingValues
@@ -2815,7 +2817,6 @@ kompoz-runtime/macros method item rd crates/kompoz-runtime/tests/macros.rs {S} a
 * fn lazy_layout_cache_window_of_fractions dd crates/kompoz-foundation/src/lazy/layout/cache_window.rs
 * fn lazy_list_prefetch_strategy d crates/kompoz-foundation/src/lazy/list/prefetch_strategy.rs
 * fn lazy_list_snap_layout_info_provider rd crates/kompoz-foundation/src/gestures/snapping/lazy_list.rs
-kompoz/kotlin_adaptive kompozable levitate_as_dialog_sample - crates/kompoz/tests/kotlin_adaptive.rs
 kompoz-material3-adaptive/samples kompozable levitate_as_dialog_sample - crates/kompoz-material3-adaptive/tests/samples.rs
 * fn light_color_scheme dddddddddddddddddddddddddddddddddddddddddddddddd crates/kompoz-material3/src/color_scheme.rs
 * method local_lookahead_position_of rdd crates/kompoz-ui/src/layout/coordinates.rs LayoutCoordinates
@@ -2920,7 +2921,6 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs ContentDrawScope
 * method record rdr crates/kompoz-ui/src/draw/graphics_layer.rs DrawScope
 kompoz-runtime/macros method refilled d crates/kompoz-runtime/tests/macros.rs Slot
-kompoz/kotlin_adaptive kompozable reflow_adapt_strategy_sample - crates/kompoz/tests/kotlin_adaptive.rs
 kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crates/kompoz-material3-adaptive/tests/samples.rs
 * kompozable register rrrr crates/kompoz-ui/src/back.rs
 * method release d crates/kompoz-test/src/input.rs MouseInjectionScope

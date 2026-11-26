@@ -7,6 +7,10 @@
 //!   (`None`), `#[route(default)]` (`Default::default()`), `#[route(default = expr)]` — is optional: a query
 //!   parameter, and what a value not given takes when its arguments are read back. Each field's type is a
 //!   `RouteValue`.
+//! - `#[route(class(name: Type, …))]` beside it (stage 14 FINAL): the Kotlin syntax's plain `@Serializable class`
+//!   (a reference to its object: a struct of a shared pointer), its constructor's properties in their order — each
+//!   read by its getter (`name` in snake case), the value made by its constructor function (the struct's name), two
+//!   routes equal when they are the same object (a plain class's `==`).
 //! - `#[derive(RouteValue)]` on an enum of unit variants gives it its `NavType`s (Kotlin's enum `NavType`: entries by
 //!   name); on another type, none built in (its `NavType` comes from the routes' `typeMap`).
 
@@ -39,6 +43,8 @@ fn navigation() -> Ts {
 #[derive(Default)]
 struct RouteAttr {
     name: Option<LitStr>,
+    /// `class(name: Type, …)`: a plain class's constructor properties.
+    class: Option<Vec<(Ident, Type)>>,
     /// `Some(None)`: `#[route(default)]`; `Some(Some(e))`: `#[route(default = e)]`.
     default: Option<Option<Expr>>,
 }
@@ -49,6 +55,19 @@ fn route_attr(attrs: &[Attribute], on_field: bool) -> Result<RouteAttr> {
         a.parse_nested_meta(|m| {
             if m.path.is_ident("name") {
                 out.name = Some(m.value()?.parse()?);
+            } else if m.path.is_ident("class") && !on_field {
+                let content;
+                parenthesized!(content in m.input);
+                let fields = content.parse_terminated(
+                    |p: parse::ParseStream| {
+                        let n: Ident = p.parse()?;
+                        p.parse::<Token![:]>()?;
+                        let t: Type = p.parse()?;
+                        Ok((n, t))
+                    },
+                    Token![,],
+                )?;
+                out.class = Some(fields.into_iter().collect());
             } else if m.path.is_ident("default") && on_field {
                 out.default = Some(if m.input.peek(Token![=]) { Some(m.value()?.parse()?) } else { None });
             } else {
@@ -78,6 +97,9 @@ pub(crate) fn derive_route(input: DeriveInput) -> Result<Ts> {
     let ident = &input.ident;
     let attr = route_attr(&input.attrs, false)?;
     let serial_name = attr.name.map(|l| l.value()).unwrap_or_else(|| ident.to_string());
+    if let Some(class) = attr.class {
+        return Ok(class_route(&nav, ident, &serial_name, &class));
+    }
     let (fields, unit) = match &input.data {
         Data::Struct(DataStruct { fields: Fields::Named(f), .. }) => (f.named.iter().collect::<Vec<_>>(), false),
         Data::Struct(DataStruct { fields: Fields::Unit, .. }) => (Vec::new(), true),
@@ -166,6 +188,82 @@ pub(crate) fn derive_route(input: DeriveInput) -> Result<Ts> {
             }
         }
     })
+}
+
+/// A plain class's `Route` (see the module's doc): its constructor's properties `class`.
+fn class_route(nav: &Ts, ident: &Ident, serial_name: &str, class: &[(Ident, Type)]) -> Ts {
+    let mut elements = Vec::new();
+    let mut values = Vec::new();
+    let mut decoded = Vec::new();
+    for (index, (n, ty)) in class.iter().enumerate() {
+        let name = n.to_string();
+        let getter = format_ident!("{}", snake(&name));
+        let optional = is_option(ty);
+        elements.push(quote! {
+            #nav::RouteElement {
+                name: #name,
+                optional: #optional,
+                nullable: <#ty as #nav::RouteValue>::NULLABLE,
+                ktype: #nav::type_of::<#ty>,
+                nav_type: <#ty as #nav::RouteValue>::nav_type,
+            }
+        });
+        values.push(quote! { #index => #nav::RouteValue::to_nav_value(&self.#getter()), });
+        let missing = if optional {
+            quote!(::core::option::Option::None)
+        } else {
+            quote!(return ::core::result::Result::Err(#nav::missing_field(#name, #serial_name)))
+        };
+        decoded.push(quote! {
+            match value(#index) {
+                ::core::option::Option::Some(v) => <#ty as #nav::RouteValue>::from_nav_value(v)
+                    .ok_or_else(|| #nav::unexpected_null(#name))?,
+                ::core::option::Option::None => #missing,
+            }
+        });
+    }
+    let count = elements.len();
+    let value_param = if class.is_empty() { quote!(_value) } else { quote!(value) };
+    quote! {
+        impl #nav::Route for #ident {
+            fn descriptor() -> &'static #nav::RouteDescriptor {
+                static ELEMENTS: [#nav::RouteElement; #count] = [#(#elements),*];
+                static DESCRIPTOR: #nav::RouteDescriptor =
+                    #nav::RouteDescriptor { serial_name: #serial_name, elements: &ELEMENTS };
+                &DESCRIPTOR
+            }
+            fn element_value(&self, index: usize) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+                match index {
+                    #(#values)*
+                    _ => panic!("kompoz: {} has no field {index}", #serial_name),
+                }
+            }
+            fn from_elements(
+                #value_param: &mut dyn FnMut(usize) -> ::core::option::Option<::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>>>,
+            ) -> ::core::result::Result<Self, ::std::string::String> {
+                ::core::result::Result::Ok(#ident(#(#decoded),*))
+            }
+            fn route_eq(&self, other: &dyn ::core::any::Any) -> bool {
+                other.downcast_ref::<Self>().is_some_and(|o| o == self)
+            }
+        }
+    }
+}
+
+/// A Kotlin name in Rust's snake case (`userId` → `user_id`).
+fn snake(name: &str) -> String {
+    let mut out = String::new();
+    for (k, c) in name.chars().enumerate() {
+        if c.is_uppercase() {
+            if k > 0 {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 pub(crate) fn derive_route_value(input: DeriveInput) -> Result<Ts> {

@@ -62,6 +62,25 @@ pub(crate) struct Control {
     pub in_init: bool,
     /// The function type a callable reference is given to (its parameters: which overload `::f` names).
     pub expected_fn: Option<Vec<super::resolve::Ty>>,
+    /// The calls being written that take a lambda, innermost last: where a jump out of an inline function's lambda
+    /// lands (see `jumps`).
+    pub leaves: Vec<LeaveFrame>,
+}
+
+/// A call taking a lambda, being written: the jumps out of its lambdas that land at it (Kotlin's non-local `return`,
+/// `break`, `continue` out of an inline function's lambda: `kt::leave` in the lambda, `kt::leaving` around the call).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LeaveFrame {
+    /// How many lambdas were being written outside it (the jumps landing at it are of that depth).
+    pub lambdas: usize,
+    /// How many loops were open outside it.
+    pub loops: usize,
+    /// The slot the jump is kept in (`__kz_leave<line>_<column>`, by the call's place).
+    pub slot: String,
+    /// A `return` (of the function, or of the lambda around the call) leaves through it.
+    pub returned: bool,
+    /// The loops jumped to (as [`JumpFrame::jumps`]).
+    pub jumps: Vec<(usize, bool, Option<Ident>)>,
 }
 
 /// A closure being written whose `return`, `break` and `continue` leave the function or loop around it (a `try`
@@ -534,8 +553,9 @@ impl Gen<'_, '_> {
                 }
                 None if self.exception_type(&class) => {
                     let lit = proc_macro2::Literal::string(&class);
-                    let cond = if class == "Throwable" { None } else { Some(quote_spanned!(cspan=> #e.is_a(#lit))) };
-                    (cond, quote_spanned!(cspan=> #e), Ty::named("Throwable"))
+                    // (`Throwable` too: what a jump out of an inline function's lambda leaves through isn't one, see
+                    // `jumps`)
+                    (Some(quote_spanned!(cspan=> #e.is_a(#lit))), quote_spanned!(cspan=> #e), Ty::named("Throwable"))
                 }
                 None => {
                     self.error(c.ty.loc, format!("`{class}` isn't an exception class KompozR knows"));

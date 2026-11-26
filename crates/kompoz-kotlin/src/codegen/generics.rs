@@ -28,6 +28,9 @@ pub(crate) struct Uses {
     /// Every type parameter is shown and compared (a data class's `toString()` and `equals`, a composable's
     /// parameters compared).
     pub all: bool,
+    /// (stage 14 FINAL) The bounds the API's generic functions put on those given them as type arguments
+    /// (`rememberListDetailPaneScaffoldNavigator<T>()`: `T: NavigatorContentKey`), Rust's text.
+    pub api_bounds: Vec<(String, String)>,
 }
 
 impl Uses {
@@ -86,6 +89,10 @@ impl Uses {
         }
         let mut look = |e: &Expr| uses.note(e, &typed);
         walk_body(f.body.as_ref(), &mut look);
+        let names: Vec<String> = f.type_params.iter().map(|t| t.name.name.clone()).collect();
+        let mut api = Vec::new();
+        walk_body(f.body.as_ref(), &mut |e: &Expr| api_bounds_of(e, &names, &mut api));
+        uses.api_bounds = api;
         uses
     }
 
@@ -130,6 +137,35 @@ impl Uses {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// (stage 14 FINAL) The bounds a call of a generic function of the API given the type parameters `names` as type
+/// arguments puts on them (its own type parameters' trait bounds, [`crate::index::fn_bounds`]; those of plain trait
+/// paths: a closure's or another type parameter's aren't Kotlin's to need).
+fn api_bounds_of(e: &Expr, names: &[String], out: &mut Vec<(String, String)>) {
+    let ExprKind::Call { callee, type_args, .. } = &e.kind else { return };
+    if type_args.is_empty() {
+        return;
+    }
+    let name = match &callee.kind {
+        ExprKind::Name(n) => &n.name,
+        ExprKind::Member { name, .. } => &name.name,
+        _ => return,
+    };
+    for (k, a) in type_args.iter().enumerate() {
+        let TypeArg::Type { ty, .. } = a else { continue };
+        let Some(p) = type_name(ty).filter(|p| names.contains(p)) else { continue };
+        for item in super::resolve::lookup(name) {
+            let Some((_, text)) = crate::index::fn_bounds(item).get(k) else { continue };
+            for b in text.split('+').map(str::trim).filter(|b| !b.is_empty()) {
+                let plain = b.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+                    && !(b.len() == 1 && b.chars().all(|c| c.is_ascii_uppercase()));
+                if plain && !out.iter().any(|(q, x)| *q == p && x == b) {
+                    out.push((p.clone(), b.to_string()));
+                }
+            }
         }
     }
 }
@@ -284,6 +320,12 @@ impl Gen<'_, '_> {
             }
             if uses.all || kompozable || uses.compared.contains(name) {
                 bounds.push(quote_spanned!(span=> ::core::cmp::PartialEq));
+            }
+            // ((stage 14 FINAL) what the API's generic functions given it need of it)
+            for (_, b) in uses.api_bounds.iter().filter(|(q, _)| q == name) {
+                if let Ok(t) = b.parse::<TokenStream>() {
+                    bounds.push(super::respan(t, span));
+                }
             }
             if let Some(b) = &p.bound {
                 let bt = self.rust_type(b, TypePos::Value);

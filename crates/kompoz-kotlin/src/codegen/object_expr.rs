@@ -448,6 +448,7 @@ impl Gen<'_, '_> {
         let saved_lambdas = std::mem::take(&mut self.lambdas);
         let saved_loops = std::mem::take(&mut self.loops);
         let saved_async = self.in_async;
+        let saved_leaves = std::mem::take(&mut self.control.leaves);
         let ret_ty = match (&output, suspend) {
             (Some(o), true) => Ty::from_rust(o),
             _ => sig.ret.as_ref().map_or(Ty::Unit, |r| Ty::from_rust(&r.to_string())),
@@ -504,6 +505,7 @@ impl Gen<'_, '_> {
         self.lambdas = saved_lambdas;
         self.loops = saved_loops;
         self.in_async = saved_async;
+        self.control.leaves = saved_leaves;
         let clones: Vec<TokenStream> = frame
             .used
             .iter()

@@ -82,7 +82,8 @@ pub use collections::{
 #[doc(hidden)]
 pub use collections::{Array_async, List_async, MutableList_async};
 pub use delegate::{
-    KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, delegate_of, lazy, post_dec, post_inc, pre_dec, pre_inc,
+    KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, KtValue, delegate_of, lazy, post_dec, post_inc, pre_dec,
+    pre_inc,
 };
 pub use format::format;
 pub use java_text::SimpleDateFormat;
@@ -111,8 +112,8 @@ pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};
 pub use text::{KtDisplay, KtToString, to_string};
 pub use throwable::{
-    Jump, KtExceptionArg, KtThrowable, OnCancel, Throwable, catching, catching_async, exception, is_standard_class,
-    parent_class, rethrow, throw,
+    Jump, KtExceptionArg, KtThrowable, Leave, OnCancel, Throwable, catching, catching_async, exception,
+    is_standard_class, leave, leaving, leaving_async, parent_class, rethrow, throw,
 };
 
 #[doc(hidden)]

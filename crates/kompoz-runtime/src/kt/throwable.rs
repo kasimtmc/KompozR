@@ -213,6 +213,9 @@ impl Throwable {
     /// `catch (e: IllegalStateException)` taking it).
     #[doc(hidden)]
     pub fn is_a(&self, name: &str) -> bool {
+        if self.0.class == LEAVING {
+            return false;
+        }
         if self.0.class == name || self.0.supers.iter().any(|s| s == name) {
             return true;
         }
@@ -248,6 +251,10 @@ impl Throwable {
     /// The exception a caught panic is (see the module's doc).
     #[doc(hidden)]
     pub fn from_panic(payload: Box<dyn Any + Send>) -> Throwable {
+        // (a jump out of an inline function's lambda passing through: no exception, see [`leave`])
+        if payload.is::<Leaving>() {
+            return Throwable::new(LEAVING, None, None);
+        }
         let text = if let Some(s) = payload.downcast_ref::<String>() {
             if let Some(t) = take_thrown(s) {
                 return t;
@@ -371,6 +378,10 @@ pub fn throw(e: impl KtThrowable) -> ! {
 #[track_caller]
 #[doc(hidden)]
 pub fn rethrow(e: Throwable) -> ! {
+    // (a jump out of an inline function's lambda, which no `catch` took: on its way, see [`leave`])
+    if e.0.class == LEAVING {
+        std::panic::resume_unwind(Box::new(Leaving));
+    }
     throw(e)
 }
 
@@ -479,6 +490,63 @@ pub enum Jump<V, R> {
     Value(V),
     Return(R),
     Loop(u32),
+}
+
+// ---- Jumps out of an inline function's lambda ---------------------------------------------------------------------
+
+/// The class name of the [`Throwable`] a `try` body's [`catching`] gives for a [`leave`] passing through it: no
+/// `catch` takes it ([`Throwable::is_a`] is false for every class), [`rethrow`] sends it on, a `finally` runs.
+const LEAVING: &str = "\u{0}leaving";
+
+/// The payload of a [`leave`]'s unwinding.
+struct Leaving;
+
+/// Where a `return`, `break` or `continue` out of an inline function's lambda (Kotlin's non-local jump: `xs.let {
+/// if (it < 0) return null }`, `buildAnnotatedString { … run { break } … }`) lands: the call taking the lambda is
+/// written `kt::leaving(&slot, || call)`, the jump `kt::leave(&slot, Jump::Return(v))` — the jump kept in the slot
+/// and the callee's frames left by unwinding (what Kotlin's inlining does: the rest of the inline function doesn't
+/// run, its `finally` blocks do), the code after the call doing it (`Jump::Loop(n)`: the call's `n`th loop jump).
+/// Any callee: the API's inline functions, the kt shims', the file's own `inline fun`s.
+#[doc(hidden)]
+pub struct Leave<R>(Cell<Option<Jump<(), R>>>);
+
+impl<R> Leave<R> {
+    #[doc(hidden)]
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Leave<R> {
+        Leave(Cell::new(None))
+    }
+}
+
+/// A jump out of an inline function's lambda (see [`Leave`]): kept in `slot`, the frames up to the call taking the
+/// lambda left (unwinding, without the panic hook: no panic).
+#[doc(hidden)]
+pub fn leave<R>(slot: &Leave<R>, jump: Jump<(), R>) -> ! {
+    slot.0.set(Some(jump));
+    std::panic::resume_unwind(Box::new(Leaving))
+}
+
+/// The call `f` whose lambda may jump out of it (see [`Leave`]): its value, or `Err` of the jump to do.
+#[doc(hidden)]
+pub fn leaving<T, R>(slot: &Leave<R>, f: impl FnOnce() -> T) -> Result<T, Jump<(), R>> {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(v) => Ok(v),
+        Err(p) if p.is::<Leaving>() => Err(slot.0.take().expect("the jump left")),
+        Err(p) => std::panic::resume_unwind(p),
+    }
+}
+
+/// [`leaving`] in a coroutine: the call's future `f` (its lambdas suspending with it) polled so.
+#[doc(hidden)]
+pub async fn leaving_async<T, R>(slot: &Leave<R>, f: impl Future<Output = T>) -> Result<T, Jump<(), R>> {
+    let mut f = std::pin::pin!(f);
+    std::future::poll_fn(|cx| match catch_unwind(AssertUnwindSafe(|| f.as_mut().poll(cx))) {
+        Ok(Poll::Ready(v)) => Poll::Ready(Ok(v)),
+        Ok(Poll::Pending) => Poll::Pending,
+        Err(p) if p.is::<Leaving>() => Poll::Ready(Err(slot.0.take().expect("the jump left"))),
+        Err(p) => std::panic::resume_unwind(p),
+    })
+    .await
 }
 
 /// A `catch (e: CancellationException)`'s body in a coroutine: run if the coroutine is dropped (cancelled) before

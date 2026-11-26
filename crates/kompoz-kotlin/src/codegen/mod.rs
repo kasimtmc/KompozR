@@ -198,6 +198,9 @@ pub(crate) struct LambdaCx {
     pub loops: usize,
     /// What its result goes to (a `return@label` value too): Kotlin's `Any` made a key.
     pub result: expr::Want,
+    /// (stage 14 FINAL) Its callee runs it in place, before it returns (Kotlin's inline function's lambda, not kept,
+    /// not a coroutine's): a jump may leave it (`jumps`).
+    pub inline: bool,
 }
 
 pub(crate) struct Gen<'a, 'd> {
@@ -239,6 +242,13 @@ pub(crate) struct Gen<'a, 'd> {
     /// `items_list(items: impl LazyListItems<T>, key: Rc<dyn Fn(&T) -> LazyKey>)`): what its lambdas' `T` is, written
     /// out where a closure made a trait object can't take it from where it goes.
     pub type_arg: Option<Ty>,
+    /// (stage 14 FINAL) The type the expression at the place is to have (a property's declared type, a parameter's
+    /// of a generic callee whose type parameter is bound): a generic callee's result `T` (`Saver<T>`) bound by it, for
+    /// its lambdas (`listSaver(save = { it… })` given to a `Saver<SnapshotStateList<Item>>`).
+    pub expected: Option<(Loc, Ty)>,
+    /// (stage 14 FINAL) [`Gen::type_arg`] was bound by [`Gen::expected`]: the lambdas' parameters of it are written
+    /// with their types.
+    pub type_arg_written: bool,
     /// The name of the type parameter [`Gen::type_arg`] binds (`T` of a collection's element, `S` of
     /// `AnimatedContent(targetState: S, …)`'s state).
     pub type_param: String,
@@ -313,6 +323,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             elem_hint: None,
             owner_arg: None,
             type_arg: None,
+            expected: None,
+            type_arg_written: false,
             type_param: "T".to_string(),
             layout_scope_callee: None,
             layout_scopes: Vec::new(),
@@ -411,12 +423,24 @@ impl<'a, 'd> Gen<'a, 'd> {
     }
 
     /// `f`'s result without the diagnostics it gives (what is written again later, and reported then).
+    /// (stage 14 FINAL) `f` writing `e`, a value of `ty` ([`Gen::expected`]: where `e` is a call).
+    pub(crate) fn expecting<R>(&mut self, e: &Expr, ty: &Ty, f: impl FnOnce(&mut Self) -> R) -> R {
+        let here = (matches!(e.kind, ExprKind::Call { .. }) && !ty.is_vague()).then(|| (e.loc, ty.clone()));
+        let outer = std::mem::replace(&mut self.expected, here);
+        let r = f(self);
+        self.expected = outer;
+        r
+    }
+
     pub fn quiet<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let n = self.diags.list.len();
+        // (the jumps it writes out of lambdas land nowhere: the pass is written again, or not at all)
+        let leaves = self.control.leaves.clone();
         self.quiet_depth += 1;
         let out = f(self);
         self.quiet_depth -= 1;
         self.diags.list.truncate(n);
+        self.control.leaves = leaves;
         out
     }
 
@@ -1005,6 +1029,19 @@ impl<'a, 'd> Gen<'a, 'd> {
         let ty = self.ty_of(t);
         let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
         let rust_ty = self.rust_type(t, pos);
+        // ((stage 14 FINAL) an inline function's lambda — not `noinline`, not `crossinline` —: run in place, never
+        // kept, so it borrows what it uses: no `'static`)
+        let rust_ty = if inline
+            && !self.fun.kompozable
+            && !p.modifiers.has(ModifierKind::Noinline)
+            && !p.modifiers.has(ModifierKind::Crossinline)
+            && matches!(self.unaliased(t).kind, TypeKind::Function(_))
+            && !self.unaliased(t).nullable
+        {
+            without_static(rust_ty)
+        } else {
+            rust_ty
+        };
         let info = self.quiet(|g| g.param_info(p, inline));
         let default = p.default.as_ref().map(|d| {
             let saved = std::mem::take(&mut self.scopes);
@@ -1386,4 +1423,18 @@ pub(crate) fn respan(tokens: TokenStream, span: Span) -> TokenStream {
             }
         })
         .collect()
+}
+
+/// A parameter's type `impl Fn(…) -> R + 'static` without its `+ 'static`.
+fn without_static(ts: TokenStream) -> TokenStream {
+    let tokens: Vec<proc_macro2::TokenTree> = ts.clone().into_iter().collect();
+    match tokens.as_slice() {
+        [
+            rest @ ..,
+            proc_macro2::TokenTree::Punct(plus),
+            proc_macro2::TokenTree::Punct(q),
+            proc_macro2::TokenTree::Ident(s),
+        ] if plus.as_char() == '+' && q.as_char() == '\'' && s == "static" => rest.iter().cloned().collect(),
+        _ => ts,
+    }
 }

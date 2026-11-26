@@ -213,6 +213,8 @@ impl<K, V> PartialEq for SnapshotStateMap<K, V> {
 }
 
 /// `mutableStateMapOf(…)`.
+///
+/// Kotlin: `mutableStateMapOf(vararg pairs: Pair<K, V>)`
 pub fn mutable_state_map_of<K: Ord + Clone + Send + Sync + 'static, V: Clone + Send + Sync + 'static>(
     entries: impl IntoIterator<Item = (K, V)>,
 ) -> SnapshotStateMap<K, V> {

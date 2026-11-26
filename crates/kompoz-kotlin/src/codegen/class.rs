@@ -394,6 +394,14 @@ impl Gen<'_, '_> {
         // value of it the base's struct made of it)
         if let Some(b) = self.callbacks_base_of(&rust) {
             let v = proc_macro2::Ident::new(b.value, span);
+            // ((stage 14 FINAL) a generic struct's, `KSerializer<T>`: its arguments the object's, inferred)
+            let n = crate::index::generics(b.value).map_or(0, |g| g.len());
+            let v = if n == 0 {
+                quote_spanned!(span=> #v)
+            } else {
+                let holes = (0..n).map(|_| quote_spanned!(span=> _));
+                quote_spanned!(span=> #v<#(#holes),*>)
+            };
             return Some((quote_spanned!(span=> <#v as ::core::convert::From<#i>>::from(#i {})), Ty::named(b.value)));
         }
         Some((quote_spanned!(span=> #i {}), Ty::named(&rust)))
@@ -1188,8 +1196,22 @@ impl Gen<'_, '_> {
                     let key = p.param.name.name.clone();
                     let getter = ident(&snake(&key), span);
                     let t = self.rust_type(ty, TypePos::Value);
-                    saves.push(quote_spanned!(span=> (#key, #rt::Saveable::save(&self.#getter()))));
-                    restores.push(quote_spanned!(span=> <#t as #rt::Saveable>::restore(__kz_map.get(#key)?)?));
+                    // ((stage 14 FINAL) `@Serializable(with = UUIDSerializer::class) val uuid: UUID`: written and
+                    // read by that serializer)
+                    match self.serializer_with(&p.param.annotations, span) {
+                        Some(sv) => {
+                            saves.push(
+                                quote_spanned!(span=> (#key, #rt::IntoSaver::into_saver(#sv).save(&self.#getter()))),
+                            );
+                            restores.push(
+                                quote_spanned!(span=> #rt::IntoSaver::<#t>::into_saver(#sv).restore(__kz_map.get(#key)?)?),
+                            );
+                        }
+                        None => {
+                            saves.push(quote_spanned!(span=> (#key, #rt::Saveable::save(&self.#getter()))));
+                            restores.push(quote_spanned!(span=> <#t as #rt::Saveable>::restore(__kz_map.get(#key)?)?));
+                        }
+                    }
                     elements.push(quote_spanned!(span=> #rt::SerialElement::of::<#t>(#key, false)));
                 }
                 (
@@ -1370,6 +1392,56 @@ impl Gen<'_, '_> {
             quote_spanned!(span=> ::std::rc::Rc)
         };
         Some(quote_spanned!(span=> let #i: #held = #ptr::new(#i);))
+    }
+
+    /// (stage 14 FINAL) The serializer `@Serializable(with = S::class)` among `annotations` names, as a value: the
+    /// object `S` (its base's struct where it is one's, `KSerializer<T>`), a class's `S()`; none for another.
+    fn serializer_with(&mut self, annotations: &[Annotation], span: Span) -> Option<TokenStream> {
+        let a = annotations.iter().find(|a| a.name.last().name == "Serializable")?;
+        let with = a.args.as_deref()?.iter().find(|x| x.name.as_ref().is_some_and(|n| n.name == "with"))?;
+        let ExprKind::CallableRef { receiver: Some(r), name } = &with.value.kind else { return None };
+        let ExprKind::Name(n) = &r.kind else { return None };
+        if name.name != "class" {
+            return None;
+        }
+        let c = self.user_class(&n.name)?.clone();
+        match c.shape {
+            Shape::Object => self.user_name_value(&n.name, span).map(|(v, _)| v),
+            Shape::Plain => {
+                let i = ident(&c.rust, span);
+                Some(quote_spanned!(span=> #i()))
+            }
+            _ => None,
+        }
+    }
+
+    /// ((stage 14 FINAL) A `@Serializable` plain class: a typed route of its constructor's properties and a route's
+    /// value — navigation-compose's `@Serializable class User(val id: WrappedUUID)`, a route whose argument's NavType
+    /// is the typeMap's, `@Serializable class WrappedUUID(…)` —: `#[derive(Route, RouteValue)]` with
+    /// `#[route(class(…))]` (only a route's value where a property has a serializer of its own).)
+    fn plain_route_attrs(&mut self, c: &Class, span: Span) -> TokenStream {
+        if !c.annotations.iter().any(|a| a.name.last().name == "Serializable") || !c.type_params.is_empty() {
+            return quote!();
+        }
+        let params: Vec<ConstructorParam> =
+            c.primary_constructor.as_ref().map(|p| p.params.clone()).unwrap_or_default();
+        if params.iter().any(|p| p.property.is_none() || p.param.ty.is_none()) {
+            return quote!();
+        }
+        if params.iter().any(|p| custom_serializer(&p.param)) {
+            return quote_spanned!(span=> #[derive(RouteValue)]);
+        }
+        let fields: Vec<TokenStream> = params
+            .iter()
+            .map(|p| {
+                let n = proc_macro2::Ident::new(&p.param.name.name, span);
+                let t = self.rust_type(p.param.ty.as_ref().expect("its type"), TypePos::Value);
+                quote_spanned!(span=> #n: #t)
+            })
+            .collect();
+        // (`@SerialName("…")`: the route's name, as a data class's)
+        let named = self.route_derive(&c.annotations, span).into_iter().skip(2).collect::<TokenStream>();
+        quote_spanned!(span=> #[derive(Route, RouteValue)] #named #[route(class(#(#fields),*))])
     }
 
     /// `#[derive(Route, Saveable)]` for `@Serializable`.
@@ -1695,7 +1767,7 @@ impl Gen<'_, '_> {
                             quote_spanned!(pspan=> #kt::KtVal)
                         };
                         let put = if p.is_var() { quote_spanned!(pspan=> set) } else { quote_spanned!(pspan=> init) };
-                        let v = self.value(init);
+                        let v = self.expecting(init, &ty, |g| g.value(init));
                         if after_super {
                             made.push(quote_spanned!(pspan=> let #i: #t = #v; __kz_v.#i.#put(::core::clone::Clone::clone(&#i));));
                             field_values.push(quote_spanned!(pspan=> #i: ::std::rc::Rc::new(#cell::new())));
@@ -1737,8 +1809,7 @@ impl Gen<'_, '_> {
                             quote_spanned!(pspan=> ::std::rc::Rc<dyn #kt_path::KtDelegate<Value = #vt>>)
                         };
                         let class = info.kotlin.clone();
-                        let e = &Self::keyed_delegate(e, &n.name, Some(&class));
-                        let made_delegate = self.value(e);
+                        let made_delegate = self.keyed_delegate_value(e, &n.name, Some(&class));
                         let v =
                             quote_spanned!(pspan=> ::std::rc::Rc::new(#kt_path::delegate_of::<#vt, _>(#made_delegate)));
                         if p.is_var() {
@@ -1789,7 +1860,7 @@ impl Gen<'_, '_> {
                             continue;
                         }
                     };
-                    let v = self.value(init);
+                    let v = self.expecting(init, &ty, |g| g.value(init));
                     made.push(quote_spanned!(pspan=> let #i: #t = #v;));
                     self.declare_at(n, snake(&n.name), LocalKind::Val, ty.clone());
                     fields.push(quote_spanned!(pspan=> #fvis #i: #t));
@@ -2515,6 +2586,7 @@ impl Gen<'_, '_> {
         let name = proc_macro2::Ident::new(&info.rust, self.span(c.name.loc));
         let fields_ty = format_ident!("__Kz{}", info.rust, span = span);
         let allow = class_allow(span);
+        let route_attrs = self.plain_route_attrs(c, span);
         let (g_decl, g_use, g_struct) = self.class_generics(d, span);
         let cx = MemberCx {
             owner: info.rust.clone(),
@@ -2729,6 +2801,7 @@ impl Gen<'_, '_> {
 
             #allow
             #[derive(::core::clone::Clone)]
+            #route_attrs
             #vis struct #name #g_struct { #[doc(hidden)] pub __kz_this: ::std::rc::Rc<#fields_ty #g_use> }
 
             #ctor_fn
@@ -2869,9 +2942,9 @@ impl Gen<'_, '_> {
         let i = self.name_ident(&snake(&n.name), n.loc);
         let var = p.is_var();
         let v = if ty.is_nullable() {
-            self.value_want(init, super::expr::Want { some: true, ..Default::default() })
+            self.expecting(init, &ty, |g| g.value_want(init, super::expr::Want { some: true, ..Default::default() }))
         } else {
-            self.value(init)
+            self.expecting(init, &ty, |g| g.value(init))
         };
         let fvis = self.member_vis(&p.modifiers, p.loc);
         let field = self.cell_field(&i, &t, var, pspan);

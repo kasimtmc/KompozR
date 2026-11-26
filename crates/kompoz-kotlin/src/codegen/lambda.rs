@@ -144,7 +144,8 @@ impl Gen<'_, '_> {
         // one, the closure's result type written so its branches' values become it)
         let shared = known.and_then(|k| super::expr::Shared::of_rust(&k.output)).filter(|_| !info.suspend);
         let result = Want { str_ok: false, any, some, shared, result: false };
-        self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len(), result });
+        let inline = !info.stored && !info.suspend && info.kind != LambdaKind::Future;
+        self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len(), result, inline });
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();
         let mut unpack = TokenStream::new();
@@ -157,6 +158,12 @@ impl Gen<'_, '_> {
             .map(|t| {
                 // (a parameter of the reified type argument the call gives: `entry<Profile> { … }`'s `K`)
                 let reified = self.type_arg.is_some() && t.trim() == self.type_param && self.type_param != "T";
+                // ((stage 14 FINAL) of a type argument the type the call is to have binds: `&T` of `listSaver`'s
+                // `save`)
+                let reified = reified
+                    || self.type_arg_written
+                        && self.type_arg.is_some()
+                        && t.split(|c: char| !c.is_alphanumeric()).any(|w| w == self.type_param);
                 if info.typed || reified { self.written_type(&self.bind_type_arg(t, span), span) } else { None }
             })
             .collect();

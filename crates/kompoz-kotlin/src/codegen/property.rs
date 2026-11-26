@@ -87,8 +87,7 @@ impl Gen<'_, '_> {
             let hint = p.ty.as_ref().map(|t| (self.rust_type(t, TypePos::Value), self.ty_of(t)));
             let outer = std::mem::replace(&mut self.state_value, hint);
             let class = self.user_class_rust(&cx.owner).map(|c| c.kotlin.clone());
-            let d = &Self::keyed_delegate(d, &n.name, class.as_deref());
-            let v = self.value(d);
+            let v = self.keyed_delegate_value(d, &n.name, class.as_deref());
             self.state_value = outer;
             let field = quote_spanned!(span=> #i: #kt::KtVal<#dyn_ty>);
             let empty = quote_spanned!(span=> #i: #kt::KtVal::new());
@@ -177,6 +176,31 @@ impl Gen<'_, '_> {
         }
     }
 
+    /// A delegate keyed by the property's name ([`Gen::keyed_delegate`]) as the value the property holds: where it is
+    /// Kotlin's `handle.saveable(saver) { … }` of a value that isn't a state — its `PropertyDelegateProvider` of a
+    /// `ReadOnlyProperty` giving the value —, that value as a delegate (`kt::KtValue`); a state is a delegate itself
+    /// (`handle.saveable { mutableStateOf(true) }`, Kotlin's `ReadWriteProperty` of the state).
+    pub(crate) fn keyed_delegate_value(&mut self, d: &Expr, name: &str, qualified: Option<&str>) -> TokenStream {
+        let keyed = Self::keyed_delegate(d, name, qualified);
+        let provided = keyed != *d
+            && matches!(&d.kind, ExprKind::Call { callee, .. }
+                if matches!(&callee.kind, ExprKind::Member { name, .. } if name.name == "saveable"));
+        let state = provided && is_state_ty(&self.peek_ty(&keyed));
+        // (the provider's value of the property's type: what binds the call's `T`)
+        let declared = self.state_value.as_ref().map(|(_, t)| t.clone()).filter(|_| provided && !state);
+        let v = match declared {
+            Some(t) => self.expecting(&keyed, &t, |g| g.value(&keyed)),
+            None => self.value(&keyed),
+        };
+        if provided && !state {
+            let span = self.span(d.loc);
+            let kt = self.kt(span);
+            quote_spanned!(span=> #kt::KtValue(#v))
+        } else {
+            v
+        }
+    }
+
     /// A member property's type: written, its delegate's, its getter's or its value's.
     fn special_property_ty(&mut self, p: &Property, cx: &MemberCx) -> Ty {
         if let Some(t) = &p.ty {
@@ -244,8 +268,7 @@ impl Gen<'_, '_> {
             PropertyInit::Delegate(d) => {
                 let hint = p.ty.as_ref().map(|t| (self.rust_type(t, TypePos::Value), self.ty_of(t)));
                 let outer = std::mem::replace(&mut self.state_value, hint);
-                let d = &Self::keyed_delegate(d, &n.name, None);
-                let v = self.value(d);
+                let v = self.keyed_delegate_value(d, &n.name, None);
                 self.state_value = outer;
                 let held = if mutable {
                     quote_spanned!(span=> ::std::rc::Rc<dyn #kt::KtMutableDelegate<Value = #t>>)
@@ -722,4 +745,11 @@ impl Gen<'_, '_> {
             }
         }
     }
+}
+
+/// Whether a value of `t` is a state (a `by` delegate itself).
+fn is_state_ty(t: &Ty) -> bool {
+    matches!(t, Ty::Named(n, _) if matches!(n.as_str(),
+        "MutableState" | "State" | "DerivedState" | "MutableIntState" | "MutableFloatState" | "MutableLongState"
+            | "MutableDoubleState" | "IntState" | "FloatState" | "LongState" | "DoubleState"))
 }

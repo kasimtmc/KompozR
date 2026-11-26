@@ -606,6 +606,12 @@ impl<T: PartialEq + Clone + 'static> KtContains<T> for SnapshotStateList<T> {
         self.with(|items| items.contains(value))
     }
 }
+/// `key in map` of a state map (a read that subscribes).
+impl<K: Ord + Clone + 'static, V: Clone + 'static> KtContains<K> for SnapshotStateMap<K, V> {
+    fn kt_contains(&self, key: &K) -> bool {
+        self.contains_key(key)
+    }
+}
 /// `key in map`.
 impl<K: PartialEq, V> KtContains<K> for KtMap<K, V> {
     fn kt_contains(&self, key: &K) -> bool {
@@ -1228,6 +1234,26 @@ pub trait KtList: KtIterable {
     /// Kotlin: `toMutableList(): MutableList<T>`
     fn to_mutable_list(&self) -> Vec<Self::Item> {
         self.kt_iter().collect()
+    }
+    /// A state list of its elements (Compose's `Collection<T>.toMutableStateList()`).
+    ///
+    /// Kotlin: `toMutableStateList(): SnapshotStateList<T>`
+    fn to_mutable_state_list(&self) -> SnapshotStateList<Self::Item>
+    where
+        Self::Item: Clone + Send + Sync + 'static,
+    {
+        SnapshotStateList::new(self.kt_iter().collect())
+    }
+    /// A state map of its pairs (Compose's `Iterable<Pair<K, V>>.toMutableStateMap()`).
+    ///
+    /// Kotlin: `toMutableStateMap(): SnapshotStateMap<K, V>`
+    fn to_mutable_state_map<K, V>(&self) -> SnapshotStateMap<K, V>
+    where
+        Self: KtIterable<Item = (K, V)>,
+        K: Ord + Clone + Send + Sync + 'static,
+        V: Clone + Send + Sync + 'static,
+    {
+        SnapshotStateMap::new(self.kt_iter().collect())
     }
     /// Kotlin: `toSet(): Set<T>`
     fn to_set(&self) -> KtSet<Self::Item>

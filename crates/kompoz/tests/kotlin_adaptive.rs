@@ -13,7 +13,6 @@ use kompoz::test::KompozTestRule;
 // (the samples': a scrim's semantics' click, the platform's back key)
 use kompoz::ui::input::{Key, KeyModifiers};
 use kompoz::ui::semantics::SemanticsActions;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 // ==== window size classes and pane scaffolds =========================================================================
@@ -222,9 +221,7 @@ fn layout_forms_take_compose_named_arguments_panes() {
 // adaptive-layout 1.2.0's ThreePaneScaffoldSample.kt from tests/kt/adaptive_layout.kt, their behaviour checked as
 // the Rust syntax's twins in kompoz-material3-adaptive's tests/samples.rs check it. Rust here, as Compose writes them:
 // their `NavItemData`, a Parcelable (android.os's Parcel and Parcelable.Creator: stage 15, the Android platform),
-// saved as a desktop navigator's keys are; and the generic `reflowAdaptStrategySample<T>()` and
-// `levitateAsDialogSample<T>()` (Rust's names theirs, as the Kotlin syntax calls them), whose `T` needs the
-// navigator's bound, which the Kotlin syntax doesn't tell from a generic call yet.
+// saved as a desktop navigator's keys are.
 
 /// Kotlin: `private data class NavItemData(val index: Int, val showExtra: Boolean = false) : Parcelable` (its
 /// parcel's two fields its saved value, Saveable's; its properties read as Kotlin's syntax reads them).
@@ -261,69 +258,6 @@ impl Saveable for NavItemData {
         let SavedValue::List(fields) = saved else { return None };
         Some(NavItemData { index: i32::restore(fields.first()?)?, show_extra: bool::restore(fields.get(1)?)? })
     }
-}
-
-/// Kotlin: `fun <T> reflowAdaptStrategySample(): ThreePaneScaffoldNavigator<T>`
-#[kompozable]
-fn reflow_adapt_strategy_sample<T: NavigatorContentKey>() -> Rc<dyn ThreePaneScaffoldNavigator<T>> {
-    remember_list_detail_pane_scaffold_navigator(
-        adapt_strategies =
-            named_args!(ListDetailPaneScaffoldDefaults.adapt_strategies(
-                extra_pane_adapt_strategy = AdaptStrategy::reflow(ListDetailPaneScaffoldRole::Detail)
-            )),
-    )
-}
-
-/// Kotlin: `fun <T> levitateAsDialogSample(): ThreePaneScaffoldNavigator<T>`
-#[kompozable]
-fn levitate_as_dialog_sample<T: NavigatorContentKey>() -> Rc<dyn ThreePaneScaffoldNavigator<T>> {
-    let coroutine_scope = remember_coroutine_scope();
-    let scaffold_directive = calculate_pane_scaffold_directive(&current_window_adaptive_info());
-    // (Kotlin's `var navigator` captured by `onClick` before it is set: a cell set after the navigator is
-    // remembered.)
-    let navigator: Rc<RefCell<Option<Rc<dyn ThreePaneScaffoldNavigator<T>>>>> =
-        remember(|| Rc::new(RefCell::new(None)));
-    let on_click: Rc<dyn Fn()> = {
-        let navigator = navigator.clone();
-        Rc::new(move || {
-            let navigator = navigator.borrow().clone();
-            named_args!(coroutine_scope.launch(async move {
-                if let Some(navigator) = navigator {
-                    navigator.navigate_back_with(BackNavigationBehavior::PopUntilScaffoldValueChange).await;
-                }
-            }));
-        })
-    };
-    // (Compose's compiler remembers the scrim's lambda, its captures stable: remembered here, the levitated value
-    // stays equal across compositions.)
-    let scrim: Rc<dyn Fn()> = remember(move || {
-        Rc::new(move || {
-            let (semantics_click, scrim_click) = (on_click.clone(), on_click.clone());
-            LevitatedPaneScrim(
-                Modifier.semantics(move |c| {
-                    c.set_content_description("Scrim".to_string());
-                    let semantics_click = semantics_click.clone();
-                    named_args!(c.on_click(
-                        label = Some("Dismiss the extra pane".to_string()),
-                        action = move || {
-                            semantics_click();
-                            true
-                        }
-                    ));
-                }),
-                on_click = scrim_click,
-            );
-        }) as Rc<dyn Fn()>
-    });
-    let n = remember_list_detail_pane_scaffold_navigator(
-        scaffold_directive = scaffold_directive.clone(),
-        adapt_strategies = named_args!(SupportingPaneScaffoldDefaults.adapt_strategies(
-            extra_pane_adapt_strategy =
-                AdaptStrategy::levitate(Alignment::Center, Some(scrim)).only_if_single_pane(&scaffold_directive)
-        )),
-    );
-    *navigator.borrow_mut() = Some(n.clone());
-    n
 }
 
 kompoz_file!("tests/kt/adaptive_layout.kt");

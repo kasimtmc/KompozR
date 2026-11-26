@@ -14,32 +14,6 @@ use kompoz::ui::platform::LocalInspectionMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// ---- what stays Rust ------------------------------------------------------------------------------------------
-
-/// NavigationSamples' `@Serializable class WrappedUUID(@Serializable(with = UUIDSerializer::class) val uuid: UUID)`:
-/// a route value of the samples' own NavType (WrappedUUIDNavType through the typeMap). (A plain `@Serializable class`:
-/// the Kotlin syntax derives a route for a data class or an object only.)
-#[derive(KotlinProperties, RouteValue, Clone, PartialEq, Debug)]
-pub struct WrappedUUID {
-    pub uuid: UUID,
-}
-
-/// Kotlin's `WrappedUUID(uuid)`.
-pub fn WrappedUUID(uuid: UUID) -> WrappedUUID {
-    WrappedUUID { uuid }
-}
-
-/// NavigationSamples' `@Serializable class User(val id: WrappedUUID)` (a plain class too).
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct User {
-    pub id: WrappedUUID,
-}
-
-/// Kotlin's `User(id)`.
-pub fn User(id: WrappedUUID) -> User {
-    User { id }
-}
-
 // The samples' string resources (NavigationSamples' `R.string.*`): tests/navResources.
 compose_resources!(dir = "tests/navResources");
 
@@ -198,11 +172,19 @@ fn preview_and_third_party_type_samples() {
     let text = "0f0e0d0c-0b0a-4908-8706-050403020100";
     let t: NavType = WrappedUUIDNavType {}.into();
     let parsed: WrappedUUID = t.parse_value(text).unwrap().unwrap();
-    assert_eq!(parsed.uuid.to_string(), text);
+    assert_eq!(parsed.uuid().to_string(), text);
     assert_eq!(t.serialize_as_value(Some(&parsed)), text);
     let bundle = SavedState::new();
     t.put(&bundle, "id", Some(&parsed));
-    assert_eq!(t.get::<WrappedUUID>(&bundle, "id"), Some(parsed));
+    // (a plain class: another object of the same UUID)
+    assert_eq!(t.get::<WrappedUUID>(&bundle, "id").map(|w| w.uuid()), Some(parsed.uuid()));
+    // (`@Serializable(with = UUIDSerializer::class) val uuid`: saved as the object UUIDSerializer writes it, its text)
+    let user = User(parsed.clone());
+    let saved = Saveable::save(&user);
+    assert_eq!(saved.get("id").get("uuid").as_str(), Some(text));
+    let back = <User as Saveable>::restore(&saved).expect("a user");
+    assert_eq!(back.id().uuid(), parsed.uuid());
+    assert_eq!(UUIDSerializer {}.descriptor().serial_name, "UUID");
 }
 
 // ---- SizeTransformSample.kt ---------------------------------------------------------------------------------------

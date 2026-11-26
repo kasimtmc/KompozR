@@ -5,7 +5,8 @@
 //! `exceptions_as_values`, `coroutines_await_what_suspends`), ported by name: the same Kotlin through `kompoz!`, the
 //! same lines expected. Then the package's other forms as they run: local and anonymous functions, callable
 //! references, a `var` lambdas share, jumps out of inline lambdas, an inline function's suspending twin, a coroutine's
-//! `catch (e: CancellationException)`.
+//! `catch (e: CancellationException)`; (stage 14 FINAL) jumps out of any inline function's lambda (the API's, the
+//! file's own `inline fun` through its `try`/`finally`, in a coroutine too).
 //!
 //! Kotlin's exceptions are Rust's unwinding panics (`kt::Throwable`): these tests, as every program using Kotlin's
 //! `try`, need `panic = "unwind"` (Rust's default).
@@ -808,6 +809,105 @@ fn exception_hierarchies() {
     );
 }
 
+// ---- jumps out of any inline function's lambda (stage 14 FINAL) ------------------------------------------------------
+
+kompoz! {
+    // Kotlin's non-local `return`, `break`, `continue` out of the lambdas of inline functions other than `forEach`/
+    // `repeat`: the API's (`run`, `let`, `also`, `takeIf`, `map`), the file's own (`guarded`, its `finally` run, its
+    // `catch (e: Throwable)` not taking the jump), `return@label` of a lambda out of one inside it, and in a coroutine
+    // out of a suspending inline lambda (`let`'s twin).
+    inline fun guarded(log: SnapshotStateList<String>, block: () -> Unit) {
+        try {
+            block()
+            log.add("sonra")
+        } catch (e: Throwable) {
+            log.add("yakalandı")
+        } finally {
+            log.add("finally")
+        }
+    }
+
+    fun firstLong(words: List<String>): String? {
+        val found: String = run {
+            var joined = ""
+            for (w in words) {
+                if (w.length > 3) return w
+                joined += w
+            }
+            joined
+        }
+        return if (found.isEmpty()) null else found
+    }
+
+    fun sumSkipping(xs: List<Int>): Int {
+        var n = 0
+        for (x in xs) {
+            x.let { if (it == 2) continue; if (it == 5) break }
+            n += x
+        }
+        return n
+    }
+
+    fun throughOwn(log: SnapshotStateList<String>, stop: Boolean): String {
+        guarded(log) {
+            if (stop) return "erken"
+        }
+        return "sonuna"
+    }
+
+    fun outerLabel(xs: List<Int>): Int = run outer@{
+        xs.map { if (it == 2) return@outer it * 10; it }
+        0
+    }
+
+    fun skipRows(rows: List<List<Int>>): Int {
+        var sum = 0
+        outer@ for (row in rows) {
+            row.also { r -> r.takeIf { it.isNotEmpty() }?.let { if (it[0] < 0) continue@outer } }
+            sum += row.sum()
+        }
+        return sum
+    }
+
+    suspend fun waitsThenLeaves(xs: List<Int>): Int {
+        xs.let {
+            delay(1)
+            if (it.size > 1) return it.first() + 100
+        }
+        return -1
+    }
+
+    fun leaveReport(): String {
+        val stopped = mutableStateListOf<String>()
+        val ran = mutableStateListOf<String>()
+        val early = throughOwn(stopped, true)
+        val late = throughOwn(ran, false)
+        return "${firstLong(listOf("a", "bc", "defg", "x"))} ${firstLong(listOf("a", "b"))} ${firstLong(listOf())} " +
+            "${sumSkipping(listOf(1, 2, 3, 5, 7))} $early ${stopped.toList()} $late ${ran.toList()} " +
+            "${outerLabel(listOf(1, 2, 3))} ${outerLabel(listOf(1))} " +
+            "${skipRows(listOf(listOf(1, 2), listOf(-1, 5), listOf(), listOf(3)))}"
+    }
+
+    @Kompozable
+    fun LeaveForms() {
+        val report = remember { leaveReport() }
+        var waited by remember { mutableStateOf(0) }
+        LaunchedEffect(Unit) { waited = waitsThenLeaves(listOf(7, 8)) + waitsThenLeaves(listOf(1)) }
+        Text("çık $report $waited")
+    }
+}
+
+fn jumps_out_of_inline_lambdas() {
+    let rule = KompozTestRule::new(LeaveForms);
+    rule.wait_for_idle();
+    for _ in 0..3 {
+        rule.main_clock().advance_time_by(10);
+        rule.wait_for_idle();
+    }
+    // (`finally` run on the way out, the rest of `guarded` not, its `catch` not taking the jump)
+    line(&rule, "çık", "çık defg ab null 4 erken [finally] sonuna [sonra, finally] 20 0 6 106");
+}
+
 fn main() {
     common::run(&[
         ("class_properties_by_delegates_and_accessors", class_properties_by_delegates_and_accessors),
@@ -827,5 +927,6 @@ fn main() {
         ("cancellation_and_inline_twins", cancellation_and_inline_twins),
         ("smart_casts_in_chains", smart_casts_in_chains),
         ("exception_hierarchies", exception_hierarchies),
+        ("jumps_out_of_inline_lambdas", jumps_out_of_inline_lambdas),
     ]);
 }

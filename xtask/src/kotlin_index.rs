@@ -737,6 +737,9 @@ struct KItem {
     /// Its suspending twin's narrower parameters ([`twin_bounds`]): each one's name, the types the twin takes there
     /// and those only the function takes.
     twin_bounds: Vec<(String, Vec<String>, Vec<String>)>,
+    /// (stage 14 FINAL) Its type parameters' trait bounds, in order (`T: NavigatorContentKey`): what a Kotlin
+    /// function's own type parameter given to it as a type argument needs ([`FN_BOUNDS`] of the Kotlin index).
+    type_bounds: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1510,6 +1513,7 @@ fn base(cx: &Cx, kotlin: &str, rust: &str, kind: &'static str, owner: &str) -> K
         ret: String::new(),
         flags,
         twin_bounds: Vec::new(),
+        type_bounds: Vec::new(),
     }
 }
 
@@ -1656,6 +1660,24 @@ fn function(cx: &Cx, attrs: &[Attribute], sig: &Signature, owner: &str, via: &st
         _ => "None",
     };
     let bounds = bounds_of(&sig.generics);
+    // ((stage 14 FINAL) its type parameters' trait bounds, for a Kotlin type parameter given as its type argument)
+    for g in &sig.generics.params {
+        let GenericParam::Type(t) = g else { continue };
+        let name = t.ident.to_string();
+        let traits: Vec<String> = bounds
+            .get(&name)
+            .into_iter()
+            .flatten()
+            .filter_map(|b| match b {
+                TypeParamBound::Trait(tb) => Some(text(tb.to_token_stream())).filter(|t| !t.starts_with('?')),
+                _ => None,
+            })
+            .collect();
+        it.type_bounds.push((name, traits.join(" + ")));
+    }
+    if it.type_bounds.iter().all(|(_, b)| b.is_empty()) {
+        it.type_bounds.clear();
+    }
     let typed: Vec<&syn::PatType> = sig
         .inputs
         .iter()
@@ -2136,6 +2158,19 @@ fn render_kotlin(
             list(taken),
             list(crossinline)
         );
+    }
+    out.push_str(
+        "];\n\n/// (stage 14 FINAL) The generic functions' type parameters' trait bounds, in order: (crate, module, owner, \
+         Rust name, [(parameter, bounds)]).\n",
+    );
+    out.push_str("pub static FN_BOUNDS: &[(&str, &str, &str, &str, &[(&str, &str)])] = &[\n");
+    let mut seen = BTreeSet::new();
+    for it in items.iter().filter(|it| !it.type_bounds.is_empty()) {
+        if !seen.insert((&it.krate, &it.module, &it.owner, &it.rust)) {
+            continue;
+        }
+        let list = it.type_bounds.iter().map(|(p, b)| format!("({p:?}, {b:?})")).collect::<Vec<_>>().join(", ");
+        let _ = writeln!(out, "    ({:?}, {:?}, {:?}, {:?}, &[{list}]),", it.krate, it.module, it.owner, it.rust);
     }
     out.push_str("];\n\n/// The API's `pub type` aliases (name, target).\n");
     out.push_str("pub static ALIASES: &[(&str, &str)] = &[\n");

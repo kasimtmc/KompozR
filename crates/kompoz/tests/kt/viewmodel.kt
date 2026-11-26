@@ -4,10 +4,9 @@
 // 1.4's (SavedStateCodecSamples.kt, SavedStateRegistryOwnerDelegatesSamples.kt).
 //
 // The codec samples' `@Serializable data class User` is local to each sample there: one top-level class here, as
-// the functions give it back. Their `class UUIDSerializer : KSerializer<UUID>` needs kotlinx.serialization's
-// KSerializer/Encoder/Decoder and java.util.UUID (KompozR's explicit serializer is a Saver: UUIDSerializer() is one,
-// in kotlin_viewmodel.rs); SavedStateRegistryOwnerDelegatesSamples' `class MyActivity : ComponentActivity()` is
-// Android's (stage 15: an Activity is the Android platform's).
+// the functions give it back (the samples return nothing: these return what they make, for the test).
+// SavedStateRegistryOwnerDelegatesSamples' `class MyActivity : ComponentActivity()` is Android's (stage 15: an
+// Activity is the Android platform's).
 
 package androidx.lifecycle.viewmodel.compose.samples
 
@@ -16,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.DEFAULT_ARGS_KEY
 import androidx.lifecycle.HasDefaultViewModelProviderFactory
@@ -30,7 +30,14 @@ import androidx.lifecycle.viewmodel.compose.*
 import androidx.savedstate.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import java.util.UUID
 
 // ---- the C++ test's classes (kompozable_tests.cpp 2594-2609) ----
 
@@ -256,7 +263,19 @@ fun encode(): SavedState {
 
 @Sampled
 fun encodeWithExplicitSerializer(): SavedState {
-    return encodeToSavedState(UUIDSerializer(), "0f0e0d0c-0b0a-0908-0706-050403020100")
+    class UUIDSerializer : KSerializer<UUID> {
+        override val descriptor: SerialDescriptor
+            get() = PrimitiveSerialDescriptor("UUIDSerializer", PrimitiveKind.STRING)
+
+        override fun deserialize(decoder: Decoder): UUID {
+            return UUID.fromString(decoder.decodeString())
+        }
+
+        override fun serialize(encoder: Encoder, value: UUID) {
+            encoder.encodeString(value.toString())
+        }
+    }
+    return encodeToSavedState(UUIDSerializer(), UUID.randomUUID())
 }
 
 // (a top-level `val` in the sample)
@@ -271,12 +290,28 @@ fun decode(): User {
     return user
 }
 
+val uuidSavedState = savedState { putString("", UUID.randomUUID().toString()) }
+
 @Sampled
-fun decodeWithExplicitSerializer(): String {
-    val uuidSavedState = savedState { putString("", "0f0e0d0c-0b0a-0908-0706-050403020100") }
+fun decodeWithExplicitSerializer(): UUID {
+    class UUIDSerializer : KSerializer<UUID> {
+        override val descriptor: SerialDescriptor
+            get() = PrimitiveSerialDescriptor("UUIDSerializer", PrimitiveKind.STRING)
+
+        override fun deserialize(decoder: Decoder): UUID {
+            return UUID.fromString(decoder.decodeString())
+        }
+
+        override fun serialize(encoder: Encoder, value: UUID) {
+            encoder.encodeString(value.toString())
+        }
+    }
     val uuid = decodeFromSavedState(UUIDSerializer(), uuidSavedState)
     return uuid
 }
+
+// (what the sample's saved state holds, for the test)
+fun uuidSavedText(): String = uuidSavedState.read { getString("") }
 
 // The rest of the API as an app writes it: a saved state read back (`read { }`), a handle's values set by index and
 // read as a flow.
@@ -286,4 +321,219 @@ fun setAndGet(handle: SavedStateHandle, query: String): String {
     handle["query"] = query
     val read: String? = handle.get("query")
     return read ?: ""
+}
+
+// ---- LifecycleViewModelSamples.kt's SnapshotStateViewModel samples (lifecycle-viewmodel-compose 2.11) ----
+
+@Sampled
+fun SnapshotStateViewModel() {
+
+    /** A simple item that is not inherently [Parcelable] */
+    data class Item(val id: UUID, val value: String)
+
+    @OptIn(SavedStateHandleSaveableApi::class)
+    class SnapshotStateViewModel(handle: SavedStateHandle) : ViewModel() {
+
+        /**
+         * A snapshot-backed [MutableList] of a list of items, persisted by the [SavedStateHandle].
+         * The size of this set must remain small in expectation, since the maximum size of saved
+         * instance state space is limited.
+         */
+        private val items: MutableList<Item> =
+            handle.saveable(
+                key = "items",
+                saver =
+                    listSaver(
+                        save = { it.map { item -> listOf(item.id.toString(), item.value) } },
+                        restore = {
+                            it.map { saved ->
+                                    Item(id = UUID.fromString(saved[0]), value = saved[1])
+                                }
+                                .toMutableStateList()
+                        },
+                    ),
+            ) {
+                mutableStateListOf()
+            }
+
+        /**
+         * A snapshot-backed [MutableMap] representing a set of selected item ids, persisted by the
+         * [SavedStateHandle]. A [MutableSet] is approximated by ignoring the keys. The size of this
+         * set must remain small in expectation, since the maximum size of saved instance state
+         * space is limited.
+         */
+        private val selectedItemIds: MutableMap<UUID, Unit> =
+            handle.saveable(
+                key = "selectedItemIds",
+                saver =
+                    listSaver(
+                        save = { it.keys.map(UUID::toString) },
+                        restore = {
+                            it.map(UUID::fromString).map { id -> id to Unit }.toMutableStateMap()
+                        },
+                    ),
+            ) {
+                mutableStateMapOf()
+            }
+
+        /**
+         * A snapshot-backed flag representing where selections are enabled, persisted by the
+         * [SavedStateHandle].
+         */
+        var areSelectionsEnabled by handle.saveable("areSelectionsEnabled") { mutableStateOf(true) }
+
+        /** A list of items paired with a selection state. */
+        val selectedItems: List<Pair<Item, Boolean>>
+            get() = items.map { it to (it.id in selectedItemIds) }
+
+        /** Updates the selection state for the item with [id] to [selected]. */
+        fun selectItem(id: UUID, selected: Boolean) {
+            if (selected) {
+                selectedItemIds[id] = Unit
+            } else {
+                selectedItemIds.remove(id)
+            }
+        }
+
+        /** Adds an item with the given [value]. */
+        fun addItem(value: String) {
+            items.add(Item(UUID.randomUUID(), value))
+        }
+    }
+}
+
+@Sampled
+fun SnapshotStateViewModelWithDelegates() {
+
+    /** A simple item that is not inherently [Parcelable] */
+    data class Item(val id: UUID, val value: String)
+
+    @OptIn(SavedStateHandleSaveableApi::class)
+    class SnapshotStateViewModel(handle: SavedStateHandle) : ViewModel() {
+
+        /**
+         * A snapshot-backed [MutableList] of a list of items, persisted by the [SavedStateHandle].
+         * The size of this set must remain small in expectation, since the maximum size of saved
+         * instance state space is limited.
+         */
+        private val items: MutableList<Item> by
+            handle.saveable(
+                saver =
+                    listSaver(
+                        save = { it.map { item -> listOf(item.id.toString(), item.value) } },
+                        restore = {
+                            it.map { saved ->
+                                    Item(id = UUID.fromString(saved[0]), value = saved[1])
+                                }
+                                .toMutableStateList()
+                        },
+                    )
+            ) {
+                mutableStateListOf()
+            }
+
+        /**
+         * A snapshot-backed [MutableMap] representing a set of selected item ids, persisted by the
+         * [SavedStateHandle]. A [MutableSet] is approximated by ignoring the keys. The size of this
+         * set must remain small in expectation, since the maximum size of saved instance state
+         * space is limited.
+         */
+        private val selectedItemIds: MutableMap<UUID, Unit> by
+            handle.saveable(
+                saver =
+                    listSaver(
+                        save = { it.keys.map(UUID::toString) },
+                        restore = {
+                            it.map(UUID::fromString).map { id -> id to Unit }.toMutableStateMap()
+                        },
+                    )
+            ) {
+                mutableStateMapOf()
+            }
+
+        /**
+         * A snapshot-backed flag representing where selections are enabled, persisted by the
+         * [SavedStateHandle].
+         */
+        var areSelectionsEnabled by handle.saveable { mutableStateOf(true) }
+
+        /** A list of items paired with a selection state. */
+        val selectedItems: List<Pair<Item, Boolean>>
+            get() = items.map { it to (it.id in selectedItemIds) }
+
+        /** Updates the selection state for the item with [id] to [selected]. */
+        fun selectItem(id: UUID, selected: Boolean) {
+            if (selected) {
+                selectedItemIds[id] = Unit
+            } else {
+                selectedItemIds.remove(id)
+            }
+        }
+
+        /** Adds an item with the given [value]. */
+        fun addItem(value: String) {
+            items.add(Item(UUID.randomUUID(), value))
+        }
+    }
+}
+
+// The samples' ViewModel as an app keeps it (theirs are local to the sample functions): a top-level one of the
+// delegates sample's body, which the test makes, changes, and makes again from what its handle saved.
+data class SelectionItem(val id: UUID, val value: String)
+
+@OptIn(SavedStateHandleSaveableApi::class)
+class SelectionViewModel(handle: SavedStateHandle) : ViewModel() {
+    private val items: MutableList<SelectionItem> by
+        handle.saveable(
+            saver =
+                listSaver(
+                    save = { it.map { item -> listOf(item.id.toString(), item.value) } },
+                    restore = {
+                        it.map { saved -> SelectionItem(id = UUID.fromString(saved[0]), value = saved[1]) }
+                            .toMutableStateList()
+                    },
+                )
+        ) {
+            mutableStateListOf()
+        }
+
+    private val selectedItemIds: MutableMap<UUID, Unit> by
+        handle.saveable(
+            saver =
+                listSaver(
+                    save = { it.keys.map(UUID::toString) },
+                    restore = { it.map(UUID::fromString).map { id -> id to Unit }.toMutableStateMap() },
+                )
+        ) {
+            mutableStateMapOf()
+        }
+
+    var areSelectionsEnabled by handle.saveable { mutableStateOf(true) }
+
+    val selectedItems: List<Pair<SelectionItem, Boolean>>
+        get() = items.map { it to (it.id in selectedItemIds) }
+
+    fun selectItem(id: UUID, selected: Boolean) {
+        if (selected) {
+            selectedItemIds[id] = Unit
+        } else {
+            selectedItemIds.remove(id)
+        }
+    }
+
+    fun addItem(value: String) {
+        items.add(SelectionItem(UUID.randomUUID(), value))
+    }
+
+    fun report(): String =
+        selectedItems.joinToString { (item, selected) -> "${item.value}=$selected" } + " $areSelectionsEnabled"
+}
+
+// Two items, the first selected, selections turned off: what the handle saved.
+fun selectionsChanged(vm: SelectionViewModel): String {
+    vm.addItem("elma")
+    vm.addItem("armut")
+    vm.selectItem(vm.selectedItems[0].first.id, true)
+    vm.areSelectionsEnabled = false
+    return vm.report()
 }

@@ -585,7 +585,7 @@ impl ::core::fmt::Debug for Profile {
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
-pub fn twice(block: impl ::core::ops::Fn() + 'static) {
+pub fn twice(block: impl ::core::ops::Fn()) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     ::kompoz::runtime::named_args!({

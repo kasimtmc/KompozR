@@ -156,12 +156,22 @@ impl Gen<'_, '_> {
                     Some(t) => self.user_class(&t.name).map(|c| c.rust.clone()).unwrap_or(t.name.clone()),
                     None => self.peek_ty(r).non_null().owner().unwrap_or("").to_string(),
                 };
-                let arity = members_of(&owner, &name.name)
-                    .next()
+                // ((stage 14 FINAL) a type's static function — a companion's, Java's `UUID::fromString` (the index's
+                // `UUID.fromString`) —: called on the type, its parameters the lambda's)
+                let static_fn = type_name.as_ref().and_then(|t| {
+                    let qualified = format!("{}.{}", t.name, name.name);
+                    members_of(&owner, &name.name)
+                        .chain(lookup(&qualified).iter().filter(|i| i.owner == owner))
+                        .find(|i| i.kind == crate::index::Kind::Function && i.receiver == crate::index::Receiver::None)
+                });
+                let is_static = static_fn.is_some();
+                let arity = static_fn
+                    .or_else(|| members_of(&owner, &name.name).next())
                     .map(|i| i.params.len())
                     .or_else(|| self.file.extension(&name.name, Some(&owner)).map(|f| f.params.len()))
                     .unwrap_or(0);
                 match type_name {
+                    Some(_) if is_static => (vec![None; arity], None, Some(r.clone())),
                     Some(t) => {
                         let ty = Type {
                             kind: TypeKind::Named(vec![TypeSegment { name: t.clone(), args: Vec::new() }]),
@@ -325,11 +335,13 @@ impl Gen<'_, '_> {
             self.in_async,
             self.inline_async,
             std::mem::take(&mut self.control.jump_frames),
+            std::mem::take(&mut self.control.leaves),
         );
         let ts = self.function(f);
         (self.scopes, self.receivers, self.frames, self.loops, self.lambdas) =
             (saved.0, saved.1, saved.2, saved.3, saved.4);
         (self.fun, self.in_async, self.inline_async, self.control.jump_frames) = (saved.5, saved.6, saved.7, saved.8);
+        self.control.leaves = saved.9;
         ts
     }
 
@@ -443,6 +455,7 @@ impl Gen<'_, '_> {
         let saved_lambdas = std::mem::take(&mut self.lambdas);
         let saved_loops = std::mem::take(&mut self.loops);
         let saved_jumps = std::mem::take(&mut self.control.jump_frames);
+        let saved_leaves = std::mem::take(&mut self.control.leaves);
         let saved_async = self.in_async;
         self.fun = super::FnState {
             kompozable: false,
@@ -492,6 +505,7 @@ impl Gen<'_, '_> {
         self.lambdas = saved_lambdas;
         self.loops = saved_loops;
         self.control.jump_frames = saved_jumps;
+        self.control.leaves = saved_leaves;
         self.in_async = saved_async;
         let rt = super::respan(self.rt().clone(), span);
         let kt = self.kt(span);
