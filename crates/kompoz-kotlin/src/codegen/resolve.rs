@@ -1040,6 +1040,12 @@ pub(crate) enum ValForm {
     Static,
     /// A thread-local value made at its first read (Kotlin's initialization of a top-level property).
     ThreadLocal,
+    /// (stage 14 WPB) A thread-local delegate read (and, `mutable`, set) through it: a top-level `var` (a `kt::Ref`),
+    /// a property by a delegate (`by lazy { … }`, `by mutableStateOf(…)`).
+    Shared { mutable: bool },
+    /// (stage 14 WPB) A property with accessors and no backing field (`val now: Int get() = …`): its getter `now()`
+    /// (and setter `set_now(v)`), functions of the file.
+    Accessors { setter: bool },
 }
 
 #[derive(Clone, Debug)]

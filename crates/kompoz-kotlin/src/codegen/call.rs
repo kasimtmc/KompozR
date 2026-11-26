@@ -126,6 +126,18 @@ impl Gen<'_, '_> {
             return self.super_call(ty.as_deref(), name, args, e.loc);
         }
         let span = self.span(e.loc);
+        // ((stage 14 WPB) `forEach`/`repeat` whose lambda jumps out of it: a loop, `jumps`)
+        if let Some(ts) = self.lowered_call(callee, args, trailing, e.loc) {
+            return Out::plain(ts, Ty::Unit);
+        }
+        // ((stage 14 WPB) a value of a user's type with `operator fun invoke`: `meter(10)`)
+        if trailing.is_none()
+            && (matches!(&callee.kind, ExprKind::Name(n) if self.is_local(&n.name))
+                || !matches!(&callee.kind, ExprKind::Name(_) | ExprKind::Member { .. }))
+            && let Some(o) = self.user_invoke(callee, args, e.loc)
+        {
+            return o;
+        }
         let mut list: Vec<ArgRef> = args
             .iter()
             .map(|a| {
@@ -139,9 +151,7 @@ impl Gen<'_, '_> {
         if let Some(l) = trailing {
             list.push(ArgRef { name: None, value: ArgValue::Lambda(l), spread: false, loc: l.loc });
         }
-        if let Some(a) = list.iter().find(|a| a.spread) {
-            return Out::plain(self.later(a.loc, "a spread argument (`*array`)"), Ty::Unknown);
-        }
+        // ((stage 14 WPB) a spread, `*xs`, is a vararg's: `many_value`)
         // (`mutableStateOf<T>(…)`: the value's type, for `mutable_state_of!`)
         if let (ExprKind::Name(n), Some(TypeArg::Type { ty, .. })) = (&callee.kind, type_args.first())
             && n.name == "mutableStateOf"
@@ -305,6 +315,47 @@ impl Gen<'_, '_> {
                 Ty::Fun(ft) => (ft.receiver.clone(), ft.ret.clone(), ft.params.clone(), ft.suspend),
                 _ => (None, Ty::Unknown, Vec::new(), false),
             };
+            // ((stage 14 WPB) a local function's call naming its arguments or leaving defaults out: its parameters'
+            // values in order, the defaults written here)
+            if let Some(ps) = self.control.local_fns.get(&l.rust).cloned()
+                && (args.iter().any(|a| a.name.is_some()) || args.len() < ps.len())
+            {
+                let mut given: Vec<Option<&ArgRef>> = vec![None; ps.len()];
+                let mut next = 0;
+                for a in args {
+                    let at = match a.name {
+                        Some(an) => ps.iter().position(|p| p.name.name == an.name),
+                        None => {
+                            while next < ps.len() && given[next].is_some() {
+                                next += 1;
+                            }
+                            (next < ps.len()).then_some(next)
+                        }
+                    };
+                    match at {
+                        Some(k) => given[k] = Some(a),
+                        None => self.error(a.loc, format!("`{}` takes no argument like this", n.name)),
+                    }
+                }
+                let mut vals = Vec::new();
+                for (k, p) in ps.iter().enumerate() {
+                    match (given[k], &p.default) {
+                        // (a `String` parameter takes a `String`: a literal made one)
+                        (Some(ArgRef { value: ArgValue::Expr(e), .. }), _) if params.get(k) == Some(&Ty::String) => {
+                            vals.push(self.value_want(e, Want { str_ok: false, ..Want::default() }))
+                        }
+                        (Some(a), _) => vals.push(self.with_label(&n.name, |me| me.loose_arg(a))),
+                        (None, Some(d)) => vals.push(self.value(d)),
+                        (None, None) => self.error(loc, format!("`{}` needs `{}`", n.name, p.name.name)),
+                    }
+                }
+                let call = quote_spanned!(span=> #f(#(#vals),*));
+                if suspend {
+                    let a = self.awaited(Some(&n.name), loc);
+                    return Out::plain(quote_spanned!(span=> #call #a), ret);
+                }
+                return Out::plain(call, ret);
+            }
             let mut vals = Vec::new();
             if let Some(r) = receiver {
                 // (its receiver: the implicit one of that type, or the innermost)
@@ -364,6 +415,23 @@ impl Gen<'_, '_> {
         {
             return out;
         }
+        // (stage 14 WPB) A standard exception class's constructor.
+        if crate::codegen::exceptions::standard_exception(&n.name)
+            && args.iter().all(|a| matches!(a.value, ArgValue::Expr(_)) && !a.spread)
+        {
+            let given: Vec<Arg> = args
+                .iter()
+                .filter_map(|a| match a.value {
+                    ArgValue::Expr(e) => {
+                        Some(Arg { name: a.name.cloned(), spread: false, value: e.clone(), loc: a.loc })
+                    }
+                    _ => None,
+                })
+                .collect();
+            if let Some(out) = self.exception_constructor(n, &given, loc) {
+                return out;
+            }
+        }
         // A member of an implicit receiver (`drawCircle(…)` in a DrawScope lambda), or an extension function of the
         // file for it (`framed()` in another extension of `Modifier`).
         let found = self.receivers.iter().rev().find_map(|r| {
@@ -420,9 +488,18 @@ impl Gen<'_, '_> {
                 return self.emit(&c, Target::Method(recv), args, loc, &n.name);
             }
         }
-        // The file's own function.
-        if let Some(f) = self.file.function(&n.name) {
-            let c = f.callee();
+        // The file's own function (one of its overloads, as Kotlin chooses).
+        if self.file.function(&n.name).is_some() {
+            let candidates: Vec<FileFn> =
+                self.file.functions[&n.name].iter().filter(|f| f.receiver.is_none()).cloned().collect();
+            let c = match self.choose_file_fn(&candidates, args) {
+                Some(f) => f.callee(),
+                None if candidates.len() > 1 => {
+                    self.error(loc, format!("no `{}` takes {} argument(s) like these", n.name, args.len()));
+                    return Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown);
+                }
+                None => candidates[0].callee(),
+            };
             let path = ident(&c.rust, nspan);
             return self.emit(&c, Target::Path(quote!(#path), c.rust.clone()), args, loc, &n.name);
         }
@@ -798,6 +875,47 @@ impl Gen<'_, '_> {
         if name.name == "toString" && args.is_empty() {
             let r = recv.ts;
             return Out::plain(quote_spanned!(span=> #kt::to_string(&#r)), Ty::String);
+        }
+        // ((stage 14 WPB) a local extension function, `fun Int.twice()` in a block: its closure, the receiver first)
+        let owner_text = match recv.ty.non_null() {
+            Ty::Int => Some("i32".to_string()),
+            Ty::Float => Some("f32".to_string()),
+            Ty::Long => Some("Long".to_string()),
+            Ty::Double => Some("Double".to_string()),
+            Ty::Bool => Some("Boolean".to_string()),
+            Ty::Char => Some("Char".to_string()),
+            t => t.owner().map(str::to_string),
+        };
+        if let Some(owner) = owner_text
+            && self.control.local_exts.iter().any(|(k, o)| *k == name.name && *o == owner)
+            && let Some(l) = self.local(&name.name)
+        {
+            let f = ident(&l.rust, span);
+            let (ret, suspend) = match &l.ty {
+                Ty::Fun(ft) => (ft.ret.clone(), ft.suspend),
+                _ => (Ty::Unknown, false),
+            };
+            let r = self.finish(recv, Want::default(), loc);
+            let vals: Vec<TokenStream> = args.iter().map(|a| self.loose_arg(a)).collect();
+            let call = quote_spanned!(span=> #f(#r #(, #vals)*));
+            if suspend {
+                let a = self.awaited(Some(&name.name), loc);
+                return Out::plain(quote_spanned!(span=> #call #a), ret);
+            }
+            return Out::plain(call, ret);
+        }
+        // ((stage 14 WPB) `f.invoke(x)` of a function value (`onClick?.invoke()`): its call)
+        if name.name == "invoke"
+            && let Ty::Fun(ft) = recv.ty.non_null()
+        {
+            let r = recv.ts;
+            let vals: Vec<TokenStream> = args.iter().map(|a| self.loose_arg(a)).collect();
+            let call = quote_spanned!(span=> (#r)(#(#vals),*));
+            if ft.suspend {
+                let a = self.awaited(Some("invoke"), loc);
+                return Out::plain(quote_spanned!(span=> #call #a), ft.ret.clone());
+            }
+            return Out::plain(call, ft.ret.clone());
         }
         let owner = recv.ty.owner().map(str::to_string);
         // (a Kotlin collection's extensions by the Kotlin type they extend: `fun List<String>.filteredBy`)
@@ -1220,6 +1338,46 @@ impl Gen<'_, '_> {
         self.choose_among(items, args, true).or_else(|| self.choose_among(items, args, false))
     }
 
+    /// (stage 14 WPB) The overload of the file's function the arguments are for, as Kotlin resolves it (see
+    /// `overloads`): the applicable ones (none of their arguments of a type known not to fit), the most specific (the
+    /// most arguments of their parameters' own types), then the one leaving no parameter to its default, then the
+    /// first declared. One candidate: it (the call's errors are its own).
+    fn choose_file_fn<'f>(&self, candidates: &'f [FileFn], args: &[ArgRef]) -> Option<&'f FileFn> {
+        if candidates.len() == 1 {
+            return candidates.first();
+        }
+        let mut best: Option<((i32, i32, i32), &FileFn)> = None;
+        for f in candidates {
+            let c = f.callee();
+            let Some((score, mismatched)) = self.fit_detail(&c, args) else { continue };
+            if mismatched {
+                continue;
+            }
+            let Ok(m) = self.map_args(&c, args) else { continue };
+            let mut exact = 0;
+            let mut defaults = 0;
+            for (k, p) in c.params.iter().enumerate() {
+                if m.given[k].is_empty() {
+                    defaults += 1;
+                }
+                for a in &m.given[k] {
+                    if let ArgValue::Expr(e) = a.value {
+                        let given = self.peek_ty(e);
+                        let want = if p.vararg { Ty::from_rust(&element_ty(&p.ty)) } else { p.ty() };
+                        if given != Ty::Unknown && given == want {
+                            exact += 1;
+                        }
+                    }
+                }
+            }
+            let key = (exact, -defaults, score);
+            if best.as_ref().is_none_or(|(k, _)| key > *k) {
+                best = Some((key, f));
+            }
+        }
+        best.map(|(_, f)| f)
+    }
+
     /// The item of `items` the arguments fit best (`strict`: of those none of whose arguments is of a type known not
     /// to fit its parameter).
     fn choose_among(&self, items: &[&'static crate::index::Item], args: &[ArgRef], strict: bool) -> Option<Callee> {
@@ -1294,6 +1452,11 @@ impl Gen<'_, '_> {
                     && !takes_any(&p.ty)
                 {
                     let ty = self.peek_ty(e);
+                    // ((stage 14 WPB) a vararg of the file's function, `Vec<T>`, takes `T`s, a spread `*xs` its
+                    // elements)
+                    let own_vararg = p.vararg && p.ty.trim_start().starts_with("Vec<");
+                    let ty = if a.spread { ty.element() } else { ty };
+                    let p = &if own_vararg { PInfo { ty: element_ty(&p.ty), ..p.clone() } } else { p.clone() };
                     // (a value of a type of its own to a shared trait object's parameter: the type may implement the
                     // trait — `rememberVectorPainter(…)`, a VectorPainter, to `Icon(painter: Painter)` —, which the
                     // index doesn't say; a parameter of the value's own type still fits better)
@@ -1382,6 +1545,9 @@ impl Gen<'_, '_> {
         match c.item {
             Some(item) => self.record_item(at, item),
             None => self.record_ref(at, crate::analysis::Target::Declaration(kotlin.to_string())),
+        }
+        if c.kompozable {
+            self.control.kompozable_calls += 1;
         }
         // (`with(x) { … }`: Kotlin's `T.() -> R`, `x` lent as `&mut T`, is a receiver lambda of `x`'s type)
         let with;
@@ -1850,6 +2016,29 @@ impl Gen<'_, '_> {
         }
         let p = &PInfo { ty: without_lifetimes(&p.ty), ..p.clone() };
         let el = PInfo { ty: element_ty(&p.ty), vararg: false, ..p.clone() };
+        // ((stage 14 WPB) a spread among them, `*more`: its elements in its place, the arguments in their order)
+        if all.iter().any(|a| a.spread) {
+            let v = self.fresh("va", span);
+            let mut steps = Vec::new();
+            for a in all {
+                if a.spread
+                    && let ArgValue::Expr(e) = a.value
+                {
+                    let xs = self.value(e);
+                    steps.push(quote_spanned!(span=> ::core::iter::Extend::extend(&mut #v, #xs);));
+                } else {
+                    let x = self.arg_value(a, Some(&el), false);
+                    steps.push(quote_spanned!(span=> #v.push(#x);));
+                }
+            }
+            let made = quote_spanned!(span=> { let mut #v = ::std::vec::Vec::new(); #(#steps)* #v });
+            return if p.ty.trim_start().starts_with("&[") { quote_spanned!(span=> &#made) } else { made };
+        }
+        // ((stage 14 WPB) the file's own function's vararg: a `Vec`)
+        if p.vararg && p.ty.trim_start().starts_with("Vec<") {
+            let vals: Vec<TokenStream> = all.iter().map(|a| self.arg_value(a, Some(&el), false)).collect();
+            return quote_spanned!(span=> ::std::vec![#(#vals),*]);
+        }
         // (a collection's elements of one type as Kotlin infers it: `listOf(null, Icons.Outlined.Info)` a list of
         // `ImageVector?`, its value given in `Some`; a list of lists too, and a declared type told — `val icons:
         // List<List<ImageVector?>> = listOf(listOf(null, null), listOf(a, b))`)
@@ -1889,6 +2078,14 @@ impl Gen<'_, '_> {
             let tys: Vec<Ty> = exprs.iter().flatten().map(|e| self.peek_ty(e)).collect();
             self.common_sealed(&tys).unwrap_or_else(|| self.elements_ty(exprs.iter().flatten().copied()))
         });
+        // ((stage 14 WPB) exceptions of the user's classes among Kotlin's: Kotlin's `Throwable`)
+        let unified = if self.user_exception(&unified)
+            && exprs.iter().flatten().any(|e| matches!(self.peek_ty(e), Ty::Named(n, _) if n == "Throwable"))
+        {
+            Ty::named("Throwable")
+        } else {
+            unified
+        };
         let mut vals = Vec::new();
         for (a, e) in all.iter().zip(&exprs) {
             if let (Some(e), Ty::List(inner) | Ty::Set(inner)) = (e, &unified)
@@ -1916,6 +2113,8 @@ impl Gen<'_, '_> {
                 }
                 // (a case of a sealed class, a class's value among an interface's: the enum's, the shared object)
                 Some(t) if self.coerces(&t, &unified) => self.coerce(v, &t, &unified, span),
+                // ((stage 14 WPB) a user's exception among Kotlin's exceptions)
+                Some(t) => self.as_throwable(v, &t, &unified, span),
                 _ => v,
             };
             let v = self.shared_value(v, a, shared.as_deref(), span);
@@ -1932,6 +2131,16 @@ impl Gen<'_, '_> {
     fn arg_value(&mut self, a: &ArgRef, p: Option<&PInfo>, transform_wraps: bool) -> TokenStream {
         let span = self.span(a.loc);
         let Some(p) = p else { return self.loose_arg(a) };
+        // ((stage 14 WPB) a callable reference given a function's parameter: its parameters' types tell which overload)
+        if let ArgValue::Expr(Expr { kind: ExprKind::CallableRef { .. }, .. }) = a.value
+            && let Some(l) = &p.lambda
+        {
+            let tys = l.inputs.iter().skip(usize::from(l.receiver.is_some())).map(|t| Ty::from_rust(t)).collect();
+            let outer = self.control.expected_fn.replace(tys);
+            let v = self.loose_arg(a);
+            self.control.expected_fn = outer;
+            return v;
+        }
         // (a nullable parameter whose default isn't null — `overscrollEffect: OverscrollEffect? =
         // rememberOverscrollEffect()` — is Rust's `Option<Option<T>>`, the outer `None` its default: what is given,
         // `null` too, in `Some`)

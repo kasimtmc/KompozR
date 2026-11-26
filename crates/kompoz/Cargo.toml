@@ -75,6 +75,12 @@ harness = false
 name = "kotlin_hierarchy"
 harness = false
 
+# (stage 14 WPB) The C++ Kompoz's Kotlin-syntax tests of functions and control flow: overloads, operators, extension
+# properties, varargs, delegates, lateinit, top-level vars, suspend funs, exceptions, the order of evaluation.
+[[test]]
+name = "kotlin_functions"
+harness = false
+
 # Foundation's components in Kotlin's syntax.
 [[test]]
 name = "kotlin_foundation"

@@ -77,6 +77,7 @@ pub fn counting(n: i32) -> i32 {
         let y = {
             let __kz_v2 = i;
             i = ::kompoz::runtime::kt::KtInc::dec(i);
+            let _ = &i;
             __kz_v2
         };
         return total + x + y;

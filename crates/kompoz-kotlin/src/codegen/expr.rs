@@ -144,6 +144,10 @@ impl Gen<'_, '_> {
                 _ => {}
             }
         }
+        // (stage 14 WPB) A `try`'s value: its body's and its catches' each what the place takes.
+        if let ExprKind::Try(t) = &e.kind {
+            return self.try_expr(t, Tail::Value(want), e.loc).ts;
+        }
         let out = self.expr(e);
         self.finish(out, want, e.loc)
     }
@@ -313,9 +317,8 @@ impl Gen<'_, '_> {
                 }
                 _ => Out::plain(self.later(e.loc, "a callable reference (`::name`)"), Ty::Unknown),
             },
-            ExprKind::CallableRef { .. } => {
-                Out::plain(self.later(e.loc, "a callable reference (`::name`)"), Ty::Unknown)
-            }
+            // ((stage 14 WPB) the lambda calling it: `capture`)
+            ExprKind::CallableRef { receiver, name } => self.callable_ref(receiver.as_deref(), name, e.loc),
             ExprKind::Lambda(l) => {
                 let ts = self.lambda(l, None, None);
                 // (WP7: search/tooltips) A lambda whose parameters are all typed is a function of them (`val field =
@@ -334,7 +337,7 @@ impl Gen<'_, '_> {
                 };
                 Out::plain(ts, ty)
             }
-            ExprKind::AnonymousFunction(_) => Out::plain(self.later(e.loc, "an anonymous function"), Ty::Unknown),
+            ExprKind::AnonymousFunction(f) => self.anonymous_function(f),
             ExprKind::Object { supers, body } => {
                 let ty = self.object_expr_ty(supers);
                 Out::plain(self.object_expr(supers, body, e.loc), ty)
@@ -349,7 +352,7 @@ impl Gen<'_, '_> {
                 self.if_expr(condition, then, otherwise.as_ref(), Tail::Value(Want::default()), e.loc)
             }
             ExprKind::When(w) => self.when(w, Tail::Value(Want::default()), e.loc),
-            ExprKind::Try(_) => Out::plain(self.later(e.loc, "`try`"), Ty::Unknown),
+            ExprKind::Try(t) => self.try_expr(t, Tail::Value(Want::default()), e.loc),
             ExprKind::Paren(inner) => {
                 let o = self.expr(inner);
                 let ts = o.ts;
@@ -358,7 +361,7 @@ impl Gen<'_, '_> {
             ExprKind::Return { .. } | ExprKind::Break { .. } | ExprKind::Continue { .. } => {
                 Out::plain(self.jump(e), Ty::Unknown)
             }
-            ExprKind::Throw(_) => Out::plain(self.later(e.loc, "`throw`"), Ty::Unknown),
+            ExprKind::Throw(v) => self.throw_expr(v, e.loc),
             ExprKind::Annotated { expr, .. } => self.expr(expr),
             // (the parser said what is wrong)
             ExprKind::Error => Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown),
@@ -399,12 +402,25 @@ impl Gen<'_, '_> {
 
     /// `x is T`: kt's `kt_is` (a cast through `KtAs` that succeeds); `!is` its negation.
     fn is_check(&mut self, inner: &Expr, negated: bool, ty: &Type, loc: Loc) -> Out {
+        // (stage 14 WPB) Of a standard exception class: the exception's class.
+        if let Some(out) = self.exception_is(inner, negated, ty, loc) {
+            return out;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         let o = self.expr(inner);
+        let nullable_dyn =
+            o.ty.is_nullable() && self.cast_operand_of(quote!(x), &o.ty.non_null(), span).to_string() != "x";
         let operand = self.cast_operand_of(o.ts, &o.ty, span);
         let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, TypePos::Value);
-        let ts = quote_spanned!(span=> #kt::kt_is::<#target, _>(&#operand));
+        // ((stage 14 WPB) a nullable shared object, `Any?`: what it holds, null being none)
+        let ts = if nullable_dyn {
+            let v = self.fresh("o", span);
+            quote_spanned!(span=> ::core::option::Option::is_some_and(::core::option::Option::as_ref(&#operand),
+                |#v| #kt::kt_is::<#target, _>(&**#v)))
+        } else {
+            quote_spanned!(span=> #kt::kt_is::<#target, _>(&#operand))
+        };
         Out::plain(if negated { quote_spanned!(span=> !#ts) } else { ts }, Ty::Bool)
     }
 
@@ -412,6 +428,9 @@ impl Gen<'_, '_> {
     /// concrete types its objects can be — an `Arc<dyn Shape>` as a `RoundedCornerShape`); `as T` a ClassCastException
     /// when it isn't one, `as? T` null then. A nullable target (`as T?`) is the safe cast's.
     fn cast(&mut self, inner: &Expr, safe: bool, ty: &Type, loc: Loc) -> Out {
+        if let Some(out) = self.exception_cast(inner, safe, ty, loc) {
+            return out;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         let o = self.expr(inner);
@@ -419,6 +438,17 @@ impl Gen<'_, '_> {
         let target_ty = Type { nullable: false, ..ty.clone() };
         let target = self.rust_type(&target_ty, TypePos::Value);
         let base = self.ty_of(&target_ty);
+        // ((stage 14 WPB) a nullable shared object, `Any?` (`equals(other: Any?)`'s): what it holds, if it holds one)
+        if o.ty.is_nullable() && self.cast_operand_of(quote!(x), &o.ty.non_null(), span).to_string() != "x" {
+            let v = self.fresh("o", span);
+            let ts = quote_spanned!(span=> ::core::option::Option::and_then(::core::option::Option::as_ref(&#operand),
+                |#v| #kt::KtAs::<#target>::kt_as_safe(&**#v)));
+            return if safe || ty.nullable {
+                Out::plain(ts, base.nullable())
+            } else {
+                Out::plain(quote_spanned!(span=> #kt::not_null(#ts)), base)
+            };
+        }
         if safe || ty.nullable {
             let ts = quote_spanned!(span=> #kt::KtAs::<#target>::kt_as_safe(&#operand));
             Out::plain(ts, base.nullable())
@@ -480,6 +510,12 @@ impl Gen<'_, '_> {
                 ValForm::Const | ValForm::Static => Out::plain(quote!(#i), v.ty),
                 ValForm::StrConst => Out { ts: quote!(#i), ty: Ty::String, kind: OutKind::StrLit },
                 ValForm::ThreadLocal => Out::plain(quote_spanned!(span=> #i.with(::core::clone::Clone::clone)), v.ty),
+                // ((stage 14 WPB) a top-level `var` or delegated property: through its delegate)
+                ValForm::Shared { .. } => {
+                    Out::plain(quote_spanned!(span=> #i.with(|__kz_d| #kt::KtDelegate::get_value(__kz_d))), v.ty)
+                }
+                // ((stage 14 WPB) a property with accessors: its getter)
+                ValForm::Accessors { .. } => Out::plain(quote_spanned!(span=> #i()), v.ty),
             };
         }
         if n.name == "Unit" {
@@ -785,6 +821,11 @@ impl Gen<'_, '_> {
 
     /// `recv.name` read, `recv` written.
     pub(crate) fn property_read(&mut self, recv: Out, name: &Ident, loc: Loc) -> Out {
+        // ((stage 14 WPB) the file's own extension property: its getter)
+        let recv = match self.file_extension_property_read(recv, name, loc) {
+            Ok(out) => return out,
+            Err(recv) => recv,
+        };
         let span = self.span(loc);
         let mspan = self.span(name.loc);
         // (kt shims' members: through their trait, by the receiver's type)
@@ -972,6 +1013,10 @@ impl Gen<'_, '_> {
 
     /// `a[i]`: Kotlin's `get` (a list's element, a map's value).
     fn index(&mut self, receiver: &Expr, indices: &[Expr], loc: Loc) -> Out {
+        // ((stage 14 WPB) an operator function of the user)
+        if let Some(o) = self.user_index(receiver, indices, loc) {
+            return o;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         // (Kotlin's `operator fun get` of an API type taking a key: its `get` — `state[key]` of a StyleState)
@@ -998,6 +1043,9 @@ impl Gen<'_, '_> {
     // ---- Operators ---------------------------------------------------------------------------------------------
 
     fn prefix(&mut self, op: PrefixOp, operand: &Expr, loc: Loc) -> Out {
+        if let Some(o) = self.user_prefix(op, operand, loc) {
+            return o;
+        }
         let span = self.span(loc);
         match op {
             PrefixOp::Minus => {
@@ -1031,13 +1079,22 @@ impl Gen<'_, '_> {
 
     /// `++x`, `x++` (`pre`), `--x`, `x--` as values.
     fn step_expr(&mut self, operand: &Expr, inc: bool, pre: bool, loc: Loc) -> Out {
+        if let Some(o) = self.user_step_expr(operand, inc, pre, loc) {
+            return o;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
+        // ((stage 14 WPB) of a top-level `var`, of a property: read, then set, as Kotlin's)
         let ExprKind::Name(n) = &operand.kind else {
-            return Out::plain(self.later(loc, "`++`/`--` on a property as a value"), Ty::Unknown);
+            return self.step_value(operand, inc, pre, loc);
         };
+        if !self.is_local(&n.name)
+            && let Some(o) = self.file_var_step(n, inc, Some(pre), loc)
+        {
+            return o;
+        }
         let Some(l) = self.local(&n.name) else {
-            return Out::plain(self.later(loc, "`++`/`--` on a property as a value"), Ty::Unknown);
+            return self.step_value(operand, inc, pre, loc);
         };
         let i = ident(&l.rust, self.span(n.loc));
         if l.kind == LocalKind::Delegated {
@@ -1049,18 +1106,24 @@ impl Gen<'_, '_> {
             };
             return Out::plain(quote_spanned!(span=> #kt::#f(&#i)), l.ty);
         }
+        self.note_assigned(&l);
         let step =
             if inc { quote_spanned!(span=> #kt::KtInc::inc(#i)) } else { quote_spanned!(span=> #kt::KtInc::dec(#i)) };
         let v = self.fresh("v", span);
         let ts = if pre {
             quote_spanned!(span=> { #i = #step; #i })
         } else {
-            quote_spanned!(span=> { let #v = #i; #i = #step; #v })
+            // (the new value read, as Kotlin's variable is whether the code reads it again or not)
+            quote_spanned!(span=> { let #v = #i; #i = #step; let _ = &#i; #v })
         };
         Out::plain(ts, l.ty)
     }
 
     fn binary(&mut self, op: BinaryOp, lhs: &Expr, rhs: &Expr, loc: Loc) -> Out {
+        // ((stage 14 WPB) an operator function of the user)
+        if let Some(o) = self.user_binary(op, lhs, rhs, loc) {
+            return o;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         match op {
@@ -1330,6 +1393,11 @@ impl Gen<'_, '_> {
                 Out::plain(ts, ty)
             }
             other => {
+                // ((stage 14 WPB) an infix extension function of the file, called as a method)
+                let lhs_ty = self.peek_ty(lhs);
+                if self.file.extension(other, lhs_ty.owner()).is_some() {
+                    return self.operator_call(lhs, other, &[rhs], loc);
+                }
                 // A member of the left side's type or a member extension of an implicit receiver, as a call is.
                 if let Some(out) = self.infix_member(name, lhs, rhs, loc) {
                     return out;
@@ -1467,9 +1535,20 @@ impl Gen<'_, '_> {
                     let a = self.peek_ty(lhs);
                     Ty::ClosedRange(Box::new(if a.is_float() { a } else { self.peek_ty(rhs) }))
                 }
-                BinaryOp::RangeTo | BinaryOp::RangeUntil => Ty::Range(Box::new(self.peek_ty(lhs))),
+                BinaryOp::RangeTo | BinaryOp::RangeUntil => {
+                    let a = self.peek_ty(lhs);
+                    // ((stage 14 WPB) a user's operator function: what it gives)
+                    match super::operators::binary_operator(*op).and_then(|f| self.operator_ret(&a, f)) {
+                        Some(t) => t,
+                        None => Ty::Range(Box::new(a)),
+                    }
+                }
                 _ => {
-                    let (a, b) = (self.peek_ty(lhs), self.peek_ty(rhs));
+                    let a = self.peek_ty(lhs);
+                    if let Some(t) = super::operators::binary_operator(*op).and_then(|f| self.operator_ret(&a, f)) {
+                        return t;
+                    }
+                    let b = self.peek_ty(rhs);
                     if *op == BinaryOp::Add && (a.is_string() || b.is_string()) {
                         Ty::String
                     // (an integer and a float: the float; a value of another type and a number, its operator's —
@@ -1526,6 +1605,11 @@ impl Gen<'_, '_> {
                 let tys: Vec<Ty> = w.branches.iter().map(|b| self.peek_block(&b.body)).collect();
                 self.joined(&tys, super::stmt::Tail::Value(Want::default())).0
             }
+            ExprKind::Try(t) => {
+                let mut tys = vec![self.peek_block(&t.body)];
+                tys.extend(t.catches.iter().map(|c| self.peek_catch(c)));
+                self.joined(&tys, super::stmt::Tail::Value(Want::default())).0
+            }
             ExprKind::Member { receiver, safe, name } => {
                 if let ExprKind::Number(_) = &receiver.kind {
                     match name.name.as_str() {
@@ -1576,6 +1660,8 @@ impl Gen<'_, '_> {
             }
             ExprKind::Index { receiver, .. } => match self.peek_ty(receiver) {
                 Ty::Map(_, v) => v.nullable(),
+                // ((stage 14 WPB) a user's `operator fun get`)
+                t if self.has_operator(&t, "get") => self.operator_ret(&t, "get").unwrap_or(Ty::Unknown),
                 t => t.element(),
             },
             ExprKind::Object { supers, .. } => self.object_expr_ty(supers),
@@ -1836,6 +1922,10 @@ impl Gen<'_, '_> {
     /// `LocalX.currentValue` in a `CompositionLocalAccessorScope`) that a value of type `recv` has, as inference sees
     /// the receivers: its type.
     fn peek_extension_property(&self, recv: &Ty, name: &str) -> Ty {
+        // ((stage 14 WPB) the file's own extension property)
+        if let Some(t) = self.file_extension_property_ty(recv, name) {
+            return t;
+        }
         self.receiver_tys()
             .iter()
             .find_map(|r| extension_member(r, recv, name, 1))
@@ -1906,8 +1996,12 @@ impl Gen<'_, '_> {
                         _ => Ty::Unknown,
                     };
                 }
-                if let Some(f) = self.file.function(&n.name) {
-                    return f.ret.clone();
+                if self.file.function(&n.name).is_some() {
+                    // ((stage 14 WPB) the overload the arguments are for)
+                    return self.peek_file_fn(&n.name, args, trailing).map(|f| f.ret.clone()).unwrap_or(Ty::Unknown);
+                }
+                if self.exception_type(&n.name) {
+                    return Ty::named("Throwable");
                 }
                 if let Some(t) = self
                     .receiver_values()

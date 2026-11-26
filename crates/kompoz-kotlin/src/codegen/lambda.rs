@@ -439,7 +439,14 @@ impl Gen<'_, '_> {
             frame.used.iter().filter(|u| *u != "self").map(|u| crate::codegen::names::ident(u, span)).collect();
         // (an outer receiver lambda's scope, given by reference: the scope itself, cloned)
         let scopes: Vec<String> = self.receivers.iter().filter(|r| r.by_ref).map(|r| r.rust.clone()).collect();
-        let lets = |span: Span| -> TokenStream {
+        // ((stage 14 WPB) a kept lambda of a member using the object, `self` (a member's `&self`): it holds a clone of
+        // it, Kotlin's lambda holding `this`)
+        let uses_self = (explicit || (info.stored && !transform_wraps))
+            && frame.used.iter().any(|u| u == "self")
+            && self.receivers.iter().any(|r| r.rust == "self");
+        let self_capture = self.self_capture(span);
+        let weak_self = !self_capture.1.is_empty();
+        let lets = |span: Span, inner: bool| -> TokenStream {
             let lets = captures.iter().map(|c| {
                 if scopes.contains(&c.to_string()) {
                     quote_spanned!(span=> let #c = #rt::__private::capture(#c);)
@@ -447,13 +454,24 @@ impl Gen<'_, '_> {
                     quote_spanned!(span=> let #c = #rt::__private::capture(&#c);)
                 }
             });
-            quote!(#(#lets)*)
+            let own = uses_self.then(|| match (inner, weak_self) {
+                (true, false) => quote_spanned!(span=> let __kz_self = __kz_self.clone();),
+                (true, true) => quote_spanned!(span=> let __kz_weak_self = __kz_weak_self.clone();),
+                (false, _) => self_capture.0.clone(),
+            });
+            quote!(#own #(#lets)*)
         };
         let block = quote_spanned!(span=> { #unpack #body });
+        let block = if uses_self { super::capture::renamed_self(block) } else { block };
+        // (an object held weakly: made a value again where the closure runs)
+        let block = match &self_capture.1 {
+            p if uses_self && !p.is_empty() => quote_spanned!(span=> { #p #block }),
+            _ => block,
+        };
 
         if info.kind == LambdaKind::Future {
             return if explicit {
-                let l = lets(span);
+                let l = lets(span, false);
                 quote_spanned!(span=> { #l async move #block })
             } else {
                 quote_spanned!(span=> async #block)
@@ -461,7 +479,7 @@ impl Gen<'_, '_> {
         }
         let closure = if suspend && info.boxed {
             // (a trait object giving a boxed future: the closure says so, so the box is made one)
-            let inner = lets(span);
+            let inner = lets(span, true);
             let output = self.written_type(&info.output, span).unwrap_or_else(|| quote_spanned!(span=> _));
             let ret =
                 quote_spanned!(span=> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = #output>>>);
@@ -469,7 +487,7 @@ impl Gen<'_, '_> {
             quote_spanned!(span=> #mv |#(#params),*| -> #ret { #inner ::std::boxed::Box::pin(async move #block) })
         } else if suspend {
             // (a closure giving a future: each call's future owns clones of what it uses)
-            let inner = lets(span);
+            let inner = lets(span, true);
             if explicit || transform_wraps {
                 quote_spanned!(span=> move |#(#params),*| { #inner async move #block })
             } else {
@@ -485,8 +503,8 @@ impl Gen<'_, '_> {
                 None => quote_spanned!(span=> #mv |#(#params),*| #block),
             }
         };
-        let closure = if explicit && !captures.is_empty() {
-            let l = lets(span);
+        let closure = if explicit && (!captures.is_empty() || uses_self) {
+            let l = lets(span, false);
             quote_spanned!(span=> { #l #closure })
         } else {
             closure

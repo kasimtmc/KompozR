@@ -8,7 +8,8 @@
 //! [`check`], [`error`].
 //!
 //! Kotlin's exceptions are panics whose message is what Kotlin's `toString()` of the exception says
-//! (`IllegalStateException: Check failed.`), at the caller's line (`#[track_caller]`).
+//! (`IllegalStateException: Check failed.`), at the caller's line (`#[track_caller]`); Kotlin's `try` catches them
+//! as the [`Throwable`]s they are ([`throwable`]: this needs `panic = "unwind"`, Rust's default).
 //!
 //! The extension traits are not in the crate's prelude (a `Vec`'s `first()` would become Kotlin's): code that wants
 //! them imports [`ext`]'s glob (`use kompoz_runtime::kt::ext::*;`), as the Kotlin syntax's generated code does.
@@ -48,6 +49,8 @@ pub mod null;
 pub mod object;
 pub mod random;
 pub mod range;
+// (stage 14 WPB: a local `var` shared by the lambdas capturing it)
+pub mod reference;
 // (stage 13: navigation's typeMap keys) kotlin.reflect's typeOf
 pub mod reflect;
 // (WP4: Navigation 3's deep links) Kotlin's Regex, Java's syntax.
@@ -55,6 +58,8 @@ pub mod regex;
 pub mod result;
 pub mod string;
 pub mod text;
+// (stage 14 WPB: Kotlin's exceptions on unwinding)
+pub mod throwable;
 
 #[cfg(test)]
 mod tests;
@@ -90,11 +95,16 @@ pub use range::{
     IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to,
     eq_nullable, is_in, range_to, step, to_closed_range, until,
 };
+pub use reference::Ref;
 pub use reflect::{KType, type_of};
 pub use regex::{KtToRegex, MatchGroup, MatchGroupCollection, MatchResult, Regex, RegexOption};
 pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};
 pub use text::{KtDisplay, KtToString, to_string};
+pub use throwable::{
+    Jump, KtExceptionArg, KtThrowable, OnCancel, Throwable, catching, catching_async, exception, is_standard_class,
+    parent_class, rethrow, throw,
+};
 
 #[doc(hidden)]
 pub use null::{KtFlattenNested, KtFlattenPlain, KtNullProbe};
@@ -117,10 +127,12 @@ pub mod ext {
     pub use super::text::KtToString as _;
 }
 
-/// Panics as Kotlin throws `kind` with `message` (none when empty): `IllegalStateException: message`.
+/// Panics as Kotlin throws `kind` with `message` (none when empty): `IllegalStateException: message`, the panic's
+/// text; a Kotlin `catch` takes it as that class's exception ([`throwable`]).
 #[track_caller]
 pub fn panic_kt(kind: &str, message: &str) -> ! {
-    if message.is_empty() { panic!("{kind}") } else { panic!("{kind}: {message}") }
+    let message = if message.is_empty() { None } else { Some(message.to_string()) };
+    throw(Throwable::new(kind, message, None))
 }
 
 /// Kotlin's `require(value)`: an IllegalArgumentException (`Failed requirement.`, or the message's text) when false.

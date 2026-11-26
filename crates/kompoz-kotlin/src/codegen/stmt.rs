@@ -65,10 +65,8 @@ impl Gen<'_, '_> {
         let span = self.span(s.loc);
         match &s.kind {
             StmtKind::Decl(Decl::Property(p)) => self.local_property(p),
-            StmtKind::Decl(Decl::Function(f)) => {
-                let t = self.later(f.loc, "a local function");
-                quote_spanned!(span=> #t;)
-            }
+            // ((stage 14 WPB) a closure: `capture`)
+            StmtKind::Decl(Decl::Function(f)) => self.local_function(f),
             StmtKind::Decl(Decl::Failed { .. }) => quote!(),
             StmtKind::Decl(d) => {
                 let t = self.later(d.loc(), "a local class, object or type alias");
@@ -79,11 +77,13 @@ impl Gen<'_, '_> {
                 self.for_loop(label.as_ref(), binding, ty.as_ref(), iterable, body, s.loc)
             }
             StmtKind::While { label, condition, body } => {
-                let l = self.label(label.as_ref());
                 let c = self.value(condition);
-                self.loops.push(LoopCx { label: label.as_ref().map(|l| l.name.clone()), body_label: None });
+                let cx = LoopCx { label: label.as_ref().map(|l| l.name.clone()), ..Default::default() };
+                let named = cx.named.clone();
+                self.loops.push(cx);
                 let b = self.braced(body, Tail::Unit);
                 self.loops.pop();
+                let l = self.loop_label(label.as_ref(), &named, span);
                 quote_spanned!(span=> #l while #c #b)
             }
             StmtKind::DoWhile { label, body, condition } => self.do_while(label.as_ref(), body, condition, s.loc),
@@ -118,6 +118,7 @@ impl Gen<'_, '_> {
                 self.if_expr(condition, then, otherwise.as_ref(), Tail::Unit, e.loc).ts
             }
             ExprKind::When(w) => self.when(w, Tail::Unit, e.loc).ts,
+            ExprKind::Try(t) => self.try_expr(t, Tail::Unit, e.loc).ts,
             ExprKind::Return { .. } | ExprKind::Break { .. } | ExprKind::Continue { .. } => self.jump(e),
             ExprKind::Paren(x) => self.stmt_expr(x),
             ExprKind::Annotated { expr, .. } => self.stmt_expr(expr),
@@ -127,6 +128,10 @@ impl Gen<'_, '_> {
 
     /// `x++`/`x--` (and `++x`, `--x`) as a statement.
     fn step_stmt(&mut self, operand: &Expr, inc: bool, loc: Loc) -> TokenStream {
+        // ((stage 14 WPB) an operator function of the user)
+        if let Some(ts) = self.user_step_stmt(operand, inc, loc) {
+            return ts;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         let f = if inc { quote_spanned!(span=> inc) } else { quote_spanned!(span=> dec) };
@@ -138,6 +143,10 @@ impl Gen<'_, '_> {
                         let read = self.expr(operand).ts;
                         return quote_spanned!(span=> #ri.#setter(#kt::KtInc::#f(#read)));
                     }
+                    // ((stage 14 WPB) a top-level `var`)
+                    if let Some(o) = self.file_var_step(n, inc, None, loc) {
+                        return o.ts;
+                    }
                     return self.later(loc, "`++`/`--` on what isn't a local or a property");
                 };
                 let i = ident(&l.rust, self.span(n.loc));
@@ -145,6 +154,7 @@ impl Gen<'_, '_> {
                     let g = if inc { quote_spanned!(span=> post_inc) } else { quote_spanned!(span=> post_dec) };
                     return quote_spanned!(span=> #kt::#g(&#i));
                 }
+                self.note_assigned(&l);
                 if l.ty.is_number() {
                     if inc { quote_spanned!(span=> #i += 1) } else { quote_spanned!(span=> #i -= 1) }
                 } else {
@@ -341,7 +351,15 @@ impl Gen<'_, '_> {
                                     {
                                         self.expected_elem = Some((**inner).clone());
                                     }
+                                    // ((stage 14 WPB) a callable reference: the declared function type's parameters
+                                    // tell which overload it names)
+                                    let expected = match &declared {
+                                        Some((Ty::Fun(f), _)) => Some(f.params.clone()),
+                                        _ => None,
+                                    };
+                                    let outer = std::mem::replace(&mut self.control.expected_fn, expected);
                                     let o = self.expr(e);
+                                    self.control.expected_fn = outer;
                                     self.expected_elem = None;
                                     o
                                 }
@@ -384,6 +402,17 @@ impl Gen<'_, '_> {
                 let lambda_value = matches!(init, PropertyInit::Value(e) if matches!(e.kind, ExprKind::Lambda(_)));
                 let shared_closure = matches!(&ty, Ty::Fun(f) if f.shared) || lambda_value;
                 let deferred = !mutable && matches!(init, PropertyInit::None);
+                // ((stage 14 WPB) a `var` a kept lambda or a local function assigns: a shared cell, `capture`)
+                if mutable && self.is_shared_var(n.loc) && !value.is_empty() {
+                    let kt = self.kt(span);
+                    let v: TokenStream = value.into_iter().skip(1).collect();
+                    let cell = match &declared_rt {
+                        Some(rt) => quote_spanned!(span=> #kt::Ref::<#rt>::new(#v)),
+                        None => quote_spanned!(span=> #kt::Ref::new(#v)),
+                    };
+                    self.declare_at(n, rust, LocalKind::Delegated, ty);
+                    return quote_spanned!(span=> let #i = #cell;);
+                }
                 self.declare_at(n, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
                 if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
                     l.shared_closure = shared_closure;
@@ -417,6 +446,8 @@ impl Gen<'_, '_> {
                     | "mutableDoubleStateOf"
                     | "derivedStateOf"
                     | "lazy"
+                    // ((stage 14 WPB) a saved state's delegate: what its block gives)
+                    | "saved"
                     | "rememberUpdatedState"
                     | "mutableStateListOf" => {
                         if let Some(a) = args.first() {
@@ -445,7 +476,11 @@ impl Gen<'_, '_> {
 
     // ---- Assignments -------------------------------------------------------------------------------------------
 
-    fn assign(&mut self, target: &Expr, op: AssignOp, value: &Expr, loc: Loc) -> TokenStream {
+    pub(crate) fn assign(&mut self, target: &Expr, op: AssignOp, value: &Expr, loc: Loc) -> TokenStream {
+        // ((stage 14 WPB) an operator function of the user: `a += b`, `a[i] = v`)
+        if let Some(ts) = self.user_assign(target, op, value, loc) {
+            return ts;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         // `target op value` as the new value (`x + v`), its read written by `read`.
@@ -494,7 +529,8 @@ impl Gen<'_, '_> {
                             self.error(target.loc, format!("`{}` is a `val`: it can't be assigned", n.name));
                             return quote!();
                         }
-                        LocalKind::Var => {}
+                        // ((stage 14 WPB) assigned from a kept lambda: shared, `capture`)
+                        LocalKind::Var => self.note_assigned(&l),
                     }
                     if op == AssignOp::Assign || l.ty.is_string() {
                         let v = combined(self, quote!(#i), &l.ty);
@@ -522,6 +558,10 @@ impl Gen<'_, '_> {
                     let read = if op == AssignOp::Assign { quote!() } else { self.expr(target).ts };
                     let v = combined(self, read, &read_ty);
                     return quote_spanned!(span=> #ri.#setter(#v););
+                }
+                // ((stage 14 WPB) a top-level `var`)
+                if let Some(ts) = self.file_var_assign(n, op, value, loc) {
+                    return ts;
                 }
                 if self.file.vals.contains_key(&n.name) {
                     self.error(target.loc, format!("`{}` is a `val`: it can't be assigned", n.name));
@@ -671,24 +711,46 @@ impl Gen<'_, '_> {
                 (quote!(#d), unpack)
             }
         };
-        self.loops.push(LoopCx { label: label.map(|l| l.name.clone()), body_label: None });
+        let cx = LoopCx { label: label.map(|l| l.name.clone()), ..Default::default() };
+        let named = cx.named.clone();
+        self.loops.push(cx);
         let b = self.block_inner(body, Tail::Unit);
         self.loops.pop();
         self.pop_scope();
+        let l = if l.is_empty() { self.loop_label(None, &named, span) } else { l };
         quote_spanned!(span=> #l for #pat in #iter { #unpack #b })
+    }
+
+    /// A loop's label: Kotlin's, or the one a jump from a lambda written as a loop inside gave it (`jumps`).
+    pub(crate) fn loop_label(
+        &self,
+        label: Option<&Ident>,
+        named: &std::rc::Rc<std::cell::RefCell<Option<String>>>,
+        span: proc_macro2::Span,
+    ) -> TokenStream {
+        match (label, named.borrow().as_ref()) {
+            (Some(_), _) => self.label(label),
+            (None, Some(n)) => {
+                let lt = super::lifetime(n, span);
+                quote!(#lt:)
+            }
+            (None, None) => quote!(),
+        }
     }
 
     /// `do { body } while (condition)`: `loop { body; if !condition { break } }` (the body's locals seen by the
     /// condition, as Kotlin's are); with a `continue` in it, the body is a labeled block it leaves.
     fn do_while(&mut self, label: Option<&Ident>, body: &Block, condition: &Expr, loc: Loc) -> TokenStream {
         let span = self.span(loc);
-        let l = self.label(label);
         let has_continue = continues(&body.stmts);
         let body_label = has_continue.then(|| self.counter_label());
-        self.loops.push(LoopCx { label: label.map(|l| l.name.clone()), body_label: body_label.clone() });
+        let cx = LoopCx { label: label.map(|l| l.name.clone()), body_label: body_label.clone(), ..Default::default() };
+        let named = cx.named.clone();
+        self.loops.push(cx);
         self.push_scope();
         let b = self.stmts(&body.stmts, Tail::Unit);
         self.loops.pop();
+        let l = self.loop_label(label, &named, span);
         let c = self.value(condition);
         self.pop_scope();
         match body_label {
@@ -710,13 +772,25 @@ impl Gen<'_, '_> {
         let span = self.span(e.loc);
         match &e.kind {
             ExprKind::Return { label, value } => {
+                // ((stage 14 WPB) `return@forEach` of a lambda written as a loop: its next turn, `jumps`)
+                if let Some(l) = label
+                    && let Some(t) = self.lowered_loop(&l.name)
+                {
+                    if value.is_some() {
+                        self.error(e.loc, format!("`return@{}` gives nothing (its lambda gives `Unit`)", l.name));
+                    }
+                    return self.loop_jump_tokens(t, false, None, span);
+                }
                 match (label, self.lambdas.last()) {
                     (None, Some(_)) => {
+                        // ((stage 14 WPB) out of an inline lambda written as a loop: `jumps`)
+                        self.control.escaped = true;
                         return self.later(e.loc, "a `return` from inside a lambda (Kotlin's non-local return)");
                     }
                     (Some(l), _) => {
                         let ok = self.lambdas.last().is_some_and(|c| c.labels.contains(&l.name));
                         if !ok {
+                            self.control.escaped = true;
                             return self
                                 .later(e.loc, &format!("`return@{}` out of more than the lambda it is in", l.name));
                         }
@@ -734,19 +808,23 @@ impl Gen<'_, '_> {
                             },
                         };
                         let v = self.value_want(v, want);
-                        quote_spanned!(span=> return #v)
+                        self.return_tokens(Some(v), span)
                     }
-                    None => quote_spanned!(span=> return),
+                    None => self.return_tokens(None, span),
                 }
             }
             ExprKind::Break { label } | ExprKind::Continue { label } => {
                 let is_break = matches!(e.kind, ExprKind::Break { .. });
                 let inside = self.lambdas.last().map_or(0, |l| l.loops);
+                // ((stage 14 WPB) not a lambda's loop: Kotlin's loop around it)
                 let target = match label {
-                    None => self.loops.len().checked_sub(1),
+                    None => self.loops.iter().rposition(|x| x.lowered.is_none()),
                     Some(l) => self.loops.iter().rposition(|x| x.label.as_deref() == Some(l.name.as_str())),
                 };
                 let Some(t) = target.filter(|t| *t >= inside) else {
+                    if target.is_some() {
+                        self.control.escaped = true;
+                    }
                     return match label {
                         Some(l) => {
                             self.error(e.loc, format!("no loop labeled `{}` around it", l.name));
@@ -755,13 +833,8 @@ impl Gen<'_, '_> {
                         None => self.later(e.loc, "`break`/`continue` outside a loop (or out of a lambda)"),
                     };
                 };
-                let lp = self.loops[t].clone();
-                if !is_break && let Some(bl) = &lp.body_label {
-                    let lt = super::lifetime(bl, span);
-                    return quote_spanned!(span=> break #lt);
-                }
-                let lt = label.as_ref().map(|l| super::lifetime(&snake(&l.name), self.span(l.loc)));
-                if is_break { quote_spanned!(span=> break #lt) } else { quote_spanned!(span=> continue #lt) }
+                // (out of a `try` body's closure too: see `exceptions`)
+                self.loop_jump_tokens(t, is_break, label.as_ref(), span)
             }
             _ => unreachable!(),
         }

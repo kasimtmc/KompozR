@@ -21,7 +21,7 @@ fn stage_14_constructs_at_their_positions() {
     let text = "\
 annotation class A
 fun f(x: Int): Int {
-    try { return 1 } catch (e: Exception) { return 2 }
+    suspend fun g() = 1
 }
 fun g(x: String): Boolean = x is String
 fun h() = listOf(1).map(::println)
@@ -30,10 +30,8 @@ fun h() = listOf(1).map(::println)
         diagnose(text),
         [
             format!("1:1: an annotation class {LATER}"),
-            format!("3:5: `try` {LATER}"),
             "6:5: write `h`'s return type: its expression's type isn't one KompozR can tell (`fun h(…): Type = …`)"
                 .to_string(),
-            format!("6:25: a callable reference (`::name`) {LATER}"),
         ]
     );
 }
@@ -93,7 +91,6 @@ fun f(xs: List<Int>) {
     assert_eq!(
         diagnose(text),
         [
-            format!("2:30: a `return` from inside a lambda (Kotlin's non-local return) {LATER}"),
             format!("3:5: `break`/`continue` outside a loop (or out of a lambda) {LATER}"),
             "4:21: no loop labeled `outer` around it".to_string(),
             "5:13: `this` here has nothing to be (no extension function or receiver lambda around it)".to_string(),
@@ -107,11 +104,46 @@ fn top_level_vals_have_their_values_types_or_written_ones() {
         diagnose(
             "val answer = 42\nvar count: Int = 0\nval ok: Int = 1\nval vague = unknownThing()\nval twice = answer * 2"
         ),
+        ["4:5: write `vague`'s type: KompozR can't tell its value's type (`val vague: Type = …`)".to_string(),]
+    );
+}
+
+#[test]
+fn try_around_composable_calls_and_overloads_no_call_fits() {
+    // ((stage 14 WPB) Kotlin's compiler refuses a `try` around a composable's call: a composition can't be left half
+    // written; an overloaded function's call that fits none of them says so)
+    let text = "\
+@Composable
+fun Safe() {
+    try { Text(\"a\") } catch (e: Exception) { }
+}
+fun pick(n: Int) = n
+fun pick(s: String) = s
+fun uses() = pick(true)
+";
+    assert_eq!(
+        diagnose(text),
         [
-            format!("2:1: a top-level `var` {LATER}"),
-            "4:5: write `vague`'s type: KompozR can't tell its value's type (`val vague: Type = …`)".to_string(),
+            "3:5: Try catch is not supported around composable function invocations.",
+            "7:14: no `pick` takes 1 argument(s) like these",
         ]
     );
+}
+
+#[test]
+fn what_local_functions_and_exception_classes_cant_be() {
+    // ((stage 14 WPB) a generic local function is a nested item: it can't use the locals around it; an exception
+    // class others derive from isn't translated yet)
+    let text = "\
+fun f(base: Int): Int {
+    fun <T> g(x: T): Int = base
+    return 1
+}
+open class Problem(val code: Int) : IllegalStateException(\"x\")
+";
+    let d = diagnose(text);
+    assert!(d[0].starts_with("2:13: a generic local function can't use the locals around it (`base`)"), "{d:?}");
+    assert_eq!(d[1], format!("5:12: an open, abstract or sealed class deriving from an exception class {LATER}"));
 }
 
 #[test]

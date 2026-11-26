@@ -592,7 +592,7 @@ impl Gen<'_, '_> {
         if f.is_kompozable() {
             return vec![self.later(f.loc, "a composable member function")];
         }
-        let rust = snake(&f.name.name);
+        let rust = self.member_fn_rust(&cx.owner, f);
         let Some(body) = &f.body else {
             return vec![self.trait_fn(f, cx, &rust, false)];
         };
@@ -859,7 +859,7 @@ impl Gen<'_, '_> {
         for m in &members {
             match m {
                 Member::Decl(Decl::Function(f)) if f.receiver.is_none() && f.type_params.is_empty() => {
-                    let rust = snake(&f.name.name);
+                    let rust = self.member_fn_rust(&d.info.rust, f);
                     if f.body.is_none() {
                         out.push(sig_of(self, f, &rust, &f.name.name, Role::Function, true));
                     } else {
@@ -1470,6 +1470,10 @@ impl Gen<'_, '_> {
             && let Some(t) = c.type_params.first()
         {
             return self.later(t.loc, "a generic sealed class (its cases' `Nothing`, `out T`)");
+        }
+        // ((stage 14 WPB) an exception class others derive from: not yet, see `exceptions`)
+        if self.exception_super(c).is_some() {
+            return self.later(c.name.loc, "an open, abstract or sealed class deriving from an exception class");
         }
         let c = (**c).clone();
         let info = d.info.clone();

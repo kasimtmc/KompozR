@@ -210,6 +210,28 @@ pub async fn count_down(from: i32) -> i32 {
     })
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[::kompoz::runtime::kompozable]
+pub fn OutOfTheLambda(log: impl ::core::ops::Fn(i32) + 'static) {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    LaunchedEffect((), async {
+        '__kz_loop5: for i in ::kompoz::runtime::kt::until(0, 3) {
+            for it in ::kompoz::runtime::kt::KtIterable::kt_iter(&::kompoz::runtime::kt::list_of([i])) {
+                delay(1).await;
+                if it == 1 {
+                    continue '__kz_loop5;
+                }
+            }
+        }
+        for it in ::kompoz::runtime::kt::KtIterable::kt_iter(&::kompoz::runtime::kt::list_of([1])) {
+            if it == 1 {
+                return;
+            }
+            delay(1).await;
+        }
+    });
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 pub fn twice(block: impl ::core::ops::Fn() + 'static) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
@@ -218,8 +240,27 @@ pub fn twice(block: impl ::core::ops::Fn() + 'static) {
         block();
     })
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[doc(hidden)]
+pub async fn twice_async(block: impl ::core::ops::AsyncFn()) {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        block().await;
+        block().await;
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[::kompoz::runtime::kompozable]
+pub fn OwnInline() {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    LaunchedEffect((), async {
+        twice_async(async || {
+            delay(1).await;
+        })
+        .await;
+    });
+}
 // error 93:46: `load` suspends, in a lambda `sortedBy` doesn't run in the coroutine: Kotlin suspends in a coroutine and in the lambdas an inline function runs in place (`with`, `let`, `apply`, `forEach`, `map`, `repeat`, …; not a `crossinline` one: `sortedBy`'s)
 // error 94:25: `delay` suspends, in a lambda `madeElsewhere` doesn't run in the coroutine: Kotlin suspends in a coroutine and in the lambdas an inline function runs in place (`with`, `let`, `apply`, `forEach`, `map`, `repeat`, …; not a `crossinline` one: `sortedBy`'s)
-// error 105:30: `break`/`continue` outside a loop (or out of a lambda) isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
-// error 108:42: `return@LaunchedEffect` out of more than the lambda it is in isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
-// error 119:36: a suspending call in a lambda given to the file's own `inline fun` isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)

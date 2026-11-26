@@ -77,12 +77,30 @@ impl Gen<'_, '_> {
         if user {
             let decl = self.classes.decls.iter().find(|d| d.info.rust == iface).cloned()?;
             let super::class::ClassAst::Class(c) = &decl.ast else { return None };
-            let m = c.body.members.iter().find_map(|m| match m {
-                Member::Decl(Decl::Function(g)) if g.name.name == f.name.name && g.params.len() == f.params.len() => {
-                    Some(g.clone())
-                }
-                _ => None,
-            })?;
+            // ((stage 14 WPB) of the interface's overloads of the name, the one of the same parameters' types)
+            let same = |g: &Function| {
+                g.name.name == f.name.name
+                    && super::overloads::mangled("", &g.params) == super::overloads::mangled("", &f.params)
+            };
+            let m = c
+                .body
+                .members
+                .iter()
+                .find_map(|m| match m {
+                    Member::Decl(Decl::Function(g)) if same(g) => Some(g.clone()),
+                    _ => None,
+                })
+                .or_else(|| {
+                    c.body.members.iter().find_map(|m| match m {
+                        Member::Decl(Decl::Function(g))
+                            if g.name.name == f.name.name && g.params.len() == f.params.len() =>
+                        {
+                            Some(g.clone())
+                        }
+                        _ => None,
+                    })
+                })?;
+            let rust = self.member_rust_name(&c.body.members, &m, &[]);
             // (a generic interface's type parameters: the expression's arguments)
             let binds: std::collections::HashMap<String, Type> =
                 decl.info.type_params.iter().cloned().zip(self.classes.object_args.clone()).collect();
@@ -96,7 +114,7 @@ impl Gen<'_, '_> {
                 .map(|t| super::class::substitute(t, &binds))
                 .filter(|t| self.ty_of(t) != Ty::Unit)
                 .map(|t| self.rust_type(&t, TypePos::Value));
-            return Some(Signature { rust: snake(&m.name.name), params, ret });
+            return Some(Signature { rust, params, ret });
         }
         let item = crate::index::lookup(&f.name.name)
             .iter()

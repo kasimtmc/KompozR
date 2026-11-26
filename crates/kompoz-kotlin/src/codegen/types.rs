@@ -98,6 +98,8 @@ impl Gen<'_, '_> {
                     "Pair" => Ty::Pair(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown))),
                     "IntRange" => Ty::Range(Box::new(Ty::Int)),
                     "ClosedFloatingPointRange" | "ClosedRange" => Ty::ClosedRange(Box::new(first())),
+                    // (stage 14 WPB) Kotlin's exception classes: one Rust type, the class the object's
+                    name if self.exception_type(name) => Ty::named("Throwable"),
                     // (a user's type by its Rust name: a nested one named alone inside its class; an open or
                     // abstract class's values its trait's objects)
                     name if self.user_class(name).is_some() => {
@@ -132,12 +134,6 @@ impl Gen<'_, '_> {
         }
         let span = self.span(t.loc);
         if let TypeKind::Function(f) = &t.kind {
-            if t.nullable {
-                return self.later(t.loc, "a nullable function type");
-            }
-            if f.suspend {
-                return self.later(t.loc, "a suspending function type");
-            }
             let mut inputs = Vec::new();
             if let Some(r) = &f.receiver
                 && receiver_name(r).is_some()
@@ -148,12 +144,31 @@ impl Gen<'_, '_> {
             for p in &f.params {
                 inputs.push(self.rust_type(&p.ty, TypePos::Value));
             }
-            let output = if self.ty_of(&f.result) == Ty::Unit {
+            let unit = self.ty_of(&f.result) == Ty::Unit;
+            // ((stage 14 WPB) `suspend (A) -> R`: a function giving a future — a parameter's `impl AsyncFn(A) -> R`,
+            // a value's shared closure giving a boxed one; `((A) -> R)?`: `Option` of the shared closure)
+            if f.suspend {
+                let r = if unit { quote_spanned!(span=> ()) } else { self.rust_type(&f.result, TypePos::Value) };
+                let shared = quote_spanned!(span=> ::std::rc::Rc<dyn ::core::ops::Fn(#(#inputs),*)
+                    -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = #r>>>>);
+                return match (t.nullable, pos) {
+                    (true, _) => quote_spanned!(span=> ::core::option::Option<#shared>),
+                    (false, TypePos::Param | TypePos::DefaultedParam | TypePos::Return) => {
+                        let output = if unit { quote!() } else { quote_spanned!(span=> -> #r) };
+                        quote_spanned!(span=> impl ::core::ops::AsyncFn(#(#inputs),*) #output + 'static)
+                    }
+                    (false, TypePos::Value) => shared,
+                };
+            }
+            let output = if unit {
                 quote!()
             } else {
                 let r = self.rust_type(&f.result, TypePos::Value);
                 quote_spanned!(span=> -> #r)
             };
+            if t.nullable {
+                return quote_spanned!(span=> ::core::option::Option<::std::rc::Rc<dyn ::core::ops::Fn(#(#inputs),*) #output>>);
+            }
             return match pos {
                 TypePos::Param | TypePos::DefaultedParam | TypePos::Return => {
                     quote_spanned!(span=> impl ::core::ops::Fn(#(#inputs),*) #output + 'static)
@@ -270,6 +285,8 @@ impl Gen<'_, '_> {
                 let t = a(0);
                 quote_spanned!(span=> ::core::ops::RangeInclusive<#t>)
             }
+            // (stage 14 WPB) Kotlin's exception classes: kt's Throwable (the class is the object's)
+            _ if self.exception_type(name) => quote_spanned!(span=> #kt::Throwable),
             // (an interface the API has as a trait: its object shared, as Kotlin's references are — `shape: Shape` is
             // an `Arc<dyn Shape>`, as the API's own shapes are; `AnimationSpec<Float>` an `Arc<dyn AnimationSpec<f32>>`)
             _ if super::resolve::trait_object(name).is_some() => {
@@ -351,6 +368,8 @@ impl Gen<'_, '_> {
                     _ => quote_spanned!(span=> ::std::boxed::Box<dyn #inner>),
                 }
             }
+            // (stage 14 WPB) Kotlin's exceptions: kt's Throwable
+            Ty::Named(n, args) if n == "Throwable" && args.is_empty() => quote_spanned!(span=> #kt::Throwable),
             Ty::Named(n, args) => {
                 let i = proc_macro2::Ident::new(n, span);
                 let t = if args.is_empty() || args.contains(&Ty::Unknown) {

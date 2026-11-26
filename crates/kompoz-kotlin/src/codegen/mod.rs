@@ -46,18 +46,29 @@
 //! Kotlin's imports and package are not translated: the names come from the Rust module's own `use`s (the
 //! prelude: `use kompoz::prelude::*;`), the kt shims' traits from a `use` the generated bodies have.
 //!
-//! What stage 9 doesn't take (classes, objects, interfaces, enums, `try`/`throw`, `is`/`as`, generic functions,
-//! local functions, callable references, …) is an error saying it comes with stage 14, at the Kotlin construct.
+//! Stage 14 adds Kotlin's classes ([`class`], [`object_expr`]) and its functions and control flow: exceptions
+//! (`exceptions`: `try`/`catch`/`finally`, `throw`, on unwinding — the program needs `panic = "unwind"`), overloads
+//! (`overloads`), operator and infix functions (`operators`), properties by delegates, with accessors, `lateinit`,
+//! top-level `var`s and extension properties (`property`), local and anonymous functions, callable references and
+//! Kotlin's capture of `var`s by reference (`capture`), jumps out of inline lambdas and inline functions' suspending
+//! twins (`jumps`), varargs and spreads, nullable and suspending function types. What isn't translated yet is an error
+//! saying it comes with stage 14, at the Kotlin construct.
 //! Errors are per declaration: a declaration with an error is left out, the others are translated.
 
 mod call;
+mod capture;
 pub(crate) mod class;
+mod exceptions;
 mod expr;
 mod generics;
 pub(crate) mod hierarchy;
+mod jumps;
 mod lambda;
 pub(crate) mod names;
 mod object_expr;
+mod operators;
+mod overloads;
+mod property;
 mod record;
 mod resolve;
 mod stmt;
@@ -67,7 +78,7 @@ use crate::Paths;
 use crate::ast::*;
 use crate::diag::Diagnostics;
 use crate::pos::{Loc, SpanMap};
-use names::{ident, is_pascal, pascal, snake, valid, value_name};
+use names::{ident, pascal, snake, valid, value_name};
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
 use resolve::*;
@@ -111,10 +122,24 @@ pub fn generate(
         file.decls.iter().filter_map(|d| d.name()).map(|n| n.name.as_str()).collect();
     // (another file's declaration of a name the text declares is that one: the text's own block, read again from
     // its file)
+    // ((stage 14 WPB) a function of another file of a name the text declares, of other parameters, is an overload)
+    let own_fn = |g: &Function| {
+        file.decls.iter().any(|d| {
+            matches!(d, Decl::Function(f) if f.name.name == g.name.name
+                && overloads::mangled("", &f.params) == overloads::mangled("", &g.params)
+                && f.receiver.as_ref().and_then(|r| r.simple_name()) == g.receiver.as_ref().and_then(|r| r.simple_name()))
+        })
+    };
     let module: Vec<&Decl> = module_files
         .iter()
         .flat_map(|f| &f.decls)
-        .filter(|d| class::exported(d) && d.name().is_none_or(|n| !own_names.contains(n.name.as_str())))
+        .filter(|d| {
+            class::exported(d)
+                && match d {
+                    Decl::Function(g) => !own_fn(g),
+                    _ => d.name().is_none_or(|n| !own_names.contains(n.name.as_str())),
+                }
+        })
         .collect();
     let mut g = Gen::new(cx, diags);
     g.overlay = Some(crate::index::overlay::install(rust_overlay(cx.module)));
@@ -123,7 +148,8 @@ pub fn generate(
     for decl in &file.decls {
         let before = g.diags.list.len();
         g.decl_range = Some(decl.loc());
-        let ts = g.top_decl(decl);
+        // ((stage 14 WPB) again with the `var`s its kept lambdas assign shared, when there are some: `capture`)
+        let ts = g.shared_pass(|g| g.top_decl(decl));
         if !g.diags.list[before..].iter().any(|d| d.is_error()) {
             out.extend(ts);
         }
@@ -147,11 +173,16 @@ pub(crate) struct FnState {
 }
 
 /// A loop being written, for `break` and `continue`.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct LoopCx {
     pub label: Option<String>,
     /// A `do … while` whose body is a labeled block (`continue` breaks out of it to the condition).
     pub body_label: Option<String>,
+    /// (stage 14 WPB) An inline lambda written as a loop (`xs.forEach { … }` as a `for`, its jumps leaving it: see
+    /// `jumps`): its Rust label (`return@forEach` continues it; Kotlin's `break`/`continue` aren't its).
+    pub lowered: Option<(String, Vec<String>)>,
+    /// (stage 14 WPB) The Rust label a jump from such a loop inside gave this one (a loop Kotlin doesn't label).
+    pub named: std::rc::Rc<std::cell::RefCell<Option<String>>>,
 }
 
 /// A lambda being written, for `return@label`.
@@ -250,6 +281,9 @@ pub(crate) struct Gen<'a, 'd> {
     pub decl_range: Option<Loc>,
     /// The name of the call being resolved (`f` of `f(x)`, `g` of `a.g()`): where what it calls is recorded.
     pub callee_loc: Option<Loc>,
+    /// (stage 14 WPB) What functions and control flow need: jumps out of closures, the composable calls written,
+    /// the locals shared by the lambdas capturing them (see [`exceptions::Control`]).
+    pub control: exceptions::Control,
 }
 
 impl<'a, 'd> Gen<'a, 'd> {
@@ -292,6 +326,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             ranges: Vec::new(),
             decl_range: None,
             callee_loc: None,
+            control: Default::default(),
         }
     }
 
@@ -331,6 +366,15 @@ impl<'a, 'd> Gen<'a, 'd> {
         }
         let span = self.span(loc);
         quote_spanned!(span=> .await)
+    }
+
+    /// (stage 14 WPB) How many fresh names have been made (a pass written again from there names its own alike).
+    pub(crate) fn counter_now(&self) -> usize {
+        self.counter
+    }
+
+    pub(crate) fn set_counter(&mut self, n: usize) {
+        self.counter = n;
     }
 
     /// A fresh name for something the generator binds (`__kz_w0`).
@@ -429,6 +473,8 @@ impl<'a, 'd> Gen<'a, 'd> {
                 f.used.push(found.rust.clone());
             }
         }
+        // ((stage 14 WPB) a `var` a kept lambda captures: shared when it is assigned, `capture`)
+        self.note_used(&found);
         Some(found)
     }
 
@@ -495,6 +541,8 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// The file's top-level functions and properties, for the calls and reads that come before them.
     fn collect(&mut self, file: &File, own: &[&Decl], module: &[&Decl]) {
         self.collect_imports(file);
+        // ((stage 14 WPB) the names declared more than once: overloads)
+        self.collect_overloads(own.iter().chain(module).copied());
         self.collect_classes(own, module);
         let mut untyped = Vec::new();
         for decl in own.iter().chain(module).copied() {
@@ -503,6 +551,8 @@ impl<'a, 'd> Gen<'a, 'd> {
                     let info = self.quiet(|g| g.file_fn(f));
                     self.file.functions.entry(f.name.name.clone()).or_default().push(info);
                 }
+                // ((stage 14 WPB) an extension property: its getter an extension function's, see `property`)
+                Decl::Property(p) if p.receiver.is_some() => self.collect_extension_property(p),
                 Decl::Property(p) => {
                     if let Binding::Name(n) = &p.binding {
                         match &p.ty {
@@ -522,8 +572,15 @@ impl<'a, 'd> Gen<'a, 'd> {
         loop {
             let before = untyped.len();
             untyped.retain(|(p, n)| {
-                let PropertyInit::Value(init) = &p.init else { return false };
-                let ty = self.peek_ty(init);
+                // ((stage 14 WPB) a delegated one: what its delegate holds)
+                let ty = match &p.init {
+                    PropertyInit::Value(init) => self.peek_ty(init),
+                    PropertyInit::Delegate(d) => self.delegate_ty(d),
+                    PropertyInit::None => match &p.getter {
+                        Some(Accessor { body: Some(FunctionBody::Expr(e)), .. }) => self.peek_ty(e),
+                        _ => return false,
+                    },
+                };
                 if ty.is_vague() {
                     return true;
                 }
@@ -566,7 +623,13 @@ impl<'a, 'd> Gen<'a, 'd> {
     fn file_fn(&mut self, f: &Function) -> FileFn {
         let kompozable = f.is_kompozable();
         let inline = f.modifiers.has(ModifierKind::Inline);
-        let params: Vec<PInfo> = f.params.iter().map(|p| self.param_info(p, inline)).collect();
+        let mut params: Vec<PInfo> = f.params.iter().map(|p| self.param_info(p, inline)).collect();
+        // ((stage 14 WPB) an inline function's lambdas may suspend in a coroutine: its twin, `jumps`)
+        if self.has_inline_twin(f) {
+            for l in params.iter_mut().filter_map(|p| p.lambda.as_mut()) {
+                l.twin = true;
+            }
+        }
         let has_defaults = params.iter().any(|p| p.default != PDefault::None);
         let ret = match (&f.result, &f.body) {
             (Some(t), _) => self.ty_of(t),
@@ -577,6 +640,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                 self.scopes = vec![HashMap::new()];
                 for p in &f.params {
                     let ty = p.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
+                    let ty = if p.is_vararg() { Ty::List(Box::new(ty)) } else { ty };
                     self.declare_at(&p.name, snake(&p.name.name), LocalKind::Param, ty);
                 }
                 if let Some(n) = f.receiver.as_ref().and_then(|r| r.simple_name()) {
@@ -598,7 +662,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             }
         };
         FileFn {
-            rust: fn_name(f),
+            rust: self.fn_rust_name(f),
             params,
             kompozable,
             suspend: f.is_suspend(),
@@ -650,9 +714,8 @@ impl<'a, 'd> Gen<'a, 'd> {
                 | ModifierKind::Protected
                 | ModifierKind::Suspend
                 | ModifierKind::Inline => {}
-                ModifierKind::Infix | ModifierKind::Operator => {
-                    self.later(m.loc, &format!("an `{}` function", m.kind.keyword()));
-                }
+                // ((stage 14 WPB) see `operators`)
+                ModifierKind::Infix | ModifierKind::Operator => {}
                 _ => {
                     self.later(m.loc, &format!("`{}` on a function", m.kind.keyword()));
                 }
@@ -801,7 +864,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         };
 
         let vis = self.visibility(&f.modifiers, f.loc);
-        let name = self.name_ident(&fn_name(f), f.name.loc);
+        let name = self.name_ident(&self.fn_rust_name(f), f.name.loc);
         let fn_kw = quote_spanned!(span=> fn);
         let asyncness = if suspend { quote_spanned!(span=> async) } else { quote!() };
         let mut allow = allow_attr(span);
@@ -815,7 +878,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         let generics = self.fn_generics(f, span);
 
         if let Some((self_ty, owner)) = self_ty {
-            let trait_name = proc_macro2::Ident::new(&format!("{owner}{}Ext", pascal(&f.name.name)), span);
+            let trait_name = proc_macro2::Ident::new(&format!("{}{}Ext", pascal(&owner), pascal(&f.name.name)), span);
             let trait_vis = match f.modifiers.visibility() {
                 Visibility::Private => quote_spanned!(span=> pub(self)),
                 _ => vis.clone(),
@@ -863,10 +926,13 @@ impl<'a, 'd> Gen<'a, 'd> {
         } else {
             quote!()
         };
+        // ((stage 14 WPB) an `inline fun` taking lambdas: its suspending twin beside it, `jumps`)
+        let twin = if self.has_inline_twin(f) { self.inline_twin(f) } else { quote!() };
         quote_spanned! {span=>
             #allow
             #attr
             #vis #asyncness #fn_kw #name #generics (#(#params),*) #ret #body
+            #twin
         }
     }
 
@@ -880,15 +946,22 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// made a `T`, which a restartable composable's macro does itself).
     fn param(&mut self, p: &Param, restartable: bool, inline: bool) -> (TokenStream, Option<TokenStream>) {
         let span = self.span(p.loc);
-        if p.is_vararg() {
-            self.later(p.loc, "a `vararg` parameter");
-        }
         let rust = snake(&p.name.name);
         let name = self.name_ident(&rust, p.name.loc);
         let Some(t) = &p.ty else {
             self.error(p.loc, "a parameter needs a type");
             return (quote!(), None);
         };
+        // ((stage 14 WPB) `vararg xs: T`: a `Vec<T>`, Kotlin's array of the arguments, a `List<T>` in the body)
+        if p.is_vararg() {
+            let el = self.rust_type(t, types::TypePos::Value);
+            let ty = Ty::List(Box::new(self.ty_of(t)));
+            self.declare_at(&p.name, rust.clone(), LocalKind::Param, ty);
+            if let Some(d) = &p.default {
+                self.error(d.loc, "a `vararg` parameter has no default (it is given none)");
+            }
+            return (quote_spanned!(span=> #name: ::std::vec::Vec<#el>), None);
+        }
         let ty = self.ty_of(t);
         let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
         let rust_ty = self.rust_type(t, pos);
@@ -921,6 +994,10 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// What a call sees of a parameter of the file's own function.
     pub(crate) fn param_info(&mut self, p: &Param, inline: bool) -> PInfo {
         let (ty_text, lambda, option) = match &p.ty {
+            // ((stage 14 WPB) a vararg: a `Vec` of its type)
+            Some(t) if p.is_vararg() => {
+                (format!("Vec<{}>", self.rust_type(t, types::TypePos::Value)), None, OptionForm::No)
+            }
             Some(t) => {
                 let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
                 let rust = self.rust_type(t, pos).to_string();
@@ -939,6 +1016,24 @@ impl<'a, 'd> Gen<'a, 'd> {
                     (false, _) => OptionForm::No,
                     (true, false) => OptionForm::IntoOption,
                     (true, true) => OptionForm::Option,
+                };
+                // ((stage 14 WPB) `((A) -> R)?`: an `Option` of a shared closure, a lambda given made one)
+                let (lambda, option, rust) = match ut.as_function().filter(|_| ut.nullable) {
+                    Some(ft) => {
+                        let mut info = self.lambda_info(ft, true);
+                        (info.stored, info.typed, info.file_inline) = (true, true, false);
+                        // (a suspending one gives a boxed future, as the shared closure does)
+                        info.boxed = info.suspend;
+                        // (its type as the index writes one, `Option<Rc<dyn Fn(A) -> R>>`: what the calls read)
+                        let output = if info.unit_output() { String::new() } else { format!(" -> {}", info.output) };
+                        let inner = if info.suspend {
+                            format!("Fn({}) -> Pin<Box<dyn Future<Output = {}>>>", info.inputs.join(", "), info.output)
+                        } else {
+                            format!("Fn({}){output}", info.inputs.join(", "))
+                        };
+                        (Some(info), OptionForm::Option, format!("Option<Rc<dyn {inner}>>"))
+                    }
+                    None => (lambda, option, rust),
                 };
                 (rust, lambda, option)
             }
@@ -977,18 +1072,19 @@ impl<'a, 'd> Gen<'a, 'd> {
         let Binding::Name(n) = &p.binding else {
             return self.later(p.loc, "a top-level destructuring declaration");
         };
-        if p.is_var() {
-            return self.later(p.loc, "a top-level `var`");
-        }
+        // ((stage 14 WPB) an extension property, a top-level `var`, a delegated one, one with accessors: `property`)
         if p.receiver.is_some() {
-            return self.later(p.loc, "an extension property");
+            return self.extension_property_decl(p);
         }
         if p.getter.is_some() || p.setter.is_some() {
-            return self.later(p.loc, "a property's getter or setter");
+            return self.top_level_accessors(p);
+        }
+        if p.is_var() || p.is_delegated() {
+            return self.top_level_shared(p);
         }
         let init = match &p.init {
             PropertyInit::Value(e) => e,
-            PropertyInit::Delegate(e) => return self.later(e.loc, "a delegated top-level property"),
+            PropertyInit::Delegate(_) => unreachable!("a delegated property is shared"),
             PropertyInit::None => {
                 self.error(n.loc, format!("`{}` needs a value", n.name));
                 return quote!();
@@ -1013,6 +1109,8 @@ impl<'a, 'd> Gen<'a, 'd> {
         };
         let allow = allow_attr(span);
         match val.form {
+            ValForm::Shared { .. } => self.top_level_shared(p),
+            ValForm::Accessors { .. } => self.top_level_accessors(p),
             ValForm::Const => {
                 let v = self.value(init);
                 quote_spanned!(span=> #allow #vis const #name: #rt = #v;)
@@ -1125,6 +1223,14 @@ fn rust_overlay(module: Option<&crate::module::ModuleTable>) -> crate::index::ov
 
 /// How a top-level `val` of type `ty` is held.
 fn val_form(p: &Property, ty: &Ty) -> ValForm {
+    // ((stage 14 WPB) a `var` or a delegated property: through a thread-local delegate, see `property`; one with
+    // accessors and no value: its getter)
+    if (p.getter.is_some() || p.setter.is_some()) && !p.is_delegated() {
+        return ValForm::Accessors { setter: p.is_var() };
+    }
+    if p.is_var() || p.is_delegated() {
+        return ValForm::Shared { mutable: p.is_var() };
+    }
     let literal = |e: &Expr| -> bool {
         fn lit(e: &Expr) -> bool {
             match &e.kind {
@@ -1175,13 +1281,6 @@ fn literal_text(e: &Expr) -> Option<String> {
         ExprKind::Paren(x) => literal_text(x),
         _ => None,
     }
-}
-
-/// A function's Rust name: a PascalCase one (a composable that emits UI) as it is, others in snake_case — a
-/// camelCase composable too (`animateColorScheme` → `animate_color_scheme`, as the API's `remember_…` are), so a
-/// call from another file, which names a function it doesn't see in snake_case, finds it.
-fn fn_name(f: &Function) -> String {
-    if is_pascal(&f.name.name) { f.name.name.clone() } else { snake(&f.name.name) }
 }
 
 /// The last segment of a dotted name.
