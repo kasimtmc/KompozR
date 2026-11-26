@@ -6,6 +6,6 @@ pub fn still_translated(x: i32) -> i32 {
 }
 // error 4:1: an annotation class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
 // error 6:1: `value` on a class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
-// error 8:21: a generic sealed class (its cases' `Nothing`, `out T`) isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
-// error 15:5: write `inferred`'s return type: its expression's type isn't one KompozR can tell (`fun inferred(…): Type = …`)
-// error 17:12: an open, abstract or sealed class deriving from an exception class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
+// error 8:28: a generic sealed class holding its type parameter's values in its own properties isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
+// error 14:5: write `inferred`'s return type: its expression's type isn't one KompozR can tell (`fun inferred(…): Type = …`)
+// error 16:14: a sealed class deriving from an exception class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)

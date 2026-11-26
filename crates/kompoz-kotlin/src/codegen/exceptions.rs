@@ -145,13 +145,91 @@ impl Gen<'_, '_> {
         Some((name, s.constructor_args.as_deref().unwrap_or(&[])))
     }
 
-    /// Whether a type (the generator's) is a user's exception class.
+    /// Whether a type (the generator's) is a user's exception class (one deriving from a standard one, or from the
+    /// user's open one: its value an open one's shared object too).
     pub(crate) fn user_exception(&self, ty: &Ty) -> bool {
         let Some(owner) = ty.owner() else { return false };
         self.classes.decls.iter().any(|d| {
-            d.info.rust == owner
-                && matches!(&d.ast, super::class::ClassAst::Class(k) if self.exception_super(k).is_some())
+            (d.info.rust == owner || d.info.members_trait().as_deref() == Some(owner))
+                && (matches!(&d.ast, super::class::ClassAst::Class(k) if self.exception_super(k).is_some())
+                    || (d.info.rust == owner && self.exception_root(d).is_some()))
         })
+    }
+
+    /// The user's classes from a class's base class up to the user's open exception class it derives from (Kotlin's
+    /// names, nearest first), the standard class that one derives from, and its members' trait.
+    pub(crate) fn exception_root(&self, d: &super::class::ClassDecl) -> Option<(Vec<String>, String, String)> {
+        let mut supers = Vec::new();
+        // (the open class's own objects: their class is it)
+        if let Some(own) = self.decl_of(&d.info.rust)
+            && own.info.inherit != super::hierarchy::Inherit::Final
+            && let super::class::ClassAst::Class(k) = &own.ast
+            && let Some((std, _)) = self.exception_super(k)
+        {
+            return Some((Vec::new(), std, own.info.members_trait()?));
+        }
+        for b in self.class_chain(d) {
+            supers.push(b.info.kotlin.rsplit('.').next().unwrap_or(&b.info.kotlin).to_string());
+            if let super::class::ClassAst::Class(k) = &b.ast
+                && let Some((std, _)) = self.exception_super(k)
+            {
+                return Some((supers, std, b.info.members_trait()?));
+            }
+        }
+        None
+    }
+
+    /// What a class deriving from the user's open exception class adds (`class NetworkException(val code: Int) :
+    /// AppException("ağ $code")`): the impls making it a Kotlin exception of its classes (its own and those above
+    /// it), its message and cause its base part's, its object an open class's shared object where caught as one.
+    pub(crate) fn exception_chain_parts(
+        &mut self,
+        d: &super::class::ClassDecl,
+        rust: &str,
+        own_to_string: bool,
+        span: Span,
+    ) -> Option<ExceptionParts> {
+        let (supers, std, root) = self.exception_root(d)?;
+        let kt = self.kt(span);
+        let name = proc_macro2::Ident::new(rust, span);
+        let tr = proc_macro2::Ident::new(&root, span);
+        let class_lit = proc_macro2::Literal::string(d.info.kotlin.rsplit('.').next().unwrap_or(&d.info.kotlin));
+        let base_lit = proc_macro2::Literal::string(&std);
+        let supers = supers.iter().map(|s| proc_macro2::Literal::string(s));
+        let display = if own_to_string {
+            quote_spanned!(span=> __kz_out.push_str(&self.to_string_kt());)
+        } else {
+            quote_spanned!(span=> __kz_out.push_str(&#kt::KtToString::kt_to_string(&#kt::KtThrowable::to_throwable(self)));)
+        };
+        let impls = quote_spanned! {span=>
+            #[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+            impl #kt::KtThrowable for #name {
+                fn to_throwable(&self) -> #kt::Throwable {
+                    #kt::Throwable::of_class_object(
+                        #class_lit,
+                        &[#(#supers),*],
+                        #base_lit,
+                        <Self as #tr>::message(self),
+                        <Self as #tr>::cause(self),
+                        ::std::rc::Rc::new(::core::clone::Clone::clone(self)),
+                        |o, to| <#name as #tr>::__kz_cast(o.downcast_ref::<#name>()?, to),
+                    )
+                }
+            }
+            #[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+            impl ::core::convert::From<#name> for #kt::Throwable {
+                fn from(e: #name) -> #kt::Throwable {
+                    #kt::KtThrowable::to_throwable(&e)
+                }
+            }
+            #[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+            impl #kt::KtAs<#name> for #kt::Throwable {
+                fn kt_as_safe(&self) -> ::core::option::Option<#name> {
+                    self.downcast::<#name>()
+                }
+            }
+        };
+        Some(ExceptionParts { field: quote!(), empty: quote!(), init: quote!(), members: quote!(), display, impls })
     }
 
     // ---- throw -------------------------------------------------------------------------------------------------
@@ -425,7 +503,20 @@ impl Gen<'_, '_> {
             let name = c.ty.simple_name().unwrap_or_default();
             let class = super::last_segment(&name).to_string();
             let user = self.user_class(&class).map(|u| u.rust.clone());
+            let open = user.as_ref().and_then(|r| self.user_class_rust(r)).is_some_and(|c| c.is_dyn());
             let (cond, bind, ty): (Option<TokenStream>, TokenStream, Ty) = match &user {
+                // ((WPA-rest) the user's open exception class: an object of its class or of one deriving from it, as
+                // its shared object)
+                Some(rust) if open && self.exception_type_rust(rust) => {
+                    let lit = proc_macro2::Literal::string(&class);
+                    let ty = self.ty_of(&c.ty);
+                    let t = self.rust_type(&c.ty, super::types::TypePos::Value);
+                    (
+                        Some(quote_spanned!(cspan=> #e.is_a(#lit))),
+                        quote_spanned!(cspan=> ::core::option::Option::unwrap(#e.cast_object::<#t>())),
+                        ty,
+                    )
+                }
                 Some(rust) if self.exception_type_rust(rust) => {
                     let t = proc_macro2::Ident::new(rust, self.span(c.ty.loc));
                     (

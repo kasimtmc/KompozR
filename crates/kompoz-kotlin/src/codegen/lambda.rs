@@ -143,7 +143,7 @@ impl Gen<'_, '_> {
         // (a result of Kotlin's interface type held as a shared trait object — a transition spec's —: each value made
         // one, the closure's result type written so its branches' values become it)
         let shared = known.and_then(|k| super::expr::Shared::of_rust(&k.output)).filter(|_| !info.suspend);
-        let result = Want { str_ok: false, any, some, shared };
+        let result = Want { str_ok: false, any, some, shared, result: false };
         self.lambdas.push(LambdaCx { labels: labels.clone(), loops: self.loops.len(), result });
         let receivers_before = self.receivers.len();
         let mut params: Vec<TokenStream> = Vec::new();

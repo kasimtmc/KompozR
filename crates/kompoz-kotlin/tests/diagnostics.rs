@@ -139,11 +139,11 @@ fun f(base: Int): Int {
     fun <T> g(x: T): Int = base
     return 1
 }
-open class Problem(val code: Int) : IllegalStateException(\"x\")
+sealed class Problem(val code: Int) : IllegalStateException(\"x\")
 ";
     let d = diagnose(text);
     assert!(d[0].starts_with("2:13: a generic local function can't use the locals around it (`base`)"), "{d:?}");
-    assert_eq!(d[1], format!("5:12: an open, abstract or sealed class deriving from an exception class {LATER}"));
+    assert_eq!(d[1], format!("5:14: a sealed class deriving from an exception class {LATER}"));
 }
 
 #[test]

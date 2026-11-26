@@ -224,6 +224,18 @@ pub struct Base {
     pub open: bool,
     /// The trait's methods without a default body (Rust's names).
     pub required: &'static [&'static str],
+    /// (stage 14 WPA-rest) A base of the second kind: the struct Kotlin's class is (`NavigationEventHandler`,
+    /// `NavType`), the trait (`NavigationEventHandlerCallbacks`, `NavTypeImpl`) its open members, which a
+    /// constructor of the struct takes an implementation of (`NavigationEventHandler::new(info, true, callbacks)`,
+    /// `NavType::new(imp)`): a subclass's object is the struct, its overrides the implementation's; a method given
+    /// the struct's object first (`handler: &NavigationEventHandler<T>`) has it as Kotlin's `this`. Empty: the trait
+    /// is the class (`ViewModel`).
+    pub value: &'static str,
+    /// Kotlin's constructor's parameters (Kotlin's names, the doc line's `(initialInfo: T, …)`): what a
+    /// constructor function takes, or a method of the trait taking nothing gives (`isNullableAllowed`).
+    pub params: &'static [&'static str],
+    /// The trait's associated types, Kotlin's type parameters in their order (`Value`: `NavType<T>`'s `T`).
+    pub assoc: &'static [&'static str],
 }
 
 /// The base class a Kotlin name is: the translation's crate's (the overlay's) or the API's.

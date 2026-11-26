@@ -10,7 +10,11 @@ use std::rc::{Rc, Weak};
 /// What a handler does at each step of a gesture (Kotlin's open members of the abstract class
 /// `NavigationEventHandler`, a subclass's overrides): each is given the handler (Kotlin's `this`: its
 /// `transition_state` is already updated when it is called). A completion it doesn't take panics, as Kotlin's
-/// default `onBackCompleted` throws: a handler that can be completed must say what it does.
+/// default `onBackCompleted` throws: a handler that can be completed must say what it does. The Kotlin syntax's
+/// `object : NavigationEventHandler<T>(info, isBackEnabled = true) { override fun onBackCompleted() { … } }` is a
+/// [`NavigationEventHandler`] of an implementation of it.
+///
+/// Kotlin: `abstract class NavigationEventHandler<T>(initialInfo: T, isBackEnabled: Boolean, isForwardEnabled: Boolean)`
 pub trait NavigationEventHandlerCallbacks<T: NavigationEventInfo + Clone>: 'static {
     /// A back gesture started (predictive: a press goes straight to its completion).
     fn on_back_started(&self, handler: &NavigationEventHandler<T>, event: NavigationEvent) {

@@ -628,10 +628,7 @@ kompoz! {
         }
 
     class Money(val cents: Int) {
-        override fun equals(other: Any?): Boolean {
-            val o = other as? Money ?: return false
-            return o.cents == cents
-        }
+        override fun equals(other: Any?): Boolean = other is Money && other.cents == cents
         override fun hashCode(): Int = cents
     }
 
@@ -713,6 +710,107 @@ fn cancellation_and_inline_twins() {
     assert_eq!(cancelled.get(), 1);
 }
 
+// ---- smart casts in chains (WPA-rest) ---------------------------------------------------------------------------
+
+kompoz! {
+    // Kotlin's smart cast where a condition's left side tells the type of a local: `x is T && …` and `x !is T || …`,
+    // as a value and in an `if`, of a value of `Any?` (`equals`' `other`), of `Any`, and of `this` in a member of an
+    // open class (the object's own class).
+    fun describeAny(x: Any?): String =
+        if (x is String && x.length > 2) "uzun $x" else if (x !is Int || x < 0) "başka" else "sayı ${x + 1}"
+
+    fun emptyOrNotText(x: Any): Boolean = x !is String || x.isEmpty()
+
+    fun bothLong(a: Any?, b: Any?): Boolean = a is String && b is String && a.length + b.length > 4
+
+    open class Shape2(val name: String) {
+        fun area(): Int = if (this is Rect2 && w > 0) w * h else 0
+    }
+
+    class Rect2(val w: Int, val h: Int) : Shape2("dikdörtgen")
+
+    fun chains(): String {
+        val m: Any? = Money(5)
+        return describeAny("abc") + " " + describeAny("ab") + " " + describeAny(41) + " " + describeAny(-1) + " " + describeAny(null) + " " +
+            emptyOrNotText(3) + emptyOrNotText("") + emptyOrNotText("x") + " " + bothLong("abc", "de") + bothLong("a", 3) + " " +
+            Money(5).equals(m) + Money(6).equals(m) + " " + Rect2(2, 3).area() + " " + Shape2("x").area()
+    }
+
+    @Kompozable
+    fun ChainForms() {
+        Text("zincir " + chains())
+    }
+}
+
+fn smart_casts_in_chains() {
+    let rule = KompozTestRule::new(ChainForms);
+    rule.wait_for_idle();
+    line(&rule, "zincir", "zincir uzun abc başka sayı 42 başka başka truetruefalse truefalse truefalse 6 0");
+}
+
+// ---- exception hierarchies of the user's (WPA-rest) ---------------------------------------------------------------
+
+kompoz! {
+    // The user's exception classes deriving from the user's open and abstract ones (which derive from a standard
+    // one): thrown, caught by their own class or by one above it (an open class's value then, its members its
+    // trait's: `e.path`, `e.hint()`), their message the one given above, their text Kotlin's.
+    open class AppException(message: String) : Exception(message)
+
+    class NetworkException(val code: Int) : AppException("ağ $code")
+
+    abstract class StorageException(val path: String) : IllegalStateException("disk $path") {
+        abstract fun hint(): String
+    }
+
+    class FullDisk(path: String) : StorageException(path) {
+        override fun hint() = "yer aç"
+    }
+
+    fun risky(n: Int): String {
+        if (n == 1) throw NetworkException(503)
+        if (n == 2) throw FullDisk("/tmp")
+        if (n == 3) throw AppException("genel")
+        if (n == 4) throw IllegalArgumentException("kötü")
+        return "tamam"
+    }
+
+    fun handled(n: Int): String = try {
+        risky(n)
+    } catch (e: NetworkException) {
+        "ağ hatası ${e.code} ${e.message}"
+    } catch (e: AppException) {
+        "uygulama: ${e.message} $e"
+    } catch (e: StorageException) {
+        "depo: ${e.path} ${e.hint()} ${e.message}"
+    } catch (e: IllegalStateException) {
+        "durum: ${e.message}"
+    } catch (e: Exception) {
+        "başka: ${e.message}"
+    }
+
+    fun caughtAbove(): String = try {
+        throw NetworkException(404)
+    } catch (e: AppException) {
+        "yukarıda: ${e.message}"
+    }
+
+    @Kompozable
+    fun ExceptionHierarchyForms() {
+        Text("istisna " + (0..4).joinToString(" | ") { handled(it) } + " | " + caughtAbove())
+    }
+}
+
+fn exception_hierarchies() {
+    let rule = KompozTestRule::new(ExceptionHierarchyForms);
+    rule.wait_for_idle();
+    line(
+        &rule,
+        "istisna",
+        "istisna tamam | ağ hatası 503 ağ 503 | depo: /tmp yer aç disk /tmp | uygulama: genel AppException: genel | \
+         başka: kötü | yukarıda: ağ 404",
+    );
+}
+
 fn main() {
     common::run(&[
         ("class_properties_by_delegates_and_accessors", class_properties_by_delegates_and_accessors),
@@ -730,5 +828,7 @@ fn main() {
         ("functions_and_jumps", functions_and_jumps),
         ("local_functions_and_accessors", local_functions_and_accessors),
         ("cancellation_and_inline_twins", cancellation_and_inline_twins),
+        ("smart_casts_in_chains", smart_casts_in_chains),
+        ("exception_hierarchies", exception_hierarchies),
     ]);
 }

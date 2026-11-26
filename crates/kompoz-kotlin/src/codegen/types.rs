@@ -201,6 +201,14 @@ impl Gen<'_, '_> {
                 && segs.iter().all(|s| s.args.is_empty())
             {
                 let i = proc_macro2::Ident::new(rust, span);
+                // ((WPA-rest) an API interface's: its shared trait object, `ViewModelProvider.Factory`)
+                if self.user_class(rust).is_none() {
+                    match super::resolve::trait_object(rust) {
+                        Some("Arc") => return quote_spanned!(span=> ::std::sync::Arc<dyn #i>),
+                        Some(_) => return quote_spanned!(span=> ::std::rc::Rc<dyn #i>),
+                        None => {}
+                    }
+                }
                 return quote_spanned!(span=> #i);
             }
             // (a user's nested type: its Rust name; its arguments the last segment's)
@@ -228,6 +236,11 @@ impl Gen<'_, '_> {
         let mut args = Vec::new();
         for a in &last.args {
             match a {
+                // ((stage 14 WPA) `Outcome<Nothing>`: kt's type of no value, `!` being unstable there)
+                TypeArg::Type { ty, .. } if super::hierarchy::is_nothing(ty) => {
+                    let kt = self.kt(span);
+                    args.push(quote_spanned!(span=> #kt::KtNothing))
+                }
                 TypeArg::Type { ty, .. } => args.push(self.rust_type(ty, TypePos::Value)),
                 TypeArg::Star(l) => args.push(self.star_projection(*l)),
             }
@@ -301,6 +314,15 @@ impl Gen<'_, '_> {
             _ if self.user_class(name).is_some() => {
                 let c = self.user_class(name).cloned().expect("a user's type");
                 self.user_type_tokens(&c, args, span)
+            }
+            // ((WPA-rest) a base of the second kind whose struct isn't generic, `NavType<Point>`: the struct, its value
+            // type the object's own)
+            _ if crate::index::base(name).is_some_and(|b| {
+                !b.value.is_empty() && crate::index::generics(b.value).is_none_or(|g| g.is_empty())
+            }) =>
+            {
+                let i = self.name_ident(name, last.name.loc);
+                quote_spanned!(span=> #i)
             }
             _ => {
                 let i = self.name_ident(name, last.name.loc);

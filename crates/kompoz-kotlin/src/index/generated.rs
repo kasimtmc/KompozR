@@ -14121,5 +14121,7 @@ pub static ALIASES: &[(&str, &str)] = &[
 
 /// The API's abstract and open classes Kotlin's classes derive from (a trait's doc line `Kotlin: abstract class …`).
 pub static BASES: &[Base] = &[
-    Base { kotlin: "ViewModel", rust: "ViewModel", open: false, required: &["view_model_impl"] },
+    Base { kotlin: "NavType", rust: "NavTypeImpl", open: false, required: &["is_nullable_allowed", "put", "get", "parse_value", "serialize_as_value"], value: "NavType", params: &["isNullableAllowed"], assoc: &["Value"] },
+    Base { kotlin: "NavigationEventHandler", rust: "NavigationEventHandlerCallbacks", open: false, required: &[], value: "NavigationEventHandler", params: &["initialInfo", "isBackEnabled", "isForwardEnabled"], assoc: &[] },
+    Base { kotlin: "ViewModel", rust: "ViewModel", open: false, required: &["view_model_impl"], value: "", params: &[], assoc: &[] },
 ];

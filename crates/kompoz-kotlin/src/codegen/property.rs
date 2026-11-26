@@ -334,6 +334,7 @@ impl Gen<'_, '_> {
                 kompozable: false,
                 nullable_result: param.is_none() && val.ty.is_nullable(),
                 shared_result: None,
+                result: param.is_none().then(|| val.ty.clone()),
             };
             me.scopes = vec![std::collections::HashMap::new()];
             me.receivers.clear();
@@ -351,7 +352,7 @@ impl Gen<'_, '_> {
             match (body, param.is_none()) {
                 (FunctionBody::Block(b), get) => me.fn_block(b, !get),
                 (FunctionBody::Expr(e), true) => {
-                    me.value_want(e, Want { some: val.ty.is_nullable(), ..Want::default() })
+                    me.value_want(e, Want { some: val.ty.is_nullable(), result: true, ..Want::default() })
                 }
                 (FunctionBody::Expr(e), false) => {
                     let s = me.stmt_expr(e);
@@ -638,8 +639,12 @@ impl Gen<'_, '_> {
             }
         };
         let accessor = |me: &mut Self, params: &[(Ident, Ty, TokenStream)], body: &FunctionBody, ret: bool| {
-            me.fun =
-                super::FnState { kompozable: false, nullable_result: ty.is_nullable() && ret, shared_result: None };
+            me.fun = super::FnState {
+                kompozable: false,
+                nullable_result: ty.is_nullable() && ret,
+                shared_result: None,
+                result: ret.then(|| ty.clone()),
+            };
             me.scopes = vec![std::collections::HashMap::new()];
             me.receivers.clear();
             me.frames.clear();
@@ -657,7 +662,9 @@ impl Gen<'_, '_> {
             }
             let b = match body {
                 FunctionBody::Block(b) => me.fn_block(b, !ret),
-                FunctionBody::Expr(e) if ret => me.value_want(e, Want { some: ty.is_nullable(), ..Want::default() }),
+                FunctionBody::Expr(e) if ret => {
+                    me.value_want(e, Want { some: ty.is_nullable(), result: true, ..Want::default() })
+                }
                 FunctionBody::Expr(e) => {
                     let s = me.stmt_expr(e);
                     quote!(#s;)

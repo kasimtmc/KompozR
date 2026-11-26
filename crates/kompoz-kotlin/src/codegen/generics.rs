@@ -302,7 +302,17 @@ impl Gen<'_, '_> {
     }
 
     /// What a user's generic class needs of its type parameters, by its Rust name: their names and uses.
+    /// ((stage 14 WPA) a generic sealed class's: its cases' too, see `Gen::sealed_uses`)
     pub(crate) fn class_uses(&self, rust: &str) -> Option<(Vec<String>, Uses)> {
+        let d = self.decl_of(rust)?;
+        if d.info.inherit == super::hierarchy::Inherit::Sealed && !d.info.type_params.is_empty() {
+            return Some((d.info.type_params.clone(), self.sealed_uses(rust)));
+        }
+        self.own_class_uses(rust)
+    }
+
+    /// What a class's own members need of its type parameters.
+    pub(crate) fn own_class_uses(&self, rust: &str) -> Option<(Vec<String>, Uses)> {
         let d = self.decl_of(rust)?;
         let super::class::ClassAst::Class(c) = &d.ast else { return None };
         let ctor: Vec<ConstructorParam> = c.primary_constructor.iter().flat_map(|p| p.params.clone()).collect();
@@ -357,7 +367,7 @@ impl Gen<'_, '_> {
         }
         let mut uses = Uses::of_function(f);
         let names: Vec<String> = params.iter().map(|p| p.name.name.clone()).collect();
-        for t in f.params.iter().filter_map(|p| p.ty.as_ref()).chain(f.result.as_ref()) {
+        for t in f.params.iter().filter_map(|p| p.ty.as_ref()).chain(f.result.as_ref()).chain(f.receiver.as_ref()) {
             self.uses_through(t, &names, &mut uses);
         }
         let mut out = self.type_param_bounds(&params, &uses, f.is_kompozable(), span);

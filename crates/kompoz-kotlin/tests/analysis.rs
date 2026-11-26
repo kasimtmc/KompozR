@@ -105,6 +105,15 @@ fn references_and_types() {
         }
         other => panic!("{other:?}"),
     }
+    // ((WPA-rest) a member read of the crate's own class: its declaration; of the API's: its item)
+    assert_eq!(
+        a.reference_at(at("note.title", 0, 6)).map(|r| &r.target),
+        Some(&Target::Declaration("Note.title".into()))
+    );
+    match a.reference_at(at("sizes.size", 0, 7)).map(|r| &r.target) {
+        Some(Target::Api { kotlin, .. }) => assert_eq!(kotlin.as_str(), "size"),
+        other => panic!("{other:?}"),
+    }
     // (the types of a member read and of a call)
     assert_eq!(a.type_at(at("note.title", 0, 6)).map(|t| t.ty.as_str()), Some("String"));
     assert_eq!(a.type_at(at("Tally.add()", 0, 7)).map(|t| t.ty.as_str()), Some("Int"));

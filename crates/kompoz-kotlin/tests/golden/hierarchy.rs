@@ -2406,6 +2406,7 @@ impl WidgetCompanion {
     pub fn make(&self, n: i32) -> Widget {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
+        let _ = (&n,);
         ::kompoz::runtime::named_args!(types(Widget(r)), { Widget(n * 10) })
     }
 }
@@ -2538,4 +2539,1765 @@ pub fn count<__KzStar0: ::core::clone::Clone + 'static>(xs: ::std::vec::Vec<__Kz
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::KtList::size(&xs) })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct OutcomeBase {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl OutcomeBase {
+    #[doc(hidden)]
+    pub fn __kz_empty() -> Self {
+        OutcomeBase {}
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+pub trait OutcomeOpen<T>: ::kompoz::runtime::kt::KtObject {
+    #[doc(hidden)]
+    fn __kz_outcome(&self) -> &OutcomeBase;
+    #[doc(hidden)]
+    fn __kz_outcome_init(&self)
+    where
+        T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({})
+    }
+    fn __kz_outcome_open_value_or_null(&self) -> ::core::option::Option<T>
+    where
+        T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(OutcomeDone(r)), {
+            if let ::core::option::Option::Some(__kz_smart8) =
+                ::kompoz::runtime::kt::kt_as_this::<OutcomeDone<T>, _>(self)
+            {
+                ::core::option::Option::Some(__kz_smart8.value())
+            } else {
+                ::core::option::Option::None
+            }
+        })
+    }
+    fn value_or_null(&self) -> ::core::option::Option<T>
+    where
+        T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    {
+        self.__kz_outcome_open_value_or_null()
+    }
+    #[doc(hidden)]
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        ::core::ptr::addr_eq(self as *const Self as *const (), other as *const dyn ::core::any::Any as *const ())
+    }
+    #[doc(hidden)]
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        let name = ::std::any::type_name::<Self>();
+        let name = name.split('<').next().unwrap_or(name);
+        let name = name.rsplit("::").next().unwrap_or(name);
+        __kz_out.push_str(&::std::format!("{}@{:x}", name, (self as *const Self as *const () as usize) & 0xffff_ffff));
+    }
+    #[doc(hidden)]
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = to;
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub enum Outcome<T> {
+    Done(OutcomeDone<T>),
+    Failed(OutcomeFailed),
+    Loading(OutcomeLoading),
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq for Outcome<T>
+{
+    fn eq(&self, other: &Self) -> bool {
+        #[allow(unreachable_patterns)]
+        match (self, other) {
+            (Outcome::Done(a), Outcome::Done(b)) => a == b,
+            (Outcome::Failed(a), Outcome::Failed(b)) => a == b,
+            (Outcome::Loading(a), Outcome::Loading(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::convert::From<OutcomeDone<T>> for Outcome<T>
+{
+    fn from(value: OutcomeDone<T>) -> Outcome<T> {
+        Outcome::Done(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::kompoz::runtime::kt::KtAs<OutcomeDone<T>> for Outcome<T>
+{
+    fn kt_as_safe(&self) -> ::core::option::Option<OutcomeDone<T>> {
+        match self {
+            Outcome::Done(v) => ::core::option::Option::Some(::core::clone::Clone::clone(v)),
+            #[allow(unreachable_patterns)]
+            _ => ::core::option::Option::None,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq<OutcomeDone<T>> for Outcome<T>
+{
+    fn eq(&self, other: &OutcomeDone<T>) -> bool {
+        #[allow(unreachable_patterns)]
+        match self {
+            Outcome::Done(v) => v == other,
+            _ => false,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq<Outcome<T>> for OutcomeDone<T>
+{
+    fn eq(&self, other: &Outcome<T>) -> bool {
+        other == self
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::convert::From<OutcomeFailed> for Outcome<T>
+{
+    fn from(value: OutcomeFailed) -> Outcome<T> {
+        Outcome::Failed(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::kompoz::runtime::kt::KtAs<OutcomeFailed> for Outcome<T>
+{
+    fn kt_as_safe(&self) -> ::core::option::Option<OutcomeFailed> {
+        match self {
+            Outcome::Failed(v) => ::core::option::Option::Some(::core::clone::Clone::clone(v)),
+            #[allow(unreachable_patterns)]
+            _ => ::core::option::Option::None,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq<OutcomeFailed> for Outcome<T>
+{
+    fn eq(&self, other: &OutcomeFailed) -> bool {
+        #[allow(unreachable_patterns)]
+        match self {
+            Outcome::Failed(v) => v == other,
+            _ => false,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq<Outcome<T>> for OutcomeFailed
+{
+    fn eq(&self, other: &Outcome<T>) -> bool {
+        other == self
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::convert::From<OutcomeLoading> for Outcome<T>
+{
+    fn from(value: OutcomeLoading) -> Outcome<T> {
+        Outcome::Loading(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::kompoz::runtime::kt::KtAs<OutcomeLoading> for Outcome<T>
+{
+    fn kt_as_safe(&self) -> ::core::option::Option<OutcomeLoading> {
+        match self {
+            Outcome::Loading(v) => ::core::option::Option::Some(::core::clone::Clone::clone(v)),
+            #[allow(unreachable_patterns)]
+            _ => ::core::option::Option::None,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq<OutcomeLoading> for Outcome<T>
+{
+    fn eq(&self, other: &OutcomeLoading) -> bool {
+        #[allow(unreachable_patterns)]
+        match self {
+            Outcome::Loading(v) => v == other,
+            _ => false,
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq<Outcome<T>> for OutcomeLoading
+{
+    fn eq(&self, other: &Outcome<T>) -> bool {
+        other == self
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::kompoz::runtime::kt::KtToString for Outcome<T>
+{
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        match self {
+            Outcome::Done(v) => ::kompoz::runtime::kt::KtToString::kt_write(v, __kz_out),
+            Outcome::Failed(v) => ::kompoz::runtime::kt::KtToString::kt_write(v, __kz_out),
+            Outcome::Loading(v) => ::kompoz::runtime::kt::KtToString::kt_write(v, __kz_out),
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::fmt::Display for Outcome<T>
+{
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> ::core::fmt::Debug
+    for Outcome<T>
+{
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> OutcomeOpen<T>
+    for Outcome<T>
+{
+    fn __kz_outcome(&self) -> &OutcomeBase {
+        match self {
+            Outcome::Done(v) => OutcomeOpen::<T>::__kz_outcome(v),
+            Outcome::Failed(v) => OutcomeOpen::<T>::__kz_outcome(v),
+            Outcome::Loading(v) => OutcomeOpen::<T>::__kz_outcome(v),
+        }
+    }
+    fn __kz_outcome_open_value_or_null(&self) -> ::core::option::Option<T> {
+        match self {
+            Outcome::Done(v) => OutcomeOpen::<T>::__kz_outcome_open_value_or_null(v),
+            Outcome::Failed(v) => OutcomeOpen::<T>::__kz_outcome_open_value_or_null(v),
+            Outcome::Loading(v) => OutcomeOpen::<T>::__kz_outcome_open_value_or_null(v),
+        }
+    }
+    fn value_or_null(&self) -> ::core::option::Option<T> {
+        match self {
+            Outcome::Done(v) => OutcomeOpen::<T>::value_or_null(v),
+            Outcome::Failed(v) => OutcomeOpen::<T>::value_or_null(v),
+            Outcome::Loading(v) => OutcomeOpen::<T>::value_or_null(v),
+        }
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+            || match self {
+                Outcome::Done(v) => OutcomeOpen::<T>::__kz_eq(v, other),
+                Outcome::Failed(v) => OutcomeOpen::<T>::__kz_eq(v, other),
+                Outcome::Loading(v) => OutcomeOpen::<T>::__kz_eq(v, other),
+            }
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        match self {
+            Outcome::Done(v) => OutcomeOpen::<T>::__kz_cast(v, to),
+            Outcome::Failed(v) => OutcomeOpen::<T>::__kz_cast(v, to),
+            Outcome::Loading(v) => OutcomeOpen::<T>::__kz_cast(v, to),
+        }
+    }
+    fn __kz_outcome_init(&self) {}
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub struct OutcomeDone<T> {
+    pub value: T,
+    #[doc(hidden)]
+    pub __kz_super: ::std::rc::Rc<OutcomeBase>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn OutcomeDone<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>(
+    value: T,
+) -> OutcomeDone<T> {
+    OutcomeDone::__kz_new(value)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> OutcomeDone<T> {
+    #[doc(hidden)]
+    pub fn __kz_new(value: T) -> OutcomeDone<T> {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(OutcomeDone(r)), {
+            let __kz_v = OutcomeDone {
+                value: ::core::clone::Clone::clone(&value),
+                __kz_super: ::std::rc::Rc::new(OutcomeBase::__kz_empty()),
+            };
+            OutcomeOpen::<T>::__kz_outcome_init(&__kz_v);
+            __kz_v
+        })
+    }
+    pub fn value(&self) -> T {
+        ::core::clone::Clone::clone(&self.value)
+    }
+    pub fn component1(&self) -> T {
+        self.value()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> OutcomeDone<T> {
+    pub fn copy(&self, # [default (:: core :: clone :: Clone :: clone (& self . value))] value: T) -> OutcomeDone<T> {
+        OutcomeDone::__kz_new(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::cmp::PartialEq for OutcomeDone<T>
+{
+    fn eq(&self, other: &Self) -> bool {
+        true && self.value == other.value
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::kompoz::runtime::kt::KtToString for OutcomeDone<T>
+{
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::{KtViaDisplay as _, KtViaToString as _};
+        __kz_out.push_str("Done(");
+        __kz_out.push_str("value=");
+        (&::kompoz::runtime::kt::KtProbe(&self.value)).kt_write_probe(__kz_out);
+        __kz_out.push(')');
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
+    ::core::fmt::Display for OutcomeDone<T>
+{
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> ::core::fmt::Debug
+    for OutcomeDone<T>
+{
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> OutcomeOpen<T>
+    for OutcomeDone<T>
+{
+    fn __kz_outcome(&self) -> &OutcomeBase {
+        &*self.__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        if to == ::core::any::TypeId::of::<Outcome<T>>() {
+            return ::core::option::Option::Some(::std::boxed::Box::new(
+                <Outcome<T> as ::core::convert::From<Self>>::from(::core::clone::Clone::clone(self)),
+            ));
+        }
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub struct OutcomeFailed {
+    pub reason: ::std::string::String,
+    #[doc(hidden)]
+    pub __kz_super: ::std::rc::Rc<OutcomeBase>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn OutcomeFailed(reason: impl ::core::convert::Into<::std::string::String>) -> OutcomeFailed {
+    let reason: ::std::string::String = ::core::convert::Into::into(reason);
+    OutcomeFailed::__kz_new(reason)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl OutcomeFailed {
+    #[doc(hidden)]
+    pub fn __kz_new(reason: ::std::string::String) -> OutcomeFailed {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(OutcomeFailed(r)), {
+            let __kz_v = OutcomeFailed {
+                reason: ::core::clone::Clone::clone(&reason),
+                __kz_super: ::std::rc::Rc::new(OutcomeBase::__kz_empty()),
+            };
+            OutcomeOpen::<::kompoz::runtime::kt::KtNothing>::__kz_outcome_init(&__kz_v);
+            __kz_v
+        })
+    }
+    pub fn reason(&self) -> ::std::string::String {
+        ::core::clone::Clone::clone(&self.reason)
+    }
+    pub fn component1(&self) -> ::std::string::String {
+        self.reason()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl OutcomeFailed {
+    pub fn copy(
+        &self,
+        # [default (:: core :: clone :: Clone :: clone (& self . reason))] reason: ::std::string::String,
+    ) -> OutcomeFailed {
+        OutcomeFailed::__kz_new(reason)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for OutcomeFailed {
+    fn eq(&self, other: &Self) -> bool {
+        true && self.reason == other.reason
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for OutcomeFailed {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::{KtViaDisplay as _, KtViaToString as _};
+        __kz_out.push_str("Failed(");
+        __kz_out.push_str("reason=");
+        (&::kompoz::runtime::kt::KtProbe(&self.reason)).kt_write_probe(__kz_out);
+        __kz_out.push(')');
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for OutcomeFailed {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for OutcomeFailed {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<__KzN0: ::core::clone::Clone + 'static> OutcomeOpen<__KzN0> for OutcomeFailed {
+    fn __kz_outcome(&self) -> &OutcomeBase {
+        &*self.__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = to;
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzOutcomeLoading {
+    #[doc(hidden)]
+    pub __kz_super: OutcomeBase,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(
+    :: core :: clone :: Clone,
+    :: core :: marker :: Copy,
+    :: core :: cmp :: PartialEq,
+    :: core :: cmp :: Eq,
+    :: core :: hash :: Hash,
+    :: core :: default :: Default,
+)]
+pub struct OutcomeLoading {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl OutcomeLoading {
+    #[doc(hidden)]
+    fn __kz_state() -> &'static __KzOutcomeLoading {
+        ::std::thread_local! { static __KZ_STATE : :: kompoz :: runtime :: kt :: KtSingleton < __KzOutcomeLoading > = const { :: kompoz :: runtime :: kt :: KtSingleton :: new () } ; }
+        __KZ_STATE.with(|s| {
+            s.get(|| __KzOutcomeLoading { __kz_super: OutcomeBase::__kz_empty() }, |_| OutcomeLoading {}.__kz_init())
+        })
+    }
+    #[doc(hidden)]
+    fn __kz_init(&self) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({
+            OutcomeOpen::<::kompoz::runtime::kt::KtNothing>::__kz_outcome_init(self);
+        })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl OutcomeLoading {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for OutcomeLoading {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "Outcome.Loading",
+            Self::__kz_state() as *const __KzOutcomeLoading as *const (),
+        ));
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for OutcomeLoading {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for OutcomeLoading {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<__KzN0: ::core::clone::Clone + 'static> OutcomeOpen<__KzN0> for OutcomeLoading {
+    fn __kz_outcome(&self) -> &OutcomeBase {
+        &Self::__kz_state().__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = to;
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn parse(text: impl ::core::convert::Into<::std::string::String>) -> Outcome<i32> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    let text: ::std::string::String = ::core::convert::Into::into(text);
+    ::kompoz::runtime::named_args!(types(OutcomeDone(r), OutcomeFailed(r)), {
+        if ::kompoz::runtime::kt::KtStr::is_empty(&text) {
+            ::core::convert::Into::<Outcome<i32>>::into(OutcomeFailed("boş"))
+        } else {
+            ::core::convert::Into::<Outcome<i32>>::into(OutcomeDone(::kompoz::runtime::kt::KtStr::length(&text)))
+        }
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn shown(o: Outcome<i32>) -> ::std::string::String {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        {
+            let __kz_w9 = o.clone();
+            match &__kz_w9 {
+                Outcome::Done(__kz_case10) => {
+                    #[allow(unused_variables)]
+                    let o = ::core::clone::Clone::clone(__kz_case10);
+                    { ::kompoz::runtime::kt::template!("#", o.value()) }
+                }
+                Outcome::Failed(_) | Outcome::Loading(_) => ::std::string::String::from("-"),
+            }
+        }
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn handler() -> NavigationEventHandler<NavigationEventInfoNone> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        {
+            #[allow(non_camel_case_types, clippy::type_complexity)]
+            struct __KzObject {
+                m0: ::std::rc::Rc<dyn ::core::ops::Fn(&NavigationEventHandler<NavigationEventInfoNone>)>,
+            }
+            #[allow(non_snake_case, clippy::all)]
+            impl NavigationEventHandlerCallbacks<NavigationEventInfoNone> for __KzObject {
+                fn on_back_completed(&self, handler: &NavigationEventHandler<NavigationEventInfoNone>) {
+                    (self.m0)(handler)
+                }
+            }
+            NavigationEventHandler::new(
+                NavigationEventInfoNone,
+                true,
+                __KzObject {
+                    m0: ::std::rc::Rc::new({
+                        move |__kz_this: &NavigationEventHandler<NavigationEventInfoNone>| {
+                            #[allow(unused_imports)]
+                            use ::kompoz::runtime::kt::ext::*;
+                            let _ = ();
+                            ::kompoz::runtime::named_args!({
+                                ::kompoz::runtime::kt::println(__kz_this.transition_state());
+                            })
+                        }
+                    }),
+                },
+            )
+        }
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzIntPairType {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(
+    :: core :: clone :: Clone,
+    :: core :: marker :: Copy,
+    :: core :: cmp :: PartialEq,
+    :: core :: cmp :: Eq,
+    :: core :: hash :: Hash,
+    :: core :: default :: Default,
+)]
+pub struct IntPairType {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl IntPairType {
+    #[doc(hidden)]
+    fn __kz_state() -> &'static __KzIntPairType {
+        ::std::thread_local! { static __KZ_STATE : :: kompoz :: runtime :: kt :: KtSingleton < __KzIntPairType > = const { :: kompoz :: runtime :: kt :: KtSingleton :: new () } ; }
+        __KZ_STATE.with(|s| s.get(|| __KzIntPairType {}, |_| IntPairType {}.__kz_init()))
+    }
+    #[doc(hidden)]
+    fn __kz_init(&self) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({})
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl IntPairType {
+    pub fn put(&self, bundle: SavedState, key: impl ::core::convert::Into<::std::string::String>, value: i32) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let key: ::std::string::String = ::core::convert::Into::into(key);
+        let _ = (&bundle, &key, &value);
+        ::kompoz::runtime::named_args!({})
+    }
+    pub fn get(
+        &self,
+        bundle: SavedState,
+        key: impl ::core::convert::Into<::std::string::String>,
+    ) -> ::core::option::Option<i32> {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let key: ::std::string::String = ::core::convert::Into::into(key);
+        let _ = (&bundle, &key);
+        ::kompoz::runtime::named_args!({ ::core::option::Option::None })
+    }
+    pub fn parse_value(&self, value: impl ::core::convert::Into<::std::string::String>) -> i32 {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let value: ::std::string::String = ::core::convert::Into::into(value);
+        let _ = (&value,);
+        ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::KtStr::to_int(&value) })
+    }
+    pub fn serialize_as_value(&self, value: i32) -> ::std::string::String {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let _ = (&value,);
+        ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::template!(value) })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for IntPairType {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "IntPairType",
+            Self::__kz_state() as *const __KzIntPairType as *const (),
+        ));
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for IntPairType {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for IntPairType {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::convert::From<IntPairType> for NavType {
+    fn from(o: IntPairType) -> NavType {
+        NavType::new(o)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl NavTypeImpl for IntPairType {
+    type Value = i32;
+    fn is_nullable_allowed(&self) -> bool {
+        false
+    }
+    fn put(&self, bundle: &SavedState, key: &str, value: ::core::option::Option<&i32>) {
+        IntPairType::put(
+            self,
+            ::core::clone::Clone::clone(bundle),
+            ::std::string::String::from(key),
+            ::kompoz::runtime::kt::not_null(::core::option::Option::map(value, ::core::clone::Clone::clone)),
+        )
+    }
+    fn get(&self, bundle: &SavedState, key: &str) -> ::core::option::Option<i32> {
+        IntPairType::get(self, ::core::clone::Clone::clone(bundle), ::std::string::String::from(key))
+    }
+    fn parse_value(&self, value: &str) -> ::core::result::Result<::core::option::Option<i32>, NavTypeError> {
+        ::core::result::Result::Ok(::core::option::Option::Some(IntPairType::parse_value(
+            self,
+            ::std::string::String::from(value),
+        )))
+    }
+    fn serialize_as_value(&self, value: ::core::option::Option<&i32>) -> ::std::string::String {
+        IntPairType::serialize_as_value(
+            self,
+            ::kompoz::runtime::kt::not_null(::core::option::Option::map(value, ::core::clone::Clone::clone)),
+        )
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct Fetcher2Base {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Fetcher2Base {
+    #[doc(hidden)]
+    pub fn __kz_empty() -> Self {
+        Fetcher2Base {}
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+pub trait Fetcher2Open: ::kompoz::runtime::kt::KtObject {
+    #[doc(hidden)]
+    fn __kz_fetcher2(&self) -> &Fetcher2Base;
+    #[doc(hidden)]
+    fn __kz_fetcher2_init(&self) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({})
+    }
+    fn calls(&self) -> i32;
+    fn set_calls(&self, value: i32);
+    fn fetch(&self, key: ::std::string::String) -> ::kompoz::runtime::kt::KtFuture<'_, ::std::string::String>;
+    #[doc(hidden)]
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        ::core::ptr::addr_eq(self as *const Self as *const (), other as *const dyn ::core::any::Any as *const ())
+    }
+    #[doc(hidden)]
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        let name = ::std::any::type_name::<Self>();
+        let name = name.split('<').next().unwrap_or(name);
+        let name = name.rsplit("::").next().unwrap_or(name);
+        __kz_out.push_str(&::std::format!("{}@{:x}", name, (self as *const Self as *const () as usize) & 0xffff_ffff));
+    }
+    #[doc(hidden)]
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = to;
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for dyn Fetcher2Open {
+    fn eq(&self, other: &Self) -> bool {
+        Fetcher2Open::__kz_eq(self, ::kompoz::runtime::kt::KtObject::as_any(other))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for dyn Fetcher2Open {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        Fetcher2Open::__kz_write(self, __kz_out)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for dyn Fetcher2Open {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for dyn Fetcher2Open {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<__KzT: ::core::any::Any + ::core::clone::Clone> ::kompoz::runtime::kt::KtAs<__KzT> for dyn Fetcher2Open {
+    fn kt_as_safe(&self) -> ::core::option::Option<__KzT> {
+        ::kompoz::runtime::kt::kt_dyn_as::<__KzT>(::kompoz::runtime::kt::KtObject::as_any(self), || {
+            Fetcher2Open::__kz_cast(self, ::core::any::TypeId::of::<__KzT>())
+        })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn counting() -> ::std::rc::Rc<dyn Fetcher2Open> {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!({
+        {
+            #[allow(non_camel_case_types, clippy::type_complexity)]
+            struct __KzObject {
+                #[doc(hidden)]
+                pub __kz_super: Fetcher2Base,
+                p0: ::std::cell::RefCell<i32>,
+                m1: ::std::rc::Rc<
+                    dyn ::core::ops::Fn(
+                            &__KzObject,
+                            ::std::string::String,
+                        )
+                            -> ::kompoz::runtime::kt::KtFuture<'_, ::std::string::String>,
+                >,
+            }
+            fn __kz_hr2<
+                F: for<'a> ::core::ops::Fn(
+                        &'a __KzObject,
+                        ::std::string::String,
+                    )
+                        -> ::kompoz::runtime::kt::KtFuture<'a, ::std::string::String>,
+            >(
+                f: F,
+            ) -> F {
+                f
+            }
+            #[allow(non_snake_case, clippy::all)]
+            impl Fetcher2Open for __KzObject {
+                fn __kz_fetcher2(&self) -> &Fetcher2Base {
+                    &self.__kz_super
+                }
+                fn calls(&self) -> i32 {
+                    ::core::clone::Clone::clone(&*self.p0.borrow())
+                }
+                fn set_calls(&self, value: i32) {
+                    *self.p0.borrow_mut() = value;
+                }
+                fn fetch(
+                    &self,
+                    key: ::std::string::String,
+                ) -> ::kompoz::runtime::kt::KtFuture<'_, ::std::string::String> {
+                    (self.m1)(self, key)
+                }
+            }
+            let __kz_o = __KzObject {
+                __kz_super: Fetcher2Base::__kz_empty(),
+                p0: ::std::cell::RefCell::new(0),
+                m1: ::std::rc::Rc::new(__kz_hr2({
+                    move |__kz_this: &__KzObject, key: ::std::string::String| {
+                        ::std::boxed::Box::pin(async move {
+                            #[allow(unused_imports)]
+                            use ::kompoz::runtime::kt::ext::*;
+                            let _ = (&key,);
+                            ::kompoz::runtime::named_args!({
+                                __kz_this.set_calls(::kompoz::runtime::kt::KtInc::inc(__kz_this.calls()));
+                                return key.clone();
+                            })
+                        })
+                    }
+                })),
+            };
+            Fetcher2Open::__kz_fetcher2_init(&__kz_o);
+            let __kz_object12: ::std::rc::Rc<dyn Fetcher2Open> = ::std::rc::Rc::new(__kz_o);
+            __kz_object12
+        }
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct Panel2Base {
+    w: ::kompoz::runtime::kt::KtVal<i32>,
+    h: ::kompoz::runtime::kt::KtVal<i32>,
+    note: ::kompoz::runtime::kt::KtVar<::std::string::String>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Panel2Base {
+    #[doc(hidden)]
+    pub fn __kz_empty() -> Self {
+        Panel2Base {
+            w: ::kompoz::runtime::kt::KtVal::new(),
+            h: ::kompoz::runtime::kt::KtVal::new(),
+            note: ::kompoz::runtime::kt::KtVar::new(),
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+pub trait Panel2Open: ::kompoz::runtime::kt::KtObject {
+    #[doc(hidden)]
+    fn __kz_panel2(&self) -> &Panel2Base;
+    fn w(&self) -> i32 {
+        self.__kz_panel2().w.get()
+    }
+    fn h(&self) -> i32 {
+        self.__kz_panel2().h.get()
+    }
+    fn note(&self) -> ::std::string::String {
+        self.__kz_panel2().note.get()
+    }
+    fn set_note(&self, value: ::std::string::String) {
+        self.__kz_panel2().note.set(value)
+    }
+    #[doc(hidden)]
+    fn __kz_panel2_init(&self, w: i32, h: i32) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({
+            self.__kz_panel2().w.init(w);
+            self.__kz_panel2().h.init(h);
+            self.__kz_panel2().note.set(::std::string::String::from(""));
+        })
+    }
+    #[doc(hidden)]
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        ::core::ptr::addr_eq(self as *const Self as *const (), other as *const dyn ::core::any::Any as *const ())
+    }
+    #[doc(hidden)]
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        let name = ::std::any::type_name::<Self>();
+        let name = name.split('<').next().unwrap_or(name);
+        let name = name.rsplit("::").next().unwrap_or(name);
+        __kz_out.push_str(&::std::format!("{}@{:x}", name, (self as *const Self as *const () as usize) & 0xffff_ffff));
+    }
+    #[doc(hidden)]
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = to;
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for dyn Panel2Open {
+    fn eq(&self, other: &Self) -> bool {
+        Panel2Open::__kz_eq(self, ::kompoz::runtime::kt::KtObject::as_any(other))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for dyn Panel2Open {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        Panel2Open::__kz_write(self, __kz_out)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for dyn Panel2Open {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for dyn Panel2Open {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<__KzT: ::core::any::Any + ::core::clone::Clone> ::kompoz::runtime::kt::KtAs<__KzT> for dyn Panel2Open {
+    fn kt_as_safe(&self) -> ::core::option::Option<__KzT> {
+        ::kompoz::runtime::kt::kt_dyn_as::<__KzT>(::kompoz::runtime::kt::KtObject::as_any(self), || {
+            Panel2Open::__kz_cast(self, ::core::any::TypeId::of::<__KzT>())
+        })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzPanel2 {
+    #[doc(hidden)]
+    pub __kz_super: Panel2Base,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub struct Panel2 {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzPanel2>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn Panel2(w: i32, h: i32) -> Panel2 {
+    Panel2::__kz_new(w, h)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Panel2 {
+    #[doc(hidden)]
+    pub fn __kz_new(w: i32, h: i32) -> Panel2 {
+        let __kz_this = Panel2 { __kz_this: ::std::rc::Rc::new(__KzPanel2 { __kz_super: Panel2Base::__kz_empty() }) };
+        __kz_this.__kz_init(w, h);
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self, w: i32, h: i32) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        Panel2Open::__kz_panel2_init(self, w, h);
+        ::kompoz::runtime::named_args!({})
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl Panel2 {
+    #[doc(hidden)]
+    pub fn __kz_ctor1(side: i32) -> Panel2 {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let __kz_this: Panel2 = ::kompoz::runtime::named_args!(types(Panel2(rr)), Panel2(side, side));
+        __kz_this.__kz_ctor_body1(side);
+        __kz_this
+    }
+    #[doc(hidden)]
+    fn __kz_ctor_body1(&self, side: i32) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({
+            self.set_note(::std::string::String::from("kare"));
+        })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for Panel2 {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Panel2 {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for Panel2 {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for Panel2 {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "Panel2",
+            ::std::rc::Rc::as_ptr(&self.__kz_this) as *const (),
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for Panel2 {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for Panel2 {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Panel2Open for Panel2 {
+    fn __kz_panel2(&self) -> &Panel2Base {
+        &self.__kz_this.__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        if to == ::core::any::TypeId::of::<::std::rc::Rc<dyn Panel2Open>>() {
+            let o: ::std::rc::Rc<dyn Panel2Open> = ::std::rc::Rc::new(::core::clone::Clone::clone(self));
+            return ::core::option::Option::Some(::std::boxed::Box::new(o));
+        }
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<Panel2> for ::std::rc::Rc<dyn Panel2Open> {
+    fn eq(&self, other: &Panel2) -> bool {
+        Panel2Open::__kz_eq(&**self, other)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<::std::rc::Rc<dyn Panel2Open>> for Panel2 {
+    fn eq(&self, other: &::std::rc::Rc<dyn Panel2Open>) -> bool {
+        Panel2Open::__kz_eq(&**other, self)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtAs<::std::rc::Rc<dyn Panel2Open>> for Panel2 {
+    fn kt_as_safe(&self) -> ::core::option::Option<::std::rc::Rc<dyn Panel2Open>> {
+        ::core::option::Option::Some(::std::rc::Rc::new(::core::clone::Clone::clone(self)))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzSquarePanel {
+    #[doc(hidden)]
+    pub __kz_super: Panel2Base,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub struct SquarePanel {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzSquarePanel>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn SquarePanel(s: i32) -> SquarePanel {
+    SquarePanel::__kz_new(s)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl SquarePanel {
+    #[doc(hidden)]
+    pub fn __kz_new(s: i32) -> SquarePanel {
+        let __kz_this =
+            SquarePanel { __kz_this: ::std::rc::Rc::new(__KzSquarePanel { __kz_super: Panel2Base::__kz_empty() }) };
+        __kz_this.__kz_init(s);
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self, s: i32) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        {
+            let side: i32 = s;
+            Panel2Open::__kz_panel2_init(self, side, side);
+            self.set_note(::std::string::String::from("kare"));
+        }
+        ::kompoz::runtime::named_args!({})
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl SquarePanel {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for SquarePanel {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for SquarePanel {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for SquarePanel {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for SquarePanel {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "SquarePanel",
+            ::std::rc::Rc::as_ptr(&self.__kz_this) as *const (),
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for SquarePanel {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for SquarePanel {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Panel2Open for SquarePanel {
+    fn __kz_panel2(&self) -> &Panel2Base {
+        &self.__kz_this.__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        if to == ::core::any::TypeId::of::<::std::rc::Rc<dyn Panel2Open>>() {
+            let o: ::std::rc::Rc<dyn Panel2Open> = ::std::rc::Rc::new(::core::clone::Clone::clone(self));
+            return ::core::option::Option::Some(::std::boxed::Box::new(o));
+        }
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<SquarePanel> for ::std::rc::Rc<dyn Panel2Open> {
+    fn eq(&self, other: &SquarePanel) -> bool {
+        Panel2Open::__kz_eq(&**self, other)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<::std::rc::Rc<dyn Panel2Open>> for SquarePanel {
+    fn eq(&self, other: &::std::rc::Rc<dyn Panel2Open>) -> bool {
+        Panel2Open::__kz_eq(&**other, self)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtAs<::std::rc::Rc<dyn Panel2Open>> for SquarePanel {
+    fn kt_as_safe(&self) -> ::core::option::Option<::std::rc::Rc<dyn Panel2Open>> {
+        ::core::option::Option::Some(::std::rc::Rc::new(::core::clone::Clone::clone(self)))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct AppExceptionBase {
+    #[doc(hidden)]
+    pub __kz_exception: ::kompoz::runtime::kt::KtVal<::kompoz::runtime::kt::Throwable>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl AppExceptionBase {
+    #[doc(hidden)]
+    pub fn __kz_empty() -> Self {
+        AppExceptionBase { __kz_exception: ::kompoz::runtime::kt::KtVal::new() }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+pub trait AppExceptionOpen: ::kompoz::runtime::kt::KtObject {
+    #[doc = r" Kotlin's `message`."]
+    fn message(&self) -> ::core::option::Option<::std::string::String> {
+        self.__kz_app_exception().__kz_exception.with(|e| e.message())
+    }
+    #[doc = r" Kotlin's `cause`."]
+    fn cause(&self) -> ::core::option::Option<::kompoz::runtime::kt::Throwable> {
+        self.__kz_app_exception().__kz_exception.with(|e| e.cause())
+    }
+    #[doc(hidden)]
+    fn __kz_app_exception(&self) -> &AppExceptionBase;
+    #[doc(hidden)]
+    fn __kz_app_exception_init(&self, message: ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({
+            self.__kz_app_exception().__kz_exception.init(::kompoz::runtime::kt::exception(
+                "Exception",
+                ::core::option::Option::map(::core::option::Option::Some(message.clone()), ::std::string::String::from),
+                ::core::option::Option::None,
+            ));
+        })
+    }
+    #[doc(hidden)]
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        ::core::ptr::addr_eq(self as *const Self as *const (), other as *const dyn ::core::any::Any as *const ())
+    }
+    #[doc(hidden)]
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        let name = ::std::any::type_name::<Self>();
+        let name = name.split('<').next().unwrap_or(name);
+        let name = name.rsplit("::").next().unwrap_or(name);
+        __kz_out.push_str(&::std::format!("{}@{:x}", name, (self as *const Self as *const () as usize) & 0xffff_ffff));
+    }
+    #[doc(hidden)]
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = to;
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for dyn AppExceptionOpen {
+    fn eq(&self, other: &Self) -> bool {
+        AppExceptionOpen::__kz_eq(self, ::kompoz::runtime::kt::KtObject::as_any(other))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for dyn AppExceptionOpen {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        AppExceptionOpen::__kz_write(self, __kz_out)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for dyn AppExceptionOpen {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for dyn AppExceptionOpen {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<__KzT: ::core::any::Any + ::core::clone::Clone> ::kompoz::runtime::kt::KtAs<__KzT> for dyn AppExceptionOpen {
+    fn kt_as_safe(&self) -> ::core::option::Option<__KzT> {
+        ::kompoz::runtime::kt::kt_dyn_as::<__KzT>(::kompoz::runtime::kt::KtObject::as_any(self), || {
+            AppExceptionOpen::__kz_cast(self, ::core::any::TypeId::of::<__KzT>())
+        })
+    }
+}
+#[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+impl ::kompoz::runtime::kt::KtThrowable for AppException {
+    fn to_throwable(&self) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::Throwable::of_class_object(
+            "AppException",
+            &[],
+            "Exception",
+            <Self as AppExceptionOpen>::message(self),
+            <Self as AppExceptionOpen>::cause(self),
+            ::std::rc::Rc::new(::core::clone::Clone::clone(self)),
+            |o, to| <AppException as AppExceptionOpen>::__kz_cast(o.downcast_ref::<AppException>()?, to),
+        )
+    }
+}
+#[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+impl ::core::convert::From<AppException> for ::kompoz::runtime::kt::Throwable {
+    fn from(e: AppException) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::KtThrowable::to_throwable(&e)
+    }
+}
+#[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+impl ::kompoz::runtime::kt::KtAs<AppException> for ::kompoz::runtime::kt::Throwable {
+    fn kt_as_safe(&self) -> ::core::option::Option<AppException> {
+        self.downcast::<AppException>()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzAppException {
+    #[doc(hidden)]
+    pub __kz_super: AppExceptionBase,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub struct AppException {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzAppException>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn AppException(message: impl ::core::convert::Into<::std::string::String>) -> AppException {
+    let message: ::std::string::String = ::core::convert::Into::into(message);
+    AppException::__kz_new(message)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl AppException {
+    #[doc(hidden)]
+    pub fn __kz_new(message: ::std::string::String) -> AppException {
+        let __kz_this = AppException {
+            __kz_this: ::std::rc::Rc::new(__KzAppException { __kz_super: AppExceptionBase::__kz_empty() }),
+        };
+        __kz_this.__kz_init(message);
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self, message: ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        AppExceptionOpen::__kz_app_exception_init(self, ::std::string::String::from(message.clone()));
+        ::kompoz::runtime::named_args!({})
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl AppException {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for AppException {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for AppException {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for AppException {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for AppException {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::KtToString::kt_to_string(
+            &::kompoz::runtime::kt::KtThrowable::to_throwable(self),
+        ));
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for AppException {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for AppException {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl AppExceptionOpen for AppException {
+    fn __kz_app_exception(&self) -> &AppExceptionBase {
+        &self.__kz_this.__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        if to == ::core::any::TypeId::of::<::std::rc::Rc<dyn AppExceptionOpen>>() {
+            let o: ::std::rc::Rc<dyn AppExceptionOpen> = ::std::rc::Rc::new(::core::clone::Clone::clone(self));
+            return ::core::option::Option::Some(::std::boxed::Box::new(o));
+        }
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<AppException> for ::std::rc::Rc<dyn AppExceptionOpen> {
+    fn eq(&self, other: &AppException) -> bool {
+        AppExceptionOpen::__kz_eq(&**self, other)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<::std::rc::Rc<dyn AppExceptionOpen>> for AppException {
+    fn eq(&self, other: &::std::rc::Rc<dyn AppExceptionOpen>) -> bool {
+        AppExceptionOpen::__kz_eq(&**other, self)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtAs<::std::rc::Rc<dyn AppExceptionOpen>> for AppException {
+    fn kt_as_safe(&self) -> ::core::option::Option<::std::rc::Rc<dyn AppExceptionOpen>> {
+        ::core::option::Option::Some(::std::rc::Rc::new(::core::clone::Clone::clone(self)))
+    }
+}
+#[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+impl ::kompoz::runtime::kt::KtThrowable for NetworkException {
+    fn to_throwable(&self) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::Throwable::of_class_object(
+            "NetworkException",
+            &["AppException"],
+            "Exception",
+            <Self as AppExceptionOpen>::message(self),
+            <Self as AppExceptionOpen>::cause(self),
+            ::std::rc::Rc::new(::core::clone::Clone::clone(self)),
+            |o, to| <NetworkException as AppExceptionOpen>::__kz_cast(o.downcast_ref::<NetworkException>()?, to),
+        )
+    }
+}
+#[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+impl ::core::convert::From<NetworkException> for ::kompoz::runtime::kt::Throwable {
+    fn from(e: NetworkException) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::KtThrowable::to_throwable(&e)
+    }
+}
+#[allow(non_snake_case, non_camel_case_types, dead_code, clippy::all)]
+impl ::kompoz::runtime::kt::KtAs<NetworkException> for ::kompoz::runtime::kt::Throwable {
+    fn kt_as_safe(&self) -> ::core::option::Option<NetworkException> {
+        self.downcast::<NetworkException>()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub struct __KzNetworkException {
+    #[doc(hidden)]
+    pub __kz_super: AppExceptionBase,
+    code: ::kompoz::runtime::kt::KtVal<i32>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub struct NetworkException {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzNetworkException>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn NetworkException(code: i32) -> NetworkException {
+    NetworkException::__kz_new(code)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl NetworkException {
+    #[doc(hidden)]
+    pub fn __kz_new(code: i32) -> NetworkException {
+        let __kz_this = NetworkException {
+            __kz_this: ::std::rc::Rc::new(__KzNetworkException {
+                __kz_super: AppExceptionBase::__kz_empty(),
+                code: ::kompoz::runtime::kt::KtVal::new(),
+            }),
+        };
+        __kz_this.__kz_init(code);
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self, code: i32) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        AppExceptionOpen::__kz_app_exception_init(
+            self,
+            ::std::string::String::from(::kompoz::runtime::kt::template!("ağ ", code)),
+        );
+        self.__kz_this.code.init(code);
+        ::kompoz::runtime::named_args!({})
+    }
+    pub fn code(&self) -> i32 {
+        self.__kz_this.code.get()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl NetworkException {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for NetworkException {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for NetworkException {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for NetworkException {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for NetworkException {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::KtToString::kt_to_string(
+            &::kompoz::runtime::kt::KtThrowable::to_throwable(self),
+        ));
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for NetworkException {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for NetworkException {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl AppExceptionOpen for NetworkException {
+    fn __kz_app_exception(&self) -> &AppExceptionBase {
+        &self.__kz_this.__kz_super
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        if to == ::core::any::TypeId::of::<::std::rc::Rc<dyn AppExceptionOpen>>() {
+            let o: ::std::rc::Rc<dyn AppExceptionOpen> = ::std::rc::Rc::new(::core::clone::Clone::clone(self));
+            return ::core::option::Option::Some(::std::boxed::Box::new(o));
+        }
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<NetworkException> for ::std::rc::Rc<dyn AppExceptionOpen> {
+    fn eq(&self, other: &NetworkException) -> bool {
+        AppExceptionOpen::__kz_eq(&**self, other)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<::std::rc::Rc<dyn AppExceptionOpen>> for NetworkException {
+    fn eq(&self, other: &::std::rc::Rc<dyn AppExceptionOpen>) -> bool {
+        AppExceptionOpen::__kz_eq(&**other, self)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtAs<::std::rc::Rc<dyn AppExceptionOpen>> for NetworkException {
+    fn kt_as_safe(&self) -> ::core::option::Option<::std::rc::Rc<dyn AppExceptionOpen>> {
+        ::core::option::Option::Some(::std::rc::Rc::new(::core::clone::Clone::clone(self)))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn handled() -> ::std::string::String {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!(types(NetworkException(r)), {
+        match ::kompoz::runtime::kt::catching(|| {
+            ::kompoz::runtime::kt::throw(NetworkException(1));
+        }) {
+            ::core::result::Result::Ok(__kz_v) => __kz_v,
+            ::core::result::Result::Err(__kz_e) => {
+                if __kz_e.is_a("AppException") {
+                    #[allow(unused_variables)]
+                    let e = ::core::option::Option::unwrap(__kz_e.cast_object::<::std::rc::Rc<dyn AppExceptionOpen>>());
+                    ::kompoz::runtime::kt::elvis(e.message(), || ::std::string::String::from(""))
+                } else {
+                    ::kompoz::runtime::kt::rethrow(__kz_e)
+                }
+            }
+        }
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn describe_any(
+    x: impl ::core::convert::Into<::core::option::Option<::std::rc::Rc<dyn ::kompoz::runtime::kt::KtObject>>>,
+) -> ::std::string::String {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    let x: ::core::option::Option<::std::rc::Rc<dyn ::kompoz::runtime::kt::KtObject>> = ::core::convert::Into::into(x);
+    ::kompoz::runtime::named_args!({
+        if let ::core::option::Option::Some(x) =
+            ::core::option::Option::and_then(::core::option::Option::as_ref(&x), |__kz_o13| {
+                ::kompoz::runtime::kt::KtAs::<::std::string::String>::kt_as_safe(&**__kz_o13)
+            })
+            && ::kompoz::runtime::kt::KtStr::length(&x) > 2
+        {
+            x.clone()
+        } else if let ::core::option::Option::Some(x) =
+            ::core::option::Option::and_then(::core::option::Option::as_ref(&x), |__kz_o14| {
+                ::kompoz::runtime::kt::KtAs::<i32>::kt_as_safe(&**__kz_o14)
+            })
+            && !(x < 0)
+        {
+            ::kompoz::runtime::kt::template!(x + 1)
+        } else {
+            ::std::string::String::from("-")
+        }
+    })
 }

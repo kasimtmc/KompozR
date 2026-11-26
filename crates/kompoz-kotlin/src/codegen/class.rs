@@ -353,6 +353,12 @@ impl Gen<'_, '_> {
             _ => c.companion.clone()?,
         };
         let i = proc_macro2::Ident::new(&rust, span);
+        // ((WPA-rest) an object of a base of the second kind, `object WrappedUUIDNavType : NavType<…>(…)`: Kotlin's
+        // value of it the base's struct made of it)
+        if let Some(b) = self.callbacks_base_of(&rust) {
+            let v = proc_macro2::Ident::new(b.value, span);
+            return Some((quote_spanned!(span=> <#v as ::core::convert::From<#i>>::from(#i {})), Ty::named(b.value)));
+        }
         Some((quote_spanned!(span=> #i {}), Ty::named(&rust)))
     }
 
@@ -602,6 +608,10 @@ impl Gen<'_, '_> {
                         .unwrap_or_default();
                     // ((stage 14 WPB) an exception class's `message` and `cause`)
                     out.extend(self.exception_items(k, &c.rust));
+                    // ((WPA-rest) an open exception class's members' trait has them too)
+                    if let Some(t) = c.members_trait() {
+                        out.extend(self.exception_items(k, &t));
+                    }
                     let makes = matches!(c.inherit, super::hierarchy::Inherit::Final | super::hierarchy::Inherit::Open);
                     if let Some(outer) = c.inner.clone().filter(|_| makes) {
                         // (an inner class's constructor: a method of its outer class, `outer.Inner(…)`)
@@ -1011,8 +1021,8 @@ impl Gen<'_, '_> {
         // ((stage 14 WPB) a standard exception class as the superclass: `exceptions`; an open or abstract one, a base
         // other classes derive from, isn't translated yet)
         let exception = usize::from(self.exception_super(c).is_some());
-        if exception == 1 && (c.is_open() || c.is_abstract() || c.is_sealed()) {
-            self.later(c.name.loc, "an open, abstract or sealed class deriving from an exception class");
+        if exception == 1 && c.is_sealed() {
+            self.later(c.name.loc, "a sealed class deriving from an exception class");
             ok = false;
         }
         let known = self.supers_of(d).len() + exception;
@@ -1586,7 +1596,12 @@ impl Gen<'_, '_> {
         let field_ident = Ident { name: "field".into(), backticked: false, loc: p.loc };
         let getter = match (p.getter.as_ref().and_then(|g| g.body.as_ref()), place) {
             (Some(body), _) => {
-                self.fun = FnState { kompozable: false, nullable_result: ty.is_nullable(), shared_result: None };
+                self.fun = FnState {
+                    kompozable: false,
+                    nullable_result: ty.is_nullable(),
+                    shared_result: None,
+                    result: Some(ty.clone()),
+                };
                 self.enter_member(cx, "", true);
                 let field = match place {
                     Some(place) => {
@@ -1597,9 +1612,10 @@ impl Gen<'_, '_> {
                 };
                 let b = match body {
                     FunctionBody::Block(b) => self.fn_block(b, false),
-                    FunctionBody::Expr(e) => {
-                        self.value_want(e, super::expr::Want { some: ty.is_nullable(), ..Default::default() })
-                    }
+                    FunctionBody::Expr(e) => self.value_want(
+                        e,
+                        super::expr::Want { some: ty.is_nullable(), result: true, ..Default::default() },
+                    ),
                 };
                 let lets = self.member_lets(cx, span);
                 quote_spanned! {span=>
@@ -1749,7 +1765,7 @@ impl Gen<'_, '_> {
         let inline = f.modifiers.has(ModifierKind::Inline);
         let unit = f.result.as_ref().is_none_or(|t| self.ty_of(t) == Ty::Unit);
         let restartable = !inline && unit;
-        self.fun = FnState { kompozable: true, nullable_result: false, shared_result: None };
+        self.fun = FnState { kompozable: true, nullable_result: false, shared_result: None, result: None };
         self.enter_member(cx, &f.name.name, true);
         // (the object: the hidden function's first parameter)
         if let Some(r) = self.receivers.iter_mut().rev().find(|r| r.rust == "self") {
@@ -1866,7 +1882,12 @@ impl Gen<'_, '_> {
         let ret_text = self.member_ret_text(f, cx);
         let ret_ty = Ty::from_rust(&ret_text);
         let unit = ret_ty == Ty::Unit;
-        self.fun = FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+        self.fun = FnState {
+            kompozable: false,
+            nullable_result: ret_ty.is_nullable(),
+            shared_result: None,
+            result: Some(ret_ty.clone()),
+        };
         self.enter_member(cx, &f.name.name, true);
         self.in_async = suspend;
         self.inline_async = false;
@@ -1922,7 +1943,7 @@ impl Gen<'_, '_> {
                     let s = self.stmt_expr(e);
                     quote!(#s;)
                 } else {
-                    let want = super::expr::Want { some: ret_ty.is_nullable(), ..Default::default() };
+                    let want = super::expr::Want { some: ret_ty.is_nullable(), result: true, ..Default::default() };
                     self.value_want(e, want)
                 }
             }
@@ -1941,12 +1962,20 @@ impl Gen<'_, '_> {
         let name = self.name_ident(&rust_name, f.name.loc);
         let recv = cx.receiver(span);
         let asyncness = if suspend { quote_spanned!(span=> async) } else { quote!() };
+        // ((WPA-rest) an override's parameters it doesn't use: Kotlin says nothing of them)
+        let unused = if super::hierarchy::is_override(&f.modifiers) && !f.params.is_empty() {
+            let names = f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc));
+            quote_spanned!(span=> let _ = (#(&#names,)*);)
+        } else {
+            quote!()
+        };
         quote_spanned! {span=>
             #vis #asyncness fn #name #generics (#recv, #(#params),*) #ret {
                 #[allow(unused_imports)]
                 use #kt::ext::*;
                 #companion
                 #(#converts)*
+                #unused
                 #rt::named_args!(#kz_types { #body })
             }
         }
@@ -2194,8 +2223,14 @@ impl Gen<'_, '_> {
             c.body.members.iter().any(
                 |m| matches!(m, Member::Decl(Decl::Function(f)) if f.name.name == "toString" && f.params.is_empty()),
             );
-        let exception = self.exception_class_parts(c, &info.rust, overrides_to_string, span);
-        if let Some(x) = &exception {
+        let exception = match self.exception_class_parts(c, &info.rust, overrides_to_string, span) {
+            Some(x) => Some(x),
+            // ((WPA-rest) one deriving from the user's open exception class: its base part has them)
+            None => self.exception_chain_parts(d, &info.rust, overrides_to_string, span),
+        };
+        if let Some(x) = &exception
+            && !x.field.is_empty()
+        {
             fields.push(x.field.clone());
             empty.push(x.empty.clone());
             init.insert(0, x.init.clone());
@@ -2966,7 +3001,12 @@ impl Gen<'_, '_> {
         let ret_ty = Ty::from_rust(&ret_text);
         let unit = ret_ty == Ty::Unit;
         for (v, binds, o) in &arms {
-            self.fun = FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+            self.fun = FnState {
+                kompozable: false,
+                nullable_result: ret_ty.is_nullable(),
+                shared_result: None,
+                result: Some(ret_ty.clone()),
+            };
             self.enter_member(cx, &f.name.name, true);
             for p in &o.params {
                 let ty = p.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
@@ -2977,7 +3017,12 @@ impl Gen<'_, '_> {
         }
         let default = match &f.body {
             Some(_) => {
-                self.fun = FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+                self.fun = FnState {
+                    kompozable: false,
+                    nullable_result: ret_ty.is_nullable(),
+                    shared_result: None,
+                    result: Some(ret_ty.clone()),
+                };
                 self.enter_member(cx, &f.name.name, true);
                 for p in &f.params {
                     let ty = p.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
@@ -3018,7 +3063,7 @@ impl Gen<'_, '_> {
                 quote!(#s;)
             }
             Some(FunctionBody::Expr(e)) => {
-                let want = super::expr::Want { some: ret.is_nullable(), ..Default::default() };
+                let want = super::expr::Want { some: ret.is_nullable(), result: true, ..Default::default() };
                 self.value_want(e, want)
             }
             None => quote!(),

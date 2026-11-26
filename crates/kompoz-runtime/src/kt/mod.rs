@@ -87,8 +87,8 @@ pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 #[doc(hidden)]
 pub use null::{elvis_async, run_async, safe_async, with_async};
 pub use object::{
-    KtFuture, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string, kt_as_object, kt_dyn_as, kt_is,
-    kt_same_object,
+    KtFuture, KtNothing, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string, kt_as_object, kt_as_this,
+    kt_dyn_as, kt_is, kt_same_object,
 };
 pub use random::{KtShuffle, Random};
 pub use range::{

@@ -437,7 +437,12 @@ impl Gen<'_, '_> {
         let saved_loops = std::mem::take(&mut self.loops);
         let saved_jumps = std::mem::take(&mut self.control.jump_frames);
         let saved_async = self.in_async;
-        self.fun = super::FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+        self.fun = super::FnState {
+            kompozable: false,
+            nullable_result: ret_ty.is_nullable(),
+            shared_result: None,
+            result: Some(ret_ty.clone()),
+        };
         self.in_async = suspend;
         let boundary = self.scopes.len();
         self.frames.push(CaptureFrame { boundary, used: Vec::new(), kept: true });
@@ -465,7 +470,7 @@ impl Gen<'_, '_> {
                 quote!(#s;)
             }
             Some(FunctionBody::Expr(e)) => {
-                self.value_want(e, super::expr::Want { some: ret_ty.is_nullable(), ..Default::default() })
+                self.value_want(e, super::expr::Want { some: ret_ty.is_nullable(), result: true, ..Default::default() })
             }
             None => {
                 self.error(f.loc, "a function here needs a body");

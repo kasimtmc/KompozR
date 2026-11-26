@@ -7,7 +7,7 @@
 use super::names::{ident, is_pascal, snake, value_name};
 use super::resolve::*;
 use super::stmt::Tail;
-use super::types::TypePos;
+
 use super::{Gen, respan};
 use crate::ast::*;
 use crate::index::{self, Kind};
@@ -56,6 +56,9 @@ pub(crate) struct Want {
     /// `Arc<dyn FiniteAnimationSpec<T>>`): a value of a type of its own (`tween(…)`, `snap()`) made one, as a
     /// parameter of that type takes it.
     pub shared: Option<Shared>,
+    /// (stage 14 WPA) It is the function's result (see `FnState::result`): a value of a sealed class's case, or of a
+    /// class where an interface, an open class or `Any` is the result, made one.
+    pub result: bool,
 }
 
 /// The pointer a shared trait object is held in.
@@ -147,6 +150,29 @@ impl Gen<'_, '_> {
         // (stage 14 WPB) A `try`'s value: its body's and its catches' each what the place takes.
         if let ExprKind::Try(t) = &e.kind {
             return self.try_expr(t, Tail::Value(want), e.loc).ts;
+        }
+        // ((stage 14 WPA) the function's result of a sealed class, an interface, an open class or `Any`: a value of
+        // a type of its own made one, each branch's — `fun load(): Outcome<Int> = if (…) Success(1) else Failure("")`)
+        if want.result
+            && let Some(to) = self.fun.result.clone()
+            && self.takes_coerced(&to)
+        {
+            match &e.kind {
+                ExprKind::If { condition, then, otherwise: Some(o) } => {
+                    return self.if_expr(condition, then, Some(o), Tail::Value(want), e.loc).ts;
+                }
+                ExprKind::When(w) => return self.when(w, Tail::Value(want), e.loc).ts,
+                ExprKind::Paren(inner) => return self.value_want(inner, want),
+                _ => {}
+            }
+            let out = self.expr(e);
+            let from = out.ty.clone();
+            if self.coerces(&from, &to) {
+                let v = self.finish(out, Want { some: false, ..want }, e.loc);
+                let span = self.span(e.loc);
+                return self.coerce(v, &from, &to, span);
+            }
+            return self.finish(out, want, e.loc);
         }
         let out = self.expr(e);
         self.finish(out, want, e.loc)
@@ -347,7 +373,7 @@ impl Gen<'_, '_> {
             ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, e.loc),
             ExprKind::Infix { name, lhs, rhs } => self.infix(name, lhs, rhs, e.loc),
             ExprKind::Is { expr: inner, negated, ty } => self.is_check(inner, *negated, ty, e.loc),
-            ExprKind::As { expr: inner, safe, ty } => self.cast(inner, *safe, ty, e.loc),
+            ExprKind::As { expr: inner, safe, ty } => self.cast_expr(inner, *safe, ty, e.loc),
             ExprKind::If { condition, then, otherwise } => {
                 self.if_expr(condition, then, otherwise.as_ref(), Tail::Value(Want::default()), e.loc)
             }
@@ -408,11 +434,24 @@ impl Gen<'_, '_> {
         }
         let span = self.span(loc);
         let kt = self.kt(span);
+        // ((stage 14 WPA) `this is T` in an interface's or open class's member: the object's class)
+        if let ExprKind::This { label } = &inner.kind
+            && let Some(r) = self.receivers.iter().rev().find(|r| match label {
+                Some(l) => r.labels.contains(&l.name),
+                None => true,
+            })
+            && self.receiver_in_trait(r)
+        {
+            let r = r.clone();
+            let (_, target) = self.cast_target(ty, &r.value, span);
+            let ts = quote_spanned!(span=> #kt::kt_as_this::<#target, _>(self).is_some());
+            return Out::plain(if negated { quote_spanned!(span=> !#ts) } else { ts }, Ty::Bool);
+        }
         let o = self.expr(inner);
         let nullable_dyn =
             o.ty.is_nullable() && self.cast_operand_of(quote!(x), &o.ty.non_null(), span).to_string() != "x";
         let operand = self.cast_operand_of(o.ts, &o.ty, span);
-        let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, TypePos::Value);
+        let (_, target) = self.cast_target(ty, &o.ty, span);
         // ((stage 14 WPB) a nullable shared object, `Any?`: what it holds, null being none)
         let ts = if nullable_dyn {
             let v = self.fresh("o", span);
@@ -427,17 +466,32 @@ impl Gen<'_, '_> {
     /// `x as T` / `x as? T`: through kt's `KtAs` (a value of `T` itself, or a shared trait object's crate saying which
     /// concrete types its objects can be — an `Arc<dyn Shape>` as a `RoundedCornerShape`); `as T` a ClassCastException
     /// when it isn't one, `as? T` null then. A nullable target (`as T?`) is the safe cast's.
-    fn cast(&mut self, inner: &Expr, safe: bool, ty: &Type, loc: Loc) -> Out {
+    pub(crate) fn cast_expr(&mut self, inner: &Expr, safe: bool, ty: &Type, loc: Loc) -> Out {
         if let Some(out) = self.exception_cast(inner, safe, ty, loc) {
             return out;
         }
         let span = self.span(loc);
         let kt = self.kt(span);
+        // ((stage 14 WPA) `this as T` in an interface's or open class's member: the object's class)
+        if let ExprKind::This { label } = &inner.kind
+            && let Some(r) = self.receivers.iter().rev().find(|r| match label {
+                Some(l) => r.labels.contains(&l.name),
+                None => true,
+            })
+            && self.receiver_in_trait(r)
+        {
+            let r = r.clone();
+            let (base, target) = self.cast_target(ty, &r.value, span);
+            let ts = quote_spanned!(span=> #kt::kt_as_this::<#target, _>(self));
+            return if safe || ty.nullable {
+                Out::plain(ts, base.nullable())
+            } else {
+                Out::plain(quote_spanned!(span=> #kt::not_null(#ts)), base)
+            };
+        }
         let o = self.expr(inner);
         let operand = self.cast_operand_of(o.ts, &o.ty, span);
-        let target_ty = Type { nullable: false, ..ty.clone() };
-        let target = self.rust_type(&target_ty, TypePos::Value);
-        let base = self.ty_of(&target_ty);
+        let (base, target) = self.cast_target(ty, &o.ty, span);
         // ((stage 14 WPB) a nullable shared object, `Any?` (`equals(other: Any?)`'s): what it holds, if it holds one)
         if o.ty.is_nullable() && self.cast_operand_of(quote!(x), &o.ty.non_null(), span).to_string() != "x" {
             let v = self.fresh("o", span);
@@ -841,6 +895,7 @@ impl Gen<'_, '_> {
         if let Some(item) = pick
             && recv.ty.owner().is_none_or(|o| members_of(o, &name.name).next().is_none())
         {
+            self.record_item(name.loc, item);
             let kt = self.kt(span);
             let t = proc_macro2::Ident::new(item.via, mspan);
             let m = ident(item.rust, mspan);
@@ -873,15 +928,19 @@ impl Gen<'_, '_> {
         {
             return self.extension_property_read(recv, &r, item, loc);
         }
-        let (rust, ty, by_value) =
-            match recv.ty.owner().and_then(|o| members_of(o, &name.name).find(|i| i.params.is_empty())) {
-                Some(item) => (
-                    item.rust.to_string(),
-                    owner_arg_ret(&recv.ty, item.ret),
-                    item.receiver == crate::index::Receiver::Value,
-                ),
-                None => (snake(&name.name), Ty::Unknown, false),
-            };
+        let found = recv.ty.owner().and_then(|o| members_of(o, &name.name).find(|i| i.params.is_empty()));
+        // ((WPA-rest) for the analysis: the property read, the crate's own class's declaration or the API's item)
+        if let Some(item) = found {
+            self.record_item(name.loc, item);
+        }
+        let (rust, ty, by_value) = match found {
+            Some(item) => (
+                item.rust.to_string(),
+                owner_arg_ret(&recv.ty, item.ret),
+                item.receiver == crate::index::Receiver::Value,
+            ),
+            None => (snake(&name.name), Ty::Unknown, false),
+        };
         let r = if by_value && recv.kind == OutKind::Local {
             let ts = recv.ts;
             quote_spanned!(span=> ::core::clone::Clone::clone(&#ts))
@@ -1127,6 +1186,34 @@ impl Gen<'_, '_> {
         let span = self.span(loc);
         let kt = self.kt(span);
         match op {
+            // ((WPA-rest) Kotlin's smart cast in a chain: `other is Money && other.cents == cents` (`x != null && …`
+            // too), `x !is T || …` — what the left side tells of a local (or of `this`) is so on the right)
+            BinaryOp::And if super::stmt::has_null_check(lhs) => {
+                self.push_scope();
+                let receivers = self.receivers.len();
+                let c = self.condition(lhs);
+                let b = self.value(rhs);
+                let c = super::stmt::unused_narrowings(c, &b);
+                self.receivers.truncate(receivers);
+                self.pop_scope();
+                Out::plain(quote_spanned!(span=> (if #c { #b } else { false })), Ty::Bool)
+            }
+            BinaryOp::Or
+                if matches!(&lhs.kind, ExprKind::Is { negated: true, expr, .. }
+                    if matches!(&expr.kind, ExprKind::Name(_) | ExprKind::This { .. })) =>
+            {
+                let ExprKind::Is { expr, ty, .. } = &lhs.kind else { unreachable!() };
+                let positive =
+                    Expr { kind: ExprKind::Is { expr: expr.clone(), negated: false, ty: ty.clone() }, loc: lhs.loc };
+                self.push_scope();
+                let receivers = self.receivers.len();
+                let c = self.condition(&positive);
+                let b = self.value(rhs);
+                let c = super::stmt::unused_narrowings(c, &b);
+                self.receivers.truncate(receivers);
+                self.pop_scope();
+                Out::plain(quote_spanned!(span=> (if #c { #b } else { true })), Ty::Bool)
+            }
             BinaryOp::Or | BinaryOp::And => {
                 let (a, b) = (self.value(lhs), self.value(rhs));
                 let ts =
@@ -1309,7 +1396,7 @@ impl Gen<'_, '_> {
         let ts = match kind {
             OutKind::StrLit | OutKind::IntLit => return o,
             OutKind::Local if !value => o.ts,
-            _ => self.finish(o, Want { str_ok: true, any: None, some: false, shared: None }, e.loc),
+            _ => self.finish(o, Want { str_ok: true, any: None, some: false, shared: None, result: false }, e.loc),
         };
         match wider {
             Some(w) if w != ty && ty.is_number() => {

@@ -9,6 +9,7 @@
 //! | `open class B(…)` | the same, and the class itself: `pub struct B` (an object of it, a subclass of `BOpen` adding nothing), its constructor `B(…)` |
 //! | `class C(…) : B(args), I` | the class (its shape: data, plain, object, enum) holding `__kz_super: BBase`, its initializer calling `BOpen::__kz_b_init(self, args)` first; `impl BOpen for C`, `impl I for C`, … (each supertype above it): what it overrides its own members (`C::f(self)`), what a class between overrides that class's hidden body, the rest the traits' defaults |
 //! | `sealed class S { data object A : S(); data class B(…) : S() }` (or `sealed interface`) | `pub enum S { A(SA), B(SB), … }` of its subclasses (nested and the file's), `From` each, `KtAs` each (`is`/`as`), `==` with each; its members (`SOpen`) and interfaces the enum's too, through the case it holds; `when (s) { is S.A -> … }` a `match` |
+//! | `sealed class Outcome<out T> { data class Done<out T>(val value: T) : Outcome<T>(); object Loading : Outcome<Nothing>() }` | `pub enum Outcome<T> { Done(OutcomeDone<T>), Loading(OutcomeLoading) }` (its state, `OutcomeBase`, of none of `T`'s values); a case of `Nothing` one type in every `Outcome<T>` (`impl<T> From<OutcomeLoading> for Outcome<T>`, its traits implemented for every argument: `impl<__KzN0> OutcomeOpen<__KzN0> for OutcomeLoading`), Kotlin's `Nothing` elsewhere `kt::KtNothing`; `when`/`is` give the case of the value's arguments (`OutcomeDone<i32>` of an `Outcome<Int>`); `this is Done` in a member the receiver smart-cast (`kt::kt_as_this`) |
 //! | `class V : ViewModel()` (an API base: a trait with a doc line ``Kotlin: `abstract class ViewModel` ``) | `impl ViewModel for V`: its state (`view_model_impl`: a `ViewModelImpl` the object holds, made of the super constructor's arguments), its overrides (`onCleared`), its `new_instance` (Kotlin's reflective constructor: none, or a `SavedStateHandle`), `ViewModelRef` (`viewModel<V>()` gives the handle) |
 //! | `class P : Greeting()` (a Rust trait of the crate with a doc line ``Kotlin: `open class Greeting` ``) | `impl Greeting for P`, its overrides |
 //!
@@ -27,6 +28,17 @@ use crate::pos::Loc;
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 use std::collections::HashMap;
+
+/// How a case of a generic sealed class (`data class Success<out T>(val data: T) : Outcome<T>()`, `object Loading :
+/// Outcome<Nothing>()`) takes the class's type arguments.
+#[derive(Clone, Debug)]
+pub(crate) struct CaseMap {
+    /// The case's type arguments in the sealed class's type parameters (`Success<T>` of `Outcome<T>`).
+    pub case_args: Vec<Type>,
+    /// Each type argument of the sealed class the case fixes (`IntCase : S<Int>`); none: any (`Nothing`, or one of
+    /// the case's type parameters).
+    pub fixed: Vec<Option<Type>>,
+}
 
 /// What may derive from a class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,12 +294,30 @@ impl Gen<'_, '_> {
             SuperKind::Api(n) => n.clone(),
         };
         let i = ident(&name, span);
-        let args: Vec<TokenStream> = a.args.iter().map(|t| self.rust_type(t, TypePos::Value)).collect();
+        let args: Vec<TokenStream> = a.args.iter().map(|t| self.type_arg(t)).collect();
+        // ((WPA-rest) a base of the second kind's trait of no type parameters, `NavTypeImpl`: Kotlin's `T` its
+        // associated type's)
+        let args = match &a.kind {
+            SuperKind::Base(b) if !b.value.is_empty() && index::generics(b.rust).is_none_or(|g| g.is_empty()) => {
+                Vec::new()
+            }
+            _ => args,
+        };
         match (args.is_empty(), turbofish) {
             (true, _) => quote_spanned!(span=> #i),
             (false, false) => quote_spanned!(span=> #i<#(#args),*>),
             (false, true) => quote_spanned!(span=> #i::<#(#args),*>),
         }
+    }
+
+    /// A type argument's Rust (`Nothing`: kt's `KtNothing`, `!` being unstable there).
+    pub(crate) fn type_arg(&mut self, t: &Type) -> TokenStream {
+        if is_nothing(t) {
+            let span = self.span(t.loc);
+            let kt = self.kt(span);
+            return quote_spanned!(span=> #kt::KtNothing);
+        }
+        self.rust_type(t, TypePos::Value)
     }
 
     /// The user's trait an ancestor is (an interface's, a class's members'), with its declaration.
@@ -326,6 +356,12 @@ impl Gen<'_, '_> {
             Some(r) => self.ancestor_trait(&r, true, span),
             None => quote_spanned!(span=> ::core::unreachable),
         }
+    }
+
+    /// Whether an open, abstract or sealed class's state (`XBase`) has its type parameters: a sealed class's hasn't
+    /// (its cases' `Nothing` arguments hold it whatever the type arguments are).
+    pub(crate) fn base_generic(&self, rust: &str) -> bool {
+        self.user_class_rust(rust).is_some_and(|c| !c.type_params.is_empty() && c.inherit != Inherit::Sealed)
     }
 
     /// Whether a user's trait is a root (no user's trait above it: it declares the hidden methods).
@@ -685,7 +721,12 @@ impl Gen<'_, '_> {
         let ret_ty = Ty::from_rust(&ret_text);
         let unit = ret_ty == Ty::Unit;
         let suspend = f.is_suspend();
-        self.fun = FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+        self.fun = FnState {
+            kompozable: false,
+            nullable_result: ret_ty.is_nullable(),
+            shared_result: None,
+            result: Some(ret_ty.clone()),
+        };
         self.enter_member(cx, &f.name.name, true);
         self.in_async = suspend;
         self.inline_async = false;
@@ -700,7 +741,7 @@ impl Gen<'_, '_> {
                 quote!(#s;)
             }
             Some(FunctionBody::Expr(e)) => {
-                let want = super::expr::Want { some: ret_ty.is_nullable(), ..Default::default() };
+                let want = super::expr::Want { some: ret_ty.is_nullable(), result: true, ..Default::default() };
                 self.value_want(e, want)
             }
             None => quote!(),
@@ -955,6 +996,9 @@ impl Gen<'_, '_> {
         if ancestors.is_empty() {
             return quote!();
         }
+        // (a supertype's `Nothing` argument, `Outcome<Nothing>` of a generic sealed class's case: any type, a type
+        // parameter of the impl's own — Kotlin's `out T` makes the case each `Outcome<T>`)
+        let (ancestors, nothings) = nothing_params(ancestors, d.info_loc());
         let chain = self.class_chain(d);
         // (`I by value`: the interfaces each delegated one is, and its field)
         let mut delegated: Vec<(SuperKind, TokenStream)> = Vec::new();
@@ -986,6 +1030,7 @@ impl Gen<'_, '_> {
             if place == Place::Enum { quote_spanned!(span=> *self) } else { quote_spanned!(span=> self) }
         };
         let casts = self.casts(d, &ancestors, span);
+        let casts = if casts.is_empty() { quote_spanned!(span=> let _ = to;) } else { casts };
         let mut out = TokenStream::new();
         for a in &ancestors {
             let tr = self.ancestor_trait(a, false, span);
@@ -1002,9 +1047,12 @@ impl Gen<'_, '_> {
                     {
                         let acc = ident(&format!("__kz_{}", type_snake(r)), span);
                         let base = ident(&format!("{r}Base"), span);
-                        let bargs: Vec<TokenStream> =
-                            a.args.iter().map(|t| self.rust_type(t, TypePos::Value)).collect();
-                        let bg = if bargs.is_empty() { quote!() } else { quote_spanned!(span=> <#(#bargs),*>) };
+                        let bargs: Vec<TokenStream> = a.args.iter().map(|t| self.type_arg(t)).collect();
+                        let bg = if bargs.is_empty() || !self.base_generic(r) {
+                            quote!()
+                        } else {
+                            quote_spanned!(span=> <#(#bargs),*>)
+                        };
                         let path = base_path(place, depth, span);
                         items.push(quote_spanned!(span=> fn #acc(&self) -> &#base #bg { #path }));
                     }
@@ -1085,6 +1133,12 @@ impl Gen<'_, '_> {
                         });
                     }
                 }
+                // ((WPA-rest) of the second kind, `object WrappedUUIDNavType : NavType<WrappedUUID>(…)`: `callbacks`)
+                SuperKind::Base(b) if !b.value.is_empty() => {
+                    let (its, from) = self.callbacks_class_items(d, *b, &a.args, place, span);
+                    items.extend(its);
+                    out.extend(from);
+                }
                 SuperKind::Base(b) => {
                     items.extend(self.base_items(d, *b, place, &chain, &own_members, span));
                 }
@@ -1092,9 +1146,10 @@ impl Gen<'_, '_> {
                     items.extend(self.api_overrides(d, t, place, &own_members, span));
                 }
             }
+            let g_impl = with_params(g_decl, &nothings[&ancestor_key(a)], span);
             out.extend(quote_spanned! {span=>
                 #allow
-                impl #g_decl #tr for #name #g_use { #(#items)* }
+                impl #g_impl #tr for #name #g_use { #(#items)* }
             });
         }
         // (`==` of the class's value with a value of an interface it is: `shelf == EmptyShelf`)
@@ -1146,7 +1201,17 @@ impl Gen<'_, '_> {
                 SuperKind::Interface(_) => {}
                 SuperKind::Class(r) if self.user_class_rust(r).is_some_and(|c| c.is_dyn()) => {}
                 SuperKind::Class(r) if self.user_class_rust(r).is_some_and(|c| c.inherit == Inherit::Sealed) => {
-                    let s = ident(r, span);
+                    // (a generic one's of the arguments the case gives it; none where it is any (`Nothing`))
+                    if a.args.iter().any(|t| t.simple_name().is_some_and(|n| n.starts_with("__KzN"))) {
+                        continue;
+                    }
+                    let i = ident(r, span);
+                    let targs: Vec<TokenStream> = a.args.iter().map(|t| self.type_arg(t)).collect();
+                    let s = if targs.is_empty() {
+                        quote_spanned!(span=> #i)
+                    } else {
+                        quote_spanned!(span=> #i<#(#targs),*>)
+                    };
                     out.extend(quote_spanned! {span=>
                         if to == ::core::any::TypeId::of::<#s>() {
                             return ::core::option::Option::Some(::std::boxed::Box::new(<#s as ::core::convert::From<Self>>::from(::core::clone::Clone::clone(self))));
@@ -1302,9 +1367,12 @@ impl Gen<'_, '_> {
                     return None;
                 }
                 let base = ident(&format!("{r}Base"), span);
-                let args: Vec<TokenStream> =
-                    type_args_of(&s.ty).iter().map(|t| self.rust_type(t, TypePos::Value)).collect();
-                let g = if args.is_empty() { quote!() } else { quote_spanned!(span=> <#(#args),*>) };
+                let args: Vec<TokenStream> = type_args_of(&s.ty).iter().map(|t| self.type_arg(t)).collect();
+                let g = if args.is_empty() || !self.base_generic(r) {
+                    quote!()
+                } else {
+                    quote_spanned!(span=> <#(#args),*>)
+                };
                 Some(if place == Place::Data {
                     (
                         quote_spanned!(span=> #[doc(hidden)] pub __kz_super: ::std::rc::Rc<#base #g>),
@@ -1362,21 +1430,41 @@ impl Gen<'_, '_> {
                 // (a secondary constructor the arguments are of, when the primary one's parameters aren't: its
                 // parameters bound to them, the primary one called with its delegation's arguments)
                 let required = params.iter().filter(|p| p.default.is_none()).count();
-                let fits = args.len() >= required && args.len() <= params.len();
+                // ((WPA-rest) Kotlin's overload by the arguments' types too: `Labeled(n)` of an `Int` the secondary
+                // `constructor(n: Int)`, not the primary `(text: String)`)
+                let typed = |me: &Self, ps: &[Param]| {
+                    args.iter().zip(ps).all(|(a, p)| {
+                        let (given, taken) =
+                            (me.peek_ty(&a.value), p.ty.as_ref().map(|t| me.ty_of(&substitute(t, &binds))));
+                        match taken {
+                            Some(t) if a.name.is_none() && given != Ty::Unknown && t != Ty::Unknown => {
+                                given.non_null() == t.non_null() || !(given.is_number() || given == Ty::String)
+                            }
+                            _ => true,
+                        }
+                    })
+                };
+                let fits = args.len() >= required && args.len() <= params.len() && typed(self, &params);
                 let secondary = members_of_ast(&sd.ast).iter().find_map(|m| match m {
                     Member::Constructor(c)
                         if !fits
                             && c.params.len() == args.len()
-                            && c.delegation.as_ref().is_some_and(|d| !d.to_super) =>
+                            && c.delegation.as_ref().is_some_and(|d| !d.to_super)
+                            && typed(self, &c.params) =>
                     {
                         Some(c.clone())
                     }
                     _ => None,
                 });
+                // ((WPA-rest) its body run after the primary one's initializer, the object `self`)
+                let by_self = this.to_string() == "self";
+                let mut body = quote!();
                 let (lets, values) = match secondary {
                     Some(c) => {
-                        if let Some(b) = &c.body {
-                            self.later(b.loc, "a secondary constructor's body run by a subclass's super call");
+                        if let Some(b) = &c.body
+                            && !by_self
+                        {
+                            self.later(b.loc, "a secondary constructor's body run by a data class's super call");
                         }
                         let given = self.super_args(&c.params, &args, &binds, s.loc);
                         self.push_scope();
@@ -1394,6 +1482,12 @@ impl Gen<'_, '_> {
                         }
                         let dargs = c.delegation.as_ref().map(|d| d.args.clone()).unwrap_or_default();
                         let values = self.super_args(&params, &dargs, &binds, s.loc);
+                        if let Some(b) = &c.body
+                            && by_self
+                        {
+                            let inner = self.block_inner(b, super::stmt::Tail::Unit);
+                            body = quote_spanned!(span=> #inner);
+                        }
                         self.pop_scope();
                         (lets, values)
                     }
@@ -1405,7 +1499,7 @@ impl Gen<'_, '_> {
                 if lets.is_empty() {
                     quote_spanned!(span=> #tr::#init(#this, #(#values),*);)
                 } else {
-                    quote_spanned!(span=> { #(#lets)* #tr::#init(#this, #(#values),*); })
+                    quote_spanned!(span=> { #(#lets)* #tr::#init(#this, #(#values),*); #body })
                 }
             }
             SuperKind::Base(b) => {
@@ -1466,14 +1560,18 @@ impl Gen<'_, '_> {
     /// objects; a sealed one's enum of its cases).
     pub(crate) fn open_class(&mut self, d: &ClassDecl) -> TokenStream {
         let ClassAst::Class(c) = &d.ast else { return quote!() };
+        // (a generic sealed class's state is its cases' whatever their type arguments: none of its type parameters'
+        // values in it)
         if d.info.inherit == Inherit::Sealed
-            && let Some(t) = c.type_params.first()
+            && !c.type_params.is_empty()
+            && let Some(loc) = sealed_state_typed(c)
         {
-            return self.later(t.loc, "a generic sealed class (its cases' `Nothing`, `out T`)");
+            return self.later(loc, "a generic sealed class holding its type parameter's values in its own properties");
         }
-        // ((stage 14 WPB) an exception class others derive from: not yet, see `exceptions`)
-        if self.exception_super(c).is_some() {
-            return self.later(c.name.loc, "an open, abstract or sealed class deriving from an exception class");
+        // ((WPA-rest) an exception class others derive from: its state holds the exception's message and cause, its
+        // trait has them; a sealed one's not yet)
+        if self.exception_super(c).is_some() && d.info.inherit == Inherit::Sealed {
+            return self.later(c.name.loc, "a sealed class deriving from an exception class");
         }
         let c = (**c).clone();
         let info = d.info.clone();
@@ -1487,9 +1585,15 @@ impl Gen<'_, '_> {
         let tname = ident(&trait_name, self.span(c.name.loc));
         let base = ident(&format!("{}Base", info.rust), span);
         let (g_decl, g_use, g_struct) = self.class_generics(d, span);
+        let g_base = if self.base_generic(&info.rust) { g_use.clone() } else { quote!() };
+        let g_struct = if self.base_generic(&info.rust) { g_struct } else { quote!() };
         let wc = {
             let ctor: Vec<ConstructorParam> = c.primary_constructor.iter().flat_map(|p| p.params.clone()).collect();
-            let uses = super::generics::Uses::of_class(&c.body.members, &ctor, info.shape == Shape::Data);
+            let uses = if info.inherit == Inherit::Sealed {
+                self.sealed_uses(&info.rust)
+            } else {
+                super::generics::Uses::of_class(&c.body.members, &ctor, info.shape == Shape::Data)
+            };
             let bounds = self.type_param_bounds(&c.type_params, &uses, false, span);
             if bounds.is_empty() { quote!() } else { quote_spanned!(span=> where #(#bounds),*) }
         };
@@ -1528,12 +1632,27 @@ impl Gen<'_, '_> {
             fields.push(f);
             empties.push(e);
         }
+        let exception_base = self.exception_super(&c).is_some();
+        if exception_base {
+            fields.push(quote_spanned!(span=> #[doc(hidden)] pub __kz_exception: #kt::KtVal<#kt::Throwable>));
+            empties.push(quote_spanned!(span=> __kz_exception: #kt::KtVal::new()));
+            items.push(quote_spanned! {span=>
+                /// Kotlin's `message`.
+                fn message(&self) -> ::core::option::Option<::std::string::String> {
+                    #state.__kz_exception.with(|e| e.message())
+                }
+                /// Kotlin's `cause`.
+                fn cause(&self) -> ::core::option::Option<#kt::Throwable> {
+                    #state.__kz_exception.with(|e| e.cause())
+                }
+            });
+        }
         let root = self.is_root(d);
         if root && !supertraits.iter().any(|t| t.to_string().contains("KtObject")) {
             supertraits.push(quote_spanned!(span=> #kt::KtObject));
         }
         if !sealed_interface {
-            items.push(quote_spanned!(span=> #[doc(hidden)] fn #acc(&self) -> &#base #g_use;));
+            items.push(quote_spanned!(span=> #[doc(hidden)] fn #acc(&self) -> &#base #g_base;));
         }
         // (its constructor's parameters: the initializer's, its properties the state's)
         self.fun = FnState::default();
@@ -1632,13 +1751,22 @@ impl Gen<'_, '_> {
                             s.loc,
                             "a secondary constructor of an open, abstract or sealed class not delegating to `this(…)`",
                         );
-                    } else if s.body.is_some() && info.inherit != Inherit::Open {
-                        self.later(s.loc, "a secondary constructor with a body of an abstract or sealed class");
+                    } else if s.body.is_some() && info.inherit == Inherit::Sealed {
+                        self.later(s.loc, "a secondary constructor with a body of a sealed class");
                     }
                 }
             }
         }
         let super_init = self.super_init(d, quote_spanned!(span=> self), Place::Trait, span);
+        // ((WPA-rest) an exception class's: the message and cause its standard class is given, first)
+        if let Some((std, args)) = self.exception_super(&c) {
+            let args = args.to_vec();
+            let ctor = Ident { name: std, backticked: false, loc: c.loc };
+            if let Some(made) = self.exception_constructor(&ctor, &args, c.loc) {
+                let m = made.ts;
+                init.insert(0, quote_spanned!(span=> #state.__kz_exception.init(#m);));
+            }
+        }
         let lets = self.member_lets(&cx, span);
         let init_fn = ident(&format!("__kz_{}_init", type_snake(&info.rust)), span);
         if !sealed_interface {
@@ -1673,7 +1801,7 @@ impl Gen<'_, '_> {
                 #[doc(hidden)]
                 #vis struct #base #g_struct { #(#fields),* }
                 #allow
-                impl #g_use #base #g_use {
+                impl #g_struct #base #g_struct {
                     #[doc(hidden)]
                     pub fn __kz_empty() -> Self { #base { #(#empties),* } }
                 }
@@ -1856,21 +1984,71 @@ impl Gen<'_, '_> {
         let name = ident(&info.rust, span);
         let allow = super::class::class_allow(span);
         let cases = self.sealed_cases(&info.rust);
+        // (a generic one's (`sealed class Outcome<out T>`): its type parameters the enum's, bounded by what its
+        // cases need of the arguments they take (`Success<T>`'s `data` shown, compared); each case's type the enum's
+        // arguments it takes, a case of a `Nothing` argument one type in every `Outcome<T>`)
+        let tps: Vec<TypeParam> = match &d.ast {
+            ClassAst::Class(c) => c.type_params.clone(),
+            ClassAst::Object(_) => Vec::new(),
+        };
+        let pnames: Vec<String> = tps.iter().map(|p| p.name.name.clone()).collect();
+        let maps: Vec<Option<CaseMap>> = cases.iter().map(|(_, c)| self.sealed_case_map(c, &info.rust)).collect();
+        let uses = self.sealed_uses(&info.rust);
+        let bounds = self.type_param_bounds(&tps, &uses, false, span);
+        let g_decl = if bounds.is_empty() { quote!() } else { quote_spanned!(span=> <#(#bounds),*>) };
+        let g_use = generic_use(&tps, span);
+        let mut used: Vec<String> = Vec::new();
         let mut variants = Vec::new();
         let mut impls = Vec::new();
         let mut writes = Vec::new();
-        for (v, case) in &cases {
+        for ((v, case), m) in cases.iter().zip(&maps) {
             let vi = ident(v, span);
-            let ci = ident(case, span);
+            let Some(m) = m else {
+                let loc = self.decl_of(case).map(|c| c.info_loc()).unwrap_or_default();
+                self.later(
+                    loc,
+                    "a case of a generic sealed class whose type parameters aren't the sealed class's arguments as they are",
+                );
+                continue;
+            };
+            for t in &m.case_args {
+                if let Some(n) = t.simple_name() {
+                    used.push(n);
+                }
+            }
+            let ci = {
+                let i = ident(case, span);
+                let a: Vec<TokenStream> = m.case_args.iter().map(|t| self.rust_type(t, TypePos::Value)).collect();
+                if a.is_empty() { quote_spanned!(span=> #i) } else { quote_spanned!(span=> #i<#(#a),*>) }
+            };
+            // (its `From`: into the enum of the arguments it fixes, any for the others)
+            let (from_decl, from_target) = if tps.is_empty() {
+                (quote!(), quote_spanned!(span=> #name))
+            } else {
+                let mut decl = Vec::new();
+                let mut target = Vec::new();
+                for (k, p) in tps.iter().enumerate() {
+                    match &m.fixed[k] {
+                        Some(t) => target.push(self.rust_type(t, TypePos::Value)),
+                        None => {
+                            decl.push(bounds[k].clone());
+                            let i = ident(&p.name.name, span);
+                            target.push(quote_spanned!(span=> #i));
+                        }
+                    }
+                }
+                let decl = if decl.is_empty() { quote!() } else { quote_spanned!(span=> <#(#decl),*>) };
+                (decl, quote_spanned!(span=> #name<#(#target),*>))
+            };
             variants.push(quote_spanned!(span=> #vi(#ci)));
             writes.push(quote_spanned!(span=> #name::#vi(v) => #kt::KtToString::kt_write(v, __kz_out)));
             impls.push(quote_spanned! {span=>
                 #allow
-                impl ::core::convert::From<#ci> for #name {
-                    fn from(value: #ci) -> #name { #name::#vi(value) }
+                impl #from_decl ::core::convert::From<#ci> for #from_target {
+                    fn from(value: #ci) -> #from_target { #name::#vi(value) }
                 }
                 #allow
-                impl #kt::KtAs<#ci> for #name {
+                impl #g_decl #kt::KtAs<#ci> for #name #g_use {
                     fn kt_as_safe(&self) -> ::core::option::Option<#ci> {
                         match self {
                             #name::#vi(v) => ::core::option::Option::Some(::core::clone::Clone::clone(v)),
@@ -1880,21 +2058,36 @@ impl Gen<'_, '_> {
                     }
                 }
                 #allow
-                impl ::core::cmp::PartialEq<#ci> for #name {
+                impl #g_decl ::core::cmp::PartialEq<#ci> for #name #g_use {
                     fn eq(&self, other: &#ci) -> bool {
                         #[allow(unreachable_patterns)]
                         match self { #name::#vi(v) => v == other, _ => false }
                     }
                 }
                 #allow
-                impl ::core::cmp::PartialEq<#name> for #ci {
-                    fn eq(&self, other: &#name) -> bool { other == self }
+                impl #g_decl ::core::cmp::PartialEq<#name #g_use> for #ci {
+                    fn eq(&self, other: &#name #g_use) -> bool { other == self }
                 }
             });
         }
+        let cases: Vec<(String, String)> =
+            cases.into_iter().zip(&maps).filter(|(_, m)| m.is_some()).map(|(c, _)| c).collect();
+        // (a type parameter no case takes: a variant holding none (`Infallible`), the parameter its own)
+        let unused: Vec<proc_macro2::Ident> =
+            pnames.iter().filter(|p| !used.contains(p)).map(|p| ident(p, span)).collect();
+        let phantom = if unused.is_empty() {
+            quote!()
+        } else {
+            variants.push(quote_spanned! {span=>
+                #[doc(hidden)]
+                __KzOf(::core::marker::PhantomData<(#(#unused,)*)>, ::core::convert::Infallible)
+            });
+            quote_spanned!(span=> #name::__KzOf(_, never) => match *never {},)
+        };
         // (its members and interfaces: through the case it holds)
         let mut delegations = TokenStream::new();
-        let mut traits: Vec<Ancestor> = vec![Ancestor { kind: SuperKind::Class(info.rust.clone()), args: Vec::new() }];
+        let own_args: Vec<Type> = pnames.iter().map(|p| named_type(p, Loc::default())).collect();
+        let mut traits: Vec<Ancestor> = vec![Ancestor { kind: SuperKind::Class(info.rust.clone()), args: own_args }];
         traits.extend(self.ancestors(d));
         for a in &traits {
             let Some(ad) = self.ancestor_decl(a) else { continue };
@@ -1938,10 +2131,12 @@ impl Gen<'_, '_> {
                 let vs = ident_list(&cases, span);
                 let body = match s.rust.as_str() {
                     "__kz_eq" => quote_spanned!(span=> other.downcast_ref::<Self>().is_some_and(|o| o == self)
-                        || match self { #(#name::#vs(v) => #trp::__kz_eq(v, other)),* }),
+                        || match self { #(#name::#vs(v) => #trp::__kz_eq(v, other),)* #phantom }),
                     "__kz_write" => quote_spanned!(span=> #kt::KtToString::kt_write(self, __kz_out)),
-                    "__kz_cast" => quote_spanned!(span=> match self { #(#name::#vs(v) => #trp::__kz_cast(v, to)),* }),
-                    _ => quote_spanned!(span=> match self { #(#arms),* }),
+                    "__kz_cast" => {
+                        quote_spanned!(span=> match self { #(#name::#vs(v) => #trp::__kz_cast(v, to),)* #phantom })
+                    }
+                    _ => quote_spanned!(span=> match self { #(#arms,)* #phantom }),
                 };
                 items.push(quote_spanned!(span=> fn #m(&self, #ps) #ret { #body }));
             }
@@ -1953,7 +2148,7 @@ impl Gen<'_, '_> {
             }
             delegations.extend(quote_spanned! {span=>
                 #allow
-                impl #tr for #name { #(#items)* }
+                impl #g_decl #tr for #name #g_use { #(#items)* }
             });
         }
         let companion = match &info.companion {
@@ -1961,7 +2156,7 @@ impl Gen<'_, '_> {
                 let ci = ident(cc, span);
                 quote_spanned! {span=>
                     #allow
-                    impl #name {
+                    impl #g_decl #name #g_use {
                         #[allow(non_upper_case_globals)]
                         pub const Companion: #ci = #ci {};
                     }
@@ -1970,25 +2165,47 @@ impl Gen<'_, '_> {
             None => quote!(),
         };
         let none = if cases.is_empty() { quote_spanned!(span=> _ => {}) } else { quote!() };
+        // (a generic one's `==` bounded as its cases' are: a derive's would only ask `T: PartialEq`)
+        let (derive, eq) = if tps.is_empty() {
+            (quote_spanned!(span=> #[derive(::core::clone::Clone, ::core::cmp::PartialEq)]), quote!())
+        } else {
+            let vs = ident_list(&cases, span);
+            (
+                quote_spanned!(span=> #[derive(::core::clone::Clone)]),
+                quote_spanned! {span=>
+                    #allow
+                    impl #g_decl ::core::cmp::PartialEq for #name #g_use {
+                        fn eq(&self, other: &Self) -> bool {
+                            #[allow(unreachable_patterns)]
+                            match (self, other) {
+                                #((#name::#vs(a), #name::#vs(b)) => a == b,)*
+                                _ => false,
+                            }
+                        }
+                    }
+                },
+            )
+        };
         quote_spanned! {span=>
             #allow
-            #[derive(::core::clone::Clone, ::core::cmp::PartialEq)]
-            #vis enum #name { #(#variants),* }
+            #derive
+            #vis enum #name #g_use { #(#variants),* }
+            #eq
             #(#impls)*
             #allow
-            impl #kt::KtToString for #name {
+            impl #g_decl #kt::KtToString for #name #g_use {
                 fn kt_write(&self, __kz_out: &mut ::std::string::String) {
-                    match self { #(#writes,)* #none }
+                    match self { #(#writes,)* #phantom #none }
                 }
             }
             #allow
-            impl ::core::fmt::Display for #name {
+            impl #g_decl ::core::fmt::Display for #name #g_use {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
             #allow
-            impl ::core::fmt::Debug for #name {
+            impl #g_decl ::core::fmt::Debug for #name #g_use {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
@@ -2032,6 +2249,192 @@ impl Gen<'_, '_> {
         out
     }
 
+    /// How a case of a generic sealed class takes the class's type arguments (see [`CaseMap`]); none where the
+    /// case's own type parameters aren't arguments of it as they are (`Pair<A> : S<List<A>>`).
+    pub(crate) fn sealed_case_map(&self, case: &str, sealed: &str) -> Option<CaseMap> {
+        let cd = self.decl_of(case)?;
+        let sd = self.decl_of(sealed)?;
+        let a = self.ancestors(&cd).into_iter().find(|a| a.kind == SuperKind::Class(sealed.to_string()))?;
+        let cq: Vec<&str> = cd.info.type_params.iter().map(String::as_str).collect();
+        let mut map: HashMap<String, Type> = HashMap::new();
+        let mut fixed = vec![None; sd.info.type_params.len()];
+        for (i, p) in sd.info.type_params.iter().enumerate() {
+            let arg = a.args.get(i)?;
+            if is_nothing(arg) {
+                continue;
+            }
+            if let Some(n) = arg.simple_name().filter(|n| cq.contains(&n.as_str()) && !arg.nullable) {
+                map.insert(n, named_type(p, arg.loc));
+                continue;
+            }
+            if type_mentions(arg, &cq) {
+                return None;
+            }
+            fixed[i] = Some(arg.clone());
+        }
+        let case_args = cq.iter().map(|q| map.get(*q).cloned()).collect::<Option<Vec<Type>>>()?;
+        Some(CaseMap { case_args, fixed })
+    }
+
+    /// What a generic sealed class's values need of its type parameters: its members' uses and its cases' of the
+    /// arguments they take (`Success<T>`'s `data` shown and compared: a data class's).
+    pub(crate) fn sealed_uses(&self, sealed: &str) -> super::generics::Uses {
+        let mut uses = self.own_class_uses(sealed).map(|(_, u)| u).unwrap_or_default();
+        let pnames = self.decl_of(sealed).map(|d| d.info.type_params).unwrap_or_default();
+        for (_, case) in self.sealed_cases(sealed) {
+            let (Some(m), Some((cps, cu))) = (self.sealed_case_map(&case, sealed), self.own_class_uses(&case)) else {
+                continue;
+            };
+            for (q, t) in cps.iter().zip(&m.case_args) {
+                let Some(p) = t.simple_name().filter(|p| pnames.contains(p)) else { continue };
+                if cu.all || cu.shown.contains(q) {
+                    uses.shown.push(p.clone());
+                }
+                if cu.all || cu.compared.contains(q) {
+                    uses.compared.push(p);
+                }
+            }
+        }
+        uses
+    }
+
+    /// A case's type as a value of the sealed type `sealed` holds it (`is Outcome.Success` of an `Outcome<Int>`:
+    /// `Outcome.Success<Int>`); as it is otherwise.
+    pub(crate) fn case_ty_in(&self, case: &Ty, sealed: &Ty) -> Ty {
+        let (Ty::Named(c, cargs), Ty::Named(s, sargs)) = (case, sealed.non_null()) else { return case.clone() };
+        if sargs.is_empty() || !cargs.is_empty() {
+            return case.clone();
+        }
+        let Some(m) = self.sealed_case_map(c, &s) else { return case.clone() };
+        let Some(sd) = self.decl_of(&s) else { return case.clone() };
+        let args: Vec<Ty> = m
+            .case_args
+            .iter()
+            .map(|t| {
+                let n = t.simple_name().unwrap_or_default();
+                sd.info
+                    .type_params
+                    .iter()
+                    .position(|p| *p == n)
+                    .and_then(|k| sargs.get(k).cloned())
+                    .unwrap_or(Ty::Unknown)
+            })
+            .collect();
+        Ty::Named(c.clone(), args)
+    }
+
+    /// The sealed class's type a value's type is (`Outcome<Int>`), or whose members' trait it is (`OutcomeOpen<T>`:
+    /// `this` in a sealed class's member).
+    pub(crate) fn sealed_value_of(&self, ty: &Ty) -> Option<Ty> {
+        let Ty::Named(n, a) = ty.non_null() else { return None };
+        if let Some(c) = self.user_class_rust(&n)
+            && c.inherit == Inherit::Sealed
+            && c.shape != Shape::Companion
+        {
+            return Some(Ty::Named(n, a));
+        }
+        let c = self
+            .classes
+            .classes
+            .values()
+            .find(|c| c.inherit == Inherit::Sealed && c.members_trait().as_deref() == Some(n.as_str()))?;
+        Some(Ty::Named(c.rust.clone(), a))
+    }
+
+    /// The type an `is`/`as` of a value of type `of` checks for, and its Rust: a sealed class's case of the value's
+    /// type arguments (`is Success` of an `Outcome<Int>`: `OutcomeSuccess<i32>`), a generic class's arguments Rust's
+    /// inference where they aren't written; else as written.
+    pub(crate) fn cast_target(&mut self, ty: &Type, of: &Ty, span: Span) -> (Ty, TokenStream) {
+        let t = Type { nullable: false, ..ty.clone() };
+        let base = self.ty_of(&t);
+        if let Some(s) = self.sealed_value_of(of) {
+            let mapped = self.case_ty_in(&base, &s);
+            if let Ty::Named(_, a) = &mapped
+                && !a.is_empty()
+                && !a.contains(&Ty::Unknown)
+            {
+                let r = self.rust_of_ty(&mapped, span);
+                return (mapped, r);
+            }
+        }
+        if let Ty::Named(n, a) = &base
+            && a.is_empty()
+            && let Some(c) = self.user_class_rust(n)
+            && !c.type_params.is_empty()
+            && !c.is_dyn()
+        {
+            let i = ident(n, span);
+            let us = c.type_params.iter().map(|_| quote_spanned!(span=> _));
+            return (base.clone(), quote_spanned!(span=> #i<#(#us),*>));
+        }
+        (base, self.rust_type(&t, TypePos::Value))
+    }
+
+    /// Whether a receiver is `self` of a trait's provided method (an interface's or an open, abstract or sealed
+    /// class's members' trait: `Self` unsized there, the object's own class).
+    pub(crate) fn receiver_in_trait(&self, r: &ImplicitReceiver) -> bool {
+        r.rust == "self" && self.classes.classes.values().any(|c| c.members_trait().as_deref() == Some(r.ty.as_str()))
+    }
+
+    /// A receiver (`this`, `this@L`) as the operand of a cast: `self` as it is (a reference already; an enum
+    /// class's lent), another by reference.
+    pub(crate) fn receiver_operand(&self, r: &ImplicitReceiver, span: Span) -> TokenStream {
+        let i = ident(&r.rust, span);
+        let by_value_self = r.rust == "self" && self.user_class_rust(&r.ty).is_some_and(|c| c.shape == Shape::Enum);
+        if r.rust == "self" && !by_value_self { quote_spanned!(span=> #i) } else { quote_spanned!(span=> &#i) }
+    }
+
+    /// `this is T` as a condition (Kotlin's smart cast of the receiver): the receiver bound as a `T`
+    /// (`let Some(__kz_smart1) = …`), pushed as the innermost receiver for what the condition guards (its members,
+    /// then the others'); the caller drops it after. None where `this` is nothing here.
+    pub(crate) fn smart_this(&mut self, label: Option<&Ident>, ty: &Type, span: Span) -> Option<TokenStream> {
+        let r = self.receiver(label.map(|l| l.name.as_str()))?;
+        let (tty, target) = self.cast_target(ty, &r.value, span);
+        let Ty::Named(owner, _) = &tty else { return None };
+        let owner = owner.clone();
+        let kt = self.kt(span);
+        let n = self.fresh("smart", span);
+        let operand = self.receiver_operand(&r, span);
+        let ts = if self.receiver_in_trait(&r) {
+            quote_spanned!(span=> let ::core::option::Option::Some(#n) = #kt::kt_as_this::<#target, _>(#operand))
+        } else {
+            quote_spanned!(span=> let ::core::option::Option::Some(#n) = #kt::KtAs::<#target>::kt_as_safe(#operand))
+        };
+        self.push_smart_receiver(&r, n.to_string(), owner, tty);
+        Some(ts)
+    }
+
+    /// A receiver smart-cast (`this` of type `value` as the local `rust`): the innermost receiver, `this` and its
+    /// labels its.
+    pub(crate) fn push_smart_receiver(&mut self, r: &ImplicitReceiver, rust: String, owner: String, value: Ty) {
+        let depth = self.scopes.len().saturating_sub(1);
+        self.receivers.push(ImplicitReceiver {
+            rust,
+            ty: owner,
+            value,
+            labels: r.labels.clone(),
+            depth,
+            by_ref: false,
+            by_mut: false,
+            owned_used: Default::default(),
+        });
+    }
+
+    /// Whether a generic sealed class's enum has a variant of its own (a type parameter no case takes).
+    pub(crate) fn sealed_phantom(&self, sealed: &str) -> bool {
+        let Some(sd) = self.decl_of(sealed) else { return false };
+        if sd.info.type_params.is_empty() {
+            return false;
+        }
+        let used: Vec<String> = self
+            .sealed_cases(sealed)
+            .iter()
+            .filter_map(|(_, c)| self.sealed_case_map(c, sealed))
+            .flat_map(|m| m.case_args.into_iter().filter_map(|t| t.simple_name()))
+            .collect();
+        sd.info.type_params.iter().any(|p| !used.contains(p))
+    }
+
     /// The sealed class a user's type name is (its Rust name), if it is one.
     pub(crate) fn sealed_of(&self, ty: &Ty) -> Option<String> {
         let Ty::Named(n, _) = ty else { return None };
@@ -2045,21 +2448,51 @@ impl Gen<'_, '_> {
         let sty = self.peek_ty(&subject.expr);
         let sealed = self.sealed_of(&sty)?;
         let cases = self.sealed_cases(&sealed);
-        // (each branch one `is` of a case, a guard none; or `else`)
-        let mut plan = Vec::new();
+        // (each branch `is` of cases (one: the subject smart-cast) or an object case itself (`Outcome.Loading ->`), a
+        // guard none; or `else`)
+        let mut plan: Vec<Option<(Vec<String>, Option<Ty>)>> = Vec::new();
+        let mut covered: Vec<String> = Vec::new();
         for b in &w.branches {
             if b.is_else() {
                 plan.push(None);
                 continue;
             }
-            let ([WhenCondition::Is { negated: false, ty, .. }], None) = (b.conditions.as_slice(), &b.guard) else {
+            if b.guard.is_some() {
                 return None;
-            };
-            let t = self.ty_of(ty);
-            let Ty::Named(case, _) = &t else { return None };
-            let v = cases.iter().find(|(_, c)| c == case).map(|(v, _)| v.clone())?;
-            plan.push(Some((v, ty.clone(), t.clone())));
+            }
+            let mut variants = Vec::new();
+            let mut smart = None;
+            for c in &b.conditions {
+                let t = match c {
+                    WhenCondition::Is { negated: false, ty, .. } => self.ty_of(ty),
+                    WhenCondition::Expr(e) => {
+                        let t = self.peek_ty(e);
+                        let object = matches!(&t, Ty::Named(n, _)
+                            if self.user_class_rust(n).is_some_and(|c| c.shape == Shape::Object));
+                        if !object {
+                            return None;
+                        }
+                        t
+                    }
+                    _ => return None,
+                };
+                let Ty::Named(case, _) = &t else { return None };
+                let v = cases.iter().find(|(_, c)| c == case).map(|(v, _)| v.clone())?;
+                smart = matches!(c, WhenCondition::Is { .. }).then(|| self.case_ty_in(&t, &sty));
+                covered.push(v.clone());
+                variants.push(v);
+            }
+            if variants.len() > 1 {
+                smart = None;
+            }
+            plan.push(Some((variants, smart)));
         }
+        let this_subject = match &subject.expr.kind {
+            ExprKind::This { label } if subject.binding.is_none() => {
+                self.receiver(label.as_ref().map(|l| l.name.as_str()))
+            }
+            _ => None,
+        };
         let span = self.span(loc);
         let (ty, tail, shared) = if matches!(tail, super::stmt::Tail::Unit) {
             (Ty::Unit, tail, None)
@@ -2080,12 +2513,12 @@ impl Gen<'_, '_> {
         let mut has_else = false;
         for (b, p) in w.branches.iter().zip(&plan) {
             match p {
-                Some((variant, _, t)) => {
+                Some((variants, smart)) => {
                     self.push_scope();
-                    let vi = ident(variant, span);
+                    let receivers = self.receivers.len();
                     let bind = self.fresh("case", span);
-                    let rebind = match &subject_local {
-                        Some(name) => {
+                    let rebind = match (smart, &subject_local, &this_subject) {
+                        (Some(t), Some(name), _) => {
                             let at = self.local(name).and_then(|l| l.at);
                             let rust = snake(name);
                             let i = ident(&rust, span);
@@ -2093,11 +2526,26 @@ impl Gen<'_, '_> {
                             self.set_local_at(name, at);
                             quote_spanned!(span=> #[allow(unused_variables)] let #i = ::core::clone::Clone::clone(#bind);)
                         }
-                        None => quote!(),
+                        // (`when (this)`: the receiver smart-cast)
+                        (Some(t @ Ty::Named(owner, _)), None, Some(r)) => {
+                            let n = self.fresh("smart", span);
+                            self.push_smart_receiver(r, n.to_string(), owner.clone(), t.clone());
+                            quote_spanned!(span=> #[allow(unused_variables)] let #n = ::core::clone::Clone::clone(#bind);)
+                        }
+                        _ => quote!(),
                     };
                     let body = self.braced(&b.body, tail);
+                    self.receivers.truncate(receivers);
                     self.pop_scope();
-                    arms.push(quote_spanned!(span=> #enum_name::#vi(#bind) => { #rebind #body }));
+                    let pats = variants.iter().map(|v| {
+                        let vi = ident(v, span);
+                        if smart.is_some() {
+                            quote_spanned!(span=> #enum_name::#vi(#bind))
+                        } else {
+                            quote_spanned!(span=> #enum_name::#vi(_))
+                        }
+                    });
+                    arms.push(quote_spanned!(span=> #(#pats)|* => { #rebind #body }));
                 }
                 None => {
                     has_else = true;
@@ -2106,9 +2554,11 @@ impl Gen<'_, '_> {
                 }
             }
         }
-        if !has_else && plan.len() < cases.len() && !matches!(tail, super::stmt::Tail::Unit) {
+        let phantom = self.sealed_phantom(&sealed);
+        let partial = cases.iter().any(|(v, _)| !covered.contains(v)) || phantom;
+        if !has_else && partial && !matches!(tail, super::stmt::Tail::Unit) {
             arms.push(quote_spanned!(span=> _ => ::core::unreachable!("no `when` branch matched")));
-        } else if !has_else && plan.len() < cases.len() {
+        } else if !has_else && partial {
             arms.push(quote_spanned!(span=> _ => {}));
         }
         let bind = match &subject.binding {
@@ -2303,6 +2753,13 @@ impl Gen<'_, '_> {
             return !matches!(from.non_null(), Ty::Unknown | Ty::Unit | Ty::Fun(_) | Ty::Nullable(_))
                 && !matches!(from.non_null(), Ty::Named(n, _) if matches!(n.as_str(), "Rc" | "Arc" | "Box") || self.user_dyn_trait(&n));
         }
+        // ((WPA-rest) a class's value where the API's shared trait object of an interface or base it is is (a
+        // generic override's erased `T`: `Rc<dyn ViewModel>`))
+        if api_shared(&to.non_null()).is_some()
+            && let Ty::Named(f, _) = from.non_null()
+        {
+            return self.user_class_rust(&f).is_some_and(|c| !c.is_dyn() && c.shape != Shape::Interface);
+        }
         let (Ty::Named(f, _), Ty::Named(t, _)) = (from.non_null(), to.non_null()) else { return false };
         if f == t {
             return false;
@@ -2318,6 +2775,17 @@ impl Gen<'_, '_> {
             && self.user_class_rust(&f).is_some()
     }
 
+    /// Whether a place of type `to` makes values of other types one ([`coerce`](Self::coerce)): a sealed class, an
+    /// interface or open class of the user's, `Any`.
+    pub(crate) fn takes_coerced(&self, to: &Ty) -> bool {
+        let to = to.non_null();
+        is_any(&to)
+            || api_shared(&to).is_some()
+            || matches!(&to, Ty::Named(n, _)
+                if self.user_class_rust(n).is_some_and(|c| c.inherit == Inherit::Sealed && c.shape != Shape::Companion)
+                    || self.user_dyn_trait(n))
+    }
+
     /// Whether a user's type is a case of the sealed class `sealed` (directly, or a case of one of its cases).
     pub(crate) fn is_case_of(&self, rust: &str, sealed: &str) -> bool {
         let Some(d) = self.decl_of(rust) else { return false };
@@ -2330,12 +2798,27 @@ impl Gen<'_, '_> {
             return v;
         }
         let Ty::Named(t, _) = to.non_null() else { return v };
-        let v = if is_any(&to.non_null()) {
+        let v = if api_shared(&to.non_null()).is_some() {
+            let tt = self.rust_of_ty(&to.non_null(), span);
+            let f = self.fresh("shared", span);
+            let ptr =
+                if t == "Arc" { quote_spanned!(span=> ::std::sync::Arc) } else { quote_spanned!(span=> ::std::rc::Rc) };
+            quote_spanned!(span=> { let #f: #tt = #ptr::new(#v); #f })
+        } else if is_any(&to.non_null()) {
             let kt = self.kt(span);
             let f = self.fresh("any", span);
             quote_spanned!(span=> { let #f: ::std::rc::Rc<dyn #kt::KtObject> = ::std::rc::Rc::new(#v); #f })
         } else if self.user_class_rust(&t).is_some_and(|c| c.inherit == Inherit::Sealed) {
-            let s = ident(&t, span);
+            // (a generic one's arguments unknown here: Rust's inference)
+            let n = self.user_class_rust(&t).map_or(0, |c| c.type_params.len());
+            let s = match to.non_null() {
+                Ty::Named(_, a) if n > 0 && (a.len() != n || a.contains(&Ty::Unknown)) => {
+                    let i = ident(&t, span);
+                    let us = (0..n).map(|_| quote_spanned!(span=> _));
+                    quote_spanned!(span=> #i<#(#us),*>)
+                }
+                to => self.rust_of_ty(&to, span),
+            };
             quote_spanned!(span=> ::core::convert::Into::<#s>::into(#v))
         } else {
             let tt = self.rust_of_ty(&to.non_null(), span);
@@ -2371,6 +2854,17 @@ impl Gen<'_, '_> {
             .collect();
         sealed.into_iter().find(|s| names.iter().all(|n| *n == s || self.is_case_of(n, s))).map(|s| Ty::named(&s))
     }
+}
+
+/// The API's trait a type is the shared trait object of (`Rc<dyn ViewModel>`: an API interface's or base's), if it is.
+pub(crate) fn api_shared(t: &Ty) -> Option<String> {
+    let Ty::Named(p, a) = t else { return None };
+    if !matches!(p.as_str(), "Rc" | "Arc") {
+        return None;
+    }
+    let [Ty::Named(n, _)] = a.as_slice() else { return None };
+    (n != "KtObject" && (index::base(n).is_some_and(|b| b.value.is_empty()) || trait_object(n).is_some()))
+        .then(|| n.clone())
 }
 
 /// Whether a type is Kotlin's `Any` (`Rc<dyn kt::KtObject>`).
@@ -2436,6 +2930,14 @@ impl Gen<'_, '_> {
                 return self.later(s.loc, "an object expression's interface by delegation");
             }
         }
+        // ((WPA-rest) a base of the second kind, `NavigationEventHandler`, `NavType`: its struct made with the
+        // object's callbacks, `callbacks`)
+        if let [s] = supers
+            && let Some(SuperKind::Base(b)) = s.ty.simple_name().and_then(|n| self.super_kind(&n))
+            && !b.value.is_empty()
+        {
+            return self.object_expr_callbacks(b, s, body, loc);
+        }
         let Some((main, main_args)) = self.object_class_trait(supers) else {
             return self.later(loc, "an object expression of a sealed class");
         };
@@ -2476,12 +2978,13 @@ impl Gen<'_, '_> {
         let main_path = self.ancestor_trait_named(&main, &main_args, span);
         // (each own member: the closure or value it is, by Kotlin's name)
         let mut overrides: Vec<(String, usize, TokenStream)> = Vec::new();
+        // (an `override var`'s setter's body, by Kotlin's name; the higher-ranked closures' functions)
+        let mut setters: Vec<(String, TokenStream)> = Vec::new();
+        let mut helpers: Vec<TokenStream> = Vec::new();
         let mut k = 0;
         for m in &body.members {
             match m {
-                Member::Decl(Decl::Function(f))
-                    if f.receiver.is_none() && f.type_params.is_empty() && !f.is_suspend() =>
-                {
+                Member::Decl(Decl::Function(f)) if f.receiver.is_none() && f.type_params.is_empty() => {
                     let Some((params, ret)) = self.object_override_sig(&ancestors, &f.name.name, f.params.len(), false)
                     else {
                         self.error(
@@ -2495,6 +2998,15 @@ impl Gen<'_, '_> {
                         f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc)).collect();
                     let field = format_ident!("m{k}", span = fspan);
                     k += 1;
+                    // ((WPA-rest) a suspending one: the boxed future borrowing the object (`KtFuture<'_, R>`), its
+                    // closure made higher-ranked by a function of the block's own)
+                    let ret = if f.is_suspend() {
+                        let kt = self.kt(fspan);
+                        let r = ret.clone().unwrap_or_else(|| quote_spanned!(fspan=> ()));
+                        Some(quote_spanned!(fspan=> #kt::KtFuture<'_, #r>))
+                    } else {
+                        ret
+                    };
                     let r = ret.as_ref().map(|r| quote_spanned!(fspan=> -> #r));
                     fields.push(
                         quote_spanned!(fspan=> #field: ::std::rc::Rc<dyn ::core::ops::Fn(&#obj, #(#params),*) #r>),
@@ -2506,12 +3018,51 @@ impl Gen<'_, '_> {
                         &names,
                         Some((&quote!(#obj), &recv_trait)),
                     );
-                    values.push(quote_spanned!(fspan=> #field: ::std::rc::Rc::new(#closure)));
+                    if f.is_suspend() {
+                        let kt = self.kt(fspan);
+                        let out = ret
+                            .as_ref()
+                            .and_then(|r| super::object_expr::future_output(&r.to_string()))
+                            .and_then(|o| o.parse::<TokenStream>().ok())
+                            .unwrap_or_else(|| quote!(()));
+                        let hr = format_ident!("__kz_hr{k}", span = fspan);
+                        helpers.push(quote_spanned! {fspan=>
+                            fn #hr<F: for<'a> ::core::ops::Fn(&'a #obj, #(#params),*) -> #kt::KtFuture<'a, #out>>(f: F) -> F { f }
+                        });
+                        values.push(quote_spanned!(fspan=> #field: ::std::rc::Rc::new(#hr(#closure))));
+                    } else {
+                        values.push(quote_spanned!(fspan=> #field: ::std::rc::Rc::new(#closure)));
+                    }
                     overrides.push((
                         f.name.name.clone(),
                         f.params.len(),
                         quote_spanned!(fspan=> (self.#field)(self, #(#names),*)),
                     ));
+                }
+                // ((WPA-rest) an `override var`: a cell of the object's, its setter's too)
+                Member::Decl(Decl::Property(p))
+                    if p.is_var()
+                        && matches!(p.init, PropertyInit::Value(_))
+                        && p.getter.is_none()
+                        && p.setter.is_none() =>
+                {
+                    let (Binding::Name(n), PropertyInit::Value(v)) = (&p.binding, &p.init) else { continue };
+                    let Some((_, Some(t))) = self.object_override_sig(&ancestors, &n.name, 0, true) else {
+                        self.error(n.loc, format!("`{}` overrides no property of the object's supertypes", n.name));
+                        continue;
+                    };
+                    let pspan = self.span(p.loc);
+                    let field = format_ident!("p{k}", span = pspan);
+                    k += 1;
+                    let val = self.value_want(v, super::expr::Want { str_ok: false, ..Default::default() });
+                    fields.push(quote_spanned!(pspan=> #field: ::std::cell::RefCell<#t>));
+                    values.push(quote_spanned!(pspan=> #field: ::std::cell::RefCell::new(#val)));
+                    overrides.push((
+                        n.name.clone(),
+                        0,
+                        quote_spanned!(pspan=> ::core::clone::Clone::clone(&*self.#field.borrow())),
+                    ));
+                    setters.push((n.name.clone(), quote_spanned!(pspan=> *self.#field.borrow_mut() = value)));
                 }
                 Member::Decl(Decl::Property(p)) if !p.is_var() && matches!(p.init, PropertyInit::Value(_)) => {
                     let (Binding::Name(n), PropertyInit::Value(v)) = (&p.binding, &p.init) else { continue };
@@ -2532,7 +3083,10 @@ impl Gen<'_, '_> {
                     ));
                 }
                 Member::Decl(d) => {
-                    self.later(d.loc(), "this member of an object expression extending a class (a `var`, a suspending or generic function, a declaration)");
+                    self.later(
+                        d.loc(),
+                        "this member of an object expression extending a class (one of its own, not an override; a generic function; a declaration)",
+                    );
                 }
                 Member::Init(b) => {
                     self.later(b.loc, "an `init` block in an object expression");
@@ -2557,9 +3111,12 @@ impl Gen<'_, '_> {
                     {
                         let acc = ident(&format!("__kz_{}", type_snake(r)), span);
                         let base = ident(&format!("{r}Base"), span);
-                        let bargs: Vec<TokenStream> =
-                            a.args.iter().map(|t| self.rust_type(t, TypePos::Value)).collect();
-                        let bg = if bargs.is_empty() { quote!() } else { quote_spanned!(span=> <#(#bargs),*>) };
+                        let bargs: Vec<TokenStream> = a.args.iter().map(|t| self.type_arg(t)).collect();
+                        let bg = if bargs.is_empty() || !self.base_generic(r) {
+                            quote!()
+                        } else {
+                            quote_spanned!(span=> <#(#bargs),*>)
+                        };
                         let path = base_path(Place::Local, depth, span);
                         items.push(quote_spanned!(span=> fn #acc(&self) -> &#base #bg { #path }));
                     }
@@ -2570,8 +3127,21 @@ impl Gen<'_, '_> {
                         let own = overrides.iter().find(|(n, ar, _)| {
                             *n == s.kotlin && (s.role != Role::Function || *ar == s.arity) && s.role != Role::Setter
                         });
-                        let body = match own {
-                            Some((_, _, b)) => Some(b.clone()),
+                        let setter = setters.iter().find(|(n, _)| *n == s.kotlin && s.role == Role::Setter);
+                        let body = match (own, setter) {
+                            (_, Some((_, b))) => {
+                                let v = s.params.first().map(|(n, _)| n.clone());
+                                Some(match v {
+                                    Some(v) if v != "value" => quote_spanned!(span=> { let value = #v; #b; }),
+                                    _ => quote_spanned!(span=> #b;),
+                                })
+                            }
+                            (Some((_, _, b)), _) if s.suspend => Some(b.clone()),
+                            (Some((_, _, b)), _) => Some(b.clone()),
+                            (None, None) => None,
+                        };
+                        let body = match body {
+                            Some(b) => Some(b),
                             None => chain.iter().take_while(|b| b.info.rust != ad.info.rust).find_map(|b| {
                                 let bc: Vec<ConstructorParam> = match &b.ast {
                                     ClassAst::Class(c) => {
@@ -2620,6 +3190,7 @@ impl Gen<'_, '_> {
             {
                 #[allow(non_camel_case_types, clippy::type_complexity)]
                 struct #obj { #(#fields),* }
+                #(#helpers)*
                 #impls
                 let __kz_o = #obj { #(#values),* };
                 #init
@@ -2632,7 +3203,7 @@ impl Gen<'_, '_> {
     /// A trait's path by its Rust name and type arguments (`PlateOpen`, `Feed<i32>`).
     fn ancestor_trait_named(&mut self, t: &str, args: &[Type], span: Span) -> TokenStream {
         let i = ident(t, span);
-        let a: Vec<TokenStream> = args.iter().map(|x| self.rust_type(x, TypePos::Value)).collect();
+        let a: Vec<TokenStream> = args.iter().map(|x| self.type_arg(x)).collect();
         if a.is_empty() { quote_spanned!(span=> #i) } else { quote_spanned!(span=> #i<#(#a),*>) }
     }
 
@@ -2705,6 +3276,89 @@ fn api_sig(t: &str, name: &str, arity: usize, _kind: SuperKind) -> Option<(Vec<T
     let params = item.params.iter().map(|p| parse(p.ty)).collect();
     let ret = (item.ret.trim() != "()").then(|| parse(item.ret));
     Some((params, ret))
+}
+
+/// Where a generic class's own state (its constructor's properties, its body's stored ones) is written with one of
+/// its type parameters, if it is.
+fn sealed_state_typed(c: &Class) -> Option<Loc> {
+    let names: Vec<&str> = c.type_params.iter().map(|t| t.name.name.as_str()).collect();
+    let mentions = |t: &Type| type_mentions(t, &names);
+    for cp in c.primary_constructor.iter().flat_map(|p| &p.params) {
+        if cp.property.is_some() && cp.param.ty.as_ref().is_some_and(mentions) {
+            return Some(cp.param.loc);
+        }
+    }
+    for m in &c.body.members {
+        if let Member::Decl(Decl::Property(p)) = m
+            && !matches!(p.init, PropertyInit::None)
+            && p.ty.as_ref().is_some_and(mentions)
+        {
+            return Some(p.loc);
+        }
+    }
+    None
+}
+
+/// Whether a type names one of `names` (a type parameter) anywhere in it.
+pub(crate) fn type_mentions(t: &Type, names: &[&str]) -> bool {
+    match &t.kind {
+        TypeKind::Named(segs) => segs.iter().any(|s| {
+            (segs.len() == 1 && s.args.is_empty() && names.contains(&s.name.name.as_str()))
+                || s.args.iter().any(|a| matches!(a, TypeArg::Type { ty, .. } if type_mentions(ty, names)))
+        }),
+        TypeKind::Function(f) => {
+            f.params.iter().any(|p| type_mentions(&p.ty, names))
+                || type_mentions(&f.result, names)
+                || f.receiver.as_ref().is_some_and(|r| type_mentions(r, names))
+        }
+        TypeKind::Error => false,
+    }
+}
+
+/// The supertypes' `Nothing` arguments replaced by type parameters of their impls' own (`__KzN0`), and those
+/// parameters by supertype ([`ancestor_key`]).
+fn nothing_params(ancestors: Vec<Ancestor>, loc: Loc) -> (Vec<Ancestor>, HashMap<String, Vec<String>>) {
+    let mut out = Vec::new();
+    let mut params = HashMap::new();
+    for mut a in ancestors {
+        let mut own = Vec::new();
+        for t in &mut a.args {
+            if is_nothing(t) {
+                let n = format!("__KzN{}", own.len());
+                *t = named_type(&n, loc);
+                own.push(n);
+            }
+        }
+        params.insert(ancestor_key(&a), own);
+        out.push(a);
+    }
+    (out, params)
+}
+
+/// Whether a type is Kotlin's `Nothing`.
+pub(crate) fn is_nothing(t: &Type) -> bool {
+    !t.nullable
+        && matches!(&t.kind, TypeKind::Named(s) if s.len() == 1 && s[0].args.is_empty() && s[0].name.name == "Nothing")
+}
+
+/// A supertype's key among a class's (its kind).
+fn ancestor_key(a: &Ancestor) -> String {
+    format!("{:?}", a.kind)
+}
+
+/// `<…>` of an impl's type parameters with `extra` ones added (bounded as every value's: `Clone + 'static`).
+fn with_params(g_decl: &TokenStream, extra: &[String], span: Span) -> TokenStream {
+    if extra.is_empty() {
+        return g_decl.clone();
+    }
+    let toks: Vec<proc_macro2::TokenTree> = g_decl.clone().into_iter().collect();
+    let inner: TokenStream =
+        if toks.len() >= 2 { toks[1..toks.len() - 1].iter().cloned().collect() } else { TokenStream::new() };
+    let extra = extra.iter().map(|n| {
+        let i = ident(n, span);
+        quote_spanned!(span=> #i: ::core::clone::Clone + 'static)
+    });
+    if inner.is_empty() { quote_spanned!(span=> <#(#extra),*>) } else { quote_spanned!(span=> <#inner, #(#extra),*>) }
 }
 
 /// A named type of a name alone (`T`).

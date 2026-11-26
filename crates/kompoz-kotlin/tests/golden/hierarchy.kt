@@ -121,3 +121,69 @@ fun forms(): String {
 fun checks(x: Any): Boolean = x is String
 
 fun count(xs: List<*>): Int = xs.size
+
+// (WPA-rest) Generic sealed classes (cases of `Nothing`, `out T`), the receiver smart-cast in their members; API
+// bases of the second kind (a struct of callbacks); an object expression's `override var` and suspending override;
+// a secondary constructor's body run by a super call; the user's exception hierarchies; smart casts in chains.
+sealed class Outcome<out T> {
+    data class Done<out T>(val value: T) : Outcome<T>()
+    data class Failed(val reason: String) : Outcome<Nothing>()
+    object Loading : Outcome<Nothing>()
+
+    fun valueOrNull(): T? = if (this is Done) value else null
+}
+
+fun parse(text: String): Outcome<Int> = if (text.isEmpty()) Outcome.Failed("boş") else Outcome.Done(text.length)
+
+fun shown(o: Outcome<Int>): String = when (o) {
+    is Outcome.Done -> "#" + o.value
+    is Outcome.Failed, Outcome.Loading -> "-"
+}
+
+fun handler(): NavigationEventHandler<NavigationEventInfo.None> =
+    object : NavigationEventHandler<NavigationEventInfo.None>(initialInfo = NavigationEventInfo.None, isBackEnabled = true) {
+        override fun onBackCompleted() {
+            println(transitionState)
+        }
+    }
+
+object IntPairType : NavType<Int>(isNullableAllowed = false) {
+    override fun put(bundle: SavedState, key: String, value: Int) {}
+    override fun get(bundle: SavedState, key: String): Int? = null
+    override fun parseValue(value: String): Int = value.toInt()
+    override fun serializeAsValue(value: Int): String = "$value"
+}
+
+abstract class Fetcher2 {
+    abstract var calls: Int
+    abstract suspend fun fetch(key: String): String
+}
+
+fun counting(): Fetcher2 = object : Fetcher2() {
+    override var calls = 0
+    override suspend fun fetch(key: String): String {
+        calls++
+        return key
+    }
+}
+
+open class Panel2(val w: Int, val h: Int) {
+    var note = ""
+    constructor(side: Int) : this(side, side) {
+        note = "kare"
+    }
+}
+
+class SquarePanel(s: Int) : Panel2(s)
+
+open class AppException(message: String) : Exception(message)
+
+class NetworkException(val code: Int) : AppException("ağ $code")
+
+fun handled(): String = try {
+    throw NetworkException(1)
+} catch (e: AppException) {
+    e.message ?: ""
+}
+
+fun describeAny(x: Any?): String = if (x is String && x.length > 2) x else if (x !is Int || x < 0) "-" else "${x + 1}"

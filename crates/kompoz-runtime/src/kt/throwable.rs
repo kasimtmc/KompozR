@@ -44,7 +44,15 @@ struct Inner {
     cause: Option<Throwable>,
     /// The object of a user's class it is.
     object: Option<Rc<dyn Any>>,
+    /// The user's classes its class derives from, nearest first (`AppException` of `NetworkException :
+    /// AppException(…)`, an open class deriving from a standard one).
+    supers: Vec<String>,
+    /// The object as one of the types it is (its class's `__kz_cast`: `Rc<dyn AppExceptionOpen>`).
+    cast: Option<ObjectCast>,
 }
+
+/// What gives the object of a user's exception class as another type it is (an open class's shared object).
+pub type ObjectCast = fn(&dyn Any, std::any::TypeId) -> Option<Box<dyn Any>>;
 
 /// The standard class Kotlin's (and Java's, and kotlinx's) exception class `name` derives from, as the JVM has them;
 /// none for `Throwable`. A class this doesn't know derives from `RuntimeException` (`…Exception`) or `Error`
@@ -106,7 +114,15 @@ impl Throwable {
     /// message and a cause).
     #[doc(hidden)]
     pub fn new(class: &str, message: Option<String>, cause: Option<Throwable>) -> Throwable {
-        Throwable(Rc::new(Inner { class: class.to_string(), base: class.to_string(), message, cause, object: None }))
+        Throwable(Rc::new(Inner {
+            class: class.to_string(),
+            base: class.to_string(),
+            message,
+            cause,
+            object: None,
+            supers: Vec::new(),
+            cast: None,
+        }))
     }
 
     /// The exception a user's class's object is (`Refused(7)`): its class's name, the standard class it derives
@@ -125,7 +141,46 @@ impl Throwable {
             message,
             cause,
             object: Some(object),
+            supers: Vec::new(),
+            cast: None,
         }))
+    }
+
+    /// The exception the object of a user's class deriving from a user's open exception class is (`class
+    /// NetworkException(val code: Int) : AppException("ağ $code")`): as [`of_object`](Self::of_object), the user's
+    /// classes above its own (`supers`, nearest first) its classes too, `cast` giving the object as another type it
+    /// is (`catch (e: AppException)`'s `Rc<dyn AppExceptionOpen>`).
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn of_class_object(
+        class: &str,
+        supers: &[&str],
+        base: &str,
+        message: Option<String>,
+        cause: Option<Throwable>,
+        object: Rc<dyn Any>,
+        cast: ObjectCast,
+    ) -> Throwable {
+        Throwable(Rc::new(Inner {
+            class: class.to_string(),
+            base: base.to_string(),
+            message,
+            cause,
+            object: Some(object),
+            supers: supers.iter().map(|s| s.to_string()).collect(),
+            cast: Some(cast),
+        }))
+    }
+
+    /// The object of a user's class it is as a `T`: the object itself, or another type it is (an open class's shared
+    /// object, `Rc<dyn AppExceptionOpen>`), if it is one.
+    #[doc(hidden)]
+    pub fn cast_object<T: Any + Clone>(&self) -> Option<T> {
+        if let Some(v) = self.downcast::<T>() {
+            return Some(v);
+        }
+        let (object, cast) = (self.0.object.as_ref()?, self.0.cast?);
+        cast(&**object, std::any::TypeId::of::<T>())?.downcast::<T>().ok().map(|b| *b)
     }
 
     /// Kotlin's `message`.
@@ -153,7 +208,7 @@ impl Throwable {
     /// `catch (e: IllegalStateException)` taking it).
     #[doc(hidden)]
     pub fn is_a(&self, name: &str) -> bool {
-        if self.0.class == name {
+        if self.0.class == name || self.0.supers.iter().any(|s| s == name) {
             return true;
         }
         let mut c: &str = &self.0.base;

@@ -56,6 +56,7 @@
 //! Errors are per declaration: a declaration with an error is left out, the others are translated.
 
 mod call;
+mod callbacks;
 mod capture;
 pub(crate) mod class;
 mod exceptions;
@@ -170,6 +171,10 @@ pub(crate) struct FnState {
     /// Its declared result is an interface the API holds as a shared trait object (`fun anchors(): DraggableAnchors<Int>
     /// = DraggableAnchors { … }`): a value it returns of a type of its own is made one.
     pub shared_result: Option<expr::Shared>,
+    /// (stage 14 WPA) Its declared result type: a value it gives of a sealed class's case, or of a class where the
+    /// result is an interface, an open class or `Any`, made one (`fun load(): Outcome<Int> = if (…) Success(1) else
+    /// Failure("")`).
+    pub result: Option<Ty>,
 }
 
 /// A loop being written, for `break` and `continue`.
@@ -742,7 +747,12 @@ impl<'a, 'd> Gen<'a, 'd> {
             .result
             .as_ref()
             .and_then(|t| expr::Shared::of_rust(&self.quiet(|g| g.rust_type(t, types::TypePos::Return)).to_string()));
-        self.fun = FnState { kompozable, nullable_result: info.ret.is_nullable(), shared_result };
+        self.fun = FnState {
+            kompozable,
+            nullable_result: info.ret.is_nullable(),
+            shared_result,
+            result: Some(info.ret.clone()),
+        };
         self.scopes = vec![HashMap::new()];
         self.receivers.clear();
         self.frames.clear();
@@ -832,6 +842,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                     quote!(#s;)
                 } else {
                     let want = expr::Want {
+                        result: true,
                         some: info.ret.is_nullable(),
                         shared: self.fun.shared_result,
                         ..Default::default()
@@ -1178,6 +1189,9 @@ fn rust_overlay(module: Option<&crate::module::ModuleTable>) -> crate::index::ov
                 rust: intern(&r.rust),
                 open: *open,
                 required: crate::index::overlay::intern_strs(required.iter().map(|s| intern(s)).collect()),
+                value: "",
+                params: &[],
+                assoc: &[],
             });
             continue;
         }

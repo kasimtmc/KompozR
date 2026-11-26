@@ -912,7 +912,22 @@ struct Scan {
     /// (stage 14 WPA) The API's abstract and open classes Kotlin classes derive from: traits whose doc line says
     /// ``Kotlin: `abstract class ViewModel` `` (or `open class`): (Kotlin's name, the trait, open, the trait's methods
     /// without a default body).
-    bases: BTreeSet<(String, String, bool, Vec<String>)>,
+    bases: BTreeSet<KBase>,
+}
+
+/// (stage 14 WPA) A base class of the API (see the Kotlin index's `Base`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct KBase {
+    kotlin: String,
+    rust: String,
+    open: bool,
+    required: Vec<String>,
+    /// The struct of the second kind (the doc line's class names another type than the trait), else empty.
+    value: String,
+    /// Kotlin's constructor's parameters' names.
+    params: Vec<String>,
+    /// The trait's associated types.
+    assoc: Vec<String>,
 }
 
 fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, String)>), String> {
@@ -1375,9 +1390,9 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                 }
                 if let Some(doc) = kotlin_doc(&t.attrs) {
                     let open = doc.starts_with("open class ");
-                    if let Some(name) = doc.strip_prefix("abstract class ").or_else(|| doc.strip_prefix("open class "))
+                    if let Some(rest) = doc.strip_prefix("abstract class ").or_else(|| doc.strip_prefix("open class "))
                     {
-                        let name = name.split(['(', '<', ' ']).next().unwrap_or(name).to_string();
+                        let name = rest.split(['(', '<', ' ']).next().unwrap_or(rest).to_string();
                         let required = t
                             .items
                             .iter()
@@ -1386,7 +1401,37 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
                                 _ => None,
                             })
                             .collect();
-                        scan.bases.insert((name, via.clone(), open, required));
+                        // (the second kind: a class that is a struct of another name than the trait's, its
+                        // constructor's parameters `(name: Type, …)`, the trait's associated types)
+                        let value = if name != via { name.clone() } else { String::new() };
+                        let params = rest
+                            .split_once('(')
+                            .map(|(_, p)| {
+                                p.trim_end_matches(')')
+                                    .split(',')
+                                    .filter_map(|x| x.split(':').next())
+                                    .map(|x| x.trim().to_string())
+                                    .filter(|x| !x.is_empty())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let assoc = t
+                            .items
+                            .iter()
+                            .filter_map(|i| match i {
+                                TraitItem::Type(ty) => Some(ty.ident.to_string()),
+                                _ => None,
+                            })
+                            .collect();
+                        scan.bases.insert(KBase {
+                            kotlin: name,
+                            rust: via.clone(),
+                            open,
+                            required,
+                            value,
+                            params,
+                            assoc,
+                        });
                     }
                 }
                 // (a fun interface: its SAM constructor takes the lambda its closures are; one of `Fn()` closures,
@@ -1992,7 +2037,7 @@ fn render_kotlin(
     types: &BTreeSet<(String, String)>,
     generics: &BTreeMap<String, Option<Vec<String>>>,
     aliases: &BTreeMap<String, Option<String>>,
-    bases: &BTreeSet<(String, String, bool, Vec<String>)>,
+    bases: &BTreeSet<KBase>,
 ) -> String {
     let mut out = String::from(
         "// The API index the Kotlin syntax's generator reads: written by `cargo xtask kotlin-index` from the\n\
@@ -2091,9 +2136,19 @@ fn render_kotlin(
          class …`).\n",
     );
     out.push_str("pub static BASES: &[Base] = &[\n");
-    for (kotlin, rust, open, required) in bases {
-        let list = required.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>().join(", ");
-        let _ = writeln!(out, "    Base {{ kotlin: {kotlin:?}, rust: {rust:?}, open: {open}, required: &[{list}] }},");
+    let list = |v: &[String]| v.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>().join(", ");
+    for b in bases {
+        let _ = writeln!(
+            out,
+            "    Base {{ kotlin: {:?}, rust: {:?}, open: {}, required: &[{}], value: {:?}, params: &[{}], assoc: &[{}] }},",
+            b.kotlin,
+            b.rust,
+            b.open,
+            list(&b.required),
+            b.value,
+            list(&b.params),
+            list(&b.assoc)
+        );
     }
     out.push_str("];\n");
     out

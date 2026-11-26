@@ -85,6 +85,32 @@ pub fn kt_as_object<T: Any + Clone>(value: &Rc<dyn KtObject>) -> Option<T> {
     (**value).kt_as::<T>()
 }
 
+/// Kotlin's `Nothing` as a type argument (`Outcome<Nothing>`: a type no value has, Rust's `!` there being
+/// unstable): what a value of every type is, so each of the traits Kotlin's values have (`==`, `toString()`,
+/// ordering, hashing) is its.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum KtNothing {}
+
+impl fmt::Display for KtNothing {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {}
+    }
+}
+
+impl KtToString for KtNothing {
+    fn kt_write(&self, _: &mut String) {
+        match *self {}
+    }
+}
+
+/// Kotlin's `this as? T` in a member of an interface or of an open, abstract or sealed class (a trait's provided
+/// method: `Self` the object's own class, unsized there): the object, if it is a `T` (`this is Success` in a sealed
+/// class's member, the case it is).
+#[doc(hidden)]
+pub fn kt_as_this<T: Any + Clone, V: KtObject + ?Sized>(value: &V) -> Option<T> {
+    value.as_any().downcast_ref::<T>().cloned()
+}
+
 /// Kotlin's `x is T` of a value: [`KtAs`]'s cast succeeding.
 pub fn kt_is<T, V: KtAs<T> + ?Sized>(value: &V) -> bool {
     value.kt_as_safe().is_some()

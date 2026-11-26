@@ -369,7 +369,7 @@ impl Gen<'_, '_> {
             for (k, a) in args.iter().enumerate() {
                 vals.push(match (a.value, params.get(k)) {
                     (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() => {
-                        self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None })
+                        self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None, result: false })
                     }
                     (ArgValue::Expr(e), Some(to)) if to.is_number() && !a.value.is_lambda() => {
                         let from = self.peek_ty(e);
@@ -588,7 +588,7 @@ impl Gen<'_, '_> {
         for a in args {
             let v = match a.value {
                 ArgValue::Expr(e) if pascal && !a.value.is_lambda() => {
-                    self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None })
+                    self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None, result: false })
                 }
                 _ => self.with_label(&n.name, |me| me.loose_arg(a)),
             };
@@ -2281,6 +2281,19 @@ impl Gen<'_, '_> {
             return self.expr(e).ts;
         }
         let pty = p.ty();
+        // ((WPA-rest) Kotlin's `Any?` given a value of a type of its own (`"abc"`, `3`): its shared object, in `Some`)
+        let any_opt = match &pty {
+            Ty::Named(n, a) if n == "implInto" && a.len() == 1 => a[0].clone(),
+            t => t.clone(),
+        };
+        if any_opt.is_nullable() && super::hierarchy::is_any(&any_opt.non_null()) {
+            let arg_ty = self.peek_ty(e);
+            let pty = any_opt;
+            if !arg_ty.is_nullable() && self.coerces(&arg_ty, &pty) {
+                let v = self.value(e);
+                return self.coerce(v, &arg_ty, &pty, span);
+            }
+        }
         if pty.is_float()
             && let Some(n) = int_literal(e)
         {
@@ -2340,7 +2353,7 @@ impl Gen<'_, '_> {
         // (Kotlin's `Any` — a key, a content type —: the value made the Rust type holding it, in `Some` for an optional
         // one; each branch of an `if`/`when`)
         if let Some(w) = AnyWrap::of_rust(&p.ty) {
-            return self.value_want(e, Want { str_ok: false, any: Some(w), some: false, shared: None });
+            return self.value_want(e, Want { str_ok: false, any: Some(w), some: false, shared: None, result: false });
         }
         // (a Kotlin `IntRange` — a progression here — to a parameter Rust holds as a `RangeInclusive`, a date
         // picker's `yearRange = 2000..2030`: its ends)
@@ -2355,7 +2368,8 @@ impl Gen<'_, '_> {
             && matches!(&e.kind, ExprKind::If { otherwise: Some(_), .. } | ExprKind::When(_))
             && self.peek_ty(e).is_nullable()
         {
-            return self.value_want(e, Want { str_ok: p.takes_str(), any: None, some: true, shared: None });
+            return self
+                .value_want(e, Want { str_ok: p.takes_str(), any: None, some: true, shared: None, result: false });
         }
         // (a list of an interface's values given `listOf(…)`: its elements held as the trait objects)
         if list_of_call(e).is_some() {
@@ -2382,7 +2396,8 @@ impl Gen<'_, '_> {
         let o_kind = o.kind;
         let place = (o.kind == OutKind::Local).then(|| o.ts.clone());
         let arg_ty = o.ty.clone();
-        let v = self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false, shared: None }, e.loc);
+        let v =
+            self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false, shared: None, result: false }, e.loc);
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
@@ -2582,11 +2597,11 @@ impl Gen<'_, '_> {
                 self.lambda_for(l, None, label.as_deref(), false)
             }
             ArgValue::Sam { expr, .. } => {
-                self.value_want(expr, Want { str_ok: true, any: None, some: false, shared: None })
+                self.value_want(expr, Want { str_ok: true, any: None, some: false, shared: None, result: false })
             }
             ArgValue::Expr(e) => match &e.kind {
                 ExprKind::Lambda(l) => self.lambda_for(l, None, None, false),
-                _ => self.value_want(e, Want { str_ok: true, any: None, some: false, shared: None }),
+                _ => self.value_want(e, Want { str_ok: true, any: None, some: false, shared: None, result: false }),
             },
         }
     }

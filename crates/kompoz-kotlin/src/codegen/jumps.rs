@@ -59,7 +59,12 @@ impl Gen<'_, '_> {
         let info = self.quiet(|g| g.file_fn(f));
         let unit = info.ret == Ty::Unit;
         let (saved_fun, saved_async) = (self.fun.clone(), self.in_async);
-        self.fun = super::FnState { kompozable: false, nullable_result: info.ret.is_nullable(), shared_result: None };
+        self.fun = super::FnState {
+            kompozable: false,
+            nullable_result: info.ret.is_nullable(),
+            shared_result: None,
+            result: Some(info.ret.clone()),
+        };
         self.scopes = vec![std::collections::HashMap::new()];
         self.receivers.clear();
         self.frames.clear();
@@ -118,9 +123,8 @@ impl Gen<'_, '_> {
                 let s = self.stmt_expr(e);
                 quote!(#s;)
             }
-            Some(FunctionBody::Expr(e)) => {
-                self.value_want(e, super::expr::Want { some: info.ret.is_nullable(), ..Default::default() })
-            }
+            Some(FunctionBody::Expr(e)) => self
+                .value_want(e, super::expr::Want { some: info.ret.is_nullable(), result: true, ..Default::default() }),
             None => quote!(),
         };
         self.fun = saved_fun;

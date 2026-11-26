@@ -31,7 +31,10 @@ impl fmt::Display for NavTypeError {
 impl std::error::Error for NavTypeError {}
 
 /// What a `NavType` of one's own implements (Kotlin's abstract `NavType<T>`): its values are `Value`s, `None`
-/// Kotlin's `null` (of a type that [allows](Self::is_nullable_allowed) it).
+/// Kotlin's `null` (of a type that [allows](Self::is_nullable_allowed) it). The Kotlin syntax's `object :
+/// NavType<T>(isNullableAllowed = false) { override fun put(…) … }` is a [`NavType`] of an implementation of it.
+///
+/// Kotlin: `abstract class NavType<T>(isNullableAllowed: Boolean)`
 pub trait NavTypeImpl: 'static {
     /// Kotlin's `T`.
     type Value: Clone + PartialEq + 'static;

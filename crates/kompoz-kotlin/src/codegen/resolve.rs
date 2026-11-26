@@ -614,7 +614,8 @@ impl PInfo {
 /// A Rust type's text without spaces and the standard paths the generator writes (`impl ::core::convert::Into<…>`
 /// → `implInto<…>`).
 pub(crate) fn plain_type_text(t: &str) -> String {
-    let mut t = t.replace(' ', "");
+    // (every whitespace: a long type's text, as tokens print it, breaks lines)
+    let mut t: String = t.chars().filter(|c| !c.is_whitespace()).collect();
     for p in [
         "::core::convert::",
         "::std::string::",

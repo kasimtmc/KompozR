@@ -800,6 +800,7 @@ impl Cents {
         use ::kompoz::runtime::kt::ext::*;
         let other: ::core::option::Option<::std::rc::Rc<dyn ::kompoz::runtime::kt::KtObject>> =
             ::core::convert::Into::into(other);
+        let _ = (&other,);
         ::kompoz::runtime::named_args!(types(Cents(r)), {
             ::kompoz::runtime::kt::safe!(
                 (::core::option::Option::and_then(::core::option::Option::as_ref(&other), |__kz_o4| {

@@ -1034,6 +1034,284 @@ fn hierarchy_forms_beyond_the_cpp_tests() {
     rule.on_node_with_text("panel p!").assert_exists();
 }
 
+// ---- generic sealed classes (WPA-rest) ---------------------------------------------------------------------------
+
+kompoz! {
+    // Generic sealed interfaces and classes as Compose's samples write them (JetNews' `Result<out R>`, a screen's UI
+    // state): a case of the class's own argument (`Success<out T>(val data: T) : Result<T>`) and cases of `Nothing`
+    // (`Error`, `Loading`: one type in every `Result<T>`, Kotlin's `out` variance); a case given where a
+    // `Result<String>` is taken (a `val`'s declared type, a function's result — each branch's, a `return`'s —, an
+    // assignment, a state's value); `when` over them (the subject smart-cast, its case's type argument the value's),
+    // `is` / `as?`, and the class's own members reading `this` as one of its cases.
+    sealed interface Result<out R> {
+        data class Success<out T>(val data: T) : Result<T>
+        data class Error(val exception: Throwable) : Result<Nothing>
+    }
+
+    fun <T> Result<T>.successOr(fallback: T): T = when (this) {
+        is Result.Success -> data
+        is Result.Error -> fallback
+    }
+
+    fun fetch(ok: Boolean): Result<String> {
+        if (!ok) return Result.Error(IllegalStateException("bağlantı yok"))
+        return Result.Success("veri")
+    }
+
+    sealed class Loadable<out T> {
+        data class Done<out T>(val value: T) : Loadable<T>()
+        data class Failed(val reason: String) : Loadable<Nothing>()
+        object Loading : Loadable<Nothing>()
+
+        val isLoading get() = this is Loading
+        fun valueOrNull(): T? = if (this is Done) value else null
+        fun describe(): String = when (this) {
+            is Done -> "değer $value"
+            is Failed -> "hata $reason"
+            Loading -> "yükleniyor"
+        }
+    }
+
+    fun parse(text: String): Loadable<Int> = if (text.isEmpty()) Loadable.Failed("boş") else Loadable.Done(text.length)
+
+    fun shown(o: Loadable<Int>): String = when (o) {
+        is Loadable.Done -> "#" + (o.value + 1)
+        is Loadable.Failed, Loadable.Loading -> "-"
+    }
+
+    @Kompozable
+    fun GenericSealedForms() {
+        var outcome: Loadable<Int> by remember { mutableStateOf(Loadable.Loading) }
+        val first: Result<String> = fetch(true)
+        var second: Result<String> = Result.Error(IllegalArgumentException("yok"))
+        val before = second.successOr("önce")
+        second = fetch(false)
+        val failed = second as? Result.Error
+        Column {
+            Text("sonuç " + outcome.describe() + " " + outcome.isLoading + " " + outcome.valueOrNull() + " " + shown(outcome))
+            Text("veri " + first.successOr("?") + " " + before + " " + second.successOr("?") + " " + (first is Result.Success) + " " + failed?.exception?.message +
+                " " + parse("") + " " + parse("abc") + " " + parse("ab").valueOrNull() + " " + listOf(parse("a"), Loadable.Loading).map { it.isLoading })
+            Button(onClick = { outcome = parse("kedi") }) { Text("Ayrıştır") }
+        }
+    }
+}
+
+fn generic_sealed_classes() {
+    let rule = KompozTestRule::new(GenericSealedForms);
+    rule.wait_for_idle();
+    rule.on_node_with_text("sonuç yükleniyor true null -").assert_exists();
+    line(&rule, "veri ", "veri veri önce ? true bağlantı yok Failed(reason=boş) Done(value=3) 2 [false, true]");
+    rule.on_node_with_text("Ayrıştır").perform_click();
+    rule.wait_for_idle();
+    rule.on_node_with_text("sonuç değer 4 false 4 #5").assert_exists();
+}
+
+// ---- API bases of the second kind (WPA-rest) -----------------------------------------------------------------------
+
+kompoz! {
+    // The API's abstract classes that are structs of callbacks, as their samples extend them in object expressions:
+    // navigationevent's `NavigationEventHandler<T>` (its constructor's arguments by name; its overrides' `this` the
+    // handler: `transitionState`, `isBackEnabled`), navigation's `NavType<T>` (`isNullableAllowed` its method, `name`
+    // an `override val`, the methods' Rust parameters given as Kotlin's: `key: String`, `value: Point`).
+    data class Point(val x: Int, val y: Int)
+
+    fun backHandler(log: MutableState<String>): NavigationEventHandler<NavigationEventInfo.None> =
+        object : NavigationEventHandler<NavigationEventInfo.None>(initialInfo = NavigationEventInfo.None, isBackEnabled = true) {
+            override fun onBackStarted(event: NavigationEvent) {
+                log.value += "başla "
+            }
+            override fun onBackProgressed(event: NavigationEvent) {
+                log.value += "${event.progress} "
+            }
+            override fun onBackCompleted() {
+                log.value += "bitti " + (transitionState == NavigationEventTransitionState.Idle) + " " + isBackEnabled
+            }
+        }
+
+    fun pointNavType(): NavType<Point> = object : NavType<Point>(isNullableAllowed = false) {
+        override val name = "nokta"
+        override fun put(bundle: SavedState, key: String, value: Point) {
+            bundle.write { putString(key, "${value.x},${value.y}") }
+        }
+        override fun get(bundle: SavedState, key: String): Point? {
+            val text = bundle.read { getString(key) }
+            return Point(text.substringBefore(",").toInt(), text.substringAfter(",").toInt())
+        }
+        override fun parseValue(value: String): Point = Point(value.substringBefore(",").toInt(), value.substringAfter(",").toInt())
+        override fun serializeAsValue(value: Point): String = "${value.x},${value.y}"
+    }
+
+    object NullablePointType : NavType<Point>(isNullableAllowed = true) {
+        override fun put(bundle: SavedState, key: String, value: Point?) {
+            if (value != null) bundle.write { putString(key, "${value.x}:${value.y}") }
+        }
+        override fun get(bundle: SavedState, key: String): Point? = null
+        override fun parseValue(value: String): Point? =
+            if (value == "null") null else Point(value.substringBefore(":").toInt(), value.substringAfter(":").toInt())
+        override fun serializeAsValue(value: Point?): String = if (value == null) "null" else "${value.x}:${value.y}"
+    }
+
+    fun nullablePoints(): NavType<Point> = NullablePointType
+
+    // navigation3-ui's AnimatedBottomSheetSample: a scene of its own, `object : OverlayScene<T>` (its supertype
+    // `Scene<T>` implemented too, its objects compared and shown as Kotlin's are, by identity), its `content` a
+    // composable lambda, its suspending `onRemove`.
+    fun sheetScene(entry: NavEntry<String>, previous: List<NavEntry<String>>, log: MutableState<String>): OverlayScene<String> =
+        object : OverlayScene<String> {
+            override val key = entry.contentKey
+            override val entries = listOf(entry)
+            override val previousEntries = previous
+            override val overlaidEntries = previous
+            override val content: @Composable () -> Unit = { Text("sayfa") }
+            override suspend fun onRemove() {
+                log.value += "kaldırıldı"
+            }
+        }
+
+    // lifecycle-viewmodel's CustomFactory sample: `object : ViewModelProvider.Factory` overriding the generic
+    // `create` (`T` its bound, a ViewModel; `as T` the value, made the factory's shared ViewModel).
+    class NoteViewModel(val note: String) : ViewModel()
+
+    fun noteFactory(note: String): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: KClass<T>, extras: CreationExtras): T {
+            @Suppress("UNCHECKED_CAST")
+            return NoteViewModel(note) as T
+        }
+    }
+
+    // foundation's dragAndDropTarget sample: `object : DragAndDropTarget` (its other callbacks the defaults).
+    fun dropTarget(log: MutableState<String>): DragAndDropTarget = object : DragAndDropTarget {
+        override fun onDrop(event: DragAndDropEvent): Boolean {
+            log.value += "bırakıldı "
+            return true
+        }
+        override fun onEntered(event: DragAndDropEvent) {
+            log.value += "girdi "
+        }
+    }
+}
+
+fn api_bases_of_the_second_kind() {
+    use kompoz::navigationevent::{DirectNavigationEventInput, NavigationEvent, NavigationEventDispatcher};
+    let log = mutable_state_of(String::new());
+    let handler = back_handler(log.clone());
+    let dispatcher = NavigationEventDispatcher::new();
+    dispatcher.add_handler(&handler);
+    let input = DirectNavigationEventInput::new();
+    dispatcher.add_input(&input);
+    input.dispatch_on_back_started(NavigationEvent::default());
+    input.dispatch_on_back_progressed(NavigationEvent { progress: 0.5, ..NavigationEvent::default() });
+    input.dispatch_on_back_completed();
+    assert_eq!(log.get(), "başla 0.5 bitti true true");
+    let t = point_nav_type();
+    assert_eq!(t.name(), "nokta");
+    assert!(!t.is_nullable_allowed());
+    let bundle = SavedState::new();
+    t.parse_and_put(&bundle, "p", "3,4").unwrap();
+    assert_eq!(t.get::<Point>(&bundle, "p"), Some(Point(3, 4)));
+    assert_eq!(t.parse_value::<Point>("1,2").unwrap(), Some(Point(1, 2)));
+    let n = nullable_points();
+    assert!(n.is_nullable_allowed() && n.parse_value::<Point>("null").unwrap().is_none());
+    assert_eq!(n.parse_value::<Point>("5:6").unwrap(), Some(Point(5, 6)));
+    assert_eq!(n.serialize_as_value(Some(&Point(1, 2))), "1:2");
+    // The overlay scene: its entries, itself as an overlay scene, `==` its identity, its `onRemove` a coroutine.
+    use kompoz::navigation3::{Metadata, NavEntry, Scene};
+    let entry = |k: &str| {
+        NavEntry::new(k.to_string(), kompoz::ui::layout::SlotKey::new(k.to_string()), Metadata::new(), |_| {})
+    };
+    let log = mutable_state_of(String::new());
+    let scene = sheet_scene(entry("üst"), vec![entry("alt")], log.clone());
+    assert_eq!(scene.entries().len(), 1);
+    assert_eq!(scene.overlaid_entries().len(), 1);
+    let same = scene.clone();
+    assert!(*scene == *same);
+    let other = sheet_scene(entry("üst"), vec![], log.clone());
+    assert!(*scene != *other);
+    let as_scene: std::rc::Rc<dyn Scene<String>> = scene.clone();
+    assert!(as_scene.as_overlay_scene().is_some());
+    let mut removing = scene.on_remove();
+    let poll = removing.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop()));
+    assert!(poll.is_ready() && log.get() == "kaldırıldı");
+    // The factory: its generic `create` the trait's.
+    let factory = note_factory("not".to_string());
+    let made = factory.create(&KClass::of::<NoteViewModel>(), &CreationExtras::default());
+    let any: std::rc::Rc<dyn std::any::Any> = made;
+    assert_eq!(any.downcast_ref::<NoteViewModel>().map(|v| v.note()), Some("not".to_string()));
+    // The drop target: its overrides called, the others the trait's defaults.
+    let log = mutable_state_of(String::new());
+    let target = drop_target(log.clone());
+    let event = kompoz::ui::draganddrop::DragAndDropEvent::default();
+    target.on_started(&event);
+    target.on_entered(&event);
+    assert!(target.on_drop(&event));
+    assert_eq!(log.get(), "girdi bırakıldı ");
+}
+
+// ---- object expressions' members and secondary constructors (WPA-rest) ------------------------------------------
+
+kompoz! {
+    // An object expression extending an abstract class: an `override var` (its setter the object's), a suspending
+    // override (a coroutine borrowing the object, called by the class's own suspending function); an open class's
+    // secondary constructor's body run when a subclass's super call goes through it (after the primary one's
+    // initializer, as Kotlin's), an abstract one's too.
+    abstract class Fetcher2 {
+        abstract var calls: Int
+        abstract suspend fun fetch(key: String): String
+        suspend fun twice(key: String): String = "${fetch(key)}${fetch(key)}"
+    }
+
+    fun counting(prefix: String): Fetcher2 = object : Fetcher2() {
+        override var calls = 0
+        override suspend fun fetch(key: String): String {
+            delay(10)
+            calls++
+            return "$prefix$key"
+        }
+    }
+
+    open class Panel2(val w: Int, val h: Int) {
+        var note = "birincil"
+        constructor(side: Int) : this(side, side) {
+            note = "kare $side"
+        }
+    }
+
+    class SquarePanel(s: Int) : Panel2(s)
+
+    abstract class Labeled2(val text: String) {
+        var shown = text
+        constructor(n: Int) : this("#$n") {
+            shown = "sayı " + text
+        }
+    }
+
+    class Numbered(n: Int) : Labeled2(n)
+
+    @Kompozable
+    fun ObjectMemberForms() {
+        val fetcher = remember { counting("ö:") }
+        var text by remember { mutableStateOf("…") }
+        LaunchedEffect(Unit) {
+            text = fetcher.twice("a") + " " + fetcher.calls
+            fetcher.calls = 10
+            text += " " + fetcher.calls
+        }
+        Column {
+            Text("nesne $text")
+            Text("ikincil " + SquarePanel(3).note + " " + SquarePanel(3).w + " " + Panel2(2, 5).note + " " + Numbered(7).shown)
+        }
+    }
+}
+
+fn object_members_and_secondary_constructors() {
+    let rule = KompozTestRule::new(ObjectMemberForms);
+    rule.wait_for_idle();
+    rule.on_node_with_text("ikincil kare 3 3 birincil sayı #7").assert_exists();
+    rule.advance_time_by(100);
+    rule.wait_for_idle();
+    rule.on_node_with_text("nesne ö:aö:a 2 10").assert_exists();
+}
+
 fn main() {
     common::run(&[
         ("sealed_classes_and_is", sealed_classes_and_is),
@@ -1056,5 +1334,8 @@ fn main() {
         ),
         ("classes_as_kotlin_writes_them", classes_as_kotlin_writes_them),
         ("hierarchy_forms_beyond_the_cpp_tests", hierarchy_forms_beyond_the_cpp_tests),
+        ("generic_sealed_classes", generic_sealed_classes),
+        ("api_bases_of_the_second_kind", api_bases_of_the_second_kind),
+        ("object_members_and_secondary_constructors", object_members_and_secondary_constructors),
     ]);
 }

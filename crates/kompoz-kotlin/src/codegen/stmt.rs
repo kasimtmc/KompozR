@@ -25,7 +25,9 @@ impl Tail {
     fn want(self, fun: &super::FnState) -> Want {
         match self {
             Tail::Value(w) => w,
-            Tail::Return => Want { some: fun.nullable_result, shared: fun.shared_result, ..Want::default() },
+            Tail::Return => {
+                Want { some: fun.nullable_result, shared: fun.shared_result, result: true, ..Want::default() }
+            }
             Tail::Unit => Want::default(),
         }
     }
@@ -381,12 +383,24 @@ impl Gen<'_, '_> {
                             && o.ty != Ty::Unknown;
                         let value_ty = o.ty.clone();
                         let v = self.finish(o, Want::default(), e.loc);
-                        let v = match &declared_rt {
-                            Some(rt) => self.as_declared(v, &value_ty, rt, span),
-                            None => v,
-                        };
-                        let v = if wrap { quote_spanned!(span=> ::core::option::Option::Some(#v)) } else { v };
-                        (quote_spanned!(span=> = #v), ty)
+                        // ((stage 14 WPA) a case of a sealed class, a class's value of an interface or of `Any`: the
+                        // declared type's — `val r: Outcome<Int> = Outcome.Failure("x")`)
+                        // (an interface's or open class's shared object: `as_declared`'s `Rc::new`)
+                        if let Some((d, _)) = &declared
+                            && !matches!(d, Ty::Fun(_))
+                            && (super::hierarchy::is_any(&d.non_null()) || self.sealed_of(&d.non_null()).is_some())
+                            && self.coerces(&value_ty, d)
+                        {
+                            let v = self.coerce(v, &value_ty, d, span);
+                            (quote_spanned!(span=> = #v), ty)
+                        } else {
+                            let v = match &declared_rt {
+                                Some(rt) => self.as_declared(v, &value_ty, rt, span),
+                                None => v,
+                            };
+                            let v = if wrap { quote_spanned!(span=> ::core::option::Option::Some(#v)) } else { v };
+                            (quote_spanned!(span=> = #v), ty)
+                        }
                     }
                     PropertyInit::None => {
                         if declared.is_none() {
@@ -804,6 +818,7 @@ impl Gen<'_, '_> {
                             None => Want {
                                 some: self.fun.nullable_result,
                                 shared: self.fun.shared_result,
+                                result: true,
                                 ..Want::default()
                             },
                         };
@@ -885,9 +900,19 @@ impl Gen<'_, '_> {
             let ts = quote_spanned!(span=> if #c #b else #a);
             return Out::plain(self.held_shared(ts, shared, span), ty);
         }
+        // ((WPA-rest) `if (x !is T || c) a else b`: `if (x is T && !c) b else a`, `x` a `T` in `b` as Kotlin's smart
+        // cast makes it)
+        if let Some(o) = otherwise
+            && let Some(positive) = negated_is_condition(condition)
+        {
+            return self.if_expr(&positive, o, Some(then), tail, loc);
+        }
         self.push_scope();
+        // (a receiver smart-cast by the condition (`this is T`): the then branch's)
+        let receivers = self.receivers.len();
         let c = self.condition(condition);
         let a = self.braced(then, tail);
+        self.receivers.truncate(receivers);
         let c = unused_narrowings(c, &a);
         self.pop_scope();
         let ts = match otherwise {
@@ -993,19 +1018,25 @@ impl Gen<'_, '_> {
             ExprKind::Is { expr, negated: false, ty } if matches!(&expr.kind, ExprKind::Name(n) if self.is_local(&n.name)) =>
             {
                 let ExprKind::Name(n) = &expr.kind else { unreachable!() };
-                let v = self.expr(expr).ts;
                 let rust = self.local(&n.name).map(|l| l.rust).unwrap_or_else(|| snake(&n.name));
                 let i = ident(&rust, self.span(n.loc));
-                let kt = self.kt(span);
-                let target = self.rust_type(&Type { nullable: false, ..(**ty).clone() }, super::types::TypePos::Value);
-                let tty = self.ty_of(&Type { nullable: false, ..(**ty).clone() });
+                // ((WPA-rest) the safe cast's, `x as? T`: of a value of `Any?` too — `other is Money` in `equals`)
+                let lty = self.local(&n.name).map(|l| l.ty).unwrap_or(Ty::Unknown);
+                let (tty, _) = self.cast_target(ty, &lty, span);
+                let cast = self.cast_expr(expr, true, &Type { nullable: false, ..(**ty).clone() }, c.loc).ts;
                 // (the same local, of the type the check gives it: where it was declared stays)
-                let l = self.local(&n.name);
-                let at = l.as_ref().and_then(|l| l.at);
-                let v = self.cast_operand_of(v, &l.map(|l| l.ty).unwrap_or(Ty::Unknown), span);
+                let at = self.local(&n.name).and_then(|l| l.at);
                 self.declare(&n.name, rust, LocalKind::Val, tty);
                 self.set_local_at(&n.name, at);
-                quote_spanned!(span=> let ::core::option::Option::Some(#i) = #kt::KtAs::<#target>::kt_as_safe(&#v))
+                quote_spanned!(span=> let ::core::option::Option::Some(#i) = #cast)
+            }
+            // ((stage 14 WPA) `this is T`: the receiver's smart cast)
+            ExprKind::Is { expr, negated: false, ty } if matches!(&expr.kind, ExprKind::This { .. }) => {
+                let ExprKind::This { label } = &expr.kind else { unreachable!() };
+                match self.smart_this(label.as_ref(), ty, span) {
+                    Some(ts) => ts,
+                    None => self.value(c),
+                }
             }
             _ => self.value(c),
         }
@@ -1054,9 +1085,39 @@ impl Gen<'_, '_> {
             },
             None => None,
         };
+        // ((stage 14 WPA) `when (this)` in an interface's or open class's member: the object's class, the receiver
+        // smart-cast in a branch of one `is`)
+        let this_in_trait = match w.subject.as_deref() {
+            Some(WhenSubject { binding: None, expr: Expr { kind: ExprKind::This { label }, .. } }) => {
+                let r = self.receivers.iter().rev().find(|r| match label {
+                    Some(l) => r.labels.contains(&l.name),
+                    None => true,
+                });
+                r.is_some_and(|r| self.receiver_in_trait(r)).then(|| label.clone())
+            }
+            _ => None,
+        };
+        if this_in_trait.is_some()
+            && let Some((i, _)) = &subject
+        {
+            prelude = quote_spanned!(span=> #[allow(unused_variables)] let #i = self;);
+        }
         let mut chain = TokenStream::new();
         let mut has_else = false;
         for (k, b) in w.branches.iter().enumerate() {
+            if let (Some(label), [WhenCondition::Is { negated: false, ty, .. }], None) =
+                (&this_in_trait, b.conditions.as_slice(), &b.guard)
+            {
+                self.push_scope();
+                let receivers = self.receivers.len();
+                let c = self.smart_this(label.as_ref(), ty, span).unwrap_or_else(|| quote!(false));
+                let body = self.braced(&b.body, tail);
+                self.receivers.truncate(receivers);
+                self.pop_scope();
+                let kw = if k == 0 { quote_spanned!(span=> if) } else { quote_spanned!(span=> else if) };
+                chain.extend(quote_spanned!(span=> #kw #c #body));
+                continue;
+            }
             let smart = match (b.conditions.as_slice(), &subject, &subject_local, &b.guard) {
                 ([WhenCondition::Is { negated: false, ty, .. }], Some((s, _)), Some(name), None) => {
                     Some((ty.clone(), s.clone(), name.clone()))
@@ -1068,8 +1129,7 @@ impl Gen<'_, '_> {
                 let s = self.cast_operand_of(quote!(#s), &sty, span);
                 let at = self.local(&name).and_then(|l| l.at);
                 self.push_scope();
-                let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, super::types::TypePos::Value);
-                let tty = self.ty_of(&Type { nullable: false, ..ty.clone() });
+                let (tty, target) = self.cast_target(&ty, &sty, span);
                 let rust = snake(&name);
                 let i = ident(&rust, span);
                 self.declare(&name, rust, LocalKind::Val, tty);
@@ -1094,6 +1154,34 @@ impl Gen<'_, '_> {
             }
             let mut conds = Vec::new();
             for c in &b.conditions {
+                // ((stage 14 WPA) `when (this)` in a trait's member: its object's class; an object's case by its
+                // class)
+                if this_in_trait.is_some() {
+                    let t = match c {
+                        WhenCondition::Is { negated, ty, .. } => Some((*negated, ty.clone())),
+                        WhenCondition::Expr(e) => {
+                            let t = self.peek_ty(e);
+                            match &t {
+                                Ty::Named(n, _)
+                                    if self
+                                        .user_class_rust(n)
+                                        .is_some_and(|c| c.shape == super::class::Shape::Object) =>
+                                {
+                                    Some((false, super::hierarchy::named_type(n, e.loc)))
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some((negated, ty)) = t {
+                        let r = self.receivers.last().map(|r| r.value.clone()).unwrap_or(Ty::Unknown);
+                        let (_, target) = self.cast_target(&ty, &r, span);
+                        let t = quote_spanned!(span=> #kt::kt_as_this::<#target, _>(self).is_some());
+                        conds.push(if negated { quote_spanned!(span=> !#t) } else { t });
+                        continue;
+                    }
+                }
                 conds.push(match (c, &subject) {
                     (WhenCondition::Expr(e), Some((s, sty))) => {
                         let v = if sty.is_float()
@@ -1101,9 +1189,15 @@ impl Gen<'_, '_> {
                         {
                             self.number(n, e.loc, true).ts
                         } else {
-                            self.value_want(e, Want { str_ok: true, any: None, some: false, shared: None })
+                            self.value_want(
+                                e,
+                                Want { str_ok: true, any: None, some: false, shared: None, result: false },
+                            )
                         };
-                        quote_spanned!(span=> #s == #v)
+                        // (an object's value, `O {}`, in parentheses: an `if`'s condition can't end in a struct's)
+                        let braced = matches!(v.clone().into_iter().last(),
+                            Some(proc_macro2::TokenTree::Group(g)) if g.delimiter() == proc_macro2::Delimiter::Brace);
+                        if braced { quote_spanned!(span=> #s == (#v)) } else { quote_spanned!(span=> #s == #v) }
                     }
                     (WhenCondition::Expr(e), None) => self.value(e),
                     (WhenCondition::In { negated, range, .. }, Some((s, _))) => {
@@ -1116,8 +1210,7 @@ impl Gen<'_, '_> {
                         quote!(false)
                     }
                     (WhenCondition::Is { negated, ty, .. }, Some((s, sty))) => {
-                        let target =
-                            self.rust_type(&Type { nullable: false, ..ty.clone() }, super::types::TypePos::Value);
+                        let (_, target) = self.cast_target(ty, sty, span);
                         let s = self.cast_operand_of(quote!(#s), sty, span);
                         let t = quote_spanned!(span=> #kt::kt_is::<#target, _>(&#s));
                         if *negated { quote_spanned!(span=> !#t) } else { t }
@@ -1181,13 +1274,41 @@ fn int_lit(e: &Expr) -> Option<&Number> {
 }
 
 /// Whether a condition has a `x != null` among its `&&`-ed parts.
-fn has_null_check(c: &Expr) -> bool {
+/// `x !is T` (on a local or `this`) or `x !is T || c`, as its negation `x is T` / `x is T && !c`.
+fn negated_is_condition(c: &Expr) -> Option<Expr> {
+    let local_is = |e: &Expr| matches!(&e.kind, ExprKind::Is { negated: true, expr, .. } if matches!(&expr.kind, ExprKind::Name(_) | ExprKind::This { .. }));
+    let positive = |e: &Expr| match &e.kind {
+        ExprKind::Is { expr, ty, .. } => {
+            Expr { kind: ExprKind::Is { expr: expr.clone(), negated: false, ty: ty.clone() }, loc: e.loc }
+        }
+        _ => e.clone(),
+    };
+    match &c.kind {
+        _ if local_is(c) => Some(positive(c)),
+        ExprKind::Binary { op: BinaryOp::Or, lhs, rhs } if local_is(lhs) => {
+            let not = Expr {
+                kind: ExprKind::Prefix {
+                    op: PrefixOp::Not,
+                    operand: Box::new(Expr { kind: ExprKind::Paren(rhs.clone()), loc: rhs.loc }),
+                },
+                loc: rhs.loc,
+            };
+            Some(Expr {
+                kind: ExprKind::Binary { op: BinaryOp::And, lhs: Box::new(positive(lhs)), rhs: Box::new(not) },
+                loc: c.loc,
+            })
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn has_null_check(c: &Expr) -> bool {
     match &c.kind {
         ExprKind::Binary { op: BinaryOp::And, lhs, rhs } => has_null_check(lhs) || has_null_check(rhs),
         ExprKind::Binary { op: BinaryOp::NotEq, lhs, rhs } => {
             matches!(rhs.kind, ExprKind::Null) && matches!(lhs.kind, ExprKind::Name(_))
         }
-        ExprKind::Is { expr, negated: false, .. } => matches!(expr.kind, ExprKind::Name(_)),
+        ExprKind::Is { expr, negated: false, .. } => matches!(expr.kind, ExprKind::Name(_) | ExprKind::This { .. }),
         _ => false,
     }
 }
