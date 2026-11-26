@@ -4,7 +4,7 @@
 //!
 //! The generator gives every token it emits the span of the Kotlin token it comes from ([`kompoz_kotlin::SpanMap`]).
 //! Outside a proc macro, spans are proc-macro2's own: [`Markers`] makes one span per Kotlin offset (an identifier
-//! `__kzS<offset>` of a text parsed for the purpose, its source text naming the offset back), [`print`] writes the
+//! `__kzS<offset>` of a text parsed for the purpose, its source text naming the offset back), [`print`](fn@print) writes the
 //! tokens out and reads each one's offset off its span. Tokens made by the generator itself (`call_site`) have none.
 
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};

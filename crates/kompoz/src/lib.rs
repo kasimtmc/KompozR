@@ -18,6 +18,14 @@
 //! What `#[kompozable]` and the Kotlin syntax generate names the crates through this one when a crate depends on it
 //! (`::kompoz::runtime::…`), so it is the only dependency an app needs. `kompoz::test` (the headless test rule) is
 //! behind the `test` feature, for a crate's tests.
+//!
+//! The Kotlin syntax translates Kotlin as Compose apps write it: composables, classes (data, enum, sealed, open and
+//! abstract, inner, generic), interfaces and objects, companions, extension functions and properties, delegates,
+//! overloads, operators, exceptions, suspending functions, jumps out of lambdas (what differs from Kotlin, and why:
+//! kompoz-kotlin's `codegen` docs). The declarations of a crate's other `kompoz!` blocks and `.kt` files are seen as
+//! a package's are. Exceptions and jumps out of lambdas unwind: keep `panic = "unwind"` (Rust's default). For the
+//! editor: `kompoz-lsp`, the language server (VS Code and CLion/RustRover plugins under `editors/`, Kate through
+//! `kompoz-lsp --kate`).
 
 // (the macros name this crate `::kompoz` in it too)
 extern crate self as kompoz;

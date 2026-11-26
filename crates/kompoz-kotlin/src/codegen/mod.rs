@@ -3,7 +3,7 @@
 //! gets the span of the Kotlin it comes from (`SpanMap`): rustc's errors and `#[track_caller]`'s call sites land on
 //! Kotlin lines.
 //!
-//! What is translated (stage 9's Kotlin):
+//! What is translated (the core, from stage 9; stage 14's classes and the rest below):
 //!
 //! | Kotlin | Rust |
 //! |---|---|
@@ -14,6 +14,7 @@
 //! | a name whose declaration isn't seen (another file's `val`, a Rust `thread_local!` or constant) | `kt::top_level!(name)`: a thread-local's value, or the value, cloned; a property of it `kt::top_level_with!(Name, |v| v.prop())`, lent in place; an infix on it in place (`Name.provides(v)`) |
 //! | `Int Long Float Double Boolean Char String Unit` | `i32 i64 f32 f64 bool char String ()` |
 //! | `T?`, `List<T>`, `Map<K, V>`, `Set<T>`, `Pair<A, B>` | `Option<T>`, `Vec<T>`, `kt::KtMap<K, V>`, `kt::KtSet<T>`, `(A, B)` |
+//! | `MutableList<T>`, `MutableMap<K, V>`, `MutableSet<T>` (`ArrayList`, `HashMap`, …) | `kt::MutableList<T>`, `kt::MutableMap<K, V>`, `kt::MutableSet<T>`: one shared object, as Kotlin's (`collections`) |
 //! | parameter `String`, `T?`, `(A) -> R` | `impl Into<String>`, `impl Into<Option<T>>`, `impl Fn(A) -> R + 'static` |
 //! | parameter of an interface the API has as a trait (`shape: Shape`) | its object shared as the API holds it (`Arc<dyn Shape>`) |
 //! | `val x = e`, `var x = e` | `let x = e;`, `let mut x = e;` (a value read again is cloned: Kotlin shares values) |
@@ -46,13 +47,30 @@
 //! Kotlin's imports and package are not translated: the names come from the Rust module's own `use`s (the
 //! prelude: `use kompoz::prelude::*;`), the kt shims' traits from a `use` the generated bodies have.
 //!
-//! Stage 14 adds Kotlin's classes ([`class`], [`object_expr`]) and its functions and control flow: exceptions
+//! Stage 14 adds Kotlin's classes (`class`, `hierarchy`, `object_expr`) and its functions and control flow: exceptions
 //! (`exceptions`: `try`/`catch`/`finally`, `throw`, on unwinding — the program needs `panic = "unwind"`), overloads
 //! (`overloads`), operator and infix functions (`operators`), properties by delegates, with accessors, `lateinit`,
 //! top-level `var`s and extension properties (`property`), local and anonymous functions, callable references and
 //! Kotlin's capture of `var`s by reference (`capture`), jumps out of inline lambdas and inline functions' suspending
 //! twins (`jumps`), varargs and spreads, nullable and suspending function types. What isn't translated yet is an error
-//! saying it comes with stage 15, at the Kotlin construct.
+//! saying it comes with stage 15, at the Kotlin construct (what remains is Android's: `LocalConfiguration`,
+//! `Build.VERSION`, activities, `Parcelable`, resources by `@DrawableRes` id).
+//!
+//! Where the Rust differs from Kotlin, on purpose:
+//!
+//! - A data class is a Rust value (`#[derive(Clone, PartialEq)]`, its copies Rust's): `==` compares it as Kotlin's
+//!   does, `===` of two data class values is an error (they have no identity of their own; compare them with `==`).
+//!   A plain class, an object and a mutable collection are shared objects, `===` their identity.
+//! - A read-only `List`/`Set`/`Map` is a value: given where Kotlin would share it (a parameter not asked
+//!   `is MutableList`, a function's result), a snapshot of a mutable one is taken at the call.
+//! - A value class is a data class's struct of its one property (it has `copy` and `componentN`, Kotlin's hasn't).
+//! - A state holding an interface's value is compared structurally, as Compose's policy is: writing the same object
+//!   again is no change.
+//! - Exceptions and non-local jumps unwind (`panic = "unwind"`, Rust's default, is required); a jump out of a
+//!   composable lambda ends the groups it leaves through the composer's marker (`end_to_marker`), as Compose's does.
+//! - Java's date classes (`java.util.Calendar`, `Date`, `TimeZone`, `java.text.SimpleDateFormat`) run on ICU4X: zone
+//!   short names are CLDR's (not the JDK's legacy ones), `Y` reads as the year, there is no `SimpleDateFormat()`.
+//!
 //! Errors are per declaration: a declaration with an error is left out, the others are translated.
 
 mod call;
