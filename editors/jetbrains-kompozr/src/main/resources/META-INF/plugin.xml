@@ -1,0 +1,26 @@
+<idea-plugin>
+    <id>com.plyg.kompozr</id>
+    <name>KompozR</name>
+    <vendor url="https://github.com/kasimtmc/kompozr">plyGround</vendor>
+    <description><![CDATA[
+        For KompozR's UI code, written in Kotlin's syntax: inside <code>kompoz! { … }</code> blocks of Rust sources
+        and in whole <code>.kt</code> files read by <code>kompoz_file!</code>. KompozR's language server,
+        <code>kompoz-lsp</code>, answers for the Kotlin in RustRover and CLion: the generator's errors on the
+        Kotlin's own lines (and rustc's, through its shadow-project bridge), hovers, completion, going to
+        definitions, and its colors for the Kotlin. The IDE's own Rust support keeps the Rust around it.
+        <code>.kt</code> files are highlighted with a Kotlin grammar of the plugin's (TextMate).
+        <p><code>kompoz-lsp</code> is found in Settings, Tools, KompozR, else in <code>KOMPOZ_LSP</code>, built in the
+        project's <code>target/</code>, on <code>PATH</code> or in <code>~/.cargo/bin</code>.</p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lsp</depends>
+    <depends>org.jetbrains.plugins.textmate</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <platform.lsp.integrationProvider implementation="com.plyg.kompozr.KompozRLspIntegrationProvider"/>
+        <textmate.bundleProvider implementation="com.plyg.kompozr.KompozRTextMateBundles"/>
+        <applicationConfigurable parentId="tools" instance="com.plyg.kompozr.KompozRConfigurable" id="com.plyg.kompozr.settings"
+                                 displayName="KompozR"/>
+    </extensions>
+</idea-plugin>

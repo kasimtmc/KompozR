@@ -9,7 +9,8 @@
 //!   highlights, document symbols. No Kotlin formatter: formatting there is refused.
 //! - [`doc`], [`text`]: open documents, their Kotlin regions and positions (LSP's UTF-16, rustc's view of the text
 //!   the Kotlin's offsets are into).
-//! - [`bridge`]: the seam for a second source of facts about the Kotlin (the shadow-project bridge).
+//! - [`bridge`]: the seam for a second source of facts about the Kotlin; [`shadow`]: the one there is, the
+//!   shadow-project bridge (rustc's errors on the Kotlin's lines, rust-analyzer's hover of the Rust it becomes).
 //! - [`json`], [`rpc`]: JSON and LSP's framing, the server's own.
 //! - [`kate`]: `kompoz-lsp --kate`, Kate's highlighting definition and its LSP client's settings.
 
@@ -20,6 +21,7 @@ pub mod kate;
 pub mod kotlin;
 pub mod rpc;
 pub mod server;
+pub mod shadow;
 pub mod text;
 pub mod tokens;
 pub mod workspace;

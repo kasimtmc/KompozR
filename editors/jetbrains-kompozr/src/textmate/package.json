@@ -1,0 +1,30 @@
+{
+  "name": "kompozr-kotlin",
+  "displayName": "Kotlin (KompozR)",
+  "description": "KompozR's Kotlin: .kt files read by kompoz_file!",
+  "version": "0.1.0",
+  "publisher": "plyground",
+  "license": "Apache-2.0",
+  "contributes": {
+    "languages": [
+      {
+        "id": "kotlin",
+        "aliases": [
+          "Kotlin",
+          "kotlin"
+        ],
+        "extensions": [
+          ".kt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kotlin",
+        "scopeName": "source.kotlin.kompozr",
+        "path": "./syntaxes/kotlin.tmLanguage.json"
+      }
+    ]
+  }
+}

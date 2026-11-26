@@ -535,7 +535,7 @@ fn finish(failures: Vec<String>) {
 #[test]
 fn kotlin_without_rust_analyzer() {
     let f = Fixture::new();
-    let mut client = Client::start(&["--no-rust-analyzer"], &f.0);
+    let mut client = Client::start(&["--no-rust-analyzer", "--no-shadow"], &f.0);
     let init = initialize(&mut client, &f.0, Json::Null);
     let legend = init["capabilities"]["semanticTokensProvider"]["legend"].clone();
     client.check("a semantic tokens legend", !legend["tokenTypes"].array().is_empty());
@@ -564,7 +564,7 @@ fn with_rust_analyzer() {
     }
     let _one = ANALYZER.lock().unwrap_or_else(|e| e.into_inner());
     let f = Fixture::new();
-    let mut client = Client::start(&[], &f.0);
+    let mut client = Client::start(&["--no-shadow"], &f.0);
     // (no cargo check, no build scripts or proc macros: the fixture has no dependency)
     let options = Json::parse(
         r#"{"checkOnSave": false, "cargo": {"buildScripts": {"enable": false}}, "procMacro": {"enable": false},
@@ -614,7 +614,7 @@ fn the_workspaces_kotlin_has_no_errors() {
         "crates/kompoz/tests/kotlin_lazy.rs",
         "crates/kompoz/tests/kt/ui.kt",
     ];
-    let mut client = Client::start(&["--no-rust-analyzer"], &root);
+    let mut client = Client::start(&["--no-rust-analyzer", "--no-shadow"], &root);
     initialize(&mut client, &root, Json::Null);
     for f in files {
         let path = root.join(f);

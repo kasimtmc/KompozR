@@ -1,0 +1,152 @@
+{
+  "name": "kompozr",
+  "displayName": "KompozR",
+  "description": "KompozR's UI code in Kotlin's syntax, in kompoz! blocks of Rust sources and in .kt files: kompoz-lsp's language server (in front of rust-analyzer) and highlighting for the Kotlin",
+  "version": "0.1.0",
+  "publisher": "plyground",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#6750A4",
+    "theme": "dark"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kasimtmc/kompozr",
+    "directory": "editors/vscode-kompozr"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "kompozr",
+    "kompoz",
+    "compose",
+    "kotlin",
+    "rust",
+    "rust-analyzer"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:rust",
+    "onLanguage:kotlin"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "kotlin",
+        "aliases": [
+          "Kotlin",
+          "kotlin"
+        ],
+        "extensions": [
+          ".kt"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kotlin",
+        "scopeName": "source.kotlin.kompozr",
+        "path": "./syntaxes/kotlin.tmLanguage.json"
+      },
+      {
+        "scopeName": "kompozr.injection.rust",
+        "path": "./syntaxes/kompoz-rust.injection.tmLanguage.json",
+        "injectTo": [
+          "source.rust"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.kotlin": "kotlin"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "KompozR",
+      "properties": {
+        "kompozr.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "The `kompoz-lsp` to run as the language server. Empty: `KOMPOZ_LSP` from the environment, else `target/debug/kompoz-lsp` or `target/release/kompoz-lsp` in a workspace folder (the newest), else `kompoz-lsp` on `PATH`."
+        },
+        "kompozr.server.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Arguments given to `kompoz-lsp` after its own: rust-analyzer's, passed on to it."
+        },
+        "kompozr.rustAnalyzer.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "The rust-analyzer `kompoz-lsp` runs (`--rust-analyzer`, and `--shadow-rust-analyzer` for the shadow-project bridge). Empty: `rust-analyzer` on `PATH` (the toolchain's: `rustup component add rust-analyzer`)."
+        },
+        "kompozr.rustAnalyzer.mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "kompozr",
+            "off"
+          ],
+          "enumDescriptions": [
+            "`kompoz-lsp` stands in front of rust-analyzer unless the rust-analyzer extension (rust-lang.rust-analyzer) is installed, which then has the Rust to itself.",
+            "Always: `kompoz-lsp` runs rust-analyzer and answers for the Rust as well (turn the rust-analyzer extension off then, or the two answer twice).",
+            "Never: `kompoz-lsp --no-rust-analyzer`, the Kotlin's answers only."
+          ],
+          "default": "auto",
+          "markdownDescription": "Who answers for the Rust in `.rs` files: `kompoz-lsp` with the toolchain's rust-analyzer behind it, or the rust-analyzer extension."
+        },
+        "kompozr.shadow.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "The shadow-project bridge: a second rust-analyzer, started when first needed, over the Rust the Kotlin translates to, for rustc's type errors and type-accurate hovers on the Kotlin's lines. Off: `--no-shadow`."
+        },
+        "kompozr.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "window",
+          "markdownDescription": "The messages between VS Code and `kompoz-lsp`, in the KompozR output channel."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "kompozr.restartServer",
+        "title": "Restart kompoz-lsp",
+        "category": "KompozR"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
+    "check": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:grammar",
+    "test:unit": "tsc -p tsconfig.test.json && node --test out/test/*.test.js",
+    "test:grammar": "vscode-tmgrammar-test -g test/grammar/rust.tmLanguage.json 'test/grammar/*.kt' 'test/grammar/*.rs'",
+    "package": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --minify && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0",
+    "vscode-tmgrammar-test": "^0.1.3"
+  }
+}

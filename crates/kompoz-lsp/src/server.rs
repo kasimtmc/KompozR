@@ -37,6 +37,8 @@ pub struct Config {
     pub analyzer_args: Vec<String>,
     /// How long after the last change the Kotlin is translated.
     pub delay: Duration,
+    /// The shadow-project bridge's rust-analyzer ([`crate::shadow`]; `None`: no bridge).
+    pub shadow: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -45,6 +47,7 @@ impl Default for Config {
             rust_analyzer: Some("rust-analyzer".into()),
             analyzer_args: Vec::new(),
             delay: Duration::from_millis(200),
+            shadow: None,
         }
     }
 }
@@ -122,7 +125,11 @@ pub fn run(config: Config) -> i32 {
         let _ = reader.send(Event::EditorClosed);
     });
     let editor = rpc::writer(std::io::stdout());
+    let shadow = config.shadow.clone();
     let mut server = Server::new(config, tx, editor);
+    if let Some(analyzer) = shadow {
+        server.set_bridge(Box::new(crate::shadow::ShadowBridge::new(analyzer)));
+    }
     server.run(rx)
 }
 
