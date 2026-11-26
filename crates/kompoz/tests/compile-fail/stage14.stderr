@@ -1,17 +1,11 @@
-error: kompoz: a class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
+error: kompoz: `sealed` on a class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
  --> tests/compile-fail/stage14.rs:6:5
   |
-6 |     class Point(val x: Int, val y: Int)
-  |     ^^^^^
+6 |     sealed class Point(val x: Int, val y: Int)
+  |     ^^^^^^
 
 error: kompoz: the type `Any` isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
  --> tests/compile-fail/stage14.rs:8:16
   |
 8 |     fun sum(a: Any): Int = if (a is Int) a else 0
   |                ^^^
-
-error: kompoz: an `is` check isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
- --> tests/compile-fail/stage14.rs:8:32
-  |
-8 |     fun sum(a: Any): Int = if (a is Int) a else 0
-  |                                ^

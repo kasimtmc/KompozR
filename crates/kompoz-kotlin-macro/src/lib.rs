@@ -33,7 +33,13 @@ mod text;
 #[proc_macro]
 pub fn kompoz(input: TokenStream) -> TokenStream {
     let acquired = text::acquire(input);
-    let opts = Options { paths: paths::resolve(), text: acquired.source, keyed_calls: false };
+    let opts = Options {
+        paths: paths::resolve(),
+        text: acquired.source,
+        keyed_calls: false,
+        module: module_table(),
+        analyze: false,
+    };
     let t = kompoz_kotlin::translate(&acquired.text, acquired.base, &acquired.spans, &opts);
     let mut out = t.tokens;
     out.extend(report(&acquired.rejected, &acquired.spans, None));
@@ -66,7 +72,13 @@ pub fn kompoz_file(input: TokenStream) -> TokenStream {
     // (rustc's view of a source: no byte order mark, LF line ends)
     let text = content.strip_prefix('\u{feff}').unwrap_or(&content).replace("\r\n", "\n");
     let spans = OneSpan(span);
-    let opts = Options { paths: paths::resolve(), text: TextSource::Exact, keyed_calls: true };
+    let opts = Options {
+        paths: paths::resolve(),
+        text: TextSource::Exact,
+        keyed_calls: true,
+        module: module_table(),
+        analyze: false,
+    };
     let t = kompoz_kotlin::translate(&text, Pos::start(1, 1), &spans, &opts);
     let tracked = path.to_string_lossy().into_owned();
     let mut out = quote_spanned!(span=> const _: &[u8] = ::core::include_bytes!(#tracked););
@@ -83,6 +95,15 @@ pub fn __kompoz_text(input: TokenStream) -> TokenStream {
     let a = text::acquire(input);
     let (text, line, rebuilt) = (a.text, a.base.line, a.source == TextSource::Rebuilt);
     quote!((#text, #line, #rebuilt)).into()
+}
+
+/// The module table of the crate being compiled (its other Kotlin sources and its `pub` Rust items), found from
+/// cargo's `CARGO_MANIFEST_DIR` and `CARGO_CRATE_NAME` and the file the macro is called from; none outside cargo.
+fn module_table() -> Option<std::sync::Arc<kompoz_kotlin::module::ModuleTable>> {
+    let dir = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR")?);
+    let name = std::env::var("CARGO_CRATE_NAME").ok();
+    let call_file = proc_macro::Span::call_site().local_file();
+    Some(kompoz_kotlin::module::cached(&dir, name.as_deref(), call_file.as_deref()))
 }
 
 /// The diagnostics as Rust's: an error is a `compile_error!` at its span; a warning, a deprecated constant used

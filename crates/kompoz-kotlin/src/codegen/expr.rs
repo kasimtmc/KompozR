@@ -233,6 +233,16 @@ impl Gen<'_, '_> {
 
     /// An expression as written.
     pub(crate) fn expr(&mut self, e: &Expr) -> Out {
+        let out = self.expr_untold(e);
+        // (for the analysis: the types of names, member reads, calls)
+        if matches!(e.kind, ExprKind::Name(_) | ExprKind::Member { .. } | ExprKind::Call { .. } | ExprKind::This { .. })
+        {
+            self.record_type(e.loc, &out.ty);
+        }
+        out
+    }
+
+    fn expr_untold(&mut self, e: &Expr) -> Out {
         if let Some(qualified) = self.imported_member(e) {
             return self.expr(&qualified);
         }
@@ -325,12 +335,15 @@ impl Gen<'_, '_> {
                 Out::plain(ts, ty)
             }
             ExprKind::AnonymousFunction(_) => Out::plain(self.later(e.loc, "an anonymous function"), Ty::Unknown),
-            ExprKind::Object { .. } => Out::plain(self.later(e.loc, "an object expression"), Ty::Unknown),
+            ExprKind::Object { supers, body } => {
+                let ty = self.object_expr_ty(supers);
+                Out::plain(self.object_expr(supers, body, e.loc), ty)
+            }
             ExprKind::Prefix { op, operand } => self.prefix(*op, operand, e.loc),
             ExprKind::Postfix { op, operand } => self.postfix(*op, operand, e.loc),
             ExprKind::Binary { op, lhs, rhs } => self.binary(*op, lhs, rhs, e.loc),
             ExprKind::Infix { name, lhs, rhs } => self.infix(name, lhs, rhs, e.loc),
-            ExprKind::Is { .. } => Out::plain(self.later(e.loc, "an `is` check"), Ty::Bool),
+            ExprKind::Is { expr: inner, negated, ty } => self.is_check(inner, *negated, ty, e.loc),
             ExprKind::As { expr: inner, safe, ty } => self.cast(inner, *safe, ty, e.loc),
             ExprKind::If { condition, then, otherwise } => {
                 self.if_expr(condition, then, otherwise.as_ref(), Tail::Value(Want::default()), e.loc)
@@ -350,6 +363,48 @@ impl Gen<'_, '_> {
             // (the parser said what is wrong)
             ExprKind::Error => Out::plain(quote_spanned!(span=> ::core::unreachable!()), Ty::Unknown),
         }
+    }
+
+    /// `a === b`: the same object — two shared values (`Rc`, `Arc`) by their pointers, a user's class (a reference
+    /// already: its `==` is its identity unless `equals` is overridden), an object or an enum entry by `==`; `null`
+    /// on a side as `==` does. A data class's value has no identity of its own here (its copies are Rust's values):
+    /// an error.
+    fn identical(&mut self, same: bool, lhs: &Expr, rhs: &Expr, loc: Loc) -> Out {
+        let span = self.span(loc);
+        let (at, bt) = (self.peek_ty(lhs).non_null(), self.peek_ty(rhs).non_null());
+        let pointer = |t: &Ty| match t {
+            Ty::Named(n, a) if matches!(n.as_str(), "Rc" | "Arc") && a.len() == 1 => Some(n.clone()),
+            _ => None,
+        };
+        if let (Some(p), Some(_)) = (pointer(&at), pointer(&bt))
+            && !matches!(lhs.kind, ExprKind::Null)
+            && !matches!(rhs.kind, ExprKind::Null)
+        {
+            let (a, b) = (self.expr(lhs).ts, self.expr(rhs).ts);
+            let ptr =
+                if p == "Arc" { quote_spanned!(span=> ::std::sync::Arc) } else { quote_spanned!(span=> ::std::rc::Rc) };
+            let ts = quote_spanned!(span=> #ptr::ptr_eq(&#a, &#b));
+            return Out::plain(if same { ts } else { quote_spanned!(span=> !#ts) }, Ty::Bool);
+        }
+        let data = |t: &Ty| {
+            t.owner().and_then(|o| self.user_class_rust(o)).is_some_and(|c| c.shape == super::class::Shape::Data)
+        };
+        if data(&at) || data(&bt) {
+            self.error(loc, "`===` of a data class's values: they have no identity of their own in KompozR (compare them with `==`)");
+            return Out::plain(quote_spanned!(span=> false), Ty::Bool);
+        }
+        let op = if same { BinaryOp::Eq } else { BinaryOp::NotEq };
+        self.binary(op, lhs, rhs, loc)
+    }
+
+    /// `x is T`: kt's `kt_is` (a cast through `KtAs` that succeeds); `!is` its negation.
+    fn is_check(&mut self, inner: &Expr, negated: bool, ty: &Type, loc: Loc) -> Out {
+        let span = self.span(loc);
+        let kt = self.kt(span);
+        let operand = self.expr(inner).ts;
+        let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, TypePos::Value);
+        let ts = quote_spanned!(span=> #kt::kt_is::<#target, _>(&#operand));
+        Out::plain(if negated { quote_spanned!(span=> !#ts) } else { ts }, Ty::Bool)
     }
 
     /// `x as T` / `x as? T`: through kt's `KtAs` (a value of `T` itself, or a shared trait object's crate saying which
@@ -377,6 +432,9 @@ impl Gen<'_, '_> {
         let span = self.span(loc);
         let kt = self.kt(span);
         if let Some(l) = self.local(&n.name) {
+            if let Some(at) = l.at {
+                self.record_ref(n.loc, crate::analysis::Target::Local(at));
+            }
             let i = ident(&l.rust, span);
             if l.kind == LocalKind::Delegated {
                 return Out::plain(quote_spanned!(span=> #kt::KtDelegate::get_value(&#i)), l.ty);
@@ -403,6 +461,7 @@ impl Gen<'_, '_> {
             return Out::plain(quote_spanned!(span=> #r.#m()), ty);
         }
         if let Some(v) = self.file.vals.get(&n.name).cloned() {
+            self.record_ref(n.loc, crate::analysis::Target::Declaration(n.name.clone()));
             let i = ident(&v.rust, span);
             return match v.form {
                 ValForm::Const | ValForm::Static => Out::plain(quote!(#i), v.ty),
@@ -412,6 +471,14 @@ impl Gen<'_, '_> {
         }
         if n.name == "Unit" {
             return Out::plain(quote_spanned!(span=> ()), Ty::Unit);
+        }
+        // (a user's object, or a class's companion: its value)
+        if let Some((ts, ty)) = self.user_name_value(&n.name, span) {
+            if let Some(c) = self.user_class(&n.name) {
+                let kotlin = c.kotlin.clone();
+                self.record_ref(n.loc, crate::analysis::Target::Declaration(kotlin));
+            }
+            return Out::plain(ts, ty);
         }
         // kotlin.math's constants (`PI`).
         if let Some(item) = lookup(&n.name)
@@ -541,11 +608,14 @@ impl Gen<'_, '_> {
                     && !self.file.vals.contains_key(&n.name)
                     && !self.receivers.iter().any(|r| members_of(&r.ty, &n.name).next().is_some()) =>
             {
-                Some(n.name.clone())
+                Some(self.user_class(&n.name).map_or_else(|| n.name.clone(), |c| c.rust.clone()))
             }
             ExprKind::Member { receiver, safe: false, name } if name.name == "Companion" => self.qualifier(receiver),
             // (a nested object Rust names as a type of its own: `Arrangement.Absolute` → `AbsoluteArrangement`)
             ExprKind::Member { receiver, safe: false, name } if is_pascal(&name.name) => {
+                if let Some(c) = self.user_type_expr(e) {
+                    return Some(c.rust);
+                }
                 let outer = self.qualifier(receiver)?;
                 crate::index::rust_type(&format!("{outer}.{}", name.name)).map(str::to_string)
             }
@@ -659,6 +729,13 @@ impl Gen<'_, '_> {
         if !safe && let Some(theme) = self.icon_theme(receiver) {
             let path = theme.iter().chain([&name.name]).map(|n| self.name_ident(n, name.loc)).collect::<Vec<_>>();
             return Out::plain(quote_spanned!(span=> #(#path)::*()), Ty::named("ImageVector"));
+        }
+        // (a user's object, or a companion's member: a member of the object's value)
+        if !safe && let Some((v, rust)) = self.user_object_value(receiver, &name.name, self.span(receiver.loc)) {
+            if name.name == "Companion" {
+                return Out::plain(v, Ty::named(&rust));
+            }
+            return self.property_read(Out::plain(v, Ty::named(&rust)), name, loc);
         }
         if let Some(q) = self.qualifier(receiver) {
             return self.qualified(&q, receiver, name, loc);
@@ -1018,9 +1095,7 @@ impl Gen<'_, '_> {
                 let ts = if eq { quote_spanned!(span=> #a == #b) } else { quote_spanned!(span=> #a != #b) };
                 Out::plain(ts, Ty::Bool)
             }
-            BinaryOp::Identical | BinaryOp::NotIdentical => {
-                Out::plain(self.later(loc, "identity equality (`===`)"), Ty::Bool)
-            }
+            BinaryOp::Identical | BinaryOp::NotIdentical => self.identical(op == BinaryOp::Identical, lhs, rhs, loc),
             BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
                 let (a, b) = self.operands(lhs, rhs);
                 let ts = match op {
@@ -1312,6 +1387,9 @@ impl Gen<'_, '_> {
                 }) {
                     return t;
                 }
+                if let Some((_, ty)) = self.user_name_value(&n.name, proc_macro2::Span::call_site()) {
+                    return ty;
+                }
                 lookup(&n.name)
                     .iter()
                     .find(|i| i.kind == Kind::Value && i.owner.is_empty())
@@ -1426,6 +1504,13 @@ impl Gen<'_, '_> {
                 if !*safe && let Some(class) = self.resource_class(receiver) {
                     return Ty::named(class);
                 }
+                if !*safe && let Some(rust) = self.user_object_ty(receiver, &name.name) {
+                    return if name.name == "Companion" {
+                        Ty::named(&rust)
+                    } else {
+                        self.member_ty(&Ty::named(&rust), &name.name, false)
+                    };
+                }
                 if let Some(q) = self.qualifier(receiver) {
                     if name.name == "Companion" {
                         return Ty::named(&q);
@@ -1457,6 +1542,7 @@ impl Gen<'_, '_> {
                 Ty::Map(_, v) => v.nullable(),
                 t => t.element(),
             },
+            ExprKind::Object { supers, .. } => self.object_expr_ty(supers),
             _ => Ty::Unknown,
         }
     }
@@ -1765,6 +1851,17 @@ impl Gen<'_, '_> {
     }
 
     fn peek_call(&self, callee: &Expr, type_args: &[TypeArg], args: &[Arg], trailing: Option<&Lambda>) -> Ty {
+        // (a user's object's or companion's member function; a nested class's constructor, `Catalog.Entry(…)`)
+        if let ExprKind::Member { receiver, safe: false, name } = &callee.kind {
+            if let Some(rust) = self.user_object_ty(receiver, &name.name) {
+                return self.member_ty(&Ty::named(&rust), &name.name, true);
+            }
+            if let Some(c) = self.user_type_expr(callee)
+                && matches!(c.shape, super::class::Shape::Data | super::class::Shape::Plain)
+            {
+                return Ty::named(&c.rust);
+            }
+        }
         match &callee.kind {
             ExprKind::Name(n) => {
                 if let Some(l) = self.scopes.iter().rev().find_map(|s| s.get(&n.name)) {

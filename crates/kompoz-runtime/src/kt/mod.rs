@@ -44,6 +44,8 @@ pub mod format;
 pub mod java_time;
 pub mod math;
 pub mod null;
+// (stage 14 WP0: Kotlin's classes and objects)
+pub mod object;
 pub mod random;
 pub mod range;
 // (stage 13: navigation's typeMap keys) kotlin.reflect's typeOf
@@ -60,10 +62,10 @@ mod tests;
 pub use cast::KtAs;
 pub use closeable::AutoCloseable;
 pub use collections::{
-    KtComponent3, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable, KtMap, KtMapExt, KtMapLike,
-    KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of, empty_list, empty_map,
-    empty_set, float_array_of, int_array_of, list_of, list_of_not_null, map_of, mutable_list_of, mutable_map_of,
-    mutable_set_of, set_of, to,
+    KtComponent3, KtComponent4, KtComponent5, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable, KtMap,
+    KtMapExt, KtMapLike, KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of,
+    empty_list, empty_map, empty_set, float_array_of, int_array_of, list_of, list_of_not_null, map_of, mutable_list_of,
+    mutable_map_of, mutable_set_of, set_of, to,
 };
 #[doc(hidden)]
 pub use collections::{List_async, MutableList_async};
@@ -79,6 +81,7 @@ pub use math::{
 pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 #[doc(hidden)]
 pub use null::{elvis_async, run_async, safe_async, with_async};
+pub use object::{KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string, kt_as_object, kt_is};
 pub use random::{KtShuffle, Random};
 pub use range::{
     IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to,
@@ -98,8 +101,8 @@ pub use text::{FormatArg, KtProbe, KtViaDisplay, KtViaToString};
 /// The extension traits, imported for their methods only (`use kompoz_runtime::kt::ext::*;`).
 pub mod ext {
     pub use super::collections::{
-        KtComponent3 as _, KtComponents as _, KtList as _, KtListOfLists as _, KtListOfNullable as _, KtMapExt as _,
-        KtMutableList as _, KtPair as _, KtTriple as _,
+        KtComponent3 as _, KtComponent4 as _, KtComponent5 as _, KtComponents as _, KtList as _, KtListOfLists as _,
+        KtListOfNullable as _, KtMapExt as _, KtMutableList as _, KtPair as _, KtTriple as _,
     };
     pub use super::delegate::{KtDelegate as _, KtInc as _, KtMutableDelegate as _};
     pub use super::math::{KtFloat as _, KtNumber as _};

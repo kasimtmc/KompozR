@@ -634,6 +634,10 @@ pub(crate) fn plain_type_text(t: &str) -> String {
 /// (`Arc`, `Rc`) the API's own parameters hold that trait's objects in (`Rc` if none says), none for what isn't a
 /// trait of the API (a trait is what the index has methods of through it, of no type).
 pub(crate) fn trait_object(name: &str) -> Option<&'static str> {
+    // (the user's interfaces: held as `Rc<dyn I>`, Kotlin's references to their objects)
+    if index::overlay::is_interface(name) {
+        return Some("Rc");
+    }
     let (arc, rc) = (format!("Arc<dyn {name}"), format!("Rc<dyn {name}"));
     // (the whole name: `Rc<dyn KeyMapping>` holds no `Key`)
     let names = |ty: &str, p: &str| {
@@ -958,6 +962,8 @@ pub(crate) struct Local {
     /// Kotlin's definite assignment, Rust's deferred initialization (`let title: String;`), which rustc checks the
     /// same way.
     pub deferred: bool,
+    /// Its name's place where it is declared (for the analysis).
+    pub at: Option<crate::pos::Loc>,
 }
 
 /// An implicit receiver: an extension function's `self`, a receiver lambda's scope parameter.

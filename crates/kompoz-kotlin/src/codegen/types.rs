@@ -51,6 +51,10 @@ pub(crate) fn into_target(rust: &TokenStream) -> Option<TokenStream> {
 impl Gen<'_, '_> {
     /// What a Kotlin type is to the generator.
     pub(crate) fn ty_of(&self, t: &Type) -> Ty {
+        // (a type alias is the type it names)
+        if let Some(expanded) = self.expand_alias(t) {
+            return self.ty_of(&expanded);
+        }
         let base = match &t.kind {
             TypeKind::Named(segs)
                 if segs.len() > 1
@@ -93,6 +97,14 @@ impl Gen<'_, '_> {
                     "Pair" => Ty::Pair(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown))),
                     "IntRange" => Ty::Range(Box::new(Ty::Int)),
                     "ClosedFloatingPointRange" | "ClosedRange" => Ty::ClosedRange(Box::new(first())),
+                    // (a user's type by its Rust name: a nested one named alone inside its class)
+                    name if self.user_class(name).is_some() => {
+                        Ty::Named(self.user_class(name).map(|c| c.rust.clone()).unwrap_or_default(), args)
+                    }
+                    // (an alias of the API's or of the crate's Rust: what it names, for its members)
+                    name if args.is_empty() && crate::index::alias(name).is_some() => {
+                        Ty::from_rust(crate::index::alias(name).unwrap_or_default())
+                    }
                     name => Ty::Named(name.to_string(), args),
                 }
             }
@@ -110,6 +122,12 @@ impl Gen<'_, '_> {
 
     /// A Kotlin type as Rust's, at `pos`.
     pub(crate) fn rust_type(&mut self, t: &Type, pos: TypePos) -> TokenStream {
+        // (a type alias is the type it names: written as that, in the position's form)
+        if let Some(expanded) = self.expand_alias(t) {
+            let mut expanded = expanded;
+            expanded.loc = t.loc;
+            return self.rust_type(&expanded, pos);
+        }
         let span = self.span(t.loc);
         if let TypeKind::Function(f) = &t.kind {
             if t.nullable {
@@ -167,6 +185,18 @@ impl Gen<'_, '_> {
             {
                 let i = proc_macro2::Ident::new(rust, span);
                 return quote_spanned!(span=> #i);
+            }
+            // (a user's nested type: its Rust name)
+            if let Some(c) = self.user_class(&kotlin) {
+                let i = proc_macro2::Ident::new(&c.rust, span);
+                return quote_spanned!(span=> #i);
+            }
+            // (the API's nested types are Rust's types in a module of the outer's name: `PressInteraction.Press` is
+            // `PressInteraction::Press`)
+            if segs.iter().all(|s| s.args.is_empty() && super::names::valid(&s.name.name)) {
+                let path: Vec<proc_macro2::Ident> =
+                    segs.iter().map(|s| proc_macro2::Ident::new(&s.name.name, self.span(s.name.loc))).collect();
+                return quote_spanned!(span=> #(#path)::*);
             }
             return self.later(loc, "a nested type");
         }
@@ -241,7 +271,9 @@ impl Gen<'_, '_> {
                 }
             }
             _ => {
-                let i = self.name_ident(name, last.name.loc);
+                // (a user's type by its Rust name: a nested one named alone inside its class)
+                let rust = self.user_class(name).map_or_else(|| name.to_string(), |c| c.rust.clone());
+                let i = self.name_ident(&rust, last.name.loc);
                 if args.is_empty() { quote_spanned!(span=> #i) } else { quote_spanned!(span=> #i<#(#args),*>) }
             }
         }

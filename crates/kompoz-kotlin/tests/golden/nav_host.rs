@@ -520,7 +520,7 @@ pub fn ProfileScreen(nav_controller: NavHostController) {
                 nav_controller.navigate(::kompoz::runtime::kt::top_level!(Dialog));
             });
             Spacer(Modifier.weight(1_f32));
-            NavigateBackButton(::core::convert::Into::into(nav_controller.clone()));
+            NavigateBackButton(nav_controller.clone());
         },
     );
 }

@@ -157,6 +157,67 @@ impl<A, B, C: Clone> KtComponent3 for (A, B, C) {
     }
 }
 
+/// A list's fourth element (Kotlin's `component4()` of a `List`).
+pub trait KtComponent4 {
+    type C4;
+    fn component4(&self) -> Self::C4;
+}
+
+/// A list's fifth element (Kotlin's `component5()` of a `List`).
+pub trait KtComponent5 {
+    type C5;
+    fn component5(&self) -> Self::C5;
+}
+
+/// A list's element at `i` for its `componentN()`: an IndexOutOfBoundsException as Kotlin's when it has fewer.
+#[track_caller]
+fn component_of<T: Clone>(list: &[T], i: usize) -> T {
+    match list.get(i) {
+        Some(v) => v.clone(),
+        None => {
+            super::panic_kt("IndexOutOfBoundsException", &format!("Index {i} out of bounds for length {}", list.len()))
+        }
+    }
+}
+
+/// Kotlin's `val (a, b) = list`: a list's first elements (`component1()`… `component5()`).
+impl<T: Clone> KtComponents for Vec<T> {
+    type C1 = T;
+    type C2 = T;
+    #[track_caller]
+    fn component1(&self) -> T {
+        component_of(self, 0)
+    }
+    #[track_caller]
+    fn component2(&self) -> T {
+        component_of(self, 1)
+    }
+}
+
+impl<T: Clone> KtComponent3 for Vec<T> {
+    type C3 = T;
+    #[track_caller]
+    fn component3(&self) -> T {
+        component_of(self, 2)
+    }
+}
+
+impl<T: Clone> KtComponent4 for Vec<T> {
+    type C4 = T;
+    #[track_caller]
+    fn component4(&self) -> T {
+        component_of(self, 3)
+    }
+}
+
+impl<T: Clone> KtComponent5 for Vec<T> {
+    type C5 = T;
+    #[track_caller]
+    fn component5(&self) -> T {
+        component_of(self, 4)
+    }
+}
+
 /// A pair's parts by Kotlin's names (`pair.first`, `pair.second`; a triple's `third`).
 pub trait KtPair {
     type A;

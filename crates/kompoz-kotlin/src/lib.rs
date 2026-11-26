@@ -16,11 +16,13 @@
 //! package builds on it. `codegen` (WP4a): `generate(&file, &Context, diags) -> TokenStream`, the full generator.
 //! `translate` and its types are the stable entry point the macros call.
 
+pub mod analysis;
 pub mod ast;
 pub mod codegen;
 pub mod diag;
 pub mod index;
 pub mod lexer;
+pub mod module;
 pub mod parser;
 pub mod pos;
 
@@ -91,6 +93,11 @@ pub struct Options {
     /// call that keeps something in the composition (a composable, `remember…`) gets a group keyed by its Kotlin
     /// line and column (`key(&(line, column), || …)`), the identity `#[track_caller]` gives it in `kompoz!`.
     pub keyed_calls: bool,
+    /// The other sources of the crate (see [`module`]): their declarations seen as the text's own are (Kotlin's
+    /// package), the crate's Rust items as the API index's.
+    pub module: Option<std::sync::Arc<module::ModuleTable>>,
+    /// Record what the generator knows of the text ([`analysis::Analysis`]: a language server's).
+    pub analyze: bool,
 }
 
 /// What a translation gives: the Rust items, and the diagnostics (errors and warnings) in the order found. With
@@ -99,6 +106,8 @@ pub struct Options {
 pub struct Translation {
     pub tokens: TokenStream,
     pub diagnostics: Vec<Diagnostic>,
+    /// What the generator knew of the text, when [`Options::analyze`] asked for it.
+    pub analysis: Option<analysis::Analysis>,
 }
 
 /// The Rust that `text` (Kotlin declarations; its offset 0 at `base`) becomes, spans from `spans`.
@@ -106,9 +115,20 @@ pub fn translate(text: &str, base: Pos, spans: &dyn SpanMap, opts: &Options) -> 
     let mut diags = Diagnostics::default();
     let tokens = lexer::lex(text, base, &mut diags);
     let file = parser::parse(&tokens, &mut diags);
-    let cx = codegen::Context { spans, paths: &opts.paths, keyed_calls: opts.keyed_calls };
-    let tokens = codegen::generate(&file, &cx, &mut diags);
-    Translation { tokens, diagnostics: diags.list }
+    let cx = codegen::Context {
+        spans,
+        paths: &opts.paths,
+        keyed_calls: opts.keyed_calls,
+        module: opts.module.as_deref(),
+        analyze: opts.analyze,
+    };
+    let (tokens, recorded) = codegen::generate(&file, &cx, &mut diags);
+    let analysis = recorded.map(|mut a| {
+        a.declarations = analysis::declarations(&file, text);
+        a.settle();
+        a
+    });
+    Translation { tokens, diagnostics: diags.list, analysis }
 }
 
 #[cfg(test)]

@@ -28,3 +28,10 @@ impl<T: Clone> KtAs<T> for T {
         Some(self.clone())
     }
 }
+
+/// A nullable value cast to what it holds (Kotlin's `x is T` / `x as? T` of a `T?`: null isn't a `T`).
+impl<T: Clone> KtAs<T> for Option<T> {
+    fn kt_as_safe(&self) -> Option<T> {
+        self.clone()
+    }
+}

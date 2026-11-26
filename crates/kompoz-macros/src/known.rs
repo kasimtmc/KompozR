@@ -100,6 +100,14 @@ impl Known {
         map.entry(name.to_string()).or_default().push(Shape { kind, defaults, memoized, owner });
     }
 
+    /// The `#[named(type)]` functions a caller names (`types(Note(rrd), …)`: the Kotlin syntax's classes of another
+    /// block or file of the crate, which the API index doesn't list): their builders reached through their types.
+    pub(crate) fn add_types(&mut self, types: &[TypeFn]) {
+        for t in types {
+            self.add(Kind::Fn, &t.name.to_string(), t.defaults.clone(), false, None);
+        }
+    }
+
     /// Whether a receiver of a type whose names are `heads` (its type and what it holds as a pointer: see
     /// `Transformer::receiver_heads`) may have the `#[named]` method `name`: one of them, or a supertype of one, is
     /// its owner's type or trait, or the method is a blanket impl's.
@@ -253,6 +261,40 @@ fn has_memoized(sig: &Signature) -> bool {
         FnArg::Typed(pt) => pt.attrs.iter().any(|a| a.path().is_ident("memoized")),
         FnArg::Receiver(_) => false,
     })
+}
+
+/// A `#[named(type)]` function a caller names, and which of its parameters have a default: `Note(rrd)` (`r` one
+/// without, `d` one with, as the index's letters; `Note()` none).
+pub(crate) struct TypeFn {
+    pub name: Ident,
+    pub defaults: Vec<bool>,
+}
+
+impl syn::parse::Parse for TypeFn {
+    fn parse(input: syn::parse::ParseStream) -> Result<Self> {
+        let name: Ident = input.parse()?;
+        let inner;
+        parenthesized!(inner in input);
+        let defaults = if inner.is_empty() {
+            Vec::new()
+        } else {
+            let letters: Ident = inner.parse()?;
+            let text = letters.to_string();
+            if !text.chars().all(|c| c == 'r' || c == 'd') {
+                return Err(Error::new(letters.span(), "kompoz: a parameter is `r` (no default) or `d` (a default)"));
+            }
+            text.chars().map(|c| c == 'd').collect()
+        };
+        Ok(TypeFn { name, defaults })
+    }
+}
+
+/// `types(A(rd), B())` (in `#[kompozable(…)]`), or the same and a `,` opening `named_args!`, `kompozable_block!`
+/// and `kompozable_lambda!`.
+pub(crate) fn parse_types(input: syn::parse::ParseStream) -> Result<Vec<TypeFn>> {
+    let inner;
+    parenthesized!(inner in input);
+    Ok(syn::punctuated::Punctuated::<TypeFn, Token![,]>::parse_terminated(&inner)?.into_iter().collect())
 }
 
 #[cfg(test)]

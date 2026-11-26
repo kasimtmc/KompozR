@@ -19,7 +19,7 @@ const LATER: &str = "isn't translated by KompozR's Kotlin syntax yet (it comes w
 #[test]
 fn stage_14_constructs_at_their_positions() {
     let text = "\
-class A
+sealed class A
 fun f(x: Int): Int {
     try { return 1 } catch (e: Exception) { return 2 }
 }
@@ -29,9 +29,8 @@ fun h() = listOf(1).map(::println)
     assert_eq!(
         diagnose(text),
         [
-            format!("1:1: a class {LATER}"),
+            format!("1:1: `sealed` on a class {LATER}"),
             format!("3:5: `try` {LATER}"),
-            format!("5:29: an `is` check {LATER}"),
             "6:5: write `h`'s return type: its expression's type isn't one KompozR can tell (`fun h(…): Type = …`)"
                 .to_string(),
             format!("6:25: a callable reference (`::name`) {LATER}"),

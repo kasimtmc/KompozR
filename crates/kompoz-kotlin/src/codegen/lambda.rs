@@ -133,6 +133,7 @@ impl Gen<'_, '_> {
 
         // Its scope: parameters, the receiver.
         self.push_scope();
+        self.ranges.push(l.loc);
         let boundary = self.scopes.len() - 1;
         self.frames.push(CaptureFrame { boundary, used: Vec::new(), kept: info.stored });
         // (a result of Kotlin's `Any` — a key lambda's —: made the Rust type holding it)
@@ -271,7 +272,7 @@ impl Gen<'_, '_> {
                             let rust = snake(&n.name);
                             let i = self.name_ident(&rust, n.loc);
                             named_params.push(i.clone());
-                            self.declare(&n.name, rust, LocalKind::LambdaParam, ty);
+                            self.declare_at(n, rust, LocalKind::LambdaParam, ty);
                             if mut_refs.get(k) == Some(&true) {
                                 self.mark_mut_ref(&n.name);
                             }
@@ -298,7 +299,7 @@ impl Gen<'_, '_> {
                                     (Ty::Pair(_, b), 1) => (**b).clone(),
                                     _ => Ty::Unknown,
                                 };
-                                self.declare(&e.name.name, rust, LocalKind::LambdaParam, ety);
+                                self.declare_at(&e.name, rust, LocalKind::LambdaParam, ety);
                             }
                         }
                     }
@@ -432,6 +433,7 @@ impl Gen<'_, '_> {
         self.owner_arg = outer_owner_arg;
         self.lambdas.pop();
         let frame = self.frames.pop().expect("its frame");
+        self.ranges.pop();
         self.pop_scope();
         let captures: Vec<proc_macro2::Ident> =
             frame.used.iter().filter(|u| *u != "self").map(|u| crate::codegen::names::ident(u, span)).collect();

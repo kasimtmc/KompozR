@@ -64,6 +64,11 @@ name = "compile_fail"
 name = "kotlin_ported"
 harness = false
 
+# (stage 14 WP0) The C++ Kompoz's Kotlin-syntax tests of classes, objects, companions, nested declarations, aliases.
+[[test]]
+name = "kotlin_classes"
+harness = false
+
 # Foundation's components in Kotlin's syntax.
 [[test]]
 name = "kotlin_foundation"

@@ -906,6 +906,9 @@ struct Scan {
     /// The traits implemented for named types (`impl Painter for VectorPainter`: no type parameters, none on the
     /// type): (type, trait), Kotlin's subtyping where the trait is an interface ([`interface_supertypes`]).
     trait_impls: BTreeSet<(String, String)>,
+    /// The API's plain `pub type` aliases (`type NavHostController = NavController`): (name, target), what Kotlin's
+    /// name of the alias is as a type (its members the target's). A name two crates alias otherwise: none.
+    type_aliases: BTreeMap<String, Option<String>>,
 }
 
 fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, String)>), String> {
@@ -933,7 +936,7 @@ fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, Strin
     items.sort();
     items.dedup();
     interface_supertypes(&items, &scan.trait_impls, &mut scan.derefs);
-    let text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics);
+    let text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics, &scan.type_aliases);
     let mut supers = scan.derefs;
     supers.extend(scan.alias_supers);
     Ok((text, supers))
@@ -1342,6 +1345,14 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
             Item::Type(ty) if is_pub(&ty.vis) && !hidden(&ty.attrs) && ty.generics.params.is_empty() => {
                 if let Some(kotlin) = kotlin_doc(&ty.attrs).filter(|d| !d.contains('(')) {
                     scan.types.insert((kotlin, ty.ident.to_string()));
+                }
+                // (an alias of a named type, not of a trait object or a closure: Kotlin's `typealias`)
+                if matches!(&*ty.ty, Type::Path(_)) && boxed_future_output(&ty.ty).is_none() {
+                    let target = text(ty.ty.to_token_stream());
+                    let entry = scan.type_aliases.entry(ty.ident.to_string()).or_insert_with(|| Some(target.clone()));
+                    if entry.as_ref().is_some_and(|known| *known != target) {
+                        *entry = None;
+                    }
                 }
             }
             Item::Struct(s) if is_pub(&s.vis) && !hidden(&s.attrs) => {
@@ -1954,6 +1965,7 @@ fn render_kotlin(
     derefs: &BTreeSet<(String, String)>,
     types: &BTreeSet<(String, String)>,
     generics: &BTreeMap<String, Option<Vec<String>>>,
+    aliases: &BTreeMap<String, Option<String>>,
 ) -> String {
     let mut out = String::from(
         "// The API index the Kotlin syntax's generator reads: written by `cargo xtask kotlin-index` from the\n\
@@ -2035,6 +2047,17 @@ fn render_kotlin(
             list(taken),
             list(crossinline)
         );
+    }
+    out.push_str("];\n\n/// The API's `pub type` aliases (name, target).\n");
+    out.push_str("pub static ALIASES: &[(&str, &str)] = &[\n");
+    for (name, target) in aliases {
+        // (not a module's own name of a nested type Kotlin names through its outer one — line_height_style's
+        // `Alignment` for `LineHeightStyle.Alignment` —: Kotlin's `Alignment` is another type)
+        if let Some(target) = target
+            && !types.iter().any(|(_, rust)| rust == target)
+        {
+            let _ = writeln!(out, "    ({name:?}, {target:?}),");
+        }
     }
     out.push_str("];\n");
     out

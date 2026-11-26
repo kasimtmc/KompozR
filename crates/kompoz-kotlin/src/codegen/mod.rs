@@ -51,9 +51,12 @@
 //! Errors are per declaration: a declaration with an error is left out, the others are translated.
 
 mod call;
+pub(crate) mod class;
 mod expr;
 mod lambda;
-mod names;
+pub(crate) mod names;
+mod object_expr;
+mod record;
 mod resolve;
 mod stmt;
 mod types;
@@ -74,22 +77,57 @@ pub struct Context<'a> {
     pub paths: &'a Paths,
     /// See `Options::keyed_calls`.
     pub keyed_calls: bool,
+    /// See `Options::module`.
+    pub module: Option<&'a crate::module::ModuleTable>,
+    /// See `Options::analyze`.
+    pub analyze: bool,
 }
 
 /// The items `file`'s declarations become; what can't be translated is a diagnostic (and the declaration it is in
 /// is left out).
-pub fn generate(file: &File, cx: &Context, diags: &mut Diagnostics) -> TokenStream {
+pub fn generate(
+    file: &File,
+    cx: &Context,
+    diags: &mut Diagnostics,
+) -> (TokenStream, Option<crate::analysis::Analysis>) {
+    // The module table's Kotlin sources, read for their declarations (their own diagnostics are their macros').
+    let module_files: Vec<File> = cx
+        .module
+        .map(|m| {
+            m.sources
+                .iter()
+                .map(|s| {
+                    let mut d = Diagnostics::default();
+                    let tokens = crate::lexer::lex(&s.text, s.base, &mut d);
+                    crate::parser::parse(&tokens, &mut d)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let own: Vec<&Decl> = file.decls.iter().collect();
+    let own_names: std::collections::HashSet<&str> =
+        file.decls.iter().filter_map(|d| d.name()).map(|n| n.name.as_str()).collect();
+    // (another file's declaration of a name the text declares is that one: the text's own block, read again from
+    // its file)
+    let module: Vec<&Decl> = module_files
+        .iter()
+        .flat_map(|f| &f.decls)
+        .filter(|d| class::exported(d) && d.name().is_none_or(|n| !own_names.contains(n.name.as_str())))
+        .collect();
     let mut g = Gen::new(cx, diags);
-    g.collect(file);
+    g.overlay = Some(crate::index::overlay::install(rust_overlay(cx.module)));
+    g.collect(file, &own, &module);
     let mut out = TokenStream::new();
     for decl in &file.decls {
         let before = g.diags.list.len();
+        g.decl_range = Some(decl.loc());
         let ts = g.top_decl(decl);
         if !g.diags.list[before..].iter().any(|d| d.is_error()) {
             out.extend(ts);
         }
     }
-    out
+    let analysis = g.analysis.take();
+    (out, analysis)
 }
 
 /// The function being written.
@@ -193,7 +231,21 @@ pub(crate) struct Gen<'a, 'd> {
     pub call_type_args: Vec<Vec<TokenStream>>,
     /// The same type arguments as the generator's types (a reified `entry<Profile> { … }`'s lambda typed by them).
     pub call_type_tys: Vec<Vec<Ty>>,
+    /// The user's classes, objects, enum classes, interfaces and type aliases (see [`class`]).
+    pub classes: class::ClassTable,
+    /// The index's overlay while the translation runs (see [`crate::index::overlay`]).
+    pub overlay: Option<crate::index::overlay::Installed>,
     counter: usize,
+    /// What is recorded for a language server ([`crate::analysis`]), when the translation asks for it.
+    pub analysis: Option<crate::analysis::Analysis>,
+    /// How deep in [`Gen::quiet`] passes the generator is (nothing is recorded in one).
+    pub quiet_depth: usize,
+    /// The blocks and lambdas being written, innermost last: where the locals they declare can be named.
+    pub ranges: Vec<Loc>,
+    /// The declaration being written (where its parameters can be named).
+    pub decl_range: Option<Loc>,
+    /// The name of the call being resolved (`f` of `f(x)`, `g` of `a.g()`): where what it calls is recorded.
+    pub callee_loc: Option<Loc>,
 }
 
 impl<'a, 'd> Gen<'a, 'd> {
@@ -228,7 +280,14 @@ impl<'a, 'd> Gen<'a, 'd> {
             state_value: None,
             call_type_args: Vec::new(),
             call_type_tys: Vec::new(),
+            classes: Default::default(),
+            overlay: None,
             counter: 0,
+            analysis: if cx.analyze { Some(Default::default()) } else { None },
+            quiet_depth: 0,
+            ranges: Vec::new(),
+            decl_range: None,
+            callee_loc: None,
         }
     }
 
@@ -301,7 +360,9 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// `f`'s result without the diagnostics it gives (what is written again later, and reported then).
     pub fn quiet<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
         let n = self.diags.list.len();
+        self.quiet_depth += 1;
         let out = f(self);
+        self.quiet_depth -= 1;
         self.diags.list.truncate(n);
         out
     }
@@ -330,6 +391,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             used: None,
             lent_ref: None,
             deferred: false,
+            at: None,
         };
         self.scopes.last_mut().expect("a scope").insert(kotlin.to_string(), local);
         rust
@@ -427,10 +489,11 @@ impl<'a, 'd> Gen<'a, 'd> {
     // ---- The file ----------------------------------------------------------------------------------------------
 
     /// The file's top-level functions and properties, for the calls and reads that come before them.
-    fn collect(&mut self, file: &File) {
+    fn collect(&mut self, file: &File, own: &[&Decl], module: &[&Decl]) {
         self.collect_imports(file);
+        self.collect_classes(own, module);
         let mut untyped = Vec::new();
-        for decl in &file.decls {
+        for decl in own.iter().chain(module).copied() {
             match decl {
                 Decl::Function(f) => {
                     let info = self.quiet(|g| g.file_fn(f));
@@ -510,7 +573,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                 self.scopes = vec![HashMap::new()];
                 for p in &f.params {
                     let ty = p.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
-                    self.declare(&p.name.name, snake(&p.name.name), LocalKind::Param, ty);
+                    self.declare_at(&p.name, snake(&p.name.name), LocalKind::Param, ty);
                 }
                 if let Some(n) = f.receiver.as_ref().and_then(|r| r.simple_name()) {
                     let ty = owner_name(last_segment(&n));
@@ -547,25 +610,12 @@ impl<'a, 'd> Gen<'a, 'd> {
             Decl::Property(p) => self.top_property(p),
             // (its diagnostics are given)
             Decl::Failed { .. } => TokenStream::new(),
-            Decl::Class(c) => {
-                let what = match c.kind {
-                    ClassKind::Interface | ClassKind::FunInterface => "an interface",
-                    ClassKind::Enum => "an enum class",
-                    ClassKind::Annotation => "an annotation class",
-                    ClassKind::Class if c.is_data() => "a data class",
-                    ClassKind::Class => "a class",
-                };
-                self.later(c.loc, what);
+            Decl::Class(c) if c.kind == ClassKind::Annotation => {
+                self.later(c.loc, "an annotation class");
                 TokenStream::new()
             }
-            Decl::Object(o) => {
-                self.later(o.loc, "an object declaration");
-                TokenStream::new()
-            }
-            Decl::TypeAlias(a) => {
-                self.later(a.loc, "a type alias");
-                TokenStream::new()
-            }
+            Decl::Class(_) | Decl::Object(_) => self.class_decl(decl),
+            Decl::TypeAlias(a) => self.type_alias(a),
         }
     }
 
@@ -730,6 +780,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         };
         let kt = self.kt(span);
         let rt = respan(self.rt().clone(), span);
+        let kz_types = self.types_arg(span);
         let empty = matches!(&f.body, Some(FunctionBody::Block(b)) if b.stmts.is_empty()) && converts.is_empty();
         let body = if empty {
             quote_spanned!(span=> {})
@@ -745,7 +796,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                 #[allow(unused_imports)]
                 use #kt::ext::*;
                 #(#converts)*
-                #rt::named_args!({ #body })
+                #rt::named_args!(#kz_types { #body })
             })
         };
 
@@ -775,11 +826,8 @@ impl<'a, 'd> Gen<'a, 'd> {
                 let hidden = proc_macro2::Ident::new(&format!("__kz_ext_{}", f.name.name), span);
                 let names: Vec<proc_macro2::Ident> =
                     f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc)).collect();
-                let attr = if inline || !unit {
-                    quote_spanned!(span=> #[#rt::kompozable(inline)])
-                } else {
-                    quote_spanned!(span=> #[#rt::kompozable])
-                };
+                let attr =
+                    if inline || !unit { self.kompozable_attr(true, span) } else { self.kompozable_attr(false, span) };
                 let this = proc_macro2::Ident::new(receiver_rust, span);
                 return quote_spanned! {span=>
                     #allow
@@ -793,7 +841,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                         #[track_caller]
                         #fn_kw #name(&self, #(#params),*) #ret {
                             let __kz_receiver = ::core::clone::Clone::clone(self);
-                            #rt::kompozable_block!({ #hidden(__kz_receiver, #(#names = #names),*) })
+                            #rt::kompozable_block!(#kz_types { #hidden(__kz_receiver, #(#names = #names),*) })
                         }
                     }
                 };
@@ -807,11 +855,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             };
         }
         let attr = if kompozable {
-            if inline || !unit {
-                quote_spanned!(span=> #[#rt::kompozable(inline)])
-            } else {
-                quote_spanned!(span=> #[#rt::kompozable])
-            }
+            if inline || !unit { self.kompozable_attr(true, span) } else { self.kompozable_attr(false, span) }
         } else if has_defaults {
             quote_spanned!(span=> #[#rt::named])
         } else {
@@ -827,7 +871,7 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// A function's block body: its statements, the last one its value unless it returns nothing (a `return` does
     /// otherwise).
     fn fn_block(&mut self, b: &Block, unit: bool) -> TokenStream {
-        self.block_inner(b, if unit { stmt::Tail::Unit } else { stmt::Tail::Return })
+        self.in_range(b.loc, |g| g.block_inner(b, if unit { stmt::Tail::Unit } else { stmt::Tail::Return }))
     }
 
     /// A parameter: its tokens (`#[default(d)] name: Type`), and what converts it in the body (an `impl Into<T>`
@@ -855,10 +899,11 @@ impl<'a, 'd> Gen<'a, 'd> {
             let s = self.span(d.loc);
             quote_spanned!(s=> #[default(#v)])
         });
-        let kept_closure = restartable && matches!(t.kind, TypeKind::Function(_)) && !t.nullable;
+        let unaliased = self.unaliased(t);
+        let kept_closure = restartable && matches!(unaliased.kind, TypeKind::Function(_)) && !unaliased.nullable;
         let into = types::into_target(&rust_ty);
         let local_ty = ty.clone();
-        self.declare(&p.name.name, rust.clone(), LocalKind::Param, local_ty);
+        self.declare_at(&p.name, rust.clone(), LocalKind::Param, local_ty);
         if kept_closure && let Some(l) = self.scopes.last_mut().unwrap().get_mut(&p.name.name) {
             l.kept_closure = true;
         }
@@ -877,7 +922,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             Some(t) => {
                 let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
                 let rust = self.rust_type(t, pos).to_string();
-                let lambda = t.as_function().filter(|_| !t.nullable).map(|ft| self.lambda_info(ft, !inline));
+                let ut = self.unaliased(t);
+                let lambda = ut.as_function().filter(|_| !ut.nullable).map(|ft| self.lambda_info(ft, !inline));
                 // (a fun interface's value — `style: Style` — takes a lambda as its SAM conversion: the interface's
                 // lambda, kept, its parameters typed for Rust to find the trait's blanket impl)
                 let lambda = lambda.or_else(|| {
@@ -1001,19 +1047,68 @@ impl<'a, 'd> Gen<'a, 'd> {
                 let v = self.as_declared(v, &value_ty, &rt, span);
                 let kt = self.kt(span);
                 let rtp = respan(self.rt().clone(), span);
+                let kz_types = self.types_arg(span);
                 quote_spanned! {span=>
                     ::std::thread_local! {
                         #allow
                         #vis static #name: #rt = {
                             #[allow(unused_imports)]
                             use #kt::ext::*;
-                            #rtp::named_args!(#v)
+                            #rtp::named_args!(#kz_types #v)
                         };
                     }
                 }
             }
         }
     }
+}
+
+/// The overlay of the module table's Rust items: its functions, methods, properties, enum variants and types (a
+/// `const`/`static`/`thread_local!` is read as before, through `kt::top_level!`, which tells them apart), and its
+/// type aliases.
+fn rust_overlay(module: Option<&crate::module::ModuleTable>) -> crate::index::overlay::Overlay {
+    use crate::index::overlay::{intern, intern_params};
+    let mut o = crate::index::overlay::Overlay::default();
+    let Some(m) = module else { return o };
+    for r in &m.rust {
+        if let Some(target) = &r.alias {
+            o.aliases.push((intern(&r.rust), intern(target)));
+            continue;
+        }
+        let is_type = r.kind == crate::index::Kind::Value && r.owner == r.rust;
+        if r.kind == crate::index::Kind::Value && !is_type {
+            continue;
+        }
+        let params = r
+            .params
+            .iter()
+            .map(|p| crate::index::Param {
+                rust: intern(&p.rust),
+                kotlin: intern(&p.kotlin),
+                ty: intern(&p.ty),
+                default: match &p.default {
+                    Some(d) => crate::index::Default::Rust(intern(d)),
+                    None => crate::index::Default::None,
+                },
+                vararg: false,
+                lambda: None,
+            })
+            .collect();
+        o.items.push(crate::index::Item {
+            kotlin: intern(&r.kotlin),
+            rust: intern(&r.rust),
+            kind: r.kind,
+            krate: "",
+            module: intern(&r.module),
+            owner: intern(&r.owner),
+            via: intern(&r.via),
+            receiver: r.receiver,
+            params: intern_params(params),
+            ret: intern(&r.ret),
+            flags: r.flags,
+        });
+    }
+    o
 }
 
 /// How a top-level `val` of type `ty` is held.

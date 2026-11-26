@@ -1,15 +1,16 @@
-// What stage 9 doesn't translate: each an error at its Kotlin position saying it comes with stage 14; the
+// What the Kotlin syntax doesn't translate yet: each an error at its Kotlin position saying it comes with stage 14; the
 // declarations without one are translated.
 
-data class Point(val x: Int, val y: Int)
+sealed interface Shape
 
-object Registry
+open class Base(val id: Int)
 
-interface Shape
-
-enum class Mode { A, B }
-
-typealias Names = List<String>
+enum class Mode {
+    A {
+        override fun toString() = "a"
+    },
+    B
+}
 
 fun <T> identity(x: T): T = x
 

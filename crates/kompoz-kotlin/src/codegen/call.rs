@@ -160,8 +160,18 @@ impl Gen<'_, '_> {
             .collect();
         self.call_type_tys.push(tys);
         let out = match &callee.kind {
-            ExprKind::Name(n) => self.name_call(n, &list, e.loc),
-            ExprKind::Member { receiver, safe, name } => self.member_call(receiver, *safe, name, &list, e.loc),
+            ExprKind::Name(n) => {
+                let outer = self.callee_loc.replace(n.loc);
+                let out = self.name_call(n, &list, e.loc);
+                self.callee_loc = outer;
+                out
+            }
+            ExprKind::Member { receiver, safe, name } => {
+                let outer = self.callee_loc.replace(name.loc);
+                let out = self.member_call(receiver, *safe, name, &list, e.loc);
+                self.callee_loc = outer;
+                out
+            }
             _ => {
                 let f = self.expr(callee).ts;
                 let vals: Vec<TokenStream> = list.iter().map(|a| self.loose_arg(a)).collect();
@@ -185,7 +195,10 @@ impl Gen<'_, '_> {
         let op = Ident { name: name.to_string(), loc, backticked: false };
         let args: Vec<ArgRef> =
             values.iter().map(|e| ArgRef { name: None, value: ArgValue::Expr(e), spread: false, loc: e.loc }).collect();
-        self.member_call(receiver, false, &op, &args, loc)
+        let outer = self.callee_loc.replace(loc);
+        let out = self.member_call(receiver, false, &op, &args, loc);
+        self.callee_loc = outer;
+        out
     }
 
     /// The lambda of a fun interface's SAM constructor (`TextFieldDecorator { … }`, `KeyboardActionHandler({ … })`):
@@ -657,6 +670,22 @@ impl Gen<'_, '_> {
         let span = self.span(loc);
         let nspan = self.span(name.loc);
         let kt = self.kt(span);
+        // (a user's object's or companion's member: a method of the object's value)
+        if !safe && let Some((v, rust)) = self.user_object_value(receiver, &name.name, self.span(receiver.loc)) {
+            return self.method_on(Out::plain(v, Ty::named(&rust)), Some(receiver), name, args, loc);
+        }
+        // (a nested class's constructor: `Catalog.Entry(…)`, the constructor of Kotlin's qualified name)
+        let whole = Expr {
+            kind: ExprKind::Member { receiver: Box::new(receiver.clone()), safe, name: name.clone() },
+            loc: name.loc,
+        };
+        if !safe
+            && let Some(c) = self.user_type_expr(&whole)
+            && matches!(c.shape, super::class::Shape::Data | super::class::Shape::Plain)
+        {
+            let n = Ident { name: c.kotlin.clone(), backticked: false, loc: name.loc };
+            return self.name_call(&n, args, loc);
+        }
         // `Type.f(…)`, `Object.f(…)`, `Modifier.padding(…)`.
         if let Some(q) = self.qualifier(receiver) {
             let qi = self.name_ident(&q, receiver.loc);
@@ -1324,6 +1353,12 @@ impl Gen<'_, '_> {
     /// The call of `c` through `target` with `args` (a generic one's element type `T` bound from the collection it is
     /// given, for its lambdas: [`Gen::type_arg`]).
     fn emit(&mut self, c: &Callee, target: Target, args: &[ArgRef], loc: Loc, kotlin: &str) -> Out {
+        // (for the analysis: what the callee's name is)
+        let at = self.callee_loc.unwrap_or(loc);
+        match c.item {
+            Some(item) => self.record_item(at, item),
+            None => self.record_ref(at, crate::analysis::Target::Declaration(kotlin.to_string())),
+        }
         // (`with(x) { … }`: Kotlin's `T.() -> R`, `x` lent as `&mut T`, is a receiver lambda of `x`'s type)
         let with;
         let c = match (c.item, args.first()) {
@@ -2328,7 +2363,8 @@ impl Gen<'_, '_> {
         };
         // (its positions are the default's own text's: its tokens get the call's span)
         let spans = crate::pos::OneSpan(span);
-        let cx = super::Context { spans: &spans, paths: self.cx.paths, keyed_calls: false };
+        let cx =
+            super::Context { spans: &spans, paths: self.cx.paths, keyed_calls: false, module: None, analyze: false };
         let mut inner_diags = crate::diag::Diagnostics::default();
         let mut g = Gen::new(&cx, &mut inner_diags);
         g.scopes = vec![Default::default()];

@@ -60,6 +60,35 @@ impl dyn Interaction {
     }
 }
 
+/// A shared interaction as one of a kind (Kotlin's `interaction is PressInteraction.Press`, `as?`): a clone of it
+/// when it is one.
+macro_rules! interaction_as {
+    ($($kind:ty),* $(,)?) => {
+        $(
+            impl kompoz_runtime::kt::KtAs<$kind> for Arc<dyn Interaction> {
+                fn kt_as_safe(&self) -> Option<$kind> {
+                    (**self).downcast_ref::<$kind>().cloned()
+                }
+            }
+        )*
+    };
+}
+
+interaction_as!(
+    press::PressInteraction::Press,
+    press::PressInteraction::Release,
+    press::PressInteraction::Cancel,
+    hover::HoverInteraction::Enter,
+    hover::HoverInteraction::Exit,
+    focus::FocusInteraction::Focus,
+    focus::FocusInteraction::Unfocus,
+    drag::DragInteraction::Start,
+    drag::DragInteraction::Stop,
+    drag::DragInteraction::Cancel,
+    drag_and_drop_hover::DragAndDropHoverInteraction::Enter,
+    drag_and_drop_hover::DragAndDropHoverInteraction::Exit,
+);
+
 /// An interaction's identity (what Compose compares interactions by): unique to the interaction made, kept by its
 /// clones.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

@@ -82,6 +82,8 @@ struct Options {
     inline: bool,
     /// The names whose calls the body leaves as written.
     plain: HashSet<String>,
+    /// The `#[named(type)]` functions it calls that the API index doesn't list.
+    types: Vec<known::TypeFn>,
 }
 
 impl syn::parse::Parse for Options {
@@ -94,10 +96,14 @@ impl syn::parse::Parse for Options {
                     let names = l.parse_args_with(Punctuated::<Ident, Token![,]>::parse_terminated)?;
                     options.plain.extend(names.iter().map(|n| n.to_string()));
                 }
+                Meta::List(l) if l.path.is_ident("types") => {
+                    let types = l.parse_args_with(Punctuated::<known::TypeFn, Token![,]>::parse_terminated)?;
+                    options.types.extend(types);
+                }
                 _ => {
                     return Err(Error::new(
                         meta.span(),
-                        "kompoz: unknown option (`inline`; `plain(name, …)`: calls of those names left as written)",
+                        "kompoz: unknown option (`inline`; `plain(name, …)`: calls of those names left as written; `types(Name(rd), …)`: #[named(type)] functions the API index doesn't list, `r`/`d` a parameter without/with a default)",
                     ));
                 }
             }
@@ -175,11 +181,35 @@ impl syn::parse::Parse for ExtensionTrait {
     }
 }
 
-/// What the calls in an expression may call: the API index's items, and those defined in it.
-fn known_in_expr(e: &Expr) -> Result<Known> {
+/// What the calls in an expression may call: the API index's items, those `types` names, and those defined in it.
+fn known_in_expr(e: &Expr, types: &[known::TypeFn]) -> Result<Known> {
     let mut known = Known::for_crate()?;
+    known.add_types(types);
     known.add_items_in_expr(e);
     Ok(known)
+}
+
+/// `named_args!`'s, `kompozable_block!`'s and `kompozable_lambda!`'s input: an expression, after `types(Name(rd), …),` naming the
+/// `#[named(type)]` functions it calls that the API index doesn't list (what the Kotlin syntax writes for its classes).
+struct TypedExpr {
+    types: Vec<known::TypeFn>,
+    expr: Expr,
+}
+
+impl syn::parse::Parse for TypedExpr {
+    fn parse(input: syn::parse::ParseStream) -> Result<Self> {
+        let mut types = Vec::new();
+        if input.peek(Ident) && input.peek2(token::Paren) {
+            let fork = input.fork();
+            let name: Ident = fork.parse()?;
+            if name == "types" && known::parse_types(&fork).is_ok() && fork.peek(Token![,]) {
+                input.parse::<Ident>()?;
+                types = known::parse_types(input)?;
+                input.parse::<Token![,]>()?;
+            }
+        }
+        Ok(TypedExpr { types, expr: input.parse()? })
+    }
 }
 
 /// `#[derive(KotlinProperties)]`: getters (and, `#[kotlin(set)]`, setters) of a struct's public fields, for the
@@ -211,8 +241,8 @@ pub fn derive_route_value(item: TokenStream) -> TokenStream {
 /// A closure written as a `#[kompozable]` body: `set_content(kompozable_lambda!(move || App()))`.
 #[proc_macro]
 pub fn kompozable_lambda(item: TokenStream) -> TokenStream {
-    let mut e = parse_macro_input!(item as Expr);
-    let known = match known_in_expr(&e) {
+    let TypedExpr { types, expr: mut e } = parse_macro_input!(item as TypedExpr);
+    let known = match known_in_expr(&e, &types) {
         Ok(k) => k,
         Err(err) => return err.to_compile_error().into(),
     };
@@ -225,8 +255,8 @@ pub fn kompozable_lambda(item: TokenStream) -> TokenStream {
 /// isn't itself `#[kompozable]`), as `kompozable_block!({ LaunchedEffect(key, effect) })`.
 #[proc_macro]
 pub fn kompozable_block(item: TokenStream) -> TokenStream {
-    let mut e = parse_macro_input!(item as Expr);
-    let known = match known_in_expr(&e) {
+    let TypedExpr { types, expr: mut e } = parse_macro_input!(item as TypedExpr);
+    let known = match known_in_expr(&e, &types) {
         Ok(k) => k,
         Err(err) => return err.to_compile_error().into(),
     };
@@ -240,8 +270,8 @@ pub fn kompozable_block(item: TokenStream) -> TokenStream {
 /// (`named_args!(TextStyle(font_size = 14.sp()))`, `named_args!(color.copy(0.5))`).
 #[proc_macro]
 pub fn named_args(item: TokenStream) -> TokenStream {
-    let mut e = parse_macro_input!(item as Expr);
-    let known = match known_in_expr(&e) {
+    let TypedExpr { types, expr: mut e } = parse_macro_input!(item as TypedExpr);
+    let known = match known_in_expr(&e, &types) {
         Ok(k) => k,
         Err(err) => return err.to_compile_error().into(),
     };
@@ -407,6 +437,7 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
     let n = params.len();
     if let Some(options) = &composable {
         let mut known = Known::for_crate()?;
+        known.add_types(&options.types);
         known.add_items_in_block(&f.block);
         let kept_closures: HashSet<String> = if restartable {
             params.iter().filter(|p| fn_sugar(p).is_some()).map(|p| p.ident.to_string()).collect()

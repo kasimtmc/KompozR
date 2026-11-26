@@ -53,8 +53,9 @@
 
 #[rustfmt::skip]
 mod generated;
+pub mod overlay;
 
-pub use generated::{DEREFS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
+pub use generated::{ALIASES, DEREFS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -254,7 +255,8 @@ impl Item {
 pub fn lookup(kotlin: &str) -> &'static [Item] {
     let start = ITEMS.partition_point(|i| i.kotlin < kotlin);
     let end = start + ITEMS[start..].partition_point(|i| i.kotlin == kotlin);
-    &ITEMS[start..end]
+    let api = &ITEMS[start..end];
+    overlay::merged(kotlin, api).unwrap_or(api)
 }
 
 /// The types whose members a value of Rust type `owner` has, in the order Rust's method calls try them: itself,
@@ -278,12 +280,21 @@ pub fn deref_chain(owner: &str) -> Vec<&str> {
 /// The Rust type a Kotlin (qualified) type name is when Rust names it otherwise (`Arrangement.Absolute` →
 /// `AbsoluteArrangement`).
 pub fn rust_type(kotlin: &str) -> Option<&'static str> {
-    TYPES.iter().find(|(k, _)| *k == kotlin).map(|(_, r)| *r)
+    overlay::rust_type(kotlin).or_else(|| TYPES.iter().find(|(k, _)| *k == kotlin).map(|(_, r)| *r))
 }
 
 /// Kotlin's name of a Rust type: what [`TYPES`] says, else the Rust one.
 pub fn kotlin_type(rust: &str) -> &str {
+    if let Some(k) = overlay::kotlin_type(rust) {
+        return k;
+    }
     TYPES.iter().find(|(_, r)| *r == rust).map_or(rust, |(k, _)| *k)
+}
+
+/// What a type alias names (`NavHostController` → `NavController`, Rust's text of the target): the translation's own
+/// and the module table's (`typealias`, `pub type`, see [`overlay`]), then the API's ([`ALIASES`]).
+pub fn alias(name: &str) -> Option<&'static str> {
+    overlay::alias(name).or_else(|| ALIASES.iter().find(|(a, _)| *a == name).map(|(_, t)| *t))
 }
 
 /// The parameters `item`'s suspending twin takes fewer types of ([`TwinBound`]).

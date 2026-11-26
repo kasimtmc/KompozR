@@ -43,7 +43,7 @@ impl Gen<'_, '_> {
     /// A block with its braces, at its position.
     pub(crate) fn braced(&mut self, b: &Block, tail: Tail) -> TokenStream {
         let span = self.span(b.loc);
-        let inner = self.block_inner(b, tail);
+        let inner = self.in_range(b.loc, |g| g.block_inner(b, tail));
         quote_spanned!(span=> { #inner })
     }
 
@@ -261,7 +261,7 @@ impl Gen<'_, '_> {
                     // (a state's setter is a cloneable closure, not a `Copy` one: cloned when used as a value —
                     // `onExpandedChange = setExpanded` and `{ setExpanded(false) }` both)
                     let setter = k == 1 && matches!(&ty, Ty::Named(n, _) if n == "MutableState");
-                    self.declare(&entry.name.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ety);
+                    self.declare_at(&entry.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ety);
                     if setter && let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&entry.name.name)) {
                         l.shared_closure = true;
                     }
@@ -295,7 +295,8 @@ impl Gen<'_, '_> {
                 };
                 let rust = snake(&n.name);
                 let i = self.name_ident(&rust, n.loc);
-                self.declare(&n.name, rust, LocalKind::Delegated, ty);
+                self.declare_at(n, rust, LocalKind::Delegated, ty);
+                self.record_mutable(mutable);
                 quote_spanned!(span=> let #i = #v;)
             }
             (Binding::Name(n), init) => {
@@ -323,25 +324,28 @@ impl Gen<'_, '_> {
                     PropertyInit::Value(e) => {
                         // (a lambda given a function type: its parameters (and receiver) of that type's, as Kotlin
                         // types them — `val stop: (Animatable<Float, AnimationVector1D>) -> Unit = { it.stop() }`)
-                        let o = match (&e.kind, p.ty.as_ref().and_then(|t| t.as_function().filter(|_| !t.nullable))) {
-                            (ExprKind::Lambda(l), Some(f)) => {
-                                let mut info = self.lambda_info(f, true);
-                                info.typed = true;
-                                Out::plain(self.lambda(l, Some(&info), None), Ty::Unknown)
-                            }
-                            _ => {
-                                // (a list of a declared type: its elements told it — `val icons: List<ImageVector?> =
-                                // listOf(null, null)`)
-                                if let Some((Ty::List(inner) | Ty::Set(inner), _)) = &declared
-                                    && super::call::list_of_call(e).is_some()
-                                {
-                                    self.expected_elem = Some((**inner).clone());
+                        let declared_fn = p.ty.as_ref().map(|t| self.unaliased(t));
+                        let o =
+                            match (&e.kind, declared_fn.as_ref().and_then(|t| t.as_function().filter(|_| !t.nullable)))
+                            {
+                                (ExprKind::Lambda(l), Some(f)) => {
+                                    let mut info = self.lambda_info(f, true);
+                                    info.typed = true;
+                                    Out::plain(self.lambda(l, Some(&info), None), Ty::Unknown)
                                 }
-                                let o = self.expr(e);
-                                self.expected_elem = None;
-                                o
-                            }
-                        };
+                                _ => {
+                                    // (a list of a declared type: its elements told it — `val icons: List<ImageVector?> =
+                                    // listOf(null, null)`)
+                                    if let Some((Ty::List(inner) | Ty::Set(inner), _)) = &declared
+                                        && super::call::list_of_call(e).is_some()
+                                    {
+                                        self.expected_elem = Some((**inner).clone());
+                                    }
+                                    let o = self.expr(e);
+                                    self.expected_elem = None;
+                                    o
+                                }
+                            };
                         // (a shared closure kept under a declared function type is still one: `val t: (Float) ->
                         // Float = SwipeToDismissBoxDefaults.positionalThreshold`)
                         let ty = match (&declared, &o.ty) {
@@ -380,7 +384,7 @@ impl Gen<'_, '_> {
                 let lambda_value = matches!(init, PropertyInit::Value(e) if matches!(e.kind, ExprKind::Lambda(_)));
                 let shared_closure = matches!(&ty, Ty::Fun(f) if f.shared) || lambda_value;
                 let deferred = !mutable && matches!(init, PropertyInit::None);
-                self.declare(&n.name, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
+                self.declare_at(n, rust, if mutable { LocalKind::Var } else { LocalKind::Val }, ty);
                 if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
                     l.shared_closure = shared_closure;
                     l.deferred = deferred;
@@ -637,7 +641,7 @@ impl Gen<'_, '_> {
             Binding::Name(n) => {
                 let rust = snake(&n.name);
                 let i = self.name_ident(&rust, n.loc);
-                self.declare(&n.name, rust, LocalKind::Val, elem);
+                self.declare_at(n, rust, LocalKind::Val, elem);
                 (quote!(#i), quote!())
             }
             Binding::Destructure(entries) => {
@@ -658,7 +662,7 @@ impl Gen<'_, '_> {
                         (Ty::Named(n, _), 0) if n == "IndexedValue" => Ty::Int,
                         _ => Ty::Unknown,
                     };
-                    self.declare(&e.name.name, rust, LocalKind::Val, ety);
+                    self.declare_at(&e.name, rust, LocalKind::Val, ety);
                 }
                 (quote!(#d), unpack)
             }
@@ -908,6 +912,22 @@ impl Gen<'_, '_> {
                 self.narrow(&n.name, l.ty.non_null());
                 quote_spanned!(span=> let ::core::option::Option::Some(#i) = #i.clone())
             }
+            // (`x is T` on a local: Kotlin's smart cast, `x` a `T` in the then branch)
+            ExprKind::Is { expr, negated: false, ty } if matches!(&expr.kind, ExprKind::Name(n) if self.is_local(&n.name)) =>
+            {
+                let ExprKind::Name(n) = &expr.kind else { unreachable!() };
+                let v = self.expr(expr).ts;
+                let rust = self.local(&n.name).map(|l| l.rust).unwrap_or_else(|| snake(&n.name));
+                let i = ident(&rust, self.span(n.loc));
+                let kt = self.kt(span);
+                let target = self.rust_type(&Type { nullable: false, ..(**ty).clone() }, super::types::TypePos::Value);
+                let tty = self.ty_of(&Type { nullable: false, ..(**ty).clone() });
+                // (the same local, of the type the check gives it: where it was declared stays)
+                let at = self.local(&n.name).and_then(|l| l.at);
+                self.declare(&n.name, rust, LocalKind::Val, tty);
+                self.set_local_at(&n.name, at);
+                quote_spanned!(span=> let ::core::option::Option::Some(#i) = #kt::KtAs::<#target>::kt_as_safe(&#v))
+            }
             _ => self.value(c),
         }
     }
@@ -932,7 +952,7 @@ impl Gen<'_, '_> {
                     Some((n, _)) => {
                         let rust = snake(&n.name);
                         let i = self.name_ident(&rust, n.loc);
-                        self.declare(&n.name, rust, LocalKind::Val, sty.clone());
+                        self.declare_at(n, rust, LocalKind::Val, sty.clone());
                         i
                     }
                     None => self.fresh("w", span),
@@ -942,9 +962,41 @@ impl Gen<'_, '_> {
             }
             None => None,
         };
+        // (the subject's local, rebound as its type in a branch of one `is`: Kotlin's smart cast)
+        let subject_local: Option<String> = match &w.subject {
+            Some(s) => match (&s.binding, &s.expr.kind) {
+                (Some((n, _)), _) => Some(n.name.clone()),
+                (None, ExprKind::Name(n)) if self.is_local(&n.name) => Some(n.name.clone()),
+                _ => None,
+            },
+            None => None,
+        };
         let mut chain = TokenStream::new();
         let mut has_else = false;
         for (k, b) in w.branches.iter().enumerate() {
+            let smart = match (b.conditions.as_slice(), &subject, &subject_local, &b.guard) {
+                ([WhenCondition::Is { negated: false, ty, .. }], Some((s, _)), Some(name), None) => {
+                    Some((ty.clone(), s.clone(), name.clone()))
+                }
+                _ => None,
+            };
+            if let Some((ty, s, name)) = smart {
+                let at = self.local(&name).and_then(|l| l.at);
+                self.push_scope();
+                let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, super::types::TypePos::Value);
+                let tty = self.ty_of(&Type { nullable: false, ..ty.clone() });
+                let rust = snake(&name);
+                let i = ident(&rust, span);
+                self.declare(&name, rust, LocalKind::Val, tty);
+                self.set_local_at(&name, at);
+                let body = self.braced(&b.body, tail);
+                self.pop_scope();
+                let kw = if k == 0 { quote_spanned!(span=> if) } else { quote_spanned!(span=> else if) };
+                chain.extend(quote_spanned! {span=>
+                    #kw let ::core::option::Option::Some(#i) = #kt::KtAs::<#target>::kt_as_safe(&#s) #body
+                });
+                continue;
+            }
             let body = self.braced(&b.body, tail);
             if b.is_else() {
                 has_else = true;
@@ -978,7 +1030,16 @@ impl Gen<'_, '_> {
                         self.error(*loc, "`in` in a `when` without a subject");
                         quote!(false)
                     }
-                    (WhenCondition::Is { loc, .. }, _) => self.later(*loc, "an `is` branch"),
+                    (WhenCondition::Is { negated, ty, .. }, Some((s, _))) => {
+                        let target =
+                            self.rust_type(&Type { nullable: false, ..ty.clone() }, super::types::TypePos::Value);
+                        let t = quote_spanned!(span=> #kt::kt_is::<#target, _>(&#s));
+                        if *negated { quote_spanned!(span=> !#t) } else { t }
+                    }
+                    (WhenCondition::Is { loc, .. }, None) => {
+                        self.error(*loc, "`is` in a `when` without a subject");
+                        quote!(false)
+                    }
                 });
             }
             if let Some(g) = &b.guard {
@@ -1040,6 +1101,7 @@ fn has_null_check(c: &Expr) -> bool {
         ExprKind::Binary { op: BinaryOp::NotEq, lhs, rhs } => {
             matches!(rhs.kind, ExprKind::Null) && matches!(lhs.kind, ExprKind::Name(_))
         }
+        ExprKind::Is { expr, negated: false, .. } => matches!(expr.kind, ExprKind::Name(_)),
         _ => false,
     }
 }
