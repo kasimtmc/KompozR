@@ -120,6 +120,21 @@ impl<T: fmt::Debug> fmt::Debug for NavEntry<T> {
     }
 }
 
+/// Kotlin's `toString()` of an entry (its `Debug`), what a data class holding one writes of it.
+impl<T: fmt::Debug> kompoz_runtime::kt::KtToString for NavEntry<T> {
+    fn kt_write(&self, out: &mut String) {
+        out.push_str(&format!("{self:?}"));
+    }
+}
+
+/// Kotlin's `hashCode()` of an entry: of its content key and its content (what its `==` compares too).
+impl<T> kompoz_runtime::kt::KtHashCode for NavEntry<T> {
+    fn kt_hash_code(&self) -> i32 {
+        let content = Rc::as_ptr(&self.content) as *const () as usize;
+        kompoz_runtime::kt::hash_code_of(&self.content_key).wrapping_mul(31).wrapping_add(content as i32)
+    }
+}
+
 /// What decorates the entries [`remember_decorated_nav_entries`](super::remember_decorated_nav_entries) gives
 /// (Compose's open class `NavEntryDecorator`): `decorate` composes an entry's content within something (a
 /// composition local provided, a wrapper; it calls `entry.Content()`), for the entries actually shown; `on_pop` cleans

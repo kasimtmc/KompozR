@@ -430,7 +430,12 @@ impl Gen<'_, '_> {
                 let inner = match &args[0] {
                     Ty::Named(t, a) => {
                         let i = proc_macro2::Ident::new(t, span);
-                        if a.is_empty() || a.contains(&Ty::Unknown) {
+                        // ((stage 14 FINAL-T) a generic trait's arguments not known: Rust's inference, `Scene<_>`)
+                        let n = crate::index::generics(t).map_or(0, |g| g.len());
+                        if n > 0 && (a.is_empty() || a.contains(&Ty::Unknown)) {
+                            let us = (0..n).map(|_| quote_spanned!(span=> _));
+                            quote_spanned!(span=> #i<#(#us),*>)
+                        } else if a.is_empty() || a.contains(&Ty::Unknown) {
                             quote_spanned!(span=> #i)
                         } else {
                             let a = a.iter().map(|t| self.rust_of_ty(t, span));

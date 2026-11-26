@@ -343,6 +343,15 @@ impl Gen<'_, '_> {
         }
     }
 
+    /// (stage 14 FINAL-T) Whether a member of the user's object `rust` overrides a method of its base of the second
+    /// kind that is given the struct (`onBackCompleted` of `object X : NavigationEventHandler<…>(…)`): the trait's
+    /// method is its body, not one of the object's own.
+    pub(crate) fn handler_override(&self, rust: &str, f: &Function) -> bool {
+        let Some(b) = self.callbacks_base_of(rust) else { return false };
+        super::hierarchy::is_override(&f.modifiers)
+            && Self::callbacks_trait_items(b).iter().any(|i| i.kotlin == f.name.name && handler_param(b, i))
+    }
+
     /// The trait's methods (the API's).
     fn callbacks_trait_items(b: index::Base) -> Vec<&'static index::Item> {
         index::ITEMS.iter().filter(|i| i.via == b.rust && i.kind == index::Kind::Method && i.owner.is_empty()).collect()
@@ -417,14 +426,69 @@ impl Gen<'_, '_> {
             match m {
                 Member::Decl(Decl::Function(f)) if super::hierarchy::is_override(&f.modifiers) => {
                     let Some(item) = trait_items.iter().copied().find(|i| i.kotlin == f.name.name) else { continue };
+                    // ((stage 14 FINAL-T) one given the struct, `onBackCompleted()` of `object X :
+                    // NavigationEventHandler<…>(…)`: its body with the object's members and then the struct's
+                    // (`isBackEnabled`, `transitionState`) in scope, Kotlin's one `this`)
                     if handler_param(b, item) {
-                        self.later(
-                            f.loc,
-                            &format!(
-                                "an object declaration's override of `{}` given its `{}` (an object expression's is)",
-                                f.name.name, b.kotlin
-                            ),
+                        let fspan = self.span(f.loc);
+                        let value_ty = self.callbacks_value_ty(b, args);
+                        let value_ts = self.rust_of_ty(&value_ty, fspan);
+                        let rust_params: Vec<&index::Param> = item.params.iter().skip(1).collect();
+                        let kparams: Vec<TokenStream> = f
+                            .params
+                            .iter()
+                            .zip(&rust_params)
+                            .map(|(p, rp)| match &p.ty {
+                                Some(t) => self.rust_type(t, TypePos::Value),
+                                None => substituted(rp.ty, &binds, fspan),
+                            })
+                            .collect();
+                        let rust_ret = (item.ret.trim() != "()").then(|| substituted(item.ret, &binds, fspan));
+                        let kret: Option<TokenStream> = match (&f.result, &rust_ret) {
+                            (Some(t), _) if self.ty_of(t) != Ty::Unit => Some(self.rust_type(t, TypePos::Value)),
+                            (Some(_), _) => None,
+                            (None, r) => r.clone(),
+                        };
+                        let names: Vec<proc_macro2::Ident> =
+                            f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc)).collect();
+                        let cx = super::class::MemberCx {
+                            owner: d.info.rust.clone(),
+                            shape: d.info.shape,
+                            companion: None,
+                            outers: self.outers_of(&d.info),
+                        };
+                        let label = d.info.kotlin.rsplit('.').next().unwrap_or_default().to_string();
+                        let saved = (
+                            std::mem::take(&mut self.scopes),
+                            std::mem::take(&mut self.receivers),
+                            std::mem::take(&mut self.frames),
+                            std::mem::take(&mut self.loops),
+                            std::mem::take(&mut self.lambdas),
                         );
+                        self.enter_member(&cx, &label, true);
+                        let closure =
+                            self.object_fn_closure_with(f, &kparams, kret.as_ref(), &names, Some((&value_ts, b.value)));
+                        (self.scopes, self.receivers, self.frames, self.loops, self.lambdas) = saved;
+                        let h = ident(item.params[0].rust, fspan);
+                        let ht = substituted(item.params[0].ty, &binds, fspan);
+                        let mut sig = vec![quote_spanned!(fspan=> #h: #ht)];
+                        let mut call = vec![quote_spanned!(fspan=> #h)];
+                        for ((p, rp), n) in f.params.iter().zip(&rust_params).zip(&names) {
+                            let t = substituted(rp.ty, &binds, fspan);
+                            sig.push(quote_spanned!(fspan=> #n: #t));
+                            let nullable = p.ty.as_ref().is_some_and(|t| t.nullable);
+                            call.push(as_kotlin_arg(&kt, rp.ty, nullable, quote!(#n), fspan));
+                        }
+                        let mi = ident(item.rust, fspan);
+                        let v = quote_spanned!(fspan=> (#closure)(#(#call),*));
+                        let (ret, v) = match &rust_ret {
+                            None => (quote!(), v),
+                            Some(r) => {
+                                let knullable = f.result.as_ref().is_some_and(|t| t.nullable);
+                                (quote_spanned!(fspan=> -> #r), as_rust_result(item.ret, knullable, v, fspan))
+                            }
+                        };
+                        items.push(quote_spanned!(fspan=> fn #mi(&self, #(#sig),*) #ret { #v }));
                         continue;
                     }
                     let fspan = self.span(f.loc);
@@ -483,11 +547,25 @@ impl Gen<'_, '_> {
         let owner = ident(ctor.owner, span);
         let f = ident(ctor.rust, span);
         let allow = super::class::class_allow(span);
+        // ((stage 14 FINAL-T) an object of a base whose callbacks are given the struct, `object X :
+        // NavigationEventHandler<…>(…)`: Kotlin's one object, the struct made once (per thread) — `addHandler(X)`
+        // and `X.remove()` of the same handler)
+        let single = d.info.shape == super::class::Shape::Object && trait_items.iter().any(|i| handler_param(b, i));
+        let made = if single {
+            quote_spanned! {span=>
+                ::std::thread_local! {
+                    static __KZ_ONE: ::std::cell::OnceCell<#value_ts> = const { ::std::cell::OnceCell::new() };
+                }
+                __KZ_ONE.with(|one| ::core::clone::Clone::clone(one.get_or_init(|| #owner::#f(#(#call_args,)* o))))
+            }
+        } else {
+            quote_spanned!(span=> #owner::#f(#(#call_args,)* o))
+        };
         let mut from = quote_spanned! {span=>
             #allow
             impl ::core::convert::From<#name> for #value_ts {
                 fn from(o: #name) -> #value_ts {
-                    #owner::#f(#(#call_args,)* o)
+                    #made
                 }
             }
         };

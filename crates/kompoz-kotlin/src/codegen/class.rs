@@ -47,6 +47,17 @@ pub(crate) enum Shape {
     Interface,
 }
 
+/// How a data class's property is compared and hashed ([`Gen::data_field_kind`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FieldKind {
+    /// `==` and `Hash` of its own.
+    Plain,
+    /// Its bits (`kt::KtBits`): a `Float`/`Double`.
+    Bits,
+    /// `==` only: the class has no `Hash`.
+    Compared,
+}
+
 /// A user's class, object, enum class or interface, as the generator knows it.
 #[derive(Clone, Debug)]
 pub(crate) struct UserClass {
@@ -135,6 +146,9 @@ pub(crate) struct ClassTable {
     pub trait_ext: Vec<TokenStream>,
     /// The where clause of the trait being written's provided methods (its type parameters' bounds).
     pub trait_where: TokenStream,
+    /// (stage 14 FINAL-T) What a generic function's body of an extension trait starts with: its overrides' calls
+    /// (`hierarchy::generic_dispatch`).
+    pub dispatch: TokenStream,
     /// The star projections of the function's parameters being written (their places, the type parameters they are).
     pub stars: Option<Vec<(crate::pos::Loc, proc_macro2::Ident)>>,
     /// (stage 14 WPD) The local classes of the text's functions, by the function's place (its start's offset):
@@ -160,10 +174,39 @@ pub(crate) fn find_classes(decls: &[&Decl], own: bool, out: &mut Vec<ClassDecl>)
     }
 }
 
+/// (stage 14 FINAL-T) The Rust names of the standard library's types the generator reads in the API's signatures
+/// (`Vec<T>` a list, `Option<T>` a nullable, …) and the prelude puts in every module: a user's top-level class of
+/// one of these names is `Kt` and its name in Rust (`class Vec` → `KtVec`), so that neither its signatures are read
+/// as the standard type's nor the module's own Rust loses the prelude's type.
+const STD_NAMES: &[&str] = &[
+    "Vec",
+    "VecDeque",
+    "Option",
+    "String",
+    "Box",
+    "Rc",
+    "Arc",
+    "HashMap",
+    "HashSet",
+    "BTreeMap",
+    "BTreeSet",
+    "KtSet",
+    "KtMap",
+    "KtProgression",
+    "RangeInclusive",
+    "List",
+    "MutableList",
+];
+
+/// The Rust name of a user's top-level type named `name` (see [`STD_NAMES`]).
+pub(crate) fn top_level_rust(name: &str) -> String {
+    if STD_NAMES.contains(&name) { format!("Kt{name}") } else { name.to_string() }
+}
+
 fn find_in(d: &Decl, outer: Option<(&str, &str)>, own: bool, out: &mut Vec<ClassDecl>) {
     let qualify = |name: &str| match outer {
         Some((k, r)) => (format!("{k}.{name}"), format!("{r}{name}")),
-        None => (name.to_string(), name.to_string()),
+        None => (name.to_string(), top_level_rust(name)),
     };
     match d {
         Decl::Class(c) => {
@@ -177,6 +220,7 @@ fn find_in(d: &Decl, outer: Option<(&str, &str)>, own: bool, out: &mut Vec<Class
             };
             let companion = c.companion().map(|o| companion_rust(&rust, o.name.as_ref()));
             let inherit = super::hierarchy::Inherit::of(&c.modifiers, shape);
+            let c = &api_typed_overrides(c);
             out.push(ClassDecl {
                 info: UserClass {
                     kotlin: kotlin.clone(),
@@ -231,6 +275,60 @@ fn find_in(d: &Decl, outer: Option<(&str, &str)>, own: bool, out: &mut Vec<Class
         }
         _ => {}
     }
+}
+
+/// (stage 14 FINAL-T) A class implementing an API interface, its overriding properties typed as the API's methods
+/// give them where the API names a type of its own for what Kotlin's declaration writes otherwise (`override val
+/// metadata: Map<String, Any>` of a `Scene`: navigation3's `Metadata`).
+fn api_typed_overrides(c: &Class) -> Box<Class> {
+    let mut c = Box::new(c.clone());
+    let traits: Vec<String> = c
+        .supers
+        .iter()
+        .filter_map(|s| s.ty.simple_name())
+        .map(|n| index::rust_type(&n).unwrap_or_else(|| super::last_segment(&n)).to_string())
+        .collect();
+    let api_type = |name: &str, ty: &Type| -> Option<Type> {
+        let item = index::lookup(name).iter().find(|i| {
+            traits.iter().any(|t| *t == i.via) && i.kind == Kind::Method && i.params.is_empty() && i.owner.is_empty()
+        })?;
+        let ret = item.ret.trim();
+        let own = ret.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
+        let written = ty.simple_name().unwrap_or_default();
+        (own && ret.chars().next().is_some_and(char::is_uppercase) && super::last_segment(&written) != ret)
+            .then(|| super::hierarchy::named_type(ret, ty.loc))
+    };
+    for m in &mut c.body.members {
+        if let Member::Decl(Decl::Property(p)) = m
+            && super::hierarchy::is_override(&p.modifiers)
+            && let (Binding::Name(n), Some(t)) = (&p.binding, &p.ty)
+            && let Some(nt) = api_type(&n.name, t)
+        {
+            p.ty = Some(nt);
+        }
+    }
+    if let Some(pc) = &mut c.primary_constructor {
+        for cp in &mut pc.params {
+            if cp.property.is_some()
+                && super::hierarchy::is_override(&cp.param.modifiers)
+                && let Some(t) = &cp.param.ty
+                && let Some(nt) = api_type(&cp.param.name.name, t)
+            {
+                cp.param.ty = Some(nt);
+            }
+        }
+    }
+    c
+}
+
+/// (stage 14 FINAL-T) Whether an initializer reads the object being made (`this`, `super`).
+fn reads_object(e: &Expr) -> bool {
+    let mut found = false;
+    super::generics::walk_expr(e, &mut |x| {
+        found |= matches!(x.kind, ExprKind::This { .. } | ExprKind::Super { .. })
+            || matches!(&x.kind, ExprKind::Member { receiver, .. } if matches!(receiver.kind, ExprKind::Super { .. }));
+    });
+    found
 }
 
 /// Whether a declaration of the module table is seen by another file (Kotlin's `private` is the file's).
@@ -393,16 +491,27 @@ impl Gen<'_, '_> {
         // ((WPA-rest) an object of a base of the second kind, `object WrappedUUIDNavType : NavType<…>(…)`: Kotlin's
         // value of it the base's struct made of it)
         if let Some(b) = self.callbacks_base_of(&rust) {
-            let v = proc_macro2::Ident::new(b.value, span);
-            // ((stage 14 FINAL) a generic struct's, `KSerializer<T>`: its arguments the object's, inferred)
+            // ((stage 14 FINAL-T) of the base's type arguments: `NavigationEventHandler<NavigationEventInfo.None>`)
+            let args = self
+                .decl_of(&rust)
+                .and_then(|d| self.superclass(&d))
+                .map(|s| super::hierarchy::type_args_of(&s.ty))
+                .unwrap_or_default();
+            // ((stage 14 FINAL) a generic struct given no arguments, `KSerializer<T>`: its arguments the object's,
+            // inferred)
             let n = crate::index::generics(b.value).map_or(0, |g| g.len());
-            let v = if n == 0 {
-                quote_spanned!(span=> #v)
-            } else {
+            if args.is_empty() && n > 0 {
+                let v = proc_macro2::Ident::new(b.value, span);
                 let holes = (0..n).map(|_| quote_spanned!(span=> _));
-                quote_spanned!(span=> #v<#(#holes),*>)
-            };
-            return Some((quote_spanned!(span=> <#v as ::core::convert::From<#i>>::from(#i {})), Ty::named(b.value)));
+                let v = quote_spanned!(span=> #v<#(#holes),*>);
+                return Some((
+                    quote_spanned!(span=> <#v as ::core::convert::From<#i>>::from(#i {})),
+                    Ty::named(b.value),
+                ));
+            }
+            let ty = self.callbacks_value_ty(b, &args);
+            let v = self.rust_of_ty(&ty, span);
+            return Some((quote_spanned!(span=> <#v as ::core::convert::From<#i>>::from(#i {})), ty));
         }
         Some((quote_spanned!(span=> #i {}), Ty::named(&rust)))
     }
@@ -499,6 +608,89 @@ impl Gen<'_, '_> {
         ty.is_copy()
             || matches!(ty, Ty::Named(n, a) if a.is_empty()
                 && self.user_class_rust(n).is_some_and(|c| matches!(c.shape, Shape::Enum | Shape::Object | Shape::Companion)))
+    }
+
+    /// (stage 14 FINAL-T) A property of a function type given a lambda, `override val content: @Composable () -> Unit
+    /// = { entry.Content() }`: the lambda as that type's (its parameters typed, composable as the type says), the
+    /// shared closure the field holds.
+    pub(crate) fn lambda_property_value(&mut self, p: &Property, init: &Expr) -> Option<TokenStream> {
+        let ExprKind::Lambda(l) = &init.kind else { return None };
+        let t = self.unaliased(p.ty.as_ref()?);
+        let f = t.as_function().filter(|_| !t.nullable)?;
+        let span = self.span(init.loc);
+        // (a composable one of no parameters, a `Scene`'s `content`: its body a composable block's, as an object
+        // expression's is)
+        if f.params.is_empty() && f.receiver.is_none() && t.annotations.iter().any(|a| a.is_kompozable()) {
+            let Binding::Name(n) = &p.binding else { return None };
+            let g = Function {
+                annotations: t.annotations.clone(),
+                modifiers: Modifiers::default(),
+                type_params: Vec::new(),
+                receiver: None,
+                name: n.clone(),
+                params: Vec::new(),
+                result: None,
+                constraints: Vec::new(),
+                body: Some(FunctionBody::Block(l.body.clone())),
+                loc: l.loc,
+            };
+            let c = self.object_fn_closure_with(&g, &[], None, &[], None);
+            return Some(quote_spanned!(span=> ::std::rc::Rc::new(#c)));
+        }
+        let mut info = self.lambda_info(f, true);
+        info.typed = true;
+        let c = self.lambda(l, Some(&info), None);
+        Some(quote_spanned!(span=> ::std::rc::Rc::new(#c)))
+    }
+
+    /// (stage 14 FINAL-T) How a data class's property of type `ty` takes part in its `equals`/`hashCode` as Kotlin's
+    /// generated ones do: compared and hashed as it is, by its bits (a `Float`/`Double`, nullable too: Kotlin's
+    /// `Float.compare`), or compared only (a type without a structural hash of Rust's: no `Hash` of the class).
+    /// `tparams`: the class's type parameters (hashed as they are, bounded `Hash`); `seen`: the data classes asked
+    /// about already (a recursive one hashes).
+    pub(crate) fn data_field_kind(&self, ty: &Ty, tparams: &[String], seen: &mut Vec<String>) -> FieldKind {
+        let plain_if = |b: bool| if b { FieldKind::Plain } else { FieldKind::Compared };
+        match ty {
+            Ty::Int | Ty::Long | Ty::Bool | Ty::Char | Ty::String | Ty::OtherInt | Ty::Unit => FieldKind::Plain,
+            Ty::Float | Ty::Double => FieldKind::Bits,
+            Ty::Nullable(t) if matches!(**t, Ty::Float | Ty::Double) => FieldKind::Bits,
+            Ty::Nullable(t) | Ty::List(t) => plain_if(self.data_field_kind(t, tparams, seen) == FieldKind::Plain),
+            Ty::Pair(a, b) => plain_if(
+                self.data_field_kind(a, tparams, seen) == FieldKind::Plain
+                    && self.data_field_kind(b, tparams, seen) == FieldKind::Plain,
+            ),
+            Ty::Named(n, a) if a.is_empty() && tparams.contains(n) => FieldKind::Plain,
+            Ty::Named(n, a) => {
+                let Some(c) = self.user_class_rust(n) else { return FieldKind::Compared };
+                if !a.iter().all(|t| self.data_field_kind(t, tparams, seen) == FieldKind::Plain) {
+                    return FieldKind::Compared;
+                }
+                match c.shape {
+                    Shape::Enum => FieldKind::Plain,
+                    Shape::Plain => plain_if(c.inherit == super::hierarchy::Inherit::Final),
+                    Shape::Data if c.inherit == super::hierarchy::Inherit::Final => {
+                        if seen.contains(n) {
+                            return FieldKind::Plain;
+                        }
+                        seen.push(n.clone());
+                        let Some(d) = self.decl_of(n) else { return FieldKind::Compared };
+                        let ClassAst::Class(k) = &d.ast else { return FieldKind::Compared };
+                        let own = d.info.type_params.clone();
+                        plain_if(
+                            k.primary_constructor.iter().flat_map(|p| &p.params).filter(|p| p.property.is_some()).all(
+                                |p| {
+                                    p.param.ty.as_ref().is_some_and(|t| {
+                                        self.data_field_kind(&self.ty_of(t), &own, seen) != FieldKind::Compared
+                                    })
+                                },
+                            ),
+                        )
+                    }
+                    _ => FieldKind::Compared,
+                }
+            }
+            _ => FieldKind::Compared,
+        }
     }
 
     // ---- Collecting --------------------------------------------------------------------------------------------
@@ -627,8 +819,14 @@ impl Gen<'_, '_> {
     fn find_locals(&mut self, own: &[&Decl], out: &mut Vec<ClassDecl>) {
         for d in own {
             let Decl::Function(f) = d else { continue };
-            let Some(FunctionBody::Block(b)) = &f.body else { continue };
-            for s in &b.stmts {
+            // ((stage 14 FINAL-T) an expression body's object expressions too: `fun box(): Box = object : Box() {
+            // … }`)
+            let stmts = match &f.body {
+                Some(FunctionBody::Block(b)) => b.stmts.as_slice(),
+                Some(FunctionBody::Expr(_)) => &[],
+                None => continue,
+            };
+            for s in stmts {
                 let StmtKind::Decl(local) = &s.kind else { continue };
                 let mut local = local.clone();
                 let (modifiers, loc) = match &mut local {
@@ -1307,13 +1505,8 @@ impl Gen<'_, '_> {
             self.error(c.loc, "a data class can't be `inner`, `open`, `abstract` or `sealed` (Kotlin's rule)");
             ok = false;
         }
-        // ((stage 14 WPB) a standard exception class as the superclass: `exceptions`; an open or abstract one, a base
-        // other classes derive from, isn't translated yet)
+        // ((stage 14 WPB) a standard exception class as the superclass: `exceptions`)
         let exception = usize::from(self.exception_super(c).is_some());
-        if exception == 1 && c.is_sealed() {
-            self.later(c.name.loc, "a sealed class deriving from an exception class");
-            ok = false;
-        }
         let known = self.supers_of(d).len() + exception;
         if known < c.supers.len() {
             for s in &c.supers {
@@ -1614,6 +1807,7 @@ impl Gen<'_, '_> {
         let mut copy_params = Vec::new();
         let mut route_attrs = Vec::new();
         let mut compared = Vec::new();
+        let mut kinds = Vec::new();
         // (a base class's constructor reads the parameters after the value is made: the fields clones of them)
         let has_super = self.superclass(d).is_some();
         for (k, cp) in params.iter().enumerate() {
@@ -1651,6 +1845,10 @@ impl Gen<'_, '_> {
             };
             route_attrs.push(route_default.clone());
             compared.push(i.clone());
+            let kind = cp.param.ty.as_ref().map_or(FieldKind::Compared, |t| {
+                self.data_field_kind(&self.ty_of(t), &info.type_params, &mut vec![info.rust.clone()])
+            });
+            kinds.push(kind);
             let given = if has_super { quote_spanned!(pspan=> ::core::clone::Clone::clone(&#i)) } else { quote!(#i) };
             if m == Mutability::Var {
                 fields.push(quote_spanned!(pspan=> #route_default #fvis #i: #kt::KtShared<#t>));
@@ -1787,6 +1985,48 @@ impl Gen<'_, '_> {
                         (self.scopes, self.receivers) = saved;
                         continue;
                     }
+                    // ((stage 14 FINAL-T) a `val` whose initializer reads the object, `super.metadata + more` (Kotlin's
+                    // `this` while it is made, the properties above it set): its value made of the object, once, when
+                    // first read — the object's whole value then, what the properties above give it alike)
+                    if let PropertyInit::Value(init) = &p.init
+                        && !p.is_var()
+                        && !after_super
+                        && reads_object(init)
+                    {
+                        let Some(pt) = &p.ty else {
+                            self.error(n.loc, format!("write `{}`'s type (its value reads the object)", n.name));
+                            continue;
+                        };
+                        let t = self.rust_type(pt, TypePos::Value);
+                        let made_name = format!("__kz_make_{}", snake(&n.name));
+                        let f = Function {
+                            annotations: Vec::new(),
+                            modifiers: Modifiers { list: vec![Modifier { kind: ModifierKind::Private, loc: p.loc }] },
+                            type_params: Vec::new(),
+                            receiver: None,
+                            name: Ident { name: made_name.clone(), backticked: false, loc: n.loc },
+                            params: Vec::new(),
+                            result: Some(pt.clone()),
+                            constraints: Vec::new(),
+                            body: Some(FunctionBody::Expr(init.clone())),
+                            loc: p.loc,
+                        };
+                        let saved = (std::mem::take(&mut self.scopes), std::mem::take(&mut self.receivers));
+                        methods.push(self.member_fn(&f, &cx));
+                        (self.scopes, self.receivers) = saved;
+                        let make = proc_macro2::Ident::new(&made_name, pspan);
+                        fields.push(
+                            quote_spanned!(pspan=> #[doc(hidden)] pub #i: ::std::rc::Rc<::std::cell::OnceCell<#t>>),
+                        );
+                        field_values.push(quote_spanned!(pspan=> #i: ::std::rc::Rc::new(::std::cell::OnceCell::new())));
+                        getters.push(quote_spanned!(pspan=>
+                            #fvis fn #i(&self) -> #t {
+                                ::core::clone::Clone::clone(self.#i.get_or_init(|| self.#make()))
+                            }
+                        ));
+                        own_fields = true;
+                        continue;
+                    }
                     // (a delegated one, `val label by lazy { … }`: the delegate kept, its value read through it)
                     // ((stage 14 WPB) the delegate held as a plain class's is, `property`: a shared `KtDelegate` (a
                     // `var`'s `KtMutableDelegate`) of the property's type, whatever the delegate's own type is)
@@ -1860,7 +2100,10 @@ impl Gen<'_, '_> {
                             continue;
                         }
                     };
-                    let v = self.expecting(init, &ty, |g| g.value(init));
+                    let v = match self.lambda_property_value(p, init) {
+                        Some(v) => v,
+                        None => self.expecting(init, &ty, |g| g.value(init)),
+                    };
                     made.push(quote_spanned!(pspan=> let #i: #t = #v;));
                     self.declare_at(n, snake(&n.name), LocalKind::Val, ty.clone());
                     fields.push(quote_spanned!(pspan=> #fvis #i: #t));
@@ -1905,26 +2148,51 @@ impl Gen<'_, '_> {
         let impls = self.class_impls(d, Place::Data, &g_decl, &g_use);
         // (Kotlin's `equals` of a data class: its constructor's properties)
         // ((stage 14 WPB) `equals`/`hashCode` overridden: theirs)
-        let (eq_body, hash_body) = self.equality_bodies(
-            &c.body.members,
-            quote_spanned!(span=> true #(&& self.#compared == other.#compared)*),
-            quote!(),
-            span,
-        );
+        // ((stage 14 FINAL-T) a `Float`/`Double` property by its bits, Kotlin's `Float.compare`; hashed — Kotlin's
+        // `hashCode()` of the properties — when every property's type hashes, `Eq` then too)
+        let bits = kinds.contains(&FieldKind::Bits);
+        let compares = compared.iter().zip(&kinds).map(|(i, k)| match k {
+            FieldKind::Bits => quote_spanned!(span=> #kt::KtBits::kt_bits(&self.#i) == #kt::KtBits::kt_bits(&other.#i)),
+            _ => quote_spanned!(span=> self.#i == other.#i),
+        });
+        let hashes = !kinds.contains(&FieldKind::Compared);
+        let structural_hash = if hashes {
+            let each = compared.iter().zip(&kinds).map(|(i, k)| match k {
+                FieldKind::Bits => {
+                    quote_spanned!(span=> ::core::hash::Hash::hash(&#kt::KtBits::kt_bits(&self.#i), state);)
+                }
+                _ => quote_spanned!(span=> ::core::hash::Hash::hash(&self.#i, state);),
+            });
+            quote_spanned!(span=> #(#each)*)
+        } else {
+            quote!()
+        };
+        let (eq_body, hash_body) =
+            self.equality_bodies(&c.body.members, quote_spanned!(span=> true #(&& #compares)*), structural_hash, span);
+        // (the class's type parameters `Hash`/`Eq` where its value is)
+        let bound = |tr: TokenStream| -> TokenStream {
+            let ps: Vec<proc_macro2::Ident> =
+                info.type_params.iter().map(|p| proc_macro2::Ident::new(p, span)).collect();
+            if ps.is_empty() { quote!() } else { quote_spanned!(span=> where #(#ps: #tr),*) }
+        };
         let hash = if hash_body.is_empty() {
             quote!()
         } else {
+            let wh = bound(quote_spanned!(span=> ::core::hash::Hash));
+            let eq_wh = bound(quote_spanned!(span=> ::core::cmp::Eq));
             quote_spanned! {span=>
                 #allow
-                impl #g_decl ::core::hash::Hash for #name #g_use {
+                impl #g_decl ::core::hash::Hash for #name #g_use #wh {
                     fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
                         #hash_body
                     }
                 }
+                #allow
+                impl #g_decl ::core::cmp::Eq for #name #g_use #eq_wh {}
             }
         };
         let overrides_eq = self.overrides_equality(&c.body.members).0;
-        let (derive_eq, eq) = if own_fields || overrides_eq {
+        let (derive_eq, eq) = if own_fields || overrides_eq || bits {
             (
                 quote!(),
                 quote_spanned! {span=>
@@ -1941,6 +2209,8 @@ impl Gen<'_, '_> {
             (quote_spanned!(span=> , ::core::cmp::PartialEq), hash)
         };
         let serializer = self.serializer_fn(&route, &vis, quote!(#allow impl #g_decl #name #g_use), span);
+        // ((stage 14 FINAL-T) `out` type parameters: `variance`)
+        let out_method = self.out_method_data(d, &g_decl, &g_use, span);
         quote_spanned! {span=>
             #allow
             #[derive(::core::clone::Clone #derive_eq)]
@@ -1948,6 +2218,7 @@ impl Gen<'_, '_> {
             #vis struct #name #g_struct { #(#fields),* }
 
             #serializer
+            #out_method
 
             #allow
             #[#rt::named(type)]
@@ -2178,7 +2449,12 @@ impl Gen<'_, '_> {
 
     /// A member function: a method of the type (`&self`; an enum's `self`), translated as a function is.
     pub(crate) fn member_fn(&mut self, f: &Function, cx: &MemberCx) -> TokenStream {
-        self.member_fn_with(f, cx, None)
+        // ((stage 14 FINAL-T) `hashCode()`'s arithmetic Kotlin's, wrapping)
+        let hash = f.name.name == "hashCode" && f.params.is_empty();
+        let saved = std::mem::replace(&mut self.control.wrapping, hash);
+        let out = self.member_fn_with(f, cx, None);
+        self.control.wrapping = saved;
+        out
     }
 
     /// A composable member function, `@Composable fun Content()` of a class: a hidden composable of the object (a
@@ -2329,6 +2605,9 @@ impl Gen<'_, '_> {
         self.collect_stars();
         let mut params = Vec::new();
         let mut converts = Vec::new();
+        // ((stage 14 FINAL-T) the receiver lent, used by a lambda kept past the call — an object expression's
+        // closures: a clone of it, `__kz___kz_ext`, `use_receiver`)
+        let ext_owned: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
         if let Some(r) = &ext {
             let rust_ty = self.rust_type(r, TypePos::Value);
             let name = r.simple_name().map(|n| owner_name(super::last_segment(&n))).unwrap_or_default();
@@ -2340,7 +2619,7 @@ impl Gen<'_, '_> {
                 depth: 0,
                 by_ref: true,
                 by_mut: false,
-                owned_used: Default::default(),
+                owned_used: ext_owned.clone(),
             });
             let i = proc_macro2::Ident::new("__kz_ext", span);
             params.push(quote_spanned!(span=> #i: &#rust_ty));
@@ -2420,6 +2699,11 @@ impl Gen<'_, '_> {
         } else {
             quote!()
         };
+        let owned = if ext_owned.get() {
+            quote_spanned!(span=> let __kz___kz_ext = ::core::clone::Clone::clone(__kz_ext);)
+        } else {
+            quote!()
+        };
         quote_spanned! {span=>
             #vis #asyncness fn #name #generics (#recv, #(#params),*) #ret {
                 #[allow(unused_imports)]
@@ -2427,6 +2711,7 @@ impl Gen<'_, '_> {
                 #companion
                 #(#converts)*
                 #unused
+                #owned
                 #rt::named_args!(#kz_types { #body })
             }
         }
@@ -2641,6 +2926,25 @@ impl Gen<'_, '_> {
             fields.push(f);
             empty.push(e);
         }
+        // ((stage 14 FINAL-T) type parameters none of its properties holds — `class Strategy<T : Any> :
+        // SceneStrategy<T>`, its `T` its interface's —: Rust's marker of them)
+        let own_params: Vec<&str> = c.type_params.iter().map(|t| t.name.name.as_str()).collect();
+        let held = |n: &str| {
+            params.iter().any(|cp| {
+                cp.property.is_some() && cp.param.ty.as_ref().is_some_and(|t| super::hierarchy::type_mentions(t, &[n]))
+            }) || c.body.members.iter().any(|m| match m {
+                Member::Decl(Decl::Property(p)) => {
+                    p.ty.as_ref().is_none_or(|t| super::hierarchy::type_mentions(t, &[n]))
+                }
+                _ => false,
+            })
+        };
+        let unheld: Vec<proc_macro2::Ident> =
+            own_params.iter().filter(|n| !held(n)).map(|n| proc_macro2::Ident::new(n, span)).collect();
+        if !unheld.is_empty() {
+            fields.push(quote_spanned!(span=> #[doc(hidden)] pub __kz_types: ::core::marker::PhantomData<fn() -> (#(#unheld,)*)>));
+            empty.push(quote_spanned!(span=> __kz_types: ::core::marker::PhantomData));
+        }
         for cp in params.iter().filter(|cp| cp.property.is_some()) {
             let pspan = self.span(cp.param.loc);
             let i = self.name_ident(&snake(&cp.param.name.name), cp.param.name.loc);
@@ -2668,6 +2972,14 @@ impl Gen<'_, '_> {
         self.enter_member(&cx, &c.name.name, true);
         for cp in &params {
             let ty = cp.param.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
+            // ((stage 14 FINAL-T) a function's: the shared closure `__kz_init` is given, `value_params`)
+            let ty = match ty {
+                Ty::Fun(mut f) => {
+                    f.shared = true;
+                    Ty::Fun(f)
+                }
+                t => t,
+            };
             self.declare_at(&cp.param.name, snake(&cp.param.name.name), LocalKind::Param, ty);
         }
         let super_init = self.super_init(d, quote_spanned!(span=> self), Place::Plain, span);
@@ -2941,7 +3253,9 @@ impl Gen<'_, '_> {
         };
         let i = self.name_ident(&snake(&n.name), n.loc);
         let var = p.is_var();
-        let v = if ty.is_nullable() {
+        let v = if let Some(v) = self.lambda_property_value(p, init) {
+            v
+        } else if ty.is_nullable() {
             self.expecting(init, &ty, |g| g.value_want(init, super::expr::Want { some: true, ..Default::default() }))
         } else {
             self.expecting(init, &ty, |g| g.value(init))
@@ -3028,6 +3342,8 @@ impl Gen<'_, '_> {
                         init.extend(i);
                     }
                 }
+                // ((stage 14 FINAL-T) an override given its base's struct: the trait's method's, `callbacks`)
+                Member::Decl(Decl::Function(f)) if self.handler_override(&d.info.rust, f) => {}
                 Member::Decl(Decl::Function(f)) => {
                     own_to_string |= f.name.name == "toString" && f.params.is_empty();
                     let saved = std::mem::take(&mut self.scopes);

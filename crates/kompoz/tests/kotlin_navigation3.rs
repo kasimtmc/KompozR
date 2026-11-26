@@ -18,77 +18,6 @@ use kompoz::ui::layout::SlotKey;
 use kompoz::ui::window::{Dialog, DialogProperties};
 use std::rc::Rc;
 
-// ---- what the Kotlin syntax doesn't translate yet -----------------------------------------------------------------
-
-// CustomSceneSamples.kt's generic scene and strategy (`private class DefaultSceneTransitionsSceneStrategy<T : Any>() :
-// SceneStrategy<T>`, `private data class DefaultSceneTransitionsScene<T : Any>(…) : Scene<T>`): a generic class of the
-// crate implementing the API's generic interfaces (its type parameter bound by what the API's types need of it, held
-// by none of its own properties) is stage 15's; Rust beside the file.
-
-/// CustomSceneSamples.kt's `private val slideHorizontal` (5 s, LinearOutSlowInEasing).
-fn scene_slide_horizontal() -> ContentTransform {
-    let spec = || -> std::sync::Arc<dyn FiniteAnimationSpec<IntOffset>> {
-        std::sync::Arc::new(named_args!(tween(5000, easing = std::sync::Arc::new(LinearOutSlowInEasing))))
-    };
-    named_args!(slide_in_horizontally(spec(), initial_offset_x = |it: i32| it / 2))
-        .together_with(named_args!(slide_out_horizontally(spec(), target_offset_x = |it: i32| -it / 2)))
-}
-
-/// CustomSceneSamples.kt's `private data class DefaultSceneTransitionsScene<T : Any>(val currentEntry: NavEntry<T>,
-/// override val previousEntries: List<NavEntry<T>>) : Scene<T>`: its metadata the scene's transitions.
-#[derive(PartialEq, Debug)]
-pub struct DefaultSceneTransitionsScene<T> {
-    current_entry: NavEntry<T>,
-    previous_entries: Vec<NavEntry<T>>,
-}
-
-impl<T: NavEntryKey> Scene<T> for DefaultSceneTransitionsScene<T> {
-    fn key(&self) -> SlotKey {
-        self.current_entry.content_key()
-    }
-    fn entries(&self) -> Vec<NavEntry<T>> {
-        vec![self.current_entry.clone()]
-    }
-    fn previous_entries(&self) -> Vec<NavEntry<T>> {
-        self.previous_entries.clone()
-    }
-    fn content(&self) {
-        self.current_entry.Content();
-    }
-    // (overrides the default animations passed to NavDisplay: `sceneTransitions`)
-    fn metadata(&self) -> Metadata {
-        metadata(|m| {
-            m.put(NavDisplay::TransitionKey, |_: &AnimatedContentTransitionScope<AnyScene>| scene_slide_horizontal());
-            m.put(NavDisplay::PopTransitionKey, |_: &AnimatedContentTransitionScope<AnyScene>| {
-                scene_slide_horizontal()
-            });
-            m.put(NavDisplay::PredictivePopTransitionKey, |_: &AnimatedContentTransitionScope<AnyScene>, _: i32| {
-                scene_slide_horizontal()
-            });
-        })
-    }
-}
-
-/// CustomSceneSamples.kt's `private class DefaultSceneTransitionsSceneStrategy<T : Any>() : SceneStrategy<T>`.
-#[derive(Default)]
-pub struct DefaultSceneTransitionsSceneStrategy {
-    _p: (),
-}
-
-pub fn DefaultSceneTransitionsSceneStrategy() -> DefaultSceneTransitionsSceneStrategy {
-    DefaultSceneTransitionsSceneStrategy::default()
-}
-
-impl<T: NavEntryKey> SceneStrategy<T> for DefaultSceneTransitionsSceneStrategy {
-    fn calculate_scene(&self, _: &SceneStrategyScope<T>, entries: Vec<NavEntry<T>>) -> Option<Rc<dyn Scene<T>>> {
-        let last = entries.last()?.clone();
-        Some(Rc::new(DefaultSceneTransitionsScene {
-            current_entry: last,
-            previous_entries: entries[..entries.len() - 1].to_vec(),
-        }))
-    }
-}
-
 // The samples' string resources (NavigationSamples.kt's `R.string.*`): tests/navResources.
 compose_resources!(dir = "tests/navResources");
 
@@ -300,6 +229,102 @@ fn scene_default_transitions_sample_as_compose_writes_it() {
     assert!(shown(&rule, "A") && !shown(&rule, "B"));
 }
 
+/// CustomSceneSamples.kt's SceneOverrideEntryTransitionsSample (a generic data class of the crate implementing the
+/// API's `Scene<T>`, `super.metadata` its default, the strategy a generic class of no property of its `T`): the
+/// scene's horizontal slide over the entry's vertical one (5 s), B mid-way to the right of where it ends, not above.
+fn scene_override_entry_transitions_sample_as_compose_writes_it() {
+    let rule = KompozTestRule::new(SceneOverrideEntryTransitionsSample);
+    assert!(shown(&rule, "A"));
+    rule.main_clock().set_auto_advance(false);
+    rule.on_node_with(has_text("Click to navigate", false, false), false).perform_click();
+    rule.advance_time_by(2500);
+    assert!(shown(&rule, "A") && shown(&rule, "B"));
+    let mid = rule.on_node_with_text("B").position_in_root();
+    rule.main_clock().set_auto_advance(true);
+    rule.wait_for_idle();
+    let end = rule.on_node_with_text("B").position_in_root();
+    assert!(mid.x > end.x + 1.0 && (mid.y - end.y).abs() < 1.0, "mid {mid:?}, end {end:?}");
+    assert!(shown(&rule, "B") && !shown(&rule, "A"));
+}
+
+/// SceneStrategySamples.kt's SceneStrategyOnBackSample (its local generic classes: an `OverlayScene<T>` with
+/// `equals`/`hashCode` of its own, its strategy): a dialog scene for every entry above the first, its dialog's
+/// dismissal the scope's onBack (the display's).
+fn scene_strategy_on_back_sample_as_compose_writes_it() {
+    let stack = NavBackStack(vec!["ana".to_string(), "pencere".to_string()]);
+    let s = stack.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let strategy: Rc<dyn SceneStrategy<String>> = Rc::new(SceneStrategyOnBackSampleSimpleDialogSceneStrategy());
+        NavDisplay(
+            s.clone(),
+            scene_strategies = vec![strategy],
+            entry_provider = |k: String| NavEntry(k, content = |k: String| BasicText(k)),
+        );
+    }));
+    assert!(shown(&rule, "ana") && shown(&rule, "pencere"));
+    // (the scenes of one entry and its previous ones equal, their hashes too; another's not)
+    let entry = |k: &str| NavEntry::new(k.to_string(), SlotKey::new(k.to_string()), Metadata::new(), |_| {});
+    let scene = |e: &NavEntry<String>, p: Vec<NavEntry<String>>| {
+        SceneStrategyOnBackSampleSimpleDialogScene(e.clone(), p, || {})
+    };
+    let (a, b) = (entry("a"), entry("b"));
+    let (x, y, z) = (scene(&b, vec![a.clone()]), scene(&b, vec![a.clone()]), scene(&a, vec![]));
+    assert!(x == y && x.hash_code_kt() == y.hash_code_kt() && x != z && x == x.clone());
+    // (the dialog's own back: its dismissal, the scope's onBack, the display's)
+    assert!(escape(&rule));
+    assert_eq!(stack.size(), 1);
+}
+
+/// ComplexBackStackSamples.kt's MultipleBackStackSample and ConcatenatedBackStackSample (the crate's interfaces of
+/// `NavKey` — `(it as SampleKey).name` of a back stack's keys, `listOf(Home, User)` of their `SampleTabKey`): a back
+/// stack per tab, switched with their decorators' states, or concatenated.
+fn complex_back_stack_samples_as_compose_writes_them() {
+    use kompoz::test::is_selectable;
+    let tab = |rule: &KompozTestRule, k: usize| {
+        rule.on_all_nodes(is_selectable()).get(k).perform_click();
+        rule.wait_for_idle();
+    };
+    let rule = KompozTestRule::new(MultipleBackStackSample);
+    assert!(shown(&rule, "Home Page") && shown(&rule, "current backStack:[Home]"));
+    click(&rule, "Navigate to Detail");
+    assert!(shown(&rule, "Detail Page in Home Tab") && shown(&rule, "current backStack:[Home, Detail]"));
+    tab(&rule, 1);
+    assert!(shown(&rule, "User Page") && shown(&rule, "current backStack:[User]"));
+    tab(&rule, 0);
+    assert!(shown(&rule, "Detail Page in Home Tab"));
+    assert!(escape(&rule));
+    assert!(shown(&rule, "Home Page"));
+    drop(rule);
+    let rule = KompozTestRule::new(ConcatenatedBackStackSample);
+    tab(&rule, 1);
+    assert!(shown(&rule, "User Page") && shown(&rule, "current backStack:[Home, User]"));
+    click(&rule, "Navigate to Detail");
+    assert!(shown(&rule, "Detail Page in User Tab") && shown(&rule, "current backStack:[Home, User, Detail]"));
+    // (back to the user's tab's first page, then out of it: the home tab's)
+    assert!(escape(&rule));
+    assert!(shown(&rule, "User Page"));
+    assert!(escape(&rule));
+    assert!(shown(&rule, "Home Page"));
+}
+
+/// AnimatedOverlaySamples.kt's AnimatedBottomSheetSample (its `object : OverlayScene<…>`'s `lateinit var sheetState`
+/// set by its content, read by its suspending `onRemove`: the object's one variable): the entry in a modal bottom
+/// sheet, its pop hiding the sheet (the scene's `onRemove`) before it leaves.
+fn animated_bottom_sheet_sample_as_compose_writes_it() {
+    let rule = KompozTestRule::new(AnimatedBottomSheetSample);
+    assert!(shown(&rule, "Click to open bottom sheet"));
+    click(&rule, "Click to open bottom sheet");
+    assert!(shown(&rule, "BottomSheet") && shown(&rule, "Close BottomSheet"));
+    rule.main_clock().set_auto_advance(false);
+    rule.on_node_with(has_text("Close BottomSheet", false, false), false).perform_click();
+    rule.advance_time_by(16);
+    // (popped: the sheet still shown while `onRemove` hides it)
+    assert!(shown(&rule, "BottomSheet"));
+    rule.main_clock().set_auto_advance(true);
+    rule.wait_for_idle();
+    assert!(!shown(&rule, "BottomSheet") && shown(&rule, "Click to open bottom sheet"));
+}
+
 /// BasicSamples.kt's SceneNav (NavigationSamples.kt's screens): Profile's ViewModel scoped to its entry; Dashboard
 /// navigated to and back (its predictive pop by the swipe's edge), Scrollable's list, DialogBase's dialog.
 fn scene_nav_as_compose_writes_it() {
@@ -351,6 +376,13 @@ fn main() {
             "scene_default_transitions_sample_as_compose_writes_it",
             scene_default_transitions_sample_as_compose_writes_it,
         ),
+        (
+            "scene_override_entry_transitions_sample_as_compose_writes_it",
+            scene_override_entry_transitions_sample_as_compose_writes_it,
+        ),
+        ("scene_strategy_on_back_sample_as_compose_writes_it", scene_strategy_on_back_sample_as_compose_writes_it),
+        ("complex_back_stack_samples_as_compose_writes_them", complex_back_stack_samples_as_compose_writes_them),
+        ("animated_bottom_sheet_sample_as_compose_writes_it", animated_bottom_sheet_sample_as_compose_writes_it),
         ("scene_nav_as_compose_writes_it", scene_nav_as_compose_writes_it),
         ("deep_link_ui_samples_as_compose_writes_them", deep_link_ui_samples_as_compose_writes_them),
         ("nav_back_stack_samples_as_compose_writes_them", nav_back_stack_samples_as_compose_writes_them),

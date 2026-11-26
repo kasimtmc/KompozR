@@ -54,6 +54,9 @@ pub(crate) struct Control {
     pub fn_params: std::collections::HashMap<String, Vec<Vec<Param>>>,
     /// A jump out of the lambda being written was met (see `jumps`).
     pub escaped: bool,
+    /// (stage 14 FINAL-T) A `hashCode()` override is being written: its `Int`/`Long` `+`, `-`, `*` wrap, as
+    /// Kotlin's do (`31 * h + e.hashCode()` of large hashes), not Rust's overflow checks.
+    pub wrapping: bool,
     /// The local functions in scope by Rust name: their parameters (their defaults filled in at a call).
     pub local_fns: std::collections::HashMap<String, Vec<Param>>,
     /// The local extension functions: their Kotlin names and receivers' types (`x.twice()` calls one).
@@ -534,6 +537,21 @@ impl Gen<'_, '_> {
                         Some(quote_spanned!(cspan=> #e.is_a(#lit))),
                         quote_spanned!(cspan=> ::core::option::Option::unwrap(#e.cast_object::<#t>())),
                         ty,
+                    )
+                }
+                // ((stage 14 FINAL-T) the user's sealed exception class: an object of one of its cases, as the enum)
+                Some(rust)
+                    if self.exception_type_rust(rust)
+                        && self
+                            .user_class_rust(rust)
+                            .is_some_and(|c| c.inherit == super::hierarchy::Inherit::Sealed) =>
+                {
+                    let lit = proc_macro2::Literal::string(&class);
+                    let t = proc_macro2::Ident::new(rust, self.span(c.ty.loc));
+                    (
+                        Some(quote_spanned!(cspan=> #e.is_a(#lit))),
+                        quote_spanned!(cspan=> ::core::option::Option::unwrap(#kt::KtAs::<#t>::kt_as_safe(&#e))),
+                        Ty::named(rust),
                     )
                 }
                 Some(rust) if self.exception_type_rust(rust) => {

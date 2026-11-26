@@ -36,7 +36,7 @@ struct Signature {
 
 /// The API traits an API interface's object implements: itself and its supertraits the index has methods of
 /// (`OverlayScene` → `Scene`), nearest first.
-fn api_chain(iface: &str) -> Vec<&str> {
+pub(crate) fn api_chain(iface: &str) -> Vec<&str> {
     crate::index::deref_chain(iface)
         .into_iter()
         .filter(|t| {
@@ -162,6 +162,140 @@ impl Gen<'_, '_> {
         let params = item.params.iter().map(|p| super::callbacks::substituted(p.ty, &binds, span)).collect();
         let ret = (item.ret.trim() != "()").then(|| super::callbacks::substituted(item.ret, &binds, span));
         Some(Signature { rust: item.rust.to_string(), params, ret, via: item.via.to_string() })
+    }
+
+    /// (stage 14 FINAL-T) An object expression with members of its own (not overrides: `lateinit var sheetState`,
+    /// `var n = start`, `fun bump()`) that isn't a local class (it uses the function's locals, `class::find_locals`):
+    /// its own members the locals of a block around it, declared in their order before it, its overrides' closures
+    /// sharing them (a `var` they assign a `kt::Ref`, a `lateinit var` a `kt::KtLateinit`: Kotlin's one object's
+    /// state). What isn't seen through the object's value (its supertype's) is the object's alone, as these are.
+    pub(crate) fn object_expr_value(&mut self, supers: &[SuperType], body: &ClassBody, loc: Loc) -> TokenStream {
+        if self.local_object(loc).is_some() {
+            return self.object_expr(supers, body, loc);
+        }
+        let own = |m: &Member| match m {
+            Member::Decl(Decl::Property(p)) => !super::hierarchy::is_override(&p.modifiers),
+            Member::Decl(Decl::Function(f)) => !super::hierarchy::is_override(&f.modifiers),
+            _ => false,
+        };
+        // (an override another member calls, `parseValue(it)` in `get`: Kotlin's `this.parseValue(it)`, the object's
+        // own function — a local function the override and its callers call)
+        let overrides: Vec<&Function> = body
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                Member::Decl(Decl::Function(f))
+                    if super::hierarchy::is_override(&f.modifiers)
+                        && f.type_params.is_empty()
+                        && f.receiver.is_none()
+                        && !f.is_kompozable() =>
+                {
+                    Some(&**f)
+                }
+                _ => None,
+            })
+            .collect();
+        let calls_of = |m: &Member| -> Vec<String> {
+            let mut out = Vec::new();
+            let mut see = |e: &Expr| {
+                if let ExprKind::Call { callee, .. } = &e.kind
+                    && let ExprKind::Name(n) = &callee.kind
+                {
+                    out.push(n.name.clone());
+                }
+            };
+            match m {
+                Member::Decl(Decl::Function(f)) => super::generics::walk_body(f.body.as_ref(), &mut see),
+                Member::Decl(Decl::Property(p)) => {
+                    if let PropertyInit::Value(v) = &p.init {
+                        super::generics::walk_body(Some(&FunctionBody::Expr(v.clone())), &mut see);
+                    }
+                }
+                _ => {}
+            }
+            out
+        };
+        let called: Vec<String> = overrides
+            .iter()
+            .filter(|f| {
+                body.members.iter().any(|m| {
+                    !matches!(m, Member::Decl(Decl::Function(g)) if std::ptr::eq(&**g, **f))
+                        && calls_of(m).contains(&f.name.name)
+                })
+            })
+            .map(|f| f.name.name.clone())
+            .collect();
+        if !body.members.iter().any(own) && called.is_empty() {
+            return self.object_expr(supers, body, loc);
+        }
+        let span = self.span(loc);
+        let mut props = Vec::new();
+        let mut funs: Vec<Function> = Vec::new();
+        let mut members = Vec::new();
+        for m in &body.members {
+            match m {
+                Member::Decl(Decl::Property(_)) if own(m) => {
+                    if let Member::Decl(d) = m {
+                        props.push(Stmt { kind: StmtKind::Decl(d.clone()), loc: d.loc() });
+                    }
+                }
+                Member::Decl(Decl::Function(f)) if own(m) => funs.push((**f).clone()),
+                Member::Decl(Decl::Function(f)) if called.contains(&f.name.name) => {
+                    // (the override: a call of the local function of its body)
+                    let mut local = (**f).clone();
+                    local.modifiers.list.retain(|x| x.kind != ModifierKind::Override);
+                    funs.push(local);
+                    let mut over = (**f).clone();
+                    let call = Expr {
+                        kind: ExprKind::Call {
+                            callee: Box::new(Expr { kind: ExprKind::Name(f.name.clone()), loc: f.name.loc }),
+                            type_args: Vec::new(),
+                            args: f
+                                .params
+                                .iter()
+                                .map(|p| Arg {
+                                    name: None,
+                                    spread: false,
+                                    value: Expr { kind: ExprKind::Name(p.name.clone()), loc: p.name.loc },
+                                    loc: p.name.loc,
+                                })
+                                .collect(),
+                            trailing_lambda: None,
+                        },
+                        loc: f.loc,
+                    };
+                    over.body = Some(FunctionBody::Expr(call));
+                    members.push(Member::Decl(Decl::Function(Box::new(over))));
+                }
+                m => members.push(m.clone()),
+            }
+        }
+        // (the functions in the order they call each other: a callee before its callers)
+        let names: Vec<String> = funs.iter().map(|f| f.name.name.clone()).collect();
+        let mut ordered: Vec<Function> = Vec::new();
+        let mut left = funs;
+        while !left.is_empty() {
+            let at = left
+                .iter()
+                .position(|f| {
+                    let m = Member::Decl(Decl::Function(Box::new(f.clone())));
+                    calls_of(&m).iter().all(|c| *c == f.name.name || !left.iter().any(|g| g.name.name == *c))
+                })
+                .unwrap_or(0);
+            ordered.push(left.remove(at));
+        }
+        let _ = names;
+        let mut stmts = props;
+        stmts.extend(ordered.into_iter().map(|f| {
+            let loc = f.loc;
+            Stmt { kind: StmtKind::Decl(Decl::Function(Box::new(f))), loc }
+        }));
+        let rest = ClassBody { members, loc: body.loc };
+        self.push_scope();
+        let lets = self.stmts(&stmts, super::stmt::Tail::Unit);
+        let object = self.object_expr(supers, &rest, loc);
+        self.pop_scope();
+        quote_spanned!(span=> { #lets #object })
     }
 
     /// `object : I { … }` (see the module's doc).

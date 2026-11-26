@@ -56,6 +56,18 @@ impl Todo {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for Todo {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.id, state);
+        ::core::hash::Hash::hash(&self.title, state);
+        ::core::hash::Hash::hash(&self.done, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Todo {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Todo {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]

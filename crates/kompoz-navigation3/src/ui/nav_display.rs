@@ -76,6 +76,30 @@ impl<F: Fn(&AnimatedContentTransitionScope<AnyScene>) -> Option<ContentTransform
     }
 }
 
+/// A lambda of a transition key written as Kotlin's syntax writes every `put` lambda (`put(NavDisplay.TransitionKey) {
+/// slideIn… }`: the Kotlin index gives `put`'s lambda the predictive pop's parameters, the swipe edge): its edge none.
+#[doc(hidden)]
+pub struct GivesTransformOfEdge;
+/// The same, giving a transform or none.
+#[doc(hidden)]
+pub struct GivesTransformOrNoneOfEdge;
+
+impl<F: Fn(&AnimatedContentTransitionScope<AnyScene>, i32) -> ContentTransform + 'static>
+    IntoMetadataValue<SceneTransitionSpec, GivesTransformOfEdge> for F
+{
+    fn into_metadata_value(self) -> SceneTransitionSpec {
+        Rc::new(move |scope| Some(self(scope, 0)))
+    }
+}
+
+impl<F: Fn(&AnimatedContentTransitionScope<AnyScene>, i32) -> Option<ContentTransform> + 'static>
+    IntoMetadataValue<SceneTransitionSpec, GivesTransformOrNoneOfEdge> for F
+{
+    fn into_metadata_value(self) -> SceneTransitionSpec {
+        Rc::new(move |scope| self(scope, 0))
+    }
+}
+
 impl<F: Fn(&AnimatedContentTransitionScope<AnyScene>, i32) -> ContentTransform + 'static>
     IntoMetadataValue<ScenePredictivePopTransitionSpec, GivesTransform> for F
 {

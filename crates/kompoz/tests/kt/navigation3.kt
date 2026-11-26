@@ -1,5 +1,6 @@
 // Navigation 3 as a Compose app writes it: navigation3-ui 1.2's samples (OverlaySamples.kt, SceneStateSamples.kt,
-// CustomSceneSamples.kt, BasicSamples.kt, DeepLinkNonPrimitiveArgSamples.kt) and navigation3-runtime 1.2's
+// CustomSceneSamples.kt, BasicSamples.kt, DeepLinkNonPrimitiveArgSamples.kt, SceneStrategySamples.kt,
+// ComplexBackStackSamples.kt, AnimatedOverlaySamples.kt) and navigation3-runtime 1.2's
 // NavigationSamples.kt (the screens BasicSamples.kt imports), as written (their @Sampled/@OptIn annotations left out);
 // checked by kotlin_navigation3.rs. The runtime samples of their own package are kt/navigation3_runtime.kt.
 //
@@ -7,16 +8,10 @@
 // its keys' `resourceId`s are Compose Multiplatform's StringResource where Android's are `Int`s (as kt/carousel.kt's),
 // its Material 2 `Divider` Material 3's `HorizontalDivider` (as kt/nav_host.kt's).
 //
-// Not translated yet (stage 15's; Rust's forms of them: crates/kompoz-navigation3/tests/navigation3.rs):
-// - CustomSceneSamples.kt's `DefaultSceneTransitionsSceneStrategy<T : Any>() : SceneStrategy<T>` and
-//   `DefaultSceneTransitionsScene<T : Any>(…) : Scene<T>`, its SceneOverrideEntryTransitionsSample's pair: a generic
-//   class of the crate implementing the API's generic interfaces (its `T` bound by what the API's types need of it,
-//   held by none of its own properties; the scene's `super.metadata`, the API trait's default) — Rust beside the file;
-// - SceneStrategySamples.kt's SceneStrategyOnBackSample: the same, local, and `previousEntries.hashCode()`;
-// - ComplexBackStackSamples.kt: `(it as SampleKey).name`, an API interface's value (`NavKey`) cast to the crate's
-//   interface, and `listOf(Home, User)` of the crate's interface they share (`SampleTabKey`, not `NavKey`);
-// - AnimatedOverlaySamples.kt: its `object : OverlayScene<Any>`'s `lateinit var sheetState` its members share, a
-//   strategy of `Any` keys, and material3's `rememberBottomSheetState` (newer than the 1.5.0-alpha17 KompozR follows).
+// (CustomSceneSamples.kt's scenes and strategies are generic classes of the crate implementing the API's generic
+// interfaces, their `T` bounded by what the API's types need of it; SceneStrategySamples.kt's are local ones;
+// ComplexBackStackSamples.kt casts keys to the crate's interfaces of `NavKey`; AnimatedOverlaySamples.kt's object
+// expression has a `lateinit var` its members share — see its section for what KompozR writes otherwise there.)
 //
 // Stage 15's (Android): BasicSamples.kt's SceneNavSharedEntrySample and SceneNavSharedElementSample — their `Cat`
 // key's `@DrawableRes val imageId: Int`, Android's resource ids (`R.drawable.cat_1`), a serializable property of a
@@ -171,6 +166,129 @@ fun SceneDefaultTransitionsSample() {
             },
     )
 }
+
+private class DefaultSceneTransitionsSceneStrategy<T : Any>() : SceneStrategy<T> {
+    override fun SceneStrategyScope<T>.calculateScene(entries: List<NavEntry<T>>): Scene<T>? {
+        if (entries.isEmpty()) return null
+        return DefaultSceneTransitionsScene(entries.last(), entries.dropLast(1))
+    }
+}
+
+private data class DefaultSceneTransitionsScene<T : Any>(
+    val currentEntry: NavEntry<T>,
+    override val previousEntries: List<NavEntry<T>>,
+) : Scene<T> {
+    override val key = currentEntry.contentKey
+    override val entries: List<NavEntry<T>> = listOf(currentEntry)
+    override val content: @Composable (() -> Unit) = { currentEntry.Content() }
+    // overrides the default animations passed to NavDisplay
+    override val metadata: Map<String, Any> = sceneTransitions
+}
+
+@Composable
+fun SceneOverrideEntryTransitionsSample() {
+    val backStack = rememberNavBackStack(A)
+    NavDisplay(
+        backStack,
+        onBack = { backStack.removeLastOrNull() },
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
+        // the Scene overrides the NavEntry's slide vertical with slide horizontal transitions
+        sceneStrategies = listOf(SceneOverrideEntryTransitionsSceneStrategy()),
+        entryProvider =
+            entryProvider {
+                entry<A> { BlueBox("A") { backStack.add(B) } }
+                // the entry defines slide vertical transitions
+                entry<B>(
+                    metadata =
+                        metadata {
+                            put(NavDisplay.TransitionKey) { slideVertical }
+                            put(NavDisplay.PopTransitionKey) { slideVertical }
+                            put(NavDisplay.PredictivePopTransitionKey, { _: Int -> slideVertical })
+                        }
+                ) {
+                    RedBox("B")
+                }
+            },
+    )
+}
+
+private class SceneOverrideEntryTransitionsSceneStrategy<T : Any>() : SceneStrategy<T> {
+    override fun SceneStrategyScope<T>.calculateScene(entries: List<NavEntry<T>>): Scene<T>? {
+        if (entries.isEmpty()) return null
+        return SceneOverrideEntryTransitionsScene(entries.last(), entries.dropLast(1))
+    }
+}
+
+private data class SceneOverrideEntryTransitionsScene<T : Any>(
+    val currentEntry: NavEntry<T>,
+    override val previousEntries: List<NavEntry<T>>,
+) : Scene<T> {
+    override val key = currentEntry.contentKey
+    override val entries: List<NavEntry<T>> = listOf(currentEntry)
+    override val content: @Composable (() -> Unit) = { currentEntry.Content() }
+    // super.metadata defaults to [entries.last()]'s metadata
+    // so this overrides the last entry's transitions
+    override val metadata: Map<String, Any> = super.metadata + sceneTransitions
+}
+
+private val sceneTransitions = metadata {
+    put(NavDisplay.TransitionKey) { slideHorizontal }
+    put(NavDisplay.PopTransitionKey) { slideHorizontal }
+    put(NavDisplay.PredictivePopTransitionKey) { slideHorizontal }
+}
+
+// ---- SceneStrategySamples.kt (navigation3-ui's scene samples) ----
+
+@Suppress("FunctionName", "unused")
+fun SceneStrategyOnBackSample() {
+    /** Class that shows a [NavEntry] as a [Dialog]. */
+    class SimpleDialogScene<T : Any>(
+        private val entry: NavEntry<T>,
+        override val previousEntries: List<NavEntry<T>>,
+        onBack: () -> Unit,
+    ) : OverlayScene<T> {
+        override val key = entry.contentKey
+        override val entries = listOf(entry)
+        override val overlaidEntries = previousEntries
+
+        override val content: @Composable () -> Unit = {
+            Dialog(onDismissRequest = onBack) { entry.Content() }
+        }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is SimpleDialogScene<*>) return false
+            return entry == other.entry && previousEntries == other.previousEntries
+        }
+
+        override fun hashCode(): Int {
+            return entry.hashCode() * 31 + previousEntries.hashCode()
+        }
+    }
+
+    /**
+     * A [SceneStrategy] that shows every screen above the first one as a dialog.
+     *
+     * In a real example, you'd have developers opt into displaying their entry as a dialog by
+     * providing a companion method that provides [NavEntry.metadata].
+     *
+     * @see androidx.navigation3.scene.DialogSceneStrategy
+     */
+    class SimpleDialogSceneStrategy<T : Any> : SceneStrategy<T> {
+        override fun SceneStrategyScope<T>.calculateScene(entries: List<NavEntry<T>>): Scene<T>? {
+            val entry = entries.lastOrNull() ?: return null
+            val previousEntries = entries.dropLast(1)
+            // Only show this as a dialog if there is something 'underneath' the dialog
+            return if (previousEntries.isNotEmpty()) {
+                SimpleDialogScene(entry, previousEntries, onBack)
+            } else {
+                null
+            }
+        }
+    }
+}
+
+// ---- CustomSceneSamples.kt (continued) ----
 
 private val duration = 5000
 private val animSpec: FiniteAnimationSpec<IntOffset> =
@@ -548,4 +666,299 @@ fun ListTypeDeepLinkSerializerSample() {
                 entry<HatListKey> { GreenBox(it.toString()) }
             },
     )
+}
+
+// ---- ComplexBackStackSamples.kt ----
+
+@Composable
+fun MultipleBackStackSample() {
+    val tabKeys = listOf(Home, User)
+
+    /** set up User entries */
+    val homeBackStack = rememberNavBackStack(Home)
+    val homeTabEntries =
+        getHomeTabEntries(
+            backStackString = homeBackStack.map { (it as SampleKey).name }.toString(),
+            backStack = homeBackStack,
+        )
+
+    /** set up User entries */
+    val userBackStack = rememberNavBackStack(User)
+    val userTabEntries =
+        getUserTabEntries(
+            backStackString = userBackStack.map { (it as SampleKey).name }.toString(),
+            backStack = userBackStack,
+        )
+
+    /** condition for which tab to switch to */
+    var currentTab: SampleTabKey by remember { mutableStateOf(Home) }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                tabKeys.forEach { tab ->
+                    val isSelected = tab == currentTab
+                    NavigationBarItem(
+                        selected = isSelected,
+                        onClick = { currentTab = tab },
+                        icon = { Icon(imageVector = tab.imageVector, contentDescription = null) },
+                    )
+                }
+            }
+        }
+    ) {
+        /** Swap backStacks based on the current selected tab */
+        NavDisplay(
+            entries = if (currentTab == Home) homeTabEntries else userTabEntries,
+            onBack = {
+                val currBackStack = if (currentTab == Home) homeBackStack else userBackStack
+                currBackStack.removeLastOrNull()
+            },
+        )
+    }
+}
+
+@Composable
+fun ConcatenatedBackStackSample() {
+    val tabKeys = listOf(Home, User)
+
+    /** set up User entries */
+    val homeBackStack = rememberNavBackStack(Home)
+    val homeBackStackNames = homeBackStack.map { (it as SampleKey).name }
+    val homeTabEntries =
+        getHomeTabEntries(
+            backStackString = homeBackStackNames.toString(),
+            backStack = homeBackStack,
+        )
+
+    /** set up User entries */
+    val userBackStack = rememberNavBackStack(User)
+    val userTabEntries =
+        getUserTabEntries(
+            backStackString =
+                (homeBackStackNames + userBackStack.map { (it as SampleKey).name }).toString(),
+            backStack = userBackStack,
+        )
+
+    /** condition for which tab to switch to */
+    var currentTab: SampleTabKey by remember { mutableStateOf(Home) }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                tabKeys.forEach { tab ->
+                    val isSelected = tab == currentTab
+                    NavigationBarItem(
+                        selected = isSelected,
+                        onClick = { currentTab = tab },
+                        icon = { Icon(imageVector = tab.imageVector, contentDescription = null) },
+                    )
+                }
+            }
+        }
+    ) {
+        /** Swap backStacks based on the current selected tab */
+        NavDisplay(
+            entries = if (currentTab == Home) homeTabEntries else homeTabEntries + userTabEntries,
+            onBack = {
+                val currBackStack = if (currentTab == Home) homeBackStack else userBackStack
+                currBackStack.removeLastOrNull()
+                if (currentTab == User && userBackStack.isEmpty()) {
+                    currentTab = Home
+                }
+            },
+        )
+    }
+}
+
+@Composable
+fun getHomeTabEntries(
+    backStackString: String,
+    backStack: NavBackStack<NavKey>,
+): List<NavEntry<NavKey>> {
+    if (backStack.isEmpty()) backStack.add(Home)
+    val homeDecorators =
+        listOf<NavEntryDecorator<NavKey>>(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator(),
+        )
+    val homeEntryProvider =
+        entryProvider<NavKey> {
+            entry<Home> {
+                HomeScreen(backStackString = backStackString) {
+                    backStack.add(Detail("in Home Tab"))
+                }
+            }
+            entry<Detail> { key ->
+                DetailScreen(
+                    backStackString = "${backStack.map { (it as SampleKey).name }}",
+                    sourceTab = key.sourceTab,
+                )
+            }
+        }
+    return rememberDecoratedNavEntries(backStack, homeDecorators, homeEntryProvider)
+}
+
+@Composable
+fun getUserTabEntries(
+    backStackString: String,
+    backStack: NavBackStack<NavKey>,
+): List<NavEntry<NavKey>> {
+    if (backStack.isEmpty()) backStack.add(User)
+    val userDecorators =
+        listOf<NavEntryDecorator<NavKey>>(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator(),
+        )
+    val userEntryProvider =
+        entryProvider<NavKey> {
+            entry<User> {
+                UserScreen(backStackString = backStackString) {
+                    backStack.add(Detail("in User Tab"))
+                }
+            }
+            entry<Detail> { key ->
+                DetailScreen(backStackString = backStackString, sourceTab = key.sourceTab)
+            }
+        }
+    return rememberDecoratedNavEntries(backStack, userDecorators, userEntryProvider)
+}
+
+private interface SampleKey : NavKey {
+    val name: String
+}
+
+private interface SampleTabKey : SampleKey {
+    val imageVector: ImageVector
+}
+
+@Serializable
+private object Home : SampleTabKey {
+    override val name: String = "Home"
+    override val imageVector: ImageVector = Icons.Filled.HouseSiding
+}
+
+@Serializable
+private object User : SampleTabKey {
+    override val name: String = "User"
+    override val imageVector: ImageVector = Icons.Filled.Person
+}
+
+@Serializable
+data class Detail(val sourceTab: String) : SampleKey {
+    override val name: String = "Detail"
+}
+
+// (BasicSamples.kt's screens of the samples above)
+
+@Composable
+fun HomeScreen(backStackString: String, onClick: () -> Unit) {
+    Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
+        Text(text = "Home Page")
+        Text(text = "current backStack:$backStackString")
+        NavigateButton("Detail", onClick)
+    }
+}
+
+@Composable
+fun UserScreen(backStackString: String, onClick: () -> Unit) {
+    Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
+        Text(text = "User Page")
+        Text(text = "current backStack:$backStackString")
+        NavigateButton("Detail", onClick)
+    }
+}
+
+@Composable
+fun DetailScreen(backStackString: String, sourceTab: String) {
+    Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
+        Text(text = "Detail Page $sourceTab")
+        Text(text = "current backStack:$backStackString")
+    }
+}
+
+// ---- AnimatedOverlaySamples.kt ----
+// (KompozR's: its keys `NavKey`s where the sample's strategy takes `Any` — a `SceneStrategy<Any>` given a back stack
+// of `NavKey`s, Kotlin's variance of the display's `T`, which Rust's types don't have —, and material3 1.5.0-alpha17's
+// `rememberModalBottomSheetState()` where the sample's newer material3 has `rememberBottomSheetState(initialValue =
+// SheetValue.Hidden)`, the same hidden modal sheet state)
+
+@Serializable private object Landing : NavKey
+
+@Serializable private object AnimatedBottomSheet : NavKey
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnimatedBottomSheetSample() {
+    val backStack = rememberNavBackStack(Landing)
+    NavDisplay(
+        backStack = backStack,
+        onBack = { backStack.removeLastOrNull() },
+        sceneStrategies = listOf(AnimatedBottomSheetSceneStrategy()),
+        entryProvider =
+            entryProvider {
+                entry<Landing> {
+                    Box(Modifier.fillMaxSize().background(Color.Green)) {
+                        Button(onClick = { backStack.add(AnimatedBottomSheet) }) {
+                            Text("Click to open bottom sheet")
+                        }
+                    }
+                }
+                entry<AnimatedBottomSheet>(
+                    metadata = AnimatedBottomSheetSceneStrategy.bottomSheet()
+                ) {
+                    Column {
+                        Text("BottomSheet")
+                        Button(onClick = { backStack.removeLastOrNull() }) {
+                            Text("Close BottomSheet")
+                        }
+                    }
+                }
+            },
+    )
+}
+
+/** An [SceneStrategy] that renders a [NavEntry] within a [ModalBottomSheet]. */
+@OptIn(ExperimentalMaterial3Api::class)
+private class AnimatedBottomSheetSceneStrategy() : SceneStrategy<NavKey> {
+
+    override fun SceneStrategyScope<NavKey>.calculateScene(entries: List<NavEntry<NavKey>>): Scene<NavKey>? {
+        val entry = entries.lastOrNull() ?: return null
+        entry.metadata[MetadataKey] ?: return null
+
+        return object : OverlayScene<NavKey> {
+            override val key = entry.contentKey
+            override val entries = listOf(entry)
+            override val previousEntries = entries.dropLast(1)
+            override val overlaidEntries = entries.dropLast(1)
+
+            lateinit var sheetState: SheetState
+
+            override val content: @Composable (() -> Unit) = {
+                sheetState = rememberModalBottomSheetState()
+                val minHeight = LocalWindowInfo.current.containerSize.height * 0.2 // 50% height
+                ModalBottomSheet(
+                    onDismissRequest = onBack,
+                    containerColor = Color.Blue,
+                    sheetState = sheetState,
+                    modifier = Modifier.heightIn(min = minHeight.dp),
+                ) {
+                    entry.Content()
+                }
+            }
+
+            override suspend fun onRemove() {
+                // run hide animations when this bottom sheet is popped from the backStack
+                sheetState.hide()
+            }
+        }
+    }
+
+    companion object {
+        object MetadataKey : NavMetadataKey<ModalBottomSheetProperties>
+
+        fun bottomSheet(
+            sheetProperties: ModalBottomSheetProperties = ModalBottomSheetProperties()
+        ) = metadata { put(MetadataKey, sheetProperties) }
+    }
 }

@@ -168,7 +168,8 @@ impl Gen<'_, '_> {
             let out = self.expr(e);
             let from = out.ty.clone();
             if self.coerces(&from, &to) {
-                let v = self.finish(out, Want { some: false, ..want }, e.loc);
+                // (made the shared object by the coercion alone)
+                let v = self.finish(out, Want { some: false, shared: None, ..want }, e.loc);
                 let span = self.span(e.loc);
                 return self.coerce(v, &from, &to, span);
             }
@@ -357,6 +358,11 @@ impl Gen<'_, '_> {
                 }
                 o
             }
+            // ((stage 14 FINAL-T) `super.metadata`: a property of the base (an API interface's default getter too))
+            ExprKind::Member { receiver, safe: false, name } if matches!(receiver.kind, ExprKind::Super { .. }) => {
+                let ExprKind::Super { ty, .. } = &receiver.kind else { unreachable!() };
+                self.super_call(ty.as_deref(), name, &[], e.loc)
+            }
             ExprKind::Member { receiver, safe, name } => self.member(receiver, *safe, name, e.loc),
             ExprKind::Index { receiver, indices } => self.index(receiver, indices, e.loc),
             // (stage 13 WP1) A class reference `Type::class` (a ViewModel's, what a factory is given): the API's
@@ -392,7 +398,7 @@ impl Gen<'_, '_> {
             ExprKind::AnonymousFunction(f) => self.anonymous_function(f),
             ExprKind::Object { supers, body } => {
                 let ty = self.object_expr_ty(supers, e.loc);
-                Out::plain(self.object_expr(supers, body, e.loc), ty)
+                Out::plain(self.object_expr_value(supers, body, e.loc), ty)
             }
             ExprKind::Prefix { op, operand } => self.prefix(*op, operand, e.loc),
             ExprKind::Postfix { op, operand } => self.postfix(*op, operand, e.loc),
@@ -439,6 +445,31 @@ impl Gen<'_, '_> {
             let ptr =
                 if p == "Arc" { quote_spanned!(span=> ::std::sync::Arc) } else { quote_spanned!(span=> ::std::rc::Rc) };
             let ts = quote_spanned!(span=> #ptr::ptr_eq(&#a, &#b));
+            return Out::plain(if same { ts } else { quote_spanned!(span=> !#ts) }, Ty::Bool);
+        }
+        // ((stage 14 FINAL-T) a plain class's object and a value of `Any`/`Any?`, `this === other` in `equals`: the
+        // same object — its shared state's —, never its `equals`)
+        let any = |t: &Ty| super::hierarchy::is_any(t);
+        let plain = |t: &Ty| {
+            t.owner().and_then(|o| self.user_class_rust(o)).is_some_and(|c| {
+                c.shape == super::class::Shape::Plain && !c.is_dyn() && c.inherit == super::hierarchy::Inherit::Final
+            })
+        };
+        if any(&at) != any(&bt) && (plain(&at) || plain(&bt)) {
+            let (vt, o_nullable) = if any(&at) {
+                (bt.clone(), self.peek_ty(lhs).is_nullable())
+            } else {
+                (at.clone(), self.peek_ty(rhs).is_nullable())
+            };
+            let (v, o) = if any(&at) { (self.value(rhs), self.value(lhs)) } else { (self.value(lhs), self.value(rhs)) };
+            let kt = self.kt(span);
+            let t = self.rust_of_ty(&vt, span);
+            let o = if o_nullable {
+                quote_spanned!(span=> ::core::option::Option::as_deref(&#o))
+            } else {
+                quote_spanned!(span=> ::core::option::Option::Some(&*#o))
+            };
+            let ts = quote_spanned!(span=> #kt::kt_same_as(&#v, #o, |x: &#t| ::std::rc::Rc::as_ptr(&x.__kz_this) as *const ()));
             return Out::plain(if same { ts } else { quote_spanned!(span=> !#ts) }, Ty::Bool);
         }
         let data = |t: &Ty| {
@@ -535,6 +566,36 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> #r.#m())
             };
             let base = Ty::named(&tn);
+            return if safe || ty.nullable {
+                Out::plain(ts, base.nullable())
+            } else {
+                Out::plain(quote_spanned!(span=> #kt::not_null(#ts)), base)
+            };
+        }
+        // ((stage 14 FINAL-T) an API interface's shared object cast to the user's interface, `(it as SampleKey)` of
+        // a `NavKey`: the user's class it holds (each of the text's implementing it tried), as the interface's)
+        if !o.ty.is_nullable()
+            && let Some((tr, classes)) = self.api_dyn_to_user_trait(&o.ty, &target_ty)
+        {
+            let r = o.ts;
+            let t = proc_macro2::Ident::new(&tr, span);
+            let v = self.fresh("o", span);
+            let tries = classes.iter().map(|c| {
+                let c = proc_macro2::Ident::new(c, span);
+                quote_spanned! {span=>
+                    if let ::core::option::Option::Some(x) = #kt::KtAs::<#c>::kt_as_safe(&**#v) {
+                        return ::core::option::Option::Some(::std::rc::Rc::new(x) as ::std::rc::Rc<dyn #t>);
+                    }
+                }
+            });
+            let ts = quote_spanned! {span=>
+                (|| -> ::core::option::Option<::std::rc::Rc<dyn #t>> {
+                    let #v = &#r;
+                    #(#tries)*
+                    ::core::option::Option::None
+                })()
+            };
+            let base = Ty::named(&tr);
             return if safe || ty.nullable {
                 Out::plain(ts, base.nullable())
             } else {
@@ -1324,6 +1385,24 @@ impl Gen<'_, '_> {
                     }
                 };
                 let (at, bt) = (a.ty.clone(), b.ty.clone());
+                // ((stage 14 FINAL-T) a value compared with one of `Any`/`Any?`, `Money(5) == m`: Kotlin's `equals`
+                // of the value's class — the other a value of it equal to it —, null equal to null)
+                let any = |t: &Ty| super::hierarchy::is_any(&t.non_null());
+                if any(&at) != any(&bt) && at != Ty::Unknown && bt != Ty::Unknown {
+                    let ((v, vt), (o, ot)) = if any(&at) { ((b.ts, bt), (a.ts, at)) } else { ((a.ts, at), (b.ts, bt)) };
+                    let v = if vt.is_nullable() {
+                        quote_spanned!(span=> ::core::option::Option::as_ref(&#v))
+                    } else {
+                        quote_spanned!(span=> ::core::option::Option::Some(&#v))
+                    };
+                    let o = if ot.is_nullable() {
+                        quote_spanned!(span=> ::core::option::Option::as_deref(&#o))
+                    } else {
+                        quote_spanned!(span=> ::core::option::Option::Some(&*#o))
+                    };
+                    let ts = quote_spanned!(span=> #kt::eq_object(#v, #o));
+                    return Out::plain(if eq { ts } else { quote_spanned!(span=> !#ts) }, Ty::Bool);
+                }
                 // (stage 13 WP3) A nullable value compared with one of another type (`navController.
                 // currentBackStackEntry == LocalLifecycleOwner.current`: Kotlin's `equals`, the entry an owner): the
                 // types' own equality, through the nullable one's value
@@ -1408,7 +1487,11 @@ impl Gen<'_, '_> {
                     a.ty.clone()
                 };
                 let (a, b) = (a.ts, b.ts);
+                let wrap = self.control.wrapping && matches!(ty, Ty::Int | Ty::Long);
                 let ts = match op {
+                    BinaryOp::Add if wrap => quote_spanned!(span=> (#a).wrapping_add(#b)),
+                    BinaryOp::Sub if wrap => quote_spanned!(span=> (#a).wrapping_sub(#b)),
+                    BinaryOp::Mul if wrap => quote_spanned!(span=> (#a).wrapping_mul(#b)),
                     BinaryOp::Add => quote_spanned!(span=> #a + #b),
                     BinaryOp::Sub => quote_spanned!(span=> #a - #b),
                     BinaryOp::Mul => quote_spanned!(span=> #a * #b),
@@ -1881,13 +1964,21 @@ impl Gen<'_, '_> {
 
     /// The type a collection's elements have together (`listOf(null, x)`'s `X?`): see [`super::call::merge_elements`].
     pub(crate) fn elements_ty<'e>(&self, elements: impl Iterator<Item = &'e Expr>) -> Ty {
-        elements.fold(Ty::Unknown, |t, e| {
-            let et = match &e.kind {
+        let tys: Vec<Ty> = elements
+            .map(|e| match &e.kind {
                 ExprKind::Null => Ty::Nullable(Box::new(Ty::Unknown)),
                 _ => self.peek_ty(e),
-            };
-            super::call::merge_elements(t, et)
-        })
+            })
+            .collect();
+        // ((stage 14 FINAL-T) values of several of the user's classes of one sealed class or interface: it,
+        // `listOf(Home, User)`'s `SampleTabKey`)
+        if let Some(t) = self.common_sealed(&tys) {
+            return t;
+        }
+        if let Some(t) = self.common_user_interface(&tys) {
+            return Ty::named(&t);
+        }
+        tys.into_iter().fold(Ty::Unknown, super::call::merge_elements)
     }
 
     pub(crate) fn peek_block(&self, b: &Block) -> Ty {
@@ -2270,6 +2361,10 @@ impl Gen<'_, '_> {
                 }
                 match n.name.as_str() {
                     "listOf" | "mutableListOf" | "arrayListOf" => {
+                        // ((stage 14 FINAL-T) its type argument where written: `listOf<Screen>(…)`)
+                        if let [TypeArg::Type { ty, .. }] = type_args {
+                            return Ty::List(Box::new(self.ty_of(ty)));
+                        }
                         return Ty::List(Box::new(self.elements_ty(args.iter().map(|a| &a.value))));
                     }
                     "mutableStateOf" => {

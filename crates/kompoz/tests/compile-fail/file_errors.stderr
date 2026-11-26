@@ -4,7 +4,7 @@ error: kompoz: tests/compile-fail/parse_error.kt:6:20: expected a type, found `)
 7 | kompoz_file!("tests/compile-fail/parse_error.kt");
   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: kompoz: tests/compile-fail/parse_error.kt:10:14: a sealed class deriving from an exception class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
+error: kompoz: tests/compile-fail/parse_error.kt:12:9: a local class in a local function, a block or a class's member, or a local type alias isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
  --> tests/compile-fail/file_errors.rs:7:14
   |
 7 | kompoz_file!("tests/compile-fail/parse_error.kt");

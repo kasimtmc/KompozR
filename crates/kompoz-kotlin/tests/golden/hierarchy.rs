@@ -150,6 +150,16 @@ impl Tag {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for Tag {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.name, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Tag {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Tag {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -1140,6 +1150,7 @@ impl ScreenOpen for Screen {
         ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
     }
     fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = &to;
         match self {
             Screen::Home(v) => ScreenOpen::__kz_cast(v, to),
             Screen::Detail(v) => ScreenOpen::__kz_cast(v, to),
@@ -1286,6 +1297,16 @@ impl ::core::cmp::PartialEq for ScreenDetail {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for ScreenDetail {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.id, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for ScreenDetail {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for ScreenDetail {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -1429,6 +1450,7 @@ impl FigureOpen for Figure {
         ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
     }
     fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = &to;
         match self {
             Figure::Disc(v) => FigureOpen::__kz_cast(v, to),
         }
@@ -1436,7 +1458,7 @@ impl FigureOpen for Figure {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
-#[derive(:: core :: clone :: Clone, :: core :: cmp :: PartialEq)]
+#[derive(:: core :: clone :: Clone)]
 pub struct Disc {
     pub r: f32,
 }
@@ -1470,6 +1492,23 @@ impl Disc {
         Disc::__kz_new(r)
     }
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for Disc {
+    fn eq(&self, other: &Self) -> bool {
+        true && ::kompoz::runtime::kt::KtBits::kt_bits(&self.r) == ::kompoz::runtime::kt::KtBits::kt_bits(&other.r)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for Disc {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&::kompoz::runtime::kt::KtBits::kt_bits(&self.r), state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Disc {}
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Disc {
@@ -1703,6 +1742,32 @@ impl<
         use ::kompoz::runtime::kt::ext::*;
         ::kompoz::runtime::named_args!(types(Duo(rr)), { Duo(self.second(), self.first()) })
     }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<
+    A: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    B: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+> ::core::hash::Hash for Duo<A, B>
+where
+    A: ::core::hash::Hash,
+    B: ::core::hash::Hash,
+{
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.first, state);
+        ::core::hash::Hash::hash(&self.second, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<
+    A: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    B: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+> ::core::cmp::Eq for Duo<A, B>
+where
+    A: ::core::cmp::Eq,
+    B: ::core::cmp::Eq,
+{
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
@@ -2783,6 +2848,23 @@ impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::c
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> Outcome<T> {
+    #[doc(hidden)]
+    pub fn __kz_out<
+        __KzU0: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    >(
+        self,
+        __kz_f0: &dyn ::core::ops::Fn(T) -> __KzU0,
+    ) -> Outcome<__KzU0> {
+        match self {
+            Outcome::Done(c) => Outcome::Done(c.__kz_out(__kz_f0)),
+            Outcome::Failed(c) => Outcome::Failed(c),
+            Outcome::Loading(c) => Outcome::Loading(c),
+        }
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq>
     ::kompoz::runtime::kt::KtToString for Outcome<T>
 {
@@ -2850,6 +2932,7 @@ impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::c
         ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
     }
     fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        let _ = &to;
         match self {
             Outcome::Done(v) => OutcomeOpen::<T>::__kz_cast(v, to),
             Outcome::Failed(v) => OutcomeOpen::<T>::__kz_cast(v, to),
@@ -2865,6 +2948,19 @@ pub struct OutcomeDone<T> {
     pub value: T,
     #[doc(hidden)]
     pub __kz_super: ::std::rc::Rc<OutcomeBase>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> OutcomeDone<T> {
+    #[doc(hidden)]
+    pub fn __kz_out<
+        __KzU0: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq,
+    >(
+        self,
+        __kz_f0: &dyn ::core::ops::Fn(T) -> __KzU0,
+    ) -> OutcomeDone<__KzU0> {
+        OutcomeDone { value: (__kz_f0)(self.value), __kz_super: self.__kz_super }
+    }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
@@ -2913,6 +3009,25 @@ impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::c
     fn eq(&self, other: &Self) -> bool {
         true && self.value == other.value
     }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> ::core::hash::Hash
+    for OutcomeDone<T>
+where
+    T: ::core::hash::Hash,
+{
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.value, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl<T: ::core::clone::Clone + 'static + ::kompoz::runtime::kt::KtToString + ::core::cmp::PartialEq> ::core::cmp::Eq
+    for OutcomeDone<T>
+where
+    T: ::core::cmp::Eq,
+{
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
@@ -3025,6 +3140,16 @@ impl ::core::cmp::PartialEq for OutcomeFailed {
         true && self.reason == other.reason
     }
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for OutcomeFailed {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.reason, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for OutcomeFailed {}
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for OutcomeFailed {
@@ -3428,72 +3553,170 @@ impl<__KzT: ::core::any::Any + ::core::clone::Clone> ::kompoz::runtime::kt::KtAs
 pub fn counting() -> ::std::rc::Rc<dyn Fetcher2Open> {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    ::kompoz::runtime::named_args!({
+    ::kompoz::runtime::named_args!(types(CountingObject()), {
         {
-            #[allow(non_camel_case_types, clippy::type_complexity)]
-            struct __KzObject {
-                #[doc(hidden)]
-                pub __kz_super: Fetcher2Base,
-                p0: ::std::cell::RefCell<i32>,
-                m1: ::std::rc::Rc<
-                    dyn ::core::ops::Fn(
-                            &__KzObject,
-                            ::std::string::String,
-                        )
-                            -> ::kompoz::runtime::kt::KtFuture<'_, ::std::string::String>,
-                >,
-            }
-            fn __kz_hr2<
-                F: for<'a> ::core::ops::Fn(
-                        &'a __KzObject,
-                        ::std::string::String,
-                    )
-                        -> ::kompoz::runtime::kt::KtFuture<'a, ::std::string::String>,
-            >(
-                f: F,
-            ) -> F {
-                f
-            }
-            #[allow(non_snake_case, clippy::all)]
-            impl Fetcher2Open for __KzObject {
-                fn __kz_fetcher2(&self) -> &Fetcher2Base {
-                    &self.__kz_super
-                }
-                fn calls(&self) -> i32 {
-                    ::core::clone::Clone::clone(&*self.p0.borrow())
-                }
-                fn set_calls(&self, value: i32) {
-                    *self.p0.borrow_mut() = value;
-                }
-                fn fetch(
-                    &self,
-                    key: ::std::string::String,
-                ) -> ::kompoz::runtime::kt::KtFuture<'_, ::std::string::String> {
-                    (self.m1)(self, key)
-                }
-            }
-            let __kz_o = __KzObject {
-                __kz_super: Fetcher2Base::__kz_empty(),
-                p0: ::std::cell::RefCell::new(0),
-                m1: ::std::rc::Rc::new(__kz_hr2({
-                    move |__kz_this: &__KzObject, key: ::std::string::String| {
-                        ::std::boxed::Box::pin(async move {
-                            #[allow(unused_imports)]
-                            use ::kompoz::runtime::kt::ext::*;
-                            let _ = (&key,);
-                            ::kompoz::runtime::named_args!({
-                                __kz_this.set_calls(::kompoz::runtime::kt::KtInc::inc(__kz_this.calls()));
-                                return key.clone();
-                            })
-                        })
-                    }
-                })),
-            };
-            Fetcher2Open::__kz_fetcher2_init(&__kz_o);
-            let __kz_object12: ::std::rc::Rc<dyn Fetcher2Open> = ::std::rc::Rc::new(__kz_o);
-            __kz_object12
+            let __kz_shared12: ::std::rc::Rc<dyn Fetcher2Open> = ::std::rc::Rc::new(CountingObject());
+            __kz_shared12
         }
     })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub(crate) struct __KzCountingObject {
+    #[doc(hidden)]
+    pub __kz_super: Fetcher2Base,
+    calls: ::kompoz::runtime::kt::KtVar<i32>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub(crate) struct CountingObject {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzCountingObject>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub(crate) fn CountingObject() -> CountingObject {
+    CountingObject::__kz_new()
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl CountingObject {
+    #[doc(hidden)]
+    pub(crate) fn __kz_new() -> CountingObject {
+        let __kz_this = CountingObject {
+            __kz_this: ::std::rc::Rc::new(__KzCountingObject {
+                __kz_super: Fetcher2Base::__kz_empty(),
+                calls: ::kompoz::runtime::kt::KtVar::new(),
+            }),
+        };
+        __kz_this.__kz_init();
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        Fetcher2Open::__kz_fetcher2_init(self);
+        ::kompoz::runtime::named_args!({
+            self.__kz_this.calls.set(0);
+        })
+    }
+    pub fn calls(&self) -> i32 {
+        self.__kz_this.calls.get()
+    }
+    pub fn set_calls(&self, value: i32) {
+        self.__kz_this.calls.set(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl CountingObject {
+    pub async fn fetch(&self, key: impl ::core::convert::Into<::std::string::String>) -> ::std::string::String {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        let key: ::std::string::String = ::core::convert::Into::into(key);
+        let _ = (&key,);
+        ::kompoz::runtime::named_args!({
+            self.set_calls(::kompoz::runtime::kt::KtInc::inc(self.calls()));
+            return key.clone();
+        })
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for CountingObject {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for CountingObject {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for CountingObject {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for CountingObject {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "Object",
+            ::std::rc::Rc::as_ptr(&self.__kz_this) as *const (),
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for CountingObject {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for CountingObject {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Fetcher2Open for CountingObject {
+    fn __kz_fetcher2(&self) -> &Fetcher2Base {
+        &self.__kz_this.__kz_super
+    }
+    fn calls(&self) -> i32 {
+        CountingObject::calls(self)
+    }
+    fn set_calls(&self, value: i32) {
+        CountingObject::set_calls(self, value)
+    }
+    fn fetch(&self, key: ::std::string::String) -> ::kompoz::runtime::kt::KtFuture<'_, ::std::string::String> {
+        ::std::boxed::Box::pin(CountingObject::fetch(self, key))
+    }
+    fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
+        other.downcast_ref::<Self>().is_some_and(|o| o == self)
+    }
+    fn __kz_write(&self, __kz_out: &mut ::std::string::String) {
+        ::kompoz::runtime::kt::KtToString::kt_write(self, __kz_out)
+    }
+    fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
+        if to == ::core::any::TypeId::of::<::std::rc::Rc<dyn Fetcher2Open>>() {
+            let o: ::std::rc::Rc<dyn Fetcher2Open> = ::std::rc::Rc::new(::core::clone::Clone::clone(self));
+            return ::core::option::Option::Some(::std::boxed::Box::new(o));
+        }
+        ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<CountingObject> for ::std::rc::Rc<dyn Fetcher2Open> {
+    fn eq(&self, other: &CountingObject) -> bool {
+        Fetcher2Open::__kz_eq(&**self, other)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq<::std::rc::Rc<dyn Fetcher2Open>> for CountingObject {
+    fn eq(&self, other: &::std::rc::Rc<dyn Fetcher2Open>) -> bool {
+        Fetcher2Open::__kz_eq(&**other, self)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtAs<::std::rc::Rc<dyn Fetcher2Open>> for CountingObject {
+    fn kt_as_safe(&self) -> ::core::option::Option<::std::rc::Rc<dyn Fetcher2Open>> {
+        ::core::option::Option::Some(::std::rc::Rc::new(::core::clone::Clone::clone(self)))
+    }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
@@ -3893,6 +4116,10 @@ pub trait AppExceptionOpen: ::kompoz::runtime::kt::KtObject {
         self.__kz_app_exception().__kz_exception.with(|e| e.cause())
     }
     #[doc(hidden)]
+    fn __kz_throwable(&self) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::exception("Exception", AppExceptionOpen::message(self), AppExceptionOpen::cause(self))
+    }
+    #[doc(hidden)]
     fn __kz_app_exception(&self) -> &AppExceptionBase;
     #[doc(hidden)]
     fn __kz_app_exception_init(&self, message: ::std::string::String) {
@@ -3921,6 +4148,13 @@ pub trait AppExceptionOpen: ::kompoz::runtime::kt::KtObject {
     fn __kz_cast(&self, to: ::core::any::TypeId) -> ::core::option::Option<::std::boxed::Box<dyn ::core::any::Any>> {
         let _ = to;
         ::core::option::Option::None
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtThrowableObject for dyn AppExceptionOpen {
+    fn kt_throwable(&self) -> ::kompoz::runtime::kt::Throwable {
+        AppExceptionOpen::__kz_throwable(self)
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
@@ -4076,6 +4310,9 @@ impl ::core::fmt::Debug for AppException {
 impl AppExceptionOpen for AppException {
     fn __kz_app_exception(&self) -> &AppExceptionBase {
         &self.__kz_this.__kz_super
+    }
+    fn __kz_throwable(&self) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::KtThrowable::to_throwable(self)
     }
     fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
         other.downcast_ref::<Self>().is_some_and(|o| o == self)
@@ -4238,6 +4475,9 @@ impl ::core::fmt::Debug for NetworkException {
 impl AppExceptionOpen for NetworkException {
     fn __kz_app_exception(&self) -> &AppExceptionBase {
         &self.__kz_this.__kz_super
+    }
+    fn __kz_throwable(&self) -> ::kompoz::runtime::kt::Throwable {
+        ::kompoz::runtime::kt::KtThrowable::to_throwable(self)
     }
     fn __kz_eq(&self, other: &dyn ::core::any::Any) -> bool {
         other.downcast_ref::<Self>().is_some_and(|o| o == self)

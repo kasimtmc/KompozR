@@ -29,6 +29,13 @@ use std::rc::Rc;
 /// ```
 pub trait NavKey: DynEq + SaveNavKey + fmt::Debug + 'static {}
 
+/// Kotlin's `key as? K` (`is K`) of a key: the key, if it is of the class `K`.
+impl<K: std::any::Any + Clone> kompoz_runtime::kt::KtAs<K> for dyn NavKey {
+    fn kt_as_safe(&self) -> Option<K> {
+        self.as_any().downcast_ref::<K>().cloned()
+    }
+}
+
 /// What saves a [`NavKey`] of any type (kotlinx's polymorphic serializer of `NavKey`, NavKeySerializer.android.kt: its
 /// class's name and its value): every [`Saveable`] key has it.
 #[doc(hidden)]

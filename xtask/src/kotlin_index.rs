@@ -916,6 +916,90 @@ struct Scan {
     /// ``Kotlin: `abstract class ViewModel` `` (or `open class`): (Kotlin's name, the trait, open, the trait's methods
     /// without a default body).
     bases: BTreeSet<KBase>,
+    /// (stage 14 FINAL-T) What the API's generic types need of their type parameters: the crates' own traits bounding
+    /// them in their inherent impls (`impl<T: NavEntryKey> NavEntry<T>`, `impl<T: NavEntryKey> dyn Scene<T>`), by
+    /// type, a set for each parameter — Kotlin's `T : Any` of a key, what a class of the crate holding a `NavEntry<T>`
+    /// bounds its own `T` by.
+    param_bounds: BTreeMap<String, Vec<BTreeSet<String>>>,
+}
+
+/// The traits of Rust's standard library a bound may name: not what [`Scan::param_bounds`] records (a Kotlin value is
+/// one of these, or the generator bounds it by its use).
+const STD_TRAITS: &[&str] = &[
+    "Clone",
+    "Copy",
+    "PartialEq",
+    "Eq",
+    "PartialOrd",
+    "Ord",
+    "Hash",
+    "Debug",
+    "Display",
+    "Default",
+    "Send",
+    "Sync",
+    "Sized",
+    "Unpin",
+    "Any",
+    "Fn",
+    "FnMut",
+    "FnOnce",
+    "Into",
+    "From",
+    "AsRef",
+    "AsMut",
+    "Iterator",
+    "IntoIterator",
+    "ToString",
+    "ToOwned",
+    "Borrow",
+    "Future",
+    "Deref",
+    "Add",
+    "Sub",
+    "Mul",
+    "Div",
+    "Neg",
+];
+
+/// (stage 14 FINAL-T) An inherent impl's bounds of its type's parameters (see [`Scan::param_bounds`]).
+fn note_param_bounds(imp: &syn::ItemImpl, scan: &mut Scan) {
+    let path = match &*imp.self_ty {
+        Type::Path(p) if p.qself.is_none() => &p.path,
+        Type::TraitObject(o) => match o.bounds.first() {
+            Some(TypeParamBound::Trait(t)) => &t.path,
+            _ => return,
+        },
+        _ => return,
+    };
+    let Some(last) = path.segments.last() else { return };
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else { return };
+    let bounds = bounds_of(&imp.generics);
+    let types: Vec<Option<String>> = args
+        .args
+        .iter()
+        .filter_map(|a| match a {
+            syn::GenericArgument::Type(Type::Path(t)) => Some(t.path.get_ident().map(|i| i.to_string())),
+            syn::GenericArgument::Type(_) => Some(None),
+            _ => None,
+        })
+        .collect();
+    let entry = scan.param_bounds.entry(last.ident.to_string()).or_default();
+    if entry.len() < types.len() {
+        entry.resize(types.len(), BTreeSet::new());
+    }
+    for (k, t) in types.iter().enumerate() {
+        let Some(t) = t else { continue };
+        for b in bounds.get(t).into_iter().flatten() {
+            if let TypeParamBound::Trait(tb) = b
+                && let Some(seg) = tb.path.segments.last()
+                && matches!(seg.arguments, syn::PathArguments::None)
+                && !STD_TRAITS.contains(&seg.ident.to_string().as_str())
+            {
+                entry[k].insert(seg.ident.to_string());
+            }
+        }
+    }
 }
 
 /// (stage 14 WPA) A base class of the API (see the Kotlin index's `Base`).
@@ -958,7 +1042,8 @@ fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, Strin
     items.sort();
     items.dedup();
     interface_supertypes(&items, &scan.trait_impls, &mut scan.derefs);
-    let text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics, &scan.type_aliases, &scan.bases);
+    let mut text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics, &scan.type_aliases, &scan.bases);
+    text.push_str(&render_param_bounds(&scan.param_bounds));
     let mut supers = scan.derefs;
     supers.extend(scan.alias_supers);
     Ok((text, supers))
@@ -1089,6 +1174,7 @@ thread_local! {
 fn prescan(items: &[Item], scan: &mut Scan) {
     for item in items {
         match item {
+            Item::Impl(imp) if imp.trait_.is_none() => note_param_bounds(imp, scan),
             Item::Impl(imp) => {
                 if let Some((path, _)) = &imp.trait_ {
                     let trait_name = path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
@@ -2201,6 +2287,27 @@ fn render_kotlin(
             list(&b.params),
             list(&b.assoc)
         );
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// (stage 14 FINAL-T) [`Scan::param_bounds`] as the index's `PARAM_BOUNDS`.
+fn render_param_bounds(bounds: &BTreeMap<String, Vec<BTreeSet<String>>>) -> String {
+    let mut out = String::from(
+        "\n/// What the API's generic types need of their type parameters (the crates' own traits bounding them in their \
+         inherent impls): by type, each parameter's.\n",
+    );
+    out.push_str("pub static PARAM_BOUNDS: &[(&str, &[&[&str]])] = &[\n");
+    for (name, params) in bounds {
+        if params.iter().all(BTreeSet::is_empty) {
+            continue;
+        }
+        let each: Vec<String> = params
+            .iter()
+            .map(|b| format!("&[{}]", b.iter().map(|t| format!("{t:?}")).collect::<Vec<_>>().join(", ")))
+            .collect();
+        let _ = writeln!(out, "    ({name:?}, &[{}]),", each.join(", "));
     }
     out.push_str("];\n");
     out

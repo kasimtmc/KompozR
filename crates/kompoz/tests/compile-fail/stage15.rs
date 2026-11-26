@@ -3,7 +3,13 @@
 use kompoz::prelude::*;
 
 kompoz! {
-    sealed class Problem(val code: Int) : IllegalStateException("kod $code")
+    @Composable
+    fun Rows(xs: List<String>) {
+        Column {
+            if (xs.isEmpty()) return
+            Text(xs.first())
+        }
+    }
 }
 
 fn main() {}

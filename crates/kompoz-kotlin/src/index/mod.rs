@@ -55,7 +55,7 @@
 mod generated;
 pub mod overlay;
 
-pub use generated::{ALIASES, BASES, DEREFS, FN_BOUNDS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
+pub use generated::{ALIASES, BASES, DEREFS, FN_BOUNDS, GENERICS, ITEMS, PARAM_BOUNDS, TWIN_BOUNDS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -359,6 +359,12 @@ pub fn twin_bounds(item: &Item) -> impl Iterator<Item = &'static TwinBound> + us
 /// A generic type's type parameters, in order (`Animatable` → `["T", "V"]`).
 pub fn generics(owner: &str) -> Option<&'static [&'static str]> {
     overlay::generics(owner).or_else(|| GENERICS.iter().find(|(o, _)| *o == owner).map(|(_, p)| *p))
+}
+
+/// (stage 14 FINAL-T) What an API generic type needs of its type parameters (its crate's traits bounding them, each
+/// parameter's): `NavEntry` → `[["NavEntryKey"]]`.
+pub fn param_bounds(owner: &str) -> Option<&'static [&'static [&'static str]]> {
+    PARAM_BOUNDS.iter().find(|(o, _)| *o == owner).map(|(_, b)| *b)
 }
 
 /// The items of a Rust name, in the index's order (a scan).

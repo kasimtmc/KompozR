@@ -97,8 +97,8 @@ pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 #[doc(hidden)]
 pub use null::{elvis_async, run_async, safe_async, with_async};
 pub use object::{
-    KtFuture, KtNothing, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string, kt_as_object, kt_as_this,
-    kt_dyn_as, kt_is, kt_same_object,
+    KtBits, KtFuture, KtHashCode, KtNothing, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string,
+    eq_object, hash_code_of, kt_as_object, kt_as_this, kt_dyn_as, kt_is, kt_same_as, kt_same_object,
 };
 pub use random::{KtShuffle, Random};
 pub use range::{
@@ -112,8 +112,8 @@ pub use result::KtResult;
 pub use string::{KtChar, KtDelimiters, KtNeedle, KtNullableStr, KtStr};
 pub use text::{KtDisplay, KtToString, to_string};
 pub use throwable::{
-    Jump, KtExceptionArg, KtThrowable, Leave, OnCancel, Throwable, catching, catching_async, exception,
-    is_standard_class, leave, leaving, leaving_async, parent_class, rethrow, throw,
+    Jump, KtExceptionArg, KtThrowable, KtThrowableObject, Leave, OnCancel, Throwable, catching, catching_async,
+    exception, is_standard_class, leave, leaving, leaving_async, parent_class, rethrow, throw,
 };
 
 #[doc(hidden)]

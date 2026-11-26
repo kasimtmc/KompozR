@@ -53,6 +53,10 @@ impl Gen<'_, '_> {
         let mut out = TokenStream::new();
         for (k, s) in stmts.iter().enumerate() {
             let last = k + 1 == stmts.len();
+            if !last && let Some(ts) = self.exit_cast(s) {
+                out.extend(ts);
+                continue;
+            }
             match (&s.kind, last, tail) {
                 (StmtKind::Expr(e), true, Tail::Value(_) | Tail::Return) if gives_value(e) => {
                     out.extend(self.value_want(e, tail.want(&self.fun)));
@@ -61,6 +65,41 @@ impl Gen<'_, '_> {
             }
         }
         out
+    }
+
+    /// (stage 14 FINAL-T) `if (x !is T) return …` (a jump out, no `else`) on a local: Kotlin's smart cast of `x` to
+    /// `T` in the statements after it — `x` bound again, the jump taken when it isn't one.
+    fn exit_cast(&mut self, s: &Stmt) -> Option<TokenStream> {
+        let StmtKind::Expr(e) = &s.kind else { return None };
+        let ExprKind::If { condition, then, otherwise: None } = &e.kind else { return None };
+        let ExprKind::Is { expr, negated: true, ty } = &condition.kind else { return None };
+        let ExprKind::Name(n) = &expr.kind else { return None };
+        if !self.is_local(&n.name) {
+            return None;
+        }
+        let jumps = |b: &Block| {
+            matches!(b.stmts.last().map(|x| &x.kind), Some(StmtKind::Expr(j))
+                if matches!(j.kind, ExprKind::Return { .. } | ExprKind::Throw(_) | ExprKind::Break { .. } | ExprKind::Continue { .. }))
+        };
+        if !jumps(then) {
+            return None;
+        }
+        let span = self.span(s.loc);
+        let rust = self.local(&n.name).map(|l| l.rust).unwrap_or_else(|| snake(&n.name));
+        let i = ident(&rust, self.span(n.loc));
+        let lty = self.local(&n.name).map(|l| l.ty).unwrap_or(Ty::Unknown);
+        let (tty, _) = self.cast_target(ty, &lty, span);
+        let cast = self.cast_expr(expr, true, &Type { nullable: false, ..(**ty).clone() }, condition.loc).ts;
+        let exit = self.braced(then, Tail::Unit);
+        let at = self.local(&n.name).and_then(|l| l.at);
+        self.declare(&n.name, rust, LocalKind::Val, tty);
+        self.set_local_at(&n.name, at);
+        Some(quote_spanned! {span=>
+            let #i = match #cast {
+                ::core::option::Option::Some(__kz_cast) => __kz_cast,
+                ::core::option::Option::None => #exit,
+            };
+        })
     }
 
     pub(crate) fn stmt(&mut self, s: &Stmt) -> TokenStream {
@@ -243,9 +282,22 @@ impl Gen<'_, '_> {
             let t = self.later(p.loc, "a local property with a receiver, getter or setter");
             return quote_spanned!(span=> #t;);
         }
+        // ((stage 14 FINAL-T) `lateinit var x: T`: a `kt::KtLateinit` cell, its clones the one variable — a lambda's
+        // or an object's capture of it too)
         if p.modifiers.has(ModifierKind::Lateinit) {
-            let t = self.later(p.loc, "a `lateinit` local");
-            return quote_spanned!(span=> #t;);
+            let (Binding::Name(n), true, Some(t), PropertyInit::None) = (&p.binding, p.is_var(), &p.ty, &p.init) else {
+                self.error(p.loc, "a `lateinit` local is a `var` with its type and no value");
+                return quote!();
+            };
+            let kt = self.kt(span);
+            let rt = self.rust_type(t, super::types::TypePos::Value);
+            let ty = self.ty_of(t);
+            let rust = snake(&n.name);
+            let i = self.name_ident(&rust, n.loc);
+            let lit = proc_macro2::Literal::string(&n.name);
+            self.declare_at(n, rust, LocalKind::Delegated, ty);
+            self.record_mutable(true);
+            return quote_spanned!(span=> let #i: #kt::KtLateinit<#rt> = #kt::KtLateinit::new(#lit););
         }
         let mutable = p.is_var();
         match (&p.binding, &p.init) {

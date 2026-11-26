@@ -31,6 +31,91 @@ pub(crate) struct Uses {
     /// (stage 14 FINAL) The bounds the API's generic functions put on those given them as type arguments
     /// (`rememberListDetailPaneScaffoldNavigator<T>()`: `T: NavigatorContentKey`), Rust's text.
     pub api_bounds: Vec<(String, String)>,
+    /// (stage 14 FINAL-T) The bounds the API's generic types in the declaration's signatures need of its type
+    /// parameters (`NavEntry<T>` → `T: NavEntryKey`): (parameter, trait).
+    pub api: Vec<(String, String)>,
+    /// Those `all` leaves out: a data class's parameters held only as the API's types' arguments those bound
+    /// (`val currentEntry: NavEntry<T>`: shown and compared as the API's type is, `T` as its bound says).
+    pub indirect: Vec<String>,
+}
+
+/// (stage 14 FINAL-T) What the API's generic types in `t` need of the names they are given (see [`Uses::api`]).
+pub(crate) fn api_bounds(t: &Type, out: &mut Vec<(String, String)>) {
+    match &t.kind {
+        TypeKind::Named(segs) => {
+            for seg in segs {
+                let args: Vec<&Type> = seg
+                    .args
+                    .iter()
+                    .filter_map(|a| match a {
+                        TypeArg::Type { ty, .. } => Some(ty),
+                        TypeArg::Star(_) => None,
+                    })
+                    .collect();
+                if args.is_empty() {
+                    continue;
+                }
+                let rust = crate::index::rust_type(&seg.name.name).unwrap_or(&seg.name.name);
+                if let Some(bounds) = crate::index::param_bounds(rust) {
+                    for (a, b) in args.iter().zip(bounds.iter()) {
+                        if let Some(n) = type_name(a) {
+                            for tr in b.iter() {
+                                if !out.iter().any(|(x, y)| *x == n && y == tr) {
+                                    out.push((n.clone(), tr.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+                for a in args {
+                    api_bounds(a, out);
+                }
+            }
+        }
+        TypeKind::Function(f) => {
+            for p in &f.params {
+                api_bounds(&p.ty, out);
+            }
+            api_bounds(&f.result, out);
+            if let Some(r) = &f.receiver {
+                api_bounds(r, out);
+            }
+        }
+        TypeKind::Error => {}
+    }
+}
+
+/// The single names `t` holds other than as an API generic type's bounded argument (see [`Uses::indirect`]).
+fn direct_names(t: &Type, out: &mut Vec<String>) {
+    if let Some(n) = type_name(t) {
+        out.push(n);
+        return;
+    }
+    match &t.kind {
+        TypeKind::Named(segs) => {
+            for seg in segs {
+                let rust = crate::index::rust_type(&seg.name.name).unwrap_or(&seg.name.name);
+                let bounds = crate::index::param_bounds(rust);
+                let mut k = 0;
+                for a in &seg.args {
+                    let TypeArg::Type { ty, .. } = a else { continue };
+                    let bounded = bounds.and_then(|b| b.get(k)).is_some_and(|b| !b.is_empty());
+                    k += 1;
+                    if bounded && type_name(ty).is_some() {
+                        continue;
+                    }
+                    direct_names(ty, out);
+                }
+            }
+        }
+        TypeKind::Function(f) => {
+            for p in &f.params {
+                direct_names(&p.ty, out);
+            }
+            direct_names(&f.result, out);
+        }
+        TypeKind::Error => {}
+    }
 }
 
 impl Uses {
@@ -60,6 +145,39 @@ impl Uses {
             }
         }
         let mut uses = Uses { all: data, ..Default::default() };
+        // ((stage 14 FINAL-T) the API's types' bounds; a data class's parameters held only as their arguments)
+        let mut api = Vec::new();
+        let mut direct = Vec::new();
+        for cp in ctor {
+            if let Some(t) = &cp.param.ty {
+                api_bounds(t, &mut api);
+                if cp.property.is_some() {
+                    direct_names(t, &mut direct);
+                }
+            }
+        }
+        for m in members {
+            match m {
+                Member::Decl(Decl::Property(p)) => {
+                    if let Some(t) = &p.ty {
+                        api_bounds(t, &mut api);
+                    }
+                }
+                Member::Decl(Decl::Function(f)) => {
+                    for t in f.params.iter().filter_map(|p| p.ty.as_ref()).chain(f.result.as_ref()) {
+                        api_bounds(t, &mut api);
+                    }
+                    if let Some(r) = &f.receiver {
+                        api_bounds(r, &mut api);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if data {
+            uses.indirect = api.iter().map(|(n, _)| n.clone()).filter(|n| !direct.contains(n)).collect();
+        }
+        uses.api = api;
         let mut look = |e: &Expr| uses.note(e, &typed);
         for m in members {
             match m {
@@ -84,6 +202,10 @@ impl Uses {
         let typed: Vec<(String, Option<String>)> =
             f.params.iter().filter_map(|p| p.ty.as_ref().map(|t| (p.name.name.clone(), type_name(t)))).collect();
         let mut uses = Uses { all: false, ..Default::default() };
+        // ((stage 14 FINAL-T) the API's types' bounds)
+        for t in f.params.iter().filter_map(|p| p.ty.as_ref()).chain(f.result.as_ref()).chain(f.receiver.as_ref()) {
+            api_bounds(t, &mut uses.api);
+        }
         if f.is_kompozable() {
             uses.compared = f.type_params.iter().map(|t| t.name.name.clone()).collect();
         }
@@ -315,10 +437,11 @@ impl Gen<'_, '_> {
             let i = ident(&p.name.name, self.span(p.name.loc));
             let name = &p.name.name;
             let mut bounds = vec![quote_spanned!(span=> ::core::clone::Clone), quote_spanned!(span=> 'static)];
-            if uses.all || uses.shown.contains(name) {
+            let all = uses.all && !uses.indirect.contains(name);
+            if all || uses.shown.contains(name) {
                 bounds.push(quote_spanned!(span=> #kt::KtToString));
             }
-            if uses.all || kompozable || uses.compared.contains(name) {
+            if all || kompozable || uses.compared.contains(name) {
                 bounds.push(quote_spanned!(span=> ::core::cmp::PartialEq));
             }
             // ((stage 14 FINAL) what the API's generic functions given it need of it)
@@ -326,6 +449,11 @@ impl Gen<'_, '_> {
                 if let Ok(t) = b.parse::<TokenStream>() {
                     bounds.push(super::respan(t, span));
                 }
+            }
+            // ((stage 14 FINAL-T) what the API's types it is given to need of it: `NavEntry<T>`'s `NavEntryKey`)
+            for (_, tr) in uses.api.iter().filter(|(n, _)| n == name) {
+                let t = ident(tr, span);
+                bounds.push(quote_spanned!(span=> #t));
             }
             if let Some(b) = &p.bound {
                 let bt = self.rust_type(b, TypePos::Value);

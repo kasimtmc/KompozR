@@ -74,6 +74,7 @@ mod record;
 mod resolve;
 mod stmt;
 mod types;
+mod variance;
 
 use crate::Paths;
 use crate::ast::*;

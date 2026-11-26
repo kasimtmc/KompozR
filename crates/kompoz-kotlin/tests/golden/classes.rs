@@ -74,6 +74,19 @@ impl Note {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for Note {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.id, state);
+        ::core::hash::Hash::hash(&self.title, state);
+        ::core::hash::Hash::hash(&self.pinned, state);
+        ::core::hash::Hash::hash(&self.tags, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Note {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Note {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -776,6 +789,17 @@ impl CatalogEntry {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for CatalogEntry {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.title, state);
+        ::core::hash::Hash::hash(&self.kind, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for CatalogEntry {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for CatalogEntry {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -1043,6 +1067,17 @@ impl LocalItemsItem {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for LocalItemsItem {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.id, state);
+        ::core::hash::Hash::hash(&self.label, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for LocalItemsItem {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for LocalItemsItem {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -1216,6 +1251,17 @@ impl LocalSizesItem {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for LocalSizesItem {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.id, state);
+        ::core::hash::Hash::hash(&self.size, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for LocalSizesItem {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for LocalSizesItem {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -1278,6 +1324,16 @@ impl Meters {
         Meters::__kz_new(value)
     }
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for Meters {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.value, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Meters {}
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Meters {

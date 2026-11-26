@@ -336,6 +336,21 @@ impl KtThrowable for Throwable {
     }
 }
 
+/// A trait object of the user's exception classes (`dyn AppErrorOpen` of `open class AppError(…) :
+/// IllegalStateException(…)`, its subclasses' objects): the exception the object is, so that its shared object
+/// (`Rc<dyn AppErrorOpen>`) is a Kotlin exception too (`e is IllegalStateException`, `throw e`).
+#[doc(hidden)]
+pub trait KtThrowableObject {
+    /// The exception it is.
+    fn kt_throwable(&self) -> Throwable;
+}
+
+impl<T: KtThrowableObject + ?Sized> KtThrowable for Rc<T> {
+    fn to_throwable(&self) -> Throwable {
+        (**self).kt_throwable()
+    }
+}
+
 // ---- Throwing and catching -------------------------------------------------------------------------------------
 
 // How many `try` bodies of the thread are running (the panic hook is quiet while one is).

@@ -80,6 +80,103 @@ impl fmt::Display for dyn KtObject {
     }
 }
 
+/// Kotlin's `==` of a value (`None`: null) with one of `Any`/`Any?` (`Money(5) == m`, `m == Money(5)`): the
+/// value's class's `equals` — the other a value of its class, equal to it —; null equal to null only.
+#[doc(hidden)]
+pub fn eq_object<T: Any + PartialEq>(value: Option<&T>, other: Option<&dyn KtObject>) -> bool {
+    match (value, other) {
+        (None, None) => true,
+        (Some(v), Some(o)) => o.as_any().downcast_ref::<T>() == Some(v),
+        _ => false,
+    }
+}
+
+/// Kotlin's `hashCode()` of a value of the API's or the standard library's types (stage 14 FINAL-T): Kotlin's own
+/// for numbers, booleans, chars, strings (Java's `s[0]*31^(n-1) + …`) and lists (`31 * h + e.hashCode()`); a type
+/// of the API its own, consistent with its `==`. A user's class's is its `Hash` ([`hash_code_of`]) or its own
+/// `hashCode()`.
+#[doc(hidden)]
+pub trait KtHashCode {
+    fn kt_hash_code(&self) -> i32;
+}
+
+impl KtHashCode for i32 {
+    fn kt_hash_code(&self) -> i32 {
+        *self
+    }
+}
+
+impl KtHashCode for i64 {
+    fn kt_hash_code(&self) -> i32 {
+        (*self ^ (*self >> 32)) as i32
+    }
+}
+
+impl KtHashCode for bool {
+    fn kt_hash_code(&self) -> i32 {
+        if *self { 1231 } else { 1237 }
+    }
+}
+
+impl KtHashCode for char {
+    fn kt_hash_code(&self) -> i32 {
+        *self as i32
+    }
+}
+
+impl KtHashCode for f32 {
+    fn kt_hash_code(&self) -> i32 {
+        super::KtBits::kt_bits(self) as i32
+    }
+}
+
+impl KtHashCode for f64 {
+    fn kt_hash_code(&self) -> i32 {
+        let b = super::KtBits::kt_bits(self);
+        (b ^ (b >> 32)) as i32
+    }
+}
+
+impl KtHashCode for String {
+    fn kt_hash_code(&self) -> i32 {
+        self.as_str().kt_hash_code()
+    }
+}
+
+impl KtHashCode for str {
+    fn kt_hash_code(&self) -> i32 {
+        self.encode_utf16().fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(c as i32))
+    }
+}
+
+impl<T: KtHashCode> KtHashCode for Vec<T> {
+    fn kt_hash_code(&self) -> i32 {
+        self.iter().fold(1i32, |h, e| h.wrapping_mul(31).wrapping_add(e.kt_hash_code()))
+    }
+}
+
+impl<T: KtHashCode> KtHashCode for Option<T> {
+    fn kt_hash_code(&self) -> i32 {
+        self.as_ref().map_or(0, KtHashCode::kt_hash_code)
+    }
+}
+
+impl<T: KtHashCode + ?Sized> KtHashCode for Rc<T> {
+    fn kt_hash_code(&self) -> i32 {
+        (**self).kt_hash_code()
+    }
+}
+
+/// Kotlin's `hashCode()` of a value whose `==` Rust's `Hash` agrees with (a user's data class's, enum's): its hash.
+#[doc(hidden)]
+pub fn hash_code_of<T: std::hash::Hash + ?Sized>(value: &T) -> i32 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut h);
+    let v = h.finish();
+    (v ^ (v >> 32)) as i32
+}
+
 /// A value of Kotlin's `Any` cast (`Rc<dyn KtObject>` as a `T`: Kotlin's `x as? T`).
 pub fn kt_as_object<T: Any + Clone>(value: &Rc<dyn KtObject>) -> Option<T> {
     (**value).kt_as::<T>()
@@ -245,6 +342,52 @@ impl<T: KtToString> KtToString for KtShared<T> {
     }
 }
 
+/// A data class's `var` property hashed as its value is (Kotlin's `hashCode()` of the data class reads it).
+impl<T: std::hash::Hash> std::hash::Hash for KtShared<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.borrow().hash(state);
+    }
+}
+
+impl<T: Eq> Eq for KtShared<T> {}
+
+/// A data class's `Float`/`Double` property as Kotlin's generated `equals`/`hashCode` see it (stage 14): its bits
+/// (`floatToIntBits`: every NaN one value, `0.0` and `-0.0` two), so `P(Float.NaN) == P(Float.NaN)` and
+/// `P(0f) != P(-0f)`, as Kotlin's `Float.compare` makes them, and equal values hash alike.
+#[doc(hidden)]
+pub trait KtBits {
+    type Bits: Eq + std::hash::Hash;
+    fn kt_bits(&self) -> Self::Bits;
+}
+
+impl KtBits for f32 {
+    type Bits = u32;
+    fn kt_bits(&self) -> u32 {
+        if self.is_nan() { f32::NAN.to_bits() } else { self.to_bits() }
+    }
+}
+
+impl KtBits for f64 {
+    type Bits = u64;
+    fn kt_bits(&self) -> u64 {
+        if self.is_nan() { f64::NAN.to_bits() } else { self.to_bits() }
+    }
+}
+
+impl<T: KtBits> KtBits for Option<T> {
+    type Bits = Option<T::Bits>;
+    fn kt_bits(&self) -> Option<T::Bits> {
+        self.as_ref().map(KtBits::kt_bits)
+    }
+}
+
+impl<T: KtBits> KtBits for KtShared<T> {
+    type Bits = T::Bits;
+    fn kt_bits(&self) -> T::Bits {
+        self.0.borrow().kt_bits()
+    }
+}
+
 /// A `@Serializable` data class's `var` property saved as its value is.
 impl<T: crate::Saveable> crate::Saveable for KtShared<T> {
     fn save(&self) -> crate::SavedValue {
@@ -304,6 +447,13 @@ pub fn kt_dyn_as<T: Any + Clone>(value: &dyn Any, cast: impl FnOnce() -> Option<
 /// Whether two values are one object (Kotlin's `===`, and `==` of a class that doesn't override `equals`).
 pub fn kt_same_object(a: &dyn Any, b: &dyn Any) -> bool {
     std::ptr::addr_eq(a as *const dyn Any, b as *const dyn Any)
+}
+
+/// Kotlin's `===` of an object of a class whose copies share one object (`identity`: its shared state's address)
+/// and a value of `Any`/`Any?` (`this === other` in `equals`): the same object, `equals` never asked.
+#[doc(hidden)]
+pub fn kt_same_as<T: Any>(value: &T, other: Option<&dyn KtObject>, identity: fn(&T) -> *const ()) -> bool {
+    other.and_then(|o| o.as_any().downcast_ref::<T>()).is_some_and(|o| identity(o) == identity(value))
 }
 
 impl<F: 'static> Default for KtSingleton<F> {

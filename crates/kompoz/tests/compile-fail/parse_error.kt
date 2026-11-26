@@ -7,4 +7,8 @@ fun Greeting(name: ) {
     BasicText("Merhaba, $name")
 }
 
-sealed class Failure(val code: Int) : IllegalStateException("kod $code")
+fun outer() {
+    fun inner() {
+        class Local
+    }
+}

@@ -61,6 +61,17 @@ impl Detail {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for Detail {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.id, state);
+        ::core::hash::Hash::hash(&self.tab, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Detail {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Detail {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -465,6 +476,16 @@ impl Member {
         Member::__kz_new(n)
     }
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for Member {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.n, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Member {}
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Member {
@@ -915,6 +936,16 @@ impl Dashboard {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for Dashboard {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.user_id, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Dashboard {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Dashboard {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]
@@ -1131,6 +1162,16 @@ impl NestedWithArg {
         NestedWithArg::__kz_new(user_id)
     }
 }
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for NestedWithArg {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.user_id, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for NestedWithArg {}
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for NestedWithArg {
@@ -1952,9 +1993,9 @@ impl ::kompoz::runtime::Saveable for WrappedUUID {
     fn save(&self) -> ::kompoz::runtime::SavedValue {
         ::kompoz::runtime::SavedValue::map::<&str>([(
             "uuid",
-            ::kompoz::runtime::IntoSaver::into_saver(<KSerializer<_> as ::core::convert::From<UUIDSerializer>>::from(
-                UUIDSerializer {},
-            ))
+            ::kompoz::runtime::IntoSaver::into_saver(
+                <KSerializer<UUID> as ::core::convert::From<UUIDSerializer>>::from(UUIDSerializer {}),
+            )
             .save(&self.uuid()),
         )])
     }
@@ -1962,7 +2003,7 @@ impl ::kompoz::runtime::Saveable for WrappedUUID {
     fn restore(__kz_saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
         let __kz_map = __kz_saved.as_map()?;
         ::core::option::Option::Some(WrappedUUID(
-            ::kompoz::runtime::IntoSaver::<UUID>::into_saver(<KSerializer<_> as ::core::convert::From<
+            ::kompoz::runtime::IntoSaver::<UUID>::into_saver(<KSerializer<UUID> as ::core::convert::From<
                 UUIDSerializer,
             >>::from(UUIDSerializer {}))
             .restore(__kz_map.get("uuid")?)?,

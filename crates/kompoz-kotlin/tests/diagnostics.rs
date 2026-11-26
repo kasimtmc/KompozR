@@ -31,7 +31,6 @@ value class D(var x: Int)
     assert_eq!(
         diagnose(text),
         [
-            format!("6:14: a sealed class deriving from an exception class {LATER}"),
             "7:5: write `h`'s return type: its expression's type isn't one KompozR can tell (`fun h(…): Type = …`)"
                 .to_string(),
             "8:1: a value class has one property: its constructor's only parameter, a `val`".to_string(),
@@ -159,8 +158,8 @@ fun uses() = pick(true)
 
 #[test]
 fn what_local_functions_and_exception_classes_cant_be() {
-    // ((stage 14 WPB) a generic local function is a nested item: it can't use the locals around it; an exception
-    // class others derive from isn't translated yet)
+    // ((stage 14 WPB) a generic local function is a nested item: it can't use the locals around it; (FINAL-T) a
+    // sealed exception class is translated)
     let text = "\
 fun f(base: Int): Int {
     fun <T> g(x: T): Int = base
@@ -170,7 +169,7 @@ sealed class Problem(val code: Int) : IllegalStateException(\"x\")
 ";
     let d = diagnose(text);
     assert!(d[0].starts_with("2:13: a generic local function can't use the locals around it (`base`)"), "{d:?}");
-    assert_eq!(d[1], format!("5:14: a sealed class deriving from an exception class {LATER}"));
+    assert_eq!(d.len(), 1, "{d:?}");
 }
 
 #[test]

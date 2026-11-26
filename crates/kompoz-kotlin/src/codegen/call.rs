@@ -125,6 +125,33 @@ impl Gen<'_, '_> {
         {
             return self.super_call(ty.as_deref(), name, args, e.loc);
         }
+        // ((stage 14 FINAL-T) `x.hashCode()` of a value whose class has no `hashCode()` of the user's: Kotlin's of
+        // the standard types and the API's (`kt::KtHashCode`), a user's data class's or enum's its `Hash`)
+        if let ExprKind::Member { receiver, name, safe: false } = &callee.kind
+            && name.name == "hashCode"
+            && args.is_empty()
+            && trailing.is_none()
+            && !matches!(receiver.kind, ExprKind::Super { .. })
+        {
+            let ty = self.peek_ty(receiver);
+            let own = ty.non_null().owner().map(str::to_string).filter(|o| self.user_class_rust(o).is_some());
+            let overridden = own.as_deref().is_some_and(|o| {
+                self.decl_of(o).is_some_and(|d| self.overrides_equality(super::hierarchy::members_of_ast(&d.ast)).1)
+            });
+            // (a value of a type not told here: the standard types' and the API's — a user's class overriding
+            // `hashCode()` has no `KtHashCode`, rustc says so)
+            if !overridden {
+                let span = self.span(e.loc);
+                let kt = self.kt(span);
+                let v = self.value(receiver);
+                let ts = if own.is_some() {
+                    quote_spanned!(span=> #kt::hash_code_of(&#v))
+                } else {
+                    quote_spanned!(span=> #kt::KtHashCode::kt_hash_code(&#v))
+                };
+                return Out::plain(ts, Ty::Int);
+            }
+        }
         let span = self.span(e.loc);
         // ((stage 14 WPB) `forEach`/`repeat` whose lambda jumps out of it: a loop, `jumps`)
         if let Some(ts) = self.lowered_call(callee, args, trailing, e.loc) {
@@ -2186,7 +2213,8 @@ impl Gen<'_, '_> {
                     _ => None,
                 })
                 .collect();
-            let t = self.common_api_interface(&tys)?;
+            // ((stage 14 FINAL-T) the user's interface they all are first, the nearest: `listOf(Home, User)`)
+            let t = self.common_user_interface(&tys).or_else(|| self.common_api_interface(&tys))?;
             Some(match trait_object(&t) {
                 Some("Arc") => format!("Arc<dyn {t}>"),
                 _ => format!("Rc<dyn {t}>"),
@@ -2218,7 +2246,11 @@ impl Gen<'_, '_> {
         let written = self.call_type_tys.last().filter(|t| t.len() == 1).map(|t| t[0].clone());
         let unified = expected.or(written).unwrap_or_else(|| {
             let tys: Vec<Ty> = exprs.iter().flatten().map(|e| self.peek_ty(e)).collect();
-            self.common_sealed(&tys).unwrap_or_else(|| self.elements_ty(exprs.iter().flatten().copied()))
+            // ((stage 14 FINAL-T) else the user's interface they all are, `listOf(Home, User)`: `SampleTabKey`)
+            let interface = || self.common_user_interface(&tys).map(|t| Ty::named(&t));
+            self.common_sealed(&tys)
+                .or_else(interface)
+                .unwrap_or_else(|| self.elements_ty(exprs.iter().flatten().copied()))
         });
         // ((stage 14 WPB) exceptions of the user's classes among Kotlin's: Kotlin's `Throwable`)
         let unified = if self.user_exception(&unified)
@@ -2240,6 +2272,8 @@ impl Gen<'_, '_> {
             let given = e.map(|e| {
                 if matches!(e.kind, ExprKind::Null) { Ty::Nullable(Box::new(Ty::Unknown)) } else { self.peek_ty(e) }
             });
+            // ((stage 14 FINAL-T) made the shared object by the coercion: not again)
+            let coerced = given.as_ref().is_some_and(|t| self.coerces(t, &unified));
             let v = match given {
                 Some(t) if unified.is_nullable() && !t.is_nullable() && t != Ty::Unknown => {
                     quote_spanned!(span=> ::core::option::Option::Some(#v))
@@ -2259,7 +2293,7 @@ impl Gen<'_, '_> {
                 Some(t) => self.as_throwable(v, &t, &unified, span),
                 _ => v,
             };
-            let v = self.shared_value(v, a, shared.as_deref(), span);
+            let v = if coerced { v } else { self.shared_value(v, a, shared.as_deref(), span) };
             vals.push(v);
         }
         if p.ty.trim_start().starts_with("&[") {
@@ -2667,7 +2701,8 @@ impl Gen<'_, '_> {
                 let held = self.fresh("f", span);
                 let args: Vec<proc_macro2::Ident> =
                     (0..f.params.len()).map(|k| quote::format_ident!("__a{k}", span = span)).collect();
-                quote_spanned!(span=> { let #held = #v; move |#(#args),*| #held(#(#args),*) })
+                // ((stage 14 FINAL-T) a clone: the value may be a closure's capture, `onBack` in a kept lambda)
+                quote_spanned!(span=> { let #held = ::core::clone::Clone::clone(&#v); move |#(#args),*| #held(#(#args),*) })
             }
             _ => v,
         };
@@ -2684,6 +2719,19 @@ impl Gen<'_, '_> {
         }
         if p.option == OptionForm::Option && !nullable_arg {
             return quote_spanned!(span=> ::core::option::Option::Some(#v));
+        }
+        // ((stage 14 FINAL-T) a generic sealed class given one of its cases (`Outcome.Missing` where an
+        // `Outcome<Animal>` is taken), a class of `out` parameters one of other arguments (`Outcome<Dog>`): made it)
+        let generic_target = match &pty {
+            Ty::Named(n, a) if n == "implInto" && a.len() == 1 => a[0].clone(),
+            t => t.clone(),
+        };
+        if !nullable_arg
+            && matches!(generic_target.non_null(), Ty::Named(ref n, ref a) if !a.is_empty()
+                && self.user_class_rust(n).is_some_and(|c| c.inherit == super::hierarchy::Inherit::Sealed || c.shape == super::class::Shape::Data))
+            && self.coerces(&arg_ty, &generic_target)
+        {
+            return self.coerce(v, &arg_ty, &generic_target, span);
         }
         // (stage 14 WPA) Kotlin's `Any` given a value of a type of its own (`"a"`, `1`, `Note(…)`): its shared object
         if super::hierarchy::is_any(&pty.non_null()) && self.coerces(&arg_ty, &pty) {

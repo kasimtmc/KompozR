@@ -274,6 +274,17 @@ impl Vec2 {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::core::hash::Hash for Vec2 {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::hash::Hash::hash(&self.x, state);
+        ::core::hash::Hash::hash(&self.y, state);
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for Vec2 {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 impl ::kompoz::runtime::kt::KtToString for Vec2 {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         #[allow(unused_imports)]

@@ -1,5 +1,5 @@
-error: kompoz: a sealed class deriving from an exception class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
- --> tests/compile-fail/stage15.rs:6:18
+error: kompoz: a jump out of a lambda of a composable call, or of one calling composables (Compose ends the composition's groups it leaves; KompozR's jump leaves them open) isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
+ --> tests/compile-fail/stage15.rs:8:9
   |
-6 |     sealed class Problem(val code: Int) : IllegalStateException("kod $code")
-  |                  ^^^^^^^
+8 |         Column {
+  |         ^^^^^^

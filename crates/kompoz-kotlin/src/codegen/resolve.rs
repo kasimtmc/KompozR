@@ -132,7 +132,10 @@ impl Ty {
     pub fn element(&self) -> Ty {
         match self {
             Ty::List(t) | Ty::Set(t) | Ty::Range(t) | Ty::ClosedRange(t) => (**t).clone(),
-            Ty::Named(n, a) if n == "SnapshotStateList" => a.first().cloned().unwrap_or(Ty::Unknown),
+            // ((stage 14 FINAL-T) navigation3's back stack, Kotlin's `MutableList<T>` too)
+            Ty::Named(n, a) if n == "SnapshotStateList" || n == "NavBackStack" => {
+                a.first().cloned().unwrap_or(Ty::Unknown)
+            }
             // ((stage 14 FINAL) a state map: its entries, as a map's)
             Ty::Named(n, a) if n == "SnapshotStateMap" && a.len() == 2 => {
                 Ty::Pair(Box::new(a[0].clone()), Box::new(a[1].clone()))
@@ -175,7 +178,10 @@ impl Ty {
                 &["KtList", "KtMutableList", "KtListOfLists", "KtListOfNullable", "KtScope"]
             }
             // (a state list: Kotlin's MutableList functions are its own, taking `&self`; its reads are a list's)
-            Ty::Named(n, _) if n == "SnapshotStateList" => &["KtList", "KtListOfLists", "KtListOfNullable", "KtScope"],
+            // ((stage 14 FINAL-T) navigation3's back stack: a state list)
+            Ty::Named(n, _) if n == "SnapshotStateList" || n == "NavBackStack" => {
+                &["KtList", "KtListOfLists", "KtListOfNullable", "KtScope"]
+            }
             // (a Rust `Result`: Kotlin's `Result<T>`, its members the kt shim's)
             Ty::Named(n, _) if n == "Result" => &["KtResult", "KtScope"],
             Ty::String => &["KtStr", "KtScope"],

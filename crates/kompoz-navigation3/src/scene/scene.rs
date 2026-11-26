@@ -32,6 +32,13 @@ pub trait Scene<T>: DynEq + fmt::Debug + 'static {
 
     /// What it tells `NavDisplay` (transitions…): by default its last entry's metadata.
     fn metadata(&self) -> Metadata {
+        self.__kz_super_metadata()
+    }
+
+    /// The default [`metadata`](Self::metadata), what an override reaches as Kotlin's `super.metadata` (its last
+    /// entry's metadata).
+    #[doc(hidden)]
+    fn __kz_super_metadata(&self) -> Metadata {
         self.entries().last().map(NavEntry::metadata).unwrap_or_default()
     }
 
