@@ -20,12 +20,12 @@ pub fn Container(
                 let shape = ::kompoz::runtime::__private::capture(&shape);
                 move |this: &dyn StyleScope| {
                     this.shape(shape.clone());
-                    this.background(Color::White);
+                    this.r#background(Color::White);
                     this.size(10.dp());
                     this.translation_x(this.to_px(2.dp()));
                     this.focused(|| {
                         this.animate_spec(::std::sync::Arc::new(tween(duration_millis = 100)), || {
-                            this.background(Color::Blue);
+                            this.r#background(Color::Blue);
                         });
                     });
                     if this.state().get(&PlayingKey.with(::core::clone::Clone::clone)) {
@@ -37,7 +37,7 @@ pub fn Container(
         .styleable(::core::option::Option::None, style = style.clone()));
 }
 ::std::thread_local! { # [allow (non_snake_case , non_upper_case_globals , unused_parens , unused_braces , unused_mut , while_true , clippy :: all)] pub static PlayingKey : StyleStateKey < bool > = { # [allow (unused_imports)] use :: kompoz :: runtime :: kt :: ext :: * ; :: kompoz :: runtime :: named_args ! (StyleStateKey :: new (false)) } ; }
-::std::thread_local! { # [allow (non_snake_case , non_upper_case_globals , unused_parens , unused_braces , unused_mut , while_true , clippy :: all)] pub static Base : :: std :: rc :: Rc < dyn Style > = { # [allow (unused_imports)] use :: kompoz :: runtime :: kt :: ext :: * ; :: kompoz :: runtime :: named_args ! ({ let __kz_f1 : :: std :: rc :: Rc < dyn Style > = :: std :: rc :: Rc :: new (move | this : & dyn StyleScope | { this . background (Color :: Red) ; }) ; __kz_f1 }) } ; }
+::std::thread_local! { # [allow (non_snake_case , non_upper_case_globals , unused_parens , unused_braces , unused_mut , while_true , clippy :: all)] pub static Base : :: std :: rc :: Rc < dyn Style > = { # [allow (unused_imports)] use :: kompoz :: runtime :: kt :: ext :: * ; :: kompoz :: runtime :: named_args ! ({ let __kz_f1 : :: std :: rc :: Rc < dyn Style > = :: std :: rc :: Rc :: new (move | this : & dyn StyleScope | { this . r#background (Color :: Red) ; }) ; __kz_f1 }) } ; }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[::kompoz::runtime::kompozable]
 pub fn Uses(playing: bool) {

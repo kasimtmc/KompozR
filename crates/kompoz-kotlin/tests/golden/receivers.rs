@@ -35,7 +35,7 @@ pub fn Animated(seekable: SeekableTransitionState<i32>, deferred: DeferredTransi
         built.animate_to(1_f32).await;
         ::kompoz::runtime::kt::KtDelegate::get_value(&delegated).animate_to(1_f32).await;
         seekable.animate_to(target_state = 2).await;
-        deferred.animate_to(3);
+        deferred.r#animate_to(3);
         ::kompoz::runtime::kt::with(remembered.clone(), |this: &mut _| {
             this.update_bounds(upper_bound = ::core::option::Option::Some(2_f32))
         });

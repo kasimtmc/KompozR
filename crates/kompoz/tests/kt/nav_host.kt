@@ -7,20 +7,22 @@
 // NavigationSamples.kt, SizeTransformSample.kt and SharedElementSample.kt (2.10.2; the last two's edits at their
 // sections below).
 //
-// Kotlin's classes are stage 14's: the @Serializable routes (Detail, Start, Shell, AccountGraph, Member, the samples'
-// Profile, Scrollable, Dialog, Dashboard, Nested, NestedWithArg, User, WrappedUUID) and the samples' NavType object
-// (WrappedUUIDNavType) and serializer are Rust twins beside this file (kotlin_nav_host.rs, D6). AppShellForms' desktop
-// MenuBar is stage 15/16's (D7). The samples are androidx.compose.material's (Material 2): KompozR has Material 3,
-// whose Button (`containerColor`, M2's `backgroundColor`), HorizontalDivider (M2's Divider) and TextField they use
-// here (and `Color.LightGray` the source's static import `LightGray`); their strings are tests/navResources'
-// (`R.string.*`), read as `stringResource(R.string.x)` where the source reads `X.resourceId` (the routes' property,
-// one a companion object's: Kotlin's classes are stage 14's). The samples' screens Profile, Dashboard and Scrollable
-// are ProfileScreen, DashboardScreen and ScrollableScreen here: Kotlin keeps a class and a function of one name apart,
-// Rust's twin of the route object and the function would share its value namespace.
+// AppShellForms' desktop MenuBar is stage 15/16's (D7). The samples are androidx.compose.material's (Material 2):
+// KompozR has Material 3, whose Button (`containerColor`, M2's `backgroundColor`), HorizontalDivider (M2's Divider)
+// and TextField they use here (and `Color.LightGray` the source's static import `LightGray`); their strings are
+// tests/navResources' (`R.string.*`). NavigationSamples' `@Serializable class User` and `@Serializable class
+// WrappedUUID` (plain classes, not data classes, as route and route value) are Rust beside this file
+// (kotlin_nav_host.rs): the Kotlin syntax derives a route for a `@Serializable` data class or object only.
 
 package androidx.navigation.compose.samples
 
 // ---- the C++ Kompoz's Navigator -----------------------------------------------------------------------------------
+
+@Serializable
+data class Detail(val id: Int, val tab: String? = null)
+
+@Serializable
+object Start
 
 @Kompozable
 fun Navigator(nav: NavController) {
@@ -59,6 +61,15 @@ fun NavigatorApp(onController: (NavHostController) -> Unit) {
 }
 
 // ---- the C++ Kompoz's AppShellForms --------------------------------------------------------------------------------
+
+@Serializable
+object Shell
+
+@Serializable
+object AccountGraph
+
+@Serializable
+data class Member(val n: Int)
 
 @Kompozable
 fun AppShellForms(nav: NavController) {
@@ -105,11 +116,38 @@ fun AppShellApp(onController: (NavHostController) -> Unit) {
 
 // ---- navigation-compose's NavigationSamples.kt ------------------------------------------------------------------
 
+// (`resourceId: Int`, an Android R id, is a StringResource here: KompozR's resources are Compose Multiplatform's)
+@Serializable
+object Profile {
+    val resourceId: StringResource = R.string.profile
+}
+
+@Serializable
+object Scrollable {
+    val resourceId: StringResource = R.string.scrollable
+}
+
+@Serializable
+object Dialog {
+    val resourceId: StringResource = R.string.dialog
+}
+
+@Serializable
+data class Dashboard(val userId: String? = "no value given") {
+    companion object {
+        val resourceId: StringResource = R.string.dashboard
+    }
+}
+
+@Serializable object Nested
+
+@Serializable data class NestedWithArg(val userId: String? = "default nested arg")
+
 @Composable
 fun BasicNav() {
     val navController = rememberNavController()
     NavHost(navController, startDestination = Profile) {
-        composable<Profile> { ProfileScreen(navController) }
+        composable<Profile> { Profile(navController) }
         composable<Dashboard>(
             enterTransition = {
                 if (initialState.destination.hasRoute<Scrollable>()) {
@@ -128,7 +166,7 @@ fun BasicNav() {
                 }
             },
         ) {
-            DashboardScreen(navController)
+            Dashboard(navController)
         }
         composable<Scrollable>(
             exitTransition = {
@@ -148,7 +186,7 @@ fun BasicNav() {
                 }
             },
         ) {
-            ScrollableScreen(navController)
+            Scrollable(navController)
         }
         dialog<Dialog> { DialogContent(navController) }
     }
@@ -159,10 +197,10 @@ fun NestedNavStartDestination() {
     val navController = rememberNavController()
     NavHost(navController, startDestination = Nested) {
         navigation<Nested>(startDestination = Profile) {
-            composable<Profile> { ProfileScreen(navController) }
+            composable<Profile> { Profile(navController) }
         }
-        composable<Dashboard> { DashboardScreen(navController) }
-        composable<Scrollable> { ScrollableScreen(navController) }
+        composable<Dashboard> { Dashboard(navController) }
+        composable<Scrollable> { Scrollable(navController) }
         dialog<Dialog> { DialogContent(navController) }
     }
 }
@@ -171,11 +209,11 @@ fun NestedNavStartDestination() {
 fun NestedNavInGraph() {
     val navController = rememberNavController()
     NavHost(navController, startDestination = Profile) {
-        composable<Profile> { ProfileScreen(navController) }
+        composable<Profile> { Profile(navController) }
         navigation<Dashboard>(startDestination = Nested) {
-            composable<Nested> { DashboardScreen(navController) }
+            composable<Nested> { Dashboard(navController) }
         }
-        composable<Scrollable> { ScrollableScreen(navController) }
+        composable<Scrollable> { Scrollable(navController) }
         dialog<Dialog> { DialogContent(navController) }
     }
 }
@@ -185,9 +223,9 @@ fun NavScaffold() {
     val navController = rememberNavController()
     Scaffold { innerPadding ->
         NavHost(navController, Profile, Modifier.padding(innerPadding)) {
-            composable<Profile> { ProfileScreen(navController) }
-            composable<Dashboard> { DashboardScreen(navController) }
-            composable<Scrollable> { ScrollableScreen(navController) }
+            composable<Profile> { Profile(navController) }
+            composable<Dashboard> { Dashboard(navController) }
+            composable<Scrollable> { Scrollable(navController) }
             dialog<Dialog> { DialogContent(navController) }
         }
     }
@@ -202,22 +240,22 @@ fun NavWithArgsInNestedGraph() {
             composable<NestedWithArg> {
                 // argument from parent graph Destination.Dashboard will automatically be
                 // bundled into the start destination's arguments
-                val userId: String? = it.toRoute<NestedWithArg>().userId
-                DashboardScreen(navController, userId)
+                val userId = it.toRoute<NestedWithArg>().userId
+                Dashboard(navController, userId)
             }
         }
     }
 }
 
 @Composable
-fun ProfileScreen(navController: NavHostController) {
+fun Profile(navController: NavHostController) {
     Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
-        Text(text = stringResource(R.string.profile))
-        NavigateButton(stringResource(R.string.dashboard)) { navController.navigate(Dashboard()) }
+        Text(text = stringResource(Profile.resourceId))
+        NavigateButton(stringResource(Dashboard.resourceId)) { navController.navigate(Dashboard()) }
         HorizontalDivider(color = Color.Black)
-        NavigateButton(stringResource(R.string.scrollable)) { navController.navigate(Scrollable) }
+        NavigateButton(stringResource(Scrollable.resourceId)) { navController.navigate(Scrollable) }
         HorizontalDivider(color = Color.Black)
-        NavigateButton(stringResource(R.string.dialog)) { navController.navigate(Dialog) }
+        NavigateButton(stringResource(Dialog.resourceId)) { navController.navigate(Dialog) }
         Spacer(Modifier.weight(1f))
         NavigateBackButton(navController)
     }
@@ -226,7 +264,7 @@ fun ProfileScreen(navController: NavHostController) {
 @Composable
 fun ProfileWithArgs(navController: NavController) {
     Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
-        Text(text = stringResource(R.string.profile))
+        Text(text = stringResource(Profile.resourceId))
         HorizontalDivider(color = Color.Black)
         val state = rememberSaveable { mutableStateOf("") }
         Box {
@@ -242,18 +280,18 @@ fun ProfileWithArgs(navController: NavController) {
 }
 
 @Composable
-fun DashboardScreen(navController: NavController, title: String? = null) {
+fun Dashboard(navController: NavController, title: String? = null) {
     Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
-        Text(text = title ?: stringResource(R.string.dashboard))
+        Text(text = title ?: stringResource(Dashboard.resourceId))
         Spacer(Modifier.weight(1f))
         NavigateBackButton(navController)
     }
 }
 
 @Composable
-fun ScrollableScreen(navController: NavController) {
+fun Scrollable(navController: NavController) {
     Column(Modifier.fillMaxSize().then(Modifier.padding(8.dp))) {
-        NavigateButton(stringResource(R.string.dashboard)) { navController.navigate(Dashboard()) }
+        NavigateButton(stringResource(Dashboard.resourceId)) { navController.navigate(Dashboard()) }
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(phrases) { phrase -> Text(phrase, fontSize = 30.sp) }
         }
@@ -330,7 +368,25 @@ fun ThirdPartySerializableType() {
     }
 }
 
-val phrases =
+object WrappedUUIDNavType : NavType<WrappedUUID>(isNullableAllowed = false) {
+    override fun put(bundle: Bundle, key: String, value: WrappedUUID) {
+        bundle.putString(key, value.uuid.toString())
+    }
+
+    // (Bundle.getString's `String?` given to Java's UUID.fromString, whose parameter is a platform type Kotlin
+    // doesn't check: `!!` here, KompozR's java.util being Kotlin's types)
+    override fun get(bundle: Bundle, key: String): WrappedUUID? =
+        WrappedUUID(UUID.fromString(bundle.getString(key)!!))
+
+    override fun parseValue(value: String): WrappedUUID = WrappedUUID(UUID.fromString(value))
+
+    override fun serializeAsValue(value: WrappedUUID): String = Uri.encode(value.uuid.toString())
+}
+
+// (the sample's `object UUIDSerializer : KSerializer<UUID>`, WrappedUUID's `@Serializable(with = …)`: KompozR's
+// routes keep a UUID by its own NavType, the typeMap's above)
+
+private val phrases =
     listOf(
         "Easy As Pie",
         "Wouldn't Harm a Fly",
@@ -366,8 +422,7 @@ val phrases =
 
 // ---- navigation-compose's SizeTransformSample.kt ------------------------------------------------------------------
 //
-// SizeTransformComposable and SizeTransformNav as written. The @Serializable objects Collapsed, Expanded, NestedGraph
-// and InnerCollapsed are Rust twins beside this file (kotlin_nav_host.rs: Kotlin's classes are stage 14's).
+// As written.
 
 @Composable
 fun SizeTransformComposable() {
@@ -454,14 +509,34 @@ fun ExpandedScreen(onNavigate: () -> Unit) {
 private val Blue = Color(0xFF2196F3)
 private val Green = Color(0xFF4CAF50)
 
+@Serializable object Collapsed
+
+@Serializable object Expanded
+
+@Serializable object NestedGraph
+
+@Serializable object InnerCollapsed
+
 // ---- navigation-compose's SharedElementSample.kt ------------------------------------------------------------------
 //
-// AnimatedNav, SharedElementAnimationNav and TopAppBarElement as written. The @Serializable objects Select,
-// SharedElement, TopAppBarShared, RedBox, BlueBox, First, Second and Third are Rust twins beside this file
-// (kotlin_nav_host.rs: Kotlin's classes are stage 14's). The sample's composables RedBox and BlueBox are RedBoxScreen
-// and BlueBoxScreen here: Kotlin keeps a class and a function of one name apart, Rust's twin of the route object and
-// the function would share its value namespace. The sample is androidx.compose.material's (Material 2): its Button,
-// Text and TopAppBar are Material 3's here (M3's TopAppBar, experimental in Compose, needs no @OptIn in KompozR).
+// As written. The sample is androidx.compose.material's (Material 2): its Button, Text and TopAppBar are Material 3's
+// here (M3's TopAppBar, experimental in Compose, needs no @OptIn in KompozR).
+
+@Serializable object Select
+
+@Serializable object SharedElement
+
+@Serializable object TopAppBarShared
+
+@Serializable object RedBox
+
+@Serializable object BlueBox
+
+@Serializable object First
+
+@Serializable object Second
+
+@Serializable object Third
 
 @Composable
 fun AnimatedNav() {
@@ -504,12 +579,12 @@ fun SharedElementAnimationNav() {
         val selectFirst = mutableStateOf(true)
         NavHost(navController, startDestination = RedBox) {
             composable<RedBox> {
-                RedBoxScreen(this@SharedTransitionLayout, this, selectFirst) {
+                RedBox(this@SharedTransitionLayout, this, selectFirst) {
                     navController.navigate(BlueBox)
                 }
             }
             composable<BlueBox> {
-                BlueBoxScreen(this@SharedTransitionLayout, this, selectFirst) {
+                BlueBox(this@SharedTransitionLayout, this, selectFirst) {
                     navController.popBackStack()
                 }
             }
@@ -519,7 +594,7 @@ fun SharedElementAnimationNav() {
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun RedBoxScreen(
+fun RedBox(
     sharedScope: SharedTransitionScope,
     scope: AnimatedContentScope,
     selectFirst: MutableState<Boolean>,
@@ -548,7 +623,7 @@ fun RedBoxScreen(
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun BlueBoxScreen(
+fun BlueBox(
     sharedScope: SharedTransitionScope,
     scope: AnimatedContentScope,
     selectFirst: MutableState<Boolean>,

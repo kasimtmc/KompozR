@@ -4,11 +4,10 @@
 //! files read by `kompoz_file!`, in the C++ showcase's folders and files (showcase.hpp + common.cpp → `common.kt`,
 //! main.cpp → `main.kt`, material/*.cpp → `material/*.kt`, places/places.cpp → `places/places.kt`).
 //!
-//! What Kotlin writes as classes is here in Rust until stage 14 brings Kotlin's classes: the screens' typed routes
-//! (Kotlin's `@Serializable` objects and data class: [`routes`]), the enum classes (`ColorSource`, `Spot`,
-//! `RowReveal`), the data class `Destination`, the two indications the ripple section provides (Kotlin's `object …
-//! : IndicationNodeFactory`), and `onAndroid` (what the C++ checks with `__ANDROID__`). The other screens (home,
-//! list, components) come with stage 16: until then their routes say so.
+//! Rust here: the two indications the ripple section provides (Kotlin's `object … : IndicationNodeFactory` creating a
+//! `Modifier.Node(), DrawModifierNode` of its own: a class extending the API's modifier node, whose `ContentDrawScope.
+//! draw()` is a member extension, isn't translated by the Kotlin syntax), and `onAndroid` (what the C++ checks with
+//! `__ANDROID__`). The other screens (home, list, components) come with stage 16: until then their routes say so.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -21,11 +20,9 @@ use kompoz::foundation::indication::{Indication, IndicationNodeFactory};
 use kompoz::graphics::Color;
 use kompoz::graphics::vector::ImageVector;
 use kompoz::material3::LocalContentColor;
-use kompoz::runtime::{KotlinProperties, Saveable, SavedValue, named};
 use kompoz::ui::draw::{ContentDrawScope, DrawModifierNode};
 use kompoz::ui::{ModifierNode, NodeCx, NodeHandle, node_capabilities};
 use std::cell::Cell;
-use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -97,157 +94,11 @@ pub use main::*;
 pub use material::*;
 pub use navigation::*;
 pub use places::*;
-pub use routes::*;
 pub use sections::*;
 pub use text_fields::*;
 
-/// The screens, as type-safe routes (named, so the addresses read "item/42", "list/all"): the C++ showcase's
-/// `namespace routes` (showcase.hpp). Kotlin writes them as top-level `@Serializable @SerialName("home") object
-/// Home`, … (a package has no namespace of its own: the .kt files name them `Home`, not the C++'s `routes::Home()`);
-/// Rust twins until stage 14 (D6), in a module of their own, seen from every file as Kotlin's package's.
-pub mod routes {
-    use kompoz::prelude::*;
-
-    /// `@Serializable @SerialName("home") object Home`: the home screen.
-    #[derive(Route, Clone, PartialEq, Debug)]
-    #[route(name = "home")]
-    pub struct Home;
-
-    /// `@Serializable @SerialName("list") object ListGraph`: the list and its items, a nested graph.
-    #[derive(Route, Clone, PartialEq, Debug)]
-    #[route(name = "list")]
-    pub struct ListGraph;
-
-    /// `@Serializable @SerialName("list/all") object ListAll`: the list.
-    #[derive(Route, Clone, PartialEq, Debug)]
-    #[route(name = "list/all")]
-    pub struct ListAll;
-
-    /// `@Serializable @SerialName("item") data class Item(val n: Int)`: an item of the list ("item/{n}").
-    #[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-    #[route(name = "item")]
-    pub struct Item {
-        pub n: i32,
-    }
-
-    /// Kotlin's `Item(n)`.
-    pub fn Item(n: i32) -> Item {
-        Item { n }
-    }
-
-    /// `@Serializable @SerialName("components") object Components`: the components screen.
-    #[derive(Route, Clone, PartialEq, Debug)]
-    #[route(name = "components")]
-    pub struct Components;
-
-    /// `@Serializable @SerialName("material") object Material`: the Material screen.
-    #[derive(Route, Clone, PartialEq, Debug)]
-    #[route(name = "material")]
-    pub struct Material;
-
-    /// `@Serializable @SerialName("places") object Places`: BottomSheetScaffold over a map.
-    #[derive(Route, Clone, PartialEq, Debug)]
-    #[route(name = "places")]
-    pub struct Places;
-}
-
 /// Where the app runs, for what differs (a phone has no hardware keyboard): the C++ showcase's `kOnAndroid`.
 pub const on_android: bool = cfg!(target_os = "android");
-
-/// Where the theme's colors come from: the app's own scheme, the system's accent color, or the wallpaper. The
-/// library offers all three; the app (here its user) picks. (Kotlin: `enum class ColorSource { App, System,
-/// Wallpaper }`, saved as Android saves an enum: by its name.)
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum ColorSource {
-    App,
-    System,
-    Wallpaper,
-}
-
-impl Saveable for ColorSource {
-    fn save(&self) -> SavedValue {
-        SavedValue::String(format!("{self:?}"))
-    }
-    fn restore(saved: &SavedValue) -> Option<ColorSource> {
-        match saved.as_str()? {
-            "App" => Some(ColorSource::App),
-            "System" => Some(ColorSource::System),
-            "Wallpaper" => Some(ColorSource::Wallpaper),
-            _ => None,
-        }
-    }
-}
-
-/// The handle's three places (Kotlin: `enum class Spot { Start, Middle, End }`; its `name` is its Debug).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Spot {
-    Start,
-    Middle,
-    End,
-}
-
-/// A row swiped open to its actions, or not (Kotlin: `enum class RowReveal { Closed, Open }`).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum RowReveal {
-    Closed,
-    Open,
-}
-
-impl fmt::Display for Spot {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl fmt::Display for RowReveal {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-/// A place to go: its label and icon (the navigation bar's and rail's items, the FAB menu's actions). Kotlin:
-/// `data class Destination(val label: String, val icon: ImageVector)`.
-#[derive(Clone, PartialEq, Debug, KotlinProperties)]
-pub struct Destination {
-    pub label: String,
-    pub icon: ImageVector,
-}
-
-/// `Destination(label, icon)`.
-#[named(type)]
-pub fn Destination(label: impl Into<String>, icon: ImageVector) -> Destination {
-    Destination { label: label.into(), icon }
-}
-
-/// The name of what a user did (the interaction section's log): what Kotlin tells apart with `when (i) { is
-/// PressInteraction.Press -> "Press" … }` (`is` comes with stage 14); "" for an interaction of another kind.
-pub fn interaction_name(i: Arc<dyn Interaction>) -> String {
-    let i = &*i;
-    let name = if i.is::<PressInteraction::Press>() {
-        "Press"
-    } else if i.is::<PressInteraction::Release>() {
-        "Release"
-    } else if i.is::<PressInteraction::Cancel>() {
-        "Cancel"
-    } else if i.is::<HoverInteraction::Enter>() {
-        "HoverEnter"
-    } else if i.is::<HoverInteraction::Exit>() {
-        "HoverExit"
-    } else if i.is::<FocusInteraction::Focus>() {
-        "Focus"
-    } else if i.is::<FocusInteraction::Unfocus>() {
-        "Unfocus"
-    } else if i.is::<DragInteraction::Start>() {
-        "DragStart"
-    } else if i.is::<DragInteraction::Stop>() {
-        "DragStop"
-    } else if i.is::<DragInteraction::Cancel>() {
-        "DragCancel"
-    } else {
-        ""
-    };
-    name.to_string()
-}
 
 /// The ripple section's flat state layer: instead of the ripple, the content color laid over the component, at
 /// Material's state-layer alphas (0.16 pressed, 0.10 focused, 0.08 hovered). Kotlin: an `object FlatStateLayer :

@@ -1,10 +1,10 @@
 //! Compose's own inline functions in a coroutine, in Kotlin's syntax: their lambdas suspend with it, as Kotlin's do —
 //! `buildAnnotatedString` with `withStyle`/`withLink` (and, in the composition, the builder's receiver lambdas),
-//! `PathData`, `ImageVector.Builder`'s `group`/`path` (through their builders: named arguments), `takeOrElse`,
-//! `TextFieldState.edit` (the state being edited while its lambda is suspended), `MutatorMutex.tryMutate` (the lock
-//! held meanwhile). The lambdas really suspend: the coroutine is seen part way. And in a `.kt`
-//! file (kompoz_file!): `withLink`, `takeOrElse`, `TextFieldState.edit`, a `withStyle` whose lambda doesn't suspend
-//! left plain.
+//! `PathData`, `ImageVector.Builder`'s `group`/`path` (through their builders: named arguments; the builder's name
+//! Compose's default), `takeOrElse` (DpOffset's and DpSize's too), `TextFieldState.edit` (the state being edited
+//! while its lambda is suspended), `MutatorMutex.tryMutate` (the lock held meanwhile). The lambdas really suspend: the
+//! coroutine is seen part way. And in a `.kt` file (kompoz_file!): `withLink`, `takeOrElse`, `TextFieldState.edit`, a
+//! `withStyle` whose lambda doesn't suspend left plain.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -34,7 +34,7 @@ kompoz! {
         val plain = buildAnnotatedString {
             append("a")
             withStyle(SpanStyle(color = Color.Red)) { append("b") }
-            withLink(LinkAnnotation.url("https://kompoz.dev")) { append("c") }
+            withLink(LinkAnnotation.Url("https://kompoz.dev")) { append("c") }
         }
         text(plain)
         LaunchedEffect(go) {
@@ -43,7 +43,7 @@ kompoz! {
                 append("x")
                 withStyle(SpanStyle(color = Color.Blue)) {
                     append("${later(1)}")
-                    withLink(LinkAnnotation.url("https://kompoz.dev")) {
+                    withLink(LinkAnnotation.Url("https://kompoz.dev")) {
                         delay(50)
                         append("y")
                     }
@@ -58,7 +58,6 @@ kompoz! {
                 close()
             })
             icon(ImageVector.Builder(
-                    name = "v",
                     defaultWidth = 8.dp,
                     defaultHeight = 8.dp,
                     viewportWidth = 8f,
@@ -83,7 +82,13 @@ kompoz! {
                 TextAlign.Center
             }
             val kept = Color.Red.takeOrElse { later(9).let { Color.Blue } }
+            val offset = DpOffset.Unspecified.takeOrElse {
+                delay(1)
+                DpOffset(1.dp, 2.dp)
+            }
+            val size = DpSize(4.dp, 5.dp).takeOrElse { DpSize(later(6).dp, 6.dp) }
             log("${color == Color.Green} $width ${align == TextAlign.Center} ${kept == Color.Red}")
+            log("${offset == DpOffset(1.dp, 2.dp)} ${size == DpSize(4.dp, 5.dp)}")
         }
     }
 
@@ -107,6 +112,104 @@ kompoz! {
 }
 
 kompoz_file!("tests/kt/compose_inline.kt");
+
+// A draw scope in a coroutine, as Kotlin holds it (a reference: Rust's `&mut DrawScope<'_>`, given on reborrowed): a
+// parameter of it, `with(scope)`, extension functions of it plain and suspending, the transforms' suspending twins
+// (`inset(h, v)`, `inset(x)`, `scale(x)` by Kotlin's names) — and the same drawn without suspending.
+kompoz! {
+    fun DrawScope.ring(color: Color) {
+        drawCircle(color, radius = 3f)
+    }
+
+    suspend fun DrawScope.slowRing(color: Color) {
+        yield()
+        drawCircle(color, radius = 3f, center = Offset(5f, 5f))
+    }
+
+    fun corner(scope: DrawScope) {
+        with(scope) { drawRect(Color.Red, size = Size(4f, 4f)) }
+    }
+
+    suspend fun paint(scope: DrawScope, log: (String) -> Unit) {
+        val half = scope.size.width / 2
+        corner(scope)
+        with(scope) {
+            translate(left = 2f) {
+                yield()
+                drawRect(Color.Red, size = Size(1f, 1f))
+                slowRing(Color.Blue)
+            }
+            withTransform({ translate(1f, 1f) }) {
+                yield()
+                drawRect(Color.Blue)
+            }
+            inset(4f, 2f) {
+                yield()
+                ring(Color.Green)
+            }
+            inset(4f) { drawRect(Color.Red) }
+            scale(2f) {
+                yield()
+                drawRect(Color.Green)
+            }
+            drawIntoCanvas {
+                yield()
+                it.drawRect(Rect(0f, 0f, 1f, 1f), Paint())
+            }
+        }
+        val same = scope
+        same.slowRing(Color.Red)
+        log("painted $half")
+    }
+
+    fun paintAtOnce(scope: DrawScope) {
+        corner(scope)
+        with(scope) {
+            translate(left = 2f) {
+                drawRect(Color.Red, size = Size(1f, 1f))
+                drawCircle(Color.Blue, radius = 3f, center = Offset(5f, 5f))
+            }
+            withTransform({ translate(1f, 1f) }) { drawRect(Color.Blue) }
+            inset(horizontal = 4f, vertical = 2f) { ring(Color.Green) }
+            inset(4f, 4f, 4f, 4f) { drawRect(Color.Red) }
+            scale(2f, 2f) { drawRect(Color.Green) }
+            drawIntoCanvas { it.drawRect(Rect(0f, 0f, 1f, 1f), Paint()) }
+        }
+        scope.drawCircle(Color.Red, radius = 3f, center = Offset(5f, 5f))
+    }
+}
+
+/// A future polled to its end (what it awaits ready at once or at the next poll: `yield()`).
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
+/// What `draw` draws in a 100 x 80 scope over a picture.
+fn picture_of(draw: impl FnOnce(&mut kompoz::ui::draw::DrawScope)) -> String {
+    let mut p = kompoz::ui::draw::Picture::new();
+    {
+        let mut d =
+            kompoz::ui::draw::DrawScope::new(&mut p, Size::new(100.0, 80.0), LayoutDirection::Ltr, Density::default());
+        draw(&mut d);
+    }
+    format!("{p:?}")
+}
+
+fn a_draw_scope_in_a_coroutine() {
+    let log: Rc<RefCell<Vec<String>>> = Rc::default();
+    let l = log.clone();
+    let suspending = picture_of(|d| block_on(paint(d, move |s: String| l.borrow_mut().push(s))));
+    let at_once = picture_of(paint_at_once);
+    assert_eq!(suspending, at_once);
+    assert!(suspending.contains("PushTransform"), "{suspending}");
+    assert_eq!(*log.borrow(), ["painted 50.0"]);
+}
 
 fn spans(s: &AnnotatedString) -> Vec<(usize, usize)> {
     s.span_styles().iter().map(|r| (r.start, r.end)).collect()
@@ -167,7 +270,7 @@ fn builders_suspend_with_the_coroutine() {
     });
     assert_eq!(*paths.borrow(), [expected_path]);
     let mut expected_icon =
-        ImageVector::Builder("v", 8.dp(), 8.dp(), 8.0, 8.0, Color::Unspecified, BlendMode::SrcIn, false);
+        ImageVector::Builder(DefaultGroupName, 8.dp(), 8.dp(), 8.0, 8.0, Color::Unspecified, BlendMode::SrcIn, false);
     named_args!(expected_icon.group(
         name = "g",
         rotate = 45.0,
@@ -182,7 +285,7 @@ fn builders_suspend_with_the_coroutine() {
         }
     ));
     assert_eq!(*icons.borrow(), [expected_icon.build()]);
-    assert_eq!(*log.borrow(), ["true 3.0.dp true true"]);
+    assert_eq!(*log.borrow(), ["true 3.0.dp true true", "true true"]);
 }
 
 fn edits_and_mutations_hold_on_while_suspended() {
@@ -242,4 +345,5 @@ tests![
     builders_suspend_with_the_coroutine,
     edits_and_mutations_hold_on_while_suspended,
     compose_inline_functions_suspend_in_a_kt_file,
+    a_draw_scope_in_a_coroutine,
 ];

@@ -12,13 +12,6 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 
-/// (The file's `enum class Panel { Closed, Open }`: enum classes come with stage 14's Kotlin syntax.)
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Panel {
-    Closed,
-    Open,
-}
-
 kompoz_file!("tests/kt/animations_all.kt");
 
 fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {

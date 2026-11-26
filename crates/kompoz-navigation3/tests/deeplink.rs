@@ -3,12 +3,12 @@
 //! KDoc, its decoder of keys (defaults, nullables, enums, lists, nested classes, `DeepLinkSerializer`s), the order of
 //! matches, `StaticKeyDeepLinkMatcher` and its mime type filter, `withBackStack`, `DeepLinkRequest` and
 //! `RequestExtras`; and the deep link samples (navigation3-runtime-samples' DeepLinkMatcherSample.kt and
-//! DeepLinkNonPrimitiveArgSample.kt, navigation3-ui-samples' DeepLinkNonPrimitiveArgSamples.kt), their classes'
-//! Rust twins asserting the keys they make.
+//! DeepLinkNonPrimitiveArgSample.kt, navigation3-ui-samples' DeepLinkNonPrimitiveArgSamples.kt) in Rust's syntax,
+//! asserting the keys they make (the Kotlin syntax's: crates/kompoz/tests/kotlin_navigation3.rs).
 
 use kompoz_navigation3::runtime::NavKey;
 use kompoz_navigation3::runtime::deeplink::{
-    DeepLinkFilter, DeepLinkMatchResult, DeepLinkMatcher, DeepLinkRequest, DeepLinkSerializer, DeepLinkUri,
+    DeepLinkFilter, DeepLinkMatchResult, DeepLinkMatcher, DeepLinkRequest, DeepLinkSerializerImpl, DeepLinkUri,
     MatchResultOf, MimeTypeExtrasKey, RequestExtras, RequestExtrasKey, StaticKeyDeepLinkMatcher, UriDeepLinkMatcher,
     UriMatchResult, empty_request_extras, mime_type_filter, request_extras, serializable_with,
 };
@@ -1255,16 +1255,17 @@ struct ProductInventoryKey {
 impl NavKey for ProductInventoryKey {}
 
 // serializer to deserialize string value into a Product object
+#[derive(Default)]
 struct ProductSerializer;
 
-impl DeepLinkSerializer for ProductSerializer {
+impl DeepLinkSerializerImpl for ProductSerializer {
     type Value = Product;
 
-    fn serial_name() -> String {
+    fn serial_name(&self) -> String {
         "androidx.navigation3.ui.samples.Product".into()
     }
 
-    fn deserialize(value: &str) -> Product {
+    fn deserialize(&self, value: &str) -> Product {
         let split_args: Vec<&str> = value.splitn(2, '-').collect();
         let id = kt::KtStr::to_int_or_null(split_args[0])
             .unwrap_or_else(|| panic_kt("SerializationException", &format!("Invalid product id: {}", split_args[0])));
@@ -1272,7 +1273,7 @@ impl DeepLinkSerializer for ProductSerializer {
         Product { id, name }
     }
 
-    fn serialize(value: &Product) -> String {
+    fn serialize(&self, value: &Product) -> String {
         format!("{}-{}", value.id, value.name)
     }
 }
@@ -1306,7 +1307,7 @@ fn deep_link_serializer_sample() {
         "SerializationException: Invalid product id: abc"
     );
     // Its descriptor: a STRING primitive of its serial name; it serializes as it deserializes.
-    let descriptor = ProductSerializer::descriptor();
+    let descriptor = ProductSerializer.descriptor();
     assert_eq!(
         (descriptor.serial_name.as_str(), descriptor.kind),
         ("androidx.navigation3.ui.samples.Product", SerialKind::String)
@@ -1349,16 +1350,17 @@ struct HatListKey {
 impl NavKey for HatListKey {}
 
 // serializer to deserialize string value into a Hat object
+#[derive(Default)]
 struct HatSerializer;
 
-impl DeepLinkSerializer for HatSerializer {
+impl DeepLinkSerializerImpl for HatSerializer {
     type Value = Hat;
 
-    fn serial_name() -> String {
+    fn serial_name(&self) -> String {
         "androidx.navigation3.ui.samples.Hat".into()
     }
 
-    fn deserialize(value: &str) -> Hat {
+    fn deserialize(&self, value: &str) -> Hat {
         let split_args: Vec<&str> = value.splitn(2, ':').collect();
         let id = kt::KtStr::to_int_or_null(split_args[0])
             .unwrap_or_else(|| panic_kt("SerializationException", &format!("Invalid product id: {}", split_args[0])));
@@ -1367,7 +1369,7 @@ impl DeepLinkSerializer for HatSerializer {
         Hat { id, weight }
     }
 
-    fn serialize(value: &Hat) -> String {
+    fn serialize(&self, value: &Hat) -> String {
         format!("{}:{}", value.id, value.weight)
     }
 }

@@ -11,44 +11,23 @@ mod common;
 
 use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 
 // ---- theming_as_compose_writes_it (kompozable_tests.cpp 2299-2343) -------------------------------------------------
 
-/// Kotlin's `enum class ThemeChoice { System, Light, Dark }`, a Rust enum (enum classes come with stage 14).
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum ThemeChoice {
-    System,
-    Light,
-    Dark,
-}
-
-thread_local! {
-    static NEXT_ID: Cell<i32> = const { Cell::new(0) };
-    static MEDIUM: RefCell<Option<CornerBasedShape>> = const { RefCell::new(None) };
-}
-
-/// The C++ test's `++gNextId`.
-fn next_id() -> i32 {
-    NEXT_ID.with(|n| {
-        n.set(n.get() + 1);
-        n.get()
-    })
-}
-
-/// The C++ test's `gMedium = …`.
-fn seen_medium(shape: CornerBasedShape) {
-    MEDIUM.with(|m| *m.borrow_mut() = Some(shape));
-}
-
 kompoz! {
+    enum class ThemeChoice { System, Light, Dark }
+
     fun schemeFor(choice: ThemeChoice): ColorScheme = when (choice) {
         ThemeChoice.Dark -> darkColorScheme(primary = Color(0xFF9ECAFF))
         else -> lightColorScheme(primary = Color(0xFF0061A4), onPrimary = Color.White)
     }
 
+    var nextId = 0
+    var medium: CornerBasedShape? = null
+
     @Composable
-    fun counted(): Int = remember { nextId() }
+    fun counted(): Int = remember { ++nextId }
 
     @Composable
     fun Themed(choice: ThemeChoice) {
@@ -57,7 +36,7 @@ kompoz! {
         var showFirst by remember { mutableStateOf(true) }
         MaterialTheme(colorScheme = schemeFor(choice), typography = type, shapes = Shapes(medium = RoundedCornerShape(20.dp))) {
             Column {
-                seenMedium(MaterialTheme.shapes.medium)
+                medium = MaterialTheme.shapes.medium
                 Text("${MaterialTheme.typography.headlineSmall.fontSize.value.toInt()}", modifier = Modifier.testTag("size"), color = MaterialTheme.colorScheme.primary)
                 if (showFirst) Text("a ${counted()}")
                 Text("b ${counted()}")
@@ -76,7 +55,7 @@ fn theming_as_compose_writes_it() {
     let canvas = rule.draw();
     let size = canvas.texts.iter().position(|t| t == "30").unwrap();
     assert_eq!(canvas.colors[size], Color(0xFF0061A4_i64));
-    assert_eq!(MEDIUM.with(|m| m.borrow().clone()), Some(CornerBasedShape::from(RoundedCornerShape(20.dp()))));
+    assert_eq!(medium.with(|m| m.get()), Some(CornerBasedShape::from(RoundedCornerShape(20.dp()))));
     rule.on_node_with_text("a 1").assert_exists();
     rule.on_node_with_text("b 2").assert_exists();
     rule.on_node_with_text("hide").perform_click();
@@ -84,7 +63,6 @@ fn theming_as_compose_writes_it() {
     // from the same site (which would hand b a's).
     rule.on_node_with_text("a 1").assert_does_not_exist();
     rule.on_node_with_text("b 2").assert_exists();
-    let _ = ThemeChoice::Light;
 }
 
 // ---- material3's samples (kt/material_theme.kt) ------------------------------------------------------------------

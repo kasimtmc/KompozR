@@ -2,8 +2,9 @@
 //! PredictiveBack) and navigationevent-compose 1.1's (rememberNavigationEventDispatcherOwner) from kt/navigation_event.kt
 //! (kompoz_file!), and navigationevent's composables as an app uses them (NavigationBackHandler with a hoisted
 //! `rememberNavigationEventState` whose transition state is read, NavigationEventHandler with forward, a scope of its
-//! own). The same behaviour crates/kompoz-navigationevent/tests/navigationevent.rs and kompoz-ui's windows.rs check in
-//! Rust.
+//! own), and a handler of the app's own as activity-compose's BackHandlerCompat writes one (an object expression of
+//! `NavigationEventHandler<NavigationEventInfo>`). The same behaviour crates/kompoz-navigationevent/tests/
+//! navigationevent.rs and kompoz-ui's windows.rs check in Rust.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -14,42 +15,6 @@ use kompoz::test::KompozTestRule;
 use kompoz::ui::input::KeyModifiers;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-// ---- Rust twins of the Kotlin classes (stage 14) -------------------------------------------------------------------
-
-/// BackHandlerSample.kt's `public class SampleCallbackHelper(val preparePop: () -> Unit, val updateProgress:
-/// (progress: Float) -> Unit, val popBackStack: () -> Unit, val cancelPop: () -> Unit)`: here one that logs.
-#[derive(Clone)]
-pub struct SampleCallbackHelper(Rc<RefCell<Vec<String>>>);
-
-impl SampleCallbackHelper {
-    pub fn prepare_pop(&self) {
-        self.0.borrow_mut().push("prepare".into());
-    }
-    pub fn update_progress(&self, progress: f32) {
-        self.0.borrow_mut().push(format!("progress {progress}"));
-    }
-    pub fn pop_back_stack(&self) {
-        self.0.borrow_mut().push("pop".into());
-    }
-    #[allow(dead_code)]
-    pub fn cancel_pop(&self) {
-        self.0.borrow_mut().push("cancel".into());
-    }
-    fn taken(&self) -> Vec<String> {
-        std::mem::take(&mut *self.0.borrow_mut())
-    }
-}
-
-/// The app's `data class Screen(val name: String) : NavigationEventInfo()`.
-#[derive(Clone, PartialEq, Debug)]
-pub struct ScreenInfo(String);
-
-impl NavigationEventInfo for ScreenInfo {}
-
-pub fn Screen(name: impl Into<String>) -> ScreenInfo {
-    ScreenInfo(name.into())
-}
 
 kompoz_file!("tests/kt/navigation_event.kt");
 
@@ -104,7 +69,19 @@ fn back_handlers_as_activity_compose_samples_write_them() {
     rule.on_node_with_text("yazı").assert_does_not_exist();
     assert!(!rule.host().wants_back());
 
-    let callback = SampleCallbackHelper(Rc::default());
+    let log = Rc::new(RefCell::new(Vec::<String>::new()));
+    let note = |text: &'static str| {
+        let log = log.clone();
+        move || log.borrow_mut().push(text.to_string())
+    };
+    let l = log.clone();
+    let callback = SampleCallbackHelper(
+        note("prepare"),
+        move |progress: f32| l.borrow_mut().push(format!("progress {progress}")),
+        note("pop"),
+        note("cancel"),
+    );
+    let taken = || std::mem::take(&mut *log.borrow_mut());
     let c = callback.clone();
     let rule = KompozTestRule::new(kompozable_lambda!(move || PredictiveBack(c.clone())));
     let host = rule.host();
@@ -118,17 +95,17 @@ fn back_handlers_as_activity_compose_samples_write_them() {
     rule.wait_for_idle();
     assert!(host.back_invoked());
     rule.wait_for_idle();
-    assert_eq!(callback.taken(), ["prepare", "progress 0.25", "progress 0.5", "pop"]);
-    // Called off: the coroutine is cancelled (the sample's catch would cancel the pop: stage 14).
+    assert_eq!(taken(), ["prepare", "progress 0.25", "progress 0.5", "pop"]);
+    // Called off: the coroutine is cancelled, the sample's catch cancels the pop.
     host.back_started(step(0.0));
     host.back_progressed(step(0.1));
     rule.wait_for_idle();
     host.back_cancelled();
     rule.wait_for_idle();
-    assert_eq!(callback.taken(), ["prepare", "progress 0.1"]);
+    assert_eq!(taken(), ["prepare", "progress 0.1", "cancel"]);
     // A press: the flow ends at once.
     assert!(escape(&rule));
-    assert_eq!(callback.taken(), ["prepare", "pop"]);
+    assert_eq!(taken(), ["prepare", "pop"]);
 }
 
 /// navigationevent-compose's RememberNavigationEventDispatcherOwner sample: a scope of its own for its content.
@@ -150,19 +127,19 @@ fn navigation_event_handlers_as_an_app_writes_them() {
         }
     }));
     let host = rule.host();
-    let history: Vec<ScreenInfo> = host
+    let history: Vec<Screen> = host
         .navigation_event_dispatcher()
         .history()
         .value()
         .merged_history()
         .iter()
-        .map(|i| i.downcast_ref::<ScreenInfo>().unwrap().clone())
+        .map(|i| i.downcast_ref::<Screen>().unwrap().clone())
         .collect();
     assert_eq!(history, [Screen("liste"), Screen("detay")]);
     host.back_started(step(0.0));
     host.back_progressed(step(0.3));
     rule.wait_for_idle();
-    rule.on_node_with_text("detay kapanıyor").assert_exists();
+    rule.on_node_with_text("detay kapanıyor 0.3").assert_exists();
     host.back_cancelled();
     rule.wait_for_idle();
     rule.on_node_with_text("detay").assert_exists();
@@ -214,6 +191,34 @@ fn navigation_event_inputs_as_an_app_writes_them() {
     assert_eq!(*log.borrow(), ["ilerleme 0", "geri"]);
 }
 
+/// A handler of the app's own (kt/navigation_event.kt's loggingHandler, as activity-compose's BackHandlerCompat writes
+/// its one): infos of any type, back disabled until enabled, its overrides told the gesture; its info in the history.
+fn navigation_event_handler_objects_as_activity_compose_writes_them() {
+    use kompoz::navigationevent::{NavigationEvent, NavigationEventDispatcher};
+    let log = mutable_state_of(String::new());
+    let info: Rc<dyn NavigationEventInfo> = Rc::new(Screen("sayfa"));
+    let handler = logging_handler(info, log.clone());
+    let dispatcher = NavigationEventDispatcher::new();
+    dispatcher.add_handler(&handler);
+    let input = DirectNavigationEventInput::new();
+    dispatcher.add_input(&input);
+    input.back_started(NavigationEvent::default());
+    input.back_completed();
+    assert!(log.get().is_empty()); // (back disabled)
+    handler.set_is_back_enabled(true);
+    input.back_started(NavigationEvent { progress: 0.25, ..NavigationEvent::default() });
+    input.back_progressed(NavigationEvent { progress: 0.5, ..NavigationEvent::default() });
+    input.back_cancelled();
+    input.back_started(NavigationEvent::default());
+    input.back_completed();
+    assert_eq!(log.get(), "başla 0.25 ilerle 0.5 vazgeçti başla 0.0 bitti ");
+    let history = dispatcher.history().value().merged_history();
+    assert_eq!(
+        history.iter().map(|i| i.downcast_ref::<Screen>().cloned()).collect::<Vec<_>>(),
+        [Some(Screen("sayfa"))]
+    );
+}
+
 fn main() {
     common::run(&[
         ("back_handlers_as_activity_compose_samples_write_them", back_handlers_as_activity_compose_samples_write_them),
@@ -223,5 +228,9 @@ fn main() {
         ),
         ("navigation_event_handlers_as_an_app_writes_them", navigation_event_handlers_as_an_app_writes_them),
         ("navigation_event_inputs_as_an_app_writes_them", navigation_event_inputs_as_an_app_writes_them),
+        (
+            "navigation_event_handler_objects_as_activity_compose_writes_them",
+            navigation_event_handler_objects_as_activity_compose_writes_them,
+        ),
     ]);
 }

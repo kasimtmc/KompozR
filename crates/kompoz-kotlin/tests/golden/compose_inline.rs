@@ -112,11 +112,14 @@ pub fn Vectors(
     });
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
-pub async fn paint(scope: DrawScope, log: impl ::core::ops::Fn(::std::string::String) + 'static) {
+pub async fn paint(
+    scope: &mut ::kompoz::ui::draw::DrawScope<'_>,
+    log: impl ::core::ops::Fn(::std::string::String) + 'static,
+) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     ::kompoz::runtime::named_args!({
-        ::kompoz::runtime::kt::with_async(scope.clone(), async |this: &mut _| {
+        ::kompoz::runtime::kt::with_async((&mut *scope), async |this: &mut _| {
             this.translate_async(
                 left = 2_f32,
                 block = async |this1| {
@@ -153,7 +156,7 @@ pub async fn paint(scope: DrawScope, log: impl ::core::ops::Fn(::std::string::St
                             this2
                                 .draw_into_canvas_async(async |it| {
                                     delay(1).await;
-                                    it.draw_rect(Rect((0_f32, 0_f32, 1_f32, 1_f32)), &Paint());
+                                    it.r#draw_rect(Rect((0_f32, 0_f32, 1_f32, 1_f32)), &Paint());
                                 })
                                 .await;
                         })
@@ -186,4 +189,4 @@ pub async fn paint(scope: DrawScope, log: impl ::core::ops::Fn(::std::string::St
 // error 121:17: `delay` suspends, in a lambda `withAnnotation` doesn't run in the coroutine: Kotlin suspends in a coroutine and in the lambdas an inline function runs in place (`with`, `let`, `apply`, `forEach`, `map`, `repeat`, …; not a `crossinline` one: `sortedBy`'s)
 // error 127:17: `withStyle(ParagraphStyle)`'s lambda can't suspend: Kotlin's `withStyle(ParagraphStyle)` takes it `crossinline` (`delay` suspends in it; only `withStyle(SpanStyle)`'s may)
 // error 130:40: `delay` suspends, in the block `withMutableSnapshot` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)
-// error 131:45: `later` suspends, in the block `withoutReadObservation` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)
+// error 131:54: `later` suspends, in the block `withoutReadObservation` runs with a snapshot current: Compose's snapshot blocks must not suspend (the snapshot is the thread's current one until the block returns: the coroutines run meanwhile would run in it)

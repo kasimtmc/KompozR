@@ -1096,11 +1096,28 @@ fn prescan(items: &[Item], scan: &mut Scan) {
                         }
                         _ => *types = None,
                     }
+                    // ((stage 14 WPD) a generic type's impl for its every value too: `impl<T, K> MatchResultOf<T> for
+                    // BackStackMatchResult<T, K>`, its arguments the impl's own type parameters)
+                    let own: Vec<String> = imp.generics.type_params().map(|t| t.ident.to_string()).collect();
+                    let every_value = |args: &syn::PathArguments| match args {
+                        syn::PathArguments::None => imp.generics.params.is_empty(),
+                        syn::PathArguments::AngleBracketed(a) => {
+                            imp.generics.const_params().next().is_none()
+                                && a.args.iter().all(|g| match g {
+                                    syn::GenericArgument::Type(Type::Path(t)) => {
+                                        t.qself.is_none()
+                                            && t.path.get_ident().is_some_and(|i| own.contains(&i.to_string()))
+                                    }
+                                    syn::GenericArgument::Lifetime(_) => true,
+                                    _ => false,
+                                })
+                        }
+                        _ => false,
+                    };
                     if let Type::Path(p) = &*imp.self_ty
-                        && imp.generics.params.is_empty()
                         && p.qself.is_none()
                         && let Some(last) = p.path.segments.last()
-                        && last.arguments.is_none()
+                        && every_value(&last.arguments)
                     {
                         scan.trait_impls.insert((last.ident.to_string(), trait_name.clone()));
                     }
@@ -2424,7 +2441,9 @@ mod tests {
     #[test]
     fn a_type_implementing_an_interface_has_its_members() {
         // (Kotlin's subtyping: `impl Painter for VectorPainter` makes a VectorPainter's members Painter's — the trait
-        // declares methods —; not a marker trait's, a kt shim's, an overloads' trait's, nor for a generic type)
+        // declares methods —, a generic type's for its every value too (`impl<T> Painter for Wrapped<T>`); not a marker
+        // trait's, a kt shim's, an overloads' trait's, nor for some values of a type only (`Arc<dyn Painter>`,
+        // `Held<i32>`))
         let file: syn::File = syn::parse_str(
             r#"
             pub trait Painter { fn draw(&self, scope: &mut DrawScope<'_>, size: Size) {} }
@@ -2438,6 +2457,7 @@ mod tests {
             impl ColorArgs for Hex { fn color(self) -> Color { todo!() } }
             impl Painter for Arc<dyn Painter> {}
             impl<T> Painter for Wrapped<T> {}
+            impl Painter for Held<i32> {}
             "#,
         )
         .unwrap();
@@ -2448,6 +2468,7 @@ mod tests {
         let d = |a: &str, b: &str| scan.derefs.contains(&(a.to_string(), b.to_string()));
         assert!(d("VectorPainter", "Painter"));
         assert!(!d("VectorPainter", "Marker") && !d("String", "KtStr") && !d("Hex", "ColorArgs"));
-        assert!(!d("Arc", "Painter") && !d("Wrapped", "Painter"));
+        assert!(!d("Arc", "Painter") && !d("Held", "Painter"));
+        assert!(d("Wrapped", "Painter"));
     }
 }

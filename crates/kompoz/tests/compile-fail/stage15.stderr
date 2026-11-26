@@ -1,0 +1,11 @@
+error: kompoz: a sealed class deriving from an exception class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
+ --> tests/compile-fail/stage15.rs:6:18
+  |
+6 |     sealed class Problem(val code: Int) : IllegalStateException("kod $code")
+  |                  ^^^^^^^
+
+error: kompoz: a `return` from inside a lambda (Kotlin's non-local return) isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)
+  --> tests/compile-fail/stage15.rs:10:31
+   |
+10 |             if (w.length > 3) return w
+   |                               ^^^^^^

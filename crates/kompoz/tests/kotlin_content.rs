@@ -3,10 +3,10 @@
 //! `hasMediaType(MediaType.Image)`, `consume { item -> … }`, `return@contentReceiver`), the text still the field's; a
 //! box taking dropped files only from a drag and drop (`TransferableContent.Source.DragAndDrop`) — through `kompoz!`;
 //! and in a `.kt` file (kompoz_file!) receivers inside receivers and the clipboard through LocalClipboard's suspending
-//! `setClipEntry`/`getClipEntry`. (Compose's ReceiveContentFullSample tells the drag's enter and exit with an object
-//! expression — `object : ReceiveContentListener { override fun onDragEnter() … }` —: Kotlin's object expressions are
-//! stage 14's, as stage 9 decided for `object : DragAndDropTarget`; the callbacks are checked in Rust,
-//! crates/kompoz-foundation/tests/content.rs, with the rest of this behaviour.)
+//! `setClipEntry`/`getClipEntry`; and the C++ Kompoz's `content_receivers_as_compose_writes_them`
+//! (kompozable_tests.cpp 2655-2687, 3555-3578, whole): a listener object hearing of drags too — `object :
+//! ReceiveContentListener { override fun onDragEnter() … }` — around a receiver lambda that takes pasted HTML. The
+//! same behaviour crates/kompoz-foundation/tests/content.rs checks in Rust.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -99,6 +99,83 @@ kompoz! {
     }
 }
 
+// ---- content_receivers_as_compose_writes_them (kompozable_tests.cpp 2655-2687) ----------------------------------
+
+kompoz! {
+    // Compose foundation's content receiving, as its samples write it: a lambda that takes the images
+    // and leaves the rest to the field, and a listener object that hears of drags too.
+    @Composable
+    fun ImagePicker(onImage: (String) -> Unit) {
+        val state = rememberTextFieldState()
+        var hovering by remember { mutableStateOf(false) }
+        val listener = remember {
+            object : ReceiveContentListener {
+                override fun onDragEnter() { hovering = true }
+                override fun onDragExit() { hovering = false }
+                override fun onReceive(transferableContent: TransferableContent): TransferableContent? {
+                    if (!transferableContent.hasMediaType(MediaType.Image)) return transferableContent
+                    return transferableContent.consume { item ->
+                        val uri = item.uri
+                        if (uri != null) onImage(uri)
+                        uri != null
+                    }
+                }
+            }
+        }
+        Column(modifier = Modifier.contentReceiver(listener)) {
+            Text(if (hovering) "üstünde" else "bekliyor")
+            Box(modifier = Modifier.contentReceiver { content ->
+                if (content.source == TransferableContent.Source.Clipboard && content.hasMediaType(MediaType.HtmlText)) {
+                    onImage("html")
+                    return@contentReceiver null
+                }
+                content
+            }) {
+                BasicTextField(state, modifier = Modifier.width(300.dp).height(40.dp).testTag("alan"))
+            }
+            Text("metin ${state.text}")
+        }
+    }
+}
+
+fn content_receivers_as_compose_writes_them() {
+    let images: Rc<RefCell<Vec<String>>> = Rc::default();
+    let im = images.clone();
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let im = im.clone();
+            ImagePicker(move |uri: String| im.borrow_mut().push(uri));
+        }),
+        IntSize::new(400, 800),
+    );
+    let h = rule.host();
+    let field = rule.on_node_with_tag("alan").fetch_semantics_node().bounds_in_root();
+    let at = Offset::new(field.left + 10.0, field.top + 10.0);
+    let types: Vec<String> = vec!["image/png".into(), "text/plain".into()];
+    let items = vec![ClipItem::with_uri("content://resim/7"), ClipItem::with_text("yazı")];
+    let both = ClipEntry::with_metadata(items, ClipMetadata::of_offered(&types));
+    h.external_drag_entered(types);
+    h.external_drag_moved(at);
+    rule.wait_for_idle();
+    rule.on_node_with_text("üstünde").assert_exists();
+    h.external_drop(dropped(both), at);
+    rule.wait_for_idle();
+    assert_eq!(*images.borrow(), ["content://resim/7"]);
+    rule.on_node_with_text("metin yazı").assert_exists();
+    // HTML pasted: taken by the inner one, nothing pasted.
+    let p = platform(&rule);
+    *p.clipboard.borrow_mut() = Some(ClipEntry::with_html_text("kalın", "<b>kalın</b>"));
+    rule.on_node_with_tag("alan").perform_click();
+    rule.wait_for_idle();
+    rule.host().key_down(Key::V, KeyModifiers::Ctrl);
+    rule.host().key_up(Key::V, KeyModifiers::Ctrl);
+    rule.wait_for_idle();
+    assert_eq!(*images.borrow(), ["content://resim/7", "html"]);
+    rule.on_node_with_text("metin yazı").assert_exists();
+}
+
+// ---- ReceiveContentBasicSample's forms ----------------------------------------------------------------------------
+
 fn a_field_takes_pasted_images_through_its_receiver() {
     let images: Rc<RefCell<Vec<(i32, i32)>>> = Rc::default();
     let im = images.clone();
@@ -179,6 +256,7 @@ fn the_clipboard_from_a_coroutine_in_a_file() {
 }
 
 tests![
+    content_receivers_as_compose_writes_them,
     a_field_takes_pasted_images_through_its_receiver,
     a_box_takes_dropped_files,
     nested_receivers_in_a_file,

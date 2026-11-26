@@ -70,8 +70,15 @@ impl Gen<'_, '_> {
             // ((stage 14 WPB) a closure: `capture`)
             StmtKind::Decl(Decl::Function(f)) => self.local_function(f),
             StmtKind::Decl(Decl::Failed { .. }) => quote!(),
+            // ((stage 14 WPD) a function's local class: written beside it, `find_locals`; one it refused, its error)
+            StmtKind::Decl(d @ (Decl::Class(_) | Decl::Object(_))) if self.is_hoisted_local(d.loc()) => {
+                quote!()
+            }
             StmtKind::Decl(d) => {
-                let t = self.later(d.loc(), "a local class, object or type alias");
+                let t = self.later(
+                    d.loc(),
+                    "a local class in a local function, a block or a class's member, or a local type alias",
+                );
                 quote_spanned!(span=> #t;)
             }
             StmtKind::Assign { target, op, value } => self.assign(target, *op, value, s.loc),
@@ -332,6 +339,8 @@ impl Gen<'_, '_> {
                     Some(rt) => quote_spanned!(span=> : #rt),
                     None => quote!(),
                 };
+                // (a drawing object lent mutably held by the `val`: a `&mut` itself, reborrowed where given on)
+                let mut lent_mut = false;
                 let (value, ty) = match init {
                     PropertyInit::Value(e) => {
                         // (a lambda given a function type: its parameters (and receiver) of that type's, as Kotlin
@@ -382,6 +391,8 @@ impl Gen<'_, '_> {
                             && !o.ty.is_nullable()
                             && o.ty != Ty::Unknown;
                         let value_ty = o.ty.clone();
+                        lent_mut = o.kind == OutKind::RefMut
+                            && matches!(&value_ty, Ty::Named(n, _) if super::types::lent_mut_type(n));
                         let v = self.finish(o, Want::default(), e.loc);
                         // ((stage 14 WPA) a case of a sealed class, a class's value of an interface or of `Any`: the
                         // declared type's — `val r: Outcome<Int> = Outcome.Failure("x")`)
@@ -431,7 +442,10 @@ impl Gen<'_, '_> {
                 if let Some(l) = self.scopes.last_mut().and_then(|s| s.get_mut(&n.name)) {
                     l.shared_closure = shared_closure;
                     l.deferred = deferred;
+                    l.mut_ref = lent_mut;
                 }
+                // (a `&mut` held is changed through without being `mut` itself; a declared type is the value's)
+                let (m, annot) = if lent_mut { (quote!(), quote!()) } else { (m, annot) };
                 quote_spanned!(span=> let #m #i #annot #value;)
             }
         }
@@ -677,6 +691,31 @@ impl Gen<'_, '_> {
         let kt = self.kt(span);
         let l = self.label(label);
         let it_ty = self.peek_ty(iterable);
+        // ((stage 14 WPD) a channel's elements, suspending for each until it is closed: Kotlin's ChannelIterator)
+        if let Ty::Named(n, args) = &it_ty
+            && n == "Channel"
+            && self.in_async
+            && let Binding::Name(name) = binding
+        {
+            let ch = self.expr(iterable).ts;
+            let elem = ty.map(|t| self.ty_of(t)).or_else(|| args.first().cloned()).unwrap_or(Ty::Unknown);
+            self.push_scope();
+            let rust = snake(&name.name);
+            let i = self.name_ident(&rust, name.loc);
+            self.declare_at(name, rust, LocalKind::Val, elem);
+            let cx = LoopCx { label: label.map(|l| l.name.clone()), ..Default::default() };
+            let named = cx.named.clone();
+            self.loops.push(cx);
+            let b = self.block_inner(body, Tail::Unit);
+            self.loops.pop();
+            self.pop_scope();
+            let l = if l.is_empty() { self.loop_label(None, &named, span) } else { l };
+            let c = self.fresh("channel", span);
+            return quote_spanned! {span=>
+                let #c = ::core::clone::Clone::clone(&#ch);
+                #l while let ::core::option::Option::Some(#i) = #c.receive().await { #b }
+            };
+        }
         let is_range = matches!(it_ty, Ty::Range(_))
             || matches!(&iterable.kind, ExprKind::Infix { name, .. } if matches!(name.name.as_str(), "until" | "downTo" | "step"))
             || matches!(&iterable.kind, ExprKind::Binary { op: BinaryOp::RangeTo | BinaryOp::RangeUntil, .. });
@@ -1038,7 +1077,15 @@ impl Gen<'_, '_> {
                     None => self.value(c),
                 }
             }
-            _ => self.value(c),
+            _ => {
+                // ((stage 14 WPD) an object's value in it, `currentTab == Home` (`Home {}`): parenthesized, a
+                // braced struct being no `if`'s condition as it is)
+                let v = self.value(c);
+                let braced = v.clone().into_iter().any(
+                    |t| matches!(t, proc_macro2::TokenTree::Group(g) if g.delimiter() == proc_macro2::Delimiter::Brace),
+                );
+                if braced { quote_spanned!(span=> (#v)) } else { v }
+            }
         }
     }
 
@@ -1137,8 +1184,13 @@ impl Gen<'_, '_> {
                 let body = self.braced(&b.body, tail);
                 self.pop_scope();
                 let kw = if k == 0 { quote_spanned!(span=> if) } else { quote_spanned!(span=> else if) };
+                // ((stage 14 WPD) a branch not reading the subject: `_`)
+                let c = unused_narrowings(
+                    quote_spanned!(span=> let ::core::option::Option::Some(#i) = #kt::KtAs::<#target>::kt_as_safe(&#s)),
+                    &body,
+                );
                 chain.extend(quote_spanned! {span=>
-                    #kw let ::core::option::Option::Some(#i) = #kt::KtAs::<#target>::kt_as_safe(&#s) #body
+                    #kw #c #body
                 });
                 continue;
             }
@@ -1366,14 +1418,30 @@ pub(crate) fn unused_narrowings(condition: TokenStream, branch: &TokenStream) ->
             && matches!(&tokens[k + 12], TokenTree::Ident(i) if i == "Some")
             && matches!(&tokens[k + 13], TokenTree::Group(_))
             && matches!(&tokens[k + 14], TokenTree::Punct(p) if p.as_char() == '=');
+        // ((stage 14 WPD) its value the same local's clone: not a smart cast's `KtAs::<T>::kt_as_safe(&x)`)
         if narrowing
             && let TokenTree::Group(g) = &tokens[k + 13]
             && let [TokenTree::Ident(x)] = g.stream().into_iter().collect::<Vec<_>>().as_slice()
+            && matches!(&tokens[k + 15], TokenTree::Ident(v) if v == x)
+            && matches!(&tokens[k + 17], TokenTree::Ident(c) if c == "clone")
             && !mentions(branch, &x.to_string())
         {
             let span = x.span();
             out.extend(quote_spanned!(span=> #x.is_some()));
             k += 19;
+            continue;
+        }
+        // ((stage 14 WPD) a smart cast whose value the branch doesn't read, `if (i is Press) open = true`: its `_`)
+        if narrowing
+            && let TokenTree::Group(g) = &tokens[k + 13]
+            && let [TokenTree::Ident(x)] = g.stream().into_iter().collect::<Vec<_>>().as_slice()
+            && !mentions(branch, &x.to_string())
+        {
+            out.extend(tokens[k..k + 13].iter().cloned());
+            let mut under = proc_macro2::Group::new(g.delimiter(), quote_spanned!(x.span()=> _));
+            under.set_span(g.span());
+            out.push(TokenTree::Group(under));
+            k += 14;
             continue;
         }
         out.push(tokens[k].clone());

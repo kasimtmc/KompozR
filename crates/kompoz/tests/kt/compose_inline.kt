@@ -13,7 +13,7 @@ fun Linked(go: Boolean, state: TextFieldState, log: (String) -> Unit) {
         if (!go) return@LaunchedEffect
         val text = buildAnnotatedString {
             withStyle(SpanStyle(fontSize = 12.sp)) { append("a") }
-            withLink(LinkAnnotation.url("https://kompoz.dev")) {
+            withLink(LinkAnnotation.Url("https://kompoz.dev")) {
                 delay(100)
                 append("b")
             }

@@ -1160,44 +1160,6 @@ mod carousel_kt {
     // KompozR's (Compose Multiplatform's): tests/composeResources' `Res`, which the Kotlin syntax maps `R.*` to.
     compose_resources!(dir = "tests/composeResources");
 
-    /// The samples' local `data class CarouselItem(val id: Int, @DrawableRes val imageResId: Int, @StringRes val
-    /// contentDescriptionResId: Int)` (and the multi-aspect sample's, with `val mainAxisSize: Dp`), its resource
-    /// ids CMP's resources: Kotlin's data classes come with stage 14. Its properties are getters, as Kotlin's.
-    #[derive(Clone, PartialEq, Debug)]
-    pub struct CarouselItem {
-        id: i32,
-        image_res_id: DrawableResource,
-        content_description_res_id: StringResource,
-        main_axis_size: Dp,
-    }
-
-    #[named(type)]
-    pub fn CarouselItem(
-        id: i32,
-        image_res_id: DrawableResource,
-        content_description_res_id: StringResource,
-        #[default(Dp(0.0))] main_axis_size: Dp,
-    ) -> CarouselItem {
-        CarouselItem { id, image_res_id, content_description_res_id, main_axis_size }
-    }
-
-    impl CarouselItem {
-        // (Kotlin's property, which the samples don't read)
-        #[allow(dead_code)]
-        pub fn id(&self) -> i32 {
-            self.id
-        }
-        pub fn image_res_id(&self) -> DrawableResource {
-            self.image_res_id.clone()
-        }
-        pub fn content_description_res_id(&self) -> StringResource {
-            self.content_description_res_id.clone()
-        }
-        pub fn main_axis_size(&self) -> Dp {
-            self.main_axis_size
-        }
-    }
-
     kompoz_file!("tests/kt/carousel.kt");
 }
 

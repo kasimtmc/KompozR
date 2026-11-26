@@ -3,7 +3,8 @@
 //! entries and their decorators' pops, the saveable state holder's and the ViewModel store's decorators, results
 //! between screens; scenes and scene strategies, the scene state, NavDisplay's navigations, pops and predictive back
 //! (seeking, cancelled, completed), its transitions (its own, an entry's, a scene's), z-order, lifecycles, overlay
-//! (dialog) scenes, shared entries; and the runtime and ui samples, in Rust (their Kotlin classes as Rust twins).
+//! (dialog) scenes, shared entries; back stacks saved by kotlinx's serializers (a serializers module, a configuration);
+//! and the runtime and ui samples in Rust's syntax (the Kotlin syntax's: crates/kompoz/tests/kotlin_navigation3.rs).
 
 #![allow(non_snake_case)]
 
@@ -1212,6 +1213,39 @@ fn nav_back_stack_samples() {
     let closed = NavBackStack::<SealedKey>::new(Vec::new());
     let saver: Saver<NavBackStack<SealedKey>> = serializer::<NavBackStack<SealedKey>>();
     assert!(saver.restore(&saver.save(&closed)).unwrap().is_empty());
+    // NavBackStackSerializer_withSerializersModule: a class this process never saw (no key of it saved or put in a
+    // back stack, not registered) read back by the configuration's module alone (its serializer, `Unseen.serializer()`;
+    // its class, `subclass(Unseen::class)`), not without it.
+    #[derive(Saveable, Clone, PartialEq, Debug)]
+    struct Unseen {
+        id: i32,
+    }
+    impl NavKey for Unseen {}
+    #[derive(Saveable, Clone, PartialEq, Debug)]
+    struct UnseenToo;
+    impl NavKey for UnseenToo {}
+    let saved = |name: &str, value: SavedValue| SavedValue::map([("type", SavedValue::from(name)), ("value", value)]);
+    let unseen = SavedValue::list([
+        saved(std::any::type_name::<Unseen>(), Unseen { id: 7 }.save()),
+        saved(std::any::type_name::<UnseenToo>(), UnseenToo.save()),
+    ]);
+    let stack_serializer = nav_back_stack_serializer();
+    assert!(stack_serializer.restore(&unseen).is_none());
+    let module = kompoz_lifecycle::SerializersModule(|m| {
+        m.polymorphic(kompoz_lifecycle::SerialClass::<dyn NavKey>::of(), |p| {
+            p.subclass_serializer(serializer::<Unseen>());
+            p.subclass(kompoz_lifecycle::SerialClass::<UnseenToo>::of());
+        })
+    });
+    assert_eq!(module.subclass_names::<dyn NavKey>().len(), 2);
+    let configuration = named_args!(kompoz_lifecycle::SavedStateConfiguration(|c| c.set_serializers_module(module)));
+    let configured = kompoz_lifecycle::configured_saver(stack_serializer.clone(), &configuration);
+    let back = configured.restore(&unseen).expect("read by the module");
+    assert_eq!(back.to_list(), [key(Unseen { id: 7 }), key(UnseenToo)]);
+    // (encoded and decoded with the configuration: kotlinx's `encodeToSavedState(serializer, value, configuration)`)
+    let encoded = kompoz_lifecycle::encode_to_saved_state_configured(&stack_serializer, &back, &configuration);
+    let decoded = kompoz_lifecycle::decode_from_saved_state_configured(&stack_serializer, &encoded, &configuration);
+    assert_eq!(decoded.to_list(), back.to_list());
 }
 
 fn main() {

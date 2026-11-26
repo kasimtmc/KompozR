@@ -3,10 +3,12 @@
 // levitated as a dialog, the supporting pane scaffold, the preferred size modifiers, the drag handle, and the
 // navigable list-detail scaffold of the back behaviors.
 //
-// What KompozR's Kotlin syntax doesn't take yet stands in Rust beside this file (kotlin_adaptive.rs), as written:
-// the generic `reflowAdaptStrategySample<T>()` and `levitateAsDialogSample<T>()` (generic functions) and the
-// Parcelable `NavItemData` (classes) come with stage 14. (The indentation of NavigableListDetailPaneScaffoldSample's
-// two composables is the earlier stand-in's, the source's lines otherwise.)
+// Rust beside this file (kotlin_adaptive.rs), as written: the samples' `private data class NavItemData(…) :
+// Parcelable` — android.os's Parcel and Parcelable.Creator: stage 15, the Android platform —, saved as a desktop
+// navigator's keys are (Saveable); and the generic `reflowAdaptStrategySample<T>()` and `levitateAsDialogSample<T>()`,
+// whose `T` needs the navigator's bound (`NavigatorContentKey`), which the Kotlin syntax doesn't tell from a generic
+// call yet. (The indentation of NavigableListDetailPaneScaffoldSample's two composables is the earlier stand-in's,
+// the source's lines otherwise.)
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Preview
@@ -384,10 +386,8 @@ fun NavigableListDetailPaneScaffoldSample() {
     }
 }
 
-// (Compose's receiver is `ThreePaneScaffoldNavigator<*>`: a star projection comes with stage 14; the samples'
-// navigators are all of NavItemData.)
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
-private fun ThreePaneScaffoldNavigator<NavItemData>.isExpanded(role: ThreePaneScaffoldRole) =
+private fun ThreePaneScaffoldNavigator<*>.isExpanded(role: ThreePaneScaffoldRole) =
     scaffoldValue[role] == PaneAdaptedValue.Expanded
 
 @Composable

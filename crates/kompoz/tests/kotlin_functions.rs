@@ -3,9 +3,8 @@
 //! `operator_functions`, `extension_properties`, `vararg_parameters`, `lateinit_properties`,
 //! `try_as_a_value_and_throw`, `overloads_by_arguments_and_types`, `top_level_vars_and_delegated_properties`,
 //! `exceptions_as_values`, `coroutines_await_what_suspends`), ported by name: the same Kotlin through `kompoz!`, the
-//! same lines expected (`coroutines_await_what_suspends`' produceState written as KompozR's takes its block, a WPD
-//! note saying so). Then the package's other forms as they run: local and anonymous functions, callable references,
-//! a `var` lambdas share, jumps out of inline lambdas, an inline function's suspending twin, a coroutine's
+//! same lines expected. Then the package's other forms as they run: local and anonymous functions, callable
+//! references, a `var` lambdas share, jumps out of inline lambdas, an inline function's suspending twin, a coroutine's
 //! `catch (e: CancellationException)`.
 //!
 //! Kotlin's exceptions are Rust's unwinding panics (`kt::Throwable`): these tests, as every program using Kotlin's
@@ -501,9 +500,7 @@ kompoz! {
 
     @Kompozable
     fun Awaits() {
-        // (WPD: Compose's `val produced by produceState(0, 21) { value = slowDouble(21) }` once KompozR's produceState gives a
-        // State and runs its block on a ProduceStateScope; its value and the state it sets meanwhile)
-        val produced = produceState(0, 21) { it.value = slowDouble(21) }
+        val produced by produceState(0, 21) { value = slowDouble(21) }
         var both by remember { mutableStateOf("…") }
         val scope = rememberCoroutineScope()
         LaunchedEffect(Unit) {

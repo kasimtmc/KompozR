@@ -185,6 +185,26 @@ fn unreserved(c: char) -> bool {
     c.is_ascii_alphanumeric() || "_-!.~'()*".contains(c)
 }
 
+/// Android's `android.net.Uri`'s static helpers, as Android code calls them (NavigationSamples' WrappedUUIDNavType:
+/// `Uri.encode(value.uuid.toString())`); a URI itself is a [`NavUri`].
+pub struct Uri;
+
+impl Uri {
+    /// [`encode`]'s.
+    ///
+    /// Kotlin: `Uri.encode(s: String, allow: String? = null)`
+    pub fn encode(s: &str, allow: Option<&str>) -> String {
+        encode(s, allow)
+    }
+
+    /// [`decode`]'s.
+    ///
+    /// Kotlin: `Uri.decode(s: String)`
+    pub fn decode(s: &str) -> String {
+        decode(s)
+    }
+}
+
 /// `s` with what a URI can't hold as it is written `%XX` (Android's `Uri.encode(s, allow)`: all but letters,
 /// digits, `_-!.~'()*` and the characters of `allow`; UTF-8 bytes, upper-case hex).
 pub fn encode(s: &str, allow: Option<&str>) -> String {

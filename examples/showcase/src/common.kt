@@ -1,10 +1,32 @@
 // What the showcase's parts share (the C++ showcase's showcase.hpp and common.cpp): a section card, a desktop note,
 // the theme animation, test colors, and the switch that outlines what recomposes.
 
+// The screens, as type-safe routes (named, so the addresses read "item/42", "list/all"): the C++ showcase's
+// `namespace routes` (a package has no namespace of its own: `Home`, not the C++'s `routes::Home()`).
+@Serializable @SerialName("home") object Home
+
+// The list and its items: a nested graph.
+@Serializable @SerialName("list") object ListGraph
+
+@Serializable @SerialName("list/all") object ListAll
+
+@Serializable @SerialName("item") data class Item(val n: Int)
+
+@Serializable @SerialName("components") object Components
+
+@Serializable @SerialName("material") object Material
+
+// BottomSheetScaffold over a map.
+@Serializable @SerialName("places") object Places
+
 // Whether the recompose highlighter is on (the eye in the app bar). The C++ showcase's `traced` modifier, which
 // outlines a node with the highlighter while it is on, is used by the screens that come with stage 16 (and the
 // highlighter, Compose's recomposeHighlighter snippet, with them).
 val LocalShowRekompozitions = compositionLocalOf { false }
+
+// Where the theme's colors come from: the app's own scheme, the system's accent color, or the
+// wallpaper. The library offers all three; the app (here its user) picks.
+enum class ColorSource { App, System, Wallpaper }
 
 // Every color animates when the theme changes, each its own animation (their calls in a fixed order).
 @Composable

@@ -685,8 +685,10 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
             if ext.is_some() {
                 m.vis = Visibility::Inherited;
                 let docs = m.attrs.iter().filter(|a| a.path().is_ident("doc"));
+                // (its `#[allow(…)]`s too: `async_fn_in_trait` of a suspending extension function)
+                let allows = m.attrs.iter().filter(|a| a.path().is_ident("allow"));
                 let sig = declaration(&m.sig);
-                decls.push(quote!(#(#docs)* #sig;));
+                decls.push(quote!(#(#docs)* #(#allows)* #sig;));
             }
             items.push(ImplItem::Fn(m));
             continue;

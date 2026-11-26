@@ -179,4 +179,15 @@ fn values_take_or_else_suspending() {
     let scale = ScaleFactor::new(2.0, 3.0);
     assert_eq!(block_on(ScaleFactor::Unspecified.take_or_else_async(async || scale)), scale);
     assert_eq!(block_on(scale.take_or_else_async(async || ScaleFactor::new(1.0, 1.0))), scale);
+    // DpOffset's and DpSize's (Compose's `DpOffset.takeOrElse`, `DpSize.takeOrElse`), plain and suspending
+    let at = DpOffset(1.dp(), 2.dp());
+    assert_eq!(DpOffset::Unspecified.take_or_else(|| at), at);
+    assert_eq!(at.take_or_else(|| DpOffset::Zero), at);
+    assert!(DpOffset::Unspecified.is_unspecified() && !at.is_unspecified());
+    assert_eq!(block_on(DpOffset::Unspecified.take_or_else_async(async || at)), at);
+    let size = DpSize(3.dp(), 4.dp());
+    assert_eq!(DpSize::Unspecified.take_or_else(|| size), size);
+    assert_eq!(size.take_or_else(|| DpSize::Zero), size);
+    assert!(DpSize::Unspecified.is_unspecified() && !size.is_unspecified());
+    assert_eq!(block_on(size.take_or_else_async(async || DpSize::Zero)), size);
 }

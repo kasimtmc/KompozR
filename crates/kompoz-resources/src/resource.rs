@@ -46,6 +46,10 @@ impl Resource {
     pub fn items(&self) -> &[ResourceItem] {
         &self.items
     }
+    /// Kotlin's `hashCode()`: its id's (Kotlin's String hash, of its UTF-16 units).
+    pub fn hash_code(&self) -> i32 {
+        self.id.encode_utf16().fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(i32::from(c)))
+    }
 }
 
 impl PartialEq for Resource {
@@ -81,6 +85,14 @@ macro_rules! resources {
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 write!(f, "{}({})", stringify!($name), self.resource.id)
+            }
+        }
+
+        /// Kotlin's `toString()`: Resource has none of its own, so its class's name and its `hashCode()` (its id's)
+        /// in hex (`DrawableResource@6a5c2d1f`).
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}@{:x}", stringify!($name), self.resource.hash_code() as u32)
             }
         }
 

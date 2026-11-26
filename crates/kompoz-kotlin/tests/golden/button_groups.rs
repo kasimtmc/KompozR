@@ -22,7 +22,7 @@ pub fn Groups(source: MutableInteractionSource, bold: bool) {
             IconButton(
                 || {
                     if __kz_menu_state.is_showing() {
-                        __kz_menu_state.dismiss();
+                        __kz_menu_state.r#dismiss();
                     } else {
                         __kz_menu_state.show();
                     }
@@ -73,7 +73,7 @@ pub fn Groups(source: MutableInteractionSource, bold: bool) {
                             Text("Özel");
                         },
                         on_click = || {
-                            __kz_state.dismiss();
+                            __kz_state.r#dismiss();
                         },
                     );
                 },

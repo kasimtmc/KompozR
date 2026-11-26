@@ -368,6 +368,12 @@ impl Gen<'_, '_> {
             // (a `String` parameter takes a `String`: a literal made one; a number parameter Kotlin's number)
             for (k, a) in args.iter().enumerate() {
                 vals.push(match (a.value, params.get(k)) {
+                    // ((stage 14 WPD) another text, a `CharSequence` parameter given an AnnotatedString (or a value of a
+                    // type not told): its `String`)
+                    (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() && other_text(&self.peek_ty(e)) => {
+                        let v = self.value(e);
+                        quote_spanned!(span=> ::core::convert::Into::<::std::string::String>::into(#v))
+                    }
                     (ArgValue::Expr(e), Some(Ty::String)) if !a.value.is_lambda() => {
                         self.value_want(e, Want { str_ok: false, any: None, some: false, shared: None, result: false })
                     }
@@ -488,8 +494,21 @@ impl Gen<'_, '_> {
                 return self.emit(&c, Target::Method(recv), args, loc, &n.name);
             }
         }
-        // The file's own function (one of its overloads, as Kotlin chooses).
-        if self.file.function(&n.name).is_some() {
+        // The file's own function (one of its overloads, as Kotlin chooses); ((stage 14 WPD) of a name that is a
+        // class's too, the class's constructor where the arguments are for none of them)
+        let class_ctor = self.class_beside_fn(&n.name) && {
+            let named: Vec<&str> = args.iter().filter_map(|a| a.name.map(|x| x.name.as_str())).collect();
+            let positional: Vec<Option<&Expr>> = args
+                .iter()
+                .filter(|a| a.name.is_none())
+                .map(|a| match a.value {
+                    ArgValue::Expr(e) if !a.spread => Some(e),
+                    _ => None,
+                })
+                .collect();
+            !self.fits_file_fn(&n.name, &named, &positional, args.len())
+        };
+        if self.file.function(&n.name).is_some() && !class_ctor {
             let candidates: Vec<FileFn> =
                 self.file.functions[&n.name].iter().filter(|f| f.receiver.is_none()).cloned().collect();
             let c = match self.choose_file_fn(&candidates, args) {
@@ -540,7 +559,13 @@ impl Gen<'_, '_> {
                 let item = c.item.expect("an index item");
                 let name = ident(&c.rust, nspan);
                 let path = if item.krate == "kompoz_runtime" && item.module.starts_with("kt") {
-                    quote_spanned!(span=> #kt::#name)
+                    // ((stage 14 WPD) a kt type's constructor: `kt::SimpleDateFormat::with_locale`)
+                    if item.owner.is_empty() {
+                        quote_spanned!(span=> #kt::#name)
+                    } else {
+                        let owner = ident(item.owner, nspan);
+                        quote_spanned!(span=> #kt::#owner::#name)
+                    }
                 } else if !item.owner.is_empty() {
                     let owner = ident(item.owner, nspan);
                     quote_spanned!(span=> #owner::#name)
@@ -771,11 +796,8 @@ impl Gen<'_, '_> {
         let span = self.span(loc);
         let nspan = self.span(name.loc);
         let kt = self.kt(span);
-        // (a user's object's or companion's member: a method of the object's value)
-        if !safe && let Some((v, rust)) = self.user_object_value(receiver, &name.name, self.span(receiver.loc)) {
-            return self.method_on(Out::plain(v, Ty::named(&rust)), Some(receiver), name, args, loc);
-        }
-        // (a nested class's constructor: `Catalog.Entry(…)`, the constructor of Kotlin's qualified name)
+        // (a nested class's constructor: `Catalog.Entry(…)`, the constructor of Kotlin's qualified name — an object's
+        // too, before its members: `NavBackStackSerializerSamples.Home("abc")`)
         let whole = Expr {
             kind: ExprKind::Member { receiver: Box::new(receiver.clone()), safe, name: name.clone() },
             loc: name.loc,
@@ -786,6 +808,10 @@ impl Gen<'_, '_> {
         {
             let n = Ident { name: c.kotlin.clone(), backticked: false, loc: name.loc };
             return self.name_call(&n, args, loc);
+        }
+        // (a user's object's or companion's member: a method of the object's value)
+        if !safe && let Some((v, rust)) = self.user_object_value(receiver, &name.name, self.span(receiver.loc)) {
+            return self.method_on(Out::plain(v, Ty::named(&rust)), Some(receiver), name, args, loc);
         }
         // `Type.f(…)`, `Object.f(…)`, `Modifier.padding(…)`.
         if let Some(q) = self.qualifier(receiver) {
@@ -802,6 +828,18 @@ impl Gen<'_, '_> {
             // `<dyn TextAutoSize>::step_based(…)`)
             let (items, companion) = associated_functions(&q, &name.name);
             let owner = if companion { quote_spanned!(qspan=> <dyn #qi>) } else { quote_spanned!(qspan=> #qi) };
+            // ((stage 14 WPD) a free function Kotlin names qualified, a companion's of an interface of associated
+            // types: `DeepLinkMatcher.mimeTypeFilter(…)`, `mime_type_filter(…)`)
+            let free: Vec<&'static crate::index::Item> = lookup(&format!("{q}.{}", name.name))
+                .iter()
+                .filter(|i| i.owner.is_empty() && i.kind == Kind::Function)
+                .collect();
+            if items.is_empty()
+                && let Some(c) = (!free.is_empty()).then(|| self.choose(&free, args, loc)).flatten()
+            {
+                let m = ident(&c.rust, nspan);
+                return self.emit(&c, Target::Path(quote_spanned!(span=> #m), c.rust.clone()), args, loc, &name.name);
+            }
             if let Some(c) = (!items.is_empty()).then(|| self.choose(&items, args, loc)).flatten() {
                 let m = ident(&c.rust, nspan);
                 return self.emit(
@@ -891,18 +929,60 @@ impl Gen<'_, '_> {
             && let Some(l) = self.local(&name.name)
         {
             let f = ident(&l.rust, span);
-            let (ret, suspend) = match &l.ty {
-                Ty::Fun(ft) => (ft.ret.clone(), ft.suspend),
-                _ => (Ty::Unknown, false),
+            let (ret, suspend, params) = match &l.ty {
+                Ty::Fun(ft) => (ft.ret.clone(), ft.suspend, ft.params.clone()),
+                _ => (Ty::Unknown, false, Vec::new()),
             };
             let r = self.finish(recv, Want::default(), loc);
-            let vals: Vec<TokenStream> = args.iter().map(|a| self.loose_arg(a)).collect();
+            // ((stage 14 WPD) a `String`/`CharSequence` parameter given an AnnotatedString (or a value of a type not
+            // told): its `String`; the closure's receiver its first parameter)
+            let first = params.len().saturating_sub(args.len());
+            let vals: Vec<TokenStream> = args
+                .iter()
+                .enumerate()
+                .map(|(k, a)| match a.value {
+                    ArgValue::Expr(e)
+                        if params.get(first + k) == Some(&Ty::String)
+                            && !a.value.is_lambda()
+                            && other_text(&self.peek_ty(e)) =>
+                    {
+                        let v = self.value(e);
+                        quote_spanned!(span=> ::core::convert::Into::<::std::string::String>::into(#v))
+                    }
+                    _ => self.loose_arg(a),
+                })
+                .collect();
             let call = quote_spanned!(span=> #f(#r #(, #vals)*));
             if suspend {
                 let a = self.awaited(Some(&name.name), loc);
                 return Out::plain(quote_spanned!(span=> #call #a), ret);
             }
             return Out::plain(call, ret);
+        }
+        // ((stage 14 WPD) a function-typed property of the user's class called as Kotlin calls it —
+        // `callback.preparePop()` of `class SampleCallbackHelper(val preparePop: () -> Unit, …)` —: its value's call)
+        if let Some(owner) = recv.ty.non_null().owner().map(str::to_string)
+            && self.user_class_rust(&owner).is_some()
+            && !members_of(&owner, &name.name).any(|i| i.kind == Kind::Method)
+            && let Some(p) = members_of(&owner, &name.name).find(|i| i.kind == Kind::Property)
+            && let Some(ft) = match Ty::from_rust(&plain_type_text(p.ret).replace("dyn", "dyn ")) {
+                Ty::Fun(ft) => Some(ft),
+                Ty::Named(n, a) if (n == "Rc" || n == "Arc") && a.len() == 1 => match &a[0] {
+                    Ty::Fun(ft) => Some(ft.clone()),
+                    _ => None,
+                },
+                _ => None,
+            }
+        {
+            let getter = ident(p.rust, span);
+            let r = recv.ts;
+            let vals: Vec<TokenStream> = args.iter().map(|a| self.loose_arg(a)).collect();
+            let call = quote_spanned!(span=> (#r.#getter())(#(#vals),*));
+            if ft.suspend {
+                let a = self.awaited(Some(&name.name), loc);
+                return Out::plain(quote_spanned!(span=> #call #a), ft.ret.clone());
+            }
+            return Out::plain(call, ft.ret.clone());
         }
         // ((stage 14 WPB) `f.invoke(x)` of a function value (`onClick?.invoke()`): its call)
         if name.name == "invoke"
@@ -1425,9 +1505,10 @@ impl Gen<'_, '_> {
                 if a.value.is_lambda() != lambda_param && !p.vararg {
                     // (a lambda to a non-function parameter, or the reverse: a function value is one, and any value
                     // can be a fun interface's — `easing = LinearEasing` to an `impl Easing`)
+                    // ((stage 14 WPD) an `impl FnOnce(…)`/`FnMut(…)` isn't one: `navigate(route, builder)` isn't
+                    // `navigate(route, navOptions)`)
                     let fun_interface = p.lambda.is_some()
-                        && !p.ty.contains("Fn(")
-                        && !p.ty.contains("Fn<")
+                        && !["Fn(", "FnMut(", "FnOnce(", "Fn<"].iter().any(|f| p.ty.contains(f))
                         && !p.ty.trim_start().starts_with("fn(");
                     // (WP5: `null` to a nullable slot — `sheetDragHandle = null`)
                     // (`null` to a nullable function type's parameter: `onClick = null`; a shared closure is a
@@ -1803,7 +1884,14 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> #p #fish(#(#vals),*) #await_)
             }
             Target::Method(r) => {
-                let name = ident(&rust, span);
+                // (a plain method of a name another type's `#[named]` method has — Canvas's `drawRect(rect, paint)`
+                // beside DrawScope's —: raw, which the macros leave as it is, not taking it for that one's builder)
+                let name = match c.item {
+                    Some(i) if !c.builder && !i.has(crate::index::flags::NAMED) && named_method(&rust) => {
+                        proc_macro2::Ident::new_raw(&rust, span)
+                    }
+                    _ => ident(&rust, span),
+                };
                 quote_spanned!(span=> #r.#name #fish(#(#vals),*) #await_)
             }
             Target::Ufcs(t, r) => {
@@ -2050,6 +2138,27 @@ impl Gen<'_, '_> {
         // (Kotlin's values of an interface — a vararg's `NavKey`s, a list's `SceneStrategy`s —: each concrete one made the
         // shared trait object Rust holds them as)
         let shared = if collection { self.shared_elem.take() } else { shared_object(&el.ty) };
+        // ((stage 14 WPD) a generic vararg given values of several of the user's classes: of the API interface they
+        // share, its shared trait object — Kotlin's `T` inferred as their common supertype; a list's too, `listOf(parent,
+        // article)`)
+        let shared = shared.or_else(|| {
+            let generic = el.ty.trim().len() == 1 && el.ty.trim().chars().all(|c| c.is_ascii_uppercase());
+            if !generic {
+                return None;
+            }
+            let tys: Vec<Ty> = all
+                .iter()
+                .filter_map(|a| match a.value {
+                    ArgValue::Expr(e) => Some(self.peek_ty(e)),
+                    _ => None,
+                })
+                .collect();
+            let t = self.common_api_interface(&tys)?;
+            Some(match trait_object(&t) {
+                Some("Arc") => format!("Arc<dyn {t}>"),
+                _ => format!("Rc<dyn {t}>"),
+            })
+        });
         if !collection {
             let vals: Vec<TokenStream> = all
                 .iter()
@@ -2164,6 +2273,25 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> ::core::option::Option::Some(#made))
             } else {
                 made
+            };
+        }
+        // ((stage 14 WPD) A class reference to a serializers module's class (`polymorphic(NavKey::class)`,
+        // `subclass(Home::class)`): savedstate's `SerialClass::<T>::of()`, an interface's its trait object's
+        // (a nested class's too: `subclass(NavBackStackSamples.Home::class)`)
+        if let ArgValue::Expr(Expr { kind: ExprKind::CallableRef { receiver: Some(r), name }, .. }) = a.value
+            && name.name == "class"
+            && p.ty.contains("SerialClass")
+            && let Some(kotlin) = dotted(r)
+        {
+            let rust = self.user_class(&kotlin).map_or(kotlin.clone(), |c| c.rust.clone());
+            let t = ident(&rust, span);
+            // (an open class's: its own struct, `subclass(Home::class)` registering it)
+            let dyn_ = trait_object(&rust).is_some()
+                || self.user_class(&kotlin).is_some_and(|c| c.is_dyn() && c.shape == super::class::Shape::Interface);
+            return if dyn_ {
+                quote_spanned!(span=> SerialClass::<dyn #t>::of())
+            } else {
+                quote_spanned!(span=> SerialClass::<#t>::of())
             };
         }
         // (one value to a slice: an array of it, unless it is a list already — `floatArrayOf(8f, 6f)`)
@@ -2488,6 +2616,14 @@ impl Gen<'_, '_> {
                     }
                     None => made,
                 }
+            }
+            // ((stage 14 WPD) a shared closure given a closure's parameter, `Button(onClick = onClick)` of an
+            // `onClick: (() -> Unit)?` smart-cast: a closure calling it)
+            Ty::Fun(f) if f.shared && !nullable_arg && p.ty.trim_start().starts_with("impl") && p.ty.contains("Fn") => {
+                let held = self.fresh("f", span);
+                let args: Vec<proc_macro2::Ident> =
+                    (0..f.params.len()).map(|k| quote::format_ident!("__a{k}", span = span)).collect();
+                quote_spanned!(span=> { let #held = #v; move |#(#args),*| #held(#(#args),*) })
             }
             _ => v,
         };
@@ -3082,6 +3218,15 @@ pub(crate) fn merge_elements(a: Ty, b: Ty) -> Ty {
 /// Whether the Rust type `inner` is a type Kotlin nests in `outer` (`PaneExpansionAnchorOffset`, Kotlin's
 /// `PaneExpansionAnchor.Offset`, in `PaneExpansionAnchor`): a subclass of the sealed class it is in, which Rust
 /// converts to it (`From`).
+/// A type's name as an expression writes it (`Home`, `NavBackStackSamples.Home`).
+fn dotted(e: &Expr) -> Option<String> {
+    match &e.kind {
+        ExprKind::Name(n) => Some(n.name.clone()),
+        ExprKind::Member { receiver, safe: false, name } => Some(format!("{}.{}", dotted(receiver)?, name.name)),
+        _ => None,
+    }
+}
+
 pub(crate) fn nested_in(inner: &str, outer: &str) -> bool {
     inner != outer
         && crate::index::kotlin_type(inner)
@@ -3171,6 +3316,23 @@ fn substitute_type_param(ty: &str, arg: &str) -> String {
         }
     }
     out
+}
+
+/// Whether some type of the API has a `#[named]` method of Rust name `rust` with a defaulted parameter (one the macros
+/// may rewrite into its builder, api-index.txt's).
+fn named_method(rust: &str) -> bool {
+    crate::index::ITEMS.iter().any(|i| {
+        i.rust == rust
+            && i.kind == crate::index::Kind::Method
+            && i.has(crate::index::flags::NAMED)
+            && i.params.iter().any(|p| matches!(p.default, crate::index::Default::Rust(_)))
+    })
+}
+
+/// Whether a value given a local function's `String` (Kotlin's `String` or `CharSequence`) parameter is a text of
+/// another type (an AnnotatedString), or of a type not told: given as `Into<String>` makes it.
+fn other_text(t: &Ty) -> bool {
+    matches!(t, Ty::Unknown) || matches!(t, Ty::Named(n, _) if n == "AnnotatedString")
 }
 
 #[cfg(test)]

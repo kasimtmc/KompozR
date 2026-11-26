@@ -14,24 +14,27 @@ fn diagnose(text: &str) -> Vec<String> {
     diagnose_at(text, 1).0
 }
 
-const LATER: &str = "isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)";
+const LATER: &str = "isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)";
 
 #[test]
-fn stage_14_constructs_at_their_positions() {
+fn stage_15_constructs_at_their_positions() {
     let text = "\
 annotation class A
+@JvmInline value class B(val x: Int)
 fun f(x: Int): Int {
     suspend fun g() = 1
 }
-fun g(x: String): Boolean = x is String
+sealed class C(val code: Int) : IllegalStateException(\"kod\")
 fun h() = listOf(1).map(::println)
+value class D(var x: Int)
 ";
     assert_eq!(
         diagnose(text),
         [
-            format!("1:1: an annotation class {LATER}"),
-            "6:5: write `h`'s return type: its expression's type isn't one KompozR can tell (`fun h(…): Type = …`)"
+            format!("6:14: a sealed class deriving from an exception class {LATER}"),
+            "7:5: write `h`'s return type: its expression's type isn't one KompozR can tell (`fun h(…): Type = …`)"
                 .to_string(),
+            "8:1: a value class has one property: its constructor's only parameter, a `val`".to_string(),
         ]
     );
 }
@@ -144,6 +147,30 @@ sealed class Problem(val code: Int) : IllegalStateException(\"x\")
     let d = diagnose(text);
     assert!(d[0].starts_with("2:13: a generic local function can't use the locals around it (`base`)"), "{d:?}");
     assert_eq!(d[1], format!("5:14: a sealed class deriving from an exception class {LATER}"));
+}
+
+#[test]
+fn what_local_classes_cant_be() {
+    // ((stage 14 WPD) Kotlin's rules: no local interfaces, enum classes or object declarations; no visibility)
+    let text = "\
+fun f(): Int {
+    interface Shown
+    enum class Side { L, R }
+    object Once
+    private class Hidden
+    class Kept(val n: Int)
+    return Kept(1).n
+}
+";
+    assert_eq!(
+        diagnose(text),
+        [
+            "2:15: an interface can't be local (Kotlin's rule)",
+            "3:16: an enum class can't be local (Kotlin's rule)",
+            "4:5: an object declaration can't be local (Kotlin's rule): an object expression can",
+            "5:5: a local class has no visibility (Kotlin's rule)",
+        ]
+    );
 }
 
 #[test]

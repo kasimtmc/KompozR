@@ -20,6 +20,7 @@ pub mod analysis;
 pub mod ast;
 pub mod codegen;
 pub mod diag;
+mod imports;
 pub mod index;
 pub mod lexer;
 pub mod module;
@@ -113,7 +114,8 @@ pub struct Translation {
 /// The Rust that `text` (Kotlin declarations; its offset 0 at `base`) becomes, spans from `spans`.
 pub fn translate(text: &str, base: Pos, spans: &dyn SpanMap, opts: &Options) -> Translation {
     let mut diags = Diagnostics::default();
-    let tokens = lexer::lex(text, base, &mut diags);
+    let mut tokens = lexer::lex(text, base, &mut diags);
+    imports::rename_imported_jvm_classes(&mut tokens);
     let file = parser::parse(&tokens, &mut diags);
     let cx = codegen::Context {
         spans,

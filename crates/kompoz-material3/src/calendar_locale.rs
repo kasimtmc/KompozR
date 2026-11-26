@@ -50,6 +50,14 @@ impl From<Locale> for CalendarLocale {
     }
 }
 
+/// (stage 14 WPD) Compose for desktop's `CalendarLocale` is `java.util.Locale`: the kt shims' one (Kotlin's `Locale`
+/// in a file importing `java.util.Locale`, `Locale("he")`) is one.
+impl From<kompoz_runtime::kt::JavaLocale> for CalendarLocale {
+    fn from(locale: kompoz_runtime::kt::JavaLocale) -> CalendarLocale {
+        CalendarLocale { locale: locale.icu_locale() }
+    }
+}
+
 impl fmt::Debug for CalendarLocale {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Java's `Locale.toString` writes `tr_TR`: the tag is what tells one apart here.

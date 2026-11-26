@@ -545,6 +545,15 @@ impl Gen<'_, '_> {
         {
             return t.clone();
         }
+        // ((stage 14 WPD) of the type parameters of the generic type whose method takes the lambda:
+        // `&dyn MatchResultOf<T>` of a `UriDeepLinkMatcher<Article>`'s `withBackStack`)
+        if let Some((_, Ty::Named(n, a))) = &self.elem_hint
+            && let Some(ps) = crate::index::generics(n).filter(|ps| ps.len() == a.len() && !ps.is_empty())
+        {
+            let binds: super::resolve::TypeBinds = ps.iter().zip(a).map(|(p, t)| (p.to_string(), t.clone())).collect();
+            // (a trait object's: the trait's type, `MatchResultOf<Article>`)
+            return Ty::from_rust_bound(bare.strip_prefix("dyn ").unwrap_or(bare), &binds);
+        }
         Ty::from_rust(text)
     }
 
@@ -577,7 +586,7 @@ impl Gen<'_, '_> {
 }
 
 /// Whether a type's text names a type parameter of the function's (a single capital letter: `Config<T>`).
-fn names_type_parameter(text: &str) -> bool {
+pub(crate) fn names_type_parameter(text: &str) -> bool {
     text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .any(|w| w.len() == 1 && w.chars().all(|c| c.is_ascii_uppercase()))
 }
@@ -594,15 +603,17 @@ impl Gen<'_, '_> {
         }
         let tokens = text.parse::<TokenStream>().ok()?;
         // (the function's type parameters, `T`, left to inference: `Box<dyn FnMut(&Animatable<_, _>)>` still tells
-        // the closure what its parameter is)
-        Some(respan(std_paths(type_params_inferred(tokens), &self.cx.paths.ui), span))
+        // the closure what its parameter is; a class of the crate of a one-letter name, `entry<A>`'s, is its own)
+        let own: Vec<String> =
+            words().filter(|w| w.len() == 1 && self.user_class(w).is_some()).map(str::to_string).collect();
+        Some(respan(std_paths(type_params_inferred(tokens, &own), &self.cx.paths.ui), span))
     }
 }
 
 /// `tokens` with a type parameter (a single capital letter) written `_`, a named lifetime `'_` and a `for<…>`
 /// left out (a closure's elided lifetimes are higher-ranked): what a closure's type can be written as where the
 /// function's generics aren't known.
-fn type_params_inferred(tokens: TokenStream) -> TokenStream {
+fn type_params_inferred(tokens: TokenStream, own: &[String]) -> TokenStream {
     use proc_macro2::{Group, Ident, Punct, Spacing, TokenTree};
     let all: Vec<TokenTree> = tokens.into_iter().collect();
     let mut out: Vec<TokenTree> = Vec::new();
@@ -651,13 +662,13 @@ fn type_params_inferred(tokens: TokenStream) -> TokenStream {
             TokenTree::Ident(i)
                 if {
                     let w = i.to_string();
-                    w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())
+                    w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase()) && !own.contains(&w)
                 } =>
             {
                 out.push(TokenTree::Ident(Ident::new("_", i.span())));
             }
             TokenTree::Group(g) => {
-                let mut ng = Group::new(g.delimiter(), type_params_inferred(g.stream()));
+                let mut ng = Group::new(g.delimiter(), type_params_inferred(g.stream(), own));
                 ng.set_span(g.span());
                 out.push(TokenTree::Group(ng));
             }

@@ -22,14 +22,9 @@ fn width(rule: &KompozTestRule, tag: &str) -> f32 {
 
 // ---- kompozable_tests.cpp 2436-2450 and 2935 ------------------------------------------------------------------
 
-/// (Kotlin's `enum class Panel { Closed, Open }`: enum classes come with stage 14's Kotlin syntax.)
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Panel {
-    Closed,
-    Open,
-}
-
 kompoz! {
+    enum class Panel { Closed, Open }
+
     @Composable
     fun AnimatedValues(open: Boolean, seen: (Float, Float, Float) -> Unit) {
         val scale by animateFloatAsState(if (open) 1.2f else 1f, spring(Spring.DampingRatioMediumBouncy), label = "scale")

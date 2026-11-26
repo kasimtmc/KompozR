@@ -841,9 +841,14 @@ dependencies = [
 name = "kompoz-runtime"
 version = "0.1.0"
 dependencies = [
+ "icu_calendar",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale_core",
  "kompoz-macros",
  "parking_lot",
  "trybuild",
+ "writeable",
 ]
 
 [[package]]

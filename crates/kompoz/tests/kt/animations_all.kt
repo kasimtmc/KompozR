@@ -17,7 +17,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
-// enum class Panel { Closed, Open }: in the test's Rust (enum classes come with stage 14's Kotlin syntax)
+enum class Panel { Closed, Open }
+
 val InkBlue = Color(0xFF1E88E5)   // Compose's Color(Long): AARRGGBB
 
 @Composable

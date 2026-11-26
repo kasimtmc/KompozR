@@ -1,8 +1,7 @@
 //! The C++ Kompoz's Kotlin-syntax tests (tests/kompozable_tests.cpp) that stage 9's Kotlin takes, ported: the same
 //! Kotlin (as Compose writes it where the C++ Kompoz's was looser) through `kompoz!` and `kompoz_file!`, the same
-//! behaviour asserted. What they use of later stages (data classes and enums, Material's components, object
-//! expressions) is left out or written as Rust types Kotlin calls, as tools/stage9-followups.md lists; Material's
-//! theme (AppTheme, the inbox's dark surface) is material3's.
+//! behaviour asserted: their data classes are Kotlin's, their C++ structs Rust types Kotlin calls; Material's theme
+//! (AppTheme, the inbox's dark surface) is material3's. (Their Gestures is kotlin_gestures.rs', whole.)
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -10,7 +9,6 @@ mod common;
 
 use kompoz::prelude::*;
 use kompoz::test::{KompozTestRule, is_heading};
-use kompoz::ui::semantics::SemanticsProperties;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -49,20 +47,6 @@ fn structs_by_name() {
 
 // ---- another_files_composables, cpp_calls_the_modules_kotlin -----------------------------------------------------
 
-/// What `StickerRow` (tests/kt/stickers.kt) shows: Kotlin's `data class Sticker(val label: String, val count: Int =
-/// 0)`, a Rust struct here (data classes come with stage 14).
-#[derive(Clone, Debug, PartialEq, KotlinProperties)]
-pub struct Sticker {
-    pub label: String,
-    pub count: i32,
-}
-
-/// `Sticker(label, count = 0)`.
-#[named(type)]
-pub fn Sticker(label: impl Into<String>, #[default(0)] count: i32) -> Sticker {
-    Sticker { label: label.into(), count }
-}
-
 kompoz_file!("tests/kt/stickers.kt");
 
 kompoz! {
@@ -88,11 +72,15 @@ fn another_files_composables() {
     rule.on_node_with_text("ton: neşeli").assert_exists();
 }
 
-/// Rust calls the module's Kotlin (another file's composable, its parameters in place).
+/// Rust calls the module's Kotlin (another file's data class and composable, its parameters in place).
 fn rust_calls_the_modules_kotlin() {
-    let rule = KompozTestRule::new(kompozable_lambda!(|| StickerRow(Sticker("çıkartma", 3), "".into(), "!".into())));
+    // (a Kotlin class's constructor, which the API index doesn't list: its parameters told as the Kotlin syntax's
+    // calls tell them, a required and a defaulted one)
+    let sticker = named_args!(types(Sticker(rd)), Sticker("çıkartma", 3));
+    let s = sticker.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || StickerRow(s.clone(), "".into(), "!".into())));
     rule.on_node_with_text("çıkartma:3!").assert_exists();
-    let rule = KompozTestRule::new(kompozable_lambda!(|| StickerRow(Sticker("çıkartma", 3), prefix = "> ".into())));
+    let rule = KompozTestRule::new(kompozable_lambda!(move || StickerRow(sticker.clone(), prefix = "> ".into())));
     rule.on_node_with_text("> çıkartma:3").assert_exists();
 }
 
@@ -236,33 +224,12 @@ fn lambdas_with_receivers() {
 
 // ---- top_level_vals_and_content_by_name -------------------------------------------------------------------------
 
-/// Kotlin's `data class Spacing(val small: Dp = 4.dp, val large: Dp = 16.dp)`, Rust's here.
-#[derive(Clone, Debug, PartialEq, KotlinProperties)]
-pub struct Spacing {
-    pub small: Dp,
-    pub large: Dp,
-}
-
-/// `Spacing(small = 4.dp, large = 16.dp)`.
-#[named(type)]
-pub fn Spacing(#[default(4.dp())] small: Dp, #[default(16.dp())] large: Dp) -> Spacing {
-    Spacing { small, large }
-}
-
-/// Kotlin's `data class Account(val name: String)`, Rust's here.
-#[derive(Clone, Debug, PartialEq, KotlinProperties)]
-pub struct Account {
-    pub name: String,
-}
-
-/// `Account(name)`.
-pub fn Account(name: impl Into<String>) -> Account {
-    Account { name: name.into() }
-}
-
 kompoz! {
     // (top-level vals as Compose's Color.kt and locals are written: their types their values', defined after what
     // reads them, or in another file of the module — StickerGreeting; content = … by name)
+    data class Spacing(val small: Dp = 4.dp, val large: Dp = 16.dp)
+    data class Account(val name: String)
+
     @Kompozable
     fun SpacedTitle(title: String) {
         Text("$title ${LocalSpacing.current.large} $StickerGreeting")
@@ -460,49 +427,6 @@ fn graphics_as_compose_writes_it() {
     assert_eq!(outline.bounds().width(), 10.0);
 }
 
-// ---- gestures_as_compose_writes_them (its draggable, anchored draggable and drop target — a target given from Rust:
-// an object expression is stage 14's — are kotlin_gestures.rs') -----------------------------------------------------
-
-kompoz! {
-    // (pointerInput { detectTapGestures(onTap = { }) }, a drag's points in a state list)
-    @Kompozable
-    fun Gestures(onEvent: (String) -> Unit) {
-        val points = remember { mutableStateListOf<Offset>() }
-        Column {
-            Box(modifier = Modifier.size(100.dp).testTag("dokun").pointerInput(Unit) {
-                detectTapGestures(onTap = { onEvent("tap") }, onLongPress = { onEvent("long") })
-            })
-            Box(modifier = Modifier.size(100.dp).testTag("çiz").pointerInput(Unit) {
-                detectDragGestures(onDragStart = { at -> points.clear(); points.add(at) }, onDrag = { change, _ -> points.add(change.position) })
-            })
-            Text("noktalar ${points.size}", modifier = Modifier.testTag("noktalar"))
-        }
-    }
-}
-
-fn gestures_as_compose_writes_them() {
-    let log = Rc::new(RefCell::new(Vec::<String>::new()));
-    let l = log.clone();
-    let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let l = l.clone();
-        Gestures(move |e: String| l.borrow_mut().push(e));
-    }));
-    rule.on_node_with_text("noktalar 0").assert_exists();
-    rule.on_node_with_tag("dokun").perform_touch_input(|t| t.click());
-    rule.wait_for_idle();
-    rule.advance_time_by(400);
-    assert_eq!(*log.borrow(), ["tap"]);
-    rule.on_node_with_tag("dokun").perform_touch_input(|t| t.long_click());
-    rule.wait_for_idle();
-    assert_eq!(*log.borrow(), ["tap", "long"]);
-    rule.on_node_with_tag("çiz").perform_touch_input(|t| t.swipe(Offset(10.0, 50.0), Offset(90.0, 50.0)));
-    rule.wait_for_idle();
-    let texts = rule.on_node_with_tag("noktalar").fetch_semantics_node().config().get(SemanticsProperties::Text);
-    let shown = texts.and_then(|t| t.first().map(|t| t.text().to_string())).unwrap_or_default();
-    let n: i32 = shown.trim_start_matches("noktalar ").parse().unwrap_or(0);
-    assert!(n >= 2, "the drag's start and moves: {shown}");
-}
-
 tests![
     structs_by_name,
     another_files_composables,
@@ -514,5 +438,4 @@ tests![
     plain_and_extension_functions,
     custom_layouts_as_compose_writes_them,
     graphics_as_compose_writes_it,
-    gestures_as_compose_writes_them,
 ];

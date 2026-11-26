@@ -74,7 +74,12 @@ pub fn is_standard_class(name: &str) -> bool {
 fn standard_parent(name: &str) -> Option<&'static str> {
     Some(match name {
         "Exception" | "Error" => "Throwable",
-        "RuntimeException" | "IOException" | "InterruptedException" | "CloneNotSupportedException" => "Exception",
+        "RuntimeException"
+        | "IOException"
+        | "InterruptedException"
+        | "CloneNotSupportedException"
+        | "ParseException" => "Exception",
+        "ZoneRulesException" => "DateTimeException",
         "IllegalArgumentException"
         | "IllegalStateException"
         | "IndexOutOfBoundsException"

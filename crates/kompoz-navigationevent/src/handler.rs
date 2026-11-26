@@ -256,13 +256,13 @@ impl<T: NavigationEventInfo + Clone> AnyHandler for NavigationEventHandler<T> {
         NavigationEventHandler::is_forward_enabled(self)
     }
     fn current_info(&self) -> Rc<dyn NavigationEventInfo> {
-        self.core.current_info.borrow().clone()
+        NavigationEventInfo::erased(self.core.current_info.borrow().clone())
     }
     fn back_info(&self) -> Vec<Rc<dyn NavigationEventInfo>> {
-        self.core.back_info.borrow().iter().map(|i| i.clone() as Rc<dyn NavigationEventInfo>).collect()
+        self.core.back_info.borrow().iter().map(|i| NavigationEventInfo::erased(i.clone())).collect()
     }
     fn forward_info(&self) -> Vec<Rc<dyn NavigationEventInfo>> {
-        self.core.forward_info.borrow().iter().map(|i| i.clone() as Rc<dyn NavigationEventInfo>).collect()
+        self.core.forward_info.borrow().iter().map(|i| NavigationEventInfo::erased(i.clone())).collect()
     }
     fn has_dispatcher(&self) -> bool {
         self.core.dispatcher.borrow().strong_count() > 0

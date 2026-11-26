@@ -68,8 +68,12 @@ impl Gen<'_, '_> {
         is_trait.then_some((last, false))
     }
 
-    /// An object expression's type: the interface's shared object.
-    pub(crate) fn object_expr_ty(&self, supers: &[SuperType]) -> Ty {
+    /// An object expression's type: the interface's shared object (one made a local class, `find_locals`: the
+    /// class).
+    pub(crate) fn object_expr_ty(&self, supers: &[SuperType], loc: Loc) -> Ty {
+        if let Some(rust) = self.local_object(loc) {
+            return Ty::named(&rust);
+        }
         match self.object_interface(supers) {
             Some((t, _)) => {
                 let ptr = trait_object(&t).unwrap_or("Rc");
@@ -163,10 +167,18 @@ impl Gen<'_, '_> {
     /// `object : I { … }` (see the module's doc).
     pub(crate) fn object_expr(&mut self, supers: &[SuperType], body: &ClassBody, loc: Loc) -> TokenStream {
         let span = self.span(loc);
+        // ((stage 14 WPD) one with members of its own: its local class's object, `find_locals`)
+        if let Some(rust) = self.local_object(loc) {
+            let class = proc_macro2::Ident::new(&rust, span);
+            return quote_spanned!(span=> #class());
+        }
         let Some((iface, user)) = self.object_interface(supers) else {
             return self.object_expr_class(supers, body, loc);
         };
         let saved_args = std::mem::replace(&mut self.classes.object_args, Self::object_type_args(supers));
+        // ((stage 14 WPD) an interface the API shares between threads, `Arc<dyn Shape>`: its functions too)
+        let arc = trait_object(&iface) == Some("Arc");
+        let threads = if arc { quote!(+ ::core::marker::Send + ::core::marker::Sync) } else { quote!() };
         let targs: Vec<TokenStream> =
             self.classes.object_args.clone().iter().map(|t| self.rust_type(t, TypePos::Value)).collect();
         let mut fields = Vec::new();
@@ -276,7 +288,7 @@ impl Gen<'_, '_> {
             let rust = ident(&sig.rust, fspan);
             fields.push(quote_spanned!(fspan=> #field: #g));
             generics.push(quote!(#g));
-            bounds.push(quote_spanned!(fspan=> #g: ::core::ops::Fn(#(#ps),*) #ret + 'static));
+            bounds.push(quote_spanned!(fspan=> #g: ::core::ops::Fn(#(#ps),*) #ret #threads + 'static));
             methods.push((
                 sig.via.clone(),
                 quote_spanned! {fspan=>
@@ -289,11 +301,7 @@ impl Gen<'_, '_> {
         self.classes.object_args = saved_args;
         let ti = proc_macro2::Ident::new(&iface, span);
         let t = if targs.is_empty() { quote_spanned!(span=> #ti) } else { quote_spanned!(span=> #ti<#(#targs),*>) };
-        let ptr = if trait_object(&iface) == Some("Arc") {
-            quote_spanned!(span=> ::std::sync::Arc)
-        } else {
-            quote_spanned!(span=> ::std::rc::Rc)
-        };
+        let ptr = if arc { quote_spanned!(span=> ::std::sync::Arc) } else { quote_spanned!(span=> ::std::rc::Rc) };
         // ((WPA-rest) an API interface's supertraits the index has methods of (`OverlayScene` → `Scene`): each
         // implemented, what the object overrides of it; one asking for the object as the interface
         // (`as_overlay_scene(self: Rc<Self>)`) given it)
@@ -320,7 +328,8 @@ impl Gen<'_, '_> {
                     fn #m(self: ::std::rc::Rc<Self>) -> #r { ::core::option::Option::Some(self) }
                 });
             }
-            if *tr == "DynEq" {
+            // (the comparing supertraits every `PartialEq` type has by a blanket impl: the object's, below)
+            if matches!(*tr, "DynEq" | "ShapeEq") {
                 continue;
             }
             let n = crate::index::generics(tr).map_or(0, |g| g.len());
@@ -329,20 +338,18 @@ impl Gen<'_, '_> {
             let trt = if ta.is_empty() { quote_spanned!(span=> #tri) } else { quote_spanned!(span=> #tri<#(#ta),*>) };
             impls.extend(quote_spanned!(span=> impl<#(#bounds),*> #trt for __KzObject<#(#generics),*> { #(#its)* }));
         }
-        // (an interface whose objects compare (`DynEq`) and are shown (`Debug`), a `Scene`: by identity, as Kotlin's
-        // object is equal to itself only)
-        if chain.contains(&"DynEq") {
-            impls.extend(quote_spanned! {span=>
-                impl<#(#generics),*> ::core::cmp::PartialEq for __KzObject<#(#generics),*> {
-                    fn eq(&self, other: &Self) -> bool { ::core::ptr::eq(self, other) }
+        // (Kotlin's `Any` members an API interface may ask for — a `Scene`'s (`DynEq`, `Debug`), a `Shape`'s —: equal as
+        // the same object only, shown as an object)
+        impls.extend(quote_spanned! {span=>
+            impl<#(#generics),*> ::core::cmp::PartialEq for __KzObject<#(#generics),*> {
+                fn eq(&self, other: &Self) -> bool { ::core::ptr::eq(self, other) }
+            }
+            impl<#(#generics),*> ::core::fmt::Debug for __KzObject<#(#generics),*> {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    ::core::write!(f, "<object>@{:p}", self)
                 }
-                impl<#(#generics),*> ::core::fmt::Debug for __KzObject<#(#generics),*> {
-                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        ::core::write!(f, "<object>@{:p}", self)
-                    }
-                }
-            });
-        }
+            }
+        });
         let o = self.fresh("object", span);
         quote_spanned! {span=>
             {

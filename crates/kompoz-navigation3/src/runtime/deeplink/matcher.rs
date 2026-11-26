@@ -184,6 +184,12 @@ impl<T: Clone + 'static> StaticKeyDeepLinkMatcher<T> {
     pub fn key(&self) -> &T {
         &self.key
     }
+
+    /// [`DeepLinkMatcher::r#match`] of its type (what the Kotlin syntax reads its result's type by).
+    /// Kotlin: `match(request: DeepLinkRequest): DeepLinkMatcher.MatchResult<T>?`
+    pub fn r#match(&self, request: &DeepLinkRequest) -> Option<DeepLinkMatchResult<T>> {
+        DeepLinkMatcher::r#match(self, request)
+    }
 }
 
 impl<T: Clone + 'static> DeepLinkMatcher for StaticKeyDeepLinkMatcher<T> {
@@ -217,6 +223,14 @@ impl<M: DeepLinkMatcher, K> BackStackMatcher<M, K> {
     }
 }
 
+impl<M: DeepLinkMatcher, K: 'static> BackStackMatcher<M, K> {
+    /// [`DeepLinkMatcher::r#match`] of its type (what the Kotlin syntax reads its result's type by).
+    /// Kotlin: `match(request: DeepLinkRequest): BackStackMatchResult<T, K>?`
+    pub fn r#match(&self, request: &DeepLinkRequest) -> Option<BackStackMatchResult<M::Key, K>> {
+        DeepLinkMatcher::r#match(self, request)
+    }
+}
+
 impl<M: DeepLinkMatcher, K: 'static> DeepLinkMatcher for BackStackMatcher<M, K> {
     type Key = M::Key;
     type Result = BackStackMatchResult<M::Key, K>;
@@ -242,6 +256,17 @@ pub struct BackStackMatchResult<T, K> {
     match_result: Rc<dyn MatchResultOf<T>>,
     back_stack_builder: BackStackBuilder<T, K>,
     back_stack: OnceCell<Vec<K>>,
+}
+
+/// The same match (Kotlin's reference to it): its back stack as built so far.
+impl<T, K: Clone> Clone for BackStackMatchResult<T, K> {
+    fn clone(&self) -> Self {
+        BackStackMatchResult {
+            match_result: self.match_result.clone(),
+            back_stack_builder: self.back_stack_builder.clone(),
+            back_stack: self.back_stack.clone(),
+        }
+    }
 }
 
 impl<T, K> BackStackMatchResult<T, K> {

@@ -235,16 +235,18 @@ impl Gen<'_, '_> {
     /// uses (clones; the `var`s it assigns or reads shared, as Kotlin's local function captures them); one calling
     /// itself reaches itself through a weak reference it is given once made. A `suspend` one gives a boxed future
     /// (its calls awaited); an extension one (`fun Int.twice() = this * 2`) takes its receiver first, called as a
-    /// method is (`x.twice()`); its parameters' defaults are filled in where it is called. A generic one is a nested
-    /// `fn` item (a closure can't be generic): it can use none of the locals around it.
+    /// method is (`x.twice()`); its parameters' defaults are filled in where it is called. A generic or composable
+    /// one is a nested `fn` item (a closure can't be generic, a composable is a function): it can use none of the
+    /// locals around it.
     pub(crate) fn local_function(&mut self, f: &crate::ast::Function) -> TokenStream {
         use quote::quote_spanned;
         let span = self.span(f.loc);
         if !f.type_params.is_empty() {
             return self.generic_local_function(f);
         }
+        // ((stage 14 WPD) a composable one too: a composable is a function of its own, the composer's group)
         if f.is_kompozable() {
-            return self.later(f.loc, "a local composable function");
+            return self.generic_local_function(f);
         }
         if let Some(p) = f.params.iter().find(|p| p.is_vararg()) {
             return self.later(p.loc, "a local function's `vararg` parameter");
@@ -286,8 +288,8 @@ impl Gen<'_, '_> {
         }
     }
 
-    /// A generic local function: a nested `fn` item, written as a top-level function is (it can't use the locals
-    /// around it: an error naming the first it uses).
+    /// A generic or composable local function: a nested `fn` item, written as a top-level function is (it can't use
+    /// the locals around it: an error naming the first it uses).
     fn generic_local_function(&mut self, f: &crate::ast::Function) -> TokenStream {
         // (what it uses of the scopes around it, told by a quiet writing of it as a closure)
         let used = self.quiet(|g| {
@@ -298,13 +300,18 @@ impl Gen<'_, '_> {
             g.frames.pop().map(|fr| fr.used).unwrap_or_default()
         });
         if let Some(u) = used.iter().find(|u| *u != "self") {
-            self.error(
-                f.name.loc,
+            let msg = if f.is_kompozable() {
+                format!(
+                    "a local composable function can't use the locals around it (`{u}`): KompozR's composables are \
+                     functions, not closures (pass it as a parameter)"
+                )
+            } else {
                 format!(
                     "a generic local function can't use the locals around it (`{u}`): Rust's generic functions are \
                      items, not closures (pass it as a parameter, or make the function not generic)"
-                ),
-            );
+                )
+            };
+            self.error(f.name.loc, msg);
             return quote::quote!();
         }
         // (written as the file's function is, the state of the function around it kept)

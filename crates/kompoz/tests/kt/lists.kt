@@ -116,9 +116,7 @@ fun SegmentedListItemWithExpansionSample() {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val numChildren = 3
     val itemCount = 1 + if (expanded) numChildren else 0
-    // (Compose's `mutableStateListOf(*Array(numChildren) { false })`: a spread argument comes with stage 14, its three
-    // falses written out until then)
-    val childrenChecked = rememberSaveable { mutableStateListOf(false, false, false) }
+    val childrenChecked = rememberSaveable { mutableStateListOf(*Array(numChildren) { false }) }
 
     val colors =
         ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)

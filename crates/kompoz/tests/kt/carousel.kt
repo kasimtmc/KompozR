@@ -1,15 +1,20 @@
 // Material's carousels as Compose's samples write them (material3 1.5's CarouselSamples, as written; their
-// @Sampled/@Preview annotations left out). Their local `data class CarouselItem`s are a Rust struct in
-// kotlin_search_carousel.rs (Kotlin's data classes come with stage 14), and their Android resources —
-// `R.drawable.carousel_image_N`, `R.string.carousel_image_N_description`, `painterResource(id = …)`,
-// `stringResource(…)` — KompozR's (Compose Multiplatform's): `R.*` is tests/composeResources' `Res` (its images
-// 3:2 ones of a color of their own, its descriptions "Carousel image N", what the samples' own aren't here).
-// FadingHorizontalMultiBrowseCarouselSample's object expression is a GenericShape (said there).
+// @Sampled/@Preview annotations left out). Their Android resources — `R.drawable.carousel_image_N`,
+// `R.string.carousel_image_N_description`, `painterResource(id = …)`, `stringResource(…)` — are KompozR's (Compose
+// Multiplatform's): `R.*` is tests/composeResources' `Res` (its images 3:2 ones of a color of their own, its
+// descriptions "Carousel image N", what the samples' own aren't here), so their local `data class CarouselItem`s'
+// resource properties are CMP's DrawableResource and StringResource where Android's are `@DrawableRes Int`s.
 
 // ---- CarouselSamples.kt ----
 
 @Composable
 fun HorizontalMultiBrowseCarouselSample() {
+
+    data class CarouselItem(
+        val id: Int,
+        @DrawableRes val imageResId: DrawableResource,
+        @StringRes val contentDescriptionResId: StringResource,
+    )
 
     val items =
         listOf(
@@ -48,6 +53,12 @@ fun HorizontalMultiBrowseCarouselSample() {
 @Composable
 fun HorizontalUncontainedCarouselSample() {
 
+    data class CarouselItem(
+        val id: Int,
+        @DrawableRes val imageResId: DrawableResource,
+        @StringRes val contentDescriptionResId: StringResource,
+    )
+
     val items =
         listOf(
             CarouselItem(0, R.drawable.carousel_image_1, R.string.carousel_image_1_description),
@@ -76,6 +87,12 @@ fun HorizontalUncontainedCarouselSample() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HorizontalCenteredHeroCarouselSample() {
+
+    data class CarouselItem(
+        val id: Int,
+        @DrawableRes val imageResId: DrawableResource,
+        @StringRes val contentDescriptionResId: StringResource,
+    )
 
     val items =
         listOf(
@@ -111,6 +128,12 @@ fun HorizontalCenteredHeroCarouselSample() {
 
 @Composable
 fun FadingHorizontalMultiBrowseCarouselSample() {
+
+    data class CarouselItem(
+        val id: Int,
+        @DrawableRes val imageResId: DrawableResource,
+        @StringRes val contentDescriptionResId: StringResource,
+    )
 
     val items =
         listOf(
@@ -161,13 +184,18 @@ fun FadingHorizontalMultiBrowseCarouselSample() {
             }
         } else {
             // Mask using a generic path shape
-            // (KompozR: the sample's `object : Shape { override fun createOutline(…) }` — object expressions come
-            // with stage 14 — as the GenericShape of the same path: an Outline.Generic of the round rect)
             val pathShape = remember {
-                GenericShape { size, _ ->
-                    val roundRect =
-                        RoundRect(0f, 0f, size.width, size.height, CornerRadius(30f))
-                    addRoundRect(roundRect)
+                object : Shape {
+                    override fun createOutline(
+                        size: Size,
+                        layoutDirection: LayoutDirection,
+                        density: Density,
+                    ): Outline {
+                        val roundRect =
+                            RoundRect(0f, 0f, size.width, size.height, CornerRadius(30f))
+                        val shapePath = Path().apply { addRoundRect(roundRect) }
+                        return Outline.Generic(shapePath)
+                    }
                 }
             }
             Box(
@@ -217,6 +245,12 @@ fun FadingHorizontalMultiBrowseCarouselSample() {
 
 @Composable
 fun CarouselWithShowAllButtonSample() {
+
+    data class CarouselItem(
+        val id: Int,
+        @DrawableRes val imageResId: DrawableResource,
+        @StringRes val contentDescriptionResId: StringResource,
+    )
 
     val items =
         listOf(
@@ -299,9 +333,14 @@ fun CarouselWithShowAllButtonSample() {
 @Composable
 fun MultiAspectCarouselLazyRowSample() {
 
-    // (KompozR: the list's type written — its data class is a Rust struct the generator doesn't know, and
-    // `itemsIndexed`'s lambda types its item by it)
-    val items: List<CarouselItem> =
+    data class CarouselItem(
+        val id: Int,
+        @DrawableRes val imageResId: DrawableResource,
+        @StringRes val contentDescriptionResId: StringResource,
+        val mainAxisSize: Dp,
+    )
+
+    val items =
         listOf(
             CarouselItem(
                 0,

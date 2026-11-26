@@ -160,7 +160,7 @@ pub fn RichTip() {
                         move || {
                             TextButton(
                                 || {
-                                    state.dismiss();
+                                    state.r#dismiss();
                                 },
                                 || {
                                     Text("OK");

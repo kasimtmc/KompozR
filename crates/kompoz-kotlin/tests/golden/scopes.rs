@@ -5,10 +5,10 @@ impl Modifier {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
         ::kompoz::runtime::named_args!({
-            self.clone().layout({
+            self.clone().r#layout({
                 let extra = ::kompoz::runtime::__private::capture(&extra);
                 move |this1, measurable, constraints| {
-                    let placeable = measurable.measure(constraints);
+                    let placeable = measurable.r#measure(constraints);
                     let more = this1.round_to_px(extra);
                     this1.layout(placeable.width(), placeable.height() + more, {
                         let placeable = ::kompoz::runtime::__private::capture(&placeable);

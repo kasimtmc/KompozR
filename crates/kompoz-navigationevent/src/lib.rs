@@ -55,7 +55,7 @@ pub use dispatcher::{
 };
 pub use event::{
     DynEq, NavigationEvent, NavigationEventHistory, NavigationEventInfo, NavigationEventInfoNone,
-    NavigationEventTransitionState,
+    NavigationEventTransitionState, NavigationEventTransitionStateInProgress,
 };
 pub use handler::{NavigationEventHandler, NavigationEventHandlerCallbacks};
 pub use input::{DirectNavigationEventInput, NavigationEventInput, NavigationEventInputCallbacks};

@@ -86,6 +86,17 @@ impl Gen<'_, '_> {
                     self.control.fn_params.entry(f.name.name.clone()).or_default().push(f.params.clone());
                 }
             }
+            // ((stage 14 WPD) a class's constructor beside a function of its name — NavigationSamples' `data class
+            // Dashboard` and `@Composable fun Dashboard(navController, title)`, which Kotlin keeps apart: the class's
+            // `Dashboard(…)` keeps its name, the function's is mangled)
+            if let Decl::Class(c) = d
+                && !matches!(
+                    c.kind,
+                    ClassKind::Interface | ClassKind::FunInterface | ClassKind::Enum | ClassKind::Annotation
+                )
+            {
+                *seen.entry((c.name.name.clone(), None)).or_default() += 1;
+            }
         }
         self.control.overloaded = seen.into_iter().filter(|(_, n)| *n > 1).map(|(k, _)| k).collect();
     }
@@ -173,6 +184,43 @@ impl Gen<'_, '_> {
                 _ => Some((s, f)),
             })
             .map(|(_, f)| f)
+    }
+
+    /// ((stage 14 WPD) a call of a name that is a class's and a function's: whether its arguments are for one of the
+    /// file's functions of that name (their number and names), else for the class's constructor.
+    /// (`positional`: the arguments not named, a plain value's expression: one of a text, number or boolean type
+    /// where the parameter's is another, or of another type where it is one of those, doesn't fit it.)
+    pub(crate) fn fits_file_fn(&self, name: &str, named: &[&str], positional: &[Option<&Expr>], given: usize) -> bool {
+        use super::resolve::Ty;
+        let basic = |t: &Ty| t.is_number() || matches!(t, Ty::String | Ty::Bool | Ty::Char);
+        self.file.functions.get(name).is_some_and(|fs| {
+            fs.iter().filter(|f| f.receiver.is_none()).any(|f| {
+                let vararg = f.params.iter().any(|p| p.vararg);
+                let required =
+                    f.params.iter().filter(|p| p.default == super::resolve::PDefault::None && !p.vararg).count();
+                let typed = positional.iter().zip(&f.params).all(|(e, p)| {
+                    let Some(e) = e else { return true };
+                    let (t, want) = (self.peek_ty(e), p.ty().non_null());
+                    t == Ty::Unknown
+                        || want == Ty::Unknown
+                        || t.non_null() == want
+                        || (t.is_number() && want.is_number())
+                        || !(basic(&t.non_null()) || basic(&want))
+                });
+                given >= required
+                    && (given <= f.params.len() || vararg)
+                    && named.iter().all(|n| f.params.iter().any(|p| p.kotlin == *n))
+                    && typed
+            })
+        })
+    }
+
+    /// Whether `name` is a class of the user's with a constructor function of that name beside a file function.
+    pub(crate) fn class_beside_fn(&self, name: &str) -> bool {
+        self.file.function(name).is_some()
+            && self
+                .user_class(name)
+                .is_some_and(|c| matches!(c.shape, super::class::Shape::Data | super::class::Shape::Plain))
     }
 
     /// A member function's Rust name in the user's type of Rust name `owner` ([`Gen::member_rust_name`]).

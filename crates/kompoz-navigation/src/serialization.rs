@@ -247,6 +247,9 @@ impl RouteValue for String {
 impl RouteValue for i8 {}
 impl RouteValue for i16 {}
 impl RouteValue for char {}
+/// java.util's `UUID` (a `@Serializable(with = UUIDSerializer::class)` property of NavigationSamples' WrappedUUID):
+/// none either.
+impl RouteValue for kompoz_runtime::kt::UUID {}
 
 impl<T: RouteValue> RouteValue for Option<T> {
     const NULLABLE: bool = true;

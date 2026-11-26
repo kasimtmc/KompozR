@@ -1,9 +1,7 @@
 // Material's menus in a Kotlin file of their own (kompoz_file!): material3 1.5's MenuSamples.kt and
 // ExposedDropdownMenuSamples.kt as Compose writes them — test tags added to find them. GroupedMenuSample's
-// DropdownMenuButtonGroup (a ButtonGroup, WP1b's) as written. ExposedDropdownMenuSamples' private helpers (`filteredBy` and the multi-autocomplete
-// sample's `TextFieldState` extensions) are local functions there, whose `return null` leaves an inline lambda:
-// Kotlin's local functions and non-local returns come with stage 14, so they are the file's own private functions
-// here, the lambda's `return` an `if` (the samples' composables are as Compose writes them).
+// DropdownMenuButtonGroup (a ButtonGroup, WP1b's) as written; ExposedDropdownMenuSamples' local functions (local
+// extensions too) as written, but for one non-local return (said there).
 @file:OptIn(ExperimentalMaterial3Api::class)
 
 package com.example.menus
@@ -405,42 +403,42 @@ fun EditableExposedDropdownMenuSample() {
     }
 }
 
-/**
- * Returns the TextRange of the current token around the cursor, where commas define token
- * boundaries.
- */
-private fun TextFieldState.currentTokenRange(): TextRange? {
-    if (!selection.collapsed) return null
-
-    val cursor = selection.start
-    var start = cursor
-    while (start > 0 && text[start - 1] != ',') {
-        start--
-    }
-    while (start < cursor && text[start] == ' ') {
-        start++
-    }
-
-    var end = cursor
-    while (end < text.length && text[end] != ',') {
-        end++
-    }
-    return TextRange(start, end)
-}
-
-private fun TextFieldState.replaceThenAddComma(start: Int, end: Int, text: CharSequence) = edit {
-    replace(start, end, text)
-    val afterText = start + text.length
-    if (afterText == this.length || this.charAt(afterText) != ',') {
-        insert(afterText, ", ")
-        placeCursorBeforeCharAt(afterText + 2)
-    } else {
-        placeCursorAfterCharAt(afterText)
-    }
-}
-
 @Composable
 fun MultiAutocompleteExposedDropdownMenuSample() {
+    /**
+     * Returns the TextRange of the current token around the cursor, where commas define token
+     * boundaries.
+     */
+    fun TextFieldState.currentTokenRange(): TextRange? {
+        if (!selection.collapsed) return null
+
+        val cursor = selection.start
+        var start = cursor
+        while (start > 0 && text[start - 1] != ',') {
+            start--
+        }
+        while (start < cursor && text[start] == ' ') {
+            start++
+        }
+
+        var end = cursor
+        while (end < text.length && text[end] != ',') {
+            end++
+        }
+        return TextRange(start, end)
+    }
+
+    fun TextFieldState.replaceThenAddComma(start: Int, end: Int, text: CharSequence) = edit {
+        replace(start, end, text)
+        val afterText = start + text.length
+        if (afterText == this.length || this.charAt(afterText) != ',') {
+            insert(afterText, ", ")
+            placeCursorBeforeCharAt(afterText + 2)
+        } else {
+            placeCursorAfterCharAt(afterText)
+        }
+    }
+
     val allOptions: List<String> = SampleData
     val textFieldState = rememberTextFieldState()
     val tokenSelection = textFieldState.currentTokenRange()
@@ -496,30 +494,32 @@ fun MultiAutocompleteExposedDropdownMenuSample() {
  * underlined as an [AnnotatedString].
  */
 private fun List<String>.filteredBy(text: CharSequence): List<AnnotatedString> {
-    return this.mapNotNull { option -> underlineSubsequence(text, option) }
-}
-
-private fun underlineSubsequence(needle: CharSequence, haystack: String): AnnotatedString? {
-    var found = true
-    val underlined = buildAnnotatedString {
-        var i = 0
-        for (char in needle) {
-            val start = i
-            val at = haystack.indexOf(char, startIndex = i, ignoreCase = true)
-            if (at < 0) {
-                found = false
-                break
+    fun underlineSubsequence(needle: CharSequence, haystack: String): AnnotatedString? {
+        // (KompozR: the sample's `haystack.indexOf(…).let { if (it < 0) return null else i = it }` returns from the
+        // function out of `let`'s lambda inside `buildAnnotatedString`'s, which the Kotlin syntax doesn't translate
+        // — its non-local returns leave `forEach`/`forEachIndexed`/`repeat` lambdas —: the miss noted, `null` after)
+        var found = true
+        val underlined = buildAnnotatedString {
+            var i = 0
+            for (char in needle) {
+                val start = i
+                val at = haystack.indexOf(char, startIndex = i, ignoreCase = true)
+                if (at < 0) {
+                    found = false
+                    break
+                }
+                i = at
+                append(haystack.substring(start, i))
+                withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
+                    append(haystack[i])
+                }
+                i += 1
             }
-            i = at
-            append(haystack.substring(start, i))
-            withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-                append(haystack[i])
-            }
-            i += 1
+            append(haystack.substring(i, haystack.length))
         }
-        append(haystack.substring(i, haystack.length))
+        return if (found) underlined else null
     }
-    return if (found) underlined else null
+    return this.mapNotNull { option -> underlineSubsequence(text, option) }
 }
 
 private val SampleData =

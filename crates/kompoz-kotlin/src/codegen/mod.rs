@@ -52,7 +52,7 @@
 //! top-level `var`s and extension properties (`property`), local and anonymous functions, callable references and
 //! Kotlin's capture of `var`s by reference (`capture`), jumps out of inline lambdas and inline functions' suspending
 //! twins (`jumps`), varargs and spreads, nullable and suspending function types. What isn't translated yet is an error
-//! saying it comes with stage 14, at the Kotlin construct.
+//! saying it comes with stage 15, at the Kotlin construct.
 //! Errors are per declaration: a declaration with an error is left out, the others are translated.
 
 mod call;
@@ -393,9 +393,9 @@ impl<'a, 'd> Gen<'a, 'd> {
         self.diags.error(loc, message);
     }
 
-    /// An error saying `what` comes with stage 14; the tokens standing in for it (`unreachable!()`).
+    /// An error saying `what` comes with stage 15; the tokens standing in for it (`unreachable!()`).
     pub fn later(&mut self, loc: Loc, what: &str) -> TokenStream {
-        self.error(loc, format!("{what} isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)"));
+        self.error(loc, format!("{what} isn't translated by KompozR's Kotlin syntax yet (it comes with stage 15)"));
         let span = self.span(loc);
         quote_spanned!(span=> ::core::unreachable!())
     }
@@ -508,6 +508,14 @@ impl<'a, 'd> Gen<'a, 'd> {
     /// Narrows a local's type in the innermost scope (a smart cast: the same Rust name, its value non-null).
     pub fn narrow(&mut self, kotlin: &str, ty: Ty) {
         if let Some(mut l) = self.scopes.iter().rev().find_map(|s| s.get(kotlin)).cloned() {
+            // ((stage 14 WPD) a nullable function's value narrowed: the shared closure it holds, `Rc<dyn Fn()>`)
+            let ty = match (&l.ty, ty) {
+                (Ty::Nullable(inner), Ty::Fun(mut f)) if matches!(**inner, Ty::Fun(_)) => {
+                    f.shared = true;
+                    Ty::Fun(f)
+                }
+                (_, ty) => ty,
+            };
             l.ty = ty;
             l.depth = self.scopes.len() - 1;
             self.scopes.last_mut().unwrap().insert(kotlin.to_string(), l);
@@ -679,14 +687,19 @@ impl<'a, 'd> Gen<'a, 'd> {
 
     fn top_decl(&mut self, decl: &Decl) -> TokenStream {
         match decl {
-            Decl::Function(f) => self.function(f),
+            Decl::Function(f) => {
+                // ((stage 14 WPD) its local classes in scope, written beside it)
+                let _locals = self.enter_locals(f.loc);
+                let mut out = self.function(f);
+                out.extend(self.class_decl(decl));
+                out
+            }
             Decl::Property(p) => self.top_property(p),
             // (its diagnostics are given)
             Decl::Failed { .. } => TokenStream::new(),
-            Decl::Class(c) if c.kind == ClassKind::Annotation => {
-                self.later(c.loc, "an annotation class");
-                TokenStream::new()
-            }
+            // (an annotation class: Kotlin's annotations tell its compiler and tools; the generator reads the ones it
+            // knows by name (`@Composable`, `@Serializable`…) and leaves the others — nothing to write)
+            Decl::Class(c) if c.kind == ClassKind::Annotation => TokenStream::new(),
             Decl::Class(_) | Decl::Object(_) => self.class_decl(decl),
             Decl::TypeAlias(a) => self.type_alias(a),
         }
@@ -764,18 +777,27 @@ impl<'a, 'd> Gen<'a, 'd> {
         // The receiver of an extension function: `self` (a composable's: its hidden function's first parameter, a
         // clone of the value it extends).
         let mut self_ty = None;
+        // (a drawing object's extension: its receiver `&mut self`, as Rust lends it)
+        let mut self_mut = false;
         let receiver_rust = if kompozable { "__kz_this" } else { "self" };
+        // (the star projections of the receiver and the parameters: the function's type parameters, its extension
+        // trait impl's for the receiver's — `ThreePaneScaffoldNavigator<*>.isExpanded(…)`)
+        self.collect_stars();
         if let Some(r) = &f.receiver {
+            let starred = matches!(&r.kind, TypeKind::Named(segs)
+                if segs.iter().any(|s| s.args.iter().any(|a| matches!(a, TypeArg::Star(_)))));
             match (r.simple_name(), r.nullable, &r.kind) {
                 // (of a generic type, its arguments given: `List<String>.filteredBy` — a method of an extension trait
                 // implemented for `Vec<String>`; one of its own type parameters is a generic function's, stage 14's)
                 (Some(n), false, TypeKind::Named(segs))
                     if segs.iter().all(|s| s.args.is_empty())
                         || (f.type_params.is_empty() && !self.ty_of(r).is_vague())
-                        || !f.type_params.is_empty() =>
+                        || !f.type_params.is_empty()
+                        || starred =>
                 {
                     let rust_ty = self.rust_type(r, types::TypePos::Value);
                     let name = owner_name(last_segment(&n));
+                    self_mut = !kompozable && self.lent_mut(r);
                     self.receivers.push(ImplicitReceiver {
                         rust: receiver_rust.into(),
                         ty: name.clone(),
@@ -783,10 +805,13 @@ impl<'a, 'd> Gen<'a, 'd> {
                         labels: vec![f.name.name.clone()],
                         depth: 0,
                         by_ref: false,
-                        by_mut: false,
+                        by_mut: self_mut,
                         owned_used: Default::default(),
                     });
                     self.declare("this", receiver_rust.into(), LocalKind::Param, self.ty_of(r));
+                    if self_mut {
+                        self.mark_mut_ref("this");
+                    }
                     self_ty = Some((rust_ty, name));
                 }
                 _ => {
@@ -795,8 +820,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             }
         }
 
-        // Parameters (their star projections the function's type parameters, stage 14 WPA).
-        self.collect_stars();
+        // Parameters (their star projections the function's type parameters, stage 14 WPA; the receiver's collected
+        // above).
         let mut params = Vec::new();
         let mut converts = Vec::new();
         for p in &f.params {
@@ -922,11 +947,15 @@ impl<'a, 'd> Gen<'a, 'd> {
                     }
                 };
             }
+            let receiver = if self_mut { quote_spanned!(span=> &mut self) } else { quote_spanned!(span=> self) };
+            // (a suspending one: an `async fn` of a public trait, no `Send` wanted — coroutines are single-threaded)
+            let async_allow = if suspend { quote_spanned!(span=> #[allow(async_fn_in_trait)]) } else { quote!() };
             return quote_spanned! {span=>
                 #allow
                 #[#rt::named(#trait_vis trait #trait_name)]
                 impl #generics #self_ty {
-                    #asyncness #fn_kw #name(self, #(#params),*) #ret #body
+                    #async_allow
+                    #asyncness #fn_kw #name(#receiver, #(#params),*) #ret #body
                 }
             };
         }
@@ -990,6 +1019,10 @@ impl<'a, 'd> Gen<'a, 'd> {
         let into = types::into_target(&rust_ty);
         let local_ty = ty.clone();
         self.declare_at(&p.name, rust.clone(), LocalKind::Param, local_ty);
+        // (a drawing object's: a `&mut` held, reborrowed where it is given on)
+        if !t.nullable && self.lent_mut(t) {
+            self.mark_mut_ref(&p.name.name);
+        }
         if kept_closure && let Some(l) = self.scopes.last_mut().unwrap().get_mut(&p.name.name) {
             l.kept_closure = true;
         }

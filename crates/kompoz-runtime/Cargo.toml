@@ -15,6 +15,13 @@ trybuild = "1"
 [dependencies]
 kompoz-macros = { path = "../kompoz-macros" }
 parking_lot.workspace = true
+# (stage 14 WPD) The kt shims' java.text.SimpleDateFormat and java.util.Calendar/Locale: CLDR's names, digits and
+# week data, as the JDK's locale data.
+icu_calendar = "2.4.0"
+icu_datetime = "2.4.0"
+icu_decimal = "2.4.0"
+icu_locale_core = "2.4.0"
+writeable = "0.6.4"
 
 [[test]]
 name = "runtime"

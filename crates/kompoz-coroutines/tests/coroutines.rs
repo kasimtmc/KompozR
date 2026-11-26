@@ -1499,6 +1499,39 @@ fn produce_state_from_a_coroutine() {
     assert!(rule.has("produced=3"));
 }
 
+fn produce_state_awaits_its_disposal() {
+    // Compose's `produceState(…) { register(callback); awaitDispose { unregister(callback) } }`: the producer's
+    // state read as a State; its keys changed, the producer before is disposed (cancelled) and the new one runs; leaving
+    // the composition disposes the last.
+    let key = mutable_state_of(1);
+    let shown = mutable_state_of(true);
+    let log = new_log();
+    let (k, s, l) = (key.clone(), shown.clone(), log.clone());
+    let rule = CoRule::new(kompozable_lambda!(move || {
+        if s.get() {
+            let key = k.get();
+            let l = l.clone();
+            let state = produce_state(String::from("-"), key, move |scope| async move {
+                push(&l, format!("registered {key}"));
+                scope.set_value(format!("got {key}"));
+                let l = l.clone();
+                scope.await_dispose(move || push(&l, format!("unregistered {key}"))).await;
+            });
+            Text(state.value());
+        }
+    }));
+    rule.wait_for_idle();
+    assert!(rule.has("got 1"));
+    assert_eq!(*log.borrow(), ["registered 1"]);
+    key.set(2);
+    rule.wait_for_idle();
+    assert!(rule.has("got 2"));
+    assert_eq!(*log.borrow(), ["registered 1", "unregistered 1", "registered 2"]);
+    shown.set(false);
+    rule.wait_for_idle();
+    assert_eq!(*log.borrow(), ["registered 1", "unregistered 1", "registered 2", "unregistered 2"]);
+}
+
 fn launched_effects_and_produce_state_take_several_keys() {
     let (a, b, c) = (mutable_state_of(1), mutable_state_of(1), mutable_state_of(1));
     let log = new_log();
@@ -2098,6 +2131,7 @@ tests!(
     state_flow_collect_follows_the_latest_value_until_cancelled,
     remember_updated_state_gives_effects_the_latest_value,
     produce_state_from_a_coroutine,
+    produce_state_awaits_its_disposal,
     launched_effects_and_produce_state_take_several_keys,
     run_woken_by_resumes_what_it_wakes_before_returning,
     run_woken_by_from_inside_a_coroutine_keeps_its_own_wake,

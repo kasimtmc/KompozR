@@ -48,6 +48,19 @@ pub fn List<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
 pub fn MutableList<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
     List(size, init)
 }
+/// Kotlin's `Array(size) { i -> … }`: an array (a `Vec` here, as Kotlin's arrays are) of each element from its
+/// index.
+/// Kotlin: `Array(size: Int, init: (Int) -> T): Array<T>`
+#[allow(non_snake_case)]
+pub fn Array<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
+    List(size, init)
+}
+/// [`Array`]'s suspending twin (see the module's doc).
+#[doc(hidden)]
+#[allow(non_snake_case)]
+pub async fn Array_async<T>(size: i32, init: impl AsyncFnMut(i32) -> T) -> Vec<T> {
+    List_async(size, init).await
+}
 /// [`List`]'s suspending twin (see the module's doc).
 #[doc(hidden)]
 #[allow(non_snake_case)]

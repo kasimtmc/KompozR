@@ -91,7 +91,26 @@ impl<T: PartialEq + 'static> DynEq for T {
 /// struct Screen(&'static str);
 /// impl NavigationEventInfo for Screen {}
 /// ```
-pub trait NavigationEventInfo: DynEq + fmt::Debug + 'static {}
+///
+/// An info of any type, `Rc<dyn NavigationEventInfo>`, is one too (Kotlin's `NavigationEventHandler<NavigationEventInfo>`,
+/// a handler whose infos are of any type): the info it holds is what history and the composables see.
+pub trait NavigationEventInfo: DynEq + fmt::Debug + 'static {
+    /// It as an info of any type (what history holds).
+    #[doc(hidden)]
+    fn erased(self: Rc<Self>) -> Rc<dyn NavigationEventInfo>
+    where
+        Self: Sized,
+    {
+        self
+    }
+}
+
+/// An info of any type: the one it holds.
+impl NavigationEventInfo for Rc<dyn NavigationEventInfo> {
+    fn erased(self: Rc<Self>) -> Rc<dyn NavigationEventInfo> {
+        (*self).clone()
+    }
+}
 
 impl dyn NavigationEventInfo {
     /// Whether it is a `T` (Kotlin's `info is T`).
@@ -168,6 +187,40 @@ impl NavigationEventTransitionState {
     pub fn direction(&self) -> Option<i32> {
         match self {
             NavigationEventTransitionState::InProgress { direction, .. } => Some(*direction),
+            NavigationEventTransitionState::Idle => None,
+        }
+    }
+}
+
+/// A gesture under way, as Kotlin's `is` / `as` give it (`if (transition is NavigationEventTransitionState.InProgress)
+/// transition.latestEvent.progress`): [`NavigationEventTransitionState::InProgress`]'s fields.
+///
+/// Kotlin: `NavigationEventTransitionState.InProgress`
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct NavigationEventTransitionStateInProgress {
+    latest_event: NavigationEvent,
+    direction: i32,
+}
+
+impl NavigationEventTransitionStateInProgress {
+    /// The gesture's latest event.
+    pub fn latest_event(&self) -> NavigationEvent {
+        self.latest_event
+    }
+
+    /// Its direction ([`NavigationEventTransitionState::TRANSITIONING_BACK`] or `TRANSITIONING_FORWARD`).
+    pub fn direction(&self) -> i32 {
+        self.direction
+    }
+}
+
+/// Kotlin's `state is InProgress` / `state as? InProgress`.
+impl kompoz_runtime::kt::KtAs<NavigationEventTransitionStateInProgress> for NavigationEventTransitionState {
+    fn kt_as_safe(&self) -> Option<NavigationEventTransitionStateInProgress> {
+        match *self {
+            NavigationEventTransitionState::InProgress { latest_event, direction } => {
+                Some(NavigationEventTransitionStateInProgress { latest_event, direction })
+            }
             NavigationEventTransitionState::Idle => None,
         }
     }

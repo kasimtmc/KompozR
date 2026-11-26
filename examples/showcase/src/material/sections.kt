@@ -214,16 +214,27 @@ fun InteractionSection() {
     var date by remember { mutableStateOf<LocalDate?>(null) }
     LaunchedEffect(button) {
         button.interactions.collect { i ->
-            // (Kotlin's `when (i) { is PressInteraction.Press -> "Press" … }`, in Rust until `is` comes with stage 14)
-            val name = interaction_name(i)
-            if (name.isNotEmpty()) {
+            val name = when (i) {
+                is PressInteraction.Press -> "Press"
+                is PressInteraction.Release -> "Release"
+                is PressInteraction.Cancel -> "Cancel"
+                is HoverInteraction.Enter -> "HoverEnter"
+                is HoverInteraction.Exit -> "HoverExit"
+                is FocusInteraction.Focus -> "Focus"
+                is FocusInteraction.Unfocus -> "Unfocus"
+                is DragInteraction.Start -> "DragStart"
+                is DragInteraction.Stop -> "DragStop"
+                is DragInteraction.Cancel -> "DragCancel"
+                else -> null
+            }
+            if (name != null) {
                 log.add(name)
                 if (log.size > 4) log.removeAt(0)
             }
         }
     }
     LaunchedEffect(field) {
-        field.interactions.collect { i -> if (interaction_name(i) == "Release") pickerOpen = true }
+        field.interactions.collect { i -> if (i is PressInteraction.Release) pickerOpen = true }
     }
     val pager = rememberPagerState(pageCount = { 4 })
     val held by pager.interactionSource.collectIsDraggedAsState()
@@ -279,6 +290,10 @@ fun InteractionSection() {
 
 // anchoredDraggable: a handle that rests at three places, and rows that swipe open to their
 // actions (a row's anchors are known from the start; the handle's come from its track's size).
+enum class Spot { Start, Middle, End }
+
+enum class RowReveal { Closed, Open }
+
 @Composable
 fun RevealRow(title: String, onAction: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme

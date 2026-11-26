@@ -5,7 +5,7 @@
 // `overscrollEffect = null` as the `Some(None)` of a nullable parameter whose default isn't null, a
 // TargetedFlingBehavior given as a FlingBehavior, an animation spec value given as its shared trait object.
 
-// (`Todo(id, title, done)`: a Rust type the Kotlin calls; data classes come with stage 14)
+data class Todo(val id: Int, val title: String, val done: Boolean = false)
 
 @Composable
 fun Todos(group: String?) {

@@ -4,9 +4,10 @@
 
 import androidx.compose.material3.TopAppBarDefaults.topAppBarColors
 
-// (the C++'s `object AppIcons { val Add = Icons.Default.Add }`, the icon from an object of the app's own: Kotlin's
-// object declarations are stage 14's, so its member is a top-level val here)
-val AppIconsAdd = Icons.Default.Add
+// (the C++'s icon from an object of the app's own)
+object AppIcons {
+    val Add = Icons.Default.Add
+}
 
 @Composable
 fun ScaffoldExample() {
@@ -39,7 +40,7 @@ fun ScaffoldExample() {
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { presses++ }) {
-                Icon(painter = rememberVectorPainter(AppIconsAdd), contentDescription = "Add")
+                Icon(painter = rememberVectorPainter(AppIcons.Add), contentDescription = "Add")
             }
         }
     ) { innerPadding ->

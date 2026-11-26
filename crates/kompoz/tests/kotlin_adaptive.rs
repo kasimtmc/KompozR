@@ -220,13 +220,14 @@ fn layout_forms_take_compose_named_arguments_panes() {
 
 // ---- samples ------------------------------------------------------------------------------------------------------
 // adaptive-layout 1.2.0's ThreePaneScaffoldSample.kt from tests/kt/adaptive_layout.kt, their behaviour checked as
-// the Rust syntax's twins in kompoz-material3-adaptive's tests/samples.rs check it. What the Kotlin syntax doesn't
-// take yet stands here in Rust, as Compose writes it: the Parcelable data class `NavItemData` (classes) and the
-// generic `reflowAdaptStrategySample<T>()` and `levitateAsDialogSample<T>()` (generic functions; Rust's names
-// theirs, as the Kotlin syntax calls them) come with stage 14.
+// the Rust syntax's twins in kompoz-material3-adaptive's tests/samples.rs check it. Rust here, as Compose writes them:
+// their `NavItemData`, a Parcelable (android.os's Parcel and Parcelable.Creator: stage 15, the Android platform),
+// saved as a desktop navigator's keys are; and the generic `reflowAdaptStrategySample<T>()` and
+// `levitateAsDialogSample<T>()` (Rust's names theirs, as the Kotlin syntax calls them), whose `T` needs the
+// navigator's bound, which the Kotlin syntax doesn't tell from a generic call yet.
 
 /// Kotlin: `private data class NavItemData(val index: Int, val showExtra: Boolean = false) : Parcelable` (its
-/// parcel's two fields its saved value; its properties read as Kotlin's syntax reads them).
+/// parcel's two fields its saved value, Saveable's; its properties read as Kotlin's syntax reads them).
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct NavItemData {
     index: i32,
@@ -439,30 +440,29 @@ fn supporting_pane_scaffold_sample_in_kotlin() {
     assert!(kt_samples_has_text(&rule, "My content") && !kt_samples_has_text(&rule, "Item 1"));
 }
 
-/// The preferred size samples (the list pane's, its content tagged) and the drag handle sample, its own state, in a
-/// scaffold. (The file's extension composables, called by their implicit receiver from Kotlin elsewhere, would be
-/// imported by that file: Kotlin's imports come with stage 14, so they are called here as Rust calls them.)
-fn preferred_sizes(proportion: bool) -> impl Fn() + 'static {
-    kompozable_lambda!(move || {
-        let navigator = remember_list_detail_pane_scaffold_navigator::<i32>();
+kompoz! {
+    // The preferred size samples (the list pane's, its content tagged) and the drag handle sample, its own state, in a
+    // scaffold: the file's extension composables called by their implicit receivers.
+    @Composable
+    fun PreferredSizes(proportion: Boolean) {
+        val navigator = rememberListDetailPaneScaffoldNavigator<Int>()
         NavigableListDetailPaneScaffold(
-            navigator,
-            list_pane = move |pane: &ThreePaneScaffoldPaneScope| {
-                let tagged = || Box(modifier = Modifier.fill_max_size().test_tag("liste"));
-                if proportion {
-                    pane.PreferredSizeModifierInProportionSample(0.25, 0.5, tagged);
+            navigator = navigator,
+            listPane = {
+                if (proportion) {
+                    PreferredSizeModifierInProportionSample(preferredWidthInProportion = 0.25f, preferredHeightInProportion = 0.5f) {
+                        Box(modifier = Modifier.fillMaxSize().testTag("liste"))
+                    }
                 } else {
-                    pane.PreferredSizeModifierInDpSample(300.dp(), 300.dp(), tagged);
+                    PreferredSizeModifierInDpSample(preferredWidth = 300.dp, preferredHeight = 300.dp) {
+                        Box(modifier = Modifier.fillMaxSize().testTag("liste"))
+                    }
                 }
             },
-            detail_pane = |pane: &ThreePaneScaffoldPaneScope| {
-                pane.AnimatedPane(modifier = Modifier.test_tag("ayrıntı"), content = |_: &AnimatedPaneScope| {});
-            },
-            pane_expansion_drag_handle = Some(Rc::new(kompozable_lambda!(
-                |scope: &ThreePaneScaffoldScope, _state: PaneExpansionState| scope.PaneExpansionDragHandleSample()
-            )) as ThreePaneDragHandle),
-        );
-    })
+            detailPane = { AnimatedPane(modifier = Modifier.testTag("ayrıntı")) {} },
+            paneExpansionDragHandle = { PaneExpansionDragHandleSample() },
+        )
+    }
 }
 
 /// The reflow sample's navigator in a scaffold, its extra pane shown.
@@ -490,12 +490,12 @@ fn reflowed() -> impl Fn() + 'static {
 
 fn preferred_size_drag_handle_and_reflow_samples_in_kotlin() {
     // The list 300 dp, then a quarter of the scaffold; the default drag handle sample's 48 dp touch target.
-    let rule = KompozTestRule::with_viewport(preferred_sizes(false), IntSize::new(1000, 800));
+    let rule = KompozTestRule::with_viewport(kompozable_lambda!(|| PreferredSizes(false)), IntSize::new(1000, 800));
     assert_eq!(rule.on_node_with_tag("liste").get_unclipped_bounds_in_root(), Rect::new(0.0, 0.0, 300.0, 800.0));
     let handle = rule.on_node_with_content_description(KT_HANDLE).get_unclipped_bounds_in_root();
     assert!(kt_samples_near(handle.width(), 48.0) && kt_samples_near(handle.center().x, 312.0), "{handle:?}");
     drop(rule);
-    let rule = KompozTestRule::with_viewport(preferred_sizes(true), IntSize::new(1000, 800));
+    let rule = KompozTestRule::with_viewport(kompozable_lambda!(|| PreferredSizes(true)), IntSize::new(1000, 800));
     assert_eq!(rule.on_node_with_tag("liste").get_unclipped_bounds_in_root(), Rect::new(0.0, 0.0, 250.0, 800.0));
     drop(rule);
     // reflowAdaptStrategySample: a tall medium window, the extra pane reflowed under the detail.

@@ -17,7 +17,7 @@ fun Built(log: (AnnotatedString) -> Unit) {
     val plain = buildAnnotatedString {
         append("a")
         withStyle(SpanStyle(color = Color.Red)) { append("b") }
-        withLink(LinkAnnotation.url("https://kompoz.dev")) { append("c") }
+        withLink(LinkAnnotation.Url("https://kompoz.dev")) { append("c") }
     }
     log(plain)
     LaunchedEffect(Unit) {
@@ -25,7 +25,7 @@ fun Built(log: (AnnotatedString) -> Unit) {
             append("x")
             withStyle(SpanStyle(color = Color.Blue)) {
                 append("${later(1)}")
-                withLink(LinkAnnotation.url("https://kompoz.dev")) {
+                withLink(LinkAnnotation.Url("https://kompoz.dev")) {
                     delay(50)
                     append("y")
                 }
@@ -128,7 +128,7 @@ fun NotSuspending(log: (Int) -> Unit) {
             }
         }
         Snapshot.withMutableSnapshot { delay(1) }
-        val read = withoutReadObservation { later(2) }
+        val read = Snapshot.withoutReadObservation { later(2) }
         log(read)
     }
 }

@@ -498,6 +498,17 @@ impl ::core::fmt::Display for Rack {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::kompoz::runtime::Saveable for Rack {
+    fn save(&self) -> ::kompoz::runtime::SavedValue {
+        ::kompoz::runtime::SavedValue::String(self.name())
+    }
+    fn restore(saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
+        let name = saved.as_str()?;
+        Self::entries().into_iter().find(|e| e.name() == name)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 #[derive(
     :: core :: clone :: Clone,
     :: core :: marker :: Copy,
@@ -580,6 +591,17 @@ impl ::kompoz::runtime::kt::KtToString for Tier {
 impl ::core::fmt::Display for Tier {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.write_str(&self.name())
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::Saveable for Tier {
+    fn save(&self) -> ::kompoz::runtime::SavedValue {
+        ::kompoz::runtime::SavedValue::String(self.name())
+    }
+    fn restore(saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
+        let name = saved.as_str()?;
+        Self::entries().into_iter().find(|e| e.name() == name)
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
@@ -852,6 +874,17 @@ impl ::core::fmt::Display for CatalogKind {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::kompoz::runtime::Saveable for CatalogKind {
+    fn save(&self) -> ::kompoz::runtime::SavedValue {
+        ::kompoz::runtime::SavedValue::String(self.name())
+    }
+    fn restore(saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
+        let name = saved.as_str()?;
+        Self::entries().into_iter().find(|e| e.name() == name)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 #[doc(hidden)]
 pub struct __KzCatalogDefaults {
     limit: ::kompoz::runtime::kt::KtVal<i32>,
@@ -941,4 +974,339 @@ pub fn uses() -> ::std::string::String {
             ::kompoz::runtime::kt::KtList::size(&Tier::entries())
         );
     })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[::kompoz::runtime::kompozable(types(LocalItemsItem(rd), LocalItemsCounter()))]
+pub fn LocalItems() {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    let mut items =
+        ::kompoz::runtime::kt::list_of([LocalItemsItem(0, ::std::string::String::from("a")), LocalItemsItem(1)]);
+    let counter = remember(|| LocalItemsCounter());
+    Text(::kompoz::runtime::kt::template!(
+        ::kompoz::runtime::kt::KtList::first(&items),
+        " ",
+        ::kompoz::runtime::kt::KtList::last(&items).label(),
+        " ",
+        counter.count()
+    ));
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone, :: core :: cmp :: PartialEq)]
+pub(crate) struct LocalItemsItem {
+    pub id: i32,
+    pub label: ::std::string::String,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub(crate) fn LocalItemsItem(
+    id: i32,
+    #[default(::std::string::String::from(""))] label: ::std::string::String,
+) -> LocalItemsItem {
+    LocalItemsItem::__kz_new(id, label)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl LocalItemsItem {
+    #[doc(hidden)]
+    pub(crate) fn __kz_new(id: i32, label: ::std::string::String) -> LocalItemsItem {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(LocalItemsItem(rd)), { LocalItemsItem { id, label } })
+    }
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+    pub fn label(&self) -> ::std::string::String {
+        ::core::clone::Clone::clone(&self.label)
+    }
+    pub fn component1(&self) -> i32 {
+        self.id()
+    }
+    pub fn component2(&self) -> ::std::string::String {
+        self.label()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl LocalItemsItem {
+    pub(crate) fn copy(
+        &self,
+        # [default (self . id)] id: i32,
+        # [default (:: core :: clone :: Clone :: clone (& self . label))] label: ::std::string::String,
+    ) -> LocalItemsItem {
+        LocalItemsItem::__kz_new(id, label)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for LocalItemsItem {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::{KtViaDisplay as _, KtViaToString as _};
+        __kz_out.push_str("Item(");
+        __kz_out.push_str("id=");
+        (&::kompoz::runtime::kt::KtProbe(&self.id)).kt_write_probe(__kz_out);
+        __kz_out.push_str(", label=");
+        (&::kompoz::runtime::kt::KtProbe(&self.label)).kt_write_probe(__kz_out);
+        __kz_out.push(')');
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for LocalItemsItem {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for LocalItemsItem {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[doc(hidden)]
+pub(crate) struct __KzLocalItemsCounter {
+    count: ::kompoz::runtime::kt::KtVar<i32>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone)]
+pub(crate) struct LocalItemsCounter {
+    #[doc(hidden)]
+    pub __kz_this: ::std::rc::Rc<__KzLocalItemsCounter>,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub(crate) fn LocalItemsCounter() -> LocalItemsCounter {
+    LocalItemsCounter::__kz_new()
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl LocalItemsCounter {
+    #[doc(hidden)]
+    pub(crate) fn __kz_new() -> LocalItemsCounter {
+        let __kz_this = LocalItemsCounter {
+            __kz_this: ::std::rc::Rc::new(__KzLocalItemsCounter { count: ::kompoz::runtime::kt::KtVar::new() }),
+        };
+        __kz_this.__kz_init();
+        __kz_this
+    }
+    #[doc(hidden)]
+    #[allow(unused_variables)]
+    fn __kz_init(&self) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!({
+            self.__kz_this.count.set(0);
+        })
+    }
+    pub fn count(&self) -> i32 {
+        self.__kz_this.count.get()
+    }
+    pub fn set_count(&self, value: i32) {
+        self.__kz_this.count.set(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl LocalItemsCounter {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::PartialEq for LocalItemsCounter {
+    fn eq(&self, other: &Self) -> bool {
+        ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::cmp::Eq for LocalItemsCounter {}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::hash::Hash for LocalItemsCounter {
+    fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
+        ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for LocalItemsCounter {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
+            "Counter",
+            ::std::rc::Rc::as_ptr(&self.__kz_this) as *const (),
+        ))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for LocalItemsCounter {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for LocalItemsCounter {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn local_sizes() -> i32 {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!(types(LocalSizesItem(rr)), {
+        let __kz_d1 = LocalSizesItem(2, 3);
+        let id = __kz_d1.component1();
+        let size = __kz_d1.component2();
+        return id.clone() + size.clone();
+    })
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone, :: core :: cmp :: PartialEq)]
+pub(crate) struct LocalSizesItem {
+    pub id: i32,
+    pub size: i32,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub(crate) fn LocalSizesItem(id: i32, size: i32) -> LocalSizesItem {
+    LocalSizesItem::__kz_new(id, size)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl LocalSizesItem {
+    #[doc(hidden)]
+    pub(crate) fn __kz_new(id: i32, size: i32) -> LocalSizesItem {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(LocalSizesItem(rr)), { LocalSizesItem { id, size } })
+    }
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+    pub fn size(&self) -> i32 {
+        self.size
+    }
+    pub fn component1(&self) -> i32 {
+        self.id()
+    }
+    pub fn component2(&self) -> i32 {
+        self.size()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl LocalSizesItem {
+    pub(crate) fn copy(&self, # [default (self . id)] id: i32, # [default (self . size)] size: i32) -> LocalSizesItem {
+        LocalSizesItem::__kz_new(id, size)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for LocalSizesItem {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::{KtViaDisplay as _, KtViaToString as _};
+        __kz_out.push_str("Item(");
+        __kz_out.push_str("id=");
+        (&::kompoz::runtime::kt::KtProbe(&self.id)).kt_write_probe(__kz_out);
+        __kz_out.push_str(", size=");
+        (&::kompoz::runtime::kt::KtProbe(&self.size)).kt_write_probe(__kz_out);
+        __kz_out.push(')');
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for LocalSizesItem {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for LocalSizesItem {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone, :: core :: cmp :: PartialEq)]
+pub struct Meters {
+    pub value: i32,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn Meters(value: i32) -> Meters {
+    Meters::__kz_new(value)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Meters {
+    #[doc(hidden)]
+    pub fn __kz_new(value: i32) -> Meters {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(Meters(r)), { Meters { value } })
+    }
+    pub fn value(&self) -> i32 {
+        self.value
+    }
+    pub fn component1(&self) -> i32 {
+        self.value()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl Meters {
+    pub fn copy(&self, # [default (self . value)] value: i32) -> Meters {
+        Meters::__kz_new(value)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for Meters {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::{KtViaDisplay as _, KtViaToString as _};
+        __kz_out.push_str("Meters(");
+        __kz_out.push_str("value=");
+        (&::kompoz::runtime::kt::KtProbe(&self.value)).kt_write_probe(__kz_out);
+        __kz_out.push(')');
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for Meters {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for Meters {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+pub fn twice(m: Meters) -> Meters {
+    #[allow(unused_imports)]
+    use ::kompoz::runtime::kt::ext::*;
+    ::kompoz::runtime::named_args!(types(Meters(r)), { Meters(m.value() * 2) })
 }

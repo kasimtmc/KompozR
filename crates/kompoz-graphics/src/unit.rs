@@ -264,6 +264,19 @@ impl DpOffset {
     pub fn is_specified(self) -> bool {
         self.x.is_specified() && self.y.is_specified()
     }
+    pub fn is_unspecified(self) -> bool {
+        !self.is_specified()
+    }
+    /// This, or `other` where this is unspecified (Compose's takeOrElse).
+    pub fn take_or_else(self, other: impl FnOnce() -> DpOffset) -> DpOffset {
+        if self.is_specified() { self } else { other() }
+    }
+    /// [`take_or_else`](Self::take_or_else) whose `other` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, other: impl AsyncFnOnce() -> DpOffset) -> DpOffset {
+        if self.is_specified() { self } else { other().await }
+    }
 }
 
 impl Add for DpOffset {
@@ -299,6 +312,19 @@ impl DpSize {
     }
     pub fn is_specified(self) -> bool {
         self.width.is_specified() && self.height.is_specified()
+    }
+    pub fn is_unspecified(self) -> bool {
+        !self.is_specified()
+    }
+    /// This, or `other` where this is unspecified (Compose's takeOrElse).
+    pub fn take_or_else(self, other: impl FnOnce() -> DpSize) -> DpSize {
+        if self.is_specified() { self } else { other() }
+    }
+    /// [`take_or_else`](Self::take_or_else) whose `other` suspends (Kotlin's inline takeOrElse: its lambda, run in
+    /// place, suspends with the coroutine it is called in).
+    #[doc(hidden)]
+    pub async fn take_or_else_async(self, other: impl AsyncFnOnce() -> DpSize) -> DpSize {
+        if self.is_specified() { self } else { other().await }
     }
     pub fn center(self) -> DpOffset {
         DpOffset { x: self.width / 2.0, y: self.height / 2.0 }

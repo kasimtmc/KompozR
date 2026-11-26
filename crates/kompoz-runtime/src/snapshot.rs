@@ -995,6 +995,12 @@ impl Snapshot {
         }
     }
 
+    /// Runs `block` with what it reads told to no one (Compose's companion `Snapshot.withoutReadObservation`; the
+    /// free [`without_read_observation`](crate::without_read_observation) is the same).
+    pub fn without_read_observation<R>(block: impl FnOnce() -> R) -> R {
+        crate::read::without_read_observation(block)
+    }
+
     /// Runs `block` in a new mutable snapshot and applies it: its writes are seen together, or not at all.
     pub fn with_mutable_snapshot<R>(block: impl FnOnce() -> R) -> Result<R, SnapshotApplyConflict> {
         let snapshot = Snapshot::take_mutable_snapshot(None, None);

@@ -249,7 +249,7 @@ pub trait PlateOpen: Titled {
     fn __kz_plate_open_describe(&self) -> ::std::string::String {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::template!(self.label(), " ", self.area()) })
+        ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::template!(self.label(), " ", self.r#area()) })
     }
     fn describe(&self) -> ::std::string::String {
         self.__kz_plate_open_describe()
@@ -1877,6 +1877,17 @@ impl ::core::fmt::Display for Calc {
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
+impl ::kompoz::runtime::Saveable for Calc {
+    fn save(&self) -> ::kompoz::runtime::SavedValue {
+        ::kompoz::runtime::SavedValue::String(self.name())
+    }
+    fn restore(saved: &::kompoz::runtime::SavedValue) -> ::core::option::Option<Self> {
+        let name = saved.as_str()?;
+        Self::entries().into_iter().find(|e| e.name() == name)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
 #[doc(hidden)]
 pub struct __KzScoreboard {
     name: ::kompoz::runtime::kt::KtVal<::std::string::String>,
@@ -2499,6 +2510,16 @@ pub fn forms() -> ::std::string::String {
             impl Titled for __KzObject {
                 fn name(&self) -> ::std::string::String {
                     ::core::clone::Clone::clone(&self.p0)
+                }
+            }
+            impl ::core::cmp::PartialEq for __KzObject {
+                fn eq(&self, other: &Self) -> bool {
+                    ::core::ptr::eq(self, other)
+                }
+            }
+            impl ::core::fmt::Debug for __KzObject {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    ::core::write!(f, "<object>@{:p}", self)
                 }
             }
             let __kz_object6: ::std::rc::Rc<dyn Titled> =

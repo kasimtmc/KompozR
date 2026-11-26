@@ -12,14 +12,20 @@
 //!   [`decode_from_saved_state`], [`SavedStateRegistryOwnerExtensions::saved`].
 
 mod compose;
+mod configuration;
 mod registry;
 mod serialization;
 
 pub use compose::LocalSavedStateRegistryOwner;
+pub use configuration::{
+    PolymorphicBase, PolymorphicModuleBuilder, SavedStateConfiguration, SavedStateConfigurationBuilder, SerialClass,
+    SerializersModule, SerializersModuleBuilder, configured_saver, polymorphic_restorer, remember_serializable,
+    remember_serializable_configured,
+};
 pub use registry::{SavedStateProvider, SavedStateRegistry, SavedStateRegistryController, SavedStateRegistryOwner};
 pub use serialization::{
-    SavedStateDelegate, SavedStateRegistryOwnerExtensions, decode_from_saved_state, decode_from_saved_state_with,
-    encode_to_saved_state, encode_to_saved_state_with,
+    SavedStateDelegate, SavedStateRegistryOwnerExtensions, decode_from_saved_state, decode_from_saved_state_configured,
+    decode_from_saved_state_with, encode_to_saved_state, encode_to_saved_state_configured, encode_to_saved_state_with,
 };
 
 use kompoz_runtime::{Saveable, SavedValue};

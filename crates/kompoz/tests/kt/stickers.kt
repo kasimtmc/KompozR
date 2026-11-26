@@ -1,7 +1,9 @@
 // Another Kotlin file of the module (the C++ Kompoz's kompozable_tests_other.cpp): its composable and vals are used
 // from kotlin_ported.rs's Kotlin as Kotlin calls them from another file (named arguments, defaults, a val read by
-// its name, a local read and provided), and from its Rust. `Sticker` is a Rust struct there (Kotlin's data classes come with stage 14).
+// its name, a local read and provided), and from its Rust.
 package com.example.stickers
+
+data class Sticker(val label: String, val count: Int = 0)
 
 @Composable
 fun StickerRow(sticker: Sticker, prefix: String = "", suffix: String = "") {

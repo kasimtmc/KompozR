@@ -5,7 +5,8 @@
 //! collections ([`list_of`], [`KtList`], [`KtMutableList`], [`KtMap`], [`KtMapExt`]), nullables ([`safe`],
 //! [`elvis`], [`not_null`]), scope functions ([`KtScope`]), numbers and `kotlin.math` ([`KtNumber`], [`KtFloat`]),
 //! a Rust `Result` as Kotlin's `Result` ([`KtResult`]: `getOrThrow()`, …), casts ([`KtAs`]: `as`, `as?`), [`require`],
-//! [`check`], [`error`].
+//! [`check`], [`error`]; and the JVM classes Kotlin/JVM code dates and times with ([`java_time`], [`java_util`]'s
+//! `Calendar`, `Date`, `TimeZone` and `Locale`, [`java_text`]'s `SimpleDateFormat`: CLDR's data through ICU4X).
 //!
 //! Kotlin's exceptions are panics whose message is what Kotlin's `toString()` of the exception says
 //! (`IllegalStateException: Check failed.`), at the caller's line (`#[track_caller]`); Kotlin's `try` catches them
@@ -41,8 +42,12 @@ pub mod closeable;
 pub mod collections;
 pub mod delegate;
 pub mod format;
+// (stage 14 WPD: what TimePickerSamples write times with) java.text's SimpleDateFormat, on ICU4X.
+pub mod java_text;
 // (WP6: pickers) java.time's dates, what Compose's JVM date picker APIs take.
 pub mod java_time;
+// (stage 14 WPD) java.util's Calendar, Date, TimeZone and Locale.
+pub mod java_util;
 pub mod math;
 pub mod null;
 // (stage 14 WP0: Kotlin's classes and objects)
@@ -60,6 +65,8 @@ pub mod string;
 pub mod text;
 // (stage 14 WPB: Kotlin's exceptions on unwinding)
 pub mod throwable;
+// (stage 14 WPD) the system's time zones, for java.util's and java.time's
+mod zoneinfo;
 
 #[cfg(test)]
 mod tests;
@@ -67,18 +74,20 @@ mod tests;
 pub use cast::KtAs;
 pub use closeable::AutoCloseable;
 pub use collections::{
-    KtComponent3, KtComponent4, KtComponent5, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable, KtMap,
-    KtMapExt, KtMapLike, KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of,
+    Array, KtComponent3, KtComponent4, KtComponent5, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable,
+    KtMap, KtMapExt, KtMapLike, KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of,
     empty_list, empty_map, empty_set, float_array_of, int_array_of, list_of, list_of_not_null, map_of, mutable_list_of,
     mutable_map_of, mutable_set_of, set_of, to,
 };
 #[doc(hidden)]
-pub use collections::{List_async, MutableList_async};
+pub use collections::{Array_async, List_async, MutableList_async};
 pub use delegate::{
     KtDelegate, KtInc, KtLateinit, KtLazy, KtMutableDelegate, delegate_of, lazy, post_dec, post_inc, pre_dec, pre_inc,
 };
 pub use format::format;
-pub use java_time::{DayOfWeek, LocalDate, YearMonth};
+pub use java_text::SimpleDateFormat;
+pub use java_time::{DayOfWeek, Instant, LocalDate, YearMonth, ZoneId, ZonedDateTime};
+pub use java_util::{Calendar, CalendarField, Date, JavaLocale, TimeZone, UUID};
 pub use math::{
     E, KtAbs, KtFloat, KtNumber, KtSum, PI, abs, acos, asin, atan, atan2, cbrt, ceil, cos, cosh, exp, floor, hypot, ln,
     log2, log10, max, max_of, min, min_of, pow, round, sign, sin, sinh, sqrt, tan, tanh, to_char, truncate,

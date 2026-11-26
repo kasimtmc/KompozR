@@ -1,8 +1,7 @@
 // Material's text fields in a Kotlin file of their own (kompoz_file!): material3 1.5's TextFieldSamples.kt as Compose
 // writes them — test tags added to find them — and the C++ Kompoz's own Compose code (kompozable_tests.cpp's TextForms,
 // Phone; its AddTextDialog is in kotlin_lists_sheets.rs, beside its Dialog), then the API the samples leave out (the
-// label above, the indicator line, the field's shape and colors). TextFieldWithErrorState's local function `validate`
-// is a lambda here (Kotlin's local functions come with stage 14).
+// label above, the indicator line, the field's shape and colors).
 package com.example.materialfields
 
 import androidx.compose.foundation.*
@@ -146,7 +145,9 @@ fun TextFieldWithErrorState() {
     var isError by rememberSaveable { mutableStateOf(false) }
     val charLimit = 10
 
-    val validate = { text: CharSequence -> isError = text.length > charLimit }
+    fun validate(text: CharSequence) {
+        isError = text.length > charLimit
+    }
 
     LaunchedEffect(Unit) {
         // Run validation whenever text value changes

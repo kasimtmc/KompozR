@@ -338,7 +338,7 @@ impl ImageVector {
     /// Kotlin: `Builder(name: String = DefaultGroupName, defaultWidth: Dp, defaultHeight: Dp, viewportWidth: Float, viewportHeight: Float, tintColor: Color = Color.Unspecified, tintBlendMode: BlendMode = BlendMode.SrcIn, autoMirror: Boolean = false)`
     #[allow(clippy::too_many_arguments)]
     pub fn Builder(
-        name: &str,
+        name: impl Into<String>,
         default_width: Dp,
         default_height: Dp,
         viewport_width: f32,
@@ -467,6 +467,20 @@ impl PartialEq for ImageVector {
                 && x.tint_color == y.tint_color
                 && x.tint_blend_mode == y.tint_blend_mode
                 && x.auto_mirror == y.auto_mirror)
+    }
+}
+
+/// Kotlin's `toString()`: ImageVector has none of its own, so its class's name and its `hashCode()` in hex
+/// (`ImageVector@1f2e3d4c`; Compose's hash of its name, sizes and mirroring here, its root's and tint's left out).
+impl fmt::Display for ImageVector {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let d = &*self.data;
+        let mut h = d.name.encode_utf16().fold(0i32, |h, c| h.wrapping_mul(31).wrapping_add(i32::from(c)));
+        for x in [d.default_width.0, d.default_height.0, d.viewport_width, d.viewport_height] {
+            h = h.wrapping_mul(31).wrapping_add(x.to_bits() as i32);
+        }
+        h = h.wrapping_mul(31).wrapping_add(if d.auto_mirror { 1231 } else { 1237 });
+        write!(f, "ImageVector@{:x}", h as u32)
     }
 }
 

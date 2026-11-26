@@ -1,14 +1,95 @@
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
-#[::kompoz::runtime::kompozable]
+#[allow(dead_code)]
+#[derive(:: core :: clone :: Clone, :: core :: cmp :: PartialEq)]
+pub struct Todo {
+    pub id: i32,
+    pub title: ::std::string::String,
+    pub done: bool,
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named(type)]
+pub fn Todo(id: i32, title: impl ::core::convert::Into<::std::string::String>, #[default(false)] done: bool) -> Todo {
+    let title: ::std::string::String = ::core::convert::Into::into(title);
+    Todo::__kz_new(id, title, done)
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl Todo {
+    #[doc(hidden)]
+    pub fn __kz_new(id: i32, title: ::std::string::String, done: bool) -> Todo {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::ext::*;
+        ::kompoz::runtime::named_args!(types(Todo(rrd)), { Todo { id, title, done } })
+    }
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+    pub fn title(&self) -> ::std::string::String {
+        ::core::clone::Clone::clone(&self.title)
+    }
+    pub fn done(&self) -> bool {
+        self.done
+    }
+    pub fn component1(&self) -> i32 {
+        self.id()
+    }
+    pub fn component2(&self) -> ::std::string::String {
+        self.title()
+    }
+    pub fn component3(&self) -> bool {
+        self.done()
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+#[::kompoz::runtime::named]
+impl Todo {
+    pub fn copy(
+        &self,
+        # [default (self . id)] id: i32,
+        # [default (:: core :: clone :: Clone :: clone (& self . title))] title: ::std::string::String,
+        # [default (self . done)] done: bool,
+    ) -> Todo {
+        Todo::__kz_new(id, title, done)
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::kompoz::runtime::kt::KtToString for Todo {
+    fn kt_write(&self, __kz_out: &mut ::std::string::String) {
+        #[allow(unused_imports)]
+        use ::kompoz::runtime::kt::{KtViaDisplay as _, KtViaToString as _};
+        __kz_out.push_str("Todo(");
+        __kz_out.push_str("id=");
+        (&::kompoz::runtime::kt::KtProbe(&self.id)).kt_write_probe(__kz_out);
+        __kz_out.push_str(", title=");
+        (&::kompoz::runtime::kt::KtProbe(&self.title)).kt_write_probe(__kz_out);
+        __kz_out.push_str(", done=");
+        (&::kompoz::runtime::kt::KtProbe(&self.done)).kt_write_probe(__kz_out);
+        __kz_out.push(')');
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Display for Todo {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[allow(dead_code)]
+impl ::core::fmt::Debug for Todo {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.write_str(&::kompoz::runtime::kt::KtToString::kt_to_string(self))
+    }
+}
+#[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
+#[::kompoz::runtime::kompozable(types(Todo(rrd)))]
 pub fn Todos(group: impl ::core::convert::Into<::core::option::Option<::std::string::String>>) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    let todos = remember(|| {
-        mutable_state_list_of([
-            Todo(1, ::std::string::String::from("Yaz"), false),
-            Todo(2, ::std::string::String::from("Oku"), false),
-        ])
-    });
+    let todos = remember(|| mutable_state_list_of([Todo(1, "Yaz", false), Todo(2, "Oku", false)]));
     let state = remember_lazy_list_state();
     LazyColumn(
         state = ::core::option::Option::Some(state.clone()),

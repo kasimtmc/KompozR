@@ -62,9 +62,12 @@ pub use lifecycle::{
 pub use registry::LifecycleRegistry;
 pub use repeat::{LifecycleDestroyedException, LifecycleFlowExtensions};
 pub use saved_state::{
-    LocalSavedStateRegistryOwner, SavedState, SavedStateDelegate, SavedStateProvider, SavedStateReader,
-    SavedStateRegistry, SavedStateRegistryController, SavedStateRegistryOwner, SavedStateRegistryOwnerExtensions,
-    SavedStateWriter, decode_from_saved_state, decode_from_saved_state_with, encode_to_saved_state,
-    encode_to_saved_state_with, saved_state, saved_state_from, saved_state_of,
+    LocalSavedStateRegistryOwner, PolymorphicBase, PolymorphicModuleBuilder, SavedState, SavedStateConfiguration,
+    SavedStateConfigurationBuilder, SavedStateDelegate, SavedStateProvider, SavedStateReader, SavedStateRegistry,
+    SavedStateRegistryController, SavedStateRegistryOwner, SavedStateRegistryOwnerExtensions, SavedStateWriter,
+    SerialClass, SerializersModule, SerializersModuleBuilder, configured_saver, decode_from_saved_state,
+    decode_from_saved_state_configured, decode_from_saved_state_with, encode_to_saved_state,
+    encode_to_saved_state_configured, encode_to_saved_state_with, polymorphic_restorer, remember_serializable,
+    remember_serializable_configured, saved_state, saved_state_from, saved_state_of,
 };
 pub use viewmodel::*;

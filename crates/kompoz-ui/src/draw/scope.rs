@@ -1047,6 +1047,7 @@ impl DrawTransform {
         self.steps.push(Step::Scale(scale_x, scale_y, pivot));
     }
     /// The same both ways.
+    /// Kotlin: `scale(scale: Float, pivot: Offset = center)`
     pub fn scale_uniform(&mut self, scale: f32, #[default(self.center())] pivot: Offset) {
         self.steps.push(Step::Scale(scale, scale, pivot));
     }
@@ -1058,9 +1059,11 @@ impl DrawTransform {
         self.steps.push(Step::Inset(left, top, right, bottom));
         self.size = Size::new((self.size.width - left - right).max(0.0), (self.size.height - top - bottom).max(0.0));
     }
+    /// Kotlin: `inset(horizontal: Float = 0f, vertical: Float = 0f)`
     pub fn inset_hv(&mut self, #[default(0.0)] horizontal: f32, #[default(0.0)] vertical: f32) {
         self.inset(horizontal, vertical, horizontal, vertical);
     }
+    /// Kotlin: `inset(inset: Float)`
     pub fn inset_all(&mut self, inset: f32) {
         self.inset(inset, inset, inset, inset);
     }
@@ -1181,6 +1184,7 @@ macro_rules! transforms {
 
             /// Inset by `horizontal` at the left and the right, `vertical` at the top and the bottom (Compose's
             /// inset(horizontal, vertical)).
+            /// Kotlin: `inset(horizontal: Float = 0f, vertical: Float = 0f, block: DrawScope.() -> Unit)`
             pub fn inset_hv(
                 &mut self,
                 #[default(0.0)] horizontal: f32,
@@ -1192,6 +1196,7 @@ macro_rules! transforms {
             }
 
             /// Inset by `inset` all round (Compose's inset(inset)).
+            /// Kotlin: `inset(inset: Float, block: DrawScope.() -> Unit)`
             pub fn inset_all(&mut self, inset: f32, block: impl FnOnce(&mut $ty<'a>)) {
                 let e = enter_inset(self, inset, inset, inset, inset);
                 entered_in(self, e, block)
@@ -1294,6 +1299,7 @@ macro_rules! transforms {
             }
 
             /// The same both ways (Compose's scale(scale)).
+            /// Kotlin: `scale(scale: Float, pivot: Offset = center, block: DrawScope.() -> Unit)`
             pub fn scale_uniform(
                 &mut self,
                 scale: f32,

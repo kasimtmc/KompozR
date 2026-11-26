@@ -142,7 +142,7 @@ fn type_name(t: &Type) -> Option<String> {
     }
 }
 
-fn walk_body(b: Option<&FunctionBody>, f: &mut impl FnMut(&Expr)) {
+pub(crate) fn walk_body(b: Option<&FunctionBody>, f: &mut impl FnMut(&Expr)) {
     match b {
         Some(FunctionBody::Block(b)) => walk_block(b, f),
         Some(FunctionBody::Expr(e)) => walk_expr(e, f),
@@ -150,7 +150,7 @@ fn walk_body(b: Option<&FunctionBody>, f: &mut impl FnMut(&Expr)) {
     }
 }
 
-fn walk_block(b: &Block, f: &mut impl FnMut(&Expr)) {
+pub(crate) fn walk_block(b: &Block, f: &mut impl FnMut(&Expr)) {
     for s in &b.stmts {
         match &s.kind {
             StmtKind::Decl(Decl::Property(p)) => {

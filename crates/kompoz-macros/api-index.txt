@@ -24,6 +24,12 @@ kompoz-material3/dialogs kompozable AlertDialogWithIconSample - crates/kompoz-ma
 * super AnalogTimePickerState - RememberObserver
 * super AnalogTimePickerState - TimePickerState
 kompoz-material3/menus kompozable Anchored r crates/kompoz-material3/tests/menus.rs
+* super AnchoredDraggableElement - ModifierNodeElement
+* super AnchoredDraggableLayoutInfoProvider - SnapLayoutInfoProvider
+* super AnchoredDraggableNode - IndirectPointerInputModifierNode
+* super AnchoredDraggableNode - ModifierNode
+* super AnchoredDraggableNode - PointerInputModifierNode
+* super AnchoredFlingScope - ScrollScope
 * super AndroidEdgeEffectOverscrollEffect - OverscrollEffect
 * super AndroidEdgeEffectOverscrollFactory - OverscrollFactory
 * super AnimateBoundsElement - ModifierNodeElement
@@ -50,12 +56,17 @@ kompoz-material3/scaffold kompozable AnimatedFloatingActionButtonSample - crates
 * super AnimatedPaneNode - ModifierNode
 * super AnimatedPaneNode - ParentDataModifierNode
 * super AnimatedPaneScope - AnimatedVisibilityScope
+* super AnimatedShape - Shape
 * kompozable AnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs
 * method AnimatedVisibility rdddr crates/kompoz-animation/src/animated_visibility.rs Transition
 * kompozable AnimatedVisibilityWithState rddddr crates/kompoz-animation/src/animated_visibility.rs
 * kompozable AnimatingChipContent rrrrrrrrrrr crates/kompoz-material3/src/chip.rs
+* super AnimationInner - AnyInfiniteTransitionAnimationState
+* super AnimationInner - AnyTransitionAnimationState
+* super AnimationState - StateSource
 * super AnnotatedString - BuilderAppend
 * super AnnotatedString - Saveable
+* super AnyTypeSpec - AnimationSpec
 * kompozable AppBarColumn dddr crates/kompoz-material3/src/app_bar_column.rs
 * super AppBarColumnScope - AppBarScope
 * kompozable AppBarOverflowIndicator rddddd crates/kompoz-material3/src/app_bar_dsl.rs
@@ -69,7 +80,9 @@ kompoz-material3/scaffold kompozable AnimatedFloatingActionButtonSample - crates
 * super ApproachLayoutModifierNodeImpl - ModifierNode
 * super ApproachMeasureScope - LookaheadScope
 * super ApproachMeasureScope - MeasureScope
+* super Arc - Instance
 kompoz-material3-adaptive/pane_scaffolds kompozable Article rr crates/kompoz-material3-adaptive/tests/pane_scaffolds.rs
+* super AsVectorized - VectorizedAnimationSpec
 * super AspectRatioElement - ModifierNodeElement
 * super AspectRatioNode - LayoutModifierNode
 * super AspectRatioNode - ModifierNode
@@ -89,6 +102,9 @@ kompoz-material3-adaptive/samples kompozable BackButton rrd crates/kompoz-materi
 * kompozable BackHandler dr crates/kompoz-material3/src/internal/back_handler.rs
 * kompozable BackHandler dr crates/kompoz-ui/src/back.rs
 * super BackStackEntryIdViewModel - ViewModel
+* super BackStackMatchResult - MatchResultOf
+* super BackStackMatchResult - WrappedMatchResult
+* super BackStackMatcher - DeepLinkMatcher
 * super BackgroundElement - ModifierNodeElement
 * super BackgroundNode - DrawModifierNode
 * super BackgroundNode - ModifierNode
@@ -161,7 +177,45 @@ kompoz-foundation/scroll kompozable Boxes rrr crates/kompoz-foundation/tests/scr
 * super BringIntoViewResponderNode - ModifierNode
 * super BringIntoViewSpec - BringIntoViewSpecEq
 * super BrushPainter - Painter
+* super BufferEditingScope - TextEditingScope
+* super BuildScope - AlphaScope
+* super BuildScope - BackgroundScope
+* super BuildScope - BaselineShiftScope
+* super BuildScope - BorderScope
+* super BuildScope - ClipScope
+* super BuildScope - ColorFilterScope
+* super BuildScope - ContentColorScope
+* super BuildScope - ContentPaddingScope
 * super BuildScope - Density
+* super BuildScope - ExternalPaddingScope
+* super BuildScope - FontFamilyScope
+* super BuildScope - FontSizeScope
+* super BuildScope - FontStyleScope
+* super BuildScope - FontSynthesisScope
+* super BuildScope - FontWeightScope
+* super BuildScope - ForegroundScope
+* super BuildScope - HyphensScope
+* super BuildScope - LetterSpacingScope
+* super BuildScope - LineBreakScope
+* super BuildScope - LineHeightScope
+* super BuildScope - MaxSizeScope
+* super BuildScope - MinSizeScope
+* super BuildScope - PositionScope
+* super BuildScope - RotationScope
+* super BuildScope - ScaleScope
+* super BuildScope - ShadowScope
+* super BuildScope - ShapeScope
+* super BuildScope - SizeScope
+* super BuildScope - StyleStateScope
+* super BuildScope - TextAlignScope
+* super BuildScope - TextDecorationScope
+* super BuildScope - TextDirectionScope
+* super BuildScope - TextIndentScope
+* super BuildScope - TextMotionScope
+* super BuildScope - TextStyleScope
+* super BuildScope - TransformOriginScope
+* super BuildScope - TranslationScope
+* super BuildScope - ZIndexScope
 * kompozable Button rddddddddr crates/kompoz-material3/src/button.rs
 kompoz-runtime/macros kompozable Button rdr crates/kompoz-runtime/tests/macros.rs
 kompoz-ui/semantics kompozable Button rr crates/kompoz-ui/tests/semantics.rs
@@ -176,6 +230,8 @@ kompoz-material3/button_groups kompozable ButtonGroupSample - crates/kompoz-mate
 * kompozable ButtonGroupWithoutOverflowIndicator dddr crates/kompoz-material3/src/button_group.rs
 * kompozable ButtonSurface rrrrrrrrrrr crates/kompoz-material3/src/button.rs
 * kompozable ButtonWithShapes rrdddddddr crates/kompoz-material3/src/button.rs
+* super ByInstance - Key
+* super ByValue - Key
 kompoz-material3-adaptive-navigation-suite/navigation_suite kompozable ByValueItems rr crates/kompoz-material3-adaptive-navigation-suite/tests/navigation_suite.rs
 * super CacheDrawModifierNode - DrawModifierNode
 * super CacheDrawModifierNode - ModifierNode
@@ -187,7 +243,6 @@ kompoz-animation/shared kompozable CallerManaged rrrr crates/kompoz-animation/te
 * kompozable Card dddddr crates/kompoz-material3/src/card.rs
 kompoz-material3/containers kompozable CardSample - crates/kompoz-material3/tests/containers.rs
 * kompozable Carousel rrrrrddddr crates/kompoz-material3/src/carousel/carousel.rs
-kompoz/kotlin_search_carousel fn CarouselItem rrrd crates/kompoz/tests/kotlin_search_carousel.rs
 * super CarouselPageSize - PageSizeCalculator
 * super CarouselState - ScrollableState
 kompoz-material3/carousel kompozable CarouselWithShowAllButtonSample - crates/kompoz-material3/tests/carousel.rs
@@ -254,6 +309,7 @@ kompoz-runtime/macros kompozable Clicker rr crates/kompoz-runtime/tests/macros.r
 * kompozable CollectInteractionsAsState rrrrr crates/kompoz-material3/src/list_item.rs
 * kompozable CollectPredictiveBackScale rr crates/kompoz-material3-adaptive/src/layout/predictive_back_scale_state.rs
 * super CollectionNavType - NavTypeImpl
+* super CollectionPreviewParameterProvider - PreviewParameterProvider
 * super ColorPainter - Painter
 * kompozable ColorProducerSurface rrddr crates/kompoz-material3/src/surface.rs
 * fn ColorScheme rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/color_scheme.rs
@@ -269,9 +325,11 @@ kompoz-runtime/subcomposition kompozable Column rr crates/kompoz-runtime/tests/c
 * super CombinedClickableElement - ModifierNodeElement
 * super CombinedFlexBoxConfig - FlexBoxConfig
 * super CombinedFlexConfig - FlexConfig
+* super CombinedSpec - AnimationSpec
 * super CombinedStyle - Style
 * super CommandsScope - TextEditingScope
 * kompozable CommonDecorationBox rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/internal/text_field_impl.rs
+* super CompatCallbacks - NavigationEventHandlerCallbacks
 * super ComponentRectPositionProvider - PopupPositionProvider
 * super ComposeLifecycleOwner - LifecycleOwner
 * super ComposeNavGraphNavigator - Navigator
@@ -335,7 +393,6 @@ kompoz-runtime/runtime kompozable CounterView r crates/kompoz-runtime/tests/runt
 * super CustomStyleScopeExt - CustomStyleScope
 kompoz-material3/top_app_bars kompozable CustomTwoRowsTopAppBar - crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable CustomizedLookaheadAnimationVisualDebugging rr crates/kompoz-animation/src/lookahead_debug.rs
-kompoz/kotlin_nav_host fn Dashboard d crates/kompoz/tests/kotlin_nav_host.rs
 * kompozable DataSnackbar rdddddddd crates/kompoz-material3/src/snackbar.rs
 * kompozable DateEntryContainer rrrrrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable DateInputContent rrrrrrrr crates/kompoz-material3/src/date_input.rs
@@ -363,10 +420,12 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DateRangePickerStateImpl - DateRangePickerState
 * method DateRangePickerTitle rdd crates/kompoz-material3/src/date_range_picker.rs DateRangePickerDefaults
 * kompozable Day rrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
+* super DecayAnimation - Animation
 * kompozable DecoratedLabel rrrrrrrrrr crates/kompoz-material3/src/internal/text_field_impl.rs
 * kompozable Decoration rrr crates/kompoz-material3/src/internal/text_field_impl.rs
 * method DecorationBox rrrrrrddddddddddd crates/kompoz-material3/src/text_field_defaults.rs OutlinedTextFieldDefaults
 * method DecorationBox rrrrrrdddddddddddd crates/kompoz-material3/src/text_field_defaults.rs TextFieldDefaults
+* super DeepLinkMatchResult - MatchResultOf
 * super DefaultAccessibilityManager - AccessibilityManager
 * kompozable DefaultAnimatedPane r crates/kompoz-material3-adaptive/src/layout/pane.rs
 * super DefaultAnimatedPaneOverride - AnimatedPaneOverride
@@ -381,6 +440,7 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DefaultDrag2DScope - Drag2DScope
 * super DefaultDragScope - DragScope
 * super DefaultDraggable2DState - Draggable2DState
+* super DefaultDraggableAnchors - DraggableAnchors
 * super DefaultDraggableState - DraggableState
 * super DefaultDrawerItemsColor - NavigationDrawerItemColors
 * super DefaultFlexBoxConfig - FlexBoxConfig
@@ -388,6 +448,8 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DefaultFlingBehavior - FlingBehavior
 * super DefaultHorizontalFloatingToolbarOverride - HorizontalFloatingToolbarOverride
 * super DefaultHorizontalFloatingToolbarWithFabOverride - HorizontalFloatingToolbarWithFabOverride
+* super DefaultIntrinsicMeasurable - IntrinsicMeasurable
+* super DefaultIntrinsicMeasurable - Measurable
 * super DefaultLazyGridPrefetchStrategy - LazyGridPrefetchStrategy
 * super DefaultLazyListPrefetchStrategy - LazyListPrefetchStrategy
 * super DefaultLifecycleObserver - LifecycleObserver
@@ -410,6 +472,7 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DefaultShortNavigationBarOverride - ShortNavigationBarOverride
 * super DefaultSingleRowTopAppBarOverride - SingleRowTopAppBarOverride
 * kompozable DefaultThreePaneScaffold r crates/kompoz-material3-adaptive/src/layout/three_pane_scaffold.rs
+* super DefaultThreePaneScaffoldNavigator - ThreePaneScaffoldNavigator
 * super DefaultThreePaneScaffoldOverride - ThreePaneScaffoldOverride
 * super DefaultTooltipCaretShape - Shape
 * super DefaultTransformScope - TransformScope
@@ -421,17 +484,20 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DefaultWideNavigationRailOverride - WideNavigationRailOverride
 * method DeferredAnimatedContent dddddr crates/kompoz-animation/src/animated_content.rs DeferredTransition
 * method DeferredAnimatedVisibility rddddr crates/kompoz-animation/src/animated_visibility.rs DeferredTransition
+* super DeferredAnimationValue - StateSource
 * super DeferredTransition - Transition
+* super DelayedVectorizedSpringSpec - VectorizedAnimationSpec
 * super DelegableSemanticsElement - ModifierNodeElement
 * super DelegableSemanticsNode - ModifierNode
 * super DelegableSemanticsNode - SemanticsModifierNode
 * super DelegableSemanticsPropertyReceiver - SemanticsConfiguration
+* super DelegateInner - SavedStateProvider
 * super DelegatingAnimationSpec - AnimationSpec
 * super DelegatingThemeAwareRippleNode - ModifierNode
 * super DelegatingThemeAwareRippleNode - ObserverModifierNode
+* super DelegatingVectorized - VectorizedAnimationSpec
 * super DerivedSizeElement - ModifierNodeElement
-* fn Destination rr examples/showcase/src/lib.rs
-kompoz/kotlin_nav_host fn Detail rd crates/kompoz/tests/kotlin_nav_host.rs
+* super DerivedState - StateSource
 kompoz-material3-adaptive/samples kompozable DetailPaneContent rrrdddr crates/kompoz-material3-adaptive/tests/samples.rs
 * kompozable DetectClickFromInteractionSource rr crates/kompoz-material3/src/search_bar.rs
 * super DeterminateCircularWavyProgressElement - ModifierNodeElement
@@ -449,6 +515,8 @@ kompoz-material3-adaptive/samples kompozable DetailPaneContent rrrdddr crates/ko
 * fn DialogProperties dddd crates/kompoz-ui/src/window/dialog.rs
 * super DialogRootPolicy - MeasurePolicy
 kompoz-navigation3/navigation3 kompozable DialogSample - crates/kompoz-navigation3/tests/navigation3.rs
+* super DialogScene - OverlayScene
+* super DialogScene - Scene
 * super DirectNavigationEventInput - NavigationEventInput
 * kompozable DisableCutCopy r crates/kompoz-foundation/src/text/basic_secure_text_field.rs
 * kompozable DisableSelection r crates/kompoz-foundation/src/text/selection/container.rs
@@ -500,6 +568,9 @@ kompoz-platform/drag_display kompozable DragApp - crates/kompoz-platform/tests/d
 * super Draggable2DNode - PointerInputModifierNode
 * super Draggable2DState - DraggableStateEq
 * super DraggableAnchors - DraggableAnchorsEq
+* super DraggableAnchorsElement - ModifierNodeElement
+* super DraggableAnchorsNode - LayoutModifierNode
+* super DraggableAnchorsNode - ModifierNode
 * super DraggableElement - ModifierNodeElement
 * super DraggableGestureConnection - GestureConnection
 * super DraggableNode - IndirectPointerInputModifierNode
@@ -579,6 +650,10 @@ kompoz-material3/top_app_bars kompozable EnterAlwaysTopAppBarWithReverseScrollin
 * super EntryData - ViewModelStoreOwner
 * super EntryKeyOf - NavEntryKey
 * super EntryObserver - RememberObserver
+* super EnumListNavType - CollectionNavType
+* super EnumListNavType - NavTypeImpl
+* super EnumNavType - NavTypeImpl
+* super EnumNullableNavType - NavTypeImpl
 kompoz-runtime/macros kompozable Equal rr crates/kompoz-runtime/tests/macros.rs
 * super EqualWeightContentMeasurePolicy - MeasurePolicy
 kompoz-material3/bottom_app_bars kompozable ExitAlwaysBottomAppBar - crates/kompoz-material3/tests/bottom_app_bars.rs
@@ -663,6 +738,7 @@ kompoz-material3/containers kompozable FilterChipWithTrailingIconSample - crates
 * super FiniteAnimationSpec - AnimationSpec
 * super FixedCountSubcomposeSlotReusePolicy - SubcomposeSlotReusePolicy
 * super FixedSize - PlaceTarget
+* super FixedState - StateSource
 * kompozable FlexBox dDr crates/kompoz-foundation/src/layout/flex_box.rs
 * super FlexBoxChildDataNode - ModifierNode
 * super FlexBoxChildDataNode - ParentDataModifierNode
@@ -674,6 +750,7 @@ kompoz-material3/containers kompozable FilterChipWithTrailingIconSample - crates
 * super Fling2DScope - ScrollScope
 * super FlingBehavior - FlingBehaviorEq
 * kompozable FloatCircularProgressIndicator rddddd crates/kompoz-material3/src/progress_indicator.rs
+* super FloatDecaySpecOf - DecayAnimationSpec
 * super FloatExponentialDecaySpec - FloatDecayAnimationSpec
 * kompozable FloatLinearProgressIndicator rdddd crates/kompoz-material3/src/progress_indicator.rs
 * super FloatSpringSpec - FloatAnimationSpec
@@ -686,6 +763,7 @@ kompoz-material3/containers kompozable FilterChipWithTrailingIconSample - crates
 kompoz-material3/fab_menu kompozable FloatingActionButtonMenuSample - crates/kompoz-material3/tests/fab_menu.rs
 * super FloatingToolbarScrollBehavior - NestedScrollConnection
 * super FloatingToolbarStateImpl - FloatingToolbarState
+* super Flow - AsFlow
 * kompozable FlowColumn dddddddr crates/kompoz-foundation/src/layout/flow_layout.rs
 * super FlowMeasurePolicy - MultiContentMeasurePolicy
 kompoz-coroutines/coroutines kompozable FlowReader r crates/kompoz-coroutines/tests/coroutines.rs
@@ -743,6 +821,7 @@ kompoz-runtime/macros kompozable GradientCard r crates/kompoz-runtime/tests/macr
 * super GridItemNode - ModifierNode
 * super GridItemNode - ParentDataModifierNode
 kompoz-foundation/grid kompozable GridLeaf rrrr crates/kompoz-foundation/tests/grid.rs
+* super GridMeasurePolicy - MeasurePolicy
 * super GridPrefetchScope - LazyGridPrefetchScope
 * super GridScrollIndicatorState - ScrollIndicatorState
 * super GridScrollScope - LazyLayoutScrollScope
@@ -853,6 +932,7 @@ kompoz-runtime/macros kompozable Iconed rdd crates/kompoz-runtime/tests/macros.r
 * kompozable IndicatorRipple rr crates/kompoz-material3/src/navigation_item.rs
 * super IndirectPointerInputDragCycleDetector - DraggableGestureConnection
 * super IndirectPointerInputDragCycleDetector - GestureConnection
+* super InfiniteTransitionAnimationState - StateSource
 * super InitializerViewModelFactory - ViewModelProviderFactory
 * super InlineChildPolicy - MeasurePolicy
 * kompozable InlineChildren rr crates/kompoz-foundation/src/text/inline_content.rs
@@ -912,6 +992,7 @@ kompoz-runtime/macros kompozable KeywordNamed rr crates/kompoz-runtime/tests/mac
 * super KtMapExt - KtMapLike
 * super KtMutableDelegate - KtDelegate
 * super KtMutableList - KtIterable
+* super KtShared - Saveable
 * super KtStep - KtRangeBound
 * super Lab - ColorSpace
 * kompozable Label rdddr crates/kompoz-material3/src/label.rs
@@ -992,6 +1073,7 @@ kompoz-runtime/subcomposition kompozable Label r crates/kompoz-runtime/tests/sub
 * super LazyLayoutSemanticsModifier - ModifierNodeElement
 * super LazyLayoutSemanticsModifierNode - ModifierNode
 * super LazyLayoutSemanticsModifierNode - SemanticsModifierNode
+* super LazyLineContentAdapter - ScrollbarAdapter
 * kompozable LazyList rrrrrrrrrrrrr crates/kompoz-foundation/src/lazy/list/list.rs
 * super LazyListCacheWindowStrategy - LazyListPrefetchStrategy
 * super LazyListInterval - LazyLayoutInterval
@@ -1180,13 +1262,21 @@ kompoz-material3/lists kompozable MultiSelectionSegmentedListItemSample - crates
 * super MutableCreationExtras - CreationExtras
 * super MutableCubic - Cubic
 * super MutableInteractionSource - InteractionSource
+* super MutableIntervalList - IntervalList
+* super MutableSharedFlow - AsFlow
 * super MutableSharedFlow - SharedFlow
 * super MutableSnapshot - Snapshot
+* super MutableState - Saveable
+* super MutableState - StateSource
+* super MutableStateFlow - AsFlow
 * super MutableStateFlow - StateFlow
 * super MutableStyleState - StyleState
 * super MutableThreePaneScaffoldState - ThreePaneScaffoldState
 * fn MutableTransform ddd crates/kompoz-animation/src/deferred_enter_exit.rs
+* super MutableTransformScopeRef - MutableTransformScope
 * super Named - LazyLayoutInterval
+* super NavBackStack - BackStackList
+* super NavBackStack - Saveable
 * super NavBackStack - SnapshotStateList
 * super NavBackStackEntry - LifecycleOwner
 * super NavDeepLinkRequest - IntoNavTarget
@@ -1310,6 +1400,8 @@ kompoz-material3/top_app_bars kompozable OneLine r crates/kompoz-material3/tests
 kompoz-material3/lists kompozable OneLineListItem - crates/kompoz-material3/tests/lists.rs
 * kompozable OneRowChildren rrrrrrr crates/kompoz-material3/src/snackbar.rs
 * kompozable OneRowSnackbar rrrrrr crates/kompoz-material3/src/snackbar.rs
+* super Option - RouteValue
+* super Option - Saveable
 * super OutlineShape - Shape
 * kompozable OutlinedButton rddddddddr crates/kompoz-material3/src/button.rs
 * kompozable OutlinedButtonWithShapes rrdddddddr crates/kompoz-material3/src/button.rs
@@ -1376,6 +1468,7 @@ kompoz-material3-adaptive/samples kompozable PaneExpansionDragHandleSample rd cr
 * super PaneScaffoldMotionDataProviderExt - PaneScaffoldMotionDataProvider
 * super PaneScaffoldParentDataImpl - PaneScaffoldParentData
 * fn Paragraph rrrrrdddd crates/kompoz-text/src/paragraph/mod.rs
+* super ParagraphMeasure - LineMeasure
 * fn ParagraphStyle ddddddddd crates/kompoz-text/src/paragraph_style.rs
 * super ParagraphStyle - BuilderStyle
 * super ParagraphStyle - Saveable
@@ -1436,6 +1529,7 @@ kompoz-material3/tabs kompozable PrimaryIconTabs - crates/kompoz-material3/tests
 * kompozable PrimaryScrollableTabRow rddddddddr crates/kompoz-material3/src/tab_row.rs
 * kompozable PrimaryTabRow rdddddr crates/kompoz-material3/src/tab_row.rs
 kompoz-material3/tabs kompozable PrimaryTextTabs - crates/kompoz-material3/tests/tabs.rs
+* super ProduceStateScope - MutableState
 * super ProducerScope - CoroutineScope
 kompoz-runtime/macros kompozable Provide rr crates/kompoz-runtime/tests/macros.rs
 * kompozable ProvideContentColorTextStyle rrr crates/kompoz-material3/src/internal/provide_content_color_text_style.rs
@@ -1465,6 +1559,8 @@ kompoz-material3-adaptive/samples kompozable RadioButtonRow rrrd crates/kompoz-m
 * fn RangeSliderState ddddd crates/kompoz-material3/src/slider/state.rs
 * method RangeTrack rddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 * kompozable RangeTrackImpl rrrrrrrrr crates/kompoz-material3/src/slider/defaults.rs
+* super Rc - BackStackList
+* super Rc - Instance
 kompoz-runtime/runtime kompozable Reader - crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable ReadsItsCallback rrr crates/kompoz-runtime/tests/runtime.rs
 kompoz-runtime/runtime kompozable ReadsItsImplCallback rrrr crates/kompoz-runtime/tests/runtime.rs
@@ -1499,6 +1595,7 @@ kompoz-ui/focus kompozable RestorableRow r crates/kompoz-ui/tests/focus.rs
 * kompozable ReusableContent rr crates/kompoz-runtime/src/context.rs
 * kompozable ReusableContentHost rr crates/kompoz-runtime/src/context.rs
 * super ReverseScope - ScrollScope
+* super ReversedSpec - AnimationSpec
 * super Rgb - ColorSpace
 kompoz-material3/snackbars_tooltips kompozable RichTip rrrrr crates/kompoz-material3/tests/snackbars_tooltips.rs
 * method RichTooltip dddddddddr crates/kompoz-material3/src/tooltip.rs DynTooltipScope as TooltipScopeComposables
@@ -1582,7 +1679,9 @@ kompoz-navigation/nav_host kompozable SaveableScreen r crates/kompoz-navigation/
 * super SaveableStateHolder - Saveable
 kompoz-runtime/runtime kompozable SavedChecks r crates/kompoz-runtime/tests/runtime.rs
 * super SavedState - BundleGetters
+* super SavedState - BundleSetters
 * super SavedState - Saveable
+* fn SavedStateConfiguration dr crates/kompoz-lifecycle/src/saved_state/configuration.rs
 * super SavedStateHandle - SavedStateHandleRoutes
 * super SavedStateHandleAttacher - LifecycleEventObserver
 * super SavedStateHandleAttacher - LifecycleObserver
@@ -1716,6 +1815,9 @@ kompoz-material3/tabs kompozable SelectedText r crates/kompoz-material3/tests/ta
 * super SemanticsElement - ModifierNodeElement
 * super SensitiveContentElement - ModifierNodeElement
 * super SensitiveContentNode - ModifierNode
+* super Set - ArgOr
+* super Set - ImplArg
+* super Set - Required
 kompoz-runtime/runtime kompozable SetsShared rr crates/kompoz-runtime/tests/runtime.rs
 * fn Shadow ddd crates/kompoz-graphics/src/shadow.rs
 * super ShadowGraphicsLayerElement - ModifierNodeElement
@@ -1736,6 +1838,7 @@ kompoz-runtime/runtime kompozable SetsShared rr crates/kompoz-runtime/tests/runt
 * super SharedBoundsNodeElement - ModifierNodeElement
 kompoz-navigation3/navigation3 kompozable SharedCats r crates/kompoz-navigation3/tests/navigation3.rs
 * method SharedContentConfig d crates/kompoz-animation/src/shared_transition.rs SharedTransitionScope
+* super SharedFlow - AsFlow
 * super SharedMutableTransformStateProviderElement - ModifierNodeElement
 * super SharedMutableTransformStateProviderNode - ModifierLocalModifierNode
 * super SharedMutableTransformStateProviderNode - ModifierNode
@@ -1774,6 +1877,7 @@ kompoz-material3/top_app_bars kompozable SimpleTopAppBarWithAdaptiveActions - cr
 kompoz-material3/top_app_bars kompozable SimpleTopAppBarWithSubtitle - crates/kompoz-material3/tests/top_app_bars.rs
 * kompozable SingleChoiceSegmentedButtonRow ddr crates/kompoz-material3/src/segmented_button.rs
 * super SingleLineCodepointTransformation - CodepointTransformation
+* super SinglePaneScene - Scene
 * kompozable SingleRowTopAppBar rrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
 kompoz-material3/button_groups kompozable SingleSelectConnectedButtonGroupSample - crates/kompoz-material3/tests/button_groups.rs
 kompoz-material3/button_groups kompozable SingleSelectConnectedButtonGroupWithFlowLayoutSample - crates/kompoz-material3/tests/button_groups.rs
@@ -1784,6 +1888,9 @@ kompoz/kotlin_ported fn Size2 dd crates/kompoz/tests/kotlin_ported.rs
 * super SizeAnimationModifierNode - LayoutModifierNode
 * super SizeAnimationModifierNode - ModifierNode
 * super SizeElement - ModifierNodeElement
+* super SizeModifierElement - ModifierNodeElement
+* super SizeModifierNode - LayoutModifierNode
+* super SizeModifierNode - ModifierNode
 * super SizeNode - LayoutModifierNode
 * super SizeNode - ModifierNode
 * super SizeScopeExt - SizeScope
@@ -1814,10 +1921,13 @@ kompoz-runtime/macros kompozable Slotted rdd crates/kompoz-runtime/tests/macros.
 * super SnackbarVisualsImpl - SnackbarVisuals
 * super SnapFlingBehavior - FlingBehavior
 * super SnapFlingBehavior - TargetedFlingBehavior
+* super SnapshotStateList - BackStackList
+* super SnapshotStateList - LazyListItems
+* super SnapshotStateList - Saveable
+* super SnapshotStateMap - Saveable
 * super SoftKeyboardInterceptionElement - ModifierNodeElement
 * kompozable Spacer r crates/kompoz-foundation/src/layout/spacer.rs
 * super SpacerMeasurePolicy - MeasurePolicy
-kompoz/kotlin_ported fn Spacing dd crates/kompoz/tests/kotlin_ported.rs
 * fn SpanStyle dddddddddddddddddd crates/kompoz-text/src/span_style.rs
 * super SpanStyle - BuilderStyle
 * super SpanStyle - Saveable
@@ -1832,22 +1942,26 @@ kompoz-ui/ui kompozable Stack dr crates/kompoz-ui/tests/ui.rs
 * super StaggeredScrollIndicatorState - ScrollIndicatorState
 * kompozable StandardBottomSheet rrrrrrrrrrr crates/kompoz-material3/src/bottom_sheet_scaffold.rs
 * method StandardFloatingActionButton rdddddr crates/kompoz-material3/src/floating_toolbar.rs FloatingToolbarDefaults
+* super StartDelayVectorizedAnimationSpec - VectorizedAnimationSpec
 * super StartIconMeasurePolicy - MeasurePolicy
 * fn StartOffset rd crates/kompoz-animation/src/spec.rs
 * super StartTransferScope - DragAndDropStartTransferScope
+* super StateDragScope - AnchoredDragScope
+* super StateFlow - AsFlow
 * super StateHolder - ViewModel
 * kompozable StateListDetailPaneScaffold rrrrdddd crates/kompoz-material3-adaptive/src/layout/list_detail_pane_scaffold.rs
+* super StateOnly - GraphicsContext
 * kompozable StateRangeSlider rdddddddd crates/kompoz-material3/src/slider/mod.rs
 * super StateSession - TextContextMenuSession
 * kompozable StateSlider rdddddd crates/kompoz-material3/src/slider/mod.rs
 * kompozable StateSupportingPaneScaffold rrrrdddd crates/kompoz-material3-adaptive/src/layout/list_detail_pane_scaffold.rs
 * method StateThumb rrdddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 * super StateVectorConfig - VectorConfig
+* super StaticKeyDeepLinkMatcher - DeepLinkMatcher
 kompoz-runtime/runtime kompozable StaticView - crates/kompoz-runtime/tests/runtime.rs
 kompoz-foundation/text_field_selection kompozable Steady rr crates/kompoz-foundation/tests/text_field_selection.rs
 kompoz-material3/text_field_halves kompozable Steady rr crates/kompoz-material3/tests/text_field_halves.rs
 * fn StepBased ddd crates/kompoz-foundation/src/text/auto_size.rs
-kompoz/kotlin_ported fn Sticker rd crates/kompoz/tests/kotlin_ported.rs
 * super StickyHeaderBringIntoViewSpec - BringIntoViewSpec
 * super StoreOwner - HasDefaultViewModelProviderFactory
 * super StoreOwner - ViewModelStoreOwner
@@ -1942,6 +2056,7 @@ kompoz-runtime/macros kompozable Tagged rdd crates/kompoz-runtime/tests/macros.r
 kompoz-material3/slider kompozable Taker r crates/kompoz-material3/tests/slider.rs
 kompoz-ui/windows kompozable Tappable rrrr crates/kompoz-ui/tests/windows.rs
 kompoz-ui/focus kompozable Target rrrr crates/kompoz-ui/tests/focus.rs
+* super TargetBasedAnimation - Animation
 * super TargetedFlingBehavior - FlingBehavior
 * super TestTagElement - ModifierNodeElement
 * super TestTagNode - ModifierNode
@@ -2141,7 +2256,9 @@ kompoz-material3/floating_toolbar kompozable TrailingContent - crates/kompoz-mat
 * super TransformableState - ScrollableStateEq
 * kompozable TransitionAnimatedContent rrrrrrr crates/kompoz-animation/src/animated_content.rs
 * kompozable TransitionAnimatedVisibility rrrrrrr crates/kompoz-animation/src/animated_visibility.rs
+* super TransitionAnimationState - StateSource
 * kompozable TransitionCrossfade rrrrr crates/kompoz-animation/src/crossfade.rs
+* super TransitionInner - AnyTransition
 * super TranslationScopeExt - TranslationScope
 * super TraversablePrefetchStateModifierElement - ModifierNodeElement
 * super TraversablePrefetchStateNode - ModifierNode
@@ -2156,6 +2273,8 @@ kompoz-material3/lists kompozable TwoLineListItem - crates/kompoz-material3/test
 * kompozable TwoRowsTopAppBar rdddddddddd crates/kompoz-material3/src/app_bar.rs
 * kompozable TwoRowsTopAppBarImpl rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
 * fn Typography dddddddddddddddddddddddddddddd crates/kompoz-material3/src/typography.rs
+* super UUID - RouteValue
+* super UUID - Saveable
 kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/tests/text_input.rs
 * super Unequal - Key
 * super UnionInsetsConsumingElement - ModifierNodeElement
@@ -2163,17 +2282,35 @@ kompoz-foundation/text_input kompozable UndoStatus r crates/kompoz-foundation/te
 * super UnspecifiedConstraintsNode - LayoutModifierNode
 * super UnspecifiedConstraintsNode - ModifierNode
 kompoz-runtime/runtime kompozable UpdatedReader rr crates/kompoz-runtime/tests/runtime.rs
+* super UriDeepLinkMatcher - DeepLinkMatcher
+* super UriMatchResult - MatchResultOf
 * super UseMinConstraints - MeasurePolicy
 * super ValidatingOffsetMapping - MapOffsets
 * kompozable ValueDecorationBox rrrrrrrrrrrrr crates/kompoz-material3/src/internal/text_field_impl.rs
 kompoz-foundation/text_field_value kompozable ValueField rr crates/kompoz-foundation/tests/text_field_value.rs
 * kompozable ValueOutlinedTextField rrddddddddddddddddddddd crates/kompoz-material3/src/outlined_text_field.rs
 * kompozable ValueTextField rrddddddddddddddddddddd crates/kompoz-material3/src/text_field.rs
+* super Vec - BackStackList
+* super Vec - LazyListItems
+* super Vec - RouteValue
+* super Vec - Saveable
 * kompozable VectorIcon rrdd crates/kompoz-material3/src/icon.rs
 * kompozable VectorImage rrddddd crates/kompoz-foundation/src/image.rs
 * super VectorPainter - Painter
+* super VectorizedCombinedSpec - VectorizedAnimationSpec
 * super VectorizedDurationBasedAnimationSpec - VectorizedFiniteAnimationSpec
 * super VectorizedFiniteAnimationSpec - VectorizedAnimationSpec
+* super VectorizedFloatAnimationSpec - VectorizedAnimationSpec
+* super VectorizedInfiniteRepeatableSpec - VectorizedAnimationSpec
+* super VectorizedKeyframesSpec - VectorizedAnimationSpec
+* super VectorizedKeyframesSpec - VectorizedDurationBasedAnimationSpec
+* super VectorizedMonoSplineKeyframesSpec - VectorizedAnimationSpec
+* super VectorizedMonoSplineKeyframesSpec - VectorizedDurationBasedAnimationSpec
+* super VectorizedRepeatableSpec - VectorizedAnimationSpec
+* super VectorizedReversedSpec - VectorizedAnimationSpec
+* super VectorizedSnapSpec - VectorizedAnimationSpec
+* super VectorizedSnapSpec - VectorizedDurationBasedAnimationSpec
+* super VectorizedTweenSpec - VectorizedDurationBasedAnimationSpec
 * super VeilModifierElement - ModifierNodeElement
 * super VeilModifierNode - DrawModifierNode
 * super VeilModifierNode - ModifierNode
@@ -2210,6 +2347,7 @@ kompoz-foundation/layout_modifiers kompozable VerticalLeaf rrr crates/kompoz-fou
 * super VisibleModifier - LayoutModifierNode
 * super VisibleModifier - ModifierNode
 * super VisibleModifier - ModifierNodeElement
+* super Weak - Instance
 * kompozable WeekDays rr crates/kompoz-material3/src/date_picker.rs
 * kompozable WideNavigationRail ddddddddr crates/kompoz-material3/src/wide_navigation_rail.rs
 * kompozable WideNavigationRailItem rrrrrdddddd crates/kompoz-material3/src/wide_navigation_rail.rs
@@ -2839,6 +2977,7 @@ kompoz-material3-adaptive/samples kompozable reflow_adapt_strategy_sample - crat
 * kompozable remember_modal_bottom_sheet_state dD crates/kompoz-material3/src/modal_bottom_sheet.rs
 * kompozable remember_movable_content R crates/kompoz-material3-adaptive-navigation-suite/src/navigation_suite_scaffold.rs
 * kompozable remember_nav_back_stack r crates/kompoz-navigation3/src/runtime/back_stack.rs
+* kompozable remember_nav_back_stack_configured rr crates/kompoz-navigation3/src/runtime/back_stack.rs
 * kompozable remember_nav_controller d crates/kompoz-navigation/src/compose/host.rs
 * kompozable remember_nav_host_event_handler rr crates/kompoz-navigation/src/compose/host.rs
 * kompozable remember_navigation_event_dispatcher_owner dd crates/kompoz-navigationevent/src/compose/mod.rs

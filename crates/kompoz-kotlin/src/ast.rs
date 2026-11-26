@@ -557,8 +557,15 @@ pub struct Class {
 }
 
 impl Class {
+    /// A `data class`, or a `value class` (`@JvmInline value class Meters(val value: Int)`: one property, compared and
+    /// shown by it as a data class's are — KompozR's value is the data class's struct).
     pub fn is_data(&self) -> bool {
-        self.modifiers.has(ModifierKind::Data)
+        self.modifiers.has(ModifierKind::Data) || self.is_value()
+    }
+
+    /// A `value class`.
+    pub fn is_value(&self) -> bool {
+        self.modifiers.has(ModifierKind::Value)
     }
 
     pub fn is_sealed(&self) -> bool {

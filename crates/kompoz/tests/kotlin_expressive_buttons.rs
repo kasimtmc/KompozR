@@ -694,7 +694,6 @@ mod fab_segmented {
     use kompoz::test::RecordingCanvas;
     use kompoz::ui::input::PointerType;
     use kompoz::ui::semantics::{Role, SemanticsActions, SemanticsProperties, ToggleableState};
-    use std::rc::Rc;
 
     // (WP1b: fab_segmented) kompozable_tests.cpp's `Mixed` (whole as written: its ViewModel and SideLine — stage 13
     // WP1 —, segments and staggered grid) with view_models_maps_and_segments_as_kotlin_writes_them's checks
@@ -711,49 +710,7 @@ mod fab_segmented {
     // segmented_buttons}.rs check them (M15's values; the differences from the C++'s said there); material3's
     // SegmentedButtonSamples (2) and FloatingActionButtonMenuSample from kt/fab_menu_segmented.kt.
 
-    // ---- Rust twins of Mixed's Kotlin classes (stage 14) ----
-
-    /// kompozable_tests.cpp's `class TodoViewModel : ViewModel() { val items = MutableStateFlow(listOf(Todo(1, "Yaz"),
-    /// Todo(2, "Gönder"))) … }` (its items' count is what SideLine shows: their titles here).
-    pub type TodoViewModel = Rc<TodoViewModelClass>;
-
-    /// TodoViewModel's object.
-    pub struct TodoViewModelClass {
-        base: ViewModelImpl,
-        items: MutableStateFlow<Vec<String>>,
-    }
-
-    impl TodoViewModelClass {
-        pub fn items(&self) -> MutableStateFlow<Vec<String>> {
-            self.items.clone()
-        }
-    }
-
-    impl ViewModel for TodoViewModelClass {
-        fn view_model_impl(&self) -> &ViewModelImpl {
-            &self.base
-        }
-        fn new_instance(_extras: &CreationExtras) -> Option<Self> {
-            Some(TodoViewModelClass {
-                base: ViewModelImpl::new(),
-                items: MutableStateFlow::new(vec!["Yaz".into(), "Gönder".into()]),
-            })
-        }
-    }
-
-    /// kompozable_tests.cpp's `enum class Side { Left, Right }`.
-    #[derive(Clone, Copy, PartialEq, Debug)]
-    pub enum Side {
-        #[allow(dead_code)] // (the C++ test uses the other one)
-        Left,
-        Right,
-    }
-
-    impl Side {
-        pub fn ordinal(self) -> i32 {
-            self as i32
-        }
-    }
+    // ---- what is the C++ test's C++ ----
 
     /// kompozable_tests.cpp's `namespace routes { struct Item { int n = 0; }; }` (Kotlin's `object routes` with its
     /// `class Item(val n: Int)`).
@@ -782,6 +739,23 @@ mod fab_segmented {
     }
 
     kompoz! {
+        // (TodoScreen's classes, kompozable_tests.cpp 2594-2607, the file's: what Mixed's ViewModel is)
+        data class Todo(val id: Int, val title: String, val done: Boolean = false)
+
+        class TodoViewModel : ViewModel() {
+            val items = MutableStateFlow(listOf(Todo(1, "Yaz"), Todo(2, "Gönder")))
+            var toggles = 0
+
+            fun toggle(id: Int, done: Boolean) {
+                toggles++
+                items.update { list -> list.map { if (it.id == id) it.copy(done = done) else it } }
+            }
+
+            override fun onCleared() {}
+        }
+
+        enum class Side { Left, Right }
+
         @Composable
         fun SideLine(vm: TodoViewModel, side: Side) {
             val items by vm.items.collectAsState()

@@ -2,7 +2,7 @@
 //! URI): deep link requests ([`DeepLinkRequest`]: a [`DeepLinkUri`] and [`RequestExtras`]), matchers of them
 //! ([`DeepLinkMatcher`]: [`UriDeepLinkMatcher`] of a URI pattern, [`StaticKeyDeepLinkMatcher`] of filters alone,
 //! [`BackStackMatcher`] building a back stack), their results and their order ([`MatchResultOf`],
-//! [`UriMatchResult`], [`BackStackMatchResult`]), and [`DeepLinkSerializer`]s of arguments of one's own types.
+//! [`UriMatchResult`], [`BackStackMatchResult`]), and [`DeepLinkSerializerImpl`]s of arguments of one's own types.
 //!
 //! Kotlin's nested names are flat here: `DeepLinkMatcher.MatchResult` is [`DeepLinkMatchResult`] (and the members
 //! of its open class [`MatchResultOf`]), `DeepLinkMatcher.Filter` [`DeepLinkFilter`], `DeepLinkMatcher.mimeTypeFilter`
@@ -29,7 +29,7 @@ pub use matcher::{
     StaticKeyDeepLinkMatcher, WrappedMatchResult, compare_wrapped, mime_type_filter,
 };
 pub use request::{DeepLinkRequest, MimeTypeExtrasKey};
-pub use serializer::DeepLinkSerializer;
+pub use serializer::{DeepLinkSerializer, DeepLinkSerializerImpl};
 pub use uri::DeepLinkUri;
 pub use uri_matcher::{UriDeepLinkMatcher, UriMatchResult};
 

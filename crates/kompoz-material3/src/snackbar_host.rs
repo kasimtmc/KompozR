@@ -294,8 +294,8 @@ fn same_data(a: &Option<Rc<dyn SnackbarData>>, b: &Option<Rc<dyn SnackbarData>>)
 }
 
 /// What a snackbar shows (Compose's interface `SnackbarVisuals`): its message, its action's label, whether it has
-/// a dismiss button, how long it stays.
-pub trait SnackbarVisuals {
+/// a dismiss button, how long it stays. (An app's own visuals are found again through a data's: `KtAs`.)
+pub trait SnackbarVisuals: std::any::Any {
     /// The text shown.
     fn message(&self) -> String;
     /// The action button's label, if any (Compose's `actionLabel`).
@@ -304,6 +304,15 @@ pub trait SnackbarVisuals {
     fn with_dismiss_action(&self) -> bool;
     /// How long it is shown.
     fn duration(&self) -> SnackbarDuration;
+}
+
+/// Kotlin's `data.visuals as? MyVisuals`: the visuals a snackbar was shown with, as the app's own type if they are
+/// one.
+impl<T: std::any::Any + Clone> kompoz_runtime::kt::KtAs<T> for dyn SnackbarVisuals {
+    fn kt_as_safe(&self) -> Option<T> {
+        let any: &dyn std::any::Any = self;
+        any.downcast_ref::<T>().cloned()
+    }
 }
 
 /// The snackbar a host shows (Compose's interface `SnackbarData`): what it shows, and how it answers the

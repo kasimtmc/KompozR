@@ -707,6 +707,19 @@ impl Callee {
                 l.typed = true;
             }
         }
+        // ((stage 14 WPD) a named plain function's builder of a concrete receiver — `SavedStateConfiguration {
+        // serializersModule = … }`, its `from` defaulted —: typed too, the named call's closure generic as well)
+        if item.has(index::flags::NAMED) && !item.has(index::flags::KOMPOZABLE) && item.owner.is_empty() {
+            for l in params.iter_mut().filter_map(|p| p.lambda.as_mut()) {
+                if l.receiver.is_some()
+                    && l.inputs.len() == 1
+                    && l.inputs[0].trim_start().starts_with("&mut")
+                    && !super::lambda::names_type_parameter(&l.inputs[0])
+                {
+                    l.typed = true;
+                }
+            }
+        }
         Callee {
             rust: item.rust.to_string(),
             params,
@@ -727,7 +740,8 @@ fn snapshot_block(item: &Item) -> bool {
     item.krate == "kompoz_runtime"
         && matches!(
             (item.module, item.rust),
-            ("snapshot", "enter" | "with_mutable_snapshot") | ("read", "without_read_observation")
+            ("snapshot", "enter" | "with_mutable_snapshot" | "without_read_observation")
+                | ("read", "without_read_observation")
         )
 }
 

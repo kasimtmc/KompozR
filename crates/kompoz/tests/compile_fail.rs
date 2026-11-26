@@ -1,5 +1,5 @@
 //! What the compiler says when the Kotlin is wrong, in `kompoz! { … }` and in a `.kt` file (`kompoz_file!`): our
-//! errors (a parse error, what comes with stage 14) at the Kotlin token, a `.kt` file's with its `file:line:column`
+//! errors (a parse error, what comes with stage 15) at the Kotlin token, a `.kt` file's with its `file:line:column`
 //! in the message; rustc's errors in the Rust the Kotlin becomes on the Kotlin token (a `.kt` file's: at the call);
 //! what Rust's lexer rejects in `kompoz!`, rustc's error and ours saying what to write (or to use a `.kt` file).
 

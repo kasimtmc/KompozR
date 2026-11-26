@@ -35,6 +35,18 @@ pub fn encode_to_saved_state_with<T: 'static>(serializer: &Saver<T>, value: &T) 
     from_saved_value(serializer.save(value))
 }
 
+/// `value` as a saved state, written by `serializer` with `configuration` in effect (Compose's
+/// `encodeToSavedState(serializer, value, configuration)`).
+///
+/// Kotlin: `encodeToSavedState(serializer: SerializationStrategy<T>, value: T, configuration: SavedStateConfiguration)`
+pub fn encode_to_saved_state_configured<T: 'static>(
+    serializer: &Saver<T>,
+    value: &T,
+    configuration: &super::SavedStateConfiguration,
+) -> SavedState {
+    configuration.in_effect(|| encode_to_saved_state_with(serializer, value))
+}
+
 fn from_saved_value(saved: SavedValue) -> SavedState {
     if saved.as_map().is_some() {
         SavedState::from_saved_value(&saved)
@@ -59,6 +71,20 @@ pub fn decode_from_saved_state<T: Saveable>(saved_state: &SavedState) -> T {
 #[track_caller]
 pub fn decode_from_saved_state_with<T: 'static>(deserializer: &Saver<T>, saved_state: &SavedState) -> T {
     decode(saved_state, |v| deserializer.restore(v))
+}
+
+/// The value `saved_state` holds, read by `deserializer` with `configuration` in effect (Compose's
+/// `decodeFromSavedState(deserializer, savedState, configuration)`): a polymorphic value's subclass found by the
+/// configuration's serializers module.
+///
+/// Kotlin: `decodeFromSavedState(deserializer: DeserializationStrategy<T>, savedState: SavedState, configuration: SavedStateConfiguration)`
+#[track_caller]
+pub fn decode_from_saved_state_configured<T: 'static>(
+    deserializer: &Saver<T>,
+    saved_state: &SavedState,
+    configuration: &super::SavedStateConfiguration,
+) -> T {
+    configuration.in_effect(|| decode_from_saved_state_with(deserializer, saved_state))
 }
 
 #[track_caller]

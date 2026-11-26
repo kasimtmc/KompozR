@@ -24,31 +24,6 @@ pub struct Mail {
     pub from: String,
 }
 
-/// A row of a keyed list (Kotlin's `data class Row2(val id: Int, val label: String)`).
-#[derive(Clone, PartialEq, Debug, KotlinProperties)]
-pub struct Row2 {
-    pub id: i32,
-    pub label: String,
-}
-
-/// `Row2(id, label)`.
-pub fn Row2(id: i32, label: impl Into<String>) -> Row2 {
-    Row2 { id, label: label.into() }
-}
-
-/// A thing to do (Kotlin's `data class Todo(val id: Int, val title: String, val done: Boolean)`).
-#[derive(Clone, PartialEq, Debug, KotlinProperties)]
-pub struct Todo {
-    pub id: i32,
-    pub title: String,
-    pub done: bool,
-}
-
-/// `Todo(id, title, done)`.
-pub fn Todo(id: i32, title: impl Into<String>, done: bool) -> Todo {
-    Todo { id, title: title.into(), done }
-}
-
 kompoz! {
     // kompozable_tests.cpp 630: a header item and the mails with their indices.
     @Kompozable
@@ -58,6 +33,8 @@ kompoz! {
             itemsIndexed(mails) { index, mail -> Text("$index: ${mail.from}") }
         }
     }
+
+    data class Row2(val id: Int, val label: String)
 
     @Kompozable
     fun KeyedRow(row: Row2) {
@@ -76,6 +53,8 @@ kompoz! {
     }
 
     // kompozable_tests.cpp 2581: a list of things to do over a state list, toggled by a click.
+    data class Todo(val id: Int, val title: String, val done: Boolean = false)
+
     @Kompozable
     fun TodoScreen() {
         val todos = remember { mutableStateListOf(Todo(1, "Yaz", false), Todo(2, "Oku", false)) }

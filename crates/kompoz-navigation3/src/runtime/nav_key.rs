@@ -102,11 +102,23 @@ pub(crate) fn save_any_nav_key(key: &Rc<dyn NavKey>) -> SavedValue {
     SavedValue::map([("type", SavedValue::from(key.nav_key_class_name())), ("value", key.save_nav_key())])
 }
 
-/// A key of any type read back: `None` if its class isn't known or its value isn't one of it.
+/// A key of any type read back: `None` if its class isn't known (seen in this process, registered, or a subclass of
+/// `NavKey` in the serializers module of a configuration in effect: kotlinx's open polymorphism) or its value isn't
+/// one of it.
 pub(crate) fn restore_any_nav_key(saved: &SavedValue) -> Option<Rc<dyn NavKey>> {
     let name = saved.get("type").as_str()?;
+    if let Some(restore) = kompoz_lifecycle::polymorphic_restorer::<dyn NavKey>(name) {
+        return restore(saved.get("value"));
+    }
     let restore = CLASSES.with(|c| c.borrow().get(name).copied())?;
     restore(saved.get("value"))
+}
+
+/// A key is a `NavKey`'s value (kotlinx's `polymorphic(NavKey::class) { subclass(Home::class) }`).
+impl<K: NavKey + Saveable> kompoz_lifecycle::PolymorphicBase<K> for dyn NavKey {
+    fn upcast(value: K) -> Rc<dyn NavKey> {
+        Rc::new(value)
+    }
 }
 
 /// What a back stack's keys can be (Kotlin's `T : Any` of `NavEntry<T>`, `NavDisplay<T>`, …): compared by `==`,

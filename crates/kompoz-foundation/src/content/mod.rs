@@ -239,6 +239,25 @@ impl<F: Fn(TransferableContent) -> Option<TransferableContent>> ReceiveContentLi
     }
 }
 
+/// A shared listener (Kotlin's reference to one: an `object : ReceiveContentListener { … }`) is one.
+impl ReceiveContentListener for Rc<dyn ReceiveContentListener> {
+    fn on_drag_start(&self) {
+        (**self).on_drag_start()
+    }
+    fn on_drag_end(&self) {
+        (**self).on_drag_end()
+    }
+    fn on_drag_enter(&self) {
+        (**self).on_drag_enter()
+    }
+    fn on_drag_exit(&self) {
+        (**self).on_drag_exit()
+    }
+    fn on_receive(&self, transferable_content: TransferableContent) -> Option<TransferableContent> {
+        (**self).on_receive(transferable_content)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The modifier
 

@@ -174,6 +174,10 @@ fn date_range_picker_picks_a_range() {
 
 kompoz_file!("tests/kt/date_picker.kt");
 
+// The Kotlin twins of DatePickerSamples' Android samples (in a `.kt` file: their nested string literals aren't Rust
+// tokens).
+kompoz_file!("tests/kt/date_picker_twins.kt");
+
 /// The samples of kt/date_picker.kt, checked as their Rust twins are.
 fn date_picker_samples() {
     set_today_for_tests(Some(|| (2023, 4, 3)));
@@ -208,6 +212,30 @@ fn date_picker_samples() {
     rule.on_node_with_text("Save").assert_is_enabled().perform_click();
     rule.wait_for_idle();
     rule.on_node_with_text("Saved range: 2023-04-15..2023-04-20").assert_exists();
+    // The twins: weekends and 2022 disabled by java.time's day of the week, then by java.util's calendar's.
+    for java_time in [true, false] {
+        let rule = KompozTestRule::with_viewport(
+            kompozable_lambda!(move || DatePickerWithDateSelectableDatesSampleTwin(java_time)),
+            IntSize::new(400, 900),
+        );
+        rule.on_node_with_text("Saturday, April 1, 2023").assert_is_not_enabled();
+        rule.on_node_with_text("Sunday, April 2, 2023").assert_is_not_enabled();
+        rule.on_node_with_text("Today, Monday, April 3, 2023").assert_is_enabled().perform_click();
+        rule.wait_for_idle();
+        rule.on_node_with_text("Selected date timestamp: 1680480000000").assert_exists();
+    }
+    // The Hebrew state's month and day, as CLDR writes them in Hebrew (not in English).
+    let he = CalendarLocale::for_language_tag("HE");
+    let month = DatePickerDefaults.date_formatter().format_month_year(Some(1578096000000), &he).unwrap();
+    let day = DatePickerDefaults.date_formatter().format_date(Some(1578096000000), &he, true).unwrap();
+    assert_ne!(month, "January 2020");
+    let rule = KompozTestRule::with_viewport(DatePickerCustomLocaleSampleTwin, IntSize::new(400, 900));
+    rule.on_node_with_text(&month).assert_exists();
+    rule.on_node_with_text(&day).assert_is_selected();
+    rule.on_node_with_text("Selected date timestamp: 1578096000000").assert_exists();
+    let rule = KompozTestRule::with_viewport(DatePickerCustomLocaleApi26SampleTwin, IntSize::new(400, 900));
+    rule.on_node_with_text(&month).assert_exists();
+    rule.on_node_with_text("Selected date: 2020-01-04").assert_exists();
     set_today_for_tests(None);
 }
 
@@ -383,108 +411,21 @@ fn time_picker_dialog_switches_modes_and_confirms() {
 
 kompoz_file!("tests/kt/time_picker.kt");
 
-// TimePickerSamples' twins: the samples but their JVM and Android lines (java.text's `SimpleDateFormat`, java.util's
-// `Calendar`, Android's `LocalConfiguration`), written in Kotlin until the lead's shims let kt/time_picker.kt's
-// samples as written in: the time as `SimpleDateFormat("hh:mm a")` writes it in English, the window's height in dp
-// for `screenHeightDp`.
+// TimePickerSwitchableSample's twin: the sample but its Android lines (`val configuration =
+// LocalConfiguration.current`, `configuration.screenHeightDp.dp`: Android's, stage 15), the window's height in dp
+// read instead; its time written by java.text's `SimpleDateFormat` from java.util's `Calendar` as the sample's.
 kompoz! {
     import androidx.compose.material3.TimePickerDialogDefaults.MinHeightForTimePicker
-
-    // (the samples' `SimpleDateFormat("hh:mm a", Locale.getDefault()).format(cal.time)`, in English)
-    fun hhMmA(hour: Int, minute: Int): String {
-        val h = if (hour % 12 == 0) 12 else hour % 12
-        val hh = if (h < 10) "0$h" else "$h"
-        val mm = if (minute < 10) "0$minute" else "$minute"
-        return "$hh:$mm ${if (hour < 12) "AM" else "PM"}"
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    fun TimePickerSampleTwin() {
-        var showTimePicker by remember { mutableStateOf(false) }
-        val state = rememberTimePickerState()
-        val snackState = remember { SnackbarHostState() }
-        val snackScope = rememberCoroutineScope()
-
-        Box(propagateMinConstraints = false) {
-            Button(modifier = Modifier.align(Alignment.Center), onClick = { showTimePicker = true }) {
-                Text("Set Time")
-            }
-            SnackbarHost(hostState = snackState)
-        }
-
-        if (showTimePicker) {
-            TimePickerDialog(
-                title = { TimePickerDialogDefaults.Title(displayMode = TimePickerDisplayMode.Picker) },
-                onDismissRequest = { showTimePicker = false },
-                confirmButton = {
-                    TextButton(
-                        enabled = state.isInputValid,
-                        onClick = {
-                            state.isHourInputValid
-                            val time = hhMmA(state.hour, state.minute)
-                            snackScope.launch {
-                                snackState.showSnackbar("Entered time: $time")
-                            }
-                            showTimePicker = false
-                        },
-                    ) {
-                        Text("Ok")
-                    }
-                },
-                dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Cancel") } },
-                modeToggleButton = {},
-            ) {
-                TimePicker(state = state)
-            }
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    fun TimeInputSampleTwin() {
-        var showTimePicker by remember { mutableStateOf(false) }
-        val state = rememberTimePickerState()
-        val snackState = remember { SnackbarHostState() }
-        val snackScope = rememberCoroutineScope()
-
-        Box(propagateMinConstraints = false) {
-            Button(modifier = Modifier.align(Alignment.Center), onClick = { showTimePicker = true }) {
-                Text("Set Time")
-            }
-            SnackbarHost(hostState = snackState)
-        }
-
-        if (showTimePicker) {
-            TimePickerDialog(
-                title = { TimePickerDialogDefaults.Title(displayMode = TimePickerDisplayMode.Input) },
-                onDismissRequest = { showTimePicker = false },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            val time = hhMmA(state.hour, state.minute)
-                            snackScope.launch {
-                                snackState.showSnackbar("Entered time: $time")
-                            }
-                            showTimePicker = false
-                        }
-                    ) {
-                        Text("Ok")
-                    }
-                },
-                dismissButton = { TextButton(onClick = { showTimePicker = false }) { Text("Cancel") } },
-                modeToggleButton = {},
-            ) {
-                TimeInput(state = state)
-            }
-        }
-    }
+    import java.text.SimpleDateFormat
+    import java.util.Calendar
+    import java.util.Locale
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun TimePickerSwitchableSampleTwin() {
         var showTimePicker by remember { mutableStateOf(false) }
         val state = rememberTimePickerState()
+        val formatter = remember { SimpleDateFormat("hh:mm a", Locale.getDefault()) }
         val snackState = remember { SnackbarHostState() }
         var displayMode by remember { mutableStateOf(TimePickerDisplayMode.Picker) }
         val snackScope = rememberCoroutineScope()
@@ -504,9 +445,12 @@ kompoz! {
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            val time = hhMmA(state.hour, state.minute)
+                            val cal = Calendar.getInstance()
+                            cal.set(Calendar.HOUR_OF_DAY, state.hour)
+                            cal.set(Calendar.MINUTE, state.minute)
+                            cal.isLenient = false
                             snackScope.launch {
-                                snackState.showSnackbar("Entered time: $time")
+                                snackState.showSnackbar("Entered time: ${formatter.format(cal.time)}")
                             }
                             showTimePicker = false
                         }
@@ -566,8 +510,9 @@ fn kt_check_time_picker_sample(rule: KompozTestRule) {
     assert_eq!(rule.host().overlay_count(), 0);
 }
 
-/// TimeInputSample's behaviour: the input in the dialog; typed 7 (on to the minute) and 45, Ok shows it.
-fn kt_check_time_input_sample(rule: KompozTestRule) {
+/// TimeInputSample's behaviour: the input in the dialog; typed 7 (on to the minute) and 45, Ok shows it (`shown`:
+/// the default locale's text of 07:45).
+fn kt_check_time_input_sample(rule: KompozTestRule, shown: &str) {
     use kompoz::ui::input::Key;
     rule.on_node_with_text("Set Time").perform_click();
     rule.wait_for_idle();
@@ -585,7 +530,7 @@ fn kt_check_time_input_sample(rule: KompozTestRule) {
     kt_type(&rule, "45");
     rule.on_node_with_text("Ok").perform_click();
     rule.wait_for_idle();
-    rule.on_node_with_text("Entered time: 07:45 AM").assert_exists();
+    rule.on_node_with_text(&format!("Entered time: {shown}")).assert_exists();
 }
 
 /// TimePickerSwitchableSample's behaviour: the toggle switches the dial and the input while the window is taller
@@ -610,10 +555,17 @@ fn kt_check_time_picker_switchable_sample(rule: KompozTestRule) {
     rule.on_node_with_text("Entered time: 12:00 AM").assert_exists();
 }
 
-fn time_picker_sample_twins() {
-    kt_check_time_picker_sample(KompozTestRule::new(TimePickerSampleTwin));
-    kt_check_time_input_sample(KompozTestRule::new(TimeInputSampleTwin));
+/// The samples of kt/time_picker.kt and TimePickerSwitchableSample's twin, their times in the default locale's
+/// (Java's `Locale.getDefault()`, the system's: English here, then Turkish's AM/PM markers).
+fn time_picker_samples() {
+    let system = JavaLocale::get_default();
+    JavaLocale::set_default(JavaLocale::US);
+    kt_check_time_picker_sample(KompozTestRule::new(TimePickerSample));
+    kt_check_time_input_sample(KompozTestRule::new(TimeInputSample), "07:45 AM");
     kt_check_time_picker_switchable_sample(KompozTestRule::new(TimePickerSwitchableSampleTwin));
+    JavaLocale::set_default(JavaLocale::new("tr"));
+    kt_check_time_input_sample(KompozTestRule::new(TimeInputSample), "07:45 ÖÖ");
+    JavaLocale::set_default(system);
 }
 
 fn main() {
@@ -631,11 +583,6 @@ fn main() {
         ("time_picker_twelve_hour_clock", time_picker_twelve_hour_clock),
         ("time_input_types_hours_and_minutes", time_input_types_hours_and_minutes),
         ("time_picker_dialog_switches_modes_and_confirms", time_picker_dialog_switches_modes_and_confirms),
-        ("time_picker_sample_twins", time_picker_sample_twins),
-        // (lead: JVM shims) ("time_picker_samples", || {
-        //     kt_check_time_picker_sample(KompozTestRule::new(TimePickerSample));
-        //     kt_check_time_input_sample(KompozTestRule::new(TimeInputSample));
-        //     kt_check_time_picker_switchable_sample(KompozTestRule::new(TimePickerSwitchableSample));
-        // }),
+        ("time_picker_samples", time_picker_samples),
     ]);
 }

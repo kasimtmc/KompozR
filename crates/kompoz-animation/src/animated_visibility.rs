@@ -385,7 +385,7 @@ pub(crate) fn animated_enter_exit_impl<S: AnimationValue>(
                     .await;
                 }
             });
-            if exit_finished(&child_transition) && should_dispose_after_exit {
+            if exit_finished(&child_transition) && should_dispose_after_exit.value() {
                 return;
             }
             group(move || {

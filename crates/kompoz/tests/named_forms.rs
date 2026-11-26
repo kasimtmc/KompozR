@@ -61,7 +61,7 @@
 //!   `navigation(startDestination =, route =)`, `navigate(route) { popUpTo(…) { inclusive }; launchSingleTop }`,
 //!   `BackHandler(enabled =)`, `combinedClickable(onClick =, onLongClick =)`, the entry's destination.
 //! - C++ `gestures_take_compose_named_arguments` (foundation's, no Material; ported nowhere else): draggable,
-//!   dragAndDropTarget (its target made in Rust: Kotlin's `object :` expressions are stage 14's), DraggableAnchors.
+//!   dragAndDropTarget (its target an `object : DragAndDropTarget`), DraggableAnchors.
 //! - C++ `graphics_forms_take_compose_named_arguments`, its Material part (its stage-11 parts above): the wavy
 //!   indicators, ContainedLoadingIndicator, `MaterialShapes.Heart.toShape()`, `Morph(Heart, Pill)`.
 //! - C++ `drawing_forms_take_compose_named_arguments` (ported nowhere else but its text part, crates/kompoz-ui/
@@ -1670,6 +1670,19 @@ fn tabs_and_fab_menu_take_compose_named_arguments() {
 // is stage 15/16's (D7).
 
 kompoz! {
+    // The C++ test's typed routes (its `KOMPOZ_ROUTE` / `KOMPOZ_NAMED_ROUTE` structs: Compose's `@Serializable` classes,
+    // `@SerialName` their names), the Rust form's too.
+    @Serializable
+    object HomeRoute
+
+    @Serializable
+    @SerialName("login")
+    object LoginGraph
+
+    @Serializable
+    @SerialName("login/username")
+    data class UsernameRoute(val attempt: Int)
+
     fun composeKeys(): List<Key> = listOf(Key.DirectionLeft, Key.MoveEnd, Key.Spacebar)
 
     @Composable
@@ -1736,25 +1749,6 @@ fn RustShellSnackbars(snackbars: SnackbarHostState, log: Rc<dyn Fn(String)>) {
     ));
 }
 
-/// The C++ test's typed routes (Compose's `@Serializable` classes: Rust twins, D6).
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct HomeRoute;
-
-#[derive(Route, Clone, PartialEq, Debug)]
-#[route(name = "login")]
-pub struct LoginGraph;
-
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-#[route(name = "login/username")]
-pub struct UsernameRoute {
-    pub attempt: i32,
-}
-
-/// Kotlin's `UsernameRoute(attempt)`.
-pub fn UsernameRoute(attempt: i32) -> UsernameRoute {
-    UsernameRoute { attempt }
-}
-
 #[kompozable]
 fn RustAppShell(on_controller: Rc<dyn Fn(NavHostController)>) {
     let nav = remember_nav_controller();
@@ -1773,13 +1767,13 @@ fn RustAppShell(on_controller: Rc<dyn Fn(NavHostController)>) {
                 let (home, login, t1, t2) = (home.clone(), login.clone(), t.clone(), t.clone());
                 NavigationSuiteItem(
                     selected = !in_login,
-                    on_click = move || home.navigate_options(HomeRoute, Some(t1.clone()), None),
+                    on_click = move || home.navigate_options(HomeRoute {}, Some(t1.clone()), None),
                     icon = || VectorIcon(Icons::Filled::Home(), Some(String::new())),
                     label = slot(|| Text("rust Ev")),
                 );
                 NavigationSuiteItem(
                     selected = in_login,
-                    on_click = move || login.navigate_options(LoginGraph, Some(t2.clone()), None),
+                    on_click = move || login.navigate_options(LoginGraph {}, Some(t2.clone()), None),
                     icon = || VectorIcon(Icons::Filled::Settings(), Some(String::new())),
                     label = slot(|| Text("rust Giriş")),
                     badge = slot(|| Badge(content = slot(|| Text("rust 1")))),
@@ -1792,7 +1786,7 @@ fn RustAppShell(on_controller: Rc<dyn Fn(NavHostController)>) {
                 move || {
                     NavHost_of(
                         nav_controller = nav.clone(),
-                        start_destination = HomeRoute,
+                        start_destination = HomeRoute {},
                         builder = |graph: &mut NavGraphBuilder| {
                             graph.kompozable_of::<HomeRoute>(|_, _| Text("rust ev ekranı"));
                             graph.navigation_of::<LoginGraph>(
@@ -2098,15 +2092,20 @@ fn text_styles_take_compose_named_arguments() {
 // ---- C++ gestures_take_compose_named_arguments --------------------------------------------------------------------
 // draggable(orientation =, state =), dragAndDropTarget(shouldStartDragAndDrop =, target =) and Compose's
 // DraggableAnchors { } builder (foundation's, no Material). The C++'s `DragAndDropTarget{.onDrop = …}` is Compose's
-// `object : DragAndDropTarget { override fun onDrop(…) }` — object expressions are stage 14's: the target is made in
-// Rust and given to the Kotlin composable.
+// `object : DragAndDropTarget { override fun onDrop(…) }`; the Rust syntax's target a struct implementing it.
 
 kompoz! {
     @Composable
-    fun GestureForms(x: MutableState<Float>, target: DragAndDropTarget) {
+    fun GestureForms(x: MutableState<Float>, dropped: (String) -> Unit) {
         val drag = rememberDraggableState { delta -> x.value = x.value + delta }
         Box(modifier = Modifier.size(56.dp).testTag("tutamaç").draggable(orientation = Orientation.Horizontal, state = drag))
-        Box(modifier = Modifier.size(100.dp).testTag("hedef").dragAndDropTarget(shouldStartDragAndDrop = { e -> e.hasMimeType("text/plain") }, target = target))
+        Box(modifier = Modifier.size(100.dp).testTag("hedef").dragAndDropTarget(shouldStartDragAndDrop = { e -> e.hasMimeType("text/plain") },
+                                                                               target = object : DragAndDropTarget {
+                                                                                   override fun onDrop(event: DragAndDropEvent): Boolean {
+                                                                                       dropped(event.text())
+                                                                                       return true
+                                                                                   }
+                                                                               }))
     }
 
     fun twoAnchors(): DraggableAnchors<Int> = DraggableAnchors {
@@ -2127,7 +2126,7 @@ fn RustGestureForms(x: MutableState<f32>, target: Rc<dyn DragAndDropTarget>) {
         .drag_and_drop_target(|e: &DragAndDropEvent| e.has_mime_type("text/plain"), target.clone()));
 }
 
-/// The C++'s target: the text dropped on it noted.
+/// The C++'s target in Rust: the text dropped on it noted.
 struct Dropped(Rc<RefCell<String>>);
 
 impl DragAndDropTarget for Dropped {
@@ -2141,12 +2140,13 @@ fn gestures_take_compose_named_arguments() {
     let (x, rust_x) = (mutable_state_of(0.0f32), mutable_state_of(0.0f32));
     let dropped = Rc::new(RefCell::new(String::new()));
     let target: Rc<dyn DragAndDropTarget> = Rc::new(Dropped(dropped.clone()));
-    let (xs, rxs) = (x.clone(), rust_x.clone());
+    let (xs, rxs, seen) = (x.clone(), rust_x.clone(), dropped.clone());
     let rule = KompozTestRule::new(kompozable_lambda!(move || {
-        let (xs, rxs, target) = (xs.clone(), rxs.clone(), target.clone());
+        let (xs, rxs, target, seen) = (xs.clone(), rxs.clone(), target.clone(), seen.clone());
         Column(
             content = move || {
-                GestureForms(xs.clone(), target.clone());
+                let seen = seen.clone();
+                GestureForms(xs.clone(), move |text: String| *seen.borrow_mut() = text);
                 RustGestureForms(rxs.clone(), target.clone());
             },
         );

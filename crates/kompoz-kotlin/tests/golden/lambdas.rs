@@ -98,7 +98,7 @@ pub fn Stacked(content: impl ::core::ops::Fn() + 'static) {
         content = content,
         modifier = Modifier.test_tag("stack"),
         measure_policy = ::kompoz::ui::layout::measure_policy(move |this, measurables, constraints| {
-            let mut placeables = ::kompoz::runtime::kt::KtList::map(&measurables, |it| it.measure(constraints));
+            let mut placeables = ::kompoz::runtime::kt::KtList::map(&measurables, |it| it.r#measure(constraints));
             let height = ::kompoz::runtime::kt::KtList::sum_of(&placeables, |it| it.height());
             this.layout(constraints.max_width(), height, {
                 let placeables = ::kompoz::runtime::__private::capture(&placeables);

@@ -72,4 +72,4 @@ pub use navigator::*;
 pub use options::*;
 pub use saved_state::*;
 pub use serialization::*;
-pub use uri::NavUri;
+pub use uri::{NavUri, Uri};

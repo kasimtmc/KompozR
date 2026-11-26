@@ -1,12 +1,17 @@
 // Material's date pickers as Compose's samples write them (material3 1.5's DatePickerSamples.kt): the date picker,
 // its java.time form, its dialog, its input mode, the date range picker and its java.time form.
 //
-// Not here, with the reason (their Rust twins are tested in crates/kompoz-material3/tests/date_picker.rs):
-// - DatePickerWithDateSelectableDatesSample: `object : SelectableDates { … }` (Kotlin object expressions: stage 14)
-//   around Android's `Build.VERSION.SDK_INT` check, java.time's `Instant`/`ZoneId` and java.util's `Calendar`.
-// - DatePickerCustomLocaleSample, DatePickerCustomLocaleApi26Sample: Android's `LocaleList`, `Configuration`,
-//   `LocalContext` and `LocalConfiguration` (the Android platform: stage 15), and `java.util.Locale` (Kotlin's
-//   `Locale` is Compose's text locale here); their Rust twin makes the state of a Hebrew `CalendarLocale`.
+// Not here, with the reason — the Android platform, stage 15 (their Rust twins are tested in
+// crates/kompoz-material3/tests/date_picker.rs, their Kotlin twins in kotlin_pickers.rs):
+// - DatePickerWithDateSelectableDatesSample: its `object : SelectableDates { … }` and its JVM classes (java.time's
+//   `Instant`/`ZoneId`, java.util's `Calendar`/`TimeZone`) are translated, but Android's `Build.VERSION.SDK_INT >=
+//   Build.VERSION_CODES.O` (android.os.Build) chooses between its two ways to the day of the week. Its Kotlin twin
+//   is the sample with that check a parameter, both ways tested.
+// - DatePickerCustomLocaleSample, DatePickerCustomLocaleApi26Sample: Android's `LocaleList.forLanguageTags`,
+//   `Configuration`, `LocalContext.current.createConfigurationContext` and `LocalConfiguration` (android.os,
+//   android.content.res, androidMain's composition locals) give the state its Hebrew locale. Their Kotlin twins are
+//   the samples with `Locale.forLanguageTag("HE")` (java.util's, Compose for desktop's `CalendarLocale`) instead,
+//   right to left.
 
 @Preview
 @Sampled

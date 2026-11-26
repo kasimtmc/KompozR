@@ -14,156 +14,11 @@ use kompoz::ui::platform::LocalInspectionMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// ---- Rust twins of the Kotlin classes (stage 14, D6) ----------------------------------------------------------------
-
-/// `@Serializable data class Detail(val id: Int, val tab: String? = null)`
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct Detail {
-    pub id: i32,
-    pub tab: Option<String>,
-}
-
-/// Kotlin's `Detail(id, tab = null)`.
-#[named(type)]
-pub fn Detail(id: i32, #[default(None)] tab: Option<String>) -> Detail {
-    Detail { id, tab }
-}
-
-/// `@Serializable object Start`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Start;
-
-/// `@Serializable object Shell`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Shell;
-
-/// `@Serializable object AccountGraph`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct AccountGraph;
-
-/// `@Serializable data class Member(val n: Int)`
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct Member {
-    pub n: i32,
-}
-
-/// Kotlin's `Member(n)`.
-pub fn Member(n: i32) -> Member {
-    Member { n }
-}
-
-/// NavigationSamples' `@Serializable object Profile { val resourceId: Int = R.string.profile }`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Profile;
-
-/// NavigationSamples' `@Serializable object Scrollable { val resourceId: Int = R.string.scrollable }`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Scrollable;
-
-/// NavigationSamples' `@Serializable object Dialog { val resourceId: Int = R.string.dialog }`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Dialog;
-
-/// NavigationSamples' `@Serializable data class Dashboard(val userId: String? = "no value given") { companion object {
-/// val resourceId: Int = R.string.dashboard } }`
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct Dashboard {
-    #[route(default = Some("no value given".to_string()))]
-    pub user_id: Option<String>,
-}
-
-/// Kotlin's `Dashboard(userId = "no value given")`.
-#[named(type)]
-pub fn Dashboard(#[default(Some("no value given".to_string()))] user_id: Option<String>) -> Dashboard {
-    Dashboard { user_id }
-}
-
-/// NavigationSamples' `@Serializable object Nested`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Nested;
-
-/// NavigationSamples' `@Serializable data class NestedWithArg(val userId: String? = "default nested arg")`
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct NestedWithArg {
-    #[route(default = Some("default nested arg".to_string()))]
-    pub user_id: Option<String>,
-}
-
-/// SizeTransformSample's `@Serializable object Collapsed`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Collapsed;
-
-/// SizeTransformSample's `@Serializable object Expanded`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Expanded;
-
-/// SizeTransformSample's `@Serializable object NestedGraph`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct NestedGraph;
-
-/// SizeTransformSample's `@Serializable object InnerCollapsed`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct InnerCollapsed;
-
-/// SharedElementSample's `@Serializable object Select`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Select;
-
-/// SharedElementSample's `@Serializable object SharedElement`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct SharedElement;
-
-/// SharedElementSample's `@Serializable object TopAppBarShared`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct TopAppBarShared;
-
-/// SharedElementSample's `@Serializable object RedBox`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct RedBox;
-
-/// SharedElementSample's `@Serializable object BlueBox`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct BlueBox;
-
-/// SharedElementSample's `@Serializable object First`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct First;
-
-/// SharedElementSample's `@Serializable object Second`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Second;
-
-/// SharedElementSample's `@Serializable object Third`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Third;
-
-/// java.util.UUID (what the samples' third-party type wraps): its text.
-#[derive(Clone, PartialEq, Debug)]
-pub struct UUID(String);
-
-impl UUID {
-    /// Kotlin's `UUID.randomUUID()`: a version-4 UUID (made from a counter and the time here).
-    pub fn random_uuid() -> UUID {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(1);
-        let n = N.fetch_add(1, Ordering::Relaxed);
-        UUID(format!("00000000-0000-4000-8000-{n:012x}"))
-    }
-
-    /// Kotlin's `UUID.fromString(s)`.
-    pub fn from_string(s: &str) -> UUID {
-        UUID(s.to_string())
-    }
-}
-
-impl std::fmt::Display for UUID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+// ---- what stays Rust ------------------------------------------------------------------------------------------
 
 /// NavigationSamples' `@Serializable class WrappedUUID(@Serializable(with = UUIDSerializer::class) val uuid: UUID)`:
-/// a route value of the samples' own NavType (WrappedUUIDNavType through the typeMap).
+/// a route value of the samples' own NavType (WrappedUUIDNavType through the typeMap). (A plain `@Serializable class`:
+/// the Kotlin syntax derives a route for a data class or an object only.)
 #[derive(KotlinProperties, RouteValue, Clone, PartialEq, Debug)]
 pub struct WrappedUUID {
     pub uuid: UUID,
@@ -174,7 +29,7 @@ pub fn WrappedUUID(uuid: UUID) -> WrappedUUID {
     WrappedUUID { uuid }
 }
 
-/// NavigationSamples' `@Serializable class User(val id: WrappedUUID)`
+/// NavigationSamples' `@Serializable class User(val id: WrappedUUID)` (a plain class too).
 #[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
 pub struct User {
     pub id: WrappedUUID,
@@ -184,34 +39,6 @@ pub struct User {
 pub fn User(id: WrappedUUID) -> User {
     User { id }
 }
-
-/// NavigationSamples' `object WrappedUUIDNavType : NavType<WrappedUUID>(isNullableAllowed = false)`: put/get as a
-/// string, parsed from and written as the UUID's text (`Uri.encode`).
-struct WrappedUUIDNavTypeImpl;
-
-impl NavTypeImpl for WrappedUUIDNavTypeImpl {
-    type Value = WrappedUUID;
-    fn is_nullable_allowed(&self) -> bool {
-        false
-    }
-    fn put(&self, bundle: &SavedState, key: &str, value: Option<&WrappedUUID>) {
-        if let Some(v) = value {
-            bundle.write(|w| w.put_string(key, v.uuid.to_string()));
-        }
-    }
-    fn get(&self, bundle: &SavedState, key: &str) -> Option<WrappedUUID> {
-        Some(WrappedUUID(UUID::from_string(&bundle.get_string(key)?)))
-    }
-    fn parse_value(&self, value: &str) -> Result<Option<WrappedUUID>, NavTypeError> {
-        Ok(Some(WrappedUUID(UUID::from_string(value))))
-    }
-    fn serialize_as_value(&self, value: Option<&WrappedUUID>) -> String {
-        value.map_or("null".into(), |v| v.uuid.to_string())
-    }
-}
-
-/// The samples' `WrappedUUIDNavType` object.
-pub const WrappedUUIDNavType: NavType = NavType::of_object(&WrappedUUIDNavTypeImpl);
 
 // The samples' string resources (NavigationSamples' `R.string.*`): tests/navResources.
 compose_resources!(dir = "tests/navResources");
@@ -359,14 +186,23 @@ fn nav_with_args_in_nested_graph_sample() {
 }
 
 /// NavigationSamples' NavHostPreview and ThirdPartySerializableType: a NavHost while inspecting; a typed route of a
-/// type of the app's own with its NavType through the typeMap.
+/// type of the app's own with its NavType through the typeMap (a random UUID's text; the NavType's object writing and
+/// reading it).
 fn preview_and_third_party_type_samples() {
     let rule = KompozTestRule::new(NavHostPreview);
     rule.wait_for_idle();
     rule.on_node_with_tag("text").assert_exists();
     let rule = KompozTestRule::new(ThirdPartySerializableType);
     rule.wait_for_idle();
-    named_args!(rule.on_node_with_text("uuid: 00000000-0000-4000-8000-", substring = true)).assert_exists();
+    named_args!(rule.on_node_with_text("uuid: ", substring = true)).assert_exists();
+    let text = "0f0e0d0c-0b0a-4908-8706-050403020100";
+    let t: NavType = WrappedUUIDNavType {}.into();
+    let parsed: WrappedUUID = t.parse_value(text).unwrap().unwrap();
+    assert_eq!(parsed.uuid.to_string(), text);
+    assert_eq!(t.serialize_as_value(Some(&parsed)), text);
+    let bundle = SavedState::new();
+    t.put(&bundle, "id", Some(&parsed));
+    assert_eq!(t.get::<WrappedUUID>(&bundle, "id"), Some(parsed));
 }
 
 // ---- SizeTransformSample.kt ---------------------------------------------------------------------------------------

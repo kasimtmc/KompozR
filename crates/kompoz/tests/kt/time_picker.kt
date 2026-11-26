@@ -1,16 +1,20 @@
 // Material's time pickers as Compose's samples write them (material3 1.5's TimePickerSamples.kt): the dial picker in
-// a dialog, the time input in a dialog, and the dialog switching between the two.
+// a dialog and the time input in a dialog, the time they show written by java.text's `SimpleDateFormat` in the
+// default locale from java.util's `Calendar` (the kt shims': CLDR's AM/PM markers through ICU4X; `Locale` is
+// java.util's by the import, as in Kotlin).
 //
-// (lead: JVM shims) The three samples write the time with java.text's `SimpleDateFormat("hh:mm a",
-// Locale.getDefault())` and java.util's `Calendar` (`Calendar.getInstance()`, `cal.set(Calendar.HOUR_OF_DAY, …)`,
-// `cal.isLenient = false`, `formatter.format(cal.time)`), and TimePickerSwitchableSample reads Android's
-// `LocalConfiguration.current.screenHeightDp`: they wait in the comment below, as written, for those shims. Their
-// Compose is tested now by their twins in kotlin_pickers.rs (`…SampleTwin`: the same but those lines, written in
-// Kotlin), checked as the samples will be.
+// Not here, with the reason (its twin, TimePickerSwitchableSampleTwin in kotlin_pickers.rs, is tested: the sample but
+// its `LocalConfiguration` lines, the window's height in dp read instead):
+// - TimePickerSwitchableSample, the dialog switching between the two: Android's `LocalConfiguration.current
+//   .screenHeightDp` decides whether the dial fits (`androidx.compose.ui.platform.LocalConfiguration`, androidMain
+//   only: Compose for desktop and the C++ Kompoz have none) — the Android platform, stage 15. It waits in the
+//   comment below, as written.
 
 import androidx.compose.material3.TimePickerDialogDefaults.MinHeightForTimePicker
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
-/*
 @OptIn(ExperimentalMaterial3Api::class)
 @Sampled
 @Composable
@@ -105,6 +109,7 @@ fun TimeInputSample() {
     }
 }
 
+/*
 @OptIn(ExperimentalMaterial3Api::class)
 @Sampled
 @Composable

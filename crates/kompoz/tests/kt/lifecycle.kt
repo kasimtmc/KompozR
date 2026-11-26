@@ -4,10 +4,7 @@
 // lifecycle-runtime-compose 2.11's samples (LifecycleComposeSamples.kt, DropUnlessLifecycleSamples.kt,
 // RememberLifecycleOwnerSamples.kt).
 //
-// Kotlin's classes are stage 14's: what the sources declare as classes is Rust beside this file
-// (kotlin_lifecycle.rs) — the samples' local `class ExampleState` (two of them: the second is `CounterState` there)
-// and their private `interface DataAnalytics` / `TimeAnalytics`, and KitchenForms' `class TickViewModel :
-// ViewModel()` (a Rust twin implementing `ViewModel`, as the stage-14 generator will make it).
+// The samples' local classes, private interfaces and local composables as written.
 
 package androidx.lifecycle.compose.samples
 
@@ -21,6 +18,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.delay
@@ -31,8 +31,18 @@ import kotlinx.coroutines.launch
 
 // Whole, as the C++ test writes it: a Channel's trySend(…).isSuccess, consumeEach { order -> } suspending per element,
 // scope.produce<Int> { send(i) }, the ViewModel's flow's collectAsStateWithLifecycle() as a member, Lifecycle.State
-// names from LocalLifecycleOwner.current, a ViewConfiguration's timeouts in millis, semantics { contentType = … }
-// (its `class TickViewModel : ViewModel()`, with SharingStarted.WhileSubscribed(5000), is Rust beside this file).
+// names from LocalLifecycleOwner.current, a ViewConfiguration's timeouts in millis, semantics { contentType = … },
+// SharingStarted.WhileSubscribed(5000).
+class TickViewModel : ViewModel() {
+    val ticks: StateFlow<Int> = flow<Int> {
+        var i = 0
+        while (true) {
+            emit(i++)
+            delay(100)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+}
+
 @Composable
 fun KitchenForms() {
     val orders = remember { Channel<Int>(2) }
@@ -70,6 +80,11 @@ fun KitchenForms() {
 @Sampled
 @Composable
 fun StateFlowCollectAsStateWithLifecycle() {
+    class ExampleState {
+        private val _uiState = MutableStateFlow("")
+        val uiState: StateFlow<String> = _uiState.asStateFlow()
+    }
+
     val state = remember { ExampleState() }
 
     val uiState by state.uiState.collectAsStateWithLifecycle()
@@ -79,22 +94,41 @@ fun StateFlowCollectAsStateWithLifecycle() {
 @Sampled
 @Composable
 fun FlowCollectAsStateWithLifecycle() {
-    val state = remember { CounterState() }
+    class ExampleState {
+        val counter = flow {
+            var count = 0
+            while (true) {
+                emit(count++)
+                delay(1000)
+            }
+        }
+    }
 
+    val state = remember { ExampleState() }
     val count by state.counter.collectAsStateWithLifecycle(initialValue = 0)
     Text(text = "$count")
 }
 
-// lifecycleEventEffectSample, lifecycleStartEffectSample and lifecycleResumeEffectSample declare their Analytics as
-// local functions (stage 14's); verbatim here, their Analytics as one top-level composable (ScreenAnalytics) in
-// kotlin_lifecycle.rs.
-/*
+private interface TimeAnalytics {
+    fun stopTimeTracking(): TimeAnalytics
+}
+
+private interface DataAnalytics {
+    fun trackScreenView(screenName: String)
+
+    fun startTimeTracking(): TimeAnalytics
+
+    fun sendDisposalAnalytics(timeAnalytics: TimeAnalytics)
+}
+
 @Sampled
 @Composable
 fun lifecycleEventEffectSample() {
     @Composable
     fun Analytics(dataAnalytics: DataAnalytics) {
         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { dataAnalytics.trackScreenView("screen1") }
+
+        // ...
     }
 }
 
@@ -108,6 +142,8 @@ fun lifecycleStartEffectSample() {
 
             onStopOrDispose { timeTracker.stopTimeTracking() }
         }
+
+        // ...
     }
 }
 
@@ -121,9 +157,10 @@ fun lifecycleResumeEffectSample() {
 
             onPauseOrDispose { timeTracker.stopTimeTracking() }
         }
+
+        // ...
     }
 }
-*/
 
 // ---- DropUnlessLifecycleSamples.kt ----
 

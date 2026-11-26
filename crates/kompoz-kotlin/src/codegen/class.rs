@@ -13,7 +13,8 @@
 //! | `class C<T>(…)`, `fun <T> f(…)` | Rust's type parameters, bounded by their uses (see [`super::generics`]) |
 //! | nested declarations (`class A { data class B … }`) | the outer's name before theirs (`AB`), Kotlin's `A.B` that type (the overlay's types), `B` alone inside `A` |
 //! | `typealias N<T> = List<T>` | `pub type N<T> = Vec<T>;` and seen through wherever the generator reads a type (Kotlin's alias is the type) |
-//! | `@Serializable` on a data class or an object | `#[derive(Route)]` (a typed navigation route: kompoz-navigation's) |
+//! | `@Serializable` on a data class or an object | `#[derive(Route, Saveable)]` (a typed navigation route: kompoz-navigation's; no route of a property of a class or of its own serializer), its companion `serializer()` |
+//! | `@Serializable` on a plain, open or sealed class | `impl Saveable` (its constructor's properties by name; a sealed class's case under `"type"`), `serializer()` |
 //!
 //! A class's members are translated as functions are (named arguments and defaults through `#[named]`), with the
 //! class's value the implicit receiver (`self`). Inheritance — interfaces implemented, `open`, `abstract` and
@@ -136,6 +137,15 @@ pub(crate) struct ClassTable {
     pub trait_where: TokenStream,
     /// The star projections of the function's parameters being written (their places, the type parameters they are).
     pub stars: Option<Vec<(crate::pos::Loc, proc_macro2::Ident)>>,
+    /// (stage 14 WPD) The local classes of the text's functions, by the function's place (its start's offset):
+    /// (Kotlin's name, Rust's), what [`Gen::enter_locals`] puts in scope.
+    pub locals: HashMap<usize, Vec<(&'static str, &'static str)>>,
+    /// The function each local class (Rust's name) is declared in (its start's offset).
+    pub local_fn: HashMap<String, usize>,
+    /// The places of local declarations refused (with an error of their own: a local interface, enum, object).
+    pub refused_locals: Vec<Loc>,
+    /// The object expressions made local classes (`find_locals`), by their start's offset: the classes' Rust names.
+    pub local_objects: HashMap<usize, String>,
 }
 
 /// The Rust name of a companion of the class `outer_rust`, named `name` (none: `Companion`).
@@ -298,8 +308,35 @@ impl Gen<'_, '_> {
 
     /// The user's type a Kotlin type name is (`Entry` inside `Catalog`, `Catalog.Entry`, `Note`).
     pub(crate) fn user_class(&self, kotlin: &str) -> Option<&UserClass> {
+        // (a local class of the function being written first: Kotlin's innermost declaration)
+        if let Some(rust) = overlay::local_class(kotlin) {
+            return self.classes.classes.get(rust);
+        }
         let rust = self.classes.names.get(kotlin)?;
         self.classes.classes.get(rust)
+    }
+
+    /// Puts the local classes of the function at `loc` in scope until the guard is dropped.
+    pub(crate) fn enter_locals(&self, loc: Loc) -> overlay::LocalsEntered {
+        overlay::enter_locals(self.classes.locals.get(&loc.start.offset).map_or(&[], |l| l.as_slice()))
+    }
+
+    /// Puts the local classes of the function a local class (Rust's name) is declared in in scope, so its members
+    /// see them, until the guard is dropped.
+    fn enter_locals_of(&self, rust: &str) -> overlay::LocalsEntered {
+        let names = self.classes.local_fn.get(rust).and_then(|f| self.classes.locals.get(f));
+        overlay::enter_locals(names.map_or(&[], |l| l.as_slice()))
+    }
+
+    /// Whether a declaration at `loc` is a local class hoisted beside its function (written there, not where
+    /// declared), or one refused.
+    pub(crate) fn is_hoisted_local(&self, loc: Loc) -> bool {
+        self.classes.refused_locals.contains(&loc)
+            || self
+                .classes
+                .decls
+                .iter()
+                .any(|d| d.own && class_loc(&d.ast) == loc && self.classes.local_fn.contains_key(&d.info.rust))
     }
 
     /// The user's type of a Rust name.
@@ -463,6 +500,7 @@ impl Gen<'_, '_> {
     pub(crate) fn collect_classes(&mut self, own: &[&Decl], module: &[&Decl]) {
         let mut decls = Vec::new();
         find_classes(own, true, &mut decls);
+        self.find_locals(own, &mut decls);
         let own_names: Vec<String> = decls.iter().map(|d| d.info.rust.clone()).collect();
         let mut theirs = Vec::new();
         find_classes(module, false, &mut theirs);
@@ -475,19 +513,24 @@ impl Gen<'_, '_> {
         let mut types = Vec::new();
         for d in &decls {
             self.classes.classes.insert(d.info.rust.clone(), d.info.clone());
+            // (a local class's names are its function's: `enter_locals`)
+            if self.classes.local_fn.contains_key(&d.info.rust) {
+                continue;
+            }
             self.classes.names.entry(d.info.kotlin.clone()).or_insert(d.info.rust.clone());
             if d.outer.is_some() {
                 types.push((overlay::intern(&d.info.kotlin), overlay::intern(&d.info.rust)));
             }
         }
         // (a nested one's own name, where no other type has it: the top-level ones' first)
-        for d in decls.iter().filter(|d| d.outer.is_some()) {
+        for d in decls.iter().filter(|d| d.outer.is_some() && !self.classes.local_fn.contains_key(&d.info.rust)) {
             let short = d.info.kotlin.rsplit('.').next().unwrap_or(&d.info.kotlin).to_string();
             self.classes.names.entry(short).or_insert(d.info.rust.clone());
         }
         self.classes.decls = decls.clone();
         let mut base = overlay::current().map(|o| (*o).clone()).unwrap_or_default();
         base.types.extend(types);
+        base.locals.extend(self.classes.local_fn.keys().map(|r| overlay::intern(r)));
         // (the traits whose values are shared objects: interfaces', open and abstract classes')
         base.interfaces.extend(decls.iter().filter(|d| d.info.is_dyn()).map(|d| overlay::intern(&d.info.value_rust())));
         // (what a type's members are: its supertypes' too)
@@ -566,8 +609,128 @@ impl Gen<'_, '_> {
         self.classes.decls = decls;
     }
 
+    /// (stage 14 WPD) The local classes of the text's functions (declared in their bodies' statements): hoisted
+    /// beside their function, private, their Rust names the function's (`StateFlowSampleExampleState`; several
+    /// functions may have one of a name), their Kotlin names seen only in their function. They capture nothing of
+    /// it (what Kotlin's would capture is rustc's unknown name). An object expression with members of its own
+    /// (`remember { object : ViewModel() { fun refresh() … } }`, its members seen through its value's type, Kotlin's
+    /// anonymous one) is one too, when it uses none of the function's locals (else it stays an object expression,
+    /// its value its supertype's).
+    fn find_locals(&mut self, own: &[&Decl], out: &mut Vec<ClassDecl>) {
+        for d in own {
+            let Decl::Function(f) = d else { continue };
+            let Some(FunctionBody::Block(b)) = &f.body else { continue };
+            for s in &b.stmts {
+                let StmtKind::Decl(local) = &s.kind else { continue };
+                let mut local = local.clone();
+                let (modifiers, loc) = match &mut local {
+                    Decl::Class(c) if matches!(c.kind, ClassKind::Interface | ClassKind::FunInterface) => {
+                        self.error(c.name.loc, "an interface can't be local (Kotlin's rule)");
+                        self.classes.refused_locals.push(c.loc);
+                        continue;
+                    }
+                    Decl::Class(c) if c.kind == ClassKind::Enum => {
+                        self.error(c.name.loc, "an enum class can't be local (Kotlin's rule)");
+                        self.classes.refused_locals.push(c.loc);
+                        continue;
+                    }
+                    Decl::Class(c) if c.kind == ClassKind::Class => (&mut c.modifiers, c.loc),
+                    Decl::Object(o) if o.name.is_some() => {
+                        self.error(
+                            o.loc,
+                            "an object declaration can't be local (Kotlin's rule): an object expression can",
+                        );
+                        self.classes.refused_locals.push(o.loc);
+                        continue;
+                    }
+                    _ => continue,
+                };
+                if let Some(m) = modifiers.list.iter().find(|m| {
+                    matches!(
+                        m.kind,
+                        ModifierKind::Public | ModifierKind::Private | ModifierKind::Internal | ModifierKind::Protected
+                    )
+                }) {
+                    self.error(m.loc, "a local class has no visibility (Kotlin's rule)");
+                }
+                modifiers.list.push(Modifier { kind: ModifierKind::Private, loc });
+                self.hoist_local(&local, f, out);
+            }
+            // (its object expressions with members of their own)
+            let mut objects = Vec::new();
+            super::generics::walk_body(f.body.as_ref(), &mut |e| {
+                if let ExprKind::Object { supers, body } = &e.kind {
+                    objects.push((supers.clone(), body.clone(), e.loc));
+                }
+            });
+            let locals = local_names(f);
+            for (supers, body, loc) in objects {
+                if !has_own_members(&body) || uses_names(&body, &locals) {
+                    continue;
+                }
+                let class = Class {
+                    annotations: Vec::new(),
+                    modifiers: Modifiers { list: vec![Modifier { kind: ModifierKind::Private, loc }] },
+                    kind: ClassKind::Class,
+                    name: Ident { name: "Object".into(), backticked: false, loc },
+                    type_params: Vec::new(),
+                    primary_constructor: None,
+                    supers,
+                    constraints: Vec::new(),
+                    enum_entries: Vec::new(),
+                    body,
+                    loc,
+                };
+                let start = self.hoist_local(&Decl::Class(Box::new(class)), f, out);
+                // (no name of Kotlin's: its value's type only)
+                let rust = out[start].info.rust.clone();
+                out[start].info.kotlin = "<object>".into();
+                if let Some(names) = self.classes.locals.get_mut(&f.loc.start.offset) {
+                    names.retain(|(_, r)| *r != rust);
+                }
+                self.classes.local_objects.insert(loc.start.offset, rust);
+            }
+        }
+    }
+
+    /// A function's local class (or object expression made one) beside it: its declarations found, their Rust names
+    /// the function's, their Kotlin names its; where they start in `out`.
+    fn hoist_local(&mut self, local: &Decl, f: &Function, out: &mut Vec<ClassDecl>) -> usize {
+        let key = f.loc.start.offset;
+        let start = out.len();
+        find_in(local, None, true, out);
+        // (its Rust name the function's; one more of that name a number)
+        let mut prefix = super::names::pascal(&f.name.name);
+        let root = out[start].info.rust.clone();
+        let taken = |p: &str, out: &[ClassDecl]| out.iter().any(|o| o.info.rust == format!("{p}{root}"));
+        if taken(&prefix, &out[..start]) {
+            let mut n = 2;
+            while taken(&format!("{prefix}{n}"), &out[..start]) {
+                n += 1;
+            }
+            prefix = format!("{prefix}{n}");
+        }
+        let rename = |r: &mut String| *r = format!("{prefix}{r}");
+        for c in &mut out[start..] {
+            rename(&mut c.info.rust);
+            for r in [c.info.companion.as_mut(), c.info.inner.as_mut(), c.outer.as_mut()].into_iter().flatten() {
+                rename(r);
+            }
+            let names = self.classes.locals.entry(key).or_default();
+            names.push((overlay::intern(&c.info.kotlin), overlay::intern(&c.info.rust)));
+            self.classes.local_fn.insert(c.info.rust.clone(), key);
+        }
+        start
+    }
+
+    /// The local class an object expression at `loc` was made (its Rust name).
+    pub(crate) fn local_object(&self, loc: Loc) -> Option<String> {
+        self.classes.local_objects.get(&loc.start.offset).cloned()
+    }
+
     /// The overlay's items of a declaration: what a use of it finds.
     fn class_items(&mut self, d: &ClassDecl) -> Vec<index::Item> {
+        let _locals = self.enter_locals_of(&d.info.rust);
         let mut out = Vec::new();
         let c = &d.info;
         // (an open, abstract or sealed class's members are its trait's: its subclasses' through it)
@@ -976,7 +1139,9 @@ impl Gen<'_, '_> {
 
     fn write_class(&mut self, d: &ClassDecl) -> TokenStream {
         use super::hierarchy::Inherit;
-        match (&d.ast, d.info.shape, d.info.inherit) {
+        let _locals = self.enter_locals_of(&d.info.rust);
+        let serializable = self.serializable_class(d);
+        let out = match (&d.ast, d.info.shape, d.info.inherit) {
             (ClassAst::Class(_), Shape::Interface, Inherit::Sealed) => self.open_class(d),
             (ClassAst::Class(_), Shape::Interface, _) => self.interface_trait(d),
             (ClassAst::Class(_), Shape::Data | Shape::Plain, Inherit::Open | Inherit::Abstract | Inherit::Sealed) => {
@@ -987,6 +1152,99 @@ impl Gen<'_, '_> {
             (ClassAst::Class(c), Shape::Enum, _) => self.enum_class(c, d),
             (ClassAst::Object(o), _, _) => self.object(o, d),
             _ => TokenStream::new(),
+        };
+        quote!(#out #serializable)
+    }
+
+    /// ((stage 14 WPD) A `@Serializable` plain class (final or open: Kotlin's reference, not a data class's derive)
+    /// or sealed class: `Saveable` as kotlinx serializes it — a class a map of its constructor's properties by their
+    /// Kotlin names (read back through its constructor: every one of them a property, each given), a sealed class
+    /// its case's name under `"type"` and the case's value under `"value"` —, and its companion `serializer()`.)
+    fn serializable_class(&mut self, d: &ClassDecl) -> TokenStream {
+        use super::hierarchy::Inherit;
+        let ClassAst::Class(c) = &d.ast else { return quote!() };
+        let c = (**c).clone();
+        if !c.annotations.iter().any(|a| a.name.last().name == "Serializable") {
+            return quote!();
+        }
+        let span = self.span(c.loc);
+        let rt = respan(self.rt().clone(), span);
+        let allow = class_allow(span);
+        let name = ident(&d.info.rust, span);
+        let vis = self.class_vis(&c.modifiers, c.loc);
+        let (save, restore, descriptor) = match (d.info.shape, d.info.inherit) {
+            (Shape::Plain, Inherit::Final | Inherit::Open) if c.type_params.is_empty() => {
+                let params: Vec<ConstructorParam> =
+                    c.primary_constructor.as_ref().map(|p| p.params.clone()).unwrap_or_default();
+                let (mut saves, mut restores, mut elements) = (Vec::new(), Vec::new(), Vec::new());
+                for p in &params {
+                    let Some(ty) = &p.param.ty else { return quote!() };
+                    if p.property.is_none() {
+                        return self.later(
+                            p.param.loc,
+                            "a `@Serializable` class's constructor parameter that isn't a property",
+                        );
+                    }
+                    let key = p.param.name.name.clone();
+                    let getter = ident(&snake(&key), span);
+                    let t = self.rust_type(ty, TypePos::Value);
+                    saves.push(quote_spanned!(span=> (#key, #rt::Saveable::save(&self.#getter()))));
+                    restores.push(quote_spanned!(span=> <#t as #rt::Saveable>::restore(__kz_map.get(#key)?)?));
+                    elements.push(quote_spanned!(span=> #rt::SerialElement::of::<#t>(#key, false)));
+                }
+                (
+                    quote_spanned!(span=> #rt::SavedValue::map::<&str>([#(#saves),*])),
+                    quote_spanned!(span=> let __kz_map = __kz_saved.as_map()?; ::core::option::Option::Some(#name(#(#restores),*))),
+                    quote_spanned!(span=> #rt::SerialDescriptor::class(::core::any::type_name::<Self>(), ::std::vec![#(#elements),*])),
+                )
+            }
+            (_, Inherit::Sealed) if c.type_params.is_empty() && d.info.shape != Shape::Interface => {
+                let cases = self.sealed_cases(&d.info.rust);
+                let vs: Vec<proc_macro2::Ident> = cases.iter().map(|(v, _)| ident(v, span)).collect();
+                let names: Vec<String> = cases.iter().map(|(v, _)| v.clone()).collect();
+                let tys: Vec<proc_macro2::Ident> = cases.iter().map(|(_, r)| ident(r, span)).collect();
+                (
+                    quote_spanned! {span=>
+                        match self {
+                            #(#name::#vs(v) => #rt::SavedValue::map::<&str>([
+                                ("type", #rt::SavedValue::from(#names)),
+                                ("value", #rt::Saveable::save(v)),
+                            ]),)*
+                        }
+                    },
+                    quote_spanned! {span=>
+                        let __kz_value = __kz_saved.get("value");
+                        match __kz_saved.get("type").as_str()? {
+                            #(#names => <#tys as #rt::Saveable>::restore(__kz_value).map(#name::#vs),)*
+                            _ => ::core::option::Option::None,
+                        }
+                    },
+                    quote_spanned!(span=> #rt::SerialDescriptor::new(::core::any::type_name::<Self>(), #rt::SerialKind::Contextual)),
+                )
+            }
+            _ => return quote!(),
+        };
+        quote_spanned! {span=>
+            #allow
+            impl #rt::Saveable for #name {
+                fn descriptor() -> #rt::SerialDescriptor {
+                    #descriptor
+                }
+                fn save(&self) -> #rt::SavedValue {
+                    #save
+                }
+                #[allow(unused_variables, clippy::question_mark)]
+                fn restore(__kz_saved: &#rt::SavedValue) -> ::core::option::Option<Self> {
+                    #restore
+                }
+            }
+            #allow
+            impl #name {
+                #[allow(dead_code)]
+                #vis fn serializer() -> #rt::Saver<Self> {
+                    #rt::serializer::<Self>()
+                }
+            }
         }
     }
 
@@ -999,6 +1257,7 @@ impl Gen<'_, '_> {
                 | ModifierKind::Private
                 | ModifierKind::Internal
                 | ModifierKind::Data
+                | ModifierKind::Value
                 | ModifierKind::Final
                 | ModifierKind::Open
                 | ModifierKind::Abstract
@@ -1008,6 +1267,14 @@ impl Gen<'_, '_> {
                     self.later(m.loc, &format!("`{}` on a class", m.kind.keyword()));
                     ok = false;
                 }
+            }
+        }
+        // (Kotlin's rule: a value class has one property, its primary constructor's only parameter, a `val`)
+        if c.is_value() {
+            let params = c.primary_constructor.as_ref().map(|p| p.params.as_slice()).unwrap_or_default();
+            if !matches!(params, [p] if p.property == Some(Mutability::Val)) {
+                self.error(c.loc, "a value class has one property: its constructor's only parameter, a `val`");
+                ok = false;
             }
         }
         if c.is_inner() && d.outer.is_none() {
@@ -1080,12 +1347,74 @@ impl Gen<'_, '_> {
         }
     }
 
-    /// `#[derive(Route)]` for `@Serializable`.
+    /// ((stage 14 WPD) a function-typed property's constructor parameter — `class SampleCallbackHelper(val
+    /// preparePop: () -> Unit, …)` —: the closure given (`impl Fn`), held as the shared one the property is.)
+    fn closure_convert(&mut self, p: &Param) -> Option<TokenStream> {
+        let t = p.ty.as_ref()?;
+        let ut = self.unaliased(t);
+        if ut.nullable || ut.as_function().is_none() {
+            return None;
+        }
+        let pos = if p.default.is_some() { TypePos::DefaultedParam } else { TypePos::Param };
+        let given = self.quiet(|g| g.rust_type(t, pos)).to_string();
+        let held = self.quiet(|g| g.rust_type(t, TypePos::Value));
+        let held_text = held.to_string();
+        if !given.starts_with("impl") || !(held_text.contains("Rc <") || held_text.contains("Arc <")) {
+            return None;
+        }
+        let span = self.span(p.loc);
+        let i = self.name_ident(&snake(&p.name.name), p.name.loc);
+        let ptr = if held_text.contains("Arc <") {
+            quote_spanned!(span=> ::std::sync::Arc)
+        } else {
+            quote_spanned!(span=> ::std::rc::Rc)
+        };
+        Some(quote_spanned!(span=> let #i: #held = #ptr::new(#i);))
+    }
+
+    /// `#[derive(Route, Saveable)]` for `@Serializable`.
     fn route_derive(&self, annotations: &[Annotation], span: Span) -> TokenStream {
         if annotations.iter().any(|a| a.name.last().name == "Serializable") {
-            quote_spanned!(span=> #[derive(Route)])
+            // ((stage 14 WPD) `@SerialName("login")`: the route's name)
+            let serial_name = annotations.iter().filter(|a| a.name.last().name == "SerialName").find_map(|a| {
+                match a.args.as_deref() {
+                    Some([arg]) => match &arg.value.kind {
+                        ExprKind::String(lit) => match lit.parts.as_slice() {
+                            [StringPart::Text { text, .. }] => Some(text.clone()),
+                            [] => Some(String::new()),
+                            _ => None,
+                        },
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            });
+            // (and saved as kotlinx serializes it: `#[derive(Saveable)]`, what a back stack's keys, `rememberSerializable`
+            // and `encodeToSavedState` take)
+            let rt = respan(self.rt().clone(), span);
+            match serial_name {
+                Some(n) => quote_spanned!(span=> #[derive(Route, #rt::Saveable)] #[route(name = #n)]),
+                None => quote_spanned!(span=> #[derive(Route, #rt::Saveable)]),
+            }
         } else {
             quote!()
+        }
+    }
+
+    /// ((stage 14 WPD) A `@Serializable` class's companion `serializer()` (kotlinx's generated one: `Home.serializer()`):
+    /// its `Saver`, `serializer::<Self>()`; nothing for another class (`route` empty).)
+    fn serializer_fn(&self, route: &TokenStream, vis: &TokenStream, header: TokenStream, span: Span) -> TokenStream {
+        if route.is_empty() {
+            return quote!();
+        }
+        let rt = respan(self.rt().clone(), span);
+        quote_spanned! {span=>
+            #header {
+                #[allow(dead_code)]
+                #vis fn serializer() -> #rt::Saver<Self> {
+                    #rt::serializer::<Self>()
+                }
+            }
         }
     }
 
@@ -1160,7 +1489,24 @@ impl Gen<'_, '_> {
         let vis = self.class_vis(&c.modifiers, c.loc);
         let name = proc_macro2::Ident::new(&info.rust, self.span(c.name.loc));
         let allow = class_allow(span);
-        let route = self.route_derive(&c.annotations, span);
+        let mut route = self.route_derive(&c.annotations, span);
+        // ((stage 14 WPD) a property of its own serializer, `@Serializable(with = ProductSerializer::class) val
+        // product: Product`, or of a class of the crate's, `val name: Name` (a navigation key's: a deep link's
+        // arguments): saved, no typed route of it — a route's arguments are primitives, enums and lists of them)
+        let class_typed = |me: &Self, p: &Param| {
+            p.ty.as_ref()
+                .and_then(|t| t.simple_name())
+                .and_then(|n| me.user_class(&n).cloned())
+                .is_some_and(|u| u.shape != Shape::Enum)
+        };
+        if !route.is_empty()
+            && c.primary_constructor
+                .iter()
+                .flat_map(|p| &p.params)
+                .any(|p| custom_serializer(&p.param) || class_typed(self, &p.param))
+        {
+            route = quote_spanned!(span=> #[derive(#rt::Saveable)]);
+        }
         let (g_decl, g_use, g_struct) = self.class_generics(d, span);
         let cx = MemberCx {
             owner: info.rust.clone(),
@@ -1181,6 +1527,7 @@ impl Gen<'_, '_> {
             let (ts, convert) = self.param(&cp.param, false, false);
             ctor_params.push(ts);
             converts.extend(convert);
+            converts.extend(self.closure_convert(&cp.param));
             let i = self.name_ident(&snake(&cp.param.name.name), cp.param.name.loc);
             let t = cp.param.ty.as_ref().map(|t| self.rust_type(t, TypePos::Value)).unwrap_or_default();
             value_params.push(quote_spanned!(span=> #i: #t));
@@ -1215,11 +1562,20 @@ impl Gen<'_, '_> {
                 (Some(d), false) => {
                     let saved = std::mem::take(&mut self.scopes);
                     self.scopes = vec![HashMap::new()];
-                    let v = self.value(d);
+                    // ((stage 14 WPD) a nullable property's: an `Option` — `val userId: String? = "no value given"`)
+                    let nullable = cp.param.ty.as_ref().is_some_and(|t| t.nullable);
+                    let v = self.value_want(d, super::expr::Want { some: nullable, ..Default::default() });
                     self.scopes = saved;
                     quote_spanned!(pspan=> #[route(default = #v)])
                 }
                 _ => quote!(),
+            };
+            // (saved under its Kotlin name, as kotlinx writes it: `userId`)
+            let kotlin_name = &cp.param.name.name;
+            let route_default = if !route.is_empty() && snake(kotlin_name) != *kotlin_name {
+                quote_spanned!(pspan=> #route_default #[saveable(name = #kotlin_name)])
+            } else {
+                route_default
             };
             route_attrs.push(route_default.clone());
             compared.push(i.clone());
@@ -1513,11 +1869,14 @@ impl Gen<'_, '_> {
         } else {
             (quote_spanned!(span=> , ::core::cmp::PartialEq), hash)
         };
+        let serializer = self.serializer_fn(&route, &vis, quote!(#allow impl #g_decl #name #g_use), span);
         quote_spanned! {span=>
             #allow
             #[derive(::core::clone::Clone #derive_eq)]
             #route
             #vis struct #name #g_struct { #(#fields),* }
+
+            #serializer
 
             #allow
             #[#rt::named(type)]
@@ -1875,9 +2234,14 @@ impl Gen<'_, '_> {
         if f.is_kompozable() {
             return self.composable_member(f, cx);
         }
-        if let Some(r) = &f.receiver {
-            return self.later(r.loc, "a member extension function");
-        }
+        // ((stage 14 WPD) a member extension, `override fun SceneStrategyScope<T>.calculateScene(…)`: its receiver an
+        // API type's value lent (`&SceneStrategyScope<T>`), the parameter `__kz_ext` before the others, the innermost
+        // implicit receiver of its body)
+        let ext = match &f.receiver {
+            Some(r) if !r.nullable && r.simple_name().is_some_and(|n| self.user_class(&n).is_none()) => Some(r.clone()),
+            Some(r) => return self.later(r.loc, "a member extension function of a nullable type or the crate's class"),
+            None => None,
+        };
         let suspend = f.is_suspend();
         let ret_text = self.member_ret_text(f, cx);
         let ret_ty = Ty::from_rust(&ret_text);
@@ -1894,6 +2258,22 @@ impl Gen<'_, '_> {
         self.collect_stars();
         let mut params = Vec::new();
         let mut converts = Vec::new();
+        if let Some(r) = &ext {
+            let rust_ty = self.rust_type(r, TypePos::Value);
+            let name = r.simple_name().map(|n| owner_name(super::last_segment(&n))).unwrap_or_default();
+            self.receivers.push(super::resolve::ImplicitReceiver {
+                rust: "__kz_ext".into(),
+                ty: name,
+                value: self.ty_of(r),
+                labels: vec![f.name.name.clone()],
+                depth: 0,
+                by_ref: true,
+                by_mut: false,
+                owned_used: Default::default(),
+            });
+            let i = proc_macro2::Ident::new("__kz_ext", span);
+            params.push(quote_spanned!(span=> #i: &#rust_ty));
+        }
         for p in &f.params {
             let (tokens, convert) = self.param(p, false, false);
             params.push(tokens);
@@ -2154,6 +2534,7 @@ impl Gen<'_, '_> {
             let (ts, convert) = self.param(&cp.param, false, false);
             ctor_params.push(ts);
             converts.extend(convert);
+            converts.extend(self.closure_convert(&cp.param));
             let i = self.name_ident(&snake(&cp.param.name.name), cp.param.name.loc);
             let t = cp.param.ty.as_ref().map(|t| self.rust_type(t, TypePos::Value)).unwrap_or_default();
             value_params.push(quote_spanned!(span=> #i: #t));
@@ -2608,6 +2989,7 @@ impl Gen<'_, '_> {
             quote_spanned!(span=> __kz_out.push_str(&#kt::default_to_string(#shown, Self::__kz_state() as *const #fields_ty as *const ()));)
         };
         let impls = self.class_impls(d, Place::Object, &quote!(), &quote!());
+        let serializer = self.serializer_fn(&route, &vis, quote!(#allow impl #name), span);
         quote_spanned! {span=>
             #allow
             #[doc(hidden)]
@@ -2617,6 +2999,8 @@ impl Gen<'_, '_> {
             #[derive(::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash, ::core::default::Default)]
             #route
             #vis struct #name {}
+
+            #serializer
 
             #allow
             impl #name {
@@ -2959,6 +3343,19 @@ impl Gen<'_, '_> {
                 }
             }
 
+            // ((stage 14 WPD) Kotlin's enums are Serializable: saved by their names, as a Bundle keeps one —
+            // `rememberSaveable { mutableStateOf(Choice.A) }`)
+            #allow
+            impl #rt::Saveable for #name {
+                fn save(&self) -> #rt::SavedValue {
+                    #rt::SavedValue::String(self.name())
+                }
+                fn restore(saved: &#rt::SavedValue) -> ::core::option::Option<Self> {
+                    let name = saved.as_str()?;
+                    Self::entries().into_iter().find(|e| e.name() == name)
+                }
+            }
+
             #impls
         }
     }
@@ -3295,4 +3692,88 @@ pub(crate) fn substitute(t: &Type, binds: &HashMap<String, Type>) -> Type {
         TypeKind::Error => {}
     }
     out
+}
+
+/// Whether an object expression's body has more than overriding functions and values (what `object_expr` makes
+/// closures and values of): members of its own (its value's type shows them), state, an `init` block, suspending
+/// functions — a class's.
+fn has_own_members(body: &ClassBody) -> bool {
+    body.members.iter().any(|m| match m {
+        Member::Decl(Decl::Function(f)) => {
+            !super::hierarchy::is_override(&f.modifiers) || f.is_suspend() || !f.type_params.is_empty()
+        }
+        Member::Decl(Decl::Property(p)) => {
+            !super::hierarchy::is_override(&p.modifiers) || p.is_var() || !matches!(p.init, PropertyInit::Value(_))
+        }
+        Member::Init(_) => true,
+        _ => false,
+    })
+}
+
+/// Whether a constructor's parameter is serialized by a serializer of its own: `@Serializable(with = S::class)` on
+/// it or on a type in its type (`List<@Serializable(with = HatSerializer::class) Hat>`).
+fn custom_serializer(p: &Param) -> bool {
+    fn with(a: &[Annotation]) -> bool {
+        a.iter().any(|a| {
+            a.name.last().name == "Serializable"
+                && a.args
+                    .as_deref()
+                    .is_some_and(|args| args.iter().any(|x| x.name.as_ref().is_some_and(|n| n.name == "with")))
+        })
+    }
+    fn in_type(t: &Type) -> bool {
+        with(&t.annotations)
+            || match &t.kind {
+                TypeKind::Named(segs) => segs.iter().flat_map(|s| &s.args).any(|a| match a {
+                    TypeArg::Type { ty, .. } => in_type(ty),
+                    TypeArg::Star(_) => false,
+                }),
+                _ => false,
+            }
+    }
+    with(&p.annotations) || p.ty.as_ref().is_some_and(in_type)
+}
+
+/// The names of a function's parameters and its body's locals (its statements', its local functions').
+fn local_names(f: &Function) -> Vec<String> {
+    let mut out: Vec<String> = f.params.iter().map(|p| p.name.name.clone()).collect();
+    if let Some(FunctionBody::Block(b)) = &f.body {
+        for s in &b.stmts {
+            match &s.kind {
+                StmtKind::Decl(Decl::Property(p)) => match &p.binding {
+                    Binding::Name(n) => out.push(n.name.clone()),
+                    Binding::Destructure(es) => out.extend(es.iter().map(|e| e.name.name.clone())),
+                },
+                StmtKind::Decl(Decl::Function(g)) => out.push(g.name.name.clone()),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Whether an object expression's members use any of `names`.
+fn uses_names(body: &ClassBody, names: &[String]) -> bool {
+    let mut used = false;
+    let mut look = |e: &Expr| {
+        if let ExprKind::Name(n) = &e.kind {
+            used |= names.contains(&n.name);
+        }
+    };
+    for m in &body.members {
+        match m {
+            Member::Decl(Decl::Function(g)) => super::generics::walk_body(g.body.as_ref(), &mut look),
+            Member::Decl(Decl::Property(p)) => {
+                if let PropertyInit::Value(e) | PropertyInit::Delegate(e) = &p.init {
+                    super::generics::walk_expr(e, &mut look);
+                }
+                for a in [&p.getter, &p.setter].into_iter().flatten() {
+                    super::generics::walk_body(a.body.as_ref(), &mut look);
+                }
+            }
+            Member::Init(b) => super::generics::walk_block(b, &mut look),
+            _ => {}
+        }
+    }
+    used
 }

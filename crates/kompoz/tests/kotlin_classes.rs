@@ -294,8 +294,34 @@ fn kotlin_in_cpp_namespaces() {
     assert_eq!(shelf::shelf_label(), "3 ürün, Top 2 1");
 }
 
+// ---- (stage 14 WPD) value classes and annotation classes -------------------------------------------------------
+
+kompoz! {
+    // (an annotation of the app's own: declared, used, nothing to write)
+    @Target(AnnotationTarget.FUNCTION)
+    annotation class Measured(val unit: String = "m")
+
+    @JvmInline
+    value class Meters(val value: Int) {
+        operator fun plus(other: Meters) = Meters(value + other.value)
+        fun doubled() = Meters(value * 2)
+    }
+
+    @Measured
+    fun walked(steps: List<Meters>): String {
+        var total = Meters(0)
+        for (s in steps) total = total + s
+        return "$total ${total.doubled().value} ${total == Meters(5)}"
+    }
+}
+
+fn value_and_annotation_classes() {
+    assert_eq!(walked(vec![Meters(2), Meters(3)]), "Meters(value=5) 10 true");
+}
+
 fn main() {
     common::run(&[
+        ("value_and_annotation_classes", value_and_annotation_classes),
         ("data_classes", data_classes),
         ("objects_with_members", objects_with_members),
         ("companion_objects", companion_objects),

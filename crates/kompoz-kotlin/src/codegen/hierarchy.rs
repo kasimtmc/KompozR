@@ -29,6 +29,9 @@ use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
 use std::collections::HashMap;
 
+/// The API's interfaces whose traits are `Debug` themselves (a supertrait): a user's trait below one is.
+const API_DEBUG_TRAITS: &[&str] = &["NavKey", "Scene", "OverlayScene", "NavigationEventInfo", "RequestExtrasKey"];
+
 /// How a case of a generic sealed class (`data class Success<out T>(val data: T) : Outcome<T>()`, `object Loading :
 /// Outcome<Nothing>()`) takes the class's type arguments.
 #[derive(Clone, Debug)]
@@ -223,11 +226,14 @@ impl Gen<'_, '_> {
         let mut out = Vec::new();
         for s in written_supers(&d.ast) {
             let Some(name) = s.ty.simple_name() else { continue };
-            // (inside the class it is nested in, a sibling by its own name: `Step(2)` of `Wizard.Step`)
-            let kind = self.super_kind(&name).or_else(|| {
+            // (inside the class it is nested in, a sibling by its own name: `Step(2)` of `Wizard.Step` — first, as
+            // Kotlin's innermost name: `Home` of `NavBackStackSerializerSamples.Home` beside another object's `Home`)
+            let nested = || {
                 let outer = d.outer.as_ref().and_then(|o| self.user_class_rust(o))?;
                 self.super_kind(&format!("{}.{name}", outer.kotlin))
-            });
+                    .filter(|k| matches!(k, SuperKind::Interface(_) | SuperKind::Class(_)))
+            };
+            let kind = nested().or_else(|| self.super_kind(&name));
             if let Some(kind) = kind {
                 out.push(SuperRef { kind, ty: s.ty.clone(), args: s.constructor_args.clone(), loc: s.loc });
             }
@@ -557,6 +563,23 @@ impl Gen<'_, '_> {
         let g = if inner.is_empty() { quote!() } else { quote_spanned!(span=> <#(#inner),*>) };
         let root = self.root_path(d, None, span);
         let allow = super::class::class_allow(span);
+        // ((stage 14 WPD) below an API trait that is `Debug` itself (`open class Home : NavKey`): Rust's already)
+        let debug = if self
+            .ancestors(d)
+            .iter()
+            .any(|a| matches!(&a.kind, SuperKind::Api(t) if API_DEBUG_TRAITS.contains(&t.as_str())))
+        {
+            quote!()
+        } else {
+            quote_spanned! {span=>
+                #allow
+                impl #g ::core::fmt::Debug for dyn #name #g_use {
+                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        f.write_str(&#kt::KtToString::kt_to_string(self))
+                    }
+                }
+            }
+        };
         quote_spanned! {span=>
             #allow
             impl #g ::core::cmp::PartialEq for dyn #name #g_use {
@@ -576,12 +599,7 @@ impl Gen<'_, '_> {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
-            #allow
-            impl #g ::core::fmt::Debug for dyn #name #g_use {
-                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    f.write_str(&#kt::KtToString::kt_to_string(self))
-                }
-            }
+            #debug
             #allow
             impl<#(#inner,)* __KzT: ::core::any::Any + ::core::clone::Clone> #kt::KtAs<__KzT> for dyn #name #g_use {
                 fn kt_as_safe(&self) -> ::core::option::Option<__KzT> {
@@ -1331,20 +1349,80 @@ impl Gen<'_, '_> {
     fn api_overrides(&mut self, d: &ClassDecl, t: &str, place: Place, own: &[Member], span: Span) -> Vec<TokenStream> {
         let mut out = Vec::new();
         let name = ident(&d.info.rust, span);
+        // ((stage 14 WPD) an overriding property — `override val distanceFraction get() = …`, a constructor's
+        // `override val message: String` —: the trait's method its getter; a nullable one Kotlin narrows, `override
+        // val actionLabel: String` of a `String?`, the getter's value in `Some`)
+        let ctor_props: Vec<(&Ident, Option<&Type>)> = match &d.ast {
+            ClassAst::Class(k) => k
+                .primary_constructor
+                .iter()
+                .flat_map(|p| &p.params)
+                .filter(|cp| cp.property.is_some() && is_override(&cp.param.modifiers))
+                .map(|cp| (&cp.param.name, cp.param.ty.as_ref()))
+                .collect(),
+            ClassAst::Object(_) => Vec::new(),
+        };
+        let body_props = own.iter().filter_map(|m| match m {
+            Member::Decl(Decl::Property(p)) if is_override(&p.modifiers) => match &p.binding {
+                Binding::Name(n) => Some((n, p.ty.as_ref())),
+                Binding::Destructure(_) => None,
+            },
+            _ => None,
+        });
+        for (n, ty) in ctor_props.into_iter().chain(body_props) {
+            let Some(item) = index::lookup(&n.name)
+                .iter()
+                .find(|i| i.via == t && i.kind == index::Kind::Method && i.params.is_empty())
+            else {
+                continue;
+            };
+            let g = ident(&snake(&n.name), span);
+            let recv = if place == Place::Enum { quote_spanned!(span=> *self) } else { quote_spanned!(span=> self) };
+            let mut v = quote_spanned!(span=> #name::#g(#recv));
+            if item.ret.trim_start().starts_with("Option<") && ty.is_some_and(|t| !t.nullable) {
+                v = quote_spanned!(span=> ::core::option::Option::Some(#v));
+            }
+            out.push(api_method(item, v, span));
+        }
         for m in own {
             let Member::Decl(Decl::Function(f)) = m else { continue };
             if !is_override(&f.modifiers) {
                 continue;
             }
+            // ((stage 14 WPD) a member extension's receiver the trait method's first parameter:
+            // `SceneStrategyScope<T>.calculateScene(entries)`, `calculate_scene(&self, scope, entries)`)
+            let ext = usize::from(f.receiver.is_some());
             let Some(item) = index::lookup(&f.name.name)
                 .iter()
-                .find(|i| i.via == t && i.kind == index::Kind::Method && i.params.len() == f.params.len())
+                .find(|i| i.via == t && i.kind == index::Kind::Method && i.params.len() == f.params.len() + ext)
             else {
                 continue;
             };
             let m = ident(&snake(&f.name.name), span);
             let recv = if place == Place::Enum { quote_spanned!(span=> *self) } else { quote_spanned!(span=> self) };
-            let names: Vec<proc_macro2::Ident> = f.params.iter().map(|p| ident(&snake(&p.name.name), span)).collect();
+            let names: Vec<proc_macro2::Ident> = item.params[..ext]
+                .iter()
+                .map(|p| ident(p.rust, span))
+                .chain(f.params.iter().map(|p| ident(&snake(&p.name.name), span)))
+                .collect();
+            // ((stage 14 WPD) a suspending one the API's trait boxes, `LocalFuture<'static, T>`: the class's async
+            // function run on a clone of the object, Kotlin's reference to it)
+            if f.is_suspend() && item.ret.trim_start().starts_with("LocalFuture") {
+                let (this, obj) = if place == Place::Enum {
+                    (quote_spanned!(span=> *self), quote_spanned!(span=> __kz_obj))
+                } else {
+                    (quote_spanned!(span=> ::core::clone::Clone::clone(self)), quote_spanned!(span=> &__kz_obj))
+                };
+                out.push(api_method(
+                    item,
+                    quote_spanned!(span=> {
+                        let __kz_obj = #this;
+                        ::std::boxed::Box::pin(async move { #name::#m(#obj, #(#names),*).await })
+                    }),
+                    span,
+                ));
+                continue;
+            }
             out.push(api_method(item, quote_spanned!(span=> #name::#m(#recv, #(#names),*)), span));
         }
         out
@@ -2090,6 +2168,19 @@ impl Gen<'_, '_> {
         let mut traits: Vec<Ancestor> = vec![Ancestor { kind: SuperKind::Class(info.rust.clone()), args: own_args }];
         traits.extend(self.ancestors(d));
         for a in &traits {
+            // ((stage 14 WPD) an API marker interface, one of no members (`sealed class SealedKey : NavKey`): the
+            // enum's too)
+            if let SuperKind::Api(t) = &a.kind
+                && tps.is_empty()
+                && !index::ITEMS.iter().any(|i| i.via == t.as_str() && i.kind == index::Kind::Method)
+            {
+                let tr = self.ancestor_trait(a, false, span);
+                delegations.extend(quote_spanned! {span=>
+                    #allow
+                    impl #tr for #name {}
+                });
+                continue;
+            }
             let Some(ad) = self.ancestor_decl(a) else { continue };
             let tr = self.ancestor_trait(a, false, span);
             let trp = self.ancestor_trait(a, true, span);
@@ -2588,6 +2679,16 @@ impl Gen<'_, '_> {
         if dynamic && !ty.is_nullable() { quote_spanned!(span=> (*#ts)) } else { ts }
     }
 
+    /// Whether a cast takes an API interface's shared object (`Rc<dyn SnackbarVisuals>`) to a user's class (one not
+    /// held as a trait object): the trait object's crate casts it (`KtAs` for `dyn SnackbarVisuals`).
+    pub(crate) fn api_dyn_to_class(&self, from: &Ty, target: &Type) -> bool {
+        let Ty::Named(n, a) = from else { return false };
+        let api = n == "Rc"
+            && matches!(a.as_slice(), [Ty::Named(t, _)] if !self.user_dyn_trait(t) && t != "KtObject"
+                && super::resolve::trait_object(t) == Some("Rc"));
+        api && target.simple_name().and_then(|c| self.user_class(&c).map(|c| !c.is_dyn())).unwrap_or(false)
+    }
+
     /// Whether a Rust type name is a user's trait whose values are shared trait objects.
     fn user_dyn_trait(&self, name: &str) -> bool {
         self.classes.classes.values().any(|c| c.is_dyn() && c.value_rust() == name)
@@ -2830,6 +2931,36 @@ impl Gen<'_, '_> {
         } else {
             v
         }
+    }
+
+    /// ((stage 14 WPD) The API interface values of several of the user's classes share — `NavBackStack(Home("abc"),
+    /// Details(42))`, Kotlin's `T` their common supertype `NavKey` —: its trait's name, when the values are of two
+    /// classes or more.)
+    pub(crate) fn common_api_interface(&self, tys: &[Ty]) -> Option<String> {
+        let names: Vec<&str> = tys
+            .iter()
+            .map(|t| match t {
+                Ty::Named(n, _) => Some(n.as_str()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        if names.iter().all(|n| *n == names[0]) {
+            return None;
+        }
+        let apis = |n: &str| -> Option<Vec<String>> {
+            let d = self.decl_of(n)?;
+            Some(
+                self.ancestors(&d)
+                    .into_iter()
+                    .filter_map(|a| match a.kind {
+                        SuperKind::Api(t) => Some(t),
+                        _ => None,
+                    })
+                    .collect(),
+            )
+        };
+        let first = apis(names[0])?;
+        first.into_iter().find(|t| names[1..].iter().all(|n| apis(n).is_some_and(|ts| ts.contains(t))))
     }
 
     /// The type a collection's elements of several user's types share: the sealed class they are cases of.

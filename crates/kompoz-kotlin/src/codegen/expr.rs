@@ -184,6 +184,10 @@ impl Gen<'_, '_> {
         let kind = out.kind;
         let ts = match kind {
             OutKind::Local => quote_spanned!(span=> #ts.clone()),
+            // (a drawing object lent mutably isn't `Clone`: Kotlin's reference to it is the `&mut` reborrowed)
+            OutKind::RefMut if matches!(&out.ty, Ty::Named(n, _) if super::types::lent_mut_type(n)) => {
+                quote_spanned!(span=> (&mut *#ts))
+            }
             OutKind::RefMut => quote_spanned!(span=> (*#ts).clone()),
             OutKind::StrLit if !want.str_ok || want.any.is_some() => {
                 quote_spanned!(span=> ::std::string::String::from(#ts))
@@ -329,6 +333,21 @@ impl Gen<'_, '_> {
                         o.ty = p;
                     }
                 }
+                // ((stage 14 WPD) a factory's `create(T::class, …)` (Kotlin's `<T : ViewModel> create(modelClass:
+                // Class<T>, …): T`): the ViewModel the app's class `T`)
+                if matches!(&o.ty, Ty::Named(rc, a) if rc == "Rc" && matches!(a.as_slice(), [Ty::Named(v, _)] if v == "ViewModel"))
+                    && matches!(&callee.kind, ExprKind::Member { .. })
+                    && let Some(first) = args.iter().find(|a| a.name.is_none())
+                    && let Some(class) = class_literal(&first.value)
+                    && let Some(c) = self.user_class(&class.name)
+                {
+                    let span = self.span(e.loc);
+                    let kt = self.kt(span);
+                    let rust = c.rust.clone();
+                    let t = ident(&rust, span);
+                    let v = o.ts;
+                    o = Out::plain(quote_spanned!(span=> #kt::KtAs::<#t>::kt_as(&*#v)), Ty::named(&rust));
+                }
                 o
             }
             ExprKind::Member { receiver, safe, name } => self.member(receiver, *safe, name, e.loc),
@@ -365,7 +384,7 @@ impl Gen<'_, '_> {
             }
             ExprKind::AnonymousFunction(f) => self.anonymous_function(f),
             ExprKind::Object { supers, body } => {
-                let ty = self.object_expr_ty(supers);
+                let ty = self.object_expr_ty(supers, e.loc);
                 Out::plain(self.object_expr(supers, body, e.loc), ty)
             }
             ExprKind::Prefix { op, operand } => self.prefix(*op, operand, e.loc),
@@ -490,7 +509,36 @@ impl Gen<'_, '_> {
             };
         }
         let o = self.expr(inner);
+        let target_ty = Type { nullable: false, ..ty.clone() };
+        // ((stage 14 WPD) an API trait object cast to another API trait its objects may implement, which the first's
+        // `as_<other>` tells — `owner as? HasDefaultViewModelProviderFactory` of a `ViewModelStoreOwner?`)
+        if let Some(tn) = target_ty.simple_name()
+            && self.user_class(&tn).is_none()
+            && let Some(from) = o.ty.non_null().owner().map(str::to_string)
+            && let Some(item) = members_of(&from, &format!("as{tn}"))
+                .find(|i| i.kind == Kind::Method && i.params.is_empty() && i.ret.starts_with("Option<"))
+        {
+            let m = ident(item.rust, span);
+            let v = self.fresh("o", span);
+            let r = o.ts;
+            let ts = if o.ty.is_nullable() {
+                quote_spanned!(span=> ::core::option::Option::and_then(::core::option::Option::as_ref(&#r),
+                    |#v| #v.#m()))
+            } else {
+                quote_spanned!(span=> #r.#m())
+            };
+            let base = Ty::named(&tn);
+            return if safe || ty.nullable {
+                Out::plain(ts, base.nullable())
+            } else {
+                Out::plain(quote_spanned!(span=> #kt::not_null(#ts)), base)
+            };
+        }
         let operand = self.cast_operand_of(o.ts, &o.ty, span);
+        // ((stage 14 WPD) an API interface's shared object cast to the user's class implementing it — `data.visuals
+        // as? MyVisuals` —: the trait object it holds, which its crate casts)
+        let operand =
+            if self.api_dyn_to_class(&o.ty, &target_ty) { quote_spanned!(span=> (*#operand)) } else { operand };
         let (base, target) = self.cast_target(ty, &o.ty, span);
         // ((stage 14 WPB) a nullable shared object, `Any?` (`equals(other: Any?)`'s): what it holds, if it holds one)
         if o.ty.is_nullable() && self.cast_operand_of(quote!(x), &o.ty.non_null(), span).to_string() != "x" {
@@ -953,6 +1001,14 @@ impl Gen<'_, '_> {
         if ty == Ty::OtherInt {
             return Out::plain(quote_spanned!(span=> (#r.#m() as i32)), Ty::Int);
         }
+        // ((stage 14 WPD) a property Rust lends of a generic holder's values (`key: &T`, `backStack: &[K]`): Kotlin's
+        // value of it, owned)
+        if let Some(item) = found
+            && let Some(lent) = item.ret.trim().strip_prefix('&')
+            && super::call::is_type_parameter(lent.trim_start_matches('[').trim_end_matches(']').trim())
+        {
+            return Out::plain(quote_spanned!(span=> ::std::borrow::ToOwned::to_owned(#r.#m())), ty);
+        }
         Out::plain(quote_spanned!(span=> #r.#m()), ty)
     }
 
@@ -981,6 +1037,14 @@ impl Gen<'_, '_> {
         }
         if let Some((ts, ty)) = number_constant(q, &name.name, span) {
             return Out::plain(ts, ty);
+        }
+        // ((stage 14 WPD) another value of a number type's companion: its Rust type's associated one —
+        // `Float.VectorConverter` → `f32::VectorConverter`)
+        if let Some(t) = number_type(q, span)
+            && is_pascal(&name.name)
+        {
+            let mi = self.name_ident(&name.name, name.loc);
+            return Out::plain(quote_spanned!(span=> #t::#mi), Ty::Unknown);
         }
         let qi = self.name_ident(q, qe.loc);
         let qi = quote_spanned!(qspan=> #qi);
@@ -1079,9 +1143,13 @@ impl Gen<'_, '_> {
         let span = self.span(loc);
         let kt = self.kt(span);
         // (Kotlin's `operator fun get` of an API type taking a key: its `get` — `state[key]` of a StyleState)
-        if keyed_operator(&self.peek_ty(receiver), "get") {
+        let recv_ty = self.peek_ty(receiver);
+        if keyed_operator(&recv_ty, "get") {
             let values: Vec<&Expr> = indices.iter().collect();
-            return self.operator_call(receiver, "get", &values, loc);
+            let out = self.operator_call(receiver, "get", &values, loc);
+            // ((stage 14 WPD) its type bound by the key's: `extras[DEFAULT_ARGS_KEY]` a `SavedState?`)
+            let bound = self.keyed_get_ty(&recv_ty, indices);
+            return if out.ty.is_vague() && !bound.is_vague() { Out { ty: bound, ..out } } else { out };
         }
         let recv = self.expr(receiver);
         let r = recv.ts;
@@ -1425,6 +1493,32 @@ impl Gen<'_, '_> {
                 ty,
             );
         }
+        // ((stage 14 WPD) values of two of the user's classes sharing an API interface — `matcher.match(request)?.key
+        // ?: HomeKey`, Kotlin's type their common supertype `NavKey` —: each made its shared trait object)
+        if let (Ty::Named(x, _), Ty::Named(y, _)) = (&ty, self.peek_ty(rhs))
+            && let Some(t) = self.common_api_interface(&[ty.clone(), Ty::named(&y)])
+        {
+            let (xi, ti) = (ident(x, span), ident(&t, span));
+            let ptr = match trait_object(&t) {
+                Some("Arc") => quote_spanned!(span=> ::std::sync::Arc),
+                _ => quote_spanned!(span=> ::std::rc::Rc),
+            };
+            let b = self.value(rhs);
+            let v = self.fresh("v", span);
+            let shared =
+                Ty::Named(if trait_object(&t) == Some("Arc") { "Arc" } else { "Rc" }.into(), vec![Ty::named(&t)]);
+            return Out::plain(
+                quote_spanned! {span=>
+                    match #a {
+                        ::core::option::Option::Some(#v) => #ptr::new(::core::clone::Clone::clone(
+                            ::core::borrow::Borrow::<#xi>::borrow(&#v),
+                        )) as #ptr<dyn #ti>,
+                        ::core::option::Option::None => #ptr::new(#b) as #ptr<dyn #ti>,
+                    }
+                },
+                shared,
+            );
+        }
         let awaits = self.awaits;
         let b = self.value(rhs);
         // (`b` suspends: Kotlin's `?:` is no function, it suspends with the coroutine)
@@ -1540,6 +1634,15 @@ impl Gen<'_, '_> {
             && c.shape == super::class::Shape::Object
         {
             return Ty::named(&c.rust);
+        }
+        // ((stage 14 WPD) a `@Serializable` class's companion `serializer()`: its `Saver`)
+        if let ExprKind::Call { callee, args, trailing_lambda: None, .. } = &e.kind
+            && args.is_empty()
+            && let ExprKind::Member { receiver, safe: false, name } = &callee.kind
+            && name.name == "serializer"
+            && let Some(c) = self.user_type_expr(receiver)
+        {
+            return Ty::Named("Saver".into(), vec![Ty::named(&c.rust)]);
         }
         match &e.kind {
             ExprKind::Number(n) => match n.kind {
@@ -1745,19 +1848,30 @@ impl Gen<'_, '_> {
             ExprKind::Call { callee, type_args, args, trailing_lambda } => {
                 self.peek_call(callee, type_args, args, trailing_lambda.as_deref())
             }
-            ExprKind::Index { receiver, .. } => match self.peek_ty(receiver) {
+            ExprKind::Index { receiver, indices } => match self.peek_ty(receiver) {
                 Ty::Map(_, v) => v.nullable(),
                 // ((stage 14 WPB) a user's `operator fun get`)
                 t if self.has_operator(&t, "get") => self.operator_ret(&t, "get").unwrap_or(Ty::Unknown),
+                // ((stage 14 WPD) an API type's keyed `get`, its result bound by the key's type — `extras[KEY]` of
+                // CreationExtras, a `CreationExtrasKey<SavedState>`'s `SavedState?`)
+                t if keyed_operator(&t, "get") => self.keyed_get_ty(&t, indices),
                 t => t.element(),
             },
-            ExprKind::Object { supers, .. } => self.object_expr_ty(supers),
+            ExprKind::Object { supers, .. } => self.object_expr_ty(supers, e.loc),
             _ => Ty::Unknown,
         }
     }
 
     /// The type of a block's value (its last expression), the locals it declares before it known as far as their
     /// values tell (`remember { val a = Animatable(0f); a }`).
+    /// What an API type's keyed `get` (`recv[indices]`) gives, its type parameters bound by the keys' types.
+    fn keyed_get_ty(&self, recv: &Ty, indices: &[Expr]) -> Ty {
+        let Some(item) = self.method_of(recv, "get") else { return Ty::Unknown };
+        let args: Vec<Arg> =
+            indices.iter().map(|i| Arg { name: None, spread: false, value: i.clone(), loc: i.loc }).collect();
+        self.method_ret(recv, item, &args, None)
+    }
+
     /// The type a collection's elements have together (`listOf(null, x)`'s `X?`): see [`super::call::merge_elements`].
     pub(crate) fn elements_ty<'e>(&self, elements: impl Iterator<Item = &'e Expr>) -> Ty {
         elements.fold(Ty::Unknown, |t, e| {
@@ -1989,9 +2103,48 @@ impl Gen<'_, '_> {
                 if gives != Ty::Unit {
                     bind_type_params(info.output, &gives, &mut binds);
                 }
+                // ((stage 14 WPD) a flow builder's `T`, its collector's: what its lambda emits — `flow { emit(n) }`)
+                if info.receiver == "FlowCollector"
+                    && let [input] = info.inputs
+                {
+                    let emitted = self.emitted_ty(l);
+                    if emitted != Ty::Unknown {
+                        bind_type_params(input, &Ty::Named("FlowCollector".into(), vec![emitted]), &mut binds);
+                    }
+                }
             }
         }
         Ty::from_rust_bound(item.ret, &binds)
+    }
+
+    /// The type of what a flow builder's lambda emits (`emit(x)` in it, its locals known to inference), if told.
+    fn emitted_ty(&self, lambda: &Lambda) -> Ty {
+        let mut emitted = Vec::new();
+        super::generics::walk_block(&lambda.body, &mut |e| {
+            if let ExprKind::Call { callee, args, trailing_lambda: None, .. } = &e.kind
+                && matches!(&callee.kind, ExprKind::Name(n) if n.name == "emit")
+                && let [a] = args.as_slice()
+            {
+                emitted.push(a.value.clone());
+            }
+        });
+        let mut scope = std::collections::HashMap::new();
+        for s in &lambda.body.stmts {
+            if let StmtKind::Decl(Decl::Property(p)) = &s.kind
+                && let Binding::Name(n) = &p.binding
+            {
+                let ty = match (&p.ty, &p.init) {
+                    (Some(t), _) => self.ty_of(t),
+                    (None, PropertyInit::Value(v)) => self.peek_ty(v),
+                    _ => Ty::Unknown,
+                };
+                scope.insert(n.name.clone(), ty);
+            }
+        }
+        self.peek_scopes.borrow_mut().push(scope);
+        let t = emitted.iter().map(|e| self.peek_ty(e)).find(|t| *t != Ty::Unknown).unwrap_or(Ty::Unknown);
+        self.peek_scopes.borrow_mut().pop();
+        t
     }
 
     /// The method `name` a value of type `recv` has, as the index tells: its type's own (or its extension traits',
@@ -2066,13 +2219,14 @@ impl Gen<'_, '_> {
     fn peek_call(&self, callee: &Expr, type_args: &[TypeArg], args: &[Arg], trailing: Option<&Lambda>) -> Ty {
         // (a user's object's or companion's member function; a nested class's constructor, `Catalog.Entry(…)`)
         if let ExprKind::Member { receiver, safe: false, name } = &callee.kind {
-            if let Some(rust) = self.user_object_ty(receiver, &name.name) {
-                return self.member_ty(&Ty::named(&rust), &name.name, true);
-            }
+            // (the nested class first: an object's `NavBackStackSerializerSamples.Home("abc")`)
             if let Some(c) = self.user_type_expr(callee)
                 && matches!(c.shape, super::class::Shape::Data | super::class::Shape::Plain)
             {
                 return Ty::named(&c.rust);
+            }
+            if let Some(rust) = self.user_object_ty(receiver, &name.name) {
+                return self.member_ty(&Ty::named(&rust), &name.name, true);
             }
         }
         match &callee.kind {
@@ -2082,6 +2236,16 @@ impl Gen<'_, '_> {
                         Ty::Fun(f) => f.ret.clone(),
                         _ => Ty::Unknown,
                     };
+                }
+                let class_ctor = self.class_beside_fn(&n.name) && {
+                    let named: Vec<&str> =
+                        args.iter().filter_map(|a| a.name.as_ref().map(|x| x.name.as_str())).collect();
+                    let positional: Vec<Option<&Expr>> =
+                        args.iter().filter(|a| a.name.is_none()).map(|a| (!a.spread).then_some(&a.value)).collect();
+                    !self.fits_file_fn(&n.name, &named, &positional, args.len() + usize::from(trailing.is_some()))
+                };
+                if class_ctor && let Some(c) = self.user_class(&n.name) {
+                    return Ty::named(&c.rust);
                 }
                 if self.file.function(&n.name).is_some() {
                     // ((stage 14 WPB) the overload the arguments are for)
@@ -2123,7 +2287,13 @@ impl Gen<'_, '_> {
                 // (a type's constructor: its result, generic or not — `StyleStateKey(false)` a
                 // `StyleStateKey<Boolean>`; before a function of that name the arguments are too few for — `Path()`,
                 // not the vector `Path(pathData, …)`)
-                let constructor = || constructor_overloads(&n.name).find(|i| i.params.len() == n_args && named(i));
+                // ((stage 14 WPD) or one of defaults left out: `UriDeepLinkMatcher(uriPattern, serializer)`)
+                let constructor = || {
+                    constructor_overloads(&n.name).find(|i| i.params.len() == n_args && named(i)).or_else(|| {
+                        constructor_overloads(&n.name)
+                            .find(|i| i.params.len() > n_args && i.required() <= n_args && named(i))
+                    })
+                };
                 free_functions(&n.name)
                     .find(|i| i.params.len() >= n_args && i.required() <= n_args && named(i))
                     .or_else(constructor)
@@ -2179,6 +2349,15 @@ impl Gen<'_, '_> {
                     if bound != Ty::Unknown && (t == Ty::Unknown || !bound.is_vague()) {
                         t = bound;
                     }
+                }
+                // ((stage 14 WPD) a method giving its type parameter, written: `entry.toRoute<NestedWithArg>()`)
+                if (t == Ty::Unknown || t.is_vague())
+                    && let [TypeArg::Type { ty, .. }] = type_args
+                    && let Some(item) = self.method_of(&r, &name.name)
+                    && item.ret.len() == 1
+                    && item.ret.starts_with(|c: char| c.is_ascii_uppercase())
+                {
+                    t = self.ty_of(ty);
                 }
                 if t == Ty::Unknown {
                     // (a member extension of a receiver: `placeable.place(…)`'s, `x.animateEnterExit()`)
@@ -2491,6 +2670,17 @@ fn recv_has_no_member(name: &str) -> bool {
     !matches!(name, "size" | "first" | "last" | "isEmpty" | "value" | "keys" | "values" | "length")
 }
 
+/// The Rust type of a Kotlin number type named as a value's qualifier (`Float` → `f32`).
+fn number_type(q: &str, span: Span) -> Option<TokenStream> {
+    Some(match q {
+        "Int" => quote_spanned!(span=> i32),
+        "Long" => quote_spanned!(span=> i64),
+        "Float" => quote_spanned!(span=> f32),
+        "Double" => quote_spanned!(span=> f64),
+        _ => return None,
+    })
+}
+
 /// Kotlin's number types' constants (`Int.MAX_VALUE` → `i32::MAX`).
 fn number_constant(q: &str, name: &str, span: Span) -> Option<(TokenStream, Ty)> {
     let (t, ty) = match q {
@@ -2577,4 +2767,16 @@ pub(crate) fn keyed_operator(ty: &Ty, name: &str) -> bool {
 /// Whether `name` is one of kotlin.math's constants (`PI`, `E`): a value, not a type to qualify a member with.
 fn is_kt_constant(name: &str) -> bool {
     lookup(name).iter().any(|i| i.kind == Kind::Value && i.krate == "kompoz_runtime" && i.module.starts_with("kt"))
+}
+
+/// The class a class literal names: `X::class`, `X::class.java`.
+fn class_literal(e: &Expr) -> Option<&Ident> {
+    match &e.kind {
+        ExprKind::CallableRef { receiver: Some(r), name } if name.name == "class" => match &r.kind {
+            ExprKind::Name(n) => Some(n),
+            _ => None,
+        },
+        ExprKind::Member { receiver, safe: false, name } if name.name == "java" => class_literal(receiver),
+        _ => None,
+    }
 }

@@ -75,7 +75,11 @@ impl<T: 'static> UriDeepLinkMatcher<T> {
     /// A matcher of `uri_pattern`, its keys made by `serializer` (Kotlin's `KSerializer<T>`: a [`Saver`],
     /// `kompoz_runtime::serializer::<T>()` for a `Saveable` `T`), requests filtered by `filters`.
     /// Kotlin: `UriDeepLinkMatcher(uriPattern: DeepLinkUri, serializer: KSerializer<T>, filters: List<Filter> = emptyList())`
-    pub fn new(uri_pattern: DeepLinkUri, serializer: Saver<T>, filters: Vec<Rc<dyn DeepLinkFilter>>) -> Self {
+    pub fn new(
+        uri_pattern: DeepLinkUri,
+        serializer: Saver<T>,
+        filters: Vec<Rc<dyn DeepLinkFilter>>,
+    ) -> UriDeepLinkMatcher<T> {
         // (RFC 2396/3986: a URI without a scheme or "//" has no authority, which puts the path segments off by one
         // against requests with them: it is given its "//")
         let text = uri_pattern.to_string();
@@ -152,6 +156,22 @@ impl<T: 'static> UriDeepLinkMatcher<T> {
         let is_exact_path =
             path_args.is_empty() && !self.normalized_uri_pattern.get_path_segments().iter().any(|s| s == ".*");
         Some(UriMatchResult::with_path(key, arguments, is_exact_path, path_args.size()))
+    }
+}
+
+/// [`DeepLinkMatcher`]'s methods of its type (what the Kotlin syntax reads its results' types by).
+impl<T: 'static> UriDeepLinkMatcher<T> {
+    /// Kotlin: `match(request: DeepLinkRequest): UriMatchResult<T>?`
+    pub fn r#match(&self, request: &DeepLinkRequest) -> Option<UriMatchResult<T>> {
+        DeepLinkMatcher::r#match(self, request)
+    }
+
+    /// Kotlin: `withBackStack(backStackBuilder: (matchResult: MatchResult<T>) -> List<K>): BackStackMatcher<T, K>`
+    pub fn with_back_stack<K: 'static>(
+        self,
+        back_stack_builder: impl Fn(&dyn MatchResultOf<T>) -> Vec<K> + 'static,
+    ) -> super::BackStackMatcher<UriDeepLinkMatcher<T>, K> {
+        DeepLinkMatcher::with_back_stack(self, back_stack_builder)
     }
 }
 

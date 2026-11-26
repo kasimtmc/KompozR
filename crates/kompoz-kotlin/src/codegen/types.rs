@@ -3,7 +3,7 @@
 //! type ([`Ty`]).
 
 use super::resolve::{FunTy, LInfo, Ty};
-use super::{Gen, last_segment};
+use super::{Gen, last_segment, respan};
 use crate::ast::*;
 use crate::index::LambdaKind;
 use proc_macro2::{Span, TokenStream};
@@ -33,6 +33,18 @@ const IMPLICIT_SCOPES: &[&str] = &[
     "FlowColumnScope",
     "BoxWithConstraintsScope",
 ];
+
+/// The UI's drawing objects Kotlin holds by reference and Rust lends mutably (`&mut DrawScope<'_>`: not `Clone`, a
+/// borrow of what is drawn into): a parameter or an extension's receiver of one of them is a `&mut` held, given on
+/// reborrowed (`with(scope)`, `scope.ring()`, `paint(scope)`), as a receiver lambda's `this` of theirs is. (The name,
+/// whether it has a lifetime.)
+const LENT_MUT_TYPES: &[(&str, bool)] =
+    &[("DrawScope", true), ("ContentDrawScope", true), ("Canvas", true), ("DrawTransform", false)];
+
+/// Whether `name` is one of [`LENT_MUT_TYPES`].
+pub(crate) fn lent_mut_type(name: &str) -> bool {
+    LENT_MUT_TYPES.iter().any(|(n, _)| *n == name)
+}
 
 /// What `impl Into<T>` converts to (`T`), for a parameter's conversion in a body.
 pub(crate) fn into_target(rust: &TokenStream) -> Option<TokenStream> {
@@ -142,7 +154,9 @@ impl Gen<'_, '_> {
                 inputs.push(quote_spanned!(span=> &mut #rt));
             }
             for p in &f.params {
-                inputs.push(self.rust_type(&p.ty, TypePos::Value));
+                let i = self.rust_type(&p.ty, TypePos::Value);
+                // (a drawing object, lent mutably: `(DrawScope) -> Unit` takes a `&mut DrawScope<'_>`)
+                inputs.push(if self.lent_mut(&p.ty) { quote_spanned!(span=> &mut #i) } else { i });
             }
             let unit = self.ty_of(&f.result) == Ty::Unit;
             // ((stage 14 WPB) `suspend (A) -> R`: a function giving a future — a parameter's `impl AsyncFn(A) -> R`,
@@ -184,11 +198,29 @@ impl Gen<'_, '_> {
             TypeKind::Error => quote_spanned!(span=> _),
         };
         let is_string = self.ty_of(t) == Ty::String;
+        // (a drawing object's parameter: a `&mut` of it, lent by the caller)
+        if !t.nullable && matches!(pos, TypePos::Param | TypePos::DefaultedParam) && self.lent_mut(t) {
+            return quote_spanned!(span=> &mut #base);
+        }
         match (t.nullable, pos) {
             (true, TypePos::Param) => quote_spanned!(span=> impl ::core::convert::Into<::core::option::Option<#base>>),
             (true, _) => quote_spanned!(span=> ::core::option::Option<#base>),
             (false, TypePos::Param) if is_string => quote_spanned!(span=> impl ::core::convert::Into<#base>),
             _ => base,
+        }
+    }
+
+    /// Whether `t` is one of the drawing objects Rust lends mutably ([`LENT_MUT_TYPES`]), not a user's class of
+    /// that name.
+    pub(crate) fn lent_mut(&self, t: &Type) -> bool {
+        match &t.kind {
+            TypeKind::Named(segs) => {
+                segs.len() == 1
+                    && segs[0].args.is_empty()
+                    && lent_mut_type(&segs[0].name.name)
+                    && self.user_class(&segs[0].name.name).is_none()
+            }
+            _ => false,
         }
     }
 
@@ -198,9 +230,21 @@ impl Gen<'_, '_> {
             // (a nested type Rust names otherwise, by its doc line: `Arrangement.Vertical` → `VerticalArrangement`)
             let kotlin = segs.iter().map(|s| s.name.name.as_str()).collect::<Vec<_>>().join(".");
             if let Some(rust) = crate::index::rust_type(&kotlin)
-                && segs.iter().all(|s| s.args.is_empty())
+                && segs[..segs.len() - 1].iter().all(|s| s.args.is_empty())
             {
                 let i = proc_macro2::Ident::new(rust, span);
+                // ((stage 14 WPD) its arguments the last segment's: `DeepLinkMatcher.MatchResult<ImageKey>`)
+                let last = &segs[segs.len() - 1];
+                if !last.args.is_empty() {
+                    let mut args = Vec::new();
+                    for a in &last.args {
+                        match a {
+                            TypeArg::Type { ty, .. } => args.push(self.rust_type(ty, TypePos::Value)),
+                            TypeArg::Star(l) => args.push(self.star_projection(*l)),
+                        }
+                    }
+                    return quote_spanned!(span=> #i<#(#args),*>);
+                }
                 // ((WPA-rest) an API interface's: its shared trait object, `ViewModelProvider.Factory`)
                 if self.user_class(rust).is_none() {
                     match super::resolve::trait_object(rust) {
@@ -248,6 +292,17 @@ impl Gen<'_, '_> {
         let a = |k: usize| args.get(k).cloned().unwrap_or_else(|| quote_spanned!(span=> _));
         let kt = self.kt(span);
         let name = last.name.name.as_str();
+        // (the UI's drawing objects, by their paths: the prelude has their module, not their names; a user's class of
+        // one of their names is its own)
+        if let Some((_, lifetime)) = LENT_MUT_TYPES.iter().find(|(n, _)| *n == name)
+            && args.is_empty()
+            && self.user_class(name).is_none()
+        {
+            let ui = respan(self.cx.paths.ui.clone(), span);
+            let i = self.name_ident(name, last.name.loc);
+            let lt = if *lifetime { quote_spanned!(span=> <'_>) } else { quote!() };
+            return quote_spanned!(span=> #ui::draw::#i #lt);
+        }
         match name {
             "Int" => quote_spanned!(span=> i32),
             "Long" => quote_spanned!(span=> i64),

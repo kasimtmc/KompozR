@@ -151,10 +151,7 @@ fun PullForms() {
 }
 
 // ---- material3 1.5's PullToRefreshSamples.kt (+ LoadingIndicatorSamples.kt's LoadingIndicatorPullToRefreshSample), as
-// written. PullToRefreshViewModelSample's `object : ViewModel() { … }` and PullToRefreshSampleCustomState's `object :
-// PullToRefreshState` are object expressions, Kotlin's classes, stage 14's: the ViewModel is a Rust twin beside this
-// file (`RefreshViewModel()`, kotlin_lists_sheets.rs), the state's sample is ported in kompoz-material3's
-// tests/swipe_pull.rs.
+// written.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Sampled
@@ -489,11 +486,37 @@ fun LoadingIndicatorPullToRefreshSample() {
     }
 }
 
-// (the sample's `remember { object : ViewModel() { … } }`: its Rust twin, `RefreshViewModel()`)
 @Sampled
 @Composable
 fun PullToRefreshViewModelSample() {
-    val viewModel = remember { RefreshViewModel() }
+    val viewModel = remember {
+        object : ViewModel() {
+            private val refreshRequests = Channel<Unit>(1)
+            var isRefreshing by mutableStateOf(false)
+                private set
+
+            var itemCount by mutableIntStateOf(15)
+                private set
+
+            init {
+                viewModelScope.launch {
+                    for (r in refreshRequests) {
+                        isRefreshing = true
+                        try {
+                            itemCount += 5
+                            delay(5000) // simulate doing real work
+                        } finally {
+                            isRefreshing = false
+                        }
+                    }
+                }
+            }
+
+            fun refresh() {
+                refreshRequests.trySend(Unit)
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -521,6 +544,76 @@ fun PullToRefreshViewModelSample() {
                     items(viewModel.itemCount) {
                         ListItem({ Text(text = "Item ${viewModel.itemCount - it}") })
                     }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Sampled
+@Composable
+@Preview
+fun PullToRefreshSampleCustomState() {
+    var itemCount by remember { mutableIntStateOf(15) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val onRefresh: () -> Unit = {
+        isRefreshing = true
+        coroutineScope.launch {
+            // fetch something
+            delay(5000)
+            itemCount += 5
+            isRefreshing = false
+        }
+    }
+
+    val state = remember {
+        object : PullToRefreshState {
+            private val anim = Animatable(0f, Float.VectorConverter)
+
+            override val distanceFraction
+                get() = anim.value
+
+            override val isAnimating: Boolean
+                get() = anim.isRunning
+
+            override suspend fun animateToThreshold() {
+                anim.animateTo(1f, spring(dampingRatio = Spring.DampingRatioHighBouncy))
+            }
+
+            override suspend fun animateToHidden() {
+                anim.animateTo(0f)
+            }
+
+            override suspend fun snapTo(targetValue: Float) {
+                anim.snapTo(targetValue)
+            }
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("TopAppBar") },
+                // Provide an accessible alternative to trigger refresh.
+                actions = {
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Filled.Refresh, "Trigger Refresh")
+                    }
+                },
+            )
+        }
+    ) {
+        PullToRefreshBox(
+            modifier = Modifier.padding(it),
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            state = state,
+        ) {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (!isRefreshing) {
+                    items(itemCount) { ListItem({ Text(text = "Item ${itemCount - it}") }) }
                 }
             }
         }

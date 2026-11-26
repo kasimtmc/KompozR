@@ -12,39 +12,23 @@ use kompoz::prelude::*;
 use kompoz::test::KompozTestRule;
 use std::rc::Rc;
 
-// ---- Rust twins of the Kotlin route classes (stage 14) --------------------------------------------------------------
-
-/// `@Serializable object Shell`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Shell;
-
-/// `@Serializable object Start`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct Start;
-
-/// `@Serializable object AccountGraph`
-#[derive(Route, Clone, PartialEq, Debug)]
-pub struct AccountGraph;
-
-/// `@Serializable data class Member(val n: Int)`
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct Member {
-    pub n: i32,
-}
-
-/// `@Serializable data class Detail(val id: Int, val tab: String? = null)`
-#[derive(Route, KotlinProperties, Clone, PartialEq, Debug)]
-pub struct Detail {
-    pub id: i32,
-    pub tab: Option<String>,
-}
-
-/// Kotlin's `Detail(id, tab)`.
-pub fn Detail(id: i32, tab: impl Into<Option<String>>) -> Detail {
-    Detail { id, tab: tab.into() }
-}
-
 kompoz! {
+    // The C++ Kompoz's routes (kompozable_tests.cpp's Navigator's and AppShellForms').
+    @Serializable
+    object Shell
+
+    @Serializable
+    object Start
+
+    @Serializable
+    object AccountGraph
+
+    @Serializable
+    data class Member(val n: Int)
+
+    @Serializable
+    data class Detail(val id: Int, val tab: String? = null)
+
     @Kompozable
     fun NavForms(nav: NavController) {
         val destination = nav.currentDestination
@@ -97,12 +81,12 @@ impl Navigator for TestNavigator {
 fn controller() -> NavController {
     let nav = NavController::new();
     nav.navigator_provider().add_navigator(Rc::new(TestNavigator::default()));
-    let graph = nav.create_graph_typed(Shell, None, TypeMap::default(), |g| {
+    let graph = nav.create_graph_typed(Shell {}, None, TypeMap::default(), |g| {
         let test = g.provider().get_navigator("test");
         g.destination(NavDestinationBuilder::new_of::<Shell>(test.clone(), TypeMap::default()));
         g.destination(NavDestinationBuilder::new_of::<Start>(test.clone(), TypeMap::default()));
         g.destination(NavDestinationBuilder::new_of::<Detail>(test.clone(), TypeMap::default()));
-        g.navigation_of::<AccountGraph>(Member { n: 0 }, |account| {
+        g.navigation_of::<AccountGraph>(Member(0), |account| {
             let mut m = NavDestinationBuilder::new_of::<Member>(test.clone(), TypeMap::default());
             m.deep_link_of::<Member>("kompoz://member");
             account.destination(m);

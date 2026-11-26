@@ -171,8 +171,14 @@ pub mod prelude {
     pub use crate::Icons;
     pub use kompoz_material_icons_core::{MaterialPathBuilder, material_icon};
     pub use kompoz_material3::{Icon, Surface, Text};
-    // (WP6: pickers — java.time's dates, as a Kotlin/JVM file imports them for the date pickers' JVM forms)
-    pub use kompoz_runtime::kt::{DayOfWeek, LocalDate, YearMonth};
+    // (WP6: pickers — java.time's dates, as a Kotlin/JVM file imports them for the date pickers' JVM forms; stage 14
+    // WPD: its instants and zones, java.util's Calendar, Date, TimeZone and Locale — `JavaLocale`, Kotlin's `Locale`
+    // where a file imports `java.util.Locale` —, java.text's SimpleDateFormat, as TimePickerSamples import them;
+    // java.util's UUID, as navigation's and lifecycle's samples use it)
+    pub use kompoz_runtime::kt::{
+        Calendar, Date, DayOfWeek, Instant, JavaLocale, LocalDate, SimpleDateFormat, TimeZone, UUID, YearMonth, ZoneId,
+        ZonedDateTime,
+    };
 
     pub use kompoz_graphics::{shape, unit};
     pub use kompoz_ui::{draw, input};
@@ -180,10 +186,13 @@ pub mod prelude {
     // (Compose's painters and vector content: `Image(rememberVectorPainter(icon))`, `Path(pathData = …)`; Compose's
     // `DefaultAlpha`, a painter's `draw(size)` default)
     pub use kompoz_ui::draw::vector::{Group, Path};
+    // (Compose's Canvas and Paint of `drawIntoCanvas { it.drawRect(rect, Paint()) }`: the type beside the Canvas
+    // composable, of another namespace)
     pub use kompoz_ui::draw::{
         BitmapPainter, BrushPainter, ColorPainter, DefaultAlpha, Painter, VectorPainter, remember_vector_painter,
         remember_vector_painter_content,
     };
+    pub use kompoz_ui::draw::{Canvas, Paint, PaintingStyle};
     // (animation-graphics': `Image(rememberAnimatedVectorPainter(image, atEnd))`; its modules `res` and `vector`
     // stay under `kompoz::animation_graphics`)
     pub use kompoz_animation_graphics::{

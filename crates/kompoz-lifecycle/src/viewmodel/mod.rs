@@ -110,6 +110,15 @@ impl dyn ViewModel {
     }
 }
 
+/// Kotlin's `x as T` / `x as? T` of a ViewModel (a factory's `create(T::class, …)`, typed `T` in Kotlin): the app's
+/// own class, if it is one.
+impl<T: Any + Clone> kompoz_runtime::kt::KtAs<T> for dyn ViewModel {
+    fn kt_as_safe(&self) -> Option<T> {
+        let any: &dyn Any = self;
+        any.downcast_ref::<T>().cloned()
+    }
+}
+
 impl fmt::Debug for dyn ViewModel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ViewModel@{:p}", self as *const dyn ViewModel as *const ())
@@ -296,6 +305,11 @@ impl KClass {
             qualified_name: std::any::type_name::<T>(),
             new_instance: new_instance_of::<T>,
         }
+    }
+
+    /// Its JVM class (Kotlin's `T::class.java`, what Android's factories are given): the class itself.
+    pub fn java(&self) -> KClass {
+        *self
     }
 
     /// Its full name (Kotlin's `qualifiedName`; Rust's type name, with its path).

@@ -5,6 +5,10 @@
 pub use kompoz_lifecycle::{SavedState, SavedStateReader, SavedStateWriter, saved_state, saved_state_from};
 use kompoz_runtime::SavedValue;
 
+/// Android's `android.os.Bundle`: the [`SavedState`] (savedstate's `typealias SavedState = Bundle` on Android), what
+/// Android code names it (NavigationSamples' `NavType.put(bundle: Bundle, …)`).
+pub type Bundle = SavedState;
+
 /// Android's `Bundle` getters on a [`SavedState`] (Kotlin's `entry.arguments?.getInt("n")`): a number or bool not
 /// there (or not of the type) is 0 / `false`, as Android's; a string, an array, none.
 pub trait BundleGetters {
@@ -64,6 +68,41 @@ impl BundleGetters for SavedState {
     }
     fn get_string_array(&self, key: &str) -> Option<Vec<String>> {
         self.read(|r| r.get_string_array_or_null(key))
+    }
+}
+
+/// Android's `Bundle` setters on a [`SavedState`] (NavigationSamples' WrappedUUIDNavType: `bundle.putString(key, …)`).
+pub trait BundleSetters {
+    fn put_int(&self, key: &str, value: i32);
+    fn put_long(&self, key: &str, value: i64);
+    fn put_float(&self, key: &str, value: f32);
+    fn put_double(&self, key: &str, value: f64);
+    fn put_boolean(&self, key: &str, value: bool);
+    /// A null `value` is kept as a null (Android's `putString(key, null)`).
+    fn put_string(&self, key: &str, value: Option<String>);
+}
+
+impl BundleSetters for SavedState {
+    fn put_int(&self, key: &str, value: i32) {
+        self.write(|w| w.put_int(key, value));
+    }
+    fn put_long(&self, key: &str, value: i64) {
+        self.write(|w| w.put_long(key, value));
+    }
+    fn put_float(&self, key: &str, value: f32) {
+        self.write(|w| w.put_float(key, value));
+    }
+    fn put_double(&self, key: &str, value: f64) {
+        self.write(|w| w.put_double(key, value));
+    }
+    fn put_boolean(&self, key: &str, value: bool) {
+        self.write(|w| w.put_boolean(key, value));
+    }
+    fn put_string(&self, key: &str, value: Option<String>) {
+        match value {
+            Some(v) => self.write(|w| w.put_string(key, v)),
+            None => self.write(|w| w.put_null(key)),
+        }
     }
 }
 

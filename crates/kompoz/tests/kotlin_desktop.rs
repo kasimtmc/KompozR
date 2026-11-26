@@ -2,8 +2,8 @@
 //! 3044's `InputForms` (`ContextMenuArea(items = { listOf(ContextMenuItem("…") { }) }) { }`, `TooltipArea(tooltip =,
 //! delayMillis =, tooltipPlacement = TooltipPlacement.ComponentRect(…))`, `Modifier.onClick(matcher =,
 //! keyboardModifiers = { })`, `onPointerEvent`, `transformable(state, canPan = { })`, `clickable(interactionSource =
-//! null, indication = null)`, `Popup(popupPositionProvider =, properties = PopupProperties(focusable = false))` — its
-//! provider a Rust one: Kotlin's `object :` expressions are stage 14's) through `kompoz!`; and from a `.kt` file
+//! null, indication = null)`, `Popup(popupPositionProvider = object : PopupPositionProvider { … }, properties =
+//! PopupProperties(focusable = false))`) through `kompoz!`; and from a `.kt` file
 //! (kompoz_file!) scrollbars of a scroll state and a lazy list (`rememberScrollbarAdapter`), `Modifier.onDrag`, a
 //! `ContextMenuDataProvider`, a text field's own menu and a value-based field's scroll state. The same components the
 //! Rust syntax's tests check (crates/kompoz-foundation/tests/desktop.rs).
@@ -16,7 +16,6 @@ use kompoz::prelude::*;
 use kompoz::test::{KompozTestRule, RecordingCanvas};
 use kompoz::ui::input::{PointerButton, PointerEventType, PointerKeyboardModifiers, PointerType};
 use kompoz::ui::window::{Popup, PopupPositionProvider, PopupProperties};
-use std::rc::Rc;
 
 fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
     rule.on_node_with_tag_unmerged(tag).get_unclipped_bounds_in_root()
@@ -24,19 +23,6 @@ fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
 
 fn near(a: f32, b: f32) -> bool {
     (a - b).abs() < 0.5
-}
-
-/// kompozable_tests.cpp 3044's `object : PopupPositionProvider` (10 px in, its height below the anchor), in Rust.
-struct UnderAnchor;
-
-impl PopupPositionProvider for UnderAnchor {
-    fn calculate_position(&self, anchor: IntRect, _: IntSize, _: LayoutDirection, size: IntSize) -> IntOffset {
-        IntOffset::new(anchor.left + 10, anchor.bottom + size.height)
-    }
-}
-
-fn under_anchor() -> Rc<dyn PopupPositionProvider> {
-    Rc::new(UnderAnchor)
 }
 
 // ---- input_forms_as_compose_writes_them (kompozable_tests.cpp 3044) --------------------------------------------
@@ -70,8 +56,11 @@ kompoz! {
             Text("tık: $clicks · ${moved.x.roundToInt()}")
             var open by remember { mutableStateOf(true) }
             if (open) {
-                Popup(popupPositionProvider = underAnchor(), onDismissRequest = { open = false },
-                      properties = PopupProperties(focusable = false)) {
+                Popup(popupPositionProvider = object : PopupPositionProvider {
+                    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+                        return IntOffset(anchorBounds.left + 10, anchorBounds.bottom + popupContentSize.height)
+                    }
+                }, onDismissRequest = { open = false }, properties = PopupProperties(focusable = false)) {
                     Text("açılır", modifier = Modifier.testTag("açılır"))
                 }
             }

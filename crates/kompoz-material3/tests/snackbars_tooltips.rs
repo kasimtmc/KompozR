@@ -636,6 +636,7 @@ fn scaffold_with_indefinite_snackbar_sample() {
 }
 
 /// `ScaffoldWithCustomSnackbar`'s `class SnackbarVisualsWithError`.
+#[derive(Clone)]
 struct SnackbarVisualsWithError {
     message: String,
     is_error: bool,
@@ -656,12 +657,6 @@ impl SnackbarVisuals for SnackbarVisualsWithError {
     }
 }
 
-thread_local! {
-    /// What the custom sample's snackbars were shown with (Kotlin's `data.visuals as? SnackbarVisualsWithError`:
-    /// a trait object can't be cast back, so the sample's visuals are found by their message).
-    static ERRORS: RefCell<Vec<(String, bool)>> = const { RefCell::new(Vec::new()) };
-}
-
 /// `ScaffoldWithCustomSnackbar`.
 #[kompozable]
 fn ScaffoldWithCustomSnackbar() {
@@ -676,7 +671,9 @@ fn ScaffoldWithCustomSnackbar() {
                 snackbar = |data: Rc<dyn SnackbarData>| {
                     // custom snackbar with the custom action button color and border
                     let message = data.visuals().message();
-                    let is_error = ERRORS.with(|e| e.borrow().iter().any(|(m, error)| *m == message && *error));
+                    // (Kotlin's `(data.visuals as? SnackbarVisualsWithError)?.isError ?: false`)
+                    let visuals = kt::KtAs::<SnackbarVisualsWithError>::kt_as_safe(&*data.visuals());
+                    let is_error = visuals.is_some_and(|v| v.is_error);
                     let button_color = if is_error {
                         named_args!(ButtonDefaults.text_button_colors(
                             container_color = MaterialTheme::color_scheme().error_container,
@@ -718,7 +715,6 @@ fn ScaffoldWithCustomSnackbar() {
                         message: format!("Snackbar # {}", click_count.get()),
                         is_error: click_count.get() % 2 != 0,
                     };
-                    ERRORS.with(|e| e.borrow_mut().push((visuals.message.clone(), visuals.is_error)));
                     let shown = state.show_snackbar_visuals(Rc::new(visuals));
                     launch_show(&scope, shown);
                 },

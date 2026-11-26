@@ -83,7 +83,16 @@ impl Gen<'_, '_> {
     /// arguments where the struct is generic (`NavigationEventHandler<Info>`, `NavType`).
     pub(crate) fn callbacks_value_ty(&self, b: index::Base, args: &[Type]) -> Ty {
         let generic = index::generics(b.value).is_some_and(|g| !g.is_empty());
-        let args = if generic { args.iter().map(|a| self.ty_of(a)).collect() } else { Vec::new() };
+        // ((stage 14 WPD) an API interface's: its shared trait object — `NavigationEventHandler<NavigationEventInfo>`'s
+        // `Rc<dyn NavigationEventInfo>`)
+        let arg = |a: &Type| match self.ty_of(a) {
+            Ty::Named(t, targs) if targs.is_empty() && super::resolve::trait_object(&t).is_some() => {
+                let ptr = super::resolve::trait_object(&t).unwrap_or("Rc");
+                Ty::Named(ptr.to_string(), vec![Ty::Named(t, Vec::new())])
+            }
+            t => t,
+        };
+        let args = if generic { args.iter().map(arg).collect() } else { Vec::new() };
         Ty::Named(b.value.to_string(), args)
     }
 
@@ -474,7 +483,7 @@ impl Gen<'_, '_> {
         let owner = ident(ctor.owner, span);
         let f = ident(ctor.rust, span);
         let allow = super::class::class_allow(span);
-        let from = quote_spanned! {span=>
+        let mut from = quote_spanned! {span=>
             #allow
             impl ::core::convert::From<#name> for #value_ts {
                 fn from(o: #name) -> #value_ts {
@@ -482,6 +491,14 @@ impl Gen<'_, '_> {
                 }
             }
         };
+        // ((stage 14 WPD) `object ProductSerializer : DeepLinkSerializer<Product>()`: its type `Saveable` through it,
+        // what Kotlin's `@Serializable(with = ProductSerializer::class)` on a key's property or list element makes it
+        // — on the type here, every such field of it read and saved through it)
+        if b.kotlin == "DeepLinkSerializer"
+            && let [t] = targ_ts.as_slice()
+        {
+            from.extend(quote_spanned!(span=> serializable_with!(#t, #name);));
+        }
         (items, from)
     }
 }

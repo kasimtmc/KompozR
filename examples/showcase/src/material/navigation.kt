@@ -1,6 +1,7 @@
 // Material screen: tabs, the FAB menu, the short navigation bar, the wide navigation rail, floating toolbars.
-// (Destination, a place to go — its label and icon: the navigation bar's and rail's items, the FAB menu's
-// actions — is a data class, in Rust until stage 14: lib.rs.)
+
+// A place to go: its label and icon (the navigation bar's and rail's items, the FAB menu's actions).
+data class Destination(val label: String, val icon: ImageVector)
 
 @Composable
 fun TabsSection() {
@@ -68,7 +69,7 @@ fun FabMenuSection() {
                 val actions = listOf(Destination("Not", Icons.Filled.Edit), Destination("Konum", Icons.Filled.Place), Destination("E-posta", Icons.Filled.Email))
                 for (a in actions) {
                     FloatingActionButtonMenuItem(onClick = { fabPicked = a.label; fabOpen = false }, text = { Text(a.label) },
-                                                 icon = { Icon(imageVector = a.icon, contentDescription = null) })
+                                                 icon = { Icon(a.icon, contentDescription = null) })
                 }
             }
         }
@@ -86,7 +87,7 @@ fun ShortNavigationBarSection() {
             Text(if (arrangement == ShortNavigationBarArrangement.EqualWeight) "Eşit paylaşım" else "Ortada", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
             ShortNavigationBar(modifier = Modifier.clip(RoundedCornerShape(16.dp)), arrangement = arrangement, windowInsets = WindowInsets(0.dp)) {
                 for (i in 0 until 3) {
-                    ShortNavigationBarItem(selected = page == i, onClick = { page = i }, icon = { Icon(imageVector = tabs[i].icon, contentDescription = null) }, label = { Text(tabs[i].label) })
+                    ShortNavigationBarItem(selected = page == i, onClick = { page = i }, icon = { Icon(tabs[i].icon, contentDescription = null) }, label = { Text(tabs[i].label) })
                 }
             }
         }
@@ -118,7 +119,7 @@ fun WideNavigationRailSection() {
                                                box = i
                                                if (modal) scope.launch { rail.collapse() }  // a modal one closes once a destination is picked
                                            },
-                                           icon = { Icon(imageVector = boxes[i].icon, contentDescription = null) }, label = { Text(boxes[i].label) },
+                                           icon = { Icon(boxes[i].icon, contentDescription = null) }, label = { Text(boxes[i].label) },
                                            railExpanded = rail.targetValue == WideNavigationRailValue.Expanded)
                 }
             }

@@ -89,17 +89,51 @@ pub fn remember_coroutine_scope() -> CoroutineScope {
     remember_observer(move || ScopeHolder(CoroutineScope::new_with_context(&d, context))).0.clone()
 }
 
-/// A state a coroutine produces (restarted when `keys` change): `producer` gets the state and sets it.
+/// What [`produce_state`]'s producer runs on (Compose's ProduceStateScope): the state it produces — it derefs to
+/// it, `scope.set_value(v)` (Kotlin's `value = v`) — and [`await_dispose`](Self::await_dispose).
+#[derive(Clone)]
+pub struct ProduceStateScope<T> {
+    state: MutableState<T>,
+}
+
+impl<T: 'static> std::ops::Deref for ProduceStateScope<T> {
+    type Target = MutableState<T>;
+    fn deref(&self) -> &MutableState<T> {
+        &self.state
+    }
+}
+
+impl<T: 'static> ProduceStateScope<T> {
+    /// Suspends until the producer is cancelled (its keys changed, or it left the composition), then runs
+    /// `on_dispose` (Compose's `awaitDispose`): what a producer registering a callback ends with, unregistering it.
+    pub async fn await_dispose(&self, on_dispose: impl FnOnce() + 'static) -> std::convert::Infallible {
+        /// Runs its function when dropped: the coroutine cancelled drops what it awaits.
+        struct OnDrop<F: FnOnce()>(Option<F>);
+        impl<F: FnOnce()> Drop for OnDrop<F> {
+            fn drop(&mut self) {
+                if let Some(f) = self.0.take() {
+                    f();
+                }
+            }
+        }
+        let _dispose = OnDrop(Some(on_dispose));
+        std::future::pending().await
+    }
+}
+
+/// A state a coroutine produces (Compose's produceState): `initial` until `producer` sets it, the producer launched
+/// when this enters the composition and again (cancelled first) whenever `keys` change (several: a tuple; none:
+/// `()`), cancelled when it leaves. The producer runs on a [`ProduceStateScope`] holding the state.
 #[kompozable]
-pub fn produce_state<T, K, Fut>(initial: T, keys: K, producer: impl FnOnce(MutableState<T>) -> Fut) -> T
+pub fn produce_state<T, K, Fut>(initial: T, keys: K, producer: impl FnOnce(ProduceStateScope<T>) -> Fut) -> State<T>
 where
     T: PartialEq + Clone + Send + Sync + 'static,
     K: PartialEq + 'static,
     Fut: Future<Output = ()> + 'static,
 {
     let state = remember(|| mutable_state_of(initial));
-    LaunchedEffect(keys, producer(state.clone()));
-    state.get()
+    LaunchedEffect(keys, producer(ProduceStateScope { state: state.clone() }));
+    State::from(state)
 }
 
 impl<T: PartialEq + Clone + Send + Sync + 'static> Flow<T> {

@@ -248,6 +248,15 @@ pub fn NavBackStackSerializer<T: Clone + 'static>(element_serializer: Saver<T>) 
     )
 }
 
+/// The saver of a back stack of keys of any type, each saved with its class (Compose's `NavBackStackSerializer<T>()`,
+/// its element serializer the polymorphic `NavKey`'s: Android's reflection, or the subclasses of `NavKey` in the
+/// serializers module of the configuration given to `encodeToSavedState`/`decodeFromSavedState`).
+///
+/// Kotlin: `NavBackStackSerializer<T>()`
+pub fn nav_back_stack_serializer() -> Saver<NavBackStack<Rc<dyn NavKey>>> {
+    Saver::of()
+}
+
 /// A back stack of `elements` remembered across recompositions and saved with the composition's state (restored
 /// after the process ends: Compose's `rememberNavBackStack(vararg elements)`, Android's, saving each key with its
 /// class: see [`NavBackStack`]'s `Saveable`). Keys are [`NavKey`]s of any type.
@@ -263,5 +272,20 @@ pub fn remember_nav_back_stack(elements: impl IntoIterator<Item = Rc<dyn NavKey>
         |s: &NavBackStack<Rc<dyn NavKey>>| s.save(),
         |v: &SavedValue| NavBackStack::<Rc<dyn NavKey>>::restore(v),
     );
+    remember_saveable_with(&saver, move || NavBackStack::new(elements))
+}
+
+/// [`remember_nav_back_stack`] saved with `configuration` in effect: its keys' classes found by its serializers
+/// module (Compose's `rememberNavBackStack(configuration, vararg elements)`, kotlinx's open polymorphism: each class
+/// registered with `polymorphic(NavKey::class) { subclass(…) }`).
+///
+/// Kotlin: `rememberNavBackStack(configuration: SavedStateConfiguration, vararg elements: NavKey): NavBackStack<NavKey>`
+#[kompozable]
+pub fn remember_nav_back_stack_configured(
+    configuration: kompoz_lifecycle::SavedStateConfiguration,
+    elements: impl IntoIterator<Item = Rc<dyn NavKey>>,
+) -> NavBackStack<Rc<dyn NavKey>> {
+    let elements: Vec<Rc<dyn NavKey>> = elements.into_iter().collect();
+    let saver = kompoz_lifecycle::configured_saver(Saver::<NavBackStack<Rc<dyn NavKey>>>::of(), &configuration);
     remember_saveable_with(&saver, move || NavBackStack::new(elements))
 }

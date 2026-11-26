@@ -245,6 +245,19 @@ impl<T: KtToString> KtToString for KtShared<T> {
     }
 }
 
+/// A `@Serializable` data class's `var` property saved as its value is.
+impl<T: crate::Saveable> crate::Saveable for KtShared<T> {
+    fn save(&self) -> crate::SavedValue {
+        self.0.borrow().save()
+    }
+    fn restore(saved: &crate::SavedValue) -> Option<Self> {
+        T::restore(saved).map(KtShared::new)
+    }
+    fn descriptor() -> crate::SerialDescriptor {
+        T::descriptor()
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for KtShared<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.borrow().fmt(f)

@@ -18,119 +18,39 @@ use kompoz::ui::semantics::ContentType;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// ---- Rust twins of the Kotlin classes (stage 14) -------------------------------------------------------------------
+// ---- what the tests log to ----------------------------------------------------------------------------------------
 
-/// LifecycleComposeSamples' `class ExampleState { private val _uiState = MutableStateFlow(""); val uiState:
-/// StateFlow<String> = _uiState.asStateFlow() }` (StateFlowCollectAsStateWithLifecycle's).
+/// The time ScreenAnalytics tracks (as the samples' `TimeAnalytics`): noted in the log.
 #[derive(Clone)]
-pub struct ExampleStateClass {
-    #[allow(dead_code)]
-    ui_state_source: MutableStateFlow<String>,
-    ui_state: StateFlow<String>,
-}
+pub struct LoggedTime(Rc<RefCell<Vec<String>>>);
 
-impl ExampleStateClass {
-    pub fn ui_state(&self) -> StateFlow<String> {
-        self.ui_state.clone()
-    }
-}
-
-pub fn ExampleState() -> ExampleStateClass {
-    let source = MutableStateFlow::new(String::new());
-    ExampleStateClass { ui_state: source.as_state_flow(), ui_state_source: source }
-}
-
-/// LifecycleComposeSamples' second `class ExampleState { val counter = flow { … } }` (FlowCollectAsStateWithLifecycle's).
-#[derive(Clone)]
-pub struct CounterStateClass {
-    counter: Flow<i32>,
-}
-
-impl CounterStateClass {
-    pub fn counter(&self) -> Flow<i32> {
-        self.counter.clone()
-    }
-}
-
-pub fn CounterState() -> CounterStateClass {
-    CounterStateClass {
-        counter: flow(|emit| async move {
-            let mut count = 0;
-            loop {
-                emit.emit(count).await;
-                count += 1;
-                delay_ms(1000).await;
-            }
-        }),
-    }
-}
-
-/// KitchenForms' `class TickViewModel : ViewModel() { val ticks: StateFlow<Int> = flow<Int> { var i = 0; while (true)
-/// { emit(i++); delay(100) } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0) }` (its public
-/// constructor taking nothing: what `viewModel<TickViewModel>()` makes it with).
-pub type TickViewModel = Rc<TickViewModelClass>;
-
-/// TickViewModel's object.
-pub struct TickViewModelClass {
-    base: ViewModelImpl,
-    ticks: StateFlow<i32>,
-}
-
-impl TickViewModelClass {
-    pub fn ticks(&self) -> StateFlow<i32> {
-        self.ticks.clone()
-    }
-}
-
-impl ViewModel for TickViewModelClass {
-    fn view_model_impl(&self) -> &ViewModelImpl {
-        &self.base
-    }
-    fn new_instance(_extras: &CreationExtras) -> Option<Self> {
-        let base = ViewModelImpl::new();
-        let ticks = flow(|emit| async move {
-            let mut i = 0;
-            loop {
-                emit.emit(i).await;
-                i += 1;
-                delay_ms(100).await;
-            }
-        })
-        .state_in(&base.view_model_scope(), SharingStarted::WhileSubscribed_millis(5000, i64::MAX), 0);
-        Some(TickViewModelClass { base, ticks })
-    }
-}
-
-/// The samples' `private interface TimeAnalytics { fun stopTimeTracking(): TimeAnalytics }`: here one that logs.
-#[derive(Clone)]
-pub struct TimeAnalytics(Rc<RefCell<Vec<String>>>);
-
-impl TimeAnalytics {
-    pub fn stop_time_tracking(&self) -> TimeAnalytics {
+impl LoggedTime {
+    pub fn stop_time_tracking(&self) -> LoggedTime {
         self.0.borrow_mut().push("stop".into());
         self.clone()
     }
 }
 
-/// The samples' `private interface DataAnalytics`: here one that logs what it is told.
+/// What ScreenAnalytics reports to (as the samples' `DataAnalytics`): a log of what it is told.
 #[derive(Clone)]
-pub struct DataAnalytics(Rc<RefCell<Vec<String>>>);
+pub struct LoggedAnalytics(Rc<RefCell<Vec<String>>>);
 
-impl PartialEq for DataAnalytics {
+impl PartialEq for LoggedAnalytics {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-impl DataAnalytics {
+impl LoggedAnalytics {
     pub fn track_screen_view(&self, screen_name: impl std::fmt::Display) {
         self.0.borrow_mut().push(format!("view {screen_name}"));
     }
-    pub fn start_time_tracking(&self) -> TimeAnalytics {
+    pub fn start_time_tracking(&self) -> LoggedTime {
         self.0.borrow_mut().push("start".into());
-        TimeAnalytics(self.0.clone())
+        LoggedTime(self.0.clone())
     }
-    pub fn send_disposal_analytics(&self, _time_analytics: TimeAnalytics) {
+    #[allow(dead_code)]
+    pub fn send_disposal_analytics(&self, _time_analytics: LoggedTime) {
         self.0.borrow_mut().push("disposal".into());
     }
     fn taken(&self) -> Vec<String> {
@@ -138,8 +58,8 @@ impl DataAnalytics {
     }
 }
 
-fn analytics() -> DataAnalytics {
-    DataAnalytics(Rc::default())
+fn analytics() -> LoggedAnalytics {
+    LoggedAnalytics(Rc::default())
 }
 
 kompoz_file!("tests/kt/lifecycle.kt");
@@ -147,9 +67,10 @@ kompoz_file!("tests/kt/lifecycle.kt");
 // ---- the rest of the API as an app writes it ------------------------------------------------------------------------
 
 kompoz! {
-    // The samples' Analytics, each an effect (their nested functions here at the top).
+    // The effects as the samples' local Analytics write them (kt/lifecycle.kt: functions of their samples, called by
+    // none), in one composable of the app's, reporting to a log of Rust's.
     @Composable
-    fun ScreenAnalytics(dataAnalytics: DataAnalytics) {
+    fun ScreenAnalytics(dataAnalytics: LoggedAnalytics) {
         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { dataAnalytics.trackScreenView("screen1") }
         LifecycleStartEffect(dataAnalytics) {
             val timeTracker = dataAnalytics.startTimeTracking()
@@ -232,8 +153,9 @@ fn state_forms_as_kotlin_writes_them() {
     rule.on_node_with_text("durum kapalı · 400 ms · tik var").assert_exists();
 }
 
-/// lifecycle-runtime-compose's samples: a StateFlow's and a Flow's values while started, dropUnlessStarted and
-/// dropUnlessResumed, rememberLifecycleOwner capped and detached (the effects' samples: ScreenAnalytics, in
+/// lifecycle-runtime-compose's samples: a StateFlow's and a Flow's values (of their local classes) while started,
+/// dropUnlessStarted and dropUnlessResumed, rememberLifecycleOwner capped and detached (the effects' samples'
+/// Analytics are local functions they don't call: their effects as ScreenAnalytics, in
 /// lifecycle_effects_as_compose_writes_them).
 fn lifecycle_runtime_compose_samples() {
     let rule = KompozTestRule::new(kompozable_lambda!(|| {
@@ -265,7 +187,7 @@ fn lifecycle_runtime_compose_samples() {
     assert_eq!(rule.on_all_nodes_with_text("Navigate to next screen").fetch_semantics_nodes().len(), 2);
 }
 
-/// The effects of the samples' Analytics, with their scopes: the time tracked while started and resumed, stopped as
+/// The effects of the samples' Analytics (ScreenAnalytics), with their scopes: the time tracked while started and resumed, stopped as
 /// the app goes to the background and as they leave; the screen view on each resume. dropUnless… drop the clicks
 /// below their states.
 fn lifecycle_effects_as_compose_writes_them() {

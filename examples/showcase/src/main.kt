@@ -3,7 +3,7 @@
 // app bar to see which parts actually run again.
 //
 // The screens are routes of a NavHost (Compose's typed routes, the C++ showcase's `routes::` namespace: Kotlin's
-// top-level @Serializable objects, lib.rs's `routes`); of them the Material and places screens are here, the home,
+// top-level @Serializable objects, common.kt's); of them the Material and places screens are here, the home,
 // list (with its item screen, its LikesViewModel and its scroll-to-top button) and components screens come with
 // stage 16 (their routes show LaterScreen). The C++ showcase's desktop menu bar (MenuBar: Dosya, Görünüm, Git) comes
 // with the window APIs (stage 15/16); its SystemBarsAppearance (the status bar icons on Android) with stage 15.

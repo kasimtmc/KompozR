@@ -7,14 +7,8 @@ fun AnimateItemSection() {
     var shuffles by remember { mutableStateOf(1) }
     Section("animateItem · SwipeToDismissBox") {
         FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = {
-                tasks.shuffle(Random(shuffles))
-                shuffles++
-            }) { Text("Karıştır") }
-            FilledTonalButton(onClick = {
-                tasks.add(0, nextTask)
-                nextTask++
-            }) { Text("Ekle") }
+            FilledTonalButton(onClick = { tasks.shuffle(Random(shuffles++)) }) { Text("Karıştır") }
+            FilledTonalButton(onClick = { tasks.add(0, nextTask++) }) { Text("Ekle") }
             FilledTonalButton(onClick = { if (tasks.isNotEmpty()) tasks.removeAt(0) }) { Text("İlkini sil") }  // it fades out where it was, the others glide up
             OutlinedButton(onClick = {
                 tasks.clear()
