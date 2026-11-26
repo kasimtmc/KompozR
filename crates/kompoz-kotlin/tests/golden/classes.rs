@@ -31,9 +31,7 @@ impl Note {
     ) -> Note {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
-            Note { id, title, pinned, tags }
-        })
+        ::kompoz::runtime::named_args!(types(Note(rrdd)), { Note { id, title, pinned, tags } })
     }
     pub fn id(&self) -> i32 {
         self.id
@@ -107,7 +105,7 @@ impl ::core::fmt::Debug for Note {
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
-#[::kompoz::runtime::kompozable(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)))]
+#[::kompoz::runtime::kompozable(types(Note(rrdd)))]
 pub fn NoteRow(note: Note) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
@@ -119,7 +117,7 @@ pub fn NoteRow(note: Note) {
     ));
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
-#[::kompoz::runtime::kompozable(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)))]
+#[::kompoz::runtime::kompozable(types(Note(rrdd)))]
 pub fn Notes() {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
@@ -159,7 +157,7 @@ pub struct Tally {}
 #[allow(dead_code)]
 impl Tally {
     #[doc(hidden)]
-    fn __kz_state() -> ::std::rc::Rc<__KzTally> {
+    fn __kz_state() -> &'static __KzTally {
         ::std::thread_local! { static __KZ_STATE : :: kompoz :: runtime :: kt :: KtSingleton < __KzTally > = const { :: kompoz :: runtime :: kt :: KtSingleton :: new () } ; }
         __KZ_STATE.with(|s| {
             s.get(
@@ -176,7 +174,7 @@ impl Tally {
     fn __kz_init(&self) {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!({
             Self::__kz_state().Step.init(2);
             Self::__kz_state().total.set(0);
             Self::__kz_state().label.init(::std::string::String::from("toplam"));
@@ -205,7 +203,7 @@ impl Tally {
     pub fn add(&self, # [default (self . Step ())] n: i32) -> i32 {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!({
             self.set_total(self.total() + n);
             return self.total();
         })
@@ -213,9 +211,7 @@ impl Tally {
     pub fn describe(&self) -> ::std::string::String {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
-            ::kompoz::runtime::kt::template!(self.label(), " ", self.total())
-        })
+        ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::template!(self.label(), " ", self.total()) })
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
@@ -224,7 +220,7 @@ impl ::kompoz::runtime::kt::KtToString for Tally {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
             "Tally",
-            ::std::rc::Rc::as_ptr(&Self::__kz_state()) as *const (),
+            Self::__kz_state() as *const __KzTally as *const (),
         ));
     }
 }
@@ -272,13 +268,14 @@ impl Ledger {
         __kz_this
     }
     #[doc(hidden)]
+    #[allow(unused_variables)]
     fn __kz_init(&self, id: i32) {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
         #[allow(unused_variables)]
         let __kz_companion = LedgerCompanion {};
         self.__kz_this.id.init(id);
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {})
+        ::kompoz::runtime::named_args!({})
     }
     pub fn id(&self) -> i32 {
         self.__kz_this.id.get()
@@ -295,9 +292,7 @@ impl Ledger {
         use ::kompoz::runtime::kt::ext::*;
         #[allow(unused_variables)]
         let __kz_companion = LedgerCompanion {};
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
-            ::kompoz::runtime::kt::template!(__kz_companion.PREFIX(), self.id())
-        })
+        ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::template!(__kz_companion.PREFIX(), self.id()) })
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
@@ -363,7 +358,7 @@ pub struct LedgerCompanion {}
 #[allow(dead_code)]
 impl LedgerCompanion {
     #[doc(hidden)]
-    fn __kz_state() -> ::std::rc::Rc<__KzLedgerCompanion> {
+    fn __kz_state() -> &'static __KzLedgerCompanion {
         ::std::thread_local! { static __KZ_STATE : :: kompoz :: runtime :: kt :: KtSingleton < __KzLedgerCompanion > = const { :: kompoz :: runtime :: kt :: KtSingleton :: new () } ; }
         __KZ_STATE.with(|s| {
             s.get(
@@ -379,7 +374,7 @@ impl LedgerCompanion {
     fn __kz_init(&self) {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!({
             Self::__kz_state().PREFIX.init(::std::string::String::from("hesap-"));
             Self::__kz_state().made.set(0);
         })
@@ -401,7 +396,7 @@ impl LedgerCompanion {
     pub fn create(&self) -> Ledger {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!(types(Ledger(r)), {
             self.set_made(::kompoz::runtime::kt::KtInc::inc(self.made()));
             return Ledger(self.made());
         })
@@ -413,7 +408,7 @@ impl ::kompoz::runtime::kt::KtToString for LedgerCompanion {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
             "Ledger$Companion",
-            ::std::rc::Rc::as_ptr(&Self::__kz_state()) as *const (),
+            Self::__kz_state() as *const __KzLedgerCompanion as *const (),
         ));
     }
 }
@@ -555,24 +550,18 @@ impl Tier {
     pub fn price(self) -> i32 {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(
-            types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)),
-            match self {
-                Tier::FREE => 0,
-                Tier::PAID => 5,
-            }
-        )
+        ::kompoz::runtime::named_args!(match self {
+            Tier::FREE => 0,
+            Tier::PAID => 5,
+        })
     }
     pub fn label(self) -> ::std::string::String {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(
-            types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)),
-            match self {
-                Tier::FREE => ::std::string::String::from(::std::string::String::from("tier")),
-                Tier::PAID => ::std::string::String::from(::std::string::String::from("paid")),
-            }
-        )
+        ::kompoz::runtime::named_args!(match self {
+            Tier::FREE => ::std::string::String::from(::std::string::String::from("tier")),
+            Tier::PAID => ::std::string::String::from(::std::string::String::from("paid")),
+        })
     }
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
@@ -603,7 +592,7 @@ pub type Cells<T> = ::std::vec::Vec<::std::vec::Vec<T>>;
 pub fn total(grid: ::std::vec::Vec<::std::vec::Vec<i32>>) -> i32 {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+    ::kompoz::runtime::named_args!({
         ::kompoz::runtime::kt::KtList::sum_of(&grid, |it| ::kompoz::runtime::kt::KtList::sum(&it))
     })
 }
@@ -611,9 +600,7 @@ pub fn total(grid: ::std::vec::Vec<::std::vec::Vec<i32>>) -> i32 {
 pub fn count_names(names: ::std::vec::Vec<::std::string::String>) -> i32 {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
-        ::kompoz::runtime::kt::KtList::size(&names)
-    })
+    ::kompoz::runtime::named_args!({ ::kompoz::runtime::kt::KtList::size(&names) })
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]
 #[allow(dead_code)]
@@ -645,10 +632,11 @@ impl Catalog {
         __kz_this
     }
     #[doc(hidden)]
+    #[allow(unused_variables)]
     fn __kz_init(&self) {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!(types(CatalogEntry(rd)), {
             self.__kz_this.items.init(::kompoz::runtime::kt::list_of([
                 CatalogEntry("a"),
                 CatalogEntry("b", CatalogKind::FILM),
@@ -667,7 +655,7 @@ impl Catalog {
     pub fn films(&self) -> ::std::vec::Vec<CatalogEntry> {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!({
             ::kompoz::runtime::kt::KtList::filter(&self.items(), |it| it.kind() == CatalogKind::FILM)
         })
     }
@@ -737,9 +725,7 @@ impl CatalogEntry {
     pub fn __kz_new(title: ::std::string::String, kind: CatalogKind) -> CatalogEntry {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
-            CatalogEntry { title, kind }
-        })
+        ::kompoz::runtime::named_args!(types(CatalogEntry(rd)), { CatalogEntry { title, kind } })
     }
     pub fn title(&self) -> ::std::string::String {
         ::core::clone::Clone::clone(&self.title)
@@ -885,7 +871,7 @@ pub struct CatalogDefaults {}
 #[allow(dead_code)]
 impl CatalogDefaults {
     #[doc(hidden)]
-    fn __kz_state() -> ::std::rc::Rc<__KzCatalogDefaults> {
+    fn __kz_state() -> &'static __KzCatalogDefaults {
         ::std::thread_local! { static __KZ_STATE : :: kompoz :: runtime :: kt :: KtSingleton < __KzCatalogDefaults > = const { :: kompoz :: runtime :: kt :: KtSingleton :: new () } ; }
         __KZ_STATE.with(|s| {
             s.get(
@@ -898,7 +884,7 @@ impl CatalogDefaults {
     fn __kz_init(&self) {
         #[allow(unused_imports)]
         use ::kompoz::runtime::kt::ext::*;
-        ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+        ::kompoz::runtime::named_args!({
             Self::__kz_state().limit.init(2);
         })
     }
@@ -916,7 +902,7 @@ impl ::kompoz::runtime::kt::KtToString for CatalogDefaults {
     fn kt_write(&self, __kz_out: &mut ::std::string::String) {
         __kz_out.push_str(&::kompoz::runtime::kt::default_to_string(
             "Catalog.Defaults",
-            ::std::rc::Rc::as_ptr(&Self::__kz_state()) as *const (),
+            Self::__kz_state() as *const __KzCatalogDefaults as *const (),
         ));
     }
 }
@@ -938,7 +924,7 @@ impl ::core::fmt::Debug for CatalogDefaults {
 pub fn uses() -> ::std::string::String {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
-    ::kompoz::runtime::named_args!(types(Note(rrdd), Ledger(r), Catalog(), CatalogEntry(rd)), {
+    ::kompoz::runtime::named_args!(types(Catalog(), CatalogEntry(rd)), {
         let e = CatalogEntry("d", CatalogKind::FILM);
         return ::kompoz::runtime::kt::template!(
             "",

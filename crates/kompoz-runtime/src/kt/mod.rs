@@ -81,7 +81,10 @@ pub use math::{
 pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 #[doc(hidden)]
 pub use null::{elvis_async, run_async, safe_async, with_async};
-pub use object::{KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string, kt_as_object, kt_is};
+pub use object::{
+    KtFuture, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string, kt_as_object, kt_dyn_as, kt_is,
+    kt_same_object,
+};
 pub use random::{KtShuffle, Random};
 pub use range::{
     IndexedValue, KtClosedRange, KtContains, KtProgression, KtProgressionIter, KtRangeBound, KtStep, down_to,

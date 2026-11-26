@@ -336,6 +336,9 @@ impl<T: Clone + PartialEq + 'static> AsFlow<T> for MutableStateFlow<T> {
 }
 
 impl<T: Clone + PartialEq + 'static> MutableStateFlow<T> {
+    /// A state flow of `value` (Kotlin's `MutableStateFlow(value)`).
+    ///
+    /// Kotlin: `MutableStateFlow(value: T)`
     pub fn new(value: T) -> Self {
         MutableStateFlow {
             flow: StateFlow {

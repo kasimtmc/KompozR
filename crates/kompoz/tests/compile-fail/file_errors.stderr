@@ -4,7 +4,7 @@ error: kompoz: tests/compile-fail/parse_error.kt:6:20: expected a type, found `)
 7 | kompoz_file!("tests/compile-fail/parse_error.kt");
   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: kompoz: tests/compile-fail/parse_error.kt:10:1: `open` on a class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
+error: kompoz: tests/compile-fail/parse_error.kt:10:1: `value` on a class isn't translated by KompozR's Kotlin syntax yet (it comes with stage 14)
  --> tests/compile-fail/file_errors.rs:7:14
   |
 7 | kompoz_file!("tests/compile-fail/parse_error.kt");

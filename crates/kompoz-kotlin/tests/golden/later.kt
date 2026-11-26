@@ -1,18 +1,14 @@
 // What the Kotlin syntax doesn't translate yet: each an error at its Kotlin position saying it comes with stage 14; the
 // declarations without one are translated.
 
-sealed interface Shape
+annotation class Marker
 
-open class Base(val id: Int)
+value class Meters(val value: Int)
 
-enum class Mode {
-    A {
-        override fun toString() = "a"
-    },
-    B
+sealed class Loaded<out T> {
+    data class Value<T>(val value: T) : Loaded<T>()
+    object Nothing : Loaded<Nothing>()
 }
-
-fun <T> identity(x: T): T = x
 
 fun tries(): Int {
     try {
@@ -21,8 +17,6 @@ fun tries(): Int {
         return 2
     }
 }
-
-fun checks(x: Any): Boolean = x is String
 
 fun throws(): Int = throw IllegalStateException("x")
 

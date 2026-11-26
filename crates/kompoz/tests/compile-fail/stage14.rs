@@ -3,9 +3,9 @@
 use kompoz::prelude::*;
 
 kompoz! {
-    sealed class Point(val x: Int, val y: Int)
+    annotation class Marker
 
-    fun sum(a: Any): Int = if (a is Int) a else 0
+    value class Meters(val value: Int)
 }
 
 fn main() {}

@@ -53,6 +53,8 @@
 mod call;
 pub(crate) mod class;
 mod expr;
+mod generics;
+pub(crate) mod hierarchy;
 mod lambda;
 pub(crate) mod names;
 mod object_expr;
@@ -126,6 +128,8 @@ pub fn generate(
             out.extend(ts);
         }
     }
+    // (stage 14 WPA) each `types(…)` list kept to the classes its code names
+    let out = class::trim_types(out);
     let analysis = g.analysis.take();
     (out, analysis)
 }
@@ -654,12 +658,6 @@ impl<'a, 'd> Gen<'a, 'd> {
                 }
             }
         }
-        if !f.type_params.is_empty() {
-            self.later(f.type_params[0].loc, "a generic function");
-        }
-        if let Some(c) = f.constraints.first() {
-            self.later(c.loc, "a `where` clause");
-        }
         if f.body.is_none() {
             self.error(f.name.loc, "a function here needs a body");
         }
@@ -700,7 +698,8 @@ impl<'a, 'd> Gen<'a, 'd> {
                 // implemented for `Vec<String>`; one of its own type parameters is a generic function's, stage 14's)
                 (Some(n), false, TypeKind::Named(segs))
                     if segs.iter().all(|s| s.args.is_empty())
-                        || (f.type_params.is_empty() && !self.ty_of(r).is_vague()) =>
+                        || (f.type_params.is_empty() && !self.ty_of(r).is_vague())
+                        || !f.type_params.is_empty() =>
                 {
                     let rust_ty = self.rust_type(r, types::TypePos::Value);
                     let name = owner_name(last_segment(&n));
@@ -723,7 +722,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             }
         }
 
-        // Parameters.
+        // Parameters (their star projections the function's type parameters, stage 14 WPA).
+        self.collect_stars();
         let mut params = Vec::new();
         let mut converts = Vec::new();
         for p in &f.params {
@@ -811,6 +811,8 @@ impl<'a, 'd> Gen<'a, 'd> {
             allow.extend(quote_spanned!(span=> #[allow(deprecated)]));
         }
         let has_defaults = info.params.iter().any(|p| p.default != PDefault::None);
+        // (stage 14 WPA) A generic function's type parameters, bounded by their uses (an extension's: its impl's)
+        let generics = self.fn_generics(f, span);
 
         if let Some((self_ty, owner)) = self_ty {
             let trait_name = proc_macro2::Ident::new(&format!("{owner}{}Ext", pascal(&f.name.name)), span);
@@ -833,11 +835,11 @@ impl<'a, 'd> Gen<'a, 'd> {
                     #allow
                     #attr
                     #[doc(hidden)]
-                    #vis #fn_kw #hidden(#this: #self_ty, #(#params),*) #ret #body
+                    #vis #fn_kw #hidden #generics (#this: #self_ty, #(#params),*) #ret #body
 
                     #allow
                     #[#rt::named(#trait_vis trait #trait_name)]
-                    impl #self_ty {
+                    impl #generics #self_ty {
                         #[track_caller]
                         #fn_kw #name(&self, #(#params),*) #ret {
                             let __kz_receiver = ::core::clone::Clone::clone(self);
@@ -849,7 +851,7 @@ impl<'a, 'd> Gen<'a, 'd> {
             return quote_spanned! {span=>
                 #allow
                 #[#rt::named(#trait_vis trait #trait_name)]
-                impl #self_ty {
+                impl #generics #self_ty {
                     #asyncness #fn_kw #name(self, #(#params),*) #ret #body
                 }
             };
@@ -864,7 +866,7 @@ impl<'a, 'd> Gen<'a, 'd> {
         quote_spanned! {span=>
             #allow
             #attr
-            #vis #asyncness #fn_kw #name(#(#params),*) #ret #body
+            #vis #asyncness #fn_kw #name #generics (#(#params),*) #ret #body
         }
     }
 
@@ -1071,6 +1073,16 @@ fn rust_overlay(module: Option<&crate::module::ModuleTable>) -> crate::index::ov
     let mut o = crate::index::overlay::Overlay::default();
     let Some(m) = module else { return o };
     for r in &m.rust {
+        // (a Rust trait that is a base class of Kotlin's: stage 14 WPA)
+        if let Some((open, required)) = &r.base {
+            o.bases.push(crate::index::Base {
+                kotlin: intern(&r.kotlin),
+                rust: intern(&r.rust),
+                open: *open,
+                required: crate::index::overlay::intern_strs(required.iter().map(|s| intern(s)).collect()),
+            });
+            continue;
+        }
         if let Some(target) = &r.alias {
             o.aliases.push((intern(&r.rust), intern(target)));
             continue;

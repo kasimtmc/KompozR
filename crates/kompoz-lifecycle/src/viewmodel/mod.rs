@@ -70,6 +70,12 @@ use std::rc::Rc;
 ///     }
 /// }
 /// ```
+///
+/// A Kotlin class `class X : ViewModel() { … }` in the Kotlin syntax is such a type: its handle holding the
+/// [`ViewModelImpl`], its `onCleared` override the trait's, its constructor (none, or a [`SavedStateHandle`]) its
+/// [`new_instance`](Self::new_instance).
+///
+/// Kotlin: `abstract class ViewModel`
 pub trait ViewModel: Any {
     /// Its base class's part (Kotlin's private `impl`): the closeables it closes as it is cleared.
     fn view_model_impl(&self) -> &ViewModelImpl;

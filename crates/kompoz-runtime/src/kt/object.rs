@@ -50,6 +50,36 @@ impl dyn KtObject {
     }
 }
 
+/// Kotlin's `x is T`/`x as? T` of a value of `Any` (`&*x` of an `Rc<dyn KtObject>`): the object's class.
+impl<T: Any + Clone> KtAs<T> for dyn KtObject {
+    fn kt_as_safe(&self) -> Option<T> {
+        self.kt_as::<T>()
+    }
+}
+
+/// Kotlin's `toString()` of a value of `Any`: a string's, a number's, a boolean's or a char's text, else its
+/// class's name and an identity hash (a value of `Any` whose text its class gives is held as its interface's).
+impl KtToString for dyn KtObject {
+    fn kt_write(&self, out: &mut String) {
+        let any = self.as_any();
+        macro_rules! shown {
+            ($($t:ty),*) => {$(
+                if let Some(v) = any.downcast_ref::<$t>() {
+                    return v.kt_write(out);
+                }
+            )*};
+        }
+        shown!(String, &'static str, i32, i64, f32, f64, bool, char, u8, u16, u32, u64, i8, i16, usize);
+        out.push_str(&default_to_string(self.kt_class_name(), any as *const dyn Any as *const ()));
+    }
+}
+
+impl fmt::Display for dyn KtObject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.kt_to_string())
+    }
+}
+
 /// A value of Kotlin's `Any` cast (`Rc<dyn KtObject>` as a `T`: Kotlin's `x as? T`).
 pub fn kt_as_object<T: Any + Clone>(value: &Rc<dyn KtObject>) -> Option<T> {
     (**value).kt_as::<T>()
@@ -93,6 +123,16 @@ impl<T> KtVal<T> {
         T: Clone,
     {
         self.with(T::clone)
+    }
+
+    /// Its value, lent for as long as the cell lives (a base class's part a class's object holds: a ViewModel's
+    /// `ViewModelImpl`).
+    #[track_caller]
+    pub fn get_ref(&self) -> &T {
+        match self.0.get() {
+            Some(v) => v,
+            None => panic_kt("UninitializedPropertyAccessException", "a property read before it was initialized"),
+        }
     }
 }
 
@@ -186,9 +226,11 @@ impl<T: fmt::Debug> fmt::Debug for KtShared<T> {
 }
 
 /// An object declaration's instance, per thread (Kotlin's object is made at its first use; the Kotlin syntax's
-/// state is the thread's, as its top-level properties are): `with` gives it, made by `make` (which stores it before
-/// running its initializers, so they may use the object, as Kotlin's do) the first time.
-pub struct KtSingleton<F: 'static>(OnceCell<Rc<F>>);
+/// state is the thread's, as its top-level properties are): `get` gives it, made by `empty` (and stored before its
+/// initializers run, so they may use the object, as Kotlin's do) the first time. It lives as long as the program
+/// (Kotlin's object is never collected): a reference to it is `'static`, what a base class's part an object holds
+/// (`fn view_model_impl(&self) -> &ViewModelImpl`) is lent from.
+pub struct KtSingleton<F: 'static>(OnceCell<&'static F>);
 
 impl<F: 'static> KtSingleton<F> {
     pub const fn new() -> KtSingleton<F> {
@@ -196,15 +238,33 @@ impl<F: 'static> KtSingleton<F> {
     }
 
     /// The instance: made with `empty` and initialized with `init` the first time.
-    pub fn get(&self, empty: impl FnOnce() -> F, init: impl FnOnce(&Rc<F>)) -> Rc<F> {
+    pub fn get(&self, empty: impl FnOnce() -> F, init: impl FnOnce(&'static F)) -> &'static F {
         if let Some(f) = self.0.get() {
-            return f.clone();
+            return f;
         }
-        let f = Rc::new(empty());
-        let _ = self.0.set(f.clone());
-        init(&f);
+        let f: &'static F = Box::leak(Box::new(empty()));
+        let _ = self.0.set(f);
+        init(f);
         f
     }
+}
+
+/// What a suspending member of a Kotlin interface gives in Rust (a trait's `async` method can't be called through a
+/// trait object): its future, boxed.
+pub type KtFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
+
+/// A value of a Kotlin interface (a trait object: `value`, what its object is, and `cast`, the object's own answer
+/// for the interfaces and sealed classes it is) as a `T`, if it is one: Kotlin's `x as? T` of an interface's value.
+pub fn kt_dyn_as<T: Any + Clone>(value: &dyn Any, cast: impl FnOnce() -> Option<Box<dyn Any>>) -> Option<T> {
+    if let Some(v) = value.downcast_ref::<T>() {
+        return Some(v.clone());
+    }
+    cast().and_then(|b| b.downcast::<T>().ok()).map(|b| *b)
+}
+
+/// Whether two values are one object (Kotlin's `===`, and `==` of a class that doesn't override `equals`).
+pub fn kt_same_object(a: &dyn Any, b: &dyn Any) -> bool {
+    std::ptr::addr_eq(a as *const dyn Any, b as *const dyn Any)
 }
 
 impl<F: 'static> Default for KtSingleton<F> {
@@ -258,5 +318,17 @@ mod tests {
         first.set(11);
         let again = S.with(|s| s.get(KtVar::new, |f| f.set(99)));
         assert_eq!(again.get(), 11);
+    }
+
+    #[test]
+    fn interface_values_cast() {
+        #[derive(Clone, PartialEq, Debug)]
+        struct A(i32);
+        let a = A(1);
+        assert_eq!(kt_dyn_as::<A>(&a, || None), Some(A(1)));
+        assert_eq!(kt_dyn_as::<String>(&a, || Some(Box::new(String::from("as")))), Some("as".to_string()));
+        assert_eq!(kt_dyn_as::<String>(&a, || None), None);
+        let b = A(1);
+        assert!(kt_same_object(&a, &a) && !kt_same_object(&a, &b));
     }
 }

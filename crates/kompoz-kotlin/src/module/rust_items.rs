@@ -54,6 +54,35 @@ fn collect(items: &[Item], module: &str, out: &mut Vec<RustItem>) {
             Item::Impl(imp) if imp.trait_.is_none() || named_attr(&imp.attrs).is_some() => {
                 impl_block(imp, module, out);
             }
+            // (stage 14 WPA) A trait: its methods (reached through it), and, when its doc line says ``Kotlin: `open
+            // class X` `` (or `abstract class`), a base class Kotlin's classes derive from.
+            Item::Trait(t) if visible(&t.vis) => {
+                let via = unraw(&t.ident);
+                for ti in &t.items {
+                    if let syn::TraitItem::Fn(f) = ti {
+                        out.push(function(&f.attrs, &f.sig, "", &via, module, false));
+                    }
+                }
+                if let Some(doc) = kotlin_doc_line(&t.attrs) {
+                    let open = doc.starts_with("open class ");
+                    if let Some(name) = doc.strip_prefix("abstract class ").or_else(|| doc.strip_prefix("open class "))
+                    {
+                        let name = name.split(['(', '<', ' ']).next().unwrap_or(name);
+                        let mut it = base(name, &via, Kind::Value, &via, module);
+                        it.flags = 0;
+                        let required = t
+                            .items
+                            .iter()
+                            .filter_map(|i| match i {
+                                syn::TraitItem::Fn(f) if f.default.is_none() => Some(unraw(&f.sig.ident)),
+                                _ => None,
+                            })
+                            .collect();
+                        it.base = Some((open, required));
+                        out.push(it);
+                    }
+                }
+            }
             Item::Const(c) if visible(&c.vis) => out.push(value(&unraw(&c.ident), &c.ty, module)),
             Item::Static(s) if visible(&s.vis) => out.push(value(&unraw(&s.ident), &s.ty, module)),
             Item::Type(t) if visible(&t.vis) => {
@@ -107,6 +136,7 @@ fn base(kotlin: &str, rust: &str, kind: Kind, owner: &str, module: &str) -> Rust
         flags: flags::REACHABLE,
         thread_local: false,
         alias: None,
+        base: None,
     }
 }
 
@@ -166,6 +196,20 @@ fn param_default(attrs: &[Attribute]) -> Option<String> {
         syn::Meta::List(l) => Some(text(l.tokens.clone())),
         _ => Some(String::new()),
     }
+}
+
+/// The text of an item's doc line ``Kotlin: `…` ``.
+fn kotlin_doc_line(attrs: &[Attribute]) -> Option<String> {
+    for a in attrs.iter().filter(|a| a.path().is_ident("doc")) {
+        let syn::Meta::NameValue(nv) = &a.meta else { continue };
+        let syn::Expr::Lit(l) = &nv.value else { continue };
+        let syn::Lit::Str(s) = &l.lit else { continue };
+        let line = s.value();
+        if let Some(text) = line.trim().strip_prefix("Kotlin: `").and_then(|r| r.strip_suffix('`')) {
+            return Some(text.to_string());
+        }
+    }
+    None
 }
 
 /// The name a doc line ``Kotlin: `name(…)` `` gives a function (its part before the parameters and any type
@@ -603,6 +647,30 @@ mod tests {
         assert_eq!(find(&items, "", "D", Kind::Value).module, "app::list::deep");
         assert_eq!(find(&items, "", "seen", Kind::Function).module, "app::private_mod");
         assert!(!items.iter().any(|i| i.rust == "private"));
+    }
+
+    #[test]
+    fn traits_and_base_classes() {
+        let items = rust_items(
+            r#"
+            /// Kotlin: `open class Greeting`
+            pub trait Greeting {
+                fn hello(&self) -> String { String::new() }
+                fn name(&self) -> String;
+            }
+            pub trait Plain { fn run(&self, n: i32); }
+            trait Hidden { fn no(&self); }
+            "#,
+            "",
+        );
+        let hello = items.iter().find(|i| i.rust == "hello").expect("a trait's method");
+        assert_eq!((hello.via.as_str(), hello.kind, hello.receiver), ("Greeting", Kind::Method, Receiver::Ref));
+        let base = items.iter().find(|i| i.base.is_some()).expect("the base class");
+        assert_eq!((base.kotlin.as_str(), base.rust.as_str()), ("Greeting", "Greeting"));
+        assert_eq!(base.base, Some((true, vec!["name".to_string()])));
+        assert!(items.iter().any(|i| i.rust == "run" && i.via == "Plain"));
+        assert!(!items.iter().any(|i| i.rust == "no"));
+        assert_eq!(items.iter().filter(|i| i.base.is_some()).count(), 1);
     }
 
     #[test]

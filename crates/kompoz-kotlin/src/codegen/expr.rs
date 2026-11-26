@@ -401,7 +401,8 @@ impl Gen<'_, '_> {
     fn is_check(&mut self, inner: &Expr, negated: bool, ty: &Type, loc: Loc) -> Out {
         let span = self.span(loc);
         let kt = self.kt(span);
-        let operand = self.expr(inner).ts;
+        let o = self.expr(inner);
+        let operand = self.cast_operand_of(o.ts, &o.ty, span);
         let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, TypePos::Value);
         let ts = quote_spanned!(span=> #kt::kt_is::<#target, _>(&#operand));
         Out::plain(if negated { quote_spanned!(span=> !#ts) } else { ts }, Ty::Bool)
@@ -413,7 +414,8 @@ impl Gen<'_, '_> {
     fn cast(&mut self, inner: &Expr, safe: bool, ty: &Type, loc: Loc) -> Out {
         let span = self.span(loc);
         let kt = self.kt(span);
-        let operand = self.expr(inner).ts;
+        let o = self.expr(inner);
+        let operand = self.cast_operand_of(o.ts, &o.ty, span);
         let target_ty = Type { nullable: false, ..ty.clone() };
         let target = self.rust_type(&target_ty, TypePos::Value);
         let base = self.ty_of(&target_ty);
@@ -459,6 +461,17 @@ impl Gen<'_, '_> {
                 return Out::plain(quote_spanned!(span=> (#r.#m() as i32)), Ty::Int);
             }
             return Out::plain(quote_spanned!(span=> #r.#m()), ty);
+        }
+        // (stage 14 WPA) an entry of the enum class whose member this is (`LOW` in `Rank`'s body): `Rank::LOW`
+        if let Some((owner, ty)) = self.receivers.iter().rev().find_map(|r| {
+            lookup(&n.name)
+                .iter()
+                .find(|i| i.kind == Kind::Variant && i.owner == r.ty.as_str() && i.krate.is_empty())
+                .map(|i| (r.ty.clone(), Ty::from_rust(i.ret)))
+        }) {
+            let o = ident(&owner, span);
+            let v = self.name_ident(&n.name, n.loc);
+            return Out::plain(quote_spanned!(span=> #o::#v), ty);
         }
         if let Some(v) = self.file.vals.get(&n.name).cloned() {
             self.record_ref(n.loc, crate::analysis::Target::Declaration(n.name.clone()));
@@ -721,6 +734,13 @@ impl Gen<'_, '_> {
                 Expr { kind: ExprKind::Member { receiver: Box::new(receiver.clone()), safe, name: name.clone() }, loc };
             if let Some(out) = self.resource_accessor(&e) {
                 return out;
+            }
+            // (stage 14 WPA) a user's object nested in a class, as a value: `LoadState.Loading`
+            if let Some(c) = self.user_type_expr(&e)
+                && c.shape == super::class::Shape::Object
+            {
+                let i = ident(&c.rust, self.span(name.loc));
+                return Out::plain(quote_spanned!(span=> #i {}), Ty::named(&c.rust));
             }
         }
         // A Material icon (`Icons.Filled.Add`, `Icons.AutoMirrored.Filled.ArrowBack`): the icons crates' function of
@@ -1359,6 +1379,13 @@ impl Gen<'_, '_> {
         if let Some(qualified) = self.imported_member(e) {
             return self.peek_ty(&qualified);
         }
+        // (stage 14 WPA) a user's object nested in a class, as a value: `LoadState.Loading`
+        if let ExprKind::Member { safe: false, .. } = &e.kind
+            && let Some(c) = self.user_type_expr(e)
+            && c.shape == super::class::Shape::Object
+        {
+            return Ty::named(&c.rust);
+        }
         match &e.kind {
             ExprKind::Number(n) => match n.kind {
                 NumberKind::Int => Ty::Int,
@@ -1384,6 +1411,15 @@ impl Gen<'_, '_> {
                 }
                 if let Some(t) = self.receiver_values().iter().find_map(|(r, value)| {
                     members_of(r, &n.name).find(|i| i.params.is_empty()).map(|i| owner_arg_ret(value, i.ret))
+                }) {
+                    return t;
+                }
+                // (an entry of the enum class whose member this is: `RIGHT` in `Turn`'s body)
+                if let Some(t) = self.receiver_values().iter().find_map(|(r, _)| {
+                    lookup(&n.name)
+                        .iter()
+                        .find(|i| i.kind == Kind::Variant && i.owner == r.as_str())
+                        .map(|i| Ty::from_rust(i.ret))
                 }) {
                     return t;
                 }
@@ -1913,6 +1949,12 @@ impl Gen<'_, '_> {
                     .or_else(|| free_functions(&n.name).find(|i| i.params.len() >= n_args && named(i)))
                     .or_else(|| free_functions(&n.name).find(named))
                     .or_else(|| free_functions(&n.name).next())
+                    // (a generic type's `new`, Kotlin's constructor of it: `MutableStateFlow(listOf(…))`)
+                    .or_else(|| {
+                        lookup("new").iter().find(|i| {
+                            i.kind == Kind::Function && i.owner == n.name.as_str() && i.params.len() == n_args
+                        })
+                    })
                     .map(|i| self.generic_ret(i, type_args, args, trailing))
                     .unwrap_or_else(|| if is_pascal(&n.name) { Ty::named(&n.name) } else { Ty::Unknown })
             }
@@ -1988,6 +2030,17 @@ impl Gen<'_, '_> {
         args: &[Arg],
         trailing: Option<&Lambda>,
     ) -> Ty {
+        // (a generic type's constructor giving `Self`, `MutableStateFlow::new(value: T)`: the type of its parameters,
+        // `MutableStateFlow<T>`, bound by the arguments)
+        let own;
+        let item = match index::generics(item.owner) {
+            Some(ps) if item.ret.trim() == "Self" && !item.owner.is_empty() => {
+                own =
+                    index::Item { ret: index::overlay::intern(&format!("{}<{}>", item.owner, ps.join(", "))), ..*item };
+                &own
+            }
+            _ => item,
+        };
         let t = self.generic_ret_of_one(item, type_args, args, trailing);
         // (one of several type parameters, or one told by a part of an argument's type — `checkNotNull(x)`'s `T` of a
         // `T?` —: each bound as a method's are)

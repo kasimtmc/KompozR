@@ -84,6 +84,7 @@ impl Gen<'_, '_> {
                     "Char" => Ty::Char,
                     "String" | "CharSequence" => Ty::String,
                     "Unit" => Ty::Unit,
+                    "Any" if args.is_empty() => Ty::Named("Rc".into(), vec![Ty::named("KtObject")]),
                     "Short" | "Byte" | "UInt" | "ULong" | "UShort" | "UByte" => Ty::OtherInt,
                     "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" | "Array" => {
                         Ty::List(Box::new(first()))
@@ -97,9 +98,10 @@ impl Gen<'_, '_> {
                     "Pair" => Ty::Pair(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown))),
                     "IntRange" => Ty::Range(Box::new(Ty::Int)),
                     "ClosedFloatingPointRange" | "ClosedRange" => Ty::ClosedRange(Box::new(first())),
-                    // (a user's type by its Rust name: a nested one named alone inside its class)
+                    // (a user's type by its Rust name: a nested one named alone inside its class; an open or
+                    // abstract class's values its trait's objects)
                     name if self.user_class(name).is_some() => {
-                        Ty::Named(self.user_class(name).map(|c| c.rust.clone()).unwrap_or_default(), args)
+                        Ty::Named(self.user_class(name).map(|c| c.value_rust()).unwrap_or_default(), args)
                     }
                     // (an alias of the API's or of the crate's Rust: what it names, for its members)
                     name if args.is_empty() && crate::index::alias(name).is_some() => {
@@ -186,10 +188,17 @@ impl Gen<'_, '_> {
                 let i = proc_macro2::Ident::new(rust, span);
                 return quote_spanned!(span=> #i);
             }
-            // (a user's nested type: its Rust name)
-            if let Some(c) = self.user_class(&kotlin) {
-                let i = proc_macro2::Ident::new(&c.rust, span);
-                return quote_spanned!(span=> #i);
+            // (a user's nested type: its Rust name; its arguments the last segment's)
+            if let Some(c) = self.user_class(&kotlin).cloned() {
+                let last = segs.last().expect("a type has a name");
+                let mut args = Vec::new();
+                for a in &last.args {
+                    match a {
+                        TypeArg::Type { ty, .. } => args.push(self.rust_type(ty, TypePos::Value)),
+                        TypeArg::Star(l) => args.push(self.star_projection(*l)),
+                    }
+                }
+                return self.user_type_tokens(&c, args, span);
             }
             // (the API's nested types are Rust's types in a module of the outer's name: `PressInteraction.Press` is
             // `PressInteraction::Press`)
@@ -205,7 +214,7 @@ impl Gen<'_, '_> {
         for a in &last.args {
             match a {
                 TypeArg::Type { ty, .. } => args.push(self.rust_type(ty, TypePos::Value)),
-                TypeArg::Star(l) => args.push(self.later(*l, "a star projection")),
+                TypeArg::Star(l) => args.push(self.star_projection(*l)),
             }
         }
         let a = |k: usize| args.get(k).cloned().unwrap_or_else(|| quote_spanned!(span=> _));
@@ -228,7 +237,8 @@ impl Gen<'_, '_> {
             // (Kotlin's `CharSequence` too: a text, which KompozR's APIs take and give as `String`s)
             "String" | "CharSequence" => quote_spanned!(span=> ::std::string::String),
             "Nothing" => quote_spanned!(span=> !),
-            "Any" => self.later(loc, "the type `Any`"),
+            // (Kotlin's `Any`: a value whose class can be asked, shared — stage 14 WPA)
+            "Any" => quote_spanned!(span=> ::std::rc::Rc<dyn #kt::KtObject>),
             "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" | "Array" => {
                 let t = a(0);
                 quote_spanned!(span=> ::std::vec::Vec<#t>)
@@ -270,13 +280,24 @@ impl Gen<'_, '_> {
                     _ => quote_spanned!(span=> ::std::rc::Rc<dyn #i #g>),
                 }
             }
+            // (a user's type by its Rust name: a nested one named alone inside its class)
+            _ if self.user_class(name).is_some() => {
+                let c = self.user_class(name).cloned().expect("a user's type");
+                self.user_type_tokens(&c, args, span)
+            }
             _ => {
-                // (a user's type by its Rust name: a nested one named alone inside its class)
-                let rust = self.user_class(name).map_or_else(|| name.to_string(), |c| c.rust.clone());
-                let i = self.name_ident(&rust, last.name.loc);
+                let i = self.name_ident(name, last.name.loc);
                 if args.is_empty() { quote_spanned!(span=> #i) } else { quote_spanned!(span=> #i<#(#args),*>) }
             }
         }
+    }
+
+    /// A user's type as Rust's, its arguments given: an interface's or an open class's values its trait's shared
+    /// objects (`Rc<dyn Titled>`, `Rc<dyn PlateOpen>`), the others their type (`Crate<i32>`).
+    fn user_type_tokens(&self, c: &super::class::UserClass, args: Vec<TokenStream>, span: Span) -> TokenStream {
+        let i = proc_macro2::Ident::new(&c.value_rust(), span);
+        let g = if args.is_empty() { quote!() } else { quote_spanned!(span=> <#(#args),*>) };
+        if c.is_dyn() { quote_spanned!(span=> ::std::rc::Rc<dyn #i #g>) } else { quote_spanned!(span=> #i #g) }
     }
 
     /// A type the generator inferred, as Rust's (for a function's result it wasn't written for).
@@ -332,11 +353,17 @@ impl Gen<'_, '_> {
             }
             Ty::Named(n, args) => {
                 let i = proc_macro2::Ident::new(n, span);
-                if args.is_empty() || args.contains(&Ty::Unknown) {
+                let t = if args.is_empty() || args.contains(&Ty::Unknown) {
                     quote_spanned!(span=> #i)
                 } else {
                     let a = args.iter().map(|t| self.rust_of_ty(t, span));
                     quote_spanned!(span=> #i<#(#a),*>)
+                };
+                // (a user's interface or open class: its values' shared trait object)
+                if self.classes.classes.values().any(|c| c.is_dyn() && c.value_rust() == *n) {
+                    quote_spanned!(span=> ::std::rc::Rc<dyn #t>)
+                } else {
+                    t
                 }
             }
             _ => quote_spanned!(span=> _),

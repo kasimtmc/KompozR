@@ -909,6 +909,10 @@ struct Scan {
     /// The API's plain `pub type` aliases (`type NavHostController = NavController`): (name, target), what Kotlin's
     /// name of the alias is as a type (its members the target's). A name two crates alias otherwise: none.
     type_aliases: BTreeMap<String, Option<String>>,
+    /// (stage 14 WPA) The API's abstract and open classes Kotlin classes derive from: traits whose doc line says
+    /// ``Kotlin: `abstract class ViewModel` `` (or `open class`): (Kotlin's name, the trait, open, the trait's methods
+    /// without a default body).
+    bases: BTreeSet<(String, String, bool, Vec<String>)>,
 }
 
 fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, String)>), String> {
@@ -936,7 +940,7 @@ fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, Strin
     items.sort();
     items.dedup();
     interface_supertypes(&items, &scan.trait_impls, &mut scan.derefs);
-    let text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics, &scan.type_aliases);
+    let text = render_kotlin(&items, &scan.derefs, &scan.types, &scan.generics, &scan.type_aliases, &scan.bases);
     let mut supers = scan.derefs;
     supers.extend(scan.alias_supers);
     Ok((text, supers))
@@ -1363,6 +1367,28 @@ fn collect(items: &[Item], cx: &Cx, scan: &mut Scan) {
             }
             Item::Trait(t) if is_pub(&t.vis) && !hidden(&t.attrs) => {
                 let via = t.ident.to_string();
+                // (an abstract or open class of the API, Kotlin's base of a user's class: its trait's required
+                // methods are what a subclass gives)
+                // (a trait Kotlin names otherwise, a nested interface: `ViewModelProvider.Factory`)
+                if let Some(kotlin) = kotlin_doc(&t.attrs).filter(|d| !d.contains('(') && !d.contains(' ')) {
+                    scan.types.insert((kotlin, via.clone()));
+                }
+                if let Some(doc) = kotlin_doc(&t.attrs) {
+                    let open = doc.starts_with("open class ");
+                    if let Some(name) = doc.strip_prefix("abstract class ").or_else(|| doc.strip_prefix("open class "))
+                    {
+                        let name = name.split(['(', '<', ' ']).next().unwrap_or(name).to_string();
+                        let required = t
+                            .items
+                            .iter()
+                            .filter_map(|i| match i {
+                                TraitItem::Fn(f) if f.default.is_none() => Some(f.sig.ident.to_string()),
+                                _ => None,
+                            })
+                            .collect();
+                        scan.bases.insert((name, via.clone(), open, required));
+                    }
+                }
                 // (a fun interface: its SAM constructor takes the lambda its closures are; one of `Fn()` closures,
                 // `Content`, stands for Kotlin's `() -> Unit`, a function type, which has none)
                 if FUN_INTERFACES.with(|f| f.borrow().contains_key(&via)) {
@@ -1966,6 +1992,7 @@ fn render_kotlin(
     types: &BTreeSet<(String, String)>,
     generics: &BTreeMap<String, Option<Vec<String>>>,
     aliases: &BTreeMap<String, Option<String>>,
+    bases: &BTreeSet<(String, String, bool, Vec<String>)>,
 ) -> String {
     let mut out = String::from(
         "// The API index the Kotlin syntax's generator reads: written by `cargo xtask kotlin-index` from the\n\
@@ -2058,6 +2085,15 @@ fn render_kotlin(
         {
             let _ = writeln!(out, "    ({name:?}, {target:?}),");
         }
+    }
+    out.push_str(
+        "];\n\n/// The API's abstract and open classes Kotlin's classes derive from (a trait's doc line `Kotlin: abstract \
+         class …`).\n",
+    );
+    out.push_str("pub static BASES: &[Base] = &[\n");
+    for (kotlin, rust, open, required) in bases {
+        let list = required.iter().map(|r| format!("{r:?}")).collect::<Vec<_>>().join(", ");
+        let _ = writeln!(out, "    Base {{ kotlin: {kotlin:?}, rust: {rust:?}, open: {open}, required: &[{list}] }},");
     }
     out.push_str("];\n");
     out

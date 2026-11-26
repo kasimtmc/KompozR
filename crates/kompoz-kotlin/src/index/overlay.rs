@@ -24,8 +24,16 @@ pub struct Overlay {
     pub types: Vec<(&'static str, &'static str)>,
     /// Type aliases: name → Rust's text of the target.
     pub aliases: Vec<(&'static str, &'static str)>,
-    /// The user's interfaces (Rust's names): traits whose values are shared trait objects (`Rc<dyn I>`).
+    /// The user's interfaces (Rust's names): traits whose values are shared trait objects (`Rc<dyn I>`); the traits
+    /// of their open and abstract classes too (`PlateOpen`).
     pub interfaces: Vec<&'static str>,
+    /// (stage 14 WPA) The user's types' supertypes (Rust's names: a class's interfaces, its base class's trait, a
+    /// sealed class's members' trait): (type, supertype), the supertype's members the type's.
+    pub supertypes: Vec<(&'static str, &'static str)>,
+    /// The base classes the crate's Rust declares (traits with a doc line ``Kotlin: `open class X` ``).
+    pub bases: Vec<super::Base>,
+    /// The user's generic types' type parameters (`Crate` → `T`), as [`super::GENERICS`] has the API's.
+    pub generics: Vec<(&'static str, &'static [&'static str])>,
 }
 
 thread_local! {
@@ -97,6 +105,16 @@ pub fn intern_strs(list: Vec<&'static str>) -> &'static [&'static str] {
     let leaked: &'static [&'static str] = Box::leak(list.clone().into_boxed_slice());
     map.insert(list, leaked);
     leaked
+}
+
+/// A user's generic type's type parameters.
+pub(super) fn generics(rust: &str) -> Option<&'static [&'static str]> {
+    current()?.generics.iter().find(|(t, _)| *t == rust).map(|(_, p)| *p)
+}
+
+/// The supertypes of a user's type (Rust's names), nearest first.
+pub fn supertypes(rust: &str) -> Vec<&'static str> {
+    current().map(|o| o.supertypes.iter().filter(|(t, _)| *t == rust).map(|(_, s)| *s).collect()).unwrap_or_default()
 }
 
 /// Whether a Rust type name is one of the user's interfaces.

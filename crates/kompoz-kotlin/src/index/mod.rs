@@ -55,7 +55,7 @@
 mod generated;
 pub mod overlay;
 
-pub use generated::{ALIASES, DEREFS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
+pub use generated::{ALIASES, BASES, DEREFS, GENERICS, ITEMS, TWIN_BOUNDS, TYPES};
 
 /// An item of the Rust API.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -209,6 +209,30 @@ pub struct TwinBound {
     pub crossinline: &'static [&'static str],
 }
 
+/// (stage 14 WPA) An abstract or open class of the API, or of the crate's Rust, that Kotlin's classes derive from: a
+/// trait whose doc line says ``Kotlin: `abstract class ViewModel` `` (or `open class`), its methods the class's
+/// members (a required one abstract, a provided one open). A required method taking nothing but `&self` and giving
+/// `&State` is the base's own part a subclass holds (`view_model_impl(&self) -> &ViewModelImpl`: made by
+/// `State::new(…)` of the super constructor's arguments).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Base {
+    /// Kotlin's name (`ViewModel`).
+    pub kotlin: &'static str,
+    /// The trait (`ViewModel`).
+    pub rust: &'static str,
+    /// An open class (else abstract).
+    pub open: bool,
+    /// The trait's methods without a default body (Rust's names).
+    pub required: &'static [&'static str],
+}
+
+/// The base class a Kotlin name is: the translation's crate's (the overlay's) or the API's.
+pub fn base(kotlin: &str) -> Option<Base> {
+    overlay::current()
+        .and_then(|o| o.bases.iter().find(|b| b.kotlin == kotlin).copied())
+        .or_else(|| BASES.iter().find(|b| b.kotlin == kotlin).copied())
+}
+
 /// What [`Item::flags`] holds.
 pub mod flags {
     /// `#[kompozable]`.
@@ -272,6 +296,12 @@ pub fn deref_chain(owner: &str) -> Vec<&str> {
                 chain.push(to);
             }
         }
+        // (the user's types' supertypes: their interfaces and base classes, whose members are theirs)
+        for to in overlay::supertypes(from) {
+            if !chain.contains(&to) {
+                chain.push(to);
+            }
+        }
         next += 1;
     }
     chain
@@ -306,7 +336,7 @@ pub fn twin_bounds(item: &Item) -> impl Iterator<Item = &'static TwinBound> + us
 
 /// A generic type's type parameters, in order (`Animatable` → `["T", "V"]`).
 pub fn generics(owner: &str) -> Option<&'static [&'static str]> {
-    GENERICS.iter().find(|(o, _)| *o == owner).map(|(_, p)| *p)
+    overlay::generics(owner).or_else(|| GENERICS.iter().find(|(o, _)| *o == owner).map(|(_, p)| *p))
 }
 
 /// The items of a Rust name, in the index's order (a scan).

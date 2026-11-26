@@ -8,16 +8,21 @@
 //! | `object O { … }` | `pub struct O {}` (`O {}` its value: a braced struct, so a function `O` can be beside it); its members `&self` methods; its state the thread's (`kt::KtSingleton`), made at first use as Kotlin's object is |
 //! | `companion object { … }` of `C` | an object `CCompanion` (`C.Companion`; a named one `CName`), `C::Companion` its value; `C.f()` is `CCompanion {}.f()`; its members are in scope in `C`'s body (an implicit receiver, `__kz_companion`) |
 //! | `enum class E(val n: Int) { A(1), B(2) }` | `#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)] pub enum E { A, B }` with `name()`, `ordinal()`, `E::entries()`, `E::values()`, `E::value_of(…)`, the constructor's properties as getters (`n()`: a `match` of the entries' arguments), member functions taking `self` |
-//! | `interface I { fun f(): Int; val p: String }` (abstract members) | `pub trait I { fn f(&self) -> i32; fn p(&self) -> String; }`; its companion an object as a class's (`I.Companion`) |
+//! | `interface I { fun f(): Int; val p: String }` | `pub trait I { fn f(&self) -> i32; fn p(&self) -> String; }` and what Kotlin's values of it are (`Rc<dyn I>`: see [`super::hierarchy`]); its companion an object as a class's (`I.Companion`) |
+//! | `inner class C(…)` of `O` | a plain class holding `O`'s value (`__kz_outer`), made by `O`'s method `C(…)` (`o.C(…)`, `C(…)` in `O`); its members see `O`'s (`this@O`) after their own |
+//! | `class C<T>(…)`, `fun <T> f(…)` | Rust's type parameters, bounded by their uses (see [`super::generics`]) |
 //! | nested declarations (`class A { data class B … }`) | the outer's name before theirs (`AB`), Kotlin's `A.B` that type (the overlay's types), `B` alone inside `A` |
 //! | `typealias N<T> = List<T>` | `pub type N<T> = Vec<T>;` and seen through wherever the generator reads a type (Kotlin's alias is the type) |
 //! | `@Serializable` on a data class or an object | `#[derive(Route)]` (a typed navigation route: kompoz-navigation's) |
 //!
 //! A class's members are translated as functions are (named arguments and defaults through `#[named]`), with the
-//! class's value the implicit receiver (`self`). What Kotlin's classes do beyond this — inheritance (`open`,
-//! `abstract`, `sealed`, interfaces implemented), `inner` classes, generic classes, object expressions, rich enum
-//! entries, operator functions, `equals`/`hashCode` overrides, property accessors with backing fields and delegates
-//! — is the next packages' (an error saying so where it is written).
+//! class's value the implicit receiver (`self`). Inheritance — interfaces implemented, `open`, `abstract` and
+//! `sealed` classes, the API's base classes — is [`super::hierarchy`]'s (stage 14 WPA), what a class's own Rust
+//! holds of it written here (its base part `__kz_super`, its constructor's call first in its initializer, the trait
+//! impls); an enum entry's body is an arm of its class's members' `match`es; a data class's body holds stored and
+//! delegated (`by lazy`) properties, `==` and `toString()` of its constructor's properties only. Operator
+//! functions, `equals`/`hashCode` overrides, accessors with backing fields and class delegates, composable members,
+//! and interfaces implemented by delegation (`I by value`) aren't translated yet (an error saying so).
 
 use super::names::{ident, is_pascal, snake};
 use super::resolve::*;
@@ -51,6 +56,47 @@ pub(crate) struct UserClass {
     pub shape: Shape,
     /// Its companion object's Rust type.
     pub companion: Option<String>,
+    /// (stage 14 WPA) What may derive from it: a final class, an open, abstract or sealed one.
+    pub inherit: super::hierarchy::Inherit,
+    /// Its type parameters' names (`T` of `Crate<T>`).
+    pub type_params: Vec<String>,
+    /// An `inner` class: its objects hold their outer class's (the Rust type of `outer`).
+    pub inner: Option<String>,
+    /// A `fun interface`.
+    pub fun_interface: bool,
+}
+
+impl UserClass {
+    /// The trait of its members a class others derive from has (`PlateOpen` of `abstract class Plate`; an
+    /// interface's is itself); none for a final class.
+    pub fn members_trait(&self) -> Option<String> {
+        use super::hierarchy::Inherit;
+        match (self.shape, self.inherit) {
+            // (a sealed interface's values are its enum's: its members' trait another)
+            (Shape::Interface, Inherit::Sealed) => Some(format!("{}Open", self.rust)),
+            (Shape::Interface, _) => Some(self.rust.clone()),
+            (_, Inherit::Open | Inherit::Abstract | Inherit::Sealed) => Some(format!("{}Open", self.rust)),
+            _ => None,
+        }
+    }
+
+    /// The Rust type Kotlin's type of its name is, a value's: an open or abstract class's trait object
+    /// (`PlateOpen`, held as `Rc<dyn PlateOpen>`), else its own (an interface's trait, held so too).
+    pub fn value_rust(&self) -> String {
+        use super::hierarchy::Inherit;
+        match (self.shape, self.inherit) {
+            (Shape::Data | Shape::Plain, Inherit::Open | Inherit::Abstract) => format!("{}Open", self.rust),
+            _ => self.rust.clone(),
+        }
+    }
+
+    /// Whether Kotlin's values of its type are shared trait objects (`Rc<dyn …>`).
+    pub fn is_dyn(&self) -> bool {
+        use super::hierarchy::Inherit;
+        (self.shape == Shape::Interface && self.inherit != Inherit::Sealed)
+            || (matches!(self.shape, Shape::Data | Shape::Plain)
+                && matches!(self.inherit, Inherit::Open | Inherit::Abstract))
+    }
 }
 
 /// A class-like declaration found, with what encloses it.
@@ -80,6 +126,16 @@ pub(crate) struct ClassTable {
     /// The type aliases (the translation's and the module table's Kotlin ones) by name.
     pub aliases: HashMap<String, TypeAlias>,
     pub decls: Vec<ClassDecl>,
+    /// The type arguments of the object expression being written's interface (`Source<Int>`'s).
+    pub object_args: Vec<Type>,
+    /// Items a class's members put beside the class (a composable member's hidden composable function).
+    pub side_items: TokenStream,
+    /// The generic functions of the trait being written (its extension trait's).
+    pub trait_ext: Vec<TokenStream>,
+    /// The where clause of the trait being written's provided methods (its type parameters' bounds).
+    pub trait_where: TokenStream,
+    /// The star projections of the function's parameters being written (their places, the type parameters they are).
+    pub stars: Option<Vec<(crate::pos::Loc, proc_macro2::Ident)>>,
 }
 
 /// The Rust name of a companion of the class `outer_rust`, named `name` (none: `Companion`).
@@ -110,8 +166,18 @@ fn find_in(d: &Decl, outer: Option<(&str, &str)>, own: bool, out: &mut Vec<Class
                 ClassKind::Class => Shape::Plain,
             };
             let companion = c.companion().map(|o| companion_rust(&rust, o.name.as_ref()));
+            let inherit = super::hierarchy::Inherit::of(&c.modifiers, shape);
             out.push(ClassDecl {
-                info: UserClass { kotlin: kotlin.clone(), rust: rust.clone(), shape, companion },
+                info: UserClass {
+                    kotlin: kotlin.clone(),
+                    rust: rust.clone(),
+                    shape,
+                    companion,
+                    inherit,
+                    type_params: c.type_params.iter().map(|t| t.name.name.clone()).collect(),
+                    inner: if c.is_inner() { outer.map(|(_, r)| r.to_string()) } else { None },
+                    fun_interface: c.kind == ClassKind::FunInterface,
+                },
                 ast: ClassAst::Class(c.clone()),
                 outer: outer.map(|(_, r)| r.to_string()),
                 own,
@@ -133,7 +199,16 @@ fn find_in(d: &Decl, outer: Option<(&str, &str)>, own: bool, out: &mut Vec<Class
                 (k, r, Shape::Object)
             };
             out.push(ClassDecl {
-                info: UserClass { kotlin: kotlin.clone(), rust: rust.clone(), shape, companion: None },
+                info: UserClass {
+                    kotlin: kotlin.clone(),
+                    rust: rust.clone(),
+                    shape,
+                    companion: None,
+                    inherit: super::hierarchy::Inherit::Final,
+                    type_params: Vec::new(),
+                    inner: None,
+                    fun_interface: false,
+                },
                 ast: ClassAst::Object(o.clone()),
                 outer: outer.map(|(_, r)| r.to_string()),
                 own,
@@ -164,11 +239,35 @@ pub(crate) fn exported(d: &Decl) -> bool {
 /// What a member function or property is written in.
 #[derive(Clone)]
 pub(crate) struct MemberCx {
-    /// The type it is a member of (Rust's name).
+    /// The type it is a member of (Rust's name; an open class's or an interface's trait).
     pub owner: String,
     pub shape: Shape,
     /// The companion whose members are in scope (the class's own, or the companion itself's).
     pub companion: Option<String>,
+    /// An inner class's outer objects, nearest first: implicit receivers after its own (`this@Outer`).
+    pub outers: Vec<Outer>,
+}
+
+/// An inner class's outer object, as its members see it: a local made at their start (`let __kz_outer =
+/// self.__kz_outer();`), an implicit receiver labeled with the outer class's name.
+#[derive(Clone, Debug)]
+pub(crate) struct Outer {
+    /// The local (`__kz_outer`, `__kz_outer2`, …).
+    pub var: String,
+    /// What it is read from (`self.__kz_outer()`, `__kz_outer.__kz_outer()`).
+    pub from: String,
+    /// The outer class's Rust name.
+    pub ty: String,
+    pub value: Ty,
+    /// Its Kotlin name (`this@Scoreboard`).
+    pub label: String,
+}
+
+impl ClassDecl {
+    /// Where the declaration is.
+    pub(crate) fn info_loc(&self) -> Loc {
+        class_loc(&self.ast)
+    }
 }
 
 impl MemberCx {
@@ -284,6 +383,12 @@ impl Gen<'_, '_> {
             if !matches!(d.info.shape, Shape::Data | Shape::Plain) {
                 continue;
             }
+            // (an abstract or sealed class has no constructor of its own, an inner one's is its outer's method)
+            if matches!(d.info.inherit, super::hierarchy::Inherit::Abstract | super::hierarchy::Inherit::Sealed)
+                || d.info.inner.is_some()
+            {
+                continue;
+            }
             let letters: String = k
                 .primary_constructor
                 .iter()
@@ -366,16 +471,73 @@ impl Gen<'_, '_> {
             self.classes.classes.insert(d.info.rust.clone(), d.info.clone());
             self.classes.names.entry(d.info.kotlin.clone()).or_insert(d.info.rust.clone());
             if d.outer.is_some() {
-                let short = d.info.kotlin.rsplit('.').next().unwrap_or(&d.info.kotlin).to_string();
-                self.classes.names.entry(short).or_insert(d.info.rust.clone());
                 types.push((overlay::intern(&d.info.kotlin), overlay::intern(&d.info.rust)));
             }
         }
+        // (a nested one's own name, where no other type has it: the top-level ones' first)
+        for d in decls.iter().filter(|d| d.outer.is_some()) {
+            let short = d.info.kotlin.rsplit('.').next().unwrap_or(&d.info.kotlin).to_string();
+            self.classes.names.entry(short).or_insert(d.info.rust.clone());
+        }
+        self.classes.decls = decls.clone();
         let mut base = overlay::current().map(|o| (*o).clone()).unwrap_or_default();
         base.types.extend(types);
-        base.interfaces
-            .extend(decls.iter().filter(|d| d.info.shape == Shape::Interface).map(|d| overlay::intern(&d.info.rust)));
+        // (the traits whose values are shared objects: interfaces', open and abstract classes')
+        base.interfaces.extend(decls.iter().filter(|d| d.info.is_dyn()).map(|d| overlay::intern(&d.info.value_rust())));
+        // (what a type's members are: its supertypes' too)
+        for d in &decls {
+            let own = overlay::intern(&d.info.rust);
+            if let Some(t) = d.info.members_trait()
+                && t != d.info.rust
+            {
+                base.supertypes.push((own, overlay::intern(&t)));
+            }
+            for s in self.supers_of(d) {
+                let t = match &s.kind {
+                    super::hierarchy::SuperKind::Interface(r) => r.clone(),
+                    super::hierarchy::SuperKind::Class(r) => {
+                        self.user_class_rust(r).and_then(|c| c.members_trait()).unwrap_or_else(|| r.clone())
+                    }
+                    super::hierarchy::SuperKind::Base(b) => b.rust.to_string(),
+                    super::hierarchy::SuperKind::Api(t) => t.clone(),
+                };
+                base.supertypes.push((own, overlay::intern(&t)));
+                if let Some(mt) = d.info.members_trait()
+                    && mt != d.info.rust
+                {
+                    base.supertypes.push((overlay::intern(&mt), overlay::intern(&t)));
+                }
+            }
+            if !d.info.type_params.is_empty() || d.info.inner.is_some() {
+                let mut ps: Vec<&'static str> = Vec::new();
+                if let Some(o) = &d.info.inner
+                    && let Some(oc) = self.user_class_rust(o)
+                {
+                    ps.extend(oc.type_params.iter().map(|t| overlay::intern(t)));
+                }
+                ps.extend(d.info.type_params.iter().map(|t| overlay::intern(t)));
+                if !ps.is_empty() {
+                    let ps = overlay::intern_strs(ps);
+                    base.generics.push((own, ps));
+                    if let Some(mt) = d.info.members_trait()
+                        && mt != d.info.rust
+                    {
+                        base.generics.push((overlay::intern(&mt), ps));
+                    }
+                }
+            }
+        }
         self.overlay = Some(overlay::install(base.clone()));
+        let mut items = Vec::new();
+        for d in &decls {
+            items.extend(self.quiet(|g| g.class_items(d)));
+        }
+        // (again, the first pass's items seen: a member's type told by another class's constructor or member,
+        // `val items = MutableStateFlow(listOf(Todo(1, "Yaz")))`)
+        let mut first = base.clone();
+        first.items.splice(0..0, items);
+        self.overlay = None;
+        self.overlay = Some(overlay::install(first));
         let mut items = Vec::new();
         for d in &decls {
             items.extend(self.quiet(|g| g.class_items(d)));
@@ -390,11 +552,29 @@ impl Gen<'_, '_> {
     fn class_items(&mut self, d: &ClassDecl) -> Vec<index::Item> {
         let mut out = Vec::new();
         let c = &d.info;
-        let cx = MemberCx { owner: c.rust.clone(), shape: c.shape, companion: c.companion.clone() };
+        // (an open, abstract or sealed class's members are its trait's: its subclasses' through it)
+        let mowner = c.members_trait().unwrap_or_else(|| c.rust.clone());
+        let cx = MemberCx {
+            owner: mowner.clone(),
+            shape: c.shape,
+            companion: c.companion.clone(),
+            outers: self.outers_of(c),
+        };
         let members = match &d.ast {
             ClassAst::Class(k) => &k.body.members,
             ClassAst::Object(o) => &o.body.members,
         };
+        let generic = |name: &str| -> String {
+            let mut ps: Vec<String> = Vec::new();
+            if let Some(o) = &c.inner
+                && let Some(oc) = self.user_class_rust(o)
+            {
+                ps.extend(oc.type_params.iter().cloned());
+            }
+            ps.extend(c.type_params.iter().cloned());
+            if ps.is_empty() { name.to_string() } else { format!("{name}<{}>", ps.join(", ")) }
+        };
+        let self_ty = generic(&c.rust);
         // (the type itself: a value the user's code names)
         let mut ty = item(&c.rust, &c.rust, Kind::Value, &c.rust);
         ty.ret = overlay::intern(&c.rust);
@@ -408,15 +588,30 @@ impl Gen<'_, '_> {
                         .as_ref()
                         .map(|p| p.params.iter().map(|cp| cp.param.clone()).collect())
                         .unwrap_or_default();
-                    let mut ctor = item(&k.name.name, &c.rust, Kind::Function, "");
-                    ctor.params = self.item_params(&params, None);
-                    ctor.ret = overlay::intern(&c.rust);
-                    ctor.flags |= flags::NAMED;
-                    out.push(ctor);
-                    if c.kotlin != k.name.name {
-                        let mut q = ctor;
-                        q.kotlin = overlay::intern(&c.kotlin);
-                        out.push(q);
+                    let makes = matches!(c.inherit, super::hierarchy::Inherit::Final | super::hierarchy::Inherit::Open);
+                    if let Some(outer) = c.inner.clone().filter(|_| makes) {
+                        // (an inner class's constructor: a method of its outer class, `outer.Inner(…)`)
+                        let mut ctor = item(&k.name.name, &k.name.name, Kind::Method, &outer);
+                        let enum_outer = self.user_class_rust(&outer).is_some_and(|o| o.shape == Shape::Enum);
+                        ctor.receiver = if enum_outer { Receiver::Value } else { Receiver::Ref };
+                        ctor.params = self.item_params(&params, None);
+                        ctor.ret = overlay::intern(&self_ty);
+                        ctor.flags |= flags::NAMED;
+                        out.push(ctor);
+                    } else if makes {
+                        let mut ctor = item(&k.name.name, &c.rust, Kind::Function, "");
+                        ctor.params = self.item_params(&params, None);
+                        ctor.ret = overlay::intern(&self_ty);
+                        ctor.flags |= flags::NAMED;
+                        if !c.type_params.is_empty() {
+                            ctor.flags |= flags::TURBOFISH;
+                        }
+                        out.push(ctor);
+                        if c.kotlin != k.name.name {
+                            let mut q = ctor;
+                            q.kotlin = overlay::intern(&c.kotlin);
+                            out.push(q);
+                        }
                     }
                     for (n, m) in members.iter().enumerate().filter_map(|(n, m)| match m {
                         Member::Constructor(s) => Some((n, s)),
@@ -432,7 +627,7 @@ impl Gen<'_, '_> {
                             let ty = cp.param.ty.as_ref().map(|t| self.value_type_text(t)).unwrap_or_default();
                             out.push(self.property_item(
                                 &cp.param.name.name,
-                                &c.rust,
+                                &mowner,
                                 &ty,
                                 cp.property == Some(Mutability::Var),
                             ));
@@ -485,6 +680,23 @@ impl Gen<'_, '_> {
                     let mut values = item("values", "values", Kind::Function, &c.rust);
                     values.ret = overlay::intern(&list);
                     out.push(values);
+                    // (an entry's own functions: methods only its body calls)
+                    for e in &k.enum_entries {
+                        for m in e.body.iter().flat_map(|b| &b.members) {
+                            let Member::Decl(Decl::Function(f)) = m else { continue };
+                            if super::hierarchy::is_override(&f.modifiers) || f.receiver.is_some() {
+                                continue;
+                            }
+                            let rust = entry_own_name(&e.name.name, &f.name.name);
+                            let mut it = item(&f.name.name, &rust, Kind::Method, &c.rust);
+                            it.receiver = Receiver::Value;
+                            it.params = self.item_params(&f.params, None);
+                            let mut g = (**f).clone();
+                            g.name.name = rust.clone();
+                            it.ret = overlay::intern(&self.member_ret_text(&g, &cx));
+                            out.push(it);
+                        }
+                    }
                     let mut value_of = item("valueOf", "value_of", Kind::Function, &c.rust);
                     value_of.params = overlay::intern_params(vec![index::Param {
                         rust: "value",
@@ -513,9 +725,11 @@ impl Gen<'_, '_> {
             let Member::Decl(decl) = m else { continue };
             match decl {
                 Decl::Function(f) if f.receiver.is_none() => {
-                    let mut it = item(&f.name.name, &snake(&f.name.name), Kind::Method, &c.rust);
+                    let mut it = item(&f.name.name, &snake(&f.name.name), Kind::Method, &mowner);
                     it.receiver = if c.shape == Shape::Enum { Receiver::Value } else { Receiver::Ref };
-                    it.params = self.item_params(&f.params, None);
+                    // (a trait's method takes its values as they are: no `impl Into<…>`, which a trait object can't)
+                    let in_trait = (mowner != c.rust || c.shape == Shape::Interface).then_some(&cx);
+                    it.params = self.item_params(&f.params, in_trait);
                     it.ret = overlay::intern(&self.member_ret_text(f, &cx));
                     if f.params.iter().any(|p| p.default.is_some()) {
                         it.flags |= flags::NAMED;
@@ -533,7 +747,7 @@ impl Gen<'_, '_> {
                         Some(t) => self.value_type_text(t),
                         None => text,
                     };
-                    let mut it = self.property_item(&n.name, &c.rust, &text, p.is_var());
+                    let mut it = self.property_item(&n.name, &mowner, &text, p.is_var());
                     if c.shape == Shape::Enum {
                         it.receiver = Receiver::Value;
                     }
@@ -561,11 +775,15 @@ impl Gen<'_, '_> {
     }
 
     /// Parameters as the index's.
-    fn item_params(&mut self, params: &[Param], _cx: Option<&MemberCx>) -> &'static [index::Param] {
+    fn item_params(&mut self, params: &[Param], in_trait: Option<&MemberCx>) -> &'static [index::Param] {
         let mut out = Vec::new();
         for p in params {
             let Some(t) = &p.ty else { continue };
-            let pos = if p.default.is_some() { TypePos::DefaultedParam } else { TypePos::Param };
+            let pos = match (in_trait, p.default.is_some()) {
+                (Some(_), _) => TypePos::Value,
+                (None, true) => TypePos::DefaultedParam,
+                (None, false) => TypePos::Param,
+            };
             let ty = self.quiet(|g| g.rust_type(t, pos)).to_string();
             let ut = self.unaliased(t);
             let lambda = ut.as_function().filter(|_| !ut.nullable).map(|ft| {
@@ -591,13 +809,26 @@ impl Gen<'_, '_> {
         overlay::intern_params(out)
     }
 
-    /// Opens a member's scope: its receivers (the value `self`, the companion in scope), as `MemberCx` says.
+    /// Opens a member's scope: its receivers (the value `self`, the companion in scope, an inner class's outer
+    /// objects), as `MemberCx` says.
     pub(crate) fn enter_member(&mut self, cx: &MemberCx, label: &str, with_self: bool) {
         self.scopes = vec![HashMap::new()];
         self.receivers.clear();
         self.frames.clear();
         self.loops.clear();
         self.lambdas.clear();
+        for o in cx.outers.iter().rev() {
+            self.receivers.push(ImplicitReceiver {
+                rust: o.var.clone(),
+                ty: o.ty.clone(),
+                value: o.value.clone(),
+                labels: vec![o.label.clone()],
+                depth: 0,
+                by_ref: false,
+                by_mut: false,
+                owned_used: Default::default(),
+            });
+        }
         if let Some(c) = &cx.companion {
             self.receivers.push(ImplicitReceiver {
                 rust: "__kz_companion".into(),
@@ -611,28 +842,39 @@ impl Gen<'_, '_> {
             });
         }
         if with_self {
+            // (a generic class's value of its own type parameters: what its members' `T` is inside it)
+            let params: Vec<Ty> = index::generics(&cx.owner).unwrap_or_default().iter().map(|p| Ty::named(p)).collect();
+            let value = Ty::Named(cx.owner.clone(), params);
             self.receivers.push(ImplicitReceiver {
                 rust: "self".into(),
                 ty: cx.owner.clone(),
-                value: Ty::named(&cx.owner),
+                value: value.clone(),
                 labels: vec![label.to_string()],
                 depth: 0,
                 by_ref: false,
                 by_mut: false,
                 owned_used: Default::default(),
             });
-            self.declare("this", "self".into(), LocalKind::Param, Ty::named(&cx.owner));
+            self.declare("this", "self".into(), LocalKind::Param, value);
         }
     }
 
     /// A member function's result type as the index's text.
-    fn member_ret_text(&mut self, f: &Function, cx: &MemberCx) -> String {
+    pub(crate) fn member_ret_text(&mut self, f: &Function, cx: &MemberCx) -> String {
         if let Some(t) = &f.result {
             return self.quiet(|g| g.rust_type(t, TypePos::Return)).to_string();
         }
         match &f.body {
             Some(FunctionBody::Expr(e)) => {
                 let ty = self.member_expr_ty(f, e, cx);
+                // (an override's: the overridden member's, where its expression doesn't tell — `override fun next()
+                // = value` of a `T`)
+                if (ty.is_vague() || matches!(&ty, Ty::Named(n, a) if a.is_empty() && n.len() == 1))
+                    && super::hierarchy::is_override(&f.modifiers)
+                    && let Some(t) = self.overridden_result(&cx.owner, f)
+                {
+                    return t;
+                }
                 if ty == Ty::Unit { "()".into() } else { self.rust_of_ty(&ty, Span::call_site()).to_string() }
             }
             _ => "()".into(),
@@ -654,7 +896,7 @@ impl Gen<'_, '_> {
 
     /// A member property's type: written, or its initializer's (the class's other members and the constructor's
     /// parameters in scope).
-    fn member_property_ty(&mut self, p: &Property, cx: &MemberCx) -> Ty {
+    pub(crate) fn member_property_ty(&mut self, p: &Property, cx: &MemberCx) -> Ty {
         if let Some(t) = &p.ty {
             return self.ty_of(t);
         }
@@ -698,46 +940,102 @@ impl Gen<'_, '_> {
         let mut out = TokenStream::new();
         for d in &found {
             out.extend(self.write_class(d));
+            // (what its members put beside it: a composable member's hidden function)
+            out.extend(std::mem::take(&mut self.classes.side_items));
         }
         out
     }
 
     fn write_class(&mut self, d: &ClassDecl) -> TokenStream {
-        match (&d.ast, d.info.shape) {
-            (ClassAst::Class(c), Shape::Data) => self.data_class(c, &d.info),
-            (ClassAst::Class(c), Shape::Plain) => self.plain_class(c, &d.info),
-            (ClassAst::Class(c), Shape::Enum) => self.enum_class(c, &d.info),
-            (ClassAst::Class(c), Shape::Interface) => self.interface(c, &d.info),
-            (ClassAst::Object(o), _) => self.object(o, &d.info),
+        use super::hierarchy::Inherit;
+        match (&d.ast, d.info.shape, d.info.inherit) {
+            (ClassAst::Class(_), Shape::Interface, Inherit::Sealed) => self.open_class(d),
+            (ClassAst::Class(_), Shape::Interface, _) => self.interface_trait(d),
+            (ClassAst::Class(_), Shape::Data | Shape::Plain, Inherit::Open | Inherit::Abstract | Inherit::Sealed) => {
+                self.open_class(d)
+            }
+            (ClassAst::Class(_), Shape::Data, _) => self.data_class(d),
+            (ClassAst::Class(_), Shape::Plain, _) => self.plain_class_decl(d),
+            (ClassAst::Class(c), Shape::Enum, _) => self.enum_class(c, d),
+            (ClassAst::Object(o), _, _) => self.object(o, d),
             _ => TokenStream::new(),
         }
     }
 
-    /// The modifiers a class may have here; the others are the next packages'.
-    fn check_class(&mut self, c: &Class) -> bool {
+    /// The modifiers a class may have; its supertypes known.
+    fn check_class(&mut self, d: &ClassDecl, c: &Class) -> bool {
         let mut ok = true;
         for m in &c.modifiers.list {
             match m.kind {
-                ModifierKind::Public | ModifierKind::Private | ModifierKind::Internal | ModifierKind::Data => {}
-                ModifierKind::Final => {}
+                ModifierKind::Public
+                | ModifierKind::Private
+                | ModifierKind::Internal
+                | ModifierKind::Data
+                | ModifierKind::Final
+                | ModifierKind::Open
+                | ModifierKind::Abstract
+                | ModifierKind::Sealed
+                | ModifierKind::Inner => {}
                 _ => {
                     self.later(m.loc, &format!("`{}` on a class", m.kind.keyword()));
                     ok = false;
                 }
             }
         }
-        if let Some(t) = c.type_params.first() {
-            self.later(t.loc, "a generic class");
+        if c.is_inner() && d.outer.is_none() {
+            self.error(c.loc, "an `inner` class is one nested in another");
+        }
+        // (Kotlin's rule: a data class can't be inner, nor open, abstract or sealed)
+        if c.is_data() && (c.is_inner() || c.is_open() || c.is_abstract() || c.is_sealed()) {
+            self.error(c.loc, "a data class can't be `inner`, `open`, `abstract` or `sealed` (Kotlin's rule)");
             ok = false;
         }
-        if let Some(s) = c.supers.first() {
-            self.later(s.loc, "a class's supertypes");
+        let known = self.supers_of(d).len();
+        if known < c.supers.len() {
+            for s in &c.supers {
+                if s.ty.simple_name().is_none_or(|n| self.super_kind(&n).is_none()) {
+                    self.error(
+                        s.loc,
+                        format!(
+                            "`{}` isn't a class or interface KompozR knows (the crate's Kotlin, an API trait, a Rust trait whose doc line says ``Kotlin: `open class …` ``)",
+                            s.ty.simple_name().unwrap_or_default()
+                        ),
+                    );
+                }
+            }
+            ok = false;
+        }
+        if let Some(s) = c.supers.iter().find(|s| {
+            s.delegate.is_some()
+                && !matches!(
+                    s.ty.simple_name().and_then(|n| self.super_kind(&n)),
+                    Some(super::hierarchy::SuperKind::Interface(_))
+                )
+        }) {
+            self.error(s.loc, "only an interface is implemented by delegation (`I by value`)");
             ok = false;
         }
         ok
     }
 
-    fn class_vis(&mut self, m: &Modifiers, loc: Loc) -> TokenStream {
+    /// The fields of a class's `I by value` delegates (`__kz_by0: Rc<dyn I>`) and their values (its constructor's
+    /// parameters in scope).
+    fn delegate_fields(&mut self, d: &ClassDecl, span: Span) -> Vec<(TokenStream, TokenStream)> {
+        let mut out = Vec::new();
+        for (k, s) in super::hierarchy::written_supers(&d.ast).to_vec().iter().enumerate() {
+            let Some(e) = &s.delegate else { continue };
+            let ty = self.ty_of(&s.ty);
+            let t = self.rust_type(&s.ty, TypePos::Value);
+            let from = self.peek_ty(e);
+            let v = self.value(e);
+            let v = self.coerce(v, &from, &ty, span);
+            let f = format_ident!("__kz_by{k}", span = span);
+            out.push((quote_spanned!(span=> #[doc(hidden)] pub #f: #t), quote_spanned!(span=> #f: #v)));
+        }
+        out
+    }
+
+    pub(crate) fn class_vis(&mut self, m: &Modifiers, loc: Loc) -> TokenStream {
         let span = self.span(loc);
         match m.visibility() {
             // (a private class is the file's: the Rust module's)
@@ -755,10 +1053,69 @@ impl Gen<'_, '_> {
         }
     }
 
-    /// A constructor parameter's field type, value and getter: a data class's `var` shared (`kt::KtShared`).
-    fn data_class(&mut self, c: &Class, info: &UserClass) -> TokenStream {
+    /// The constructors of the inner classes of `outer`: its methods (`outer.Inner(…)`), each giving its object
+    /// holding `outer` (a clone of its handle, or its value).
+    fn inner_ctors(&mut self, outer: &UserClass) -> Vec<TokenStream> {
+        let inner: Vec<ClassDecl> = self
+            .classes
+            .decls
+            .iter()
+            .filter(|d| d.own && d.info.inner.as_deref() == Some(outer.rust.as_str()))
+            .cloned()
+            .collect();
+        let mut out = Vec::new();
+        for d in inner {
+            let ClassAst::Class(c) = &d.ast else { continue };
+            if !matches!(d.info.inherit, super::hierarchy::Inherit::Final | super::hierarchy::Inherit::Open) {
+                continue;
+            }
+            let span = self.span(c.loc);
+            let cx = MemberCx {
+                owner: outer.rust.clone(),
+                shape: outer.shape,
+                companion: outer.companion.clone(),
+                outers: self.outers_of(outer),
+            };
+            self.fun = FnState::default();
+            self.enter_member(&cx, &c.name.name, false);
+            let mut params = Vec::new();
+            let mut converts = Vec::new();
+            let mut names = Vec::new();
+            for cp in c.primary_constructor.iter().flat_map(|p| &p.params) {
+                let (ts, convert) = self.param(&cp.param, false, false);
+                params.push(ts);
+                converts.extend(convert);
+                names.push(self.name_ident(&snake(&cp.param.name.name), cp.param.name.loc));
+            }
+            let (_, g_use, _) = self.class_generics(&d, span);
+            let ty = proc_macro2::Ident::new(&d.info.rust, span);
+            let m = proc_macro2::Ident::new(&c.name.name, self.span(c.name.loc));
+            let vis = self.member_vis(&c.modifiers, c.loc);
+            let (recv, this) = if outer.shape == Shape::Enum {
+                (quote_spanned!(span=> self), quote_spanned!(span=> self))
+            } else {
+                (quote_spanned!(span=> &self), quote_spanned!(span=> ::core::clone::Clone::clone(self)))
+            };
+            out.push(quote_spanned! {span=>
+                #[allow(non_snake_case)]
+                #vis fn #m(#recv, #(#params),*) -> #ty #g_use {
+                    #(#converts)*
+                    #ty::__kz_new(#this, #(#names),*)
+                }
+            });
+        }
+        out
+    }
+
+    /// A data class (see the module's doc): its body's stored and delegated properties made with the value, its
+    /// base class's part shared by its copies; `==` and `toString()` of its constructor's properties only.
+    fn data_class(&mut self, d: &ClassDecl) -> TokenStream {
+        use super::hierarchy::Place;
+        let ClassAst::Class(c) = &d.ast else { return quote!() };
+        let c = &**c;
+        let info = &d.info;
         let span = self.span(c.loc);
-        if !self.check_class(c) {
+        if !self.check_class(d, c) {
             return quote!();
         }
         let kt = self.kt(span);
@@ -768,7 +1125,13 @@ impl Gen<'_, '_> {
         let name = proc_macro2::Ident::new(&info.rust, self.span(c.name.loc));
         let allow = class_allow(span);
         let route = self.route_derive(&c.annotations, span);
-        let cx = MemberCx { owner: info.rust.clone(), shape: Shape::Data, companion: info.companion.clone() };
+        let (g_decl, g_use, g_struct) = self.class_generics(d, span);
+        let cx = MemberCx {
+            owner: info.rust.clone(),
+            shape: Shape::Data,
+            companion: info.companion.clone(),
+            outers: self.outers_of(info),
+        };
         let params: Vec<ConstructorParam> =
             c.primary_constructor.as_ref().map(|p| p.params.clone()).unwrap_or_default();
         // The constructor's parameters (a plain function's: `impl Into<String>`, defaults).
@@ -795,6 +1158,9 @@ impl Gen<'_, '_> {
         let mut components = Vec::new();
         let mut copy_params = Vec::new();
         let mut route_attrs = Vec::new();
+        let mut compared = Vec::new();
+        // (a base class's constructor reads the parameters after the value is made: the fields clones of them)
+        let has_super = self.superclass(d).is_some();
         for (k, cp) in params.iter().enumerate() {
             let Some(m) = cp.property else {
                 continue;
@@ -820,9 +1186,11 @@ impl Gen<'_, '_> {
                 _ => quote!(),
             };
             route_attrs.push(route_default.clone());
+            compared.push(i.clone());
+            let given = if has_super { quote_spanned!(pspan=> ::core::clone::Clone::clone(&#i)) } else { quote!(#i) };
             if m == Mutability::Var {
                 fields.push(quote_spanned!(pspan=> #route_default #fvis #i: #kt::KtShared<#t>));
-                field_values.push(quote_spanned!(pspan=> #i: #kt::KtShared::new(#i)));
+                field_values.push(quote_spanned!(pspan=> #i: #kt::KtShared::new(#given)));
                 let setter = format_ident!("set_{}", i.to_string().trim_start_matches("r#"), span = pspan);
                 getters.push(quote_spanned! {pspan=>
                     #fvis fn #i(&self) -> #t { self.#i.get() }
@@ -831,7 +1199,11 @@ impl Gen<'_, '_> {
                 copy_params.push(quote_spanned!(pspan=> #[default(self.#i.get())] #i: #t));
             } else {
                 fields.push(quote_spanned!(pspan=> #route_default #fvis #i: #t));
-                field_values.push(quote_spanned!(pspan=> #i));
+                field_values.push(if has_super {
+                    quote_spanned!(pspan=> #i: #given)
+                } else {
+                    quote_spanned!(pspan=> #i)
+                });
                 getters.push(quote_spanned!(pspan=> #fvis fn #i(&self) -> #t { #read }));
                 copy_params.push(quote_spanned!(pspan=> #[default(#read)] #i: #t));
             }
@@ -842,12 +1214,43 @@ impl Gen<'_, '_> {
             let comp = format_ident!("component{}", k + 1, span = pspan);
             components.push(quote_spanned!(pspan=> #fvis fn #comp(&self) -> #t { self.#i() }));
         }
+        // (its base class's part: shared by the copies, made anew by `copy()`)
+        let mut own_fields = false;
+        if let Some((f, e)) = self.super_field(d, Place::Data, span) {
+            fields.push(f);
+            field_values.push(e);
+            own_fields = true;
+        }
+        for (f, e) in self.delegate_fields(d, span) {
+            fields.push(f);
+            field_values.push(e);
+            own_fields = true;
+        }
         // The body: stored properties computed as the value is made (the constructor's parameters in scope), init
         // blocks run then, member functions.
         self.enter_member(&cx, &c.name.name, false);
         for cp in &params {
             let ty = cp.param.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
             self.declare_at(&cp.param.name, snake(&cp.param.name.name), LocalKind::Param, ty);
+        }
+        let super_init = self.super_init(d, quote_spanned!(span=> &__kz_v), Place::Data, span);
+        // (with a base class, Kotlin's order: the value made first — its body's properties empty cells —, the base's
+        // initializer run on it, then the body's initializers and init blocks in order)
+        let after_super = !super_init.is_empty();
+        // (then the value its initializers see: the base's members theirs, as `this`'s)
+        if after_super {
+            let params: Vec<Ty> =
+                index::generics(&info.rust).unwrap_or_default().iter().map(|p| Ty::named(p)).collect();
+            self.receivers.push(ImplicitReceiver {
+                rust: "__kz_v".into(),
+                ty: info.rust.clone(),
+                value: Ty::Named(info.rust.clone(), params),
+                labels: vec![c.name.name.clone()],
+                depth: 0,
+                by_ref: false,
+                by_mut: false,
+                owned_used: Default::default(),
+            });
         }
         let mut made = Vec::new();
         let mut methods = Vec::new();
@@ -867,8 +1270,99 @@ impl Gen<'_, '_> {
                         methods.push(self.getter_member(p, &cx));
                         continue;
                     }
-                    if p.is_delegated() || p.getter.is_some() || p.setter.is_some() || p.is_var() {
-                        self.later(p.loc, "a data class's `var`, delegated or accessor property in its body");
+                    let celled = after_super || p.is_var() || p.getter.is_some() || p.setter.is_some();
+                    let kt_path = kt.clone();
+                    let pspan = self.span(p.loc);
+                    let i = self.name_ident(&snake(&n.name), n.loc);
+                    let fvis = self.member_vis(&p.modifiers, p.loc);
+                    if celled && !p.is_delegated() {
+                        // (a `var`, one with accessors, or one made after the base's initializer: a cell of the value,
+                        // shared by its copies, `copy()` making it anew)
+                        let PropertyInit::Value(init) = &p.init else {
+                            self.error(n.loc, format!("`{}` needs a value", n.name));
+                            continue;
+                        };
+                        let ty = match &p.ty {
+                            Some(t) => self.ty_of(t),
+                            None => self.peek_ty(init),
+                        };
+                        let t = match &p.ty {
+                            Some(t) => self.rust_type(t, TypePos::Value),
+                            None if !ty.is_vague() => self.rust_of_ty(&ty, pspan),
+                            None => {
+                                self.error(
+                                    n.loc,
+                                    format!("write `{}`'s type: KompozR can't tell its value's type", n.name),
+                                );
+                                continue;
+                            }
+                        };
+                        let cell = if p.is_var() {
+                            quote_spanned!(pspan=> #kt::KtVar)
+                        } else {
+                            quote_spanned!(pspan=> #kt::KtVal)
+                        };
+                        let put = if p.is_var() { quote_spanned!(pspan=> set) } else { quote_spanned!(pspan=> init) };
+                        let v = self.value(init);
+                        if after_super {
+                            made.push(quote_spanned!(pspan=> let #i: #t = #v; __kz_v.#i.#put(::core::clone::Clone::clone(&#i));));
+                            field_values.push(quote_spanned!(pspan=> #i: ::std::rc::Rc::new(#cell::new())));
+                        } else {
+                            made.push(quote_spanned!(pspan=> let #i: #t = #v;));
+                            field_values.push(quote_spanned!(pspan=> #i: {
+                                let c = #cell::new();
+                                c.#put(::core::clone::Clone::clone(&#i));
+                                ::std::rc::Rc::new(c)
+                            }));
+                        }
+                        self.declare_at(n, snake(&n.name), LocalKind::Val, ty.clone());
+                        fields.push(quote_spanned!(pspan=> #[doc(hidden)] pub #i: ::std::rc::Rc<#cell<#t>>));
+                        own_fields = true;
+                        let saved = (std::mem::take(&mut self.scopes), std::mem::take(&mut self.receivers));
+                        getters.push(self.accessors_with_field(p, &i, &t, &ty, &fvis, &cx));
+                        (self.scopes, self.receivers) = saved;
+                        continue;
+                    }
+                    // (a delegated one, `val label by lazy { … }`: the delegate kept, its value read through it)
+                    if let PropertyInit::Delegate(e) = &p.init {
+                        let dty = self.peek_ty(e);
+                        let dt = match &dty {
+                            // (Kotlin's `lazy { … }`: the kt shim's)
+                            Ty::Named(n, a) if n == "KtLazy" && a.len() == 1 => {
+                                let inner = self.rust_of_ty(&a[0], pspan);
+                                quote_spanned!(pspan=> #kt_path::KtLazy<#inner>)
+                            }
+                            Ty::Named(_, a) if !a.contains(&Ty::Unknown) => self.rust_of_ty(&dty, pspan),
+                            _ => {
+                                self.error(n.loc, format!("KompozR can't tell the type of `{}`'s delegate", n.name));
+                                continue;
+                            }
+                        };
+                        let vt = match (&p.ty, &dty) {
+                            (Some(t), _) => self.rust_type(t, TypePos::Value),
+                            (None, Ty::Named(_, a)) if a.len() == 1 => self.rust_of_ty(&a[0], pspan),
+                            _ => {
+                                self.error(n.loc, format!("write `{}`'s type", n.name));
+                                continue;
+                            }
+                        };
+                        let v = self.value(e);
+                        if after_super {
+                            made.push(quote_spanned!(pspan=> __kz_v.#i.init(#v);));
+                            fields.push(quote_spanned!(pspan=> #[doc(hidden)] pub #i: ::std::rc::Rc<#kt::KtVal<#dt>>));
+                            field_values.push(quote_spanned!(pspan=> #i: ::std::rc::Rc::new(#kt::KtVal::new())));
+                            getters.push(quote_spanned!(pspan=>
+                                #fvis fn #i(&self) -> #vt { #kt::KtDelegate::get_value(self.#i.get_ref()) }
+                            ));
+                        } else {
+                            made.push(quote_spanned!(pspan=> let #i: #dt = #v;));
+                            fields.push(quote_spanned!(pspan=> #[doc(hidden)] pub #i: #dt));
+                            field_values.push(quote_spanned!(pspan=> #i));
+                            getters.push(
+                                quote_spanned!(pspan=> #fvis fn #i(&self) -> #vt { #kt::KtDelegate::get_value(&self.#i) }),
+                            );
+                        }
+                        own_fields = true;
                         continue;
                     }
                     let PropertyInit::Value(init) = &p.init else {
@@ -879,7 +1373,6 @@ impl Gen<'_, '_> {
                         Some(t) => self.ty_of(t),
                         None => self.peek_ty(init),
                     };
-                    let pspan = self.span(p.loc);
                     let t = match &p.ty {
                         Some(t) => self.rust_type(t, TypePos::Value),
                         None if !ty.is_vague() => self.rust_of_ty(&ty, pspan),
@@ -891,13 +1384,12 @@ impl Gen<'_, '_> {
                             continue;
                         }
                     };
-                    let i = self.name_ident(&snake(&n.name), n.loc);
                     let v = self.value(init);
                     made.push(quote_spanned!(pspan=> let #i: #t = #v;));
                     self.declare_at(n, snake(&n.name), LocalKind::Val, ty.clone());
-                    let fvis = self.member_vis(&p.modifiers, p.loc);
                     fields.push(quote_spanned!(pspan=> #fvis #i: #t));
                     field_values.push(quote_spanned!(pspan=> #i));
+                    own_fields = true;
                     let read = if self.copied(&ty) {
                         quote_spanned!(pspan=> self.#i)
                     } else {
@@ -920,6 +1412,7 @@ impl Gen<'_, '_> {
                 }
             }
         }
+        methods.extend(self.inner_ctors(info));
         let kt_name = &c.name.name;
         let display = if own_to_string {
             quote_spanned!(span=> __kz_out.push_str(&self.to_string_kt());)
@@ -928,24 +1421,45 @@ impl Gen<'_, '_> {
             quote_spanned!(span=> __kz_out.push_str(#open); #(#to_string)* __kz_out.push(')');)
         };
         let companion_const = self.companion_const(info, span);
-        let new_body = quote_spanned!(span=> #(#made)* #name { #(#field_values),* });
+        let new_body = if super_init.is_empty() {
+            quote_spanned!(span=> #(#made)* #name { #(#field_values),* })
+        } else {
+            quote_spanned!(span=> let __kz_v = #name { #(#field_values),* }; #super_init #(#made)* __kz_v)
+        };
+        let impls = self.class_impls(d, Place::Data, &g_decl, &g_use);
+        // (Kotlin's `equals` of a data class: its constructor's properties)
+        let (derive_eq, eq) = if own_fields {
+            (
+                quote!(),
+                quote_spanned! {span=>
+                    #allow
+                    impl #g_decl ::core::cmp::PartialEq for #name #g_use {
+                        fn eq(&self, other: &Self) -> bool {
+                            true #(&& self.#compared == other.#compared)*
+                        }
+                    }
+                },
+            )
+        } else {
+            (quote_spanned!(span=> , ::core::cmp::PartialEq), quote!())
+        };
         quote_spanned! {span=>
             #allow
-            #[derive(::core::clone::Clone, ::core::cmp::PartialEq)]
+            #[derive(::core::clone::Clone #derive_eq)]
             #route
-            #vis struct #name { #(#fields),* }
+            #vis struct #name #g_struct { #(#fields),* }
 
             #allow
             #[#rt::named(type)]
-            #vis fn #name(#(#ctor_params),*) -> #name {
+            #vis fn #name #g_decl (#(#ctor_params),*) -> #name #g_use {
                 #(#converts)*
                 #name::__kz_new(#(#names),*)
             }
 
             #allow
-            impl #name {
+            impl #g_decl #name #g_use {
                 #[doc(hidden)]
-                #vis fn __kz_new(#(#value_params),*) -> #name {
+                #vis fn __kz_new(#(#value_params),*) -> #name #g_use {
                     #[allow(unused_imports)]
                     use #kt::ext::*;
                     #rt::named_args!(#kz_types { #new_body })
@@ -957,15 +1471,17 @@ impl Gen<'_, '_> {
 
             #allow
             #[#rt::named]
-            impl #name {
-                #vis fn copy(&self, #(#copy_params),*) -> #name {
+            impl #g_decl #name #g_use {
+                #vis fn copy(&self, #(#copy_params),*) -> #name #g_use {
                     #name::__kz_new(#(#names),*)
                 }
                 #(#methods)*
             }
 
+            #eq
+
             #allow
-            impl #kt::KtToString for #name {
+            impl #g_decl #kt::KtToString for #name #g_use {
                 fn kt_write(&self, __kz_out: &mut ::std::string::String) {
                     #[allow(unused_imports)]
                     use #kt::{KtViaDisplay as _, KtViaToString as _};
@@ -973,18 +1489,106 @@ impl Gen<'_, '_> {
                 }
             }
             #allow
-            impl ::core::fmt::Display for #name {
+            impl #g_decl ::core::fmt::Display for #name #g_use {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
             #allow
-            impl ::core::fmt::Debug for #name {
+            impl #g_decl ::core::fmt::Debug for #name #g_use {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
+
+            #impls
         }
+    }
+    /// A data class's body property held in a cell (`self.x`): its getter and setter, Kotlin's accessors' bodies
+    /// where written (`field` the cell's value, a setter's assignment to it written back).
+    fn accessors_with_field(
+        &mut self,
+        p: &Property,
+        i: &proc_macro2::Ident,
+        t: &TokenStream,
+        ty: &Ty,
+        vis: &TokenStream,
+        cx: &MemberCx,
+    ) -> TokenStream {
+        let span = self.span(p.loc);
+        let kt = self.kt(span);
+        let rt = respan(self.rt().clone(), span);
+        let kz_types = self.types_arg(span);
+        let field_ident = Ident { name: "field".into(), backticked: false, loc: p.loc };
+        let getter = match p.getter.as_ref().and_then(|g| g.body.as_ref()) {
+            Some(body) => {
+                self.fun = FnState { kompozable: false, nullable_result: ty.is_nullable(), shared_result: None };
+                self.enter_member(cx, "", true);
+                self.declare_at(&field_ident, "field".into(), LocalKind::Val, ty.clone());
+                let b = match body {
+                    FunctionBody::Block(b) => self.fn_block(b, false),
+                    FunctionBody::Expr(e) => {
+                        self.value_want(e, super::expr::Want { some: ty.is_nullable(), ..Default::default() })
+                    }
+                };
+                let lets = self.member_lets(cx, span);
+                quote_spanned! {span=>
+                    #vis fn #i(&self) -> #t {
+                        #[allow(unused_imports)]
+                        use #kt::ext::*;
+                        #lets
+                        #[allow(unused_variables)]
+                        let field: #t = self.#i.get();
+                        #rt::named_args!(#kz_types { #b })
+                    }
+                }
+            }
+            None => quote_spanned!(span=> #vis fn #i(&self) -> #t { self.#i.get() }),
+        };
+        if !p.is_var() {
+            return getter;
+        }
+        let set = format_ident!("set_{}", i.to_string().trim_start_matches("r#"), span = span);
+        let setter_vis = match p.setter.as_ref() {
+            Some(s) if s.modifiers.visibility() == Visibility::Private => quote!(),
+            _ => vis.clone(),
+        };
+        let setter = match p.setter.as_ref().and_then(|s| s.body.as_ref().map(|b| (s, b))) {
+            Some((s, body)) => {
+                let pname = s.param.as_ref().map(|p| p.name.clone()).unwrap_or(Ident {
+                    name: "value".into(),
+                    backticked: false,
+                    loc: p.loc,
+                });
+                self.fun = FnState::default();
+                self.enter_member(cx, "", true);
+                self.declare_at(&field_ident, "field".into(), LocalKind::Var, ty.clone());
+                let pr = snake(&pname.name);
+                self.declare_at(&pname, pr.clone(), LocalKind::Param, ty.clone());
+                let b = match body {
+                    FunctionBody::Block(b) => self.fn_block(b, true),
+                    FunctionBody::Expr(e) => {
+                        let s = self.stmt_expr(e);
+                        quote!(#s;)
+                    }
+                };
+                let lets = self.member_lets(cx, span);
+                let pi = ident(&pr, span);
+                quote_spanned! {span=>
+                    #setter_vis fn #set(&self, #pi: #t) {
+                        #[allow(unused_imports)]
+                        use #kt::ext::*;
+                        #lets
+                        #[allow(unused_mut, unused_assignments)]
+                        let mut field: #t = self.#i.get();
+                        #rt::named_args!(#kz_types { #b });
+                        self.#i.set(field)
+                    }
+                }
+            }
+            None => quote_spanned!(span=> #setter_vis fn #set(&self, value: #t) { self.#i.set(value) }),
+        };
+        quote!(#getter #setter)
     }
 
     /// `pub const Companion: CCompanion = CCompanion {};` of a class with a companion (Kotlin's `C.Companion`).
@@ -1005,10 +1609,10 @@ impl Gen<'_, '_> {
             Visibility::Public => quote_spanned!(span=> pub),
             Visibility::Internal => quote_spanned!(span=> pub(crate)),
             Visibility::Private => quote!(),
+            // (Kotlin's `protected`: the class's and its subclasses' — the crate's here, where they are)
             Visibility::Protected => {
-                let at = m.find(ModifierKind::Protected).unwrap_or(loc);
-                self.later(at, "a `protected` member");
-                quote!()
+                let _ = loc;
+                quote_spanned!(span=> pub(crate))
             }
         }
     }
@@ -1041,6 +1645,110 @@ impl Gen<'_, '_> {
 
     /// A member function: a method of the type (`&self`; an enum's `self`), translated as a function is.
     pub(crate) fn member_fn(&mut self, f: &Function, cx: &MemberCx) -> TokenStream {
+        self.member_fn_with(f, cx, None)
+    }
+
+    /// A composable member function, `@Composable fun Content()` of a class: a hidden composable of the object (a
+    /// clone of its handle, or its value) and the parameters, restartable as a composable function is, beside the
+    /// class; the method `Content(…)` calls it (`state.Content()` in a composable).
+    fn composable_member(&mut self, f: &Function, cx: &MemberCx) -> TokenStream {
+        let span = self.span(f.loc);
+        if !index::generics(&cx.owner).unwrap_or_default().is_empty() || !f.type_params.is_empty() {
+            return self.later(f.loc, "a composable member function of a generic class or with type parameters");
+        }
+        if cx.shape == Shape::Interface || self.user_class_rust(&cx.owner).is_none() {
+            return self.later(f.loc, "a composable member function of an interface or an open class");
+        }
+        let inline = f.modifiers.has(ModifierKind::Inline);
+        let unit = f.result.as_ref().is_none_or(|t| self.ty_of(t) == Ty::Unit);
+        let restartable = !inline && unit;
+        self.fun = FnState { kompozable: true, nullable_result: false, shared_result: None };
+        self.enter_member(cx, &f.name.name, true);
+        // (the object: the hidden function's first parameter)
+        if let Some(r) = self.receivers.iter_mut().rev().find(|r| r.rust == "self") {
+            r.rust = "__kz_this".into();
+        }
+        let this_ty = self.receivers.iter().rev().find(|r| r.rust == "__kz_this").map(|r| r.value.clone());
+        self.declare("this", "__kz_this".into(), LocalKind::Param, this_ty.unwrap_or(Ty::named(&cx.owner)));
+        self.in_async = false;
+        self.inline_async = false;
+        let mut params = Vec::new();
+        let mut converts = Vec::new();
+        for p in &f.params {
+            let (tokens, convert) = self.param(p, restartable, inline);
+            params.push(tokens);
+            converts.extend(convert);
+        }
+        let ret = match &f.result {
+            Some(t) if self.ty_of(t) != Ty::Unit => {
+                let rt = self.rust_type(t, TypePos::Return);
+                quote_spanned!(span=> -> #rt)
+            }
+            _ => quote!(),
+        };
+        let body = match &f.body {
+            Some(FunctionBody::Block(b)) => self.fn_block(b, unit),
+            Some(FunctionBody::Expr(e)) => {
+                let s = self.stmt_expr(e);
+                quote!(#s;)
+            }
+            None => {
+                self.error(f.name.loc, "a function here needs a body");
+                quote!()
+            }
+        };
+        let kt = self.kt(span);
+        let rt = respan(self.rt().clone(), span);
+        let kz_types = self.types_arg(span);
+        let lets = self.member_lets(cx, span).to_string().replace("self.", "__kz_this.");
+        let lets: TokenStream = respan(lets.parse().unwrap_or_default(), span);
+        let owner = proc_macro2::Ident::new(&cx.owner, span);
+        let hidden = format_ident!("__kz_member_{}_{}", cx.owner, f.name.name, span = span);
+        let name = self.name_ident(&f.name.name, f.name.loc);
+        let names: Vec<proc_macro2::Ident> =
+            f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc)).collect();
+        let vis = self.member_vis(&f.modifiers, f.loc);
+        let attr = self.kompozable_attr(inline || !unit, span);
+        let allow = allow_attr(span);
+        let (recv, this) = if cx.shape == Shape::Enum {
+            (quote_spanned!(span=> self), quote_spanned!(span=> self))
+        } else {
+            (quote_spanned!(span=> &self), quote_spanned!(span=> ::core::clone::Clone::clone(self)))
+        };
+        self.classes.side_items.extend(quote_spanned! {span=>
+            #allow
+            #attr
+            #[doc(hidden)]
+            #vis fn #hidden(__kz_this: #owner, #(#params),*) #ret {
+                #[allow(unused_imports)]
+                use #kt::ext::*;
+                #lets
+                #(#converts)*
+                #body
+            }
+        });
+        let mparams: Vec<TokenStream> = f
+            .params
+            .iter()
+            .map(|p| {
+                let saved = std::mem::take(&mut self.scopes);
+                self.scopes = vec![HashMap::new()];
+                let (t, _) = self.param(p, false, false);
+                self.scopes = saved;
+                t
+            })
+            .collect();
+        quote_spanned! {span=>
+            #[track_caller]
+            #vis fn #name(#recv, #(#mparams),*) #ret {
+                let __kz_receiver = #this;
+                #rt::kompozable_block!(#kz_types { #hidden(__kz_receiver, #(#names = #names),*) })
+            }
+        }
+    }
+
+    /// [`member_fn`](Self::member_fn), its body `given` where there is one (an enum class's `match` of its entries).
+    pub(crate) fn member_fn_with(&mut self, f: &Function, cx: &MemberCx, given: Option<TokenStream>) -> TokenStream {
         let span = self.span(f.loc);
         for m in &f.modifiers.list {
             match m.kind {
@@ -1049,21 +1757,20 @@ impl Gen<'_, '_> {
                 | ModifierKind::Internal
                 | ModifierKind::Suspend
                 | ModifierKind::Inline
-                | ModifierKind::Final => {}
-                ModifierKind::Override if f.name.name == "toString" => {}
+                | ModifierKind::Final
+                | ModifierKind::Open
+                | ModifierKind::Abstract
+                | ModifierKind::Override => {}
                 _ => {
                     self.later(m.loc, &format!("`{}` on a member function", m.kind.keyword()));
                 }
             }
         }
         if f.is_kompozable() {
-            return self.later(f.loc, "a composable member function");
+            return self.composable_member(f, cx);
         }
         if let Some(r) = &f.receiver {
             return self.later(r.loc, "a member extension function");
-        }
-        if let Some(t) = f.type_params.first() {
-            return self.later(t.loc, "a generic member function");
         }
         if f.name.name == "equals" || f.name.name == "hashCode" {
             return self.later(f.name.loc, &format!("an `{}` override", f.name.name));
@@ -1076,6 +1783,7 @@ impl Gen<'_, '_> {
         self.enter_member(cx, &f.name.name, true);
         self.in_async = suspend;
         self.inline_async = false;
+        self.collect_stars();
         let mut params = Vec::new();
         let mut converts = Vec::new();
         for p in &f.params {
@@ -1083,6 +1791,7 @@ impl Gen<'_, '_> {
             params.push(tokens);
             converts.extend(convert);
         }
+        let generics = self.fn_generics(f, span);
         let ret = match &f.result {
             Some(t) if self.ty_of(t) != Ty::Unit => {
                 let rt = self.rust_type(t, TypePos::Return);
@@ -1091,7 +1800,16 @@ impl Gen<'_, '_> {
             Some(_) => quote!(),
             None => match &f.body {
                 Some(FunctionBody::Expr(e)) if !unit => {
-                    if ret_ty.is_vague() {
+                    // (a generic type of the class's own type parameters, `Duo<B, A>`: as inference wrote it)
+                    let written: Option<TokenStream> =
+                        (!ret_text.contains('_') && ret_text != "()").then(|| ret_text.parse().ok()).flatten();
+                    if ret_ty.is_vague()
+                        && let Some(t) = written
+                    {
+                        let s = self.span(e.loc);
+                        let t = respan(t, s);
+                        quote_spanned!(s=> -> #t)
+                    } else if ret_ty.is_vague() {
                         self.error(
                             f.name.loc,
                             format!(
@@ -1109,9 +1827,10 @@ impl Gen<'_, '_> {
                 _ => quote!(),
             },
         };
-        let body = match &f.body {
-            Some(FunctionBody::Block(b)) => self.fn_block(b, unit),
-            Some(FunctionBody::Expr(e)) => {
+        let body = match (&f.body, given) {
+            (_, Some(g)) => g,
+            (Some(FunctionBody::Block(b)), None) => self.fn_block(b, unit),
+            (Some(FunctionBody::Expr(e)), None) => {
                 if unit {
                     let s = self.stmt_expr(e);
                     quote!(#s;)
@@ -1120,7 +1839,7 @@ impl Gen<'_, '_> {
                     self.value_want(e, want)
                 }
             }
-            None => {
+            (None, None) => {
                 self.error(f.name.loc, "a function here needs a body");
                 quote!()
             }
@@ -1128,7 +1847,7 @@ impl Gen<'_, '_> {
         let kt = self.kt(span);
         let rt = respan(self.rt().clone(), span);
         let kz_types = self.types_arg(span);
-        let companion = self.companion_let(cx, span);
+        let companion = self.member_lets(cx, span);
         let vis = self.member_vis(&f.modifiers, f.loc);
         let rust_name = if f.name.name == "toString" && f.params.is_empty() {
             "to_string_kt".to_string()
@@ -1139,7 +1858,7 @@ impl Gen<'_, '_> {
         let recv = cx.receiver(span);
         let asyncness = if suspend { quote_spanned!(span=> async) } else { quote!() };
         quote_spanned! {span=>
-            #vis #asyncness fn #name(#recv, #(#params),*) #ret {
+            #vis #asyncness fn #name #generics (#recv, #(#params),*) #ret {
                 #[allow(unused_imports)]
                 use #kt::ext::*;
                 #companion
@@ -1158,6 +1877,40 @@ impl Gen<'_, '_> {
             }
             None => quote!(),
         }
+    }
+
+    /// What a member's body starts with: the companion's value, an inner class's outer objects.
+    pub(crate) fn member_lets(&self, cx: &MemberCx, span: Span) -> TokenStream {
+        let mut out = self.companion_let(cx, span);
+        for o in &cx.outers {
+            let v = proc_macro2::Ident::new(&o.var, span);
+            let from: TokenStream = respan(o.from.parse().expect("a path"), span);
+            out.extend(quote_spanned!(span=> #[allow(unused_variables)] let #v = #from;));
+        }
+        out
+    }
+
+    /// The outer objects an inner class's members see (none for another class).
+    pub(crate) fn outers_of(&self, info: &UserClass) -> Vec<Outer> {
+        let mut out = Vec::new();
+        let mut cur = info.clone();
+        let mut from = "self.__kz_outer()".to_string();
+        while let Some(o) = cur.inner.clone() {
+            let Some(oc) = self.user_class_rust(&o).cloned() else { break };
+            let var = if out.is_empty() { "__kz_outer".to_string() } else { format!("__kz_outer{}", out.len() + 1) };
+            let label = oc.kotlin.rsplit('.').next().unwrap_or(&oc.kotlin).to_string();
+            let args: Vec<Ty> = oc.type_params.iter().map(|t| Ty::named(t)).collect();
+            out.push(Outer {
+                var: var.clone(),
+                from: from.clone(),
+                ty: oc.rust.clone(),
+                value: Ty::Named(oc.rust.clone(), args),
+                label,
+            });
+            from = format!("{var}.__kz_outer()");
+            cur = oc;
+        }
+        out
     }
 
     /// A secondary constructor: `C::__kz_ctorN(…)`, the primary constructor (`: this(…)`) then its body run on the
@@ -1251,10 +2004,15 @@ impl Gen<'_, '_> {
         }
     }
 
-    /// A plain class: a reference to an object of cells (see the module's doc).
-    fn plain_class(&mut self, c: &Class, info: &UserClass) -> TokenStream {
+    /// A plain class: a reference to an object of cells (see the module's doc); an inner one's object holds its
+    /// outer one, a subclass's its base class's part.
+    pub(crate) fn plain_class_decl(&mut self, d: &ClassDecl) -> TokenStream {
+        use super::hierarchy::Place;
+        let ClassAst::Class(c) = &d.ast else { return quote!() };
+        let c = &**c;
+        let info = &d.info;
         let span = self.span(c.loc);
-        if !self.check_class(c) {
+        if !self.check_class(d, c) {
             return quote!();
         }
         let kt = self.kt(span);
@@ -1264,7 +2022,13 @@ impl Gen<'_, '_> {
         let name = proc_macro2::Ident::new(&info.rust, self.span(c.name.loc));
         let fields_ty = format_ident!("__Kz{}", info.rust, span = span);
         let allow = class_allow(span);
-        let cx = MemberCx { owner: info.rust.clone(), shape: Shape::Plain, companion: info.companion.clone() };
+        let (g_decl, g_use, g_struct) = self.class_generics(d, span);
+        let cx = MemberCx {
+            owner: info.rust.clone(),
+            shape: Shape::Plain,
+            companion: info.companion.clone(),
+            outers: self.outers_of(info),
+        };
         let params: Vec<ConstructorParam> =
             c.primary_constructor.as_ref().map(|p| p.params.clone()).unwrap_or_default();
         self.fun = FnState::default();
@@ -1286,6 +2050,31 @@ impl Gen<'_, '_> {
         let mut empty = Vec::new();
         let mut getters = Vec::new();
         let mut init = Vec::new();
+        // (an inner class's outer object: given to its constructor, held first)
+        let outer = match &info.inner {
+            Some(o) => {
+                let oc = self.user_class_rust(o).cloned();
+                let ot = proc_macro2::Ident::new(o, span);
+                let og = oc.map(|oc| super::hierarchy::generic_use_names(&oc.type_params, span)).unwrap_or_default();
+                fields.push(quote_spanned!(span=> #[doc(hidden)] pub __kz_outer: #ot #og));
+                empty.push(quote_spanned!(span=> __kz_outer));
+                getters.push(quote_spanned! {span=>
+                    #[doc(hidden)]
+                    pub fn __kz_outer(&self) -> #ot #og { ::core::clone::Clone::clone(&self.__kz_this.__kz_outer) }
+                });
+                Some(quote_spanned!(span=> __kz_outer: #ot #og))
+            }
+            None => None,
+        };
+        // (a subclass's base class's part)
+        if let Some((f, e)) = self.super_field(d, Place::Plain, span) {
+            fields.push(f);
+            empty.push(e);
+        }
+        for (f, e) in self.delegate_fields(d, span) {
+            fields.push(f);
+            empty.push(e);
+        }
         for cp in params.iter().filter(|cp| cp.property.is_some()) {
             let pspan = self.span(cp.param.loc);
             let i = self.name_ident(&snake(&cp.param.name.name), cp.param.name.loc);
@@ -1295,18 +2084,27 @@ impl Gen<'_, '_> {
             fields.push(self.cell_field(&i, &t, var, pspan));
             empty.push(self.cell_empty(&i, var, pspan));
             getters.push(self.cell_accessors(&i, &t, var, &fvis, quote_spanned!(pspan=> self.__kz_this), pspan));
-            init.push(if var {
-                quote_spanned!(pspan=> self.__kz_this.#i.set(#i);)
+            // (a value the body's initializers read too: a clone of it held)
+            let copied = cp.param.ty.as_ref().is_some_and(|t| self.copied(&self.ty_of(t)));
+            let v = if copied {
+                quote_spanned!(pspan=> #i)
             } else {
-                quote_spanned!(pspan=> self.__kz_this.#i.init(#i);)
+                quote_spanned!(pspan=> ::core::clone::Clone::clone(&#i))
+            };
+            init.push(if var {
+                quote_spanned!(pspan=> self.__kz_this.#i.set(#v);)
+            } else {
+                quote_spanned!(pspan=> self.__kz_this.#i.init(#v);)
             });
         }
-        // The body in order: initializers and init blocks in `__kz_init`, the object `self`.
+        // The body in order: the base class's constructor, initializers and init blocks in `__kz_init`, the object
+        // `self`.
         self.enter_member(&cx, &c.name.name, true);
         for cp in &params {
             let ty = cp.param.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
             self.declare_at(&cp.param.name, snake(&cp.param.name.name), LocalKind::Param, ty);
         }
+        let super_init = self.super_init(d, quote_spanned!(span=> self), Place::Plain, span);
         let mut methods = Vec::new();
         let mut own_to_string = false;
         let members = c.body.members.clone();
@@ -1346,7 +2144,8 @@ impl Gen<'_, '_> {
                 }
             }
         }
-        let companion = self.companion_let(&cx, span);
+        methods.extend(self.inner_ctors(info));
+        let lets = self.member_lets(&cx, span);
         let companion_const = self.companion_const(info, span);
         let kt_name = &c.name.name;
         let display = if own_to_string {
@@ -1354,35 +2153,69 @@ impl Gen<'_, '_> {
         } else {
             quote_spanned!(span=> __kz_out.push_str(&#kt::default_to_string(#kt_name, ::std::rc::Rc::as_ptr(&self.__kz_this) as *const ())))
         };
+        let new_params: Vec<TokenStream> = outer.iter().cloned().chain(value_params.iter().cloned()).collect();
+        let impls = self.class_impls(d, Place::Plain, &g_decl, &g_use);
+        // (a ViewModel's object made by its store's factory: Kotlin's constructor taking nothing)
+        let default_new = if names.is_empty() && outer.is_none() && self.derives_from(d, "ViewModel") {
+            quote_spanned! {span=>
+                #[doc(hidden)]
+                #vis fn __kz_new_default() -> #name #g_use { #name::__kz_new() }
+            }
+        } else {
+            quote!()
+        };
+        let view_model = if self.derives_from(d, "ViewModel") {
+            quote_spanned! {span=>
+                #allow
+                impl #g_decl ViewModelRef for #name #g_use {
+                    type Model = #name #g_use;
+                    fn from_rc(model: ::std::rc::Rc<#name #g_use>) -> #name #g_use {
+                        ::core::clone::Clone::clone(&*model)
+                    }
+                }
+            }
+        } else {
+            quote!()
+        };
+        let ctor_fn = if outer.is_some() {
+            quote!()
+        } else {
+            quote_spanned! {span=>
+                #allow
+                #[#rt::named(type)]
+                #vis fn #name #g_decl (#(#ctor_params),*) -> #name #g_use {
+                    #(#converts)*
+                    #name::__kz_new(#(#names),*)
+                }
+            }
+        };
         quote_spanned! {span=>
             #allow
             #[doc(hidden)]
-            #vis struct #fields_ty { #(#fields),* }
+            #vis struct #fields_ty #g_struct { #(#fields),* }
 
             #allow
             #[derive(::core::clone::Clone)]
-            #vis struct #name { #[doc(hidden)] pub __kz_this: ::std::rc::Rc<#fields_ty> }
+            #vis struct #name #g_struct { #[doc(hidden)] pub __kz_this: ::std::rc::Rc<#fields_ty #g_use> }
+
+            #ctor_fn
 
             #allow
-            #[#rt::named(type)]
-            #vis fn #name(#(#ctor_params),*) -> #name {
-                #(#converts)*
-                #name::__kz_new(#(#names),*)
-            }
-
-            #allow
-            impl #name {
+            impl #g_decl #name #g_use {
                 #[doc(hidden)]
-                #vis fn __kz_new(#(#value_params),*) -> #name {
+                #vis fn __kz_new(#(#new_params),*) -> #name #g_use {
                     let __kz_this = #name { __kz_this: ::std::rc::Rc::new(#fields_ty { #(#empty),* }) };
                     __kz_this.__kz_init(#(#names),*);
                     __kz_this
                 }
+                #default_new
                 #[doc(hidden)]
+                #[allow(unused_variables)]
                 fn __kz_init(&self, #(#value_params),*) {
                     #[allow(unused_imports)]
                     use #kt::ext::*;
-                    #companion
+                    #lets
+                    #super_init
                     #(#init)*
                     #rt::named_args!(#kz_types { #(#body_init)* })
                 }
@@ -1392,51 +2225,58 @@ impl Gen<'_, '_> {
 
             #allow
             #[#rt::named]
-            impl #name {
+            impl #g_decl #name #g_use {
                 #(#methods)*
             }
 
             #allow
-            impl ::core::cmp::PartialEq for #name {
+            impl #g_decl ::core::cmp::PartialEq for #name #g_use {
                 fn eq(&self, other: &Self) -> bool {
                     ::std::rc::Rc::ptr_eq(&self.__kz_this, &other.__kz_this)
                 }
             }
             #allow
-            impl ::core::cmp::Eq for #name {}
+            impl #g_decl ::core::cmp::Eq for #name #g_use {}
             #allow
-            impl ::core::hash::Hash for #name {
+            impl #g_decl ::core::hash::Hash for #name #g_use {
                 fn hash<H: ::core::hash::Hasher>(&self, state: &mut H) {
                     ::core::ptr::hash(::std::rc::Rc::as_ptr(&self.__kz_this), state)
                 }
             }
             #allow
-            impl #kt::KtToString for #name {
+            impl #g_decl #kt::KtToString for #name #g_use {
                 fn kt_write(&self, __kz_out: &mut ::std::string::String) {
                     #display
                 }
             }
             #allow
-            impl ::core::fmt::Display for #name {
+            impl #g_decl ::core::fmt::Display for #name #g_use {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
             #allow
-            impl ::core::fmt::Debug for #name {
+            impl #g_decl ::core::fmt::Debug for #name #g_use {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
+
+            #impls
+            #view_model
         }
     }
 
-    fn cell_field(&self, i: &proc_macro2::Ident, t: &TokenStream, var: bool, span: Span) -> TokenStream {
+    /// Whether a class derives from a base class of the API (by its Kotlin name), directly or not.
+    pub(crate) fn derives_from(&self, d: &ClassDecl, base: &str) -> bool {
+        self.ancestors(d).iter().any(|a| matches!(&a.kind, super::hierarchy::SuperKind::Base(b) if b.kotlin == base))
+    }
+    pub(crate) fn cell_field(&self, i: &proc_macro2::Ident, t: &TokenStream, var: bool, span: Span) -> TokenStream {
         let kt = self.kt(span);
         if var { quote_spanned!(span=> #i: #kt::KtVar<#t>) } else { quote_spanned!(span=> #i: #kt::KtVal<#t>) }
     }
 
-    fn cell_empty(&self, i: &proc_macro2::Ident, var: bool, span: Span) -> TokenStream {
+    pub(crate) fn cell_empty(&self, i: &proc_macro2::Ident, var: bool, span: Span) -> TokenStream {
         let kt = self.kt(span);
         if var { quote_spanned!(span=> #i: #kt::KtVar::new()) } else { quote_spanned!(span=> #i: #kt::KtVal::new()) }
     }
@@ -1458,7 +2298,7 @@ impl Gen<'_, '_> {
 
     /// A body property of a class or object held in a cell: its field, its empty cell, its accessors, and its
     /// initialization (in `__kz_init`); a getter-only one a method.
-    fn cell_property(
+    pub(crate) fn cell_property(
         &mut self,
         p: &Property,
         cx: &MemberCx,
@@ -1513,8 +2353,11 @@ impl Gen<'_, '_> {
         Some((field, empty, acc, Some(set)))
     }
 
-    /// An object declaration (or a companion): `struct O {}` and its members as methods, its state the thread's.
-    fn object(&mut self, o: &Object, info: &UserClass) -> TokenStream {
+    /// An object declaration (or a companion): `struct O {}` and its members as methods, its state the thread's
+    /// (made at its first use and kept: `&'static`), a base class's part in it.
+    fn object(&mut self, o: &Object, d: &ClassDecl) -> TokenStream {
+        use super::hierarchy::Place;
+        let info = &d.info;
         let span = self.span(o.loc);
         for m in &o.modifiers.list {
             match m.kind {
@@ -1528,8 +2371,19 @@ impl Gen<'_, '_> {
                 }
             }
         }
-        if let Some(s) = o.supers.first() {
-            return self.later(s.loc, "an object's supertypes");
+        if self.supers_of(d).len() < o.supers.len() {
+            for s in &o.supers {
+                if s.ty.simple_name().is_none_or(|n| self.super_kind(&n).is_none()) {
+                    self.error(
+                        s.loc,
+                        format!(
+                            "`{}` isn't a class or interface KompozR knows",
+                            s.ty.simple_name().unwrap_or_default()
+                        ),
+                    );
+                }
+            }
+            return quote!();
         }
         let kt = self.kt(span);
         let rt = respan(self.rt().clone(), span);
@@ -1539,7 +2393,7 @@ impl Gen<'_, '_> {
         let fields_ty = format_ident!("__Kz{}", info.rust, span = span);
         let allow = class_allow(span);
         let route = self.route_derive(&o.annotations, span);
-        let cx = MemberCx { owner: info.rust.clone(), shape: Shape::Object, companion: None };
+        let cx = MemberCx { owner: info.rust.clone(), shape: Shape::Object, companion: None, outers: Vec::new() };
         self.fun = FnState::default();
         self.enter_member(&cx, &info.rust, true);
         let place = quote_spanned!(span=> Self::__kz_state());
@@ -1549,6 +2403,15 @@ impl Gen<'_, '_> {
         let mut init = Vec::new();
         let mut methods = Vec::new();
         let mut own_to_string = false;
+        if let Some((f, e)) = self.super_field(d, Place::Object, span) {
+            fields.push(f);
+            empty.push(e);
+        }
+        for (f, e) in self.delegate_fields(d, span) {
+            fields.push(f);
+            empty.push(e);
+        }
+        init.push(self.super_init(d, quote_spanned!(span=> self), Place::Object, span));
         for m in &o.body.members {
             match m {
                 Member::Init(b) => {
@@ -1590,10 +2453,13 @@ impl Gen<'_, '_> {
         let display = if own_to_string {
             quote_spanned!(span=> __kz_out.push_str(&self.to_string_kt());)
         } else if o.is_data() {
-            quote_spanned!(span=> __kz_out.push_str(#shown);)
+            // (a data object's text: its own name)
+            let own = shown.rsplit('.').next().unwrap_or(&shown).to_string();
+            quote_spanned!(span=> __kz_out.push_str(#own);)
         } else {
-            quote_spanned!(span=> __kz_out.push_str(&#kt::default_to_string(#shown, ::std::rc::Rc::as_ptr(&Self::__kz_state()) as *const ()));)
+            quote_spanned!(span=> __kz_out.push_str(&#kt::default_to_string(#shown, Self::__kz_state() as *const #fields_ty as *const ()));)
         };
+        let impls = self.class_impls(d, Place::Object, &quote!(), &quote!());
         quote_spanned! {span=>
             #allow
             #[doc(hidden)]
@@ -1607,7 +2473,7 @@ impl Gen<'_, '_> {
             #allow
             impl #name {
                 #[doc(hidden)]
-                fn __kz_state() -> ::std::rc::Rc<#fields_ty> {
+                fn __kz_state() -> &'static #fields_ty {
                     ::std::thread_local! {
                         static __KZ_STATE: #kt::KtSingleton<#fields_ty> = const { #kt::KtSingleton::new() };
                     }
@@ -1646,19 +2512,27 @@ impl Gen<'_, '_> {
                     f.write_str(&#kt::KtToString::kt_to_string(self))
                 }
             }
+
+            #impls
         }
     }
-
-    /// An enum class of entries without bodies (see the module's doc).
-    fn enum_class(&mut self, c: &Class, info: &UserClass) -> TokenStream {
+    /// An enum class (see the module's doc): its entries' bodies are arms of its members' `match`es (an entry's
+    /// override; the class's own member for the others), its interfaces implemented through them.
+    fn enum_class(&mut self, c: &Class, d: &ClassDecl) -> TokenStream {
+        use super::hierarchy::Place;
+        let info = &d.info;
         let span = self.span(c.loc);
         for m in &c.modifiers.list {
             if !matches!(m.kind, ModifierKind::Public | ModifierKind::Private | ModifierKind::Internal) {
                 self.later(m.loc, &format!("`{}` on an enum class", m.kind.keyword()));
             }
         }
-        if let Some(s) = c.supers.first() {
-            return self.later(s.loc, "an enum class's supertypes");
+        if let Some(s) = c.supers.iter().find(|s| {
+            s.ty.simple_name().and_then(|n| self.super_kind(&n)).is_none_or(|k| {
+                !matches!(k, super::hierarchy::SuperKind::Interface(_) | super::hierarchy::SuperKind::Api(_))
+            })
+        }) {
+            return self.later(s.loc, "an enum class's supertype that isn't an interface");
         }
         let kt = self.kt(span);
         let rt = respan(self.rt().clone(), span);
@@ -1666,20 +2540,67 @@ impl Gen<'_, '_> {
         let vis = self.class_vis(&c.modifiers, c.loc);
         let name = proc_macro2::Ident::new(&info.rust, self.span(c.name.loc));
         let allow = class_allow(span);
-        let cx = MemberCx { owner: info.rust.clone(), shape: Shape::Enum, companion: info.companion.clone() };
+        let cx = MemberCx {
+            owner: info.rust.clone(),
+            shape: Shape::Enum,
+            companion: info.companion.clone(),
+            outers: Vec::new(),
+        };
         let kt_name = &c.name.name;
         let mut variants = Vec::new();
         let mut names = Vec::new();
         let mut parse = Vec::new();
         for e in &c.enum_entries {
-            if let Some(b) = &e.body {
-                self.later(b.loc.unwrap_or(e.loc), "an enum entry's body");
-            }
             let v = self.name_ident(&e.name.name, e.name.loc);
             let text = &e.name.name;
             variants.push(quote!(#v));
             names.push(quote_spanned!(span=> #name::#v => #text));
             parse.push(quote_spanned!(span=> #text => #name::#v));
+        }
+        // (what the entries' bodies override, by member name: (entry, its member))
+        let mut entry_fns: HashMap<String, Vec<(Ident, Function)>> = HashMap::new();
+        let mut entry_strings: Vec<(Ident, Function)> = Vec::new();
+        let mut entry_own: Vec<Function> = Vec::new();
+        for e in &c.enum_entries {
+            let Some(b) = &e.body else { continue };
+            for m in &b.members {
+                match m {
+                    Member::Decl(Decl::Function(f)) if f.name.name == "toString" && f.params.is_empty() => {
+                        entry_strings.push((e.name.clone(), (**f).clone()));
+                    }
+                    Member::Decl(Decl::Function(f)) if super::hierarchy::is_override(&f.modifiers) => {
+                        entry_fns.entry(f.name.name.clone()).or_default().push((e.name.clone(), (**f).clone()));
+                    }
+                    Member::Decl(Decl::Property(p)) if super::hierarchy::is_override(&p.modifiers) => {
+                        let (Binding::Name(n), PropertyInit::Value(v)) = (&p.binding, &p.init) else {
+                            self.later(p.loc, "this property of an enum entry");
+                            continue;
+                        };
+                        let f = Function {
+                            annotations: Vec::new(),
+                            modifiers: p.modifiers.clone(),
+                            type_params: Vec::new(),
+                            receiver: None,
+                            name: n.clone(),
+                            params: Vec::new(),
+                            result: p.ty.clone(),
+                            constraints: Vec::new(),
+                            body: Some(FunctionBody::Expr(v.clone())),
+                            loc: p.loc,
+                        };
+                        entry_fns.entry(n.name.clone()).or_default().push((e.name.clone(), f));
+                    }
+                    // (an entry's own function: a method of the enum only its body calls, `__kz_<entry>_<name>`)
+                    Member::Decl(Decl::Function(f)) if f.receiver.is_none() => {
+                        let mut own = (**f).clone();
+                        own.name.name = entry_own_name(&e.name.name, &f.name.name);
+                        entry_own.push(own);
+                    }
+                    _ => {
+                        self.later(m_loc(m), "an enum entry's member that overrides none of its class's");
+                    }
+                }
+            }
         }
         // The constructor's properties: a getter matching the entries' arguments (or the parameter's default).
         let params: Vec<ConstructorParam> =
@@ -1737,7 +2658,8 @@ impl Gen<'_, '_> {
                 Member::Decl(Decl::Function(f)) => {
                     let saved = std::mem::take(&mut self.scopes);
                     let saved_r = std::mem::take(&mut self.receivers);
-                    methods.push(self.member_fn(f, &cx));
+                    let overrides = entry_fns.remove(&f.name.name).unwrap_or_default();
+                    methods.push(self.enum_member(c, f, &overrides, &cx));
                     self.scopes = saved;
                     self.receivers = saved_r;
                 }
@@ -1767,7 +2689,8 @@ impl Gen<'_, '_> {
                     };
                     let saved = std::mem::take(&mut self.scopes);
                     let saved_r = std::mem::take(&mut self.receivers);
-                    methods.push(self.member_fn(&f, &cx));
+                    let overrides = entry_fns.remove(&n.name).unwrap_or_default();
+                    methods.push(self.enum_member(c, &f, &overrides, &cx));
                     self.scopes = saved;
                     self.receivers = saved_r;
                 }
@@ -1783,10 +2706,56 @@ impl Gen<'_, '_> {
                 }
             }
         }
+        for (n, fs) in entry_fns {
+            if let Some((_, f)) = fs.first() {
+                self.error(f.name.loc, format!("`{n}` overrides none of the enum class's members"));
+            }
+        }
+        methods.extend(self.inner_ctors(info));
+        for f in &entry_own {
+            let saved = (std::mem::take(&mut self.scopes), std::mem::take(&mut self.receivers));
+            methods.push(self.member_fn(f, &cx));
+            (self.scopes, self.receivers) = saved;
+        }
+        // (Kotlin's `toString()`: an entry's own, else its name)
+        let mut text_arms = Vec::new();
+        for (e, f) in &entry_strings {
+            let v = self.name_ident(&e.name, e.loc);
+            self.fun = FnState::default();
+            self.enter_member(&cx, &f.name.name, true);
+            let body = match &f.body {
+                Some(FunctionBody::Block(b)) => self.fn_block(b, false),
+                Some(FunctionBody::Expr(x)) => self.value(x),
+                None => quote!(),
+            };
+            text_arms.push(quote_spanned!(span=> #name::#v => {
+                #[allow(unused_imports)]
+                use #kt::ext::*;
+                let s: ::std::string::String = #rt::named_args!(#kz_types { #body });
+                __kz_out.push_str(&s)
+            }));
+        }
         let companion_const = self.companion_const(info, span);
         let missing = format!("No enum constant {kt_name}.");
         let entries = variants.iter().map(|v| quote_spanned!(span=> #name::#v));
         let entries2 = entries.clone();
+        let impls = self.class_impls(d, Place::Enum, &quote!(), &quote!());
+        let text = if text_arms.is_empty() {
+            quote_spanned!(span=> __kz_out.push_str(&self.name());)
+        } else {
+            quote_spanned! {span=>
+                #[allow(unreachable_patterns)]
+                match self {
+                    #(#text_arms,)*
+                    _ => __kz_out.push_str(&self.name()),
+                }
+            }
+        };
+        let display = if text_arms.is_empty() {
+            quote_spanned!(span=> f.write_str(&self.name()))
+        } else {
+            quote_spanned!(span=> f.write_str(&#kt::KtToString::kt_to_string(self)))
+        };
         quote_spanned! {span=>
             #allow
             #[derive(::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq, ::core::hash::Hash, ::core::cmp::PartialOrd, ::core::cmp::Ord, ::core::fmt::Debug)]
@@ -1832,99 +2801,119 @@ impl Gen<'_, '_> {
             #allow
             impl #kt::KtToString for #name {
                 fn kt_write(&self, __kz_out: &mut ::std::string::String) {
-                    __kz_out.push_str(&self.name());
+                    #text
                 }
             }
             #allow
             impl ::core::fmt::Display for #name {
                 fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    f.write_str(&self.name())
+                    #display
                 }
             }
+
+            #impls
         }
     }
 
-    /// An interface of abstract members: a trait.
-    fn interface(&mut self, c: &Class, info: &UserClass) -> TokenStream {
-        let span = self.span(c.loc);
-        if c.kind == ClassKind::FunInterface || c.is_sealed() {
-            return self.later(c.loc, if c.is_sealed() { "a sealed interface" } else { "a fun interface" });
+    /// An enum class's member function: its body, or, where entries override it, a `match` of the entries (each
+    /// overriding one's body, its parameters named its own way bound to the class's; the class's body for the
+    /// others, an abstract one's none).
+    fn enum_member(&mut self, c: &Class, f: &Function, overrides: &[(Ident, Function)], cx: &MemberCx) -> TokenStream {
+        if overrides.is_empty() && f.body.is_some() {
+            return self.member_fn(f, cx);
         }
-        if let Some(s) = c.supers.first() {
-            return self.later(s.loc, "an interface's supertypes");
+        let span = self.span(f.loc);
+        let name = proc_macro2::Ident::new(&cx.owner, span);
+        // (the class's signature; an abstract function's result type from its declaration, else from an override)
+        let mut sig = f.clone();
+        if sig.result.is_none() && sig.body.is_none() {
+            sig.result = overrides.iter().find_map(|(_, o)| o.result.clone());
         }
-        if let Some(t) = c.type_params.first() {
-            return self.later(t.loc, "a generic interface");
+        let mut arms = Vec::new();
+        for (e, o) in overrides {
+            let v = self.name_ident(&e.name, e.loc);
+            let mut body_fn = o.clone();
+            // (its parameters bound to the class's names)
+            let binds: Vec<TokenStream> = o
+                .params
+                .iter()
+                .zip(&f.params)
+                .filter(|(a, b)| a.name.name != b.name.name)
+                .map(|(a, b)| {
+                    let ai = ident(&snake(&a.name.name), span);
+                    let bi = ident(&snake(&b.name.name), span);
+                    quote_spanned!(span=> let #ai = #bi;)
+                })
+                .collect();
+            body_fn.params = o.params.clone();
+            arms.push((v, binds, body_fn));
         }
-        let vis = self.class_vis(&c.modifiers, c.loc);
-        let name = proc_macro2::Ident::new(&info.rust, self.span(c.name.loc));
-        let allow = class_allow(span);
-        let mut items = Vec::new();
-        for m in &c.body.members {
-            match m {
-                Member::Decl(Decl::Function(f))
-                    if f.body.is_none() && f.type_params.is_empty() && f.receiver.is_none() =>
-                {
-                    let fspan = self.span(f.loc);
-                    let i = self.name_ident(&snake(&f.name.name), f.name.loc);
-                    let mut ps = Vec::new();
-                    for p in &f.params {
-                        let pi = self.name_ident(&snake(&p.name.name), p.name.loc);
-                        let t = p.ty.as_ref().map(|t| self.rust_type(t, TypePos::Value)).unwrap_or_default();
-                        ps.push(quote_spanned!(fspan=> #pi: #t));
-                    }
-                    let ret = match &f.result {
-                        Some(t) if self.ty_of(t) != Ty::Unit => {
-                            let t = self.rust_type(t, TypePos::Value);
-                            quote_spanned!(fspan=> -> #t)
-                        }
-                        _ => quote!(),
-                    };
-                    let asyncness = if f.is_suspend() { quote_spanned!(fspan=> async) } else { quote!() };
-                    items.push(quote_spanned!(fspan=> #asyncness fn #i(&self, #(#ps),*) #ret;));
-                }
-                Member::Decl(Decl::Property(p))
-                    if matches!(p.init, PropertyInit::None) && p.getter.is_none() && p.ty.is_some() =>
-                {
-                    let Binding::Name(n) = &p.binding else { continue };
-                    let pspan = self.span(p.loc);
-                    let i = self.name_ident(&snake(&n.name), n.loc);
-                    let t = self.rust_type(p.ty.as_ref().expect("a type"), TypePos::Value);
-                    items.push(quote_spanned!(pspan=> fn #i(&self) -> #t;));
-                    if p.is_var() {
-                        let s = format_ident!("set_{}", i.to_string().trim_start_matches("r#"), span = pspan);
-                        items.push(quote_spanned!(pspan=> fn #s(&self, value: #t);));
-                    }
-                }
-                Member::Decl(Decl::Class(_) | Decl::Object(_) | Decl::TypeAlias(_)) => {}
-                Member::Decl(d) => {
-                    self.later(d.loc(), "an interface's member with a body");
-                }
-                Member::Init(b) => {
-                    self.error(b.loc, "an interface has no `init` blocks");
-                }
-                Member::Constructor(s) => {
-                    self.error(s.loc, "an interface has no constructors");
-                }
+        let mut written = Vec::new();
+        let ret_text = self.member_ret_text(&sig, cx);
+        let ret_ty = Ty::from_rust(&ret_text);
+        let unit = ret_ty == Ty::Unit;
+        for (v, binds, o) in &arms {
+            self.fun = FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+            self.enter_member(cx, &f.name.name, true);
+            for p in &o.params {
+                let ty = p.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
+                self.declare_at(&p.name, snake(&p.name.name), LocalKind::Param, ty);
             }
+            let body = self.enum_arm_body(o, unit, &ret_ty);
+            written.push(quote_spanned!(span=> #name::#v => { #(#binds)* #body }));
         }
-        let companion = match &info.companion {
-            Some(cc) => {
-                let ci = proc_macro2::Ident::new(cc, span);
-                quote_spanned! {span=>
-                    #allow
-                    impl dyn #name {
-                        #[allow(non_upper_case_globals)]
-                        pub const Companion: #ci = #ci {};
-                    }
+        let default = match &f.body {
+            Some(_) => {
+                self.fun = FnState { kompozable: false, nullable_result: ret_ty.is_nullable(), shared_result: None };
+                self.enter_member(cx, &f.name.name, true);
+                for p in &f.params {
+                    let ty = p.ty.as_ref().map(|t| self.ty_of(t)).unwrap_or(Ty::Unknown);
+                    self.declare_at(&p.name, snake(&p.name.name), LocalKind::Param, ty);
                 }
+                let body = self.enum_arm_body(f, unit, &ret_ty);
+                quote_spanned!(span=> _ => { #body })
+            }
+            None => {
+                let missing: Vec<&EnumEntry> =
+                    c.enum_entries.iter().filter(|e| !overrides.iter().any(|(n, _)| n.name == e.name.name)).collect();
+                if let Some(e) = missing.first() {
+                    self.error(e.name.loc, format!("`{}` doesn't implement `{}`", e.name.name, f.name.name));
+                }
+                quote_spanned!(span=> _ => ::core::unreachable!())
+            }
+        };
+        // (the function itself: the class's parameters and result, a `match` of the entries for its body)
+        // (its body for its result's type: the class's, else an entry's)
+        let typing = sig.body.clone().or_else(|| overrides.first().and_then(|(_, o)| o.body.clone()));
+        let synth = Function {
+            body: typing.or_else(|| Some(FunctionBody::Block(Block { stmts: Vec::new(), braced: true, loc: f.loc }))),
+            ..sig
+        };
+        let arms_ts = quote_spanned!(span=> #[allow(unreachable_patterns)] match self { #(#written,)* #default });
+        self.member_fn_with(&synth, cx, Some(arms_ts))
+    }
+
+    /// An enum arm's body: a function's block or expression, as its result.
+    fn enum_arm_body(&mut self, f: &Function, unit: bool, ret: &Ty) -> TokenStream {
+        let kt = self.kt(self.span(f.loc));
+        let rt = respan(self.rt().clone(), self.span(f.loc));
+        let kz_types = self.types_arg(self.span(f.loc));
+        let body = match &f.body {
+            Some(FunctionBody::Block(b)) => self.fn_block(b, unit),
+            Some(FunctionBody::Expr(e)) if unit => {
+                let s = self.stmt_expr(e);
+                quote!(#s;)
+            }
+            Some(FunctionBody::Expr(e)) => {
+                let want = super::expr::Want { some: ret.is_nullable(), ..Default::default() };
+                self.value_want(e, want)
             }
             None => quote!(),
         };
-        quote_spanned! {span=>
-            #allow
-            #vis trait #name { #(#items)* }
-            #companion
+        quote! {
+            #[allow(unused_imports)]
+            use #kt::ext::*;
+            #rt::named_args!(#kz_types { #body })
         }
     }
 
@@ -1945,10 +2934,167 @@ impl Gen<'_, '_> {
 
 /// The lints a class's Rust keeps quiet: [`allow_attr`]'s, and dead code (what Kotlin gives every class of its
 /// kind — `componentN`, `copy`, `entries`, `values()` — is there whether the program uses it or not).
-fn class_allow(span: Span) -> TokenStream {
+pub(crate) fn class_allow(span: Span) -> TokenStream {
     let mut a = allow_attr(span);
     a.extend(quote_spanned!(span=> #[allow(dead_code)]));
     a
+}
+
+/// The translation with each `types(…)` list (what `named_args!`, `kompozable_block!` and `#[kompozable]` are told
+/// of the user's classes) naming only the classes the code it is given names: the list is what the macros need to
+/// rewrite those classes' calls, and the generator writes every class it knows at each place.
+pub(crate) fn trim_types(ts: TokenStream) -> TokenStream {
+    use proc_macro2::{Delimiter, Group, TokenTree};
+    use std::collections::HashSet;
+    fn idents(ts: &TokenStream, out: &mut HashSet<String>) {
+        for t in ts.clone() {
+            match t {
+                TokenTree::Ident(i) => {
+                    out.insert(i.to_string());
+                }
+                TokenTree::Group(g) => idents(&g.stream(), out),
+                _ => {}
+            }
+        }
+    }
+    /// `types(A(r), B(rd))` kept to the entries `used` names.
+    fn filtered(list: &Group, used: &HashSet<String>) -> Option<TokenTree> {
+        let mut kept = Vec::new();
+        let mut entry: Vec<TokenTree> = Vec::new();
+        let flush = |entry: &mut Vec<TokenTree>, kept: &mut Vec<TokenStream>| {
+            if let Some(TokenTree::Ident(i)) = entry.first()
+                && used.contains(&i.to_string())
+            {
+                kept.push(entry.iter().cloned().collect());
+            }
+            entry.clear();
+        };
+        for t in list.stream() {
+            match &t {
+                TokenTree::Punct(p) if p.as_char() == ',' => flush(&mut entry, &mut kept),
+                _ => entry.push(t),
+            }
+        }
+        flush(&mut entry, &mut kept);
+        if kept.is_empty() {
+            return None;
+        }
+        let mut g = Group::new(Delimiter::Parenthesis, quote!(#(#kept),*));
+        g.set_span(list.span());
+        Some(TokenTree::Group(g))
+    }
+    fn walk(ts: TokenStream) -> TokenStream {
+        let tokens: Vec<TokenTree> = ts.into_iter().collect();
+        let mut out: Vec<TokenTree> = Vec::new();
+        let mut k = 0;
+        while k < tokens.len() {
+            let t = tokens[k].clone();
+            match t {
+                TokenTree::Group(g) => {
+                    let inner: Vec<TokenTree> = walk(g.stream()).into_iter().collect();
+                    // (`types(…), rest`: a macro's own list, of what the rest names)
+                    let inner = match inner.as_slice() {
+                        [TokenTree::Ident(i), TokenTree::Group(list), rest @ ..]
+                            if i == "types"
+                                && list.delimiter() == Delimiter::Parenthesis
+                                && matches!(rest.first(), Some(TokenTree::Punct(p)) if p.as_char() == ',') =>
+                        {
+                            let mut used = HashSet::new();
+                            idents(&rest.iter().cloned().collect(), &mut used);
+                            match filtered(list, &used) {
+                                Some(l) => {
+                                    [TokenTree::Ident(i.clone()), l].into_iter().chain(rest.iter().cloned()).collect()
+                                }
+                                // (none left: the list and its comma go)
+                                None => rest.iter().skip(1).cloned().collect::<Vec<_>>(),
+                            }
+                        }
+                        _ => inner,
+                    };
+                    let mut ng = Group::new(g.delimiter(), inner.into_iter().collect());
+                    ng.set_span(g.span());
+                    out.push(TokenTree::Group(ng));
+                }
+                t => out.push(t),
+            }
+            k += 1;
+        }
+        // (`#[…kompozable(types(…), …)]` of the item after it: trimmed to what that item names)
+        let mut k = 0;
+        while k + 1 < out.len() {
+            if let (TokenTree::Punct(p), TokenTree::Group(attr)) = (&out[k], &out[k + 1])
+                && p.as_char() == '#'
+                && attr.delimiter() == Delimiter::Bracket
+            {
+                let a: Vec<TokenTree> = attr.stream().into_iter().collect();
+                if let Some(pos) = a.iter().position(|t| matches!(t, TokenTree::Ident(i) if i == "kompozable"))
+                    && let Some(TokenTree::Group(opts)) = a.get(pos + 1)
+                    && opts.delimiter() == Delimiter::Parenthesis
+                {
+                    // (the item: up to its body)
+                    let mut used = HashSet::new();
+                    for t in &out[k + 2..] {
+                        idents(&TokenStream::from(t.clone()), &mut used);
+                        if matches!(t, TokenTree::Group(g) if g.delimiter() == Delimiter::Brace) {
+                            break;
+                        }
+                    }
+                    let o: Vec<TokenTree> = opts.stream().into_iter().collect();
+                    let mut no: Vec<TokenTree> = Vec::new();
+                    let mut j = 0;
+                    while j < o.len() {
+                        match (&o[j], o.get(j + 1)) {
+                            (TokenTree::Ident(i), Some(TokenTree::Group(list))) if i == "types" => {
+                                if let Some(l) = filtered(list, &used) {
+                                    no.push(o[j].clone());
+                                    no.push(l);
+                                } else if no
+                                    .last()
+                                    .is_some_and(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ','))
+                                {
+                                    no.pop();
+                                } else if matches!(o.get(j + 2), Some(TokenTree::Punct(p)) if p.as_char() == ',') {
+                                    j += 1;
+                                }
+                                j += 2;
+                            }
+                            _ => {
+                                no.push(o[j].clone());
+                                j += 1;
+                            }
+                        }
+                    }
+                    let mut new_a: Vec<TokenTree> = a[..=pos].to_vec();
+                    if !no.is_empty() {
+                        let mut g = Group::new(Delimiter::Parenthesis, no.into_iter().collect());
+                        g.set_span(opts.span());
+                        new_a.push(TokenTree::Group(g));
+                    }
+                    new_a.extend(a[pos + 2..].iter().cloned());
+                    let mut ng = Group::new(Delimiter::Bracket, new_a.into_iter().collect());
+                    ng.set_span(attr.span());
+                    out[k + 1] = TokenTree::Group(ng);
+                }
+            }
+            k += 1;
+        }
+        out.into_iter().collect()
+    }
+    walk(ts)
+}
+
+/// The Rust name of an enum entry's own function (`__kz_plus_twice`).
+fn entry_own_name(entry: &str, name: &str) -> String {
+    format!("__kz_{}_{}", entry.to_lowercase(), snake(name))
+}
+
+/// Where a member is.
+fn m_loc(m: &Member) -> Loc {
+    match m {
+        Member::Decl(d) => d.loc(),
+        Member::Init(b) => b.loc,
+        Member::Constructor(s) => s.loc,
+    }
 }
 
 fn class_loc(a: &ClassAst) -> Loc {
@@ -1959,7 +3105,7 @@ fn class_loc(a: &ClassAst) -> Loc {
 }
 
 /// `t` with the type parameters `binds` names replaced.
-fn substitute(t: &Type, binds: &HashMap<String, Type>) -> Type {
+pub(crate) fn substitute(t: &Type, binds: &HashMap<String, Type>) -> Type {
     let mut out = t.clone();
     match &mut out.kind {
         TypeKind::Named(segs) => {

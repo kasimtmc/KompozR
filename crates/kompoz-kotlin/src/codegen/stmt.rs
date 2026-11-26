@@ -461,7 +461,11 @@ impl Gen<'_, '_> {
                 me.value(value)
             };
             match op {
-                AssignOp::Assign => v,
+                // (a case of a sealed class, a class's value of an interface: the place's type's, stage 14 WPA)
+                AssignOp::Assign => {
+                    let from = me.peek_ty(value);
+                    me.coerce(v, &from, read_ty, span)
+                }
                 AssignOp::Add if read_ty.is_string() || me.peek_ty(value).is_string() && !read_ty.is_number() => {
                     let piece = me.expr(value).ts;
                     quote_spanned!(span=> #kt::template!(#read, #piece))
@@ -868,7 +872,7 @@ impl Gen<'_, '_> {
     }
 
     /// `ts` held as the shared trait object `shared` names (a typed binding: the branches' `Arc::new(…)` coerce to it).
-    fn held_shared(
+    pub(crate) fn held_shared(
         &mut self,
         ts: TokenStream,
         shared: Option<(super::expr::Shared, String)>,
@@ -923,7 +927,9 @@ impl Gen<'_, '_> {
                 let target = self.rust_type(&Type { nullable: false, ..(**ty).clone() }, super::types::TypePos::Value);
                 let tty = self.ty_of(&Type { nullable: false, ..(**ty).clone() });
                 // (the same local, of the type the check gives it: where it was declared stays)
-                let at = self.local(&n.name).and_then(|l| l.at);
+                let l = self.local(&n.name);
+                let at = l.as_ref().and_then(|l| l.at);
+                let v = self.cast_operand_of(v, &l.map(|l| l.ty).unwrap_or(Ty::Unknown), span);
                 self.declare(&n.name, rust, LocalKind::Val, tty);
                 self.set_local_at(&n.name, at);
                 quote_spanned!(span=> let ::core::option::Option::Some(#i) = #kt::KtAs::<#target>::kt_as_safe(&#v))
@@ -934,6 +940,10 @@ impl Gen<'_, '_> {
 
     /// `when`: an `if` chain on the subject (bound once).
     pub(crate) fn when(&mut self, w: &When, tail: Tail, loc: Loc) -> Out {
+        // (of a sealed class's value: a `match` of its cases)
+        if let Some(out) = self.sealed_when(w, tail, loc) {
+            return out;
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         let (ty, tail, shared) = if matches!(tail, Tail::Unit) {
@@ -981,6 +991,8 @@ impl Gen<'_, '_> {
                 _ => None,
             };
             if let Some((ty, s, name)) = smart {
+                let sty = subject.as_ref().map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
+                let s = self.cast_operand_of(quote!(#s), &sty, span);
                 let at = self.local(&name).and_then(|l| l.at);
                 self.push_scope();
                 let target = self.rust_type(&Type { nullable: false, ..ty.clone() }, super::types::TypePos::Value);
@@ -1030,9 +1042,10 @@ impl Gen<'_, '_> {
                         self.error(*loc, "`in` in a `when` without a subject");
                         quote!(false)
                     }
-                    (WhenCondition::Is { negated, ty, .. }, Some((s, _))) => {
+                    (WhenCondition::Is { negated, ty, .. }, Some((s, sty))) => {
                         let target =
                             self.rust_type(&Type { nullable: false, ..ty.clone() }, super::types::TypePos::Value);
+                        let s = self.cast_operand_of(quote!(#s), sty, span);
                         let t = quote_spanned!(span=> #kt::kt_is::<#target, _>(&#s));
                         if *negated { quote_spanned!(span=> !#t) } else { t }
                     }

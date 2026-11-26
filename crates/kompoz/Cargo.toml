@@ -69,6 +69,12 @@ harness = false
 name = "kotlin_classes"
 harness = false
 
+# (stage 14 WPA) The C++ Kompoz's Kotlin-syntax tests of class hierarchies: interfaces, open, abstract and sealed
+# classes, inner classes, generics, enum entries with bodies, data class bodies.
+[[test]]
+name = "kotlin_hierarchy"
+harness = false
+
 # Foundation's components in Kotlin's syntax.
 [[test]]
 name = "kotlin_foundation"

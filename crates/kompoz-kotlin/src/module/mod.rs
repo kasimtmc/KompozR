@@ -85,6 +85,10 @@ pub struct RustItem {
     pub thread_local: bool,
     /// A `type Name = Target;`'s target (the item's kind is then [`crate::index::Kind::Value`], its owner empty).
     pub alias: Option<String>,
+    /// (stage 14 WPA) A trait that is a base class of Kotlin's (a doc line ``Kotlin: `open class X` ``): whether it is
+    /// open (else abstract), and its methods without a default body; the item's kind [`crate::index::Kind::Value`],
+    /// its owner and Rust name the trait's, its Kotlin name the class's.
+    pub base: Option<(bool, Vec<String>)>,
 }
 
 /// A parameter of a Rust function or method.

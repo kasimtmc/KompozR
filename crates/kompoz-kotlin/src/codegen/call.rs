@@ -119,6 +119,12 @@ impl Gen<'_, '_> {
         args: &[Arg],
         trailing: Option<&Lambda>,
     ) -> Out {
+        // (stage 14 WPA) `super.f(…)`: the base class's (or an interface's) body of `f`
+        if let ExprKind::Member { receiver, name, .. } = &callee.kind
+            && let ExprKind::Super { ty, .. } = &receiver.kind
+        {
+            return self.super_call(ty.as_deref(), name, args, e.loc);
+        }
         let span = self.span(e.loc);
         let mut list: Vec<ArgRef> = args
             .iter()
@@ -186,6 +192,12 @@ impl Gen<'_, '_> {
         if type_args.is_empty() {
             return out;
         }
+        // (stage 14 WPA) a composable giving its type argument, `viewModel<VM>()`: that type, not the unit a
+        // composable's call is taken for
+        let out = match (&out.ty, self.peek_ty(e)) {
+            (Ty::Unit, p) if p != Ty::Unit && p != Ty::Unknown => Out { ty: p, ..out },
+            _ => out,
+        };
         self.typed_call(out, callee, type_args, span)
     }
 
@@ -342,6 +354,14 @@ impl Gen<'_, '_> {
         }
         // Special forms.
         if let Some(out) = self.special_call(n, args, loc) {
+            return out;
+        }
+        // (stage 14 WPA) A user's fun interface's SAM constructor: `Check { it.isNotEmpty() }`.
+        if let [a] = args
+            && a.name.is_none()
+            && let Some(l) = a.value.lambda()
+            && let Some(out) = self.user_sam(n, l, loc)
+        {
             return out;
         }
         // A member of an implicit receiver (`drawCircle(…)` in a DrawScope lambda), or an extension function of the
@@ -600,7 +620,11 @@ impl Gen<'_, '_> {
         };
         let v = self.arg_value(value, Some(&param), false);
         let (v, ty) = match hint {
-            Some((rust, ty)) => (quote_spanned!(span=> ::core::convert::identity::<#rust>(#v)), ty),
+            Some((rust, ty)) => {
+                // (a case of a sealed class, a class's value of an interface: the state's type's, stage 14 WPA)
+                let v = self.coerce(v, &peeked, &ty, span);
+                (quote_spanned!(span=> ::core::convert::identity::<#rust>(#v)), ty)
+            }
             None => (v, peeked),
         };
         let rt = self.rt().clone();
@@ -1858,7 +1882,13 @@ impl Gen<'_, '_> {
                 _ => None,
             })
             .collect();
-        let unified = expected.unwrap_or_else(|| self.elements_ty(exprs.iter().flatten().copied()));
+        // (the type written, `listOf<Screen>(…)`; else the elements' — several cases of a sealed class are
+        // values of it, stage 14 WPA)
+        let written = self.call_type_tys.last().filter(|t| t.len() == 1).map(|t| t[0].clone());
+        let unified = expected.or(written).unwrap_or_else(|| {
+            let tys: Vec<Ty> = exprs.iter().flatten().map(|e| self.peek_ty(e)).collect();
+            self.common_sealed(&tys).unwrap_or_else(|| self.elements_ty(exprs.iter().flatten().copied()))
+        });
         let mut vals = Vec::new();
         for (a, e) in all.iter().zip(&exprs) {
             if let (Some(e), Ty::List(inner) | Ty::Set(inner)) = (e, &unified)
@@ -1876,11 +1906,16 @@ impl Gen<'_, '_> {
                     quote_spanned!(span=> ::core::option::Option::Some(#v))
                 }
                 // (a nested subclass's value among its sealed class's: converted to it)
-                Some(Ty::Named(t, _)) if matches!(&unified, Ty::Named(u, _) if nested_in(&t, u)) => {
+                Some(Ty::Named(t, _))
+                    if matches!(&unified, Ty::Named(u, _) if nested_in(&t, u))
+                        && !self.coerces(&Ty::named(&t), &unified) =>
+                {
                     let Ty::Named(u, _) = &unified else { unreachable!() };
                     let u = ident(u, span);
                     quote_spanned!(span=> ::core::convert::Into::<#u>::into(#v))
                 }
+                // (a case of a sealed class, a class's value among an interface's: the enum's, the shared object)
+                Some(t) if self.coerces(&t, &unified) => self.coerce(v, &t, &unified, span),
                 _ => v,
             };
             let v = self.shared_value(v, a, shared.as_deref(), span);
@@ -2245,6 +2280,10 @@ impl Gen<'_, '_> {
         }
         if p.option == OptionForm::Option && !nullable_arg {
             return quote_spanned!(span=> ::core::option::Option::Some(#v));
+        }
+        // (stage 14 WPA) Kotlin's `Any` given a value of a type of its own (`"a"`, `1`, `Note(…)`): its shared object
+        if super::hierarchy::is_any(&pty.non_null()) && self.coerces(&arg_ty, &pty) {
+            return self.coerce(v, &arg_ty, &pty, span);
         }
         // (a shared trait object, `shape: Arc<dyn Shape>`, given a value of its own type, `RoundedCornerShape(16.dp)`:
         // Kotlin's interface value is the Rust side's `Arc::new` of it; a value of the interface's type is one already)

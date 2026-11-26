@@ -7,6 +7,4 @@ fun Greeting(name: ) {
     BasicText("Merhaba, $name")
 }
 
-open class Settings {
-    val dark = false
-}
+value class Settings(val dark: Boolean)
