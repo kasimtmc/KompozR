@@ -98,15 +98,19 @@ impl Gen<'_, '_> {
                     "Unit" => Ty::Unit,
                     "Any" if args.is_empty() => Ty::Named("Rc".into(), vec![Ty::named("KtObject")]),
                     "Short" | "Byte" | "UInt" | "ULong" | "UShort" | "UByte" => Ty::OtherInt,
-                    "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" | "Array" => {
-                        Ty::List(Box::new(first()))
+                    "List" | "Collection" | "Iterable" | "Array" => Ty::List(Box::new(first())),
+                    // ((stage 14 LISTS) Kotlin's mutable collections: kt's shared ones, Kotlin's references)
+                    "MutableList" | "ArrayList" => Ty::Named("MutableList".into(), vec![first()]),
+                    "MutableSet" | "HashSet" | "LinkedHashSet" => Ty::Named("MutableSet".into(), vec![first()]),
+                    "MutableMap" | "HashMap" | "LinkedHashMap" => {
+                        Ty::Named("MutableMap".into(), vec![first(), args.get(1).cloned().unwrap_or(Ty::Unknown)])
                     }
+                    // ((stage 14 LISTS) a `List` that may be a `MutableList`: see `kt::ListView`)
+                    "ListView" if self.user_class("ListView").is_none() => Ty::Named("ListView".into(), vec![first()]),
                     "IntArray" => Ty::List(Box::new(Ty::Int)),
                     "FloatArray" => Ty::List(Box::new(Ty::Float)),
-                    "Set" | "MutableSet" | "HashSet" => Ty::Set(Box::new(first())),
-                    "Map" | "MutableMap" | "HashMap" => {
-                        Ty::Map(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown)))
-                    }
+                    "Set" => Ty::Set(Box::new(first())),
+                    "Map" => Ty::Map(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown))),
                     "Pair" => Ty::Pair(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown))),
                     "IntRange" => Ty::Range(Box::new(Ty::Int)),
                     "ClosedFloatingPointRange" | "ClosedRange" => Ty::ClosedRange(Box::new(first())),
@@ -322,9 +326,26 @@ impl Gen<'_, '_> {
             "Nothing" => quote_spanned!(span=> !),
             // (Kotlin's `Any`: a value whose class can be asked, shared — stage 14 WPA)
             "Any" => quote_spanned!(span=> ::std::rc::Rc<dyn #kt::KtObject>),
-            "List" | "MutableList" | "ArrayList" | "Collection" | "Iterable" | "Array" => {
+            "List" | "Collection" | "Iterable" | "Array" => {
                 let t = a(0);
                 quote_spanned!(span=> ::std::vec::Vec<#t>)
+            }
+            // ((stage 14 LISTS) Kotlin's mutable collections: kt's shared ones)
+            "MutableList" | "ArrayList" => {
+                let t = a(0);
+                quote_spanned!(span=> #kt::MutableList<#t>)
+            }
+            "MutableSet" | "HashSet" | "LinkedHashSet" => {
+                let t = a(0);
+                quote_spanned!(span=> #kt::MutableSet<#t>)
+            }
+            "MutableMap" | "HashMap" | "LinkedHashMap" => {
+                let (k, v) = (a(0), a(1));
+                quote_spanned!(span=> #kt::MutableMap<#k, #v>)
+            }
+            "ListView" if self.user_class("ListView").is_none() => {
+                let t = a(0);
+                quote_spanned!(span=> #kt::ListView<#t>)
             }
             "IntArray" => quote_spanned!(span=> ::std::vec::Vec<i32>),
             "LongArray" => quote_spanned!(span=> ::std::vec::Vec<i64>),
@@ -332,11 +353,11 @@ impl Gen<'_, '_> {
             "DoubleArray" => quote_spanned!(span=> ::std::vec::Vec<f64>),
             "BooleanArray" => quote_spanned!(span=> ::std::vec::Vec<bool>),
             "CharArray" => quote_spanned!(span=> ::std::vec::Vec<char>),
-            "Set" | "MutableSet" | "HashSet" => {
+            "Set" => {
                 let t = a(0);
                 quote_spanned!(span=> #kt::KtSet<#t>)
             }
-            "Map" | "MutableMap" | "HashMap" => {
+            "Map" => {
                 let (k, v) = (a(0), a(1));
                 quote_spanned!(span=> #kt::KtMap<#k, #v>)
             }
@@ -413,6 +434,20 @@ impl Gen<'_, '_> {
             Ty::List(t) => {
                 let t = self.rust_of_ty(t, span);
                 quote_spanned!(span=> ::std::vec::Vec<#t>)
+            }
+            Ty::Set(t) => {
+                let t = self.rust_of_ty(t, span);
+                quote_spanned!(span=> #kt::KtSet<#t>)
+            }
+            Ty::Map(k, v) => {
+                let (k, v) = (self.rust_of_ty(k, span), self.rust_of_ty(v, span));
+                quote_spanned!(span=> #kt::KtMap<#k, #v>)
+            }
+            // ((stage 14 LISTS) kt's shared mutable collections, a `List` that may be one: their kt paths)
+            Ty::Named(n, args) if matches!(n.as_str(), "MutableList" | "MutableSet" | "MutableMap" | "ListView") => {
+                let i = proc_macro2::Ident::new(n, span);
+                let a = args.iter().map(|t| self.rust_of_ty(t, span));
+                quote_spanned!(span=> #kt::#i<#(#a),*>)
             }
             Ty::Range(t) => {
                 let t = self.rust_of_ty(t, span);

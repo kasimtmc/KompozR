@@ -276,7 +276,7 @@ impl<T: KtToString> KtToString for Option<T> {
 
 // ---- Collections ----
 
-fn write_list<'a, T: KtToString + 'a>(out: &mut String, items: impl IntoIterator<Item = &'a T>) {
+pub(crate) fn write_list<'a, T: KtToString + 'a>(out: &mut String, items: impl IntoIterator<Item = &'a T>) {
     out.push('[');
     for (i, v) in items.into_iter().enumerate() {
         if i > 0 {
@@ -287,7 +287,7 @@ fn write_list<'a, T: KtToString + 'a>(out: &mut String, items: impl IntoIterator
     out.push(']');
 }
 
-fn write_map<'a, K: KtToString + 'a, V: KtToString + 'a>(
+pub(crate) fn write_map<'a, K: KtToString + 'a, V: KtToString + 'a>(
     out: &mut String,
     entries: impl IntoIterator<Item = (&'a K, &'a V)>,
 ) {

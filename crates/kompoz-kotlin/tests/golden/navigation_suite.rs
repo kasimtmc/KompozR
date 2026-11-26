@@ -28,7 +28,7 @@ pub fn Suite(tab: i32, on_tab: impl ::core::ops::Fn(i32) + 'static) {
                         on_tab(1);
                     }
                 },
-                move || {
+                icon = move || {
                     VectorIcon(Icons::Filled::Settings(), ::core::option::Option::None);
                 },
             );

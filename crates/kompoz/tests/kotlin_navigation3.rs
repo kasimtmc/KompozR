@@ -3,7 +3,8 @@
 //! kompoz_file!) — NavDisplay with a remembered back stack and the entry provider DSL, the dialog scene strategy, a
 //! hoisted scene state with its navigation back handler, scenes and strategies of their own giving transitions, back
 //! stacks switched and concatenated, entries with their ViewModels, back stacks saved by kotlinx's serializers (open
-//! and closed polymorphism, a serializers module, Android's reflection), deep links matched to keys and back stacks.
+//! and closed polymorphism, a serializers module, Android's reflection), deep links matched to keys and back stacks,
+//! (stage 14 LISTS) the runtime samples' CommonUiNavDisplay (kt/navigation3_common_ui.kt) popping its caller's list.
 //! crates/kompoz-navigation3/tests/navigation3.rs and deeplink.rs check the same in Rust's syntax.
 
 #![allow(non_snake_case, non_upper_case_globals)]
@@ -30,6 +31,14 @@ mod runtime_samples {
     use kompoz::navigation3::runtime::deeplink::*;
     use kompoz::prelude::*;
     kompoz_file!("tests/kt/navigation3_runtime.kt");
+}
+
+/// kt/navigation3_common_ui.kt: CommonUiNavDisplaySample.kt (its object and composable of one name, its
+/// `TopLevelRoute`), and the test's caller.
+mod common_ui {
+    #![allow(non_snake_case, non_upper_case_globals)]
+    use kompoz::prelude::*;
+    kompoz_file!("tests/kt/navigation3_common_ui.kt");
 }
 
 // ---- runtime samples --------------------------------------------------------------------------------------------
@@ -368,8 +377,29 @@ fn deep_link_ui_samples_as_compose_writes_them() {
     assert!(shown(&rule, "HatListKey(hats=[Hat(id=2342, weight=4.5), Hat(id=2643, weight=5.6)])"));
 }
 
+/// CommonUiNavDisplaySample.kt's CommonUiNavDisplay, given the caller's state list (a `MutableList`): a navigation
+/// fades the new entry in (700 ms: mid-way both shown), the display's default back — `onBack: () -> Unit = { if
+/// (backstack is MutableList) backstack.removeAt(backstack.size - 1) }`, a default reading the earlier parameter —
+/// pops the caller's list itself, and the back handler is off with one entry left.
+fn common_ui_nav_display_sample_as_compose_writes_it() {
+    let rule = KompozTestRule::new(common_ui::CommonUiNavDisplayDemo);
+    assert!(shown(&rule, "ekran Ana") && shown(&rule, "yığın Ana"));
+    rule.main_clock().set_auto_advance(false);
+    rule.on_node_with(has_text("git", false, false), false).perform_click();
+    rule.advance_time_by(350);
+    assert!(shown(&rule, "ekran Ana") && shown(&rule, "ekran Ayrıntı") && shown(&rule, "yığın Ana/Ayrıntı"));
+    rule.main_clock().set_auto_advance(true);
+    rule.wait_for_idle();
+    assert!(shown(&rule, "ekran Ayrıntı") && !shown(&rule, "ekran Ana"));
+    assert!(escape(&rule));
+    assert!(shown(&rule, "yığın Ana") && shown(&rule, "ekran Ana") && !shown(&rule, "ekran Ayrıntı"));
+    assert!(!escape(&rule));
+    assert!(shown(&rule, "yığın Ana"));
+}
+
 fn main() {
     common::run(&[
+        ("common_ui_nav_display_sample_as_compose_writes_it", common_ui_nav_display_sample_as_compose_writes_it),
         ("dialog_sample_as_compose_writes_it", dialog_sample_as_compose_writes_it),
         ("scene_state_sample_as_compose_writes_it", scene_state_sample_as_compose_writes_it),
         (

@@ -109,6 +109,14 @@ impl std::fmt::Debug for SlotKey {
     }
 }
 
+/// Kotlin's `toString()` of the `Any?` it holds (a content key's: `newStack.toString()`): a text's or a number's
+/// value, else its type.
+impl kompoz_runtime::kt::KtToString for SlotKey {
+    fn kt_write(&self, out: &mut String) {
+        out.push_str(&self.0.describe());
+    }
+}
+
 /// The id a slot kept for reuse gets once its layout itself was reused or deactivated (Compose's
 /// `ReusedSlotId`): any slot can take it.
 #[derive(Hash, PartialEq, Eq)]

@@ -56,6 +56,9 @@ pub(crate) enum FieldKind {
     Bits,
     /// `==` only: the class has no `Hash`.
     Compared,
+    /// (stage 14 LISTS) Kotlin's `Any` (`Any?`): `==` of what it holds (`kt::KtObject`'s; a derived `==` of an
+    /// `Rc<dyn KtObject>` isn't Rust's to write), no `Hash`.
+    Any,
 }
 
 /// A user's class, object, enum class or interface, as the generator knows it.
@@ -650,6 +653,9 @@ impl Gen<'_, '_> {
     /// about already (a recursive one hashes).
     pub(crate) fn data_field_kind(&self, ty: &Ty, tparams: &[String], seen: &mut Vec<String>) -> FieldKind {
         let plain_if = |b: bool| if b { FieldKind::Plain } else { FieldKind::Compared };
+        if super::hierarchy::is_any(&ty.non_null()) {
+            return FieldKind::Any;
+        }
         match ty {
             Ty::Int | Ty::Long | Ty::Bool | Ty::Char | Ty::String | Ty::OtherInt | Ty::Unit => FieldKind::Plain,
             Ty::Float | Ty::Double => FieldKind::Bits,
@@ -2186,12 +2192,13 @@ impl Gen<'_, '_> {
         // ((stage 14 WPB) `equals`/`hashCode` overridden: theirs)
         // ((stage 14 FINAL-T) a `Float`/`Double` property by its bits, Kotlin's `Float.compare`; hashed — Kotlin's
         // `hashCode()` of the properties — when every property's type hashes, `Eq` then too)
-        let bits = kinds.contains(&FieldKind::Bits);
+        let bits = kinds.contains(&FieldKind::Bits) || kinds.contains(&FieldKind::Any);
         let compares = compared.iter().zip(&kinds).map(|(i, k)| match k {
             FieldKind::Bits => quote_spanned!(span=> #kt::KtBits::kt_bits(&self.#i) == #kt::KtBits::kt_bits(&other.#i)),
+            FieldKind::Any => quote_spanned!(span=> #kt::eq_any(&self.#i, &other.#i)),
             _ => quote_spanned!(span=> self.#i == other.#i),
         });
-        let hashes = !kinds.contains(&FieldKind::Compared);
+        let hashes = !kinds.contains(&FieldKind::Compared) && !kinds.contains(&FieldKind::Any);
         let structural_hash = if hashes {
             let each = compared.iter().zip(&kinds).map(|(i, k)| match k {
                 FieldKind::Bits => {
@@ -2549,7 +2556,11 @@ impl Gen<'_, '_> {
         let lets: TokenStream = respan(lets.parse().unwrap_or_default(), span);
         let owner = proc_macro2::Ident::new(&cx.owner, span);
         let hidden = format_ident!("__kz_member_{}_{}", cx.owner, f.name.name, span = span);
-        let name = self.name_ident(&f.name.name, f.name.loc);
+        // ((stage 14 LISTS) a camelCase one — `fun toLayoutType(): NavigationSuiteType` of an enum — snake_case, as its
+        // calls write it; a PascalCase one as written)
+        let rust_name =
+            if f.name.name.starts_with(char::is_uppercase) { f.name.name.clone() } else { snake(&f.name.name) };
+        let name = self.name_ident(&rust_name, f.name.loc);
         let names: Vec<proc_macro2::Ident> =
             f.params.iter().map(|p| self.name_ident(&snake(&p.name.name), p.name.loc)).collect();
         let vis = self.member_vis(&f.modifiers, f.loc);
@@ -3312,6 +3323,11 @@ impl Gen<'_, '_> {
             self.expecting(init, &ty, |g| g.value_want(init, super::expr::Want { some: true, ..Default::default() }))
         } else {
             self.expecting(init, &ty, |g| g.value(init))
+        };
+        // ((stage 14 LISTS) a mutable collection held by a read-only type's property, a list by a view's)
+        let from = self.peek_ty(init);
+        let v = match self.collection_coerce(v, &from, &ty, pspan) {
+            Ok(v) | Err(v) => v,
         };
         let fvis = self.member_vis(&p.modifiers, p.loc);
         let field = self.cell_field(&i, &t, var, pspan);

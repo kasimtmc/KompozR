@@ -288,11 +288,14 @@ impl Gen<'_, '_> {
         let a0 = args.first().cloned().unwrap_or_else(|| quote_spanned!(span=> _));
         let a1 = args.get(1).cloned().unwrap_or_else(|| quote_spanned!(span=> _));
         let ty = match name {
-            "listOf" | "mutableListOf" | "emptyList" | "arrayListOf" | "listOfNotNull" => {
-                quote_spanned!(span=> ::std::vec::Vec<#a0>)
-            }
-            "setOf" | "mutableSetOf" | "emptySet" => quote_spanned!(span=> #kt::KtSet<#a0>),
-            "mapOf" | "mutableMapOf" | "emptyMap" => quote_spanned!(span=> #kt::KtMap<#a0, #a1>),
+            "listOf" | "emptyList" | "listOfNotNull" => quote_spanned!(span=> ::std::vec::Vec<#a0>),
+            "setOf" | "emptySet" => quote_spanned!(span=> #kt::KtSet<#a0>),
+            "mapOf" | "emptyMap" => quote_spanned!(span=> #kt::KtMap<#a0, #a1>),
+            // ((stage 14 LISTS) the shared mutable ones)
+            "mutableListOf" | "arrayListOf" => quote_spanned!(span=> #kt::MutableList<#a0>),
+            "mutableSetOf" | "hashSetOf" | "linkedSetOf" => quote_spanned!(span=> #kt::MutableSet<#a0>),
+            "mutableMapOf" | "hashMapOf" | "linkedMapOf" => quote_spanned!(span=> #kt::MutableMap<#a0, #a1>),
+
             "mutableStateOf" => quote_spanned!(span=> MutableState<#a0>),
             "mutableStateListOf" => quote_spanned!(span=> SnapshotStateList<#a0>),
             // (WP8) An API function of one type parameter its result names (`rememberListDetailPaneScaffoldNavigator<Int>()`:
@@ -1024,15 +1027,26 @@ impl Gen<'_, '_> {
             }
             return Out::plain(call, ft.ret.clone());
         }
+        // ((stage 14 LISTS) a mutable collection's (a view's) call of an extension of its read-only kind, `fun
+        // List<String>.filteredBy` of a `MutableList<String>`: on what it holds now, the read-only value the
+        // extension takes)
+        let recv = match recv.ty.read_only() {
+            Some(ro)
+                if recv.ty.owner().is_none_or(|o| self.file.extension(&name.name, Some(o)).is_none())
+                    && read_only_names(&ro).iter().any(|n| self.file.extension(&name.name, Some(n)).is_some()) =>
+            {
+                let span = self.span(loc);
+                let from = recv.ty.clone();
+                match self.collection_coerce(recv.ts, &from, &ro, span) {
+                    Ok(ts) | Err(ts) => Out::plain(ts, ro),
+                }
+            }
+            _ => recv,
+        };
         let owner = recv.ty.owner().map(str::to_string);
         // (a Kotlin collection's extensions by the Kotlin type they extend: `fun List<String>.filteredBy`)
         let ext_owner = owner.clone().or_else(|| {
-            let names: &[&str] = match &recv.ty {
-                Ty::List(_) => &["List", "MutableList", "Collection", "Iterable"],
-                Ty::Set(_) => &["Set", "MutableSet", "Collection", "Iterable"],
-                Ty::Map(..) => &["Map", "MutableMap"],
-                _ => &[],
-            };
+            let names = read_only_names(&recv.ty);
             names.iter().find(|n| self.file.extension(&name.name, Some(n)).is_some()).map(|n| n.to_string())
         });
         // An extension function of the file.
@@ -1285,9 +1299,11 @@ impl Gen<'_, '_> {
         // (`apply { … }`, `run { … }`: Kotlin's `T.() -> R`, the receiver's value lent as `&mut Self`, is a receiver
         // lambda of the receiver's type)
         receiver_of_self(&mut c, &recv_ty, "&mut Self");
-        self.elem_hint = Some((elem, recv_ty));
+        // ((stage 14 LISTS) the outer call's hint restored after: a kt call in a lambda of a generic type's method —
+        // `contentKey = { it.last() }` of `transition.AnimatedContent(…)` — leaves its later lambdas their types)
+        let outer = self.elem_hint.replace((elem, recv_ty));
         let out = self.emit(&c, Target::Ufcs(quote_spanned!(span=> #kt::#t), r), args, loc, &name.name);
-        self.elem_hint = None;
+        self.elem_hint = outer;
         out
     }
 
@@ -1584,7 +1600,11 @@ impl Gen<'_, '_> {
                     if (!compatible(&ty, &p.ty()) || string_to_shared || object_to_string) && !may_implement {
                         score -= 5;
                         mismatched = true;
-                    } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y) {
+                    } else if matches!((&ty, &p.ty()), (Ty::Named(x, _), Ty::Named(y, _)) if x == y)
+                        // ((stage 14 LISTS) a text to a text's parameter, beside a trait's — `metadata[name]`, the
+                        // name's `get(key: String)` beside a typed key's)
+                        || ty == Ty::String && p.ty() == Ty::String
+                    {
                         score += 1;
                     }
                 }
@@ -2065,7 +2085,11 @@ impl Gen<'_, '_> {
                 vals.push((name, v, lambda));
                 last_written = Some(k);
             }
-            if transform_wraps
+            // ((stage 14 LISTS) a method's too: the macro rewrites one whose receiver's type it can't tell by its name
+            // — `item(…)` of a NavigationSuiteScope in a `forEach` lambda, LazyListScope's taking fewer —, its last
+            // closure then the last parameter's)
+            let method = c.item.is_some_and(|i| i.kind == Kind::Method);
+            if (transform_wraps || method)
                 && c.builder
                 && let (Some(k), Some(last)) = (last_written, vals.last_mut())
                 && last.2
@@ -2604,7 +2628,12 @@ impl Gen<'_, '_> {
                 self.shared_elem = Some(elem.trim().to_string());
             }
         }
-        let o = self.expr(e);
+        // ((stage 14 LISTS) `mapOf(…)` of `Any` values: each made one)
+        let target = if p.option == OptionForm::Option { pty.non_null() } else { pty.clone() };
+        let o = match self.map_literal(e, &target) {
+            Some(ts) => Out::plain(ts, target),
+            None => self.expr(e),
+        };
         self.shared_elem = None;
         // (a `&mut` held — a receiver lambda's `this` lent mutably — given to a `&mut` parameter: reborrowed,
         // `drawStopIndicator(drawScope = this, …)`)
@@ -2619,6 +2648,12 @@ impl Gen<'_, '_> {
         let v =
             self.finish(o, Want { str_ok: p.takes_str(), any: None, some: false, shared: None, result: false }, e.loc);
         let v = self.kotlin_number(v, &arg_ty, &pty, span);
+        // ((stage 14 LISTS) a mutable collection where its read-only kind is taken, a state list where a `MutableList`
+        // is, a list where a `List` that may be mutable is: `collections`)
+        let to = if p.option == OptionForm::Option && !arg_ty.is_nullable() { pty.non_null() } else { pty.clone() };
+        let v = match self.collection_coerce(v, &arg_ty, &to, span) {
+            Ok(made) | Err(made) => made,
+        };
         let t = plain_type_text(&p.ty);
         let t = t.as_str();
         // (Kotlin's `Int` to another of Rust's integer types — a buffer's `usize` index —: converted)
@@ -2991,6 +3026,8 @@ fn compatible(a: &Ty, p: &Ty) -> bool {
         (Ty::Unknown, _) | (_, Ty::Unknown) => true,
         (Ty::Nullable(_), Ty::Nullable(_)) => true,
         (a, Ty::Nullable(p)) => compatible(a, p),
+        // ((stage 14 LISTS) a collection where another kind of Kotlin's it is is taken: `collections`)
+        (a, p) if super::collections::converts(a, p) => true,
         (Ty::Int | Ty::Long | Ty::OtherInt, p) => p.is_number(),
         (Ty::Float | Ty::Double, p) => p.is_float(),
         (Ty::Named(x, _), Ty::Named(y, _)) => x == y,
@@ -3031,7 +3068,17 @@ fn kt_ret(c: &Ty, text: &str, elem: &Ty, recv: &Ty) -> Ty {
         "Self::Item" | "T" => elem.clone(),
         "Option<Self::Item>" | "Option<T>" => elem.clone().nullable(),
         "Vec<Self::Item>" | "Vec<T>" => Ty::List(Box::new(elem.clone())),
+        // ((stage 14 LISTS) a new shared mutable collection of them: `toMutableList()`, `toMutableSet()`,
+        // `toMutableMap()`)
+        "MutableList<Self::Item>" | "MutableList<T>" | "MutableSet<Self::Item>" | "MutableSet<T>" => {
+            Ty::Named(text.split('<').next().unwrap_or_default().to_string(), vec![elem.clone()])
+        }
+        "MutableMap<Self::K, Self::V>" => match recv.read_only().unwrap_or_else(|| recv.clone()) {
+            Ty::Map(k, v) => Ty::Named("MutableMap".into(), vec![*k, *v]),
+            _ => c.clone(),
+        },
         "Self" => recv.clone(),
+
         // (WP1b: fab_segmented — a pair's parts: `pair.first`, `pair.component1()`)
         "Self::A" | "Self::B" => super::expr::pair_part(recv, text),
         t if t.starts_with("Vec<IndexedValue<") => {
@@ -3061,9 +3108,24 @@ fn kt_twin(kotlin: &str) -> Option<String> {
         .then(|| format!("{}_async", first.rust))
 }
 
+/// The Kotlin names of a read-only collection type an extension of the file may extend (`fun List<String>.f`,
+/// `fun Collection<T>.g`): Rust's value of it is the extension's receiver.
+fn read_only_names(t: &Ty) -> &'static [&'static str] {
+    match t {
+        Ty::List(_) => &["List", "Collection", "Iterable"],
+        Ty::Set(_) => &["Set", "Collection", "Iterable"],
+        Ty::Map(..) => &["Map"],
+        _ => &[],
+    }
+}
+
 /// An implicit receiver's type as Kotlin's standard members see it: its value's type when that is a Kotlin
 /// collection (`this` of `fun List<String>.f()`), else its Rust type's.
 fn receiver_kotlin_ty(r: &ImplicitReceiver) -> Ty {
+    // ((stage 14 LISTS) kt's shared mutable ones too: their Kotlin type is theirs)
+    if r.value.mutable_collection().is_some() {
+        return r.value.clone();
+    }
     match &r.value {
         v @ (Ty::List(_) | Ty::Set(_) | Ty::Map(..)) => v.clone(),
         _ => Ty::from_rust(&r.ty),

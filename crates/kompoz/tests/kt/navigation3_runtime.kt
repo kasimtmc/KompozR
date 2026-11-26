@@ -8,10 +8,8 @@
 // one name (`Home` of NavBackStackSamples, of NavBackStackSerializerSamples, …) written qualified, not imported.
 // The withReflection forms run as on Android: KompozR's classes of the keys seen in this process are its reflection.
 //
-// Not here yet: CommonUiNavDisplaySample.kt and ListDetailNavDisplaySample.kt — generic composables (`fun <T : Any>
-// CommonUiNavDisplay(backstack: List<T>, …)`) over the API's generic types (the stage-14 form kt/navigation3.kt's
-// header names), their entries' metadata read by its texts (`entry.metadata[TRANSITION_SPEC] as? ContentTransform`);
-// ListDetailNavDisplay's `calculateWindowSizeClass(LocalActivity.current!!)` is Android's (stage 15).
+// CommonUiNavDisplaySample.kt is kt/navigation3_common_ui.kt (its package has names of its own). Not here yet:
+// ListDetailNavDisplaySample.kt — its `calculateWindowSizeClass(LocalActivity.current!!)` is Android's (stage 15).
 
 package androidx.navigation3.runtime.samples
 

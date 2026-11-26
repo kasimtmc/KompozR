@@ -3,7 +3,7 @@
 use super::nav_entry::{NavEntry, NavEntryDecorator};
 use super::nav_key::NavEntryKey;
 use kompoz_runtime::{
-    DisposableEffect, SnapshotStateList, group, key, kompozable, on_dispose, remember, remember_keyed,
+    DisposableEffect, SnapshotStateList, group, key, kompozable, kt, on_dispose, remember, remember_keyed,
     remember_updated_state,
 };
 use kompoz_ui::layout::SlotKey;
@@ -53,6 +53,27 @@ impl<T: Clone + 'static> BackStackList<T> for SnapshotStateList<T> {
         }
         self.remove_at(n - 1);
         true
+    }
+}
+
+/// Kotlin's `MutableList` (the Kotlin syntax's `mutableListOf(…)`): one a display may pop.
+impl<T: Clone + 'static> BackStackList<T> for kt::MutableList<T> {
+    fn keys(&self) -> Vec<T> {
+        self.to_vec()
+    }
+    fn remove_last_key(&self) -> bool {
+        self.remove_last_or_null().is_some()
+    }
+}
+
+/// Kotlin's `List<T>` that may be a `MutableList` (the Kotlin syntax's parameter asked `is MutableList`): the caller's
+/// list, popped if it is mutable.
+impl<T: Clone + 'static> BackStackList<T> for kt::ListView<T> {
+    fn keys(&self) -> Vec<T> {
+        self.to_vec()
+    }
+    fn remove_last_key(&self) -> bool {
+        self.as_mutable().is_some_and(|m| m.remove_last_or_null().is_some())
     }
 }
 

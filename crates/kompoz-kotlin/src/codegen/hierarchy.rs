@@ -3237,6 +3237,10 @@ impl Gen<'_, '_> {
         {
             return self.user_class_rust(&f).is_some_and(|c| !c.is_dyn() && c.shape != Shape::Interface);
         }
+        // ((stage 14 LISTS) one of Kotlin's collections where another kind it is is taken: `collections`)
+        if self.collection_coerces(from, to) {
+            return true;
+        }
         // (a value of a type of its own where Kotlin's `Any` is: the shared object)
         if is_any(&to.non_null()) {
             return !matches!(from.non_null(), Ty::Unknown | Ty::Unit | Ty::Fun(_) | Ty::Nullable(_))
@@ -3269,7 +3273,11 @@ impl Gen<'_, '_> {
     /// interface or open class of the user's, `Any`.
     pub(crate) fn takes_coerced(&self, to: &Ty) -> bool {
         let to = to.non_null();
-        is_any(&to)
+        // ((stage 14 LISTS) a read-only collection, a `MutableList`, a `List` that may be one: `collections`)
+        let collection = matches!(&to, Ty::List(_) | Ty::Set(_) | Ty::Map(..))
+            || matches!(&to, Ty::Named(n, _) if n == "MutableList" || n == "ListView");
+        collection
+            || is_any(&to)
             || api_shared(&to).is_some()
             || api_boxed(&to).is_some()
             || matches!(&to, Ty::Named(n, a) if !a.is_empty() && self.out_mappable(n))
@@ -3289,6 +3297,11 @@ impl Gen<'_, '_> {
         if !self.coerces(from, to) {
             return v;
         }
+        let v = match self.collection_coerce(v, from, to, span) {
+            Ok(made) => return made,
+            Err(v) => v,
+        };
+
         if self.out_coerces(from, to) {
             return self.out_coerce(v, from, to, span);
         }

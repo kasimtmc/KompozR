@@ -76,13 +76,15 @@ pub fn Menu(open: bool) {
                             ::std::string::String::from("Aç")
                         }),
                         modifier = Modifier
-                            .animate_icon({
-                                let __kz_f2: ::std::rc::Rc<dyn ::core::ops::Fn() -> f32> = ::std::rc::Rc::new({
-                                    let __kz_this = ::kompoz::runtime::__private::capture(&__kz_this);
-                                    move || __kz_this.checked_progress()
-                                });
-                                __kz_f2
-                            })
+                            .animate_icon(
+                                checked_progress = {
+                                    let __kz_f2: ::std::rc::Rc<dyn ::core::ops::Fn() -> f32> = ::std::rc::Rc::new({
+                                        let __kz_this = ::kompoz::runtime::__private::capture(&__kz_this);
+                                        move || __kz_this.checked_progress()
+                                    });
+                                    __kz_f2
+                                },
+                            )
                             .graphics_layer_block({
                                 let __kz_this = ::kompoz::runtime::__private::capture(&__kz_this);
                                 move |this1| {

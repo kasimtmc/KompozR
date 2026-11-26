@@ -45,21 +45,22 @@ impl<T> ArgOr<T> for Unset {
     }
 }
 
-/// An `impl Fn…` parameter: the closure given, or the default as a function pointer `D`.
+/// An `impl Fn…` parameter: the closure given, or the default as a function pointer `D` (a boxed closure when it
+/// reads earlier parameters), made only when it is wanted.
 pub trait ImplArg<D> {
     type Out;
-    fn pick(self, default: D) -> Self::Out;
+    fn pick(self, default: impl FnOnce() -> D) -> Self::Out;
 }
 impl<D, V> ImplArg<D> for Set<V> {
     type Out = V;
-    fn pick(self, _: D) -> V {
+    fn pick(self, _: impl FnOnce() -> D) -> V {
         self.0
     }
 }
 impl<D> ImplArg<D> for Unset {
     type Out = D;
-    fn pick(self, default: D) -> D {
-        default
+    fn pick(self, default: impl FnOnce() -> D) -> D {
+        default()
     }
 }
 

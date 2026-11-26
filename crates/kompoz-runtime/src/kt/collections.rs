@@ -5,6 +5,7 @@
 //! Lambdas get the elements themselves (clones), as Kotlin's see them, not borrows: `list.filter(|it| it > 2)`.
 //! Kotlin's `Int` results (sizes, indices, counts) are `i32`; an index out of range panics as Kotlin throws.
 
+use super::mutable::{MutableList, MutableMap, MutableSet};
 use super::range::{IndexedValue, KtContains, KtProgression, KtStep, kt_compare};
 use super::text::{KtToString, to_string};
 use super::{KtSum, panic_kt};
@@ -20,13 +21,20 @@ use std::hash::{BuildHasher, Hash};
 pub fn list_of<I: IntoIterator>(elements: I) -> Vec<I::Item> {
     elements.into_iter().collect()
 }
+/// Kotlin's `mutableListOf(a, b, c)`: a new [`MutableList`] (shared by whoever is given it, as Kotlin's).
 /// Kotlin: `mutableListOf(vararg elements: T): MutableList<T>`
-pub fn mutable_list_of<I: IntoIterator>(elements: I) -> Vec<I::Item> {
-    elements.into_iter().collect()
+pub fn mutable_list_of<I: IntoIterator>(elements: I) -> MutableList<I::Item> {
+    MutableList::from_vec(elements.into_iter().collect())
 }
 /// Kotlin: `arrayListOf(vararg elements: T): ArrayList<T>`
-pub fn array_list_of<I: IntoIterator>(elements: I) -> Vec<I::Item> {
-    elements.into_iter().collect()
+pub fn array_list_of<I: IntoIterator>(elements: I) -> MutableList<I::Item> {
+    mutable_list_of(elements)
+}
+/// Kotlin's `ArrayList()`: a new empty [`MutableList`].
+/// Kotlin: `ArrayList(): ArrayList<E>`
+#[allow(non_snake_case)]
+pub fn ArrayList<T>() -> MutableList<T> {
+    MutableList::new()
 }
 /// Kotlin's `listOfNotNull(a, b)`: the elements that aren't null.
 /// Kotlin: `listOfNotNull(vararg elements: T?): List<T>`
@@ -45,8 +53,8 @@ pub fn List<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
 }
 /// Kotlin: `MutableList(size: Int, init: (Int) -> T): MutableList<T>`
 #[allow(non_snake_case)]
-pub fn MutableList<T>(size: i32, init: impl FnMut(i32) -> T) -> Vec<T> {
-    List(size, init)
+pub fn MutableList<T>(size: i32, init: impl FnMut(i32) -> T) -> MutableList<T> {
+    MutableList::from_vec(List(size, init))
 }
 /// Kotlin's `Array(size) { i -> … }`: an array (a `Vec` here, as Kotlin's arrays are) of each element from its
 /// index.
@@ -74,8 +82,8 @@ pub async fn List_async<T>(size: i32, mut init: impl AsyncFnMut(i32) -> T) -> Ve
 /// [`MutableList`]'s suspending twin (see the module's doc).
 #[doc(hidden)]
 #[allow(non_snake_case)]
-pub async fn MutableList_async<T>(size: i32, init: impl AsyncFnMut(i32) -> T) -> Vec<T> {
-    List_async(size, init).await
+pub async fn MutableList_async<T>(size: i32, init: impl AsyncFnMut(i32) -> T) -> MutableList<T> {
+    MutableList::from_vec(List_async(size, init).await)
 }
 /// Kotlin: `intArrayOf(vararg elements: Int): IntArray`
 pub fn int_array_of<I: IntoIterator<Item = i32>>(elements: I) -> Vec<i32> {
@@ -89,9 +97,29 @@ pub fn float_array_of<I: IntoIterator<Item = f32>>(elements: I) -> Vec<f32> {
 pub fn set_of<T: PartialEq, I: IntoIterator<Item = T>>(elements: I) -> KtSet<T> {
     elements.into_iter().collect()
 }
+/// Kotlin's `mutableSetOf(a, b)`: a new [`MutableSet`] (shared by whoever is given it, as Kotlin's).
 /// Kotlin: `mutableSetOf(vararg elements: T): MutableSet<T>`
-pub fn mutable_set_of<T: PartialEq, I: IntoIterator<Item = T>>(elements: I) -> KtSet<T> {
-    elements.into_iter().collect()
+pub fn mutable_set_of<T: PartialEq, I: IntoIterator<Item = T>>(elements: I) -> MutableSet<T> {
+    MutableSet::of(elements.into_iter().collect())
+}
+/// Kotlin: `hashSetOf(vararg elements: T): HashSet<T>`
+pub fn hash_set_of<T: PartialEq, I: IntoIterator<Item = T>>(elements: I) -> MutableSet<T> {
+    mutable_set_of(elements)
+}
+/// Kotlin: `linkedSetOf(vararg elements: T): LinkedHashSet<T>`
+pub fn linked_set_of<T: PartialEq, I: IntoIterator<Item = T>>(elements: I) -> MutableSet<T> {
+    mutable_set_of(elements)
+}
+/// Kotlin's `HashSet()`: a new empty [`MutableSet`] (insertion-ordered, as `LinkedHashSet`).
+/// Kotlin: `HashSet(): HashSet<E>`
+#[allow(non_snake_case)]
+pub fn HashSet<T>() -> MutableSet<T> {
+    MutableSet::new()
+}
+/// Kotlin: `LinkedHashSet(): LinkedHashSet<E>`
+#[allow(non_snake_case)]
+pub fn LinkedHashSet<T>() -> MutableSet<T> {
+    MutableSet::new()
 }
 /// Kotlin: `emptySet(): Set<T>`
 pub fn empty_set<T>() -> KtSet<T> {
@@ -102,9 +130,29 @@ pub fn empty_set<T>() -> KtSet<T> {
 pub fn map_of<K: PartialEq, V, I: IntoIterator<Item = (K, V)>>(pairs: I) -> KtMap<K, V> {
     pairs.into_iter().collect()
 }
+/// Kotlin's `mutableMapOf(k to v, …)`: a new [`MutableMap`] (shared by whoever is given it, as Kotlin's).
 /// Kotlin: `mutableMapOf(vararg pairs: Pair<K, V>): MutableMap<K, V>`
-pub fn mutable_map_of<K: PartialEq, V, I: IntoIterator<Item = (K, V)>>(pairs: I) -> KtMap<K, V> {
-    pairs.into_iter().collect()
+pub fn mutable_map_of<K: PartialEq, V, I: IntoIterator<Item = (K, V)>>(pairs: I) -> MutableMap<K, V> {
+    MutableMap::of(pairs.into_iter().collect())
+}
+/// Kotlin: `hashMapOf(vararg pairs: Pair<K, V>): HashMap<K, V>`
+pub fn hash_map_of<K: PartialEq, V, I: IntoIterator<Item = (K, V)>>(pairs: I) -> MutableMap<K, V> {
+    mutable_map_of(pairs)
+}
+/// Kotlin: `linkedMapOf(vararg pairs: Pair<K, V>): LinkedHashMap<K, V>`
+pub fn linked_map_of<K: PartialEq, V, I: IntoIterator<Item = (K, V)>>(pairs: I) -> MutableMap<K, V> {
+    mutable_map_of(pairs)
+}
+/// Kotlin's `HashMap()`: a new empty [`MutableMap`] (insertion-ordered, as `LinkedHashMap`).
+/// Kotlin: `HashMap(): HashMap<K, V>`
+#[allow(non_snake_case)]
+pub fn HashMap<K, V>() -> MutableMap<K, V> {
+    MutableMap::new()
+}
+/// Kotlin: `LinkedHashMap(): LinkedHashMap<K, V>`
+#[allow(non_snake_case)]
+pub fn LinkedHashMap<K, V>() -> MutableMap<K, V> {
+    MutableMap::new()
 }
 /// Kotlin: `emptyMap(): Map<K, V>`
 pub fn empty_map<K, V>() -> KtMap<K, V> {
@@ -1231,9 +1279,10 @@ pub trait KtList: KtIterable {
     fn to_list(&self) -> Vec<Self::Item> {
         self.kt_iter().collect()
     }
+    /// A new [`MutableList`] of its elements.
     /// Kotlin: `toMutableList(): MutableList<T>`
-    fn to_mutable_list(&self) -> Vec<Self::Item> {
-        self.kt_iter().collect()
+    fn to_mutable_list(&self) -> MutableList<Self::Item> {
+        MutableList::from_vec(self.kt_iter().collect())
     }
     /// A state list of its elements (Compose's `Collection<T>.toMutableStateList()`).
     ///
@@ -1262,12 +1311,13 @@ pub trait KtList: KtIterable {
     {
         self.kt_iter().collect()
     }
+    /// A new [`MutableSet`] of its elements.
     /// Kotlin: `toMutableSet(): MutableSet<T>`
-    fn to_mutable_set(&self) -> KtSet<Self::Item>
+    fn to_mutable_set(&self) -> MutableSet<Self::Item>
     where
         Self::Item: PartialEq,
     {
-        self.kt_iter().collect()
+        MutableSet::of(self.kt_iter().collect())
     }
 
     // ---- Compose's list helpers (androidx.compose.ui.util's ListUtils.kt, ui-util 1.12.1) ----
@@ -2373,12 +2423,13 @@ pub trait KtMapExt: KtMapLike {
     fn to_list(&self) -> Vec<(Self::K, Self::V)> {
         self.kt_entries()
     }
+    /// A new [`MutableMap`] of its entries.
     /// Kotlin: `toMutableMap(): MutableMap<K, V>`
-    fn to_mutable_map(&self) -> KtMap<Self::K, Self::V>
+    fn to_mutable_map(&self) -> MutableMap<Self::K, Self::V>
     where
         Self::K: PartialEq,
     {
-        self.kt_entries().into_iter().collect()
+        MutableMap::of(self.kt_entries().into_iter().collect())
     }
     /// Kotlin: `plus(pair: Pair<K, V>): Map<K, V>` (`map + (k to v)`)
     fn plus(&self, pair: (Self::K, Self::V)) -> KtMap<Self::K, Self::V>

@@ -564,9 +564,21 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
         }
     } else {
         let req = original.iter().filter(|o| !o.2).map(|(i, t, _)| quote!(#i: #t));
-        let all = params.iter().map(|p| match &p.default {
-            Some(d) => quote!(#d),
-            None => {
+        // (a default reading earlier parameters — Kotlin's `b: Int = a * 2` —, and the defaults it reads, made before
+        // the call by the parameters' names, each lending it the earlier ones; the others in place)
+        let hoisted = builder::hoisted_defaults(&params);
+        let hoists = params.iter().enumerate().filter(|(k, _)| hoisted[*k]).map(|(k, p)| {
+            let (i, d) = (&p.ident, p.default.as_ref().expect("a default"));
+            let lets = builder::earlier_lets(&params, k, |e| {
+                let n = &params[e].ident;
+                quote!(#n)
+            });
+            quote!(let #i = { #lets #d };)
+        });
+        let hoists: Vec<Ts> = hoists.collect();
+        let all = params.iter().enumerate().map(|(k, p)| match &p.default {
+            Some(d) if !hoisted[k] => quote!(#d),
+            _ => {
                 let i = &p.ident;
                 quote!(#i)
             }
@@ -613,7 +625,7 @@ fn expand_fn(mut f: ItemFn, composable: Option<Options>, own_type: bool) -> Resu
             #(#attrs)*
             #[track_caller]
             #[allow(non_snake_case, clippy::too_many_arguments)]
-            #vis fn #name #gi(#(#req),*) #output #wc { #imp(#(#all,)* #no_ids) }
+            #vis fn #name #gi(#(#req),*) #output #wc { #(#hoists)* #imp(#(#all,)* #no_ids) }
         }
     };
     Ok(quote! {
@@ -784,12 +796,21 @@ fn expand_impl(mut imp: ItemImpl, ext: Option<ExtensionTrait>) -> Result<Ts> {
 
         // The plain method: the parameters without a default, in order.
         let req: Vec<Ts> = original.iter().filter(|o| !o.2).map(|(i, t, _)| quote!(#i: #t)).collect();
-        let defaults = params.iter().filter_map(|p| {
+        let defaults = params.iter().enumerate().filter_map(|(k, p)| {
             let i = &p.ident;
             p.default.as_ref().map(|d| {
                 let mut d = d.clone();
                 builder::SelfToRecv.visit_expr_mut(&mut d);
-                quote!(let #i = #d;)
+                // (one reading earlier parameters lent them by their names)
+                if builder::earlier_in_default(&params, k).is_empty() {
+                    quote!(let #i = #d;)
+                } else {
+                    let lets = builder::earlier_lets(&params, k, |e| {
+                        let n = &params[e].ident;
+                        quote!(#n)
+                    });
+                    quote!(let #i = { #lets #d };)
+                }
             })
         });
         let all = params.iter().map(|p| &p.ident);

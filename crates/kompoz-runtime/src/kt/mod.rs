@@ -49,6 +49,8 @@ pub mod java_time;
 // (stage 14 WPD) java.util's Calendar, Date, TimeZone and Locale.
 pub mod java_util;
 pub mod math;
+// (stage 14 LISTS: Kotlin's MutableList/MutableSet/MutableMap, shared as Kotlin's references)
+pub mod mutable;
 pub mod null;
 // (stage 14 WP0: Kotlin's classes and objects)
 pub mod object;
@@ -74,10 +76,11 @@ mod tests;
 pub use cast::KtAs;
 pub use closeable::AutoCloseable;
 pub use collections::{
-    Array, KtComponent3, KtComponent4, KtComponent5, KtComponents, KtIterable, KtList, KtListOfLists, KtListOfNullable,
-    KtMap, KtMapExt, KtMapLike, KtMutableList, KtPair, KtSet, KtTriple, List, MutableList, Pair, Triple, array_list_of,
-    empty_list, empty_map, empty_set, float_array_of, int_array_of, list_of, list_of_not_null, map_of, mutable_list_of,
-    mutable_map_of, mutable_set_of, set_of, to,
+    Array, ArrayList, HashMap, HashSet, KtComponent3, KtComponent4, KtComponent5, KtComponents, KtIterable, KtList,
+    KtListOfLists, KtListOfNullable, KtMap, KtMapExt, KtMapLike, KtMutableList, KtPair, KtSet, KtTriple, LinkedHashMap,
+    LinkedHashSet, List, MutableList, Pair, Triple, array_list_of, empty_list, empty_map, empty_set, float_array_of,
+    hash_map_of, hash_set_of, int_array_of, linked_map_of, linked_set_of, list_of, list_of_not_null, map_of,
+    mutable_list_of, mutable_map_of, mutable_set_of, set_of, to,
 };
 #[doc(hidden)]
 pub use collections::{Array_async, List_async, MutableList_async};
@@ -93,12 +96,13 @@ pub use math::{
     E, KtAbs, KtFloat, KtNumber, KtSum, PI, abs, acos, asin, atan, atan2, cbrt, ceil, cos, cosh, exp, floor, hypot, ln,
     log2, log10, max, max_of, min, min_of, pow, round, sign, sin, sinh, sqrt, tan, tanh, to_char, truncate,
 };
+pub use mutable::{ListView, MutableList, MutableMap, MutableSet};
 pub use null::{KtElvis, KtScope, elvis, not_null, run, safe, with};
 #[doc(hidden)]
 pub use null::{elvis_async, run_async, safe_async, with_async};
 pub use object::{
-    KtBits, KtFuture, KtHashCode, KtNothing, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string,
-    eq_object, hash_code_of, kt_as_object, kt_as_this, kt_dyn_as, kt_is, kt_same_as, kt_same_object,
+    KtBits, KtEqAny, KtFuture, KtHashCode, KtNothing, KtObject, KtShared, KtSingleton, KtVal, KtVar, default_to_string,
+    eq_any, eq_object, hash_code_of, kt_as_object, kt_as_this, kt_dyn_as, kt_is, kt_same_as, kt_same_object,
 };
 pub use random::{KtShuffle, Random};
 pub use range::{

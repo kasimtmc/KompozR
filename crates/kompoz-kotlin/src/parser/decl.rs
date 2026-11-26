@@ -509,6 +509,7 @@ impl Parser<'_, '_> {
             name,
             ty,
             default,
+            read_by_default: false,
             loc: self.loc_from(head.start),
         })
     }

@@ -68,8 +68,8 @@ pub fn collections() -> i32 {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     ::kompoz::runtime::named_args!({
-        let mut xs = ::kompoz::runtime::kt::mutable_list_of([3, 1, 2]);
-        ::kompoz::runtime::kt::KtMutableList::add(&mut xs, 4);
+        let xs = ::kompoz::runtime::kt::mutable_list_of([3, 1, 2]);
+        xs.add(4);
         let mut ys = ::kompoz::runtime::kt::KtList::reversed(&::kompoz::runtime::kt::KtList::sorted(&xs));
         let mut m = ::kompoz::runtime::kt::map_of([
             ::kompoz::runtime::kt::to(::std::string::String::from("a"), 1),
@@ -87,7 +87,7 @@ pub fn collections() -> i32 {
             total > 0,
             ::core::option::Option::Some(&|| ::std::string::String::from("pozitif olmalı")),
         );
-        return total + ::kompoz::runtime::kt::KtList::get(&xs, 0);
+        return total + xs.get(0);
     })
 }
 #[allow(non_snake_case, non_upper_case_globals, unused_parens, unused_braces, unused_mut, while_true, clippy::all)]

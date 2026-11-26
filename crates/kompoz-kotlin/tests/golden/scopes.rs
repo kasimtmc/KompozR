@@ -41,7 +41,7 @@ pub fn Scopes() {
                 let tags = ::kompoz::runtime::__private::capture(&tags);
                 move || {
                     todos.update(|it| {
-                        ::kompoz::runtime::kt::KtMutableList::add(&mut *it, ::std::string::String::from("iki"));
+                        it.add(::std::string::String::from("iki"));
                     });
                     tags.add(::std::string::String::from("b"));
                 }

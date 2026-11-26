@@ -59,6 +59,7 @@ mod call;
 mod callbacks;
 mod capture;
 pub(crate) mod class;
+mod collections;
 mod exceptions;
 mod expr;
 mod generics;
@@ -75,6 +76,8 @@ mod resolve;
 mod stmt;
 mod types;
 mod variance;
+
+pub(crate) use generics::{walk_body, walk_expr};
 
 use crate::Paths;
 use crate::ast::*;
@@ -1028,7 +1031,12 @@ impl<'a, 'd> Gen<'a, 'd> {
             return (quote_spanned!(span=> #name: ::std::vec::Vec<#el>), None);
         }
         let ty = self.ty_of(t);
-        let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
+        // ((stage 14 LISTS) one a later default reads: its type itself, the value the default sees)
+        let pos = if p.default.is_some() || p.read_by_default {
+            types::TypePos::DefaultedParam
+        } else {
+            types::TypePos::Param
+        };
         let rust_ty = self.rust_type(t, pos);
         // ((stage 14 FINAL) an inline function's lambda — not `noinline`, not `crossinline` —: run in place, never
         // kept, so it borrows what it uses: no `'static`; (stage 14 JUMP) an inline composable's too, as Compose's
@@ -1044,12 +1052,48 @@ impl<'a, 'd> Gen<'a, 'd> {
         let by_ref = (borrowed && self.fun.kompozable).then(|| quote_spanned!(span=> let #name = &#name;));
         let info = self.quiet(|g| g.param_info(p, inline));
         let default = p.default.as_ref().map(|d| {
+            // (the builder makes it: the function's locals aren't there; (stage 14 LISTS) the earlier parameters are,
+            // by their names, lent — each it reads taken as Kotlin's value of it: a copy, a clone (the object), a
+            // function lent)
+            let earlier: HashMap<String, resolve::Local> = self
+                .scopes
+                .last()
+                .map(|s| s.iter().filter(|(k, l)| l.kind == LocalKind::Param && *k != "this"))
+                .into_iter()
+                .flatten()
+                .map(|(k, l)| (k.clone(), l.clone()))
+                .collect();
             let saved = std::mem::take(&mut self.scopes);
-            self.scopes = vec![HashMap::new()];
+            self.scopes = vec![earlier.clone()];
             let v = self.value_for(d, Some(&info));
             self.scopes = saved;
             let s = self.span(d.loc);
-            quote_spanned!(s=> #[default(#v)])
+            let mut taken: Vec<&resolve::Local> =
+                earlier.values().filter(|l| collections::mentions_ident(&v, &l.rust)).collect();
+            taken.sort_by(|a, b| a.rust.cmp(&b.rust));
+            let lets = taken.iter().map(|l| {
+                let i = ident(&l.rust, s);
+                match &l.ty {
+                    t if t.is_copy() => quote_spanned!(s=> let #i = *#i;),
+                    Ty::Fun(f) if !f.shared => quote!(),
+                    _ => quote_spanned!(s=> let #i = ::core::clone::Clone::clone(#i);),
+                }
+            });
+            let lets: Vec<TokenStream> = lets.collect();
+            // ((stage 14 LISTS) a default calling with named arguments — `ContentTransform(fadeIn(animationSpec =
+            // tween(…)), …, sizeTransform = null)` —: rewritten as a body's calls are, the builder evaluating it)
+            let v = if collections::named_call_in(&v) {
+                let rt = respan(self.rt().clone(), s);
+                let types = self.types_arg(s);
+                quote_spanned!(s=> #rt::named_args!(#types { #v }))
+            } else {
+                v
+            };
+            if lets.is_empty() {
+                quote_spanned!(s=> #[default(#v)])
+            } else {
+                quote_spanned!(s=> #[default({ #(#lets)* #v })])
+            }
         });
         let unaliased = self.unaliased(t);
         let kept_closure = restartable && matches!(unaliased.kind, TypeKind::Function(_)) && !unaliased.nullable;
@@ -1069,7 +1113,9 @@ impl<'a, 'd> Gen<'a, 'd> {
             )),
             _ => by_ref,
         };
-        (quote_spanned!(span=> #default #name: #rust_ty), convert)
+        // ((stage 14 LISTS) one a later default reads may be read there only: Kotlin doesn't warn)
+        let allow = if p.read_by_default { quote_spanned!(span=> #[allow(unused_variables)]) } else { quote!() };
+        (quote_spanned!(span=> #allow #default #name: #rust_ty), convert)
     }
 
     /// What a call sees of a parameter of the file's own function.
@@ -1080,7 +1126,9 @@ impl<'a, 'd> Gen<'a, 'd> {
                 (format!("Vec<{}>", self.rust_type(t, types::TypePos::Value)), None, OptionForm::No)
             }
             Some(t) => {
-                let pos = if p.default.is_some() { types::TypePos::DefaultedParam } else { types::TypePos::Param };
+                // ((stage 14 LISTS) one a later default reads: its type itself)
+                let plain = p.default.is_some() || p.read_by_default;
+                let pos = if plain { types::TypePos::DefaultedParam } else { types::TypePos::Param };
                 let rust = self.rust_type(t, pos).to_string();
                 let ut = self.unaliased(t);
                 let lambda = ut.as_function().filter(|_| !ut.nullable).map(|ft| self.lambda_info(ft, !inline));
@@ -1093,7 +1141,7 @@ impl<'a, 'd> Gen<'a, 'd> {
                     (info.stored, info.typed) = (true, true);
                     Some(info)
                 });
-                let option = match (t.nullable, p.default.is_some()) {
+                let option = match (t.nullable, p.default.is_some() || p.read_by_default) {
                     (false, _) => OptionForm::No,
                     (true, false) => OptionForm::IntoOption,
                     (true, true) => OptionForm::Option,

@@ -1149,7 +1149,72 @@ fn method_calls_by_name_keep_the_plain_method_of_a_typed_receiver_of_another_typ
     assert_eq!(*out.borrow(), [5, 12, 13, 32, 45, 62]);
 }
 
+// ---- Defaults reading earlier parameters --------------------------------------------------------------------------
+
+/// Kotlin's `fun scaled(a: Int, b: Int = a * 2, c: String = "$a/$b")`: a default sees the parameters before it, by
+/// their names (lent: `&i32`, `&String`), a defaulted one's value too.
+#[named]
+fn scaled(a: i32, #[default(a * 2)] b: i32, #[default(format!("{a}/{b}"))] c: String) -> String {
+    format!("{a} {b} {c}")
+}
+
+/// A closure's default reading an earlier parameter (Kotlin's `onBack: () -> Unit = { stack.removeLast() }`): it
+/// takes what it reads (a clone of the shared list), made only where it is wanted.
+#[named]
+fn popper(
+    #[allow(unused_variables)] stack: Rc<RefCell<Vec<i32>>>,
+    #[default({ let stack = stack.clone(); move || { stack.borrow_mut().pop(); } })] on_back: impl Fn() + 'static,
+) -> Rc<dyn Fn()> {
+    Rc::new(on_back)
+}
+
+/// A composable's default reading an earlier parameter.
+#[kompozable]
+fn Echo(text: String, #[default(format!("{text}!"))] label: String) {
+    Label(format!("{text} {label}"));
+}
+
+struct Grid {
+    unit: i32,
+}
+
+#[named]
+impl Grid {
+    /// A method's: the receiver and the earlier parameters.
+    fn cell(&self, columns: i32, #[default(columns * self.unit)] width: i32) -> (i32, i32) {
+        (columns, width)
+    }
+}
+
+fn a_default_reads_the_earlier_parameters_by_their_names() {
+    // The plain function: the parameters without a default.
+    assert_eq!(scaled(3), "3 6 3/6");
+    assert_eq!(named_args!(scaled(3, b = 1)), "3 1 3/1");
+    assert_eq!(named_args!(scaled(a = 2, c = "c".to_string())), "2 4 c");
+    let grid = Grid { unit: 10 };
+    assert_eq!(grid.cell(3), (3, 30));
+    assert_eq!(named_args!(grid.cell(3, width = 7)), (3, 7));
+    // A closure's default: the caller's list changed through it.
+    let stack = Rc::new(RefCell::new(vec![1, 2, 3]));
+    popper(stack.clone())();
+    assert_eq!(*stack.borrow(), [1, 2]);
+    let other = Rc::new(Cell::new(0));
+    let o = other.clone();
+    named_args!(popper(stack.clone(), on_back = move || o.set(1)))();
+    assert_eq!((stack.borrow().len(), other.get()), (2, 1));
+    let s = stack.clone();
+    named_args!(popper(stack = s))();
+    assert_eq!(*stack.borrow(), [1]);
+    let rule = Rule::new(kompozable_lambda!(|| {
+        Echo("a".to_string());
+        Echo("b".to_string(), label = "c".to_string());
+        Label(scaled(5, c = "x".to_string()));
+    }));
+    assert_eq!(rule.names(), ["a a!", "b c", "5 10 x"]);
+}
+
 tests!(
+    a_default_reads_the_earlier_parameters_by_their_names,
     method_calls_by_name_keep_the_plain_method_of_a_typed_receiver_of_another_type,
     counters_take_named_arguments_and_trailing_closures,
     the_users_scaffold_sample_reads_as_in_kotlin,

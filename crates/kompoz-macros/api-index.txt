@@ -612,6 +612,7 @@ kompoz-platform/drag_display kompozable DragApp - crates/kompoz-platform/tests/d
 * super DynamicListener - ReceiveContentListener
 * super DynamicPaddingValues - CustomPaddingValues
 * super DynamicReceiveContentConfiguration - ReceiveContentConfiguration
+kompoz-runtime/macros kompozable Echo rd crates/kompoz-runtime/tests/macros.rs
 kompoz-platform/wayland_display kompozable Editor - crates/kompoz-platform/tests/wayland_display.rs
 * kompozable ElevatedAssistChip rrddddddddddd crates/kompoz-material3/src/chip.rs
 kompoz-material3/containers kompozable ElevatedAssistChipSample - crates/kompoz-material3/tests/containers.rs
@@ -1152,6 +1153,7 @@ kompoz-material3-adaptive/samples kompozable ListPaneContent rrrdr crates/kompoz
 * super ListScrollIndicatorState - ScrollIndicatorState
 * super ListScrollScope - LazyLayoutScrollScope
 * super ListScrollScope - ScrollScope
+* super ListView - BackStackList
 * kompozable LoadingIndicator rddd crates/kompoz-material3/src/loading_indicator.rs
 * method LoadingIndicator rrddddd crates/kompoz-material3/src/pulltorefresh.rs PullToRefreshDefaults
 kompoz-material3/swipe_pull kompozable LoadingIndicatorPullToRefreshSample - crates/kompoz-material3/tests/swipe_pull.rs
@@ -1267,6 +1269,7 @@ kompoz-material3/lists kompozable MultiSelectionSegmentedListItemSample - crates
 * super MutableCubic - Cubic
 * super MutableInteractionSource - InteractionSource
 * super MutableIntervalList - IntervalList
+* super MutableList - BackStackList
 * super MutableSharedFlow - AsFlow
 * super MutableSharedFlow - SharedFlow
 * super MutableSnapshot - Snapshot
@@ -2511,6 +2514,7 @@ kompoz-runtime/macros method background rd crates/kompoz-runtime/tests/macros.rs
 * method can_navigate_back d crates/kompoz-material3-adaptive/src/navigation/three_pane_scaffold_navigator.rs DynThreePaneScaffoldNavigator as ThreePaneScaffoldNavigatorExt
 * method card_colors dddd crates/kompoz-material3/src/card.rs CardDefaults
 * method card_elevation dddddd crates/kompoz-material3/src/card.rs CardDefaults
+kompoz-runtime/macros method cell rd crates/kompoz-runtime/tests/macros.rs Grid
 * method center_aligned_top_app_bar_colors ddddd crates/kompoz-material3/src/top_app_bar_defaults.rs TopAppBarDefaults
 * super char - BuilderAppend
 * super char - RouteValue
@@ -2912,6 +2916,7 @@ kompoz-runtime/macros method padding_sides dddd crates/kompoz-runtime/tests/macr
 * kompozable plural_string_resource rr crates/kompoz-resources/src/strings.rs
 * kompozable plural_string_resource_formatted rrr crates/kompoz-resources/src/strings.rs
 * method pointer_hover_icon rd crates/kompoz-ui/src/input/hover_icon.rs Modifier
+kompoz-runtime/macros fn popper rd crates/kompoz-runtime/tests/macros.rs
 * kompozable popup_properties_for_anchor_type rr crates/kompoz-material3/src/exposed_dropdown_menu_desktop.rs
 * method press d crates/kompoz-test/src/input.rs MouseInjectionScope
 * method press_key rd crates/kompoz-test/src/input.rs KeyInjectionScope
@@ -3097,6 +3102,7 @@ kompoz-foundation/layout_modifiers kompozable rtl r crates/kompoz-foundation/tes
 * fn scale_in ddd crates/kompoz-animation/src/enter_exit.rs
 * fn scale_out ddd crates/kompoz-animation/src/enter_exit.rs
 * method scale_uniform rd crates/kompoz-ui/src/draw/scope.rs DrawTransform
+kompoz-runtime/macros fn scaled rdd crates/kompoz-runtime/tests/macros.rs
 * method scroll dr crates/kompoz-foundation/src/gestures/scrollable2d_state.rs {S} as Scrollable2DStateExtensions
 * method scroll dr crates/kompoz-foundation/src/gestures/scrollable_state.rs {S} as ScrollableStateExtensions
 * method scroll rd crates/kompoz-test/src/input.rs MouseInjectionScope

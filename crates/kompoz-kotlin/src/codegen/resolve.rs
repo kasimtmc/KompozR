@@ -132,9 +132,18 @@ impl Ty {
     pub fn element(&self) -> Ty {
         match self {
             Ty::List(t) | Ty::Set(t) | Ty::Range(t) | Ty::ClosedRange(t) => (**t).clone(),
-            // ((stage 14 FINAL-T) navigation3's back stack, Kotlin's `MutableList<T>` too)
-            Ty::Named(n, a) if n == "SnapshotStateList" || n == "NavBackStack" => {
+            // ((stage 14 FINAL-T) navigation3's back stack, Kotlin's `MutableList<T>` too; (stage 14 LISTS) kt's
+            // shared mutable list and set, a `List` that may be mutable)
+            Ty::Named(n, a)
+                if matches!(
+                    n.as_str(),
+                    "SnapshotStateList" | "NavBackStack" | "MutableList" | "MutableSet" | "ListView"
+                ) =>
+            {
                 a.first().cloned().unwrap_or(Ty::Unknown)
+            }
+            Ty::Named(n, a) if n == "MutableMap" && a.len() == 2 => {
+                Ty::Pair(Box::new(a[0].clone()), Box::new(a[1].clone()))
             }
             // ((stage 14 FINAL) a state map: its entries, as a map's)
             Ty::Named(n, a) if n == "SnapshotStateMap" && a.len() == 2 => {
@@ -145,6 +154,39 @@ impl Ty {
             Ty::Map(k, v) => Ty::Pair(k.clone(), v.clone()),
             Ty::String => Ty::Char,
             _ => Ty::Unknown,
+        }
+    }
+
+    /// ((stage 14 LISTS) Which of kt's shared mutable collections it is (`MutableList`, `MutableSet`, `MutableMap`):
+    /// Kotlin's reference to one object.)
+    pub fn mutable_collection(&self) -> Option<&'static str> {
+        match self {
+            Ty::Named(n, _) => match n.as_str() {
+                "MutableList" => Some("MutableList"),
+                "MutableSet" => Some("MutableSet"),
+                "MutableMap" => Some("MutableMap"),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// ((stage 14 LISTS) Kotlin's read-only collection type a mutable one is (`MutableList<T>`, a `List<T>` that may
+    /// be one, a state list: a `List<T>`; `MutableSet<T>` a `Set<T>`; `MutableMap<K, V>` a `Map<K, V>`), none for
+    /// another type.)
+    pub fn read_only(&self) -> Option<Ty> {
+        match self {
+            Ty::Named(n, a)
+                if a.len() == 1
+                    && matches!(n.as_str(), "MutableList" | "ListView" | "SnapshotStateList" | "NavBackStack") =>
+            {
+                Some(Ty::List(Box::new(a[0].clone())))
+            }
+            Ty::Named(n, a) if a.len() == 1 && n == "MutableSet" => Some(Ty::Set(Box::new(a[0].clone()))),
+            Ty::Named(n, a) if a.len() == 2 && n == "MutableMap" => {
+                Some(Ty::Map(Box::new(a[0].clone()), Box::new(a[1].clone())))
+            }
+            _ => None,
         }
     }
 
@@ -179,9 +221,17 @@ impl Ty {
             }
             // (a state list: Kotlin's MutableList functions are its own, taking `&self`; its reads are a list's)
             // ((stage 14 FINAL-T) navigation3's back stack: a state list)
-            Ty::Named(n, _) if n == "SnapshotStateList" || n == "NavBackStack" => {
+            // ((stage 14 LISTS) kt's shared mutable list and set, a `List` that may be mutable: the same, their
+            // MutableList functions their own)
+            Ty::Named(n, _)
+                if matches!(
+                    n.as_str(),
+                    "SnapshotStateList" | "NavBackStack" | "MutableList" | "MutableSet" | "ListView"
+                ) =>
+            {
                 &["KtList", "KtListOfLists", "KtListOfNullable", "KtScope"]
             }
+            Ty::Named(n, _) if n == "MutableMap" => &["KtMapExt", "KtScope"],
             // (a Rust `Result`: Kotlin's `Result<T>`, its members the kt shim's)
             Ty::Named(n, _) if n == "Result" => &["KtResult", "KtScope"],
             Ty::String => &["KtStr", "KtScope"],
@@ -202,9 +252,10 @@ impl Ty {
     pub fn from_rust(text: &str) -> Ty {
         // (WP7: search/tooltips) A type the generator wrote itself, its tokens printed with spaces round the paths'
         // `::` (`:: std :: string :: String`, a file function's `(String) -> Unit` parameter): read as one path.
+        // ((stage 14 LISTS) printed by the compiler in a macro, a long one is broken into lines: `:: std :: rc\n:: Rc`)
         let joined;
-        let text = if text.contains(":: ") {
-            joined = text.replace(":: ", "::").replace(" ::", "::");
+        let text = if text.contains(":: ") || text.contains('\n') {
+            joined = text.replace('\n', " ").replace(":: ", "::").replace(" ::", "::");
             joined.as_str()
         } else {
             text
@@ -270,6 +321,10 @@ fn unify(pattern: &Ty, actual: &Ty, binds: &mut TypeBinds) {
             for (p, a) in pa.iter().zip(aa) {
                 unify(p, a, binds);
             }
+        }
+        // ((stage 14 LISTS) a mutable collection where its read-only kind is taken)
+        (p @ (Ty::List(_) | Ty::Set(_) | Ty::Map(..)), a) if a.read_only().is_some() => {
+            unify(p, &a.read_only().expect("read-only"), binds)
         }
         _ => {}
     }
@@ -482,7 +537,10 @@ impl TypeText<'_, '_> {
                 t => t,
             },
             "Option" => Ty::Nullable(Box::new(first())),
-            "Vec" | "VecDeque" | "List" | "MutableList" => Ty::List(Box::new(first())),
+            "Vec" | "VecDeque" | "List" => Ty::List(Box::new(first())),
+            // ((stage 14 LISTS) kt's shared mutable collections, and a `List` that may be one)
+            "MutableList" | "MutableSet" | "ListView" => Ty::Named(name, vec![first()]),
+            "MutableMap" => Ty::Named(name, vec![first(), args.get(1).cloned().unwrap_or(Ty::Unknown)]),
             "KtSet" | "HashSet" | "BTreeSet" => Ty::Set(Box::new(first())),
             "KtMap" | "HashMap" | "BTreeMap" => {
                 Ty::Map(Box::new(first()), Box::new(args.get(1).cloned().unwrap_or(Ty::Unknown)))

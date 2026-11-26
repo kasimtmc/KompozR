@@ -178,7 +178,7 @@ impl Uses {
             uses.indirect = api.iter().map(|(n, _)| n.clone()).filter(|n| !direct.contains(n)).collect();
         }
         uses.api = api;
-        let mut look = |e: &Expr| uses.note(e, &typed);
+        let mut look = |e: &Expr| uses.note(e, &typed, &[]);
         for m in members {
             match m {
                 Member::Decl(Decl::Function(f)) => walk_body(f.body.as_ref(), &mut look),
@@ -209,7 +209,10 @@ impl Uses {
         if f.is_kompozable() {
             uses.compared = f.type_params.iter().map(|t| t.name.name.clone()).collect();
         }
-        let mut look = |e: &Expr| uses.note(e, &typed);
+        // ((stage 14 LISTS) the parameters holding a type parameter's values: `xs: List<T>`, their elements of it)
+        let elems: Vec<(String, String)> =
+            f.params.iter().filter_map(|p| Some((p.name.name.clone(), element_param(p.ty.as_ref()?)?))).collect();
+        let mut look = |e: &Expr| uses.note(e, &typed, &elems);
         walk_body(f.body.as_ref(), &mut look);
         let names: Vec<String> = f.type_params.iter().map(|t| t.name.name.clone()).collect();
         let mut api = Vec::new();
@@ -219,8 +222,39 @@ impl Uses {
     }
 
     /// An expression's uses: a template's piece, `==`'s operands, `toString()`.
-    fn note(&mut self, e: &Expr, typed: &[(String, Option<String>)]) {
+    fn note(&mut self, e: &Expr, typed: &[(String, Option<String>)], elems: &[(String, String)]) {
         let param_of = |x: &Expr| -> Option<String> {
+            // ((stage 14 LISTS) an element of a parameter holding the type parameter's values: `xs[i]`, `xs.first()`)
+            let elem_of = |r: &Expr| match &r.kind {
+                ExprKind::Name(n) => elems.iter().find(|(p, _)| *p == n.name).map(|(_, t)| t.clone()),
+                _ => None,
+            };
+            match &x.kind {
+                ExprKind::Index { receiver, .. } => return elem_of(receiver),
+                ExprKind::Call { callee, .. } => {
+                    return match &callee.kind {
+                        ExprKind::Member { receiver, name, .. }
+                            if matches!(
+                                name.name.as_str(),
+                                "first"
+                                    | "last"
+                                    | "get"
+                                    | "elementAt"
+                                    | "single"
+                                    | "firstOrNull"
+                                    | "lastOrNull"
+                                    | "getOrNull"
+                                    | "singleOrNull"
+                                    | "random"
+                            ) =>
+                        {
+                            elem_of(receiver)
+                        }
+                        _ => None,
+                    };
+                }
+                _ => {}
+            }
             let name = match &x.kind {
                 ExprKind::Name(n) => &n.name,
                 ExprKind::Member { receiver, name, .. } if matches!(receiver.kind, ExprKind::This { .. }) => &name.name,
@@ -289,6 +323,22 @@ fn api_bounds_of(e: &Expr, names: &[String], out: &mut Vec<(String, String)>) {
                 }
             }
         }
+    }
+}
+
+/// (stage 14 LISTS) The type parameter a collection type holds (`List<T>`, `MutableList<T>`, `Set<T>`, …: `T`).
+fn element_param(t: &Type) -> Option<String> {
+    let TypeKind::Named(segs) = &t.kind else { return None };
+    let [seg] = segs.as_slice() else { return None };
+    if !matches!(
+        seg.name.name.as_str(),
+        "List" | "MutableList" | "Collection" | "Iterable" | "Set" | "MutableSet" | "ArrayList" | "ListView" | "Array"
+    ) {
+        return None;
+    }
+    match seg.args.as_slice() {
+        [TypeArg::Type { ty, .. }] => type_name(ty),
+        _ => None,
     }
 }
 

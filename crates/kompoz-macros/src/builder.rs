@@ -91,8 +91,25 @@ pub(crate) fn fn_sugar(p: &Param) -> Option<&ParenthesizedGenericArguments> {
 /// The type of an `impl Trait` parameter's default: a fn pointer for an `impl Fn…` (its default a closure or a
 /// function), else the unit struct its default names (`#[default(DefaultFlexBoxConfig)] config: impl FlexBoxConfig`:
 /// Compose's companion object standing for the default).
-fn fn_pointer(p: &Param) -> Result<Type> {
+/// A default reading earlier parameters (`capturing`) is a closure holding what it takes of them: a boxed `dyn Fn…`.
+fn fn_pointer(p: &Param, capturing: bool) -> Result<Type> {
     match fn_sugar(p) {
+        Some(args) if capturing => {
+            let (inputs, output) = (&args.inputs, &args.output);
+            let name = p
+                .bounds()
+                .into_iter()
+                .flatten()
+                .find_map(|b| match b {
+                    TypeParamBound::Trait(t) => {
+                        let seg = t.path.segments.last().unwrap();
+                        ["Fn", "FnMut", "FnOnce"].iter().any(|n| seg.ident == n).then(|| seg.ident.clone())
+                    }
+                    _ => None,
+                })
+                .expect("an `impl Fn…`");
+            Ok(parse_quote!(::std::boxed::Box<dyn #name(#inputs) #output>))
+        }
         Some(args) => {
             let (inputs, output) = (&args.inputs, &args.output);
             Ok(parse_quote!(fn(#inputs) #output))
@@ -105,6 +122,88 @@ fn fn_pointer(p: &Param) -> Result<Type> {
             )),
         },
     }
+}
+
+/// The earlier parameters `params[i]`'s default names (Kotlin's `fun f(a: Int, b: Int = a * 2)`: a default sees
+/// the parameters before it), by index: an identifier of the default's tokens (inside macros too) that is one of
+/// theirs, not a field or method after `.` nor a path's segment.
+pub(crate) fn earlier_in_default(params: &[Param], i: usize) -> Vec<usize> {
+    let Some(d) = &params[i].default else { return Vec::new() };
+    let mut names = std::collections::HashSet::new();
+    fn scan(ts: Ts, names: &mut std::collections::HashSet<String>) {
+        let mut prev: Option<proc_macro2::TokenTree> = None;
+        let tokens: Vec<proc_macro2::TokenTree> = ts.into_iter().collect();
+        for (k, t) in tokens.iter().enumerate() {
+            match t {
+                proc_macro2::TokenTree::Group(g) => scan(g.stream(), names),
+                proc_macro2::TokenTree::Ident(id) => {
+                    let after_dot_or_path = matches!(&prev, Some(proc_macro2::TokenTree::Punct(p))
+                        if p.as_char() == '.' || (p.as_char() == ':' && k >= 2
+                            && matches!(&tokens[k - 2], proc_macro2::TokenTree::Punct(q) if q.as_char() == ':')));
+                    // (a path's segment, a named argument's name — `f(x = 1)` — or a binding's — `let x = …`)
+                    let before_path = matches!(tokens.get(k + 1), Some(proc_macro2::TokenTree::Punct(p))
+                        if p.as_char() == ':' && p.spacing() == proc_macro2::Spacing::Joint
+                            || p.as_char() == '=' && p.spacing() == proc_macro2::Spacing::Alone);
+                    if !after_dot_or_path && !before_path {
+                        names.insert(id.to_string());
+                    }
+                }
+                // (a format string's captured names: `format!("{a}/{b}")`)
+                proc_macro2::TokenTree::Literal(l) => {
+                    let text = l.to_string();
+                    if text.ends_with('"') {
+                        let mut rest = text.as_str();
+                        while let Some(at) = rest.find('{') {
+                            rest = &rest[at + 1..];
+                            if rest.starts_with('{') {
+                                rest = &rest[1..];
+                                continue;
+                            }
+                            let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                            if !name.is_empty() && !name.starts_with(|c: char| c.is_ascii_digit()) {
+                                names.insert(name);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            prev = Some(t.clone());
+        }
+    }
+    scan(quote!(#d), &mut names);
+    (0..i).filter(|&k| names.contains(&params[k].ident.to_string())).collect()
+}
+
+/// The `let`s giving a default the earlier parameters it names by their names, each lent (`let a = &__a0;`): a
+/// default reads them, as Kotlin's does, without taking them from the call.
+pub(crate) fn earlier_lets(params: &[Param], i: usize, slot: impl Fn(usize) -> Ts) -> Ts {
+    let lets = earlier_in_default(params, i).into_iter().map(|k| {
+        let name = &params[k].ident;
+        let s = slot(k);
+        quote!(#[allow(unused_variables)] let #name = &#s;)
+    });
+    quote!(#(#lets)*)
+}
+
+/// Which defaults a plain call (the parameters without a default given) makes before the call, by the parameters'
+/// names: those reading earlier parameters, and the earlier defaults they read.
+pub(crate) fn hoisted_defaults(params: &[Param]) -> Vec<bool> {
+    let mut hoisted = vec![false; params.len()];
+    for i in (0..params.len()).rev() {
+        let reads = earlier_in_default(params, i);
+        if !reads.is_empty() {
+            hoisted[i] = true;
+        }
+        if hoisted[i] {
+            for k in reads {
+                if params[k].default.is_some() {
+                    hoisted[k] = true;
+                }
+            }
+        }
+    }
+    hoisted
 }
 
 /// Replaces `self` in a default with `__self`, the receiver the builder holds.
@@ -435,8 +534,9 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     // (a closure parameter left at its default has the default's identity, the same each call, as Kotlin's default
     // lambda is one instance; a setter resets it)
     let ids_init = pass_ids.then(|| {
-        let ids = params.iter().zip(wants_id).map(|(p, w)| {
-            if *w && p.default.is_some() {
+        let ids = params.iter().zip(wants_id).enumerate().map(|(k, (p, w))| {
+            // (one reading earlier parameters is made each call, as Kotlin's capturing lambda is: no identity)
+            if *w && p.default.is_some() && earlier_in_default(params, k).is_empty() {
                 quote!(#rt::__private::DEFAULT_CLOSURE_ID)
             } else {
                 quote!(::core::option::Option::None)
@@ -692,6 +792,12 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
     for (i, p) in params.iter().enumerate() {
         let (pi, fi, ty) = (&ps[i], &fs[i], &p.ty);
         let a = format_ident!("__a{i}");
+        // (the earlier parameters it reads, by their names: Kotlin's `b: Int = a * 2`)
+        let earlier = earlier_lets(params, i, |k| {
+            let s = format_ident!("__a{k}");
+            quote!(#s)
+        });
+        let capturing = !earlier_in_default(params, i).is_empty();
         let default = p.default.clone().map(|mut d| {
             SelfToRecv.visit_expr_mut(&mut d);
             d
@@ -707,10 +813,11 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
             }
             (None, Some(d)) => {
                 bounds.push(quote!(#pi: #rt::__private::ArgOr<#ty>));
+                let d = if capturing { quote!({ #earlier #d }) } else { quote!(#d) };
                 lets.push(quote!(let #a = #rt::__private::ArgOr::<#ty>::or(self.#fi, || #d);));
             }
             (Some(b), Some(d)) => {
-                let fp = fn_pointer(p)?;
+                let fp = fn_pointer(p, capturing)?;
                 bounds.push(quote!(#pi: #rt::__private::ImplArg<#fp>, <#pi as #rt::__private::ImplArg<#fp>>::Out: #b));
                 // (rustc doesn't take a projection's `'static` from the where clause when its default's fn pointer is
                 // higher-ranked, `for<'a> fn(&'a T)`: it asks it of the slot's type, `Unset` or `Set<V>`, so that is
@@ -718,7 +825,10 @@ pub(crate) fn builder(spec: Spec<'_>) -> Result<Built> {
                 if b.iter().any(|b| matches!(b, TypeParamBound::Lifetime(l) if l.ident == "static")) {
                     bounds.push(quote!(#pi: 'static));
                 }
-                lets.push(quote!(let #a = #rt::__private::ImplArg::<#fp>::pick(self.#fi, { let d: #fp = #d; d });));
+                let made = if capturing { quote!(::std::boxed::Box::new({ #earlier #d })) } else { quote!(#d) };
+                lets.push(
+                    quote!(let #a = #rt::__private::ImplArg::<#fp>::pick(self.#fi, || { let d: #fp = #made; d });),
+                );
             }
         }
     }

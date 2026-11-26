@@ -165,6 +165,10 @@ impl Gen<'_, '_> {
                 ExprKind::Paren(inner) => return self.value_want(inner, want),
                 _ => {}
             }
+            // ((stage 14 LISTS) `mapOf(…)` of `Any` values: each made one)
+            if let Some(ts) = self.map_literal(e, &to) {
+                return ts;
+            }
             let out = self.expr(e);
             let from = out.ty.clone();
             if self.coerces(&from, &to) {
@@ -431,6 +435,10 @@ impl Gen<'_, '_> {
     /// on a side as `==` does. A data class's value has no identity of its own here (its copies are Rust's values):
     /// an error.
     fn identical(&mut self, same: bool, lhs: &Expr, rhs: &Expr, loc: Loc) -> Out {
+        // ((stage 14 LISTS) of shared mutable collections: the same object)
+        if let Some(ts) = self.collection_identical(same, lhs, rhs, loc) {
+            return Out::plain(ts, Ty::Bool);
+        }
         let span = self.span(loc);
         let (at, bt) = (self.peek_ty(lhs).non_null(), self.peek_ty(rhs).non_null());
         let pointer = |t: &Ty| match t {
@@ -489,6 +497,11 @@ impl Gen<'_, '_> {
         if let Some(out) = self.exception_is(inner, negated, ty, loc) {
             return out;
         }
+        // ((stage 14 LISTS) a list asked whether it is a `MutableList`: `collections`)
+        if let Some(out) = self.collection_cast(inner, false, true, ty, loc) {
+            let ts = out.ts;
+            return Out::plain(if negated { quote!(!#ts) } else { ts }, Ty::Bool);
+        }
         let span = self.span(loc);
         let kt = self.kt(span);
         // ((stage 14 WPA) `this is T` in an interface's or open class's member: the object's class)
@@ -525,6 +538,10 @@ impl Gen<'_, '_> {
     /// when it isn't one, `as? T` null then. A nullable target (`as T?`) is the safe cast's.
     pub(crate) fn cast_expr(&mut self, inner: &Expr, safe: bool, ty: &Type, loc: Loc) -> Out {
         if let Some(out) = self.exception_cast(inner, safe, ty, loc) {
+            return out;
+        }
+        // ((stage 14 LISTS) a list cast to a `MutableList`: `collections`)
+        if let Some(out) = self.collection_cast(inner, safe, false, ty, loc) {
             return out;
         }
         let span = self.span(loc);
@@ -1228,6 +1245,15 @@ impl Gen<'_, '_> {
                 Out::plain(quote_spanned!(span=> #kt::KtMapExt::get(&#r, #(#args),*)), v.nullable())
             }
             Ty::String => Out::plain(quote_spanned!(span=> #kt::KtStr::get(&#r, #(#args),*)), Ty::Char),
+            // ((stage 14 LISTS) kt's shared list or map, a `List` that may be mutable: their own `get`)
+            Ty::Named(n, a) if n == "MutableMap" && a.len() == 2 => {
+                let v = a[1].clone();
+                Out::plain(quote_spanned!(span=> #r.get(#(#args),*)), v.nullable())
+            }
+            t @ Ty::Named(n, _) if n == "MutableList" || n == "ListView" => {
+                let el = t.element();
+                Out::plain(quote_spanned!(span=> #r.get(#(#args),*)), el)
+            }
             t => {
                 let el = t.element();
                 Out::plain(quote_spanned!(span=> #kt::KtList::get(&#r, #(#args),*)), el)
@@ -1470,11 +1496,18 @@ impl Gen<'_, '_> {
                 }
                 // A list plus or minus an element or a collection (Kotlin's `plus`/`minus` operators of
                 // `Collection`: `served + order`), a new list.
+                // ((stage 14 LISTS) a mutable one's or a view's: a new read-only list too)
+                let lhs_ty = self.peek_ty(lhs);
+                let lhs_ty = match lhs_ty.read_only() {
+                    Some(l @ Ty::List(_)) => l,
+                    _ => lhs_ty,
+                };
                 if matches!(op, BinaryOp::Add | BinaryOp::Sub)
-                    && let ty @ Ty::List(_) = self.peek_ty(lhs)
+                    && let ty @ Ty::List(_) = lhs_ty
                 {
                     let a = self.expr(lhs).ts;
-                    let many = matches!(self.peek_ty(rhs), Ty::List(_) | Ty::Set(_) | Ty::Range(_));
+                    let rhs_ty = self.peek_ty(rhs);
+                    let many = matches!(rhs_ty.read_only().unwrap_or(rhs_ty), Ty::List(_) | Ty::Set(_) | Ty::Range(_));
                     let b = self.expr(rhs).ts;
                     let ts = match (op, many) {
                         (BinaryOp::Add, true) => quote_spanned!(span=> #kt::KtList::plus(&#a, &#b)),
@@ -1944,6 +1977,7 @@ impl Gen<'_, '_> {
             }
             ExprKind::Index { receiver, indices } => match self.peek_ty(receiver) {
                 Ty::Map(_, v) => v.nullable(),
+                Ty::Named(n, a) if n == "MutableMap" && a.len() == 2 => a[1].clone().nullable(),
                 // ((stage 14 WPB) a user's `operator fun get`)
                 t if self.has_operator(&t, "get") => self.operator_ret(&t, "get").unwrap_or(Ty::Unknown),
                 // ((stage 14 WPD) an API type's keyed `get`, its result bound by the key's type — `extras[KEY]` of
@@ -2308,6 +2342,14 @@ impl Gen<'_, '_> {
             "Self::Item" | "T" => elem,
             "Option<Self::Item>" | "Option<T>" => elem.nullable(),
             "Vec<Self::Item>" | "Vec<T>" => Ty::List(Box::new(elem)),
+            // ((stage 14 LISTS) a new shared mutable collection of them)
+            "MutableList<Self::Item>" | "MutableList<T>" | "MutableSet<Self::Item>" | "MutableSet<T>" => {
+                Ty::Named(ret.split('<').next().unwrap_or_default().to_string(), vec![elem])
+            }
+            "MutableMap<Self::K, Self::V>" => match recv.read_only().unwrap_or_else(|| recv.clone()) {
+                Ty::Map(k, v) => Ty::Named("MutableMap".into(), vec![*k, *v]),
+                _ => Ty::Unknown,
+            },
             "Self" => recv.clone(),
             // (WP1b: fab_segmented — a pair's parts, `KtPair`'s `Self::A`/`Self::B`: `item.first` of a
             // `listOf(Icons.Filled.X to "…")` an ImageVector, which picks `Icon`'s overload)
@@ -2375,10 +2417,17 @@ impl Gen<'_, '_> {
                 match n.name.as_str() {
                     "listOf" | "mutableListOf" | "arrayListOf" => {
                         // ((stage 14 FINAL-T) its type argument where written: `listOf<Screen>(…)`)
-                        if let [TypeArg::Type { ty, .. }] = type_args {
-                            return Ty::List(Box::new(self.ty_of(ty)));
-                        }
-                        return Ty::List(Box::new(self.elements_ty(args.iter().map(|a| &a.value))));
+                        let elem = if let [TypeArg::Type { ty, .. }] = type_args {
+                            self.ty_of(ty)
+                        } else {
+                            self.elements_ty(args.iter().map(|a| &a.value))
+                        };
+                        // ((stage 14 LISTS) a mutable one: kt's shared list)
+                        return if n.name == "listOf" {
+                            Ty::List(Box::new(elem))
+                        } else {
+                            Ty::Named("MutableList".into(), vec![elem])
+                        };
                     }
                     "mutableStateOf" => {
                         // (its type argument where written: `mutableStateOf<Animatable<Dp, …>?>(null)`)

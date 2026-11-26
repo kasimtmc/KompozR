@@ -144,7 +144,7 @@ pub fn Collections(anim: Animatable<f32, AnimationVector1D>, log: impl ::core::o
             },
         )
         .await;
-        let mut cache = ::core::convert::identity::<::kompoz::runtime::kt::KtMap<::std::string::String, i32>>(
+        let cache = ::core::convert::identity::<::kompoz::runtime::kt::MutableMap<::std::string::String, i32>>(
             ::kompoz::runtime::kt::mutable_map_of([]),
         );
         let cached = cache.get_or_put_async(::std::string::String::from("a"), async || load(5).await).await;
@@ -190,7 +190,7 @@ pub fn Collections(anim: Animatable<f32, AnimationVector1D>, log: impl ::core::o
             + ::kompoz::runtime::kt::KtList::size(&odd)
             + sum
             + ::kompoz::runtime::kt::KtList::size(&chars)
-            + cached.clone()
+            + cached
             + ::kompoz::runtime::kt::KtList::size(&made)
             + if any { 1 } else { 0 });
     });

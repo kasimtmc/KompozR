@@ -1001,6 +1001,90 @@ kompoz! {
     }
 }
 
+// ---- (stage 14 LISTS) Kotlin's mutable collections are references --------------------------------------------------
+
+kompoz! {
+    // A function given a MutableList/MutableMap/MutableSet changes the caller's; two vals hold one object; a class's
+    // property is shared by whoever got it; `===` is the object's identity, `==` the elements; a `List` declared over a
+    // mutable one sees it change (a view), `toList()`/`toMutableList()` copy; a `List` parameter asked `is MutableList`
+    // is the caller's list.
+    fun dropFirst(xs: MutableList<Int>) { xs.removeAt(0) }
+    fun tally(counts: MutableMap<String, Int>, key: String) { counts[key] = (counts[key] ?: 0) + 1 }
+    fun mark(seen: MutableSet<String>, s: String): Boolean = seen.add(s)
+    fun total(xs: List<Int>): Int = xs.sum()
+    fun <T> popIfMutable(stack: List<T>): Boolean {
+        if (stack is MutableList) {
+            stack.removeAt(stack.size - 1)
+            return true
+        }
+        return false
+    }
+
+    class Basket(val items: MutableList<String> = mutableListOf()) {
+        private val _log = mutableListOf<String>()
+        val log: List<String> = _log
+        fun put(item: String) {
+            items += item
+            _log.add("+$item")
+        }
+    }
+
+    fun sharedCollections(): String {
+        val xs = mutableListOf(1, 2, 3)
+        val ys = xs
+        dropFirst(xs)
+        ys.add(4)
+        xs[0] = 9
+        val copy = xs.toMutableList()
+        copy += 5
+        val view: List<Int> = xs
+        val snapshot = xs.toList()
+        xs.add(6)
+        val counts = mutableMapOf<String, Int>()
+        tally(counts, "a")
+        tally(counts, "a")
+        tally(counts, "b")
+        val seen = mutableSetOf<String>()
+        mark(seen, "x")
+        val again = mark(seen, "x")
+        mark(seen, "y")
+        val basket = Basket()
+        val held = basket.items
+        basket.put("elma")
+        held.add("armut")
+        var sum = 0
+        for (x in xs) sum += x
+        val popped = popIfMutable(xs) && !popIfMutable(listOf(1))
+        return "$xs $ys $copy $view $snapshot ${total(xs)} $counts $seen $again ${basket.items} ${basket.log} " +
+            "${xs === ys} ${xs === copy} ${xs == ys} ${copy == listOf(9, 3, 4, 5)} $sum $popped"
+    }
+
+    // A parameter's default reads the parameters before it: in a function, a composable, a class's constructor.
+    fun scaled(a: Int, b: Int = a * 2, label: String = "$a/$b"): String = "$a $b $label"
+    fun <T> popper(stack: List<T>, onBack: () -> Unit = { if (stack is MutableList) stack.removeAt(stack.size - 1) }): () -> Unit = onBack
+    class Frame(val width: Int, val height: Int = width / 2) {
+        override fun toString() = "${width}x$height"
+    }
+
+    @Kompozable
+    fun Titled(title: String, subtitle: String = title.uppercase() + "!") {
+        Text("başlık $title $subtitle")
+    }
+
+    @Kompozable
+    fun SharedCollections() {
+        val stack = remember { mutableStateListOf("a", "b", "c") }
+        Column {
+            Text("ortak " + sharedCollections())
+            Text("önce " + scaled(3) + " | " + scaled(3, 1) + " | " + scaled(2, label = "x") + " | " + Frame(8) + " " + Frame(8, 1))
+            Titled("kotlin")
+            Titled("a", "b")
+            Text("yığın ${stack.joinToString("")}")
+            Button(onClick = popper(stack)) { Text("geri") }
+        }
+    }
+}
+
 /// The texts shown, in the tree's order.
 fn texts(rule: &KompozTestRule) -> Vec<String> {
     use kompoz::ui::semantics::SemanticsProperties;
@@ -1071,8 +1155,27 @@ fn jumps_out_of_composable_lambdas() {
     assert!(texts(&rule).ends_with(&["önce 1".to_string(), "sonra 0".to_string(), "son".to_string()]));
 }
 
+fn shared_mutable_collections_and_defaults() {
+    let rule = KompozTestRule::new(SharedCollections);
+    rule.wait_for_idle();
+    line(
+        &rule,
+        "ortak",
+        "ortak [9, 3, 4] [9, 3, 4] [9, 3, 4, 5] [9, 3, 4] [9, 3, 4] 16 {a=2, b=1} [x, y] false [elma, armut] [+elma] \
+         true false true true 22 true",
+    );
+    line(&rule, "önce", "önce 3 6 3/6 | 3 1 3/1 | 2 4 x | 8x4 8x1");
+    line(&rule, "başlık kotlin", "başlık kotlin KOTLIN!");
+    line(&rule, "başlık a", "başlık a b");
+    line(&rule, "yığın", "yığın abc");
+    rule.on_node_with_text("geri").perform_click();
+    rule.wait_for_idle();
+    line(&rule, "yığın", "yığın ab");
+}
+
 fn main() {
     common::run(&[
+        ("shared_mutable_collections_and_defaults", shared_mutable_collections_and_defaults),
         ("class_properties_by_delegates_and_accessors", class_properties_by_delegates_and_accessors),
         ("suspend_functions", suspend_functions),
         ("kotlins_order_of_evaluation", kotlins_order_of_evaluation),

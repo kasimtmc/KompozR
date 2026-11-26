@@ -74,6 +74,28 @@ impl KtToString for dyn KtObject {
     }
 }
 
+/// Kotlin's `==` of two values of `Any` (a data class's property of `Any`, `TopLevelRoute(route: Any, …)`): the same
+/// object, or equal strings, numbers, booleans or chars (their classes' `equals`); values of other classes are equal
+/// when they are the one object (their `equals` isn't known through `Any` here).
+/// (Of any lifetimes: a derived `==` of a field `Rc<dyn KtObject>` compares through them.)
+impl<'a, 'b> PartialEq<dyn KtObject + 'b> for dyn KtObject + 'a {
+    fn eq(&self, other: &(dyn KtObject + 'b)) -> bool {
+        let (a, b) = (self.as_any(), other.as_any());
+        if std::ptr::addr_eq(a as *const dyn Any, b as *const dyn Any) {
+            return true;
+        }
+        macro_rules! same {
+            ($($t:ty),*) => {$(
+                if let (Some(x), Some(y)) = (a.downcast_ref::<$t>(), b.downcast_ref::<$t>()) {
+                    return x == y;
+                }
+            )*};
+        }
+        same!(String, &'static str, i32, i64, f32, f64, bool, char, u8, u16, u32, u64, i8, i16, usize);
+        false
+    }
+}
+
 impl fmt::Display for dyn KtObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.kt_to_string())
@@ -328,6 +350,38 @@ impl<T> Clone for KtShared<T> {
     fn clone(&self) -> Self {
         KtShared(self.0.clone())
     }
+}
+
+/// Kotlin's `==` of two values of `Any` (`Any?`) as a data class holds them (its property's field: the shared object,
+/// in an `Option`, in a `var`'s [`KtShared`]): what they hold compared (`dyn KtObject`'s `==`). A derived `==` of an
+/// `Rc<dyn KtObject>` field isn't one Rust writes.
+#[doc(hidden)]
+pub trait KtEqAny {
+    fn kt_eq_any(&self, other: &Self) -> bool;
+}
+impl KtEqAny for Rc<dyn KtObject> {
+    fn kt_eq_any(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+impl KtEqAny for Option<Rc<dyn KtObject>> {
+    fn kt_eq_any(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Some(a), Some(b)) => a.kt_eq_any(b),
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
+}
+impl<T: KtEqAny> KtEqAny for KtShared<T> {
+    fn kt_eq_any(&self, other: &Self) -> bool {
+        self.0.borrow().kt_eq_any(&other.0.borrow())
+    }
+}
+
+/// [`KtEqAny`]'s `==`.
+#[doc(hidden)]
+pub fn eq_any<T: KtEqAny>(a: &T, b: &T) -> bool {
+    a.kt_eq_any(b)
 }
 
 impl<T: PartialEq> PartialEq for KtShared<T> {

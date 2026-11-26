@@ -312,8 +312,9 @@ fn collection_functions() {
     assert_eq!(vec![1, 2, 3].windowed(2, 1, false), [vec![1, 2], vec![2, 3]]);
     assert_eq!(vec![1, 2, 3].fold(10, |acc, it| acc + it), 16);
     assert!(KtList::contains(&vec![1, 2], 2));
-    let mut list = mutable_list_of([1, 2, 3, 4]);
-    list.add(5);
+    // (Kotlin's `MutableList` functions of a `Vec`, a Rust caller's own list)
+    let mut list = vec![1, 2, 3, 4];
+    KtMutableList::add(&mut list, 5);
     list.add_at(0, 0);
     assert!(KtMutableList::remove(&mut list, 3));
     assert_eq!(list.remove_at(0), 0);
@@ -330,8 +331,71 @@ fn collection_functions() {
 }
 
 #[test]
+fn mutable_collections_are_one_object_shared() {
+    // A function given the list changes the caller's; two holders see one object; `==` the elements, `same` the object.
+    fn drop_first(xs: MutableList<i32>) -> i32 {
+        xs.remove_at(0)
+    }
+    let xs = mutable_list_of([1, 2, 3]);
+    let ys = xs.clone();
+    assert_eq!(drop_first(xs.clone()), 1);
+    ys.add(4);
+    ys.add_at(0, 0);
+    assert_eq!(xs.to_vec(), [0, 2, 3, 4]);
+    assert!(xs.same(&ys) && xs == ys);
+    let copy = xs.to_mutable_list();
+    assert!(copy == xs && !copy.same(&xs));
+    copy.set(0, 9);
+    assert_eq!((xs.get(0), copy.get(0)), (0, 9));
+    assert_eq!(xs, vec![0, 2, 3, 4]);
+    assert_eq!(template!(xs), "[0, 2, 3, 4]");
+    assert_eq!(xs.filter(|it| it % 2 == 0), [0, 2, 4]);
+    assert_eq!(KtList::size(&xs), 4);
+    assert!(xs.remove(3) && !xs.remove(7));
+    assert!(xs.remove_all(|it| it == 0));
+    assert_eq!(xs.remove_last_or_null(), Some(4));
+    xs.add_all_at(0, [5, 6]);
+    assert_eq!(xs.to_vec(), [5, 6, 2]);
+    xs.sort();
+    assert_eq!(xs.to_vec(), [2, 5, 6]);
+    xs.sort_by_descending(|it| it);
+    assert_eq!(xs.to_vec(), [6, 5, 2]);
+    assert_eq!(xs.into_iter().collect::<Vec<_>>(), [6, 5, 2]);
+    assert_eq!(MutableList(3, |i| i).to_vec(), [0, 1, 2]);
+    // A state list as a `MutableList`: the same state.
+    let state = crate::mutable_state_list_of([1, 2]);
+    let m = MutableList::of_state(state.clone());
+    m.add(3);
+    assert_eq!(state.to_vec(), [1, 2, 3]);
+    assert!(m.same(&MutableList::from(state.clone())));
+    // A `List` that may be a `MutableList`.
+    let view: ListView<i32> = state.clone().into();
+    assert!(view.is_mutable());
+    view.as_mutable().expect("mutable").remove_last();
+    assert_eq!((state.to_vec(), view.size(), view.last()), (vec![1, 2], 2, 2));
+    let values: ListView<i32> = vec![7].into();
+    assert!(values.as_mutable().is_none() && values.get(0) == 7);
+    // Sets and maps.
+    let s = mutable_set_of([1, 2]);
+    let t = s.clone();
+    assert!(t.add(3) && !t.add(1));
+    assert_eq!(template!(s), "[1, 2, 3]");
+    assert!(s == set_of([3, 2, 1]) && s.same(&t));
+    assert!(s.remove_all(|it| it > 1));
+    assert_eq!(s.to_set(), set_of([1]));
+    let m = mutable_map_of([("a", 1)]);
+    let n = m.clone();
+    n.set("b", 2);
+    assert_eq!(m.get_or_put("c", || 3), 3);
+    assert_eq!(template!(m), "{a=1, b=2, c=3}");
+    assert_eq!(m.get("b"), Some(2));
+    assert!(m.same(&n) && !m.to_mutable_map().same(&m));
+    assert_eq!(n.to_map(), map_of([("c", 3), ("b", 2), ("a", 1)]));
+}
+
+#[test]
 fn maps_and_sets_keep_their_order() {
-    let mut m = mutable_map_of([("b", 1), ("a", 2)]);
+    let m = mutable_map_of([("b", 1), ("a", 2)]);
     m.set("c", 3);
     m.put("b", 10);
     assert_eq!(template!(m), "{b=10, a=2, c=3}");

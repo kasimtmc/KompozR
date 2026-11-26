@@ -72,10 +72,13 @@ pub fn Zoom() {
     Column(|| {
         Box(modifier = Modifier
             .size(300.dp())
-            .transformable_with_can_pan(state.clone(), {
-                let scale = ::kompoz::runtime::__private::capture(&scale);
-                move |_| ::kompoz::runtime::kt::KtDelegate::get_value(&scale) > 1_f32
-            })
+            .transformable_with_can_pan(
+                state.clone(),
+                can_pan = {
+                    let scale = ::kompoz::runtime::__private::capture(&scale);
+                    move |_| ::kompoz::runtime::kt::KtDelegate::get_value(&scale) > 1_f32
+                },
+            )
             .test_tag("yakın"));
         Text(::kompoz::runtime::kt::template!(
             "ölçek ",

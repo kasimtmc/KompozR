@@ -1,6 +1,6 @@
 //! NavMetadataKey.kt, NavMetadata.kt: an entry's (and a scene's) metadata, Kotlin's `Map<String, Any>`.
 
-use std::any::Any;
+use kompoz_runtime::kt::{KtMap, KtObject};
 use std::fmt;
 use std::ops::Add;
 use std::rc::Rc;
@@ -21,7 +21,7 @@ pub trait NavMetadataKey<T>: 'static {
 /// an entry provider's are, is equal to itself).
 #[derive(Clone, Default)]
 pub struct Metadata {
-    entries: Rc<Vec<(String, Rc<dyn Any>)>>,
+    entries: Rc<Vec<(String, Rc<dyn KtObject>)>>,
 }
 
 impl Metadata {
@@ -32,13 +32,13 @@ impl Metadata {
 
     /// One of a value by name (Kotlin's `mapOf(name to value)`).
     pub fn of<V: 'static>(name: impl Into<String>, value: V) -> Metadata {
-        Metadata { entries: Rc::new(vec![(name.into(), Rc::new(value) as Rc<dyn Any>)]) }
+        Metadata { entries: Rc::new(vec![(name.into(), Rc::new(value) as Rc<dyn KtObject>)]) }
     }
 
     /// The value of `key`, if there is one of its type (Kotlin's `metadata[key]`, an operator extension of
     /// `Map<String, Any>`).
     pub fn get<T: Clone + 'static>(&self, key: impl NavMetadataKey<T>) -> Option<T> {
-        self.get_by_name(&key.metadata_key_name())?.downcast_ref::<T>().cloned()
+        (*self.get_by_name(&key.metadata_key_name())?).as_any().downcast_ref::<T>().cloned()
     }
 
     /// Whether it has a value for `key` (Kotlin's `key in metadata`).
@@ -46,14 +46,16 @@ impl Metadata {
         self.contains_name(&key.metadata_key_name())
     }
 
-    /// The value of the name `name`, of any type (Kotlin's `metadata["name"]`).
-    pub fn get_by_name(&self, name: &str) -> Option<Rc<dyn Any>> {
+    /// The value of the name `name`, of any type (Kotlin's `metadata["name"]`, a value of `Any?`).
+    ///
+    /// Kotlin: `get(key: String): Any?`
+    pub fn get_by_name(&self, name: &str) -> Option<Rc<dyn KtObject>> {
         self.entries.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone())
     }
 
     /// The value of the name `name` if it is a `T` (Kotlin's `metadata["name"] as? T`).
     pub fn get_as<T: Clone + 'static>(&self, name: &str) -> Option<T> {
-        self.get_by_name(name)?.downcast_ref::<T>().cloned()
+        (*self.get_by_name(name)?).as_any().downcast_ref::<T>().cloned()
     }
 
     /// Whether it has a value of the name `name` (Kotlin's `metadata.containsKey(name)`).
@@ -78,7 +80,7 @@ impl Metadata {
     /// This one with `other`'s values, `other`'s taking the place of this one's of the same names (Kotlin's
     /// `metadata + other`).
     pub fn plus(&self, other: &Metadata) -> Metadata {
-        let mut entries: Vec<(String, Rc<dyn Any>)> = (*self.entries).clone();
+        let mut entries: Vec<(String, Rc<dyn KtObject>)> = (*self.entries).clone();
         for (name, value) in other.entries.iter() {
             match entries.iter_mut().find(|(n, _)| n == name) {
                 Some(e) => e.1 = value.clone(),
@@ -88,12 +90,24 @@ impl Metadata {
         Metadata { entries: Rc::new(entries) }
     }
 
-    pub(crate) fn put_by_name(&mut self, name: String, value: Rc<dyn Any>) {
+    pub(crate) fn put_by_name(&mut self, name: String, value: Rc<dyn KtObject>) {
         let entries = Rc::make_mut(&mut self.entries);
         match entries.iter_mut().find(|(n, _)| *n == name) {
             Some(e) => e.1 = value,
             None => entries.push((name, value)),
         }
+    }
+}
+
+/// Kotlin's `Map<String, Any>` as an entry's metadata (`NavEntry(key, metadata = mapOf("name" to value))`): its values
+/// by their names, in order.
+impl From<KtMap<String, Rc<dyn KtObject>>> for Metadata {
+    fn from(map: KtMap<String, Rc<dyn KtObject>>) -> Metadata {
+        let mut m = Metadata::new();
+        for (name, value) in map {
+            m.put_by_name(name, value);
+        }
+        m
     }
 }
 

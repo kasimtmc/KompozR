@@ -230,6 +230,8 @@ impl Gen<'_, '_> {
                 let set = match ty {
                     // (a state list: its own `set`, taking `&self` and a `usize`)
                     Ty::Named(n, _) if n == "SnapshotStateList" => quote_spanned!(span=> #r.set((#i) as usize, #v)),
+                    // ((stage 14 LISTS) kt's shared list: its own `set`, taking `&self`)
+                    Ty::Named(n, _) if n == "MutableList" => quote_spanned!(span=> #r.set(#i, #v)),
                     _ => quote_spanned!(span=> #kt::KtMutableList::set(&mut #r, #i, #v)),
                 };
                 quote_spanned!(span=> {
@@ -371,7 +373,9 @@ impl Gen<'_, '_> {
                 quote_spanned!(span=> let #i = #v;)
             }
             (Binding::Name(n), init) => {
-                let declared = p.ty.as_ref().map(|t| (self.ty_of(t), t));
+                // ((stage 14 LISTS) a `List<T>` holding a mutable list: a view of that list, `collections`)
+                let viewed = self.list_view_type(p.ty.as_ref(), init);
+                let declared = viewed.as_ref().or(p.ty.as_ref()).map(|t| (self.ty_of(t), t));
                 let rust = snake(&n.name);
                 let i = self.name_ident(&rust, n.loc);
                 // (a collection held by a `val` is still changed through it: Kotlin's lists are objects; so is a value
@@ -422,9 +426,15 @@ impl Gen<'_, '_> {
                                     };
                                     let outer = std::mem::replace(&mut self.control.expected_fn, expected);
                                     // ((stage 14 FINAL) a generic call's result bound by the declared type)
-                                    let o = match &declared {
-                                        Some((d, _)) => self.expecting(e, &d.clone(), |g| g.expr(e)),
-                                        None => self.expr(e),
+                                    // ((stage 14 LISTS) `mapOf(…)` of `Any` values: each made one)
+                                    let literal = declared.as_ref().and_then(|(d, _)| {
+                                        let d = d.clone();
+                                        self.map_literal(e, &d).map(|ts| Out::plain(ts, d))
+                                    });
+                                    let o = match (&declared, literal) {
+                                        (_, Some(o)) => o,
+                                        (Some((d, _)), None) => self.expecting(e, &d.clone(), |g| g.expr(e)),
+                                        (None, None) => self.expr(e),
                                     };
                                     self.control.expected_fn = outer;
                                     self.expected_elem = None;
@@ -453,9 +463,12 @@ impl Gen<'_, '_> {
                         // ((stage 14 WPA) a case of a sealed class, a class's value of an interface or of `Any`: the
                         // declared type's — `val r: Outcome<Int> = Outcome.Failure("x")`)
                         // (an interface's or open class's shared object: `as_declared`'s `Rc::new`)
+                        // ((stage 14 LISTS) a mutable collection of a read-only type, a list of a view: `collections`)
                         if let Some((d, _)) = &declared
                             && !matches!(d, Ty::Fun(_))
-                            && (super::hierarchy::is_any(&d.non_null()) || self.sealed_of(&d.non_null()).is_some())
+                            && (super::hierarchy::is_any(&d.non_null())
+                                || self.sealed_of(&d.non_null()).is_some()
+                                || self.collection_coerces(&value_ty, d))
                             && self.coerces(&value_ty, d)
                         {
                             let v = self.coerce(v, &value_ty, d, span);
@@ -564,6 +577,10 @@ impl Gen<'_, '_> {
     pub(crate) fn assign(&mut self, target: &Expr, op: AssignOp, value: &Expr, loc: Loc) -> TokenStream {
         // ((stage 14 WPB) an operator function of the user: `a += b`, `a[i] = v`)
         if let Some(ts) = self.user_assign(target, op, value, loc) {
+            return ts;
+        }
+        // ((stage 14 LISTS) `+=`/`-=` of a shared mutable collection: Kotlin's `plusAssign`/`minusAssign`, changing it)
+        if let Some(ts) = self.collection_assign(target, op, value, loc) {
             return ts;
         }
         let span = self.span(loc);
@@ -725,6 +742,10 @@ impl Gen<'_, '_> {
                     }
                     // ((stage 14 FINAL) a state map: its own `put`, taking `&self`)
                     Ty::Named(n, _) if n == "SnapshotStateMap" => quote_spanned!(span=> #r.put(#(#idx,)* #v);),
+                    // ((stage 14 LISTS) kt's shared list or map: its own `set`, taking `&self`)
+                    Ty::Named(n, _) if n == "MutableList" || n == "MutableMap" => {
+                        quote_spanned!(span=> #r.set(#(#idx,)* #v);)
+                    }
                     _ => quote_spanned!(span=> #kt::KtMutableList::set(&mut #r, #(#idx,)* #v);),
                 }
             }

@@ -167,7 +167,7 @@ pub fn Counts(i: i32) {
     #[allow(unused_imports)]
     use ::kompoz::runtime::kt::ext::*;
     let counts = remember(|| mutable_state_list_of([0, 0, 0]));
-    let mut local = ::kompoz::runtime::kt::mutable_list_of([1.5_f32, 2_f32]);
+    let local = ::kompoz::runtime::kt::mutable_list_of([1.5_f32, 2_f32]);
     {
         let __kz_i7 = i + 1;
         let __kz_v8 = ::kompoz::runtime::kt::KtInc::inc(::kompoz::runtime::kt::KtList::get(&counts, __kz_i7));
@@ -176,11 +176,7 @@ pub fn Counts(i: i32) {
     {
         let __kz_i9 = 0;
         let __kz_v10 = ::kompoz::runtime::kt::KtInc::dec(::kompoz::runtime::kt::KtList::get(&local, __kz_i9));
-        ::kompoz::runtime::kt::KtMutableList::set(&mut local, __kz_i9, __kz_v10);
+        local.set(__kz_i9, __kz_v10);
     };
-    Text(::kompoz::runtime::kt::template!(
-        ::kompoz::runtime::kt::KtList::get(&counts, 1),
-        " ",
-        ::kompoz::runtime::kt::KtList::get(&local, 0)
-    ));
+    Text(::kompoz::runtime::kt::template!(::kompoz::runtime::kt::KtList::get(&counts, 1), " ", local.get(0)));
 }

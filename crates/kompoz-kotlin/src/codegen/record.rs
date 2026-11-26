@@ -133,6 +133,8 @@ pub(crate) fn kotlin_ty(t: &Ty) -> String {
             let suspend = if f.suspend { "suspend " } else { "" };
             format!("{suspend}{receiver}({}) -> {}", params.join(", "), arg(&f.ret))
         }
+        // ((stage 14 LISTS) a `List` that may be mutable: Kotlin's `List`)
+        Ty::Named(n, args) if n == "ListView" && args.len() == 1 => format!("List<{}>", arg(&args[0])),
         Ty::Named(n, args) => {
             let name = index::kotlin_type(n);
             if args.is_empty() {

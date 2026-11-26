@@ -436,6 +436,9 @@ pub struct Param {
     /// None only where Kotlin lets it be inferred (a setter's `set(v)`).
     pub ty: Option<Type>,
     pub default: Option<Expr>,
+    /// (stage 14 LISTS) A later parameter's default reads it (`fun f(a: Int, b: Int = a * 2)`): set before the file is
+    /// translated (`refine`).
+    pub read_by_default: bool,
     pub loc: Loc,
 }
 
