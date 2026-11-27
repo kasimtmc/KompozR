@@ -69,6 +69,8 @@ pub fn on_load(vm: Vm, entry: fn() -> AndroidApp) -> jint {
                 return -1;
             }
         }
+        // (HTTP, content:// and BitmapFactory for the worker threads: found here, where the app's classes are.)
+        super::network::load(&env);
         JNI_VERSION_1_6
     })
 }
@@ -104,8 +106,11 @@ fn natives() -> Vec<(&'static CStr, Vec<super::jni::JNINativeMethod>)> {
             ],
         ),
     ];
-    // (KompozView's accessibility, content capture, translation, autofill and scroll capture: delegate's.)
+    // (KompozView's accessibility, content capture, translation, autofill and scroll capture: delegate's; the
+    // system's services' and their own classes': services'.)
     list[1].1.extend(super::delegate::view_natives());
+    list[0].1.extend(super::services::activity_natives());
+    list.extend(super::services::class_natives());
     list
 }
 

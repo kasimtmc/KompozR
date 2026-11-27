@@ -3,24 +3,31 @@
 //! handed to the core as they come, its frames on the display's beat (`AChoreographer`: one posted at a time), work
 //! from other threads and a coroutine's delay waking the UI thread's looper (an eventfd, a timerfd), the window the
 //! view's surface has followed (another after the background: the GPU device's surface made again, before the old
-//! window is let go), its state saved into the activity's Bundle and given back after a process death.
+//! window is let go), its state saved into the activity's Bundle and given back after a process death; what the
+//! system's services tell (`services`) handed over: the insets, back's steps, deep links, drags, the animator scale
+//! and the wallpaper's colours.
 //!
 //! Everything runs on the UI thread: the natives (`natives`) and the looper's and choreographer's callbacks find the
 //! app in a thread-local. A call that comes while the app is busy (Java calling back into native code from inside a
 //! call of ours) has its events kept and handed over when that call is done.
 
+use super::clip::Description;
 use super::configuration::Configuration;
+use super::drag::{self, DragEvent};
 use super::input::{Motion, MotionDecoder, key_events};
 use super::jni::{Env, Global, JObject, MethodId, Vm};
 use super::ndk::{Assets, Looper, NativeWindow, api_level, post_frame_callback};
 use super::platform::{AndroidPlatform, Shared};
 use super::saved_state;
+use super::services::Services;
+use super::system::BackPhase;
 use super::text_input::TextInput;
 use super::{AndroidApp, log_error, log_line};
 use crate::app::{AppCore, Event};
 use crate::system::{set_asset_reader, set_cache_directory};
 use crate::unix::sys;
 use crate::unix::waker::Waker;
+use kompoz_ui::platform::SystemInsets;
 use std::cell::{Cell, RefCell};
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::path::PathBuf;
@@ -110,11 +117,13 @@ impl Running {
         let activity = env.new_global(c.activity)?;
         let view = env.new_global(c.view)?;
         let finish = env.class_of(c.activity).and_then(|class| env.method(&class, c"finish", c"()V"));
-        // The APK's assets, where a path isn't a file; the app's cache directory; relative paths (a script's
-        // shots) in the app's files.
+        // The APK's assets, where a path isn't a file (a `content://` URI's bytes from its provider); the app's
+        // cache directory; relative paths (a script's shots) in the app's files.
         let assets_ref = env.new_global(c.assets);
         if let Some(assets) = Assets::from_java(&env, c.assets) {
-            set_asset_reader(Some(Box::new(move |path| assets.read(path))));
+            set_asset_reader(Some(Box::new(move |path| {
+                if path.starts_with("content://") { super::network::read_content(path) } else { assets.read(path) }
+            })));
         }
         set_cache_directory(Some(c.cache_dir.clone()));
         let _ = std::fs::create_dir_all(&c.files_dir);
@@ -150,11 +159,17 @@ impl Running {
             media: Cell::new(None),
             view_configuration: Cell::new(None),
             text_input,
+            services: RefCell::new(None),
+            insets: RefCell::new(None),
+            deep_links: RefCell::new(Vec::new()),
+            animator_scale: Rc::new(Cell::new(1.0)),
+            drop_entry: RefCell::new(None),
+            drop_taken: Cell::new(false),
         });
         let made = entry();
         let mut config = made.config;
         config.args = vec![config.title.clone()]; // (the process's are app_process's)
-        let core = made.content.core(AndroidPlatform { shared: shared.clone() }, &config);
+        let core = made.content.core(AndroidPlatform::new(shared.clone()), &config);
         let running = Running {
             core,
             window: None,
@@ -293,6 +308,80 @@ impl Running {
             _ => {}
         }
         self.deliver(event.clone());
+    }
+
+    // ---- The system's services (`services`' natives) ----
+
+    /// KompozActivity's service objects, for the platform's callbacks; the animator scale as it is now.
+    pub fn set_services(&mut self, services: Rc<Services>) {
+        self.shared.animator_scale.set(services.animator_scale());
+        *self.shared.services.borrow_mut() = Some(services);
+    }
+
+    /// A link the app is opened with: its navigation goes there (once the host is there).
+    pub fn deep_link(&mut self, link: String) {
+        match self.host() {
+            Some(host) => {
+                host.open_deep_link(&link);
+                self.request_frame();
+            }
+            None => self.shared.deep_links.borrow_mut().push(link),
+        }
+    }
+
+    /// The insets as they are now (kept for the host as it starts).
+    pub fn insets(&mut self, insets: SystemInsets) {
+        *self.shared.insets.borrow_mut() = Some(insets.clone());
+        if let Some(host) = self.host() {
+            host.set_system_insets(insets);
+            self.request_frame();
+        }
+    }
+
+    /// A step of back: the gesture's to the host's back handling (Compose's PredictiveBackHandler); back itself
+    /// as an event (the host's, or the system's if nothing in the app takes it).
+    pub fn back(&mut self, step: BackPhase) {
+        if let BackPhase::Invoked = step {
+            self.deliver(Event::Back);
+            return;
+        }
+        let Some(host) = self.host() else { return };
+        match step {
+            BackPhase::Started(event) => host.back_started(event),
+            BackPhase::Progressed(event) => host.back_progressed(event),
+            BackPhase::Cancelled => host.back_cancelled(),
+            BackPhase::Invoked => {}
+        }
+        self.request_frame();
+    }
+
+    /// The animator duration scale changed (read by animations as they run).
+    pub fn animator_scale(&mut self, scale: f32) {
+        self.shared.animator_scale.set(scale);
+        self.request_frame();
+    }
+
+    /// The wallpaper's colours changed: the system's palettes read again.
+    pub fn wallpaper_changed(&mut self) {
+        self.deliver(Event::WallpaperChanged);
+    }
+
+    /// A drag over the view (`drag`'s events), handed to the core; for a drop, whether a target took it.
+    pub fn drag(&mut self, event: &DragEvent, description: Option<Description>) -> bool {
+        if !self.started {
+            return false;
+        }
+        if event.action == drag::action::DROP && !event.own {
+            let entry = self.shared.services().zip(description).map(|(s, d)| s.drop_entry(d));
+            *self.shared.drop_entry.borrow_mut() = entry;
+        }
+        self.shared.drop_taken.set(false);
+        // (Android's drags have no action of their own: the app's own one taken is a copy.)
+        for e in drag::events(event, &[]) {
+            self.deliver(e);
+        }
+        self.shared.drop_entry.borrow_mut().take();
+        self.shared.drop_taken.get()
     }
 
     /// The input devices (KompozInputDevices' media info) and the system's gesture thresholds, as they start and

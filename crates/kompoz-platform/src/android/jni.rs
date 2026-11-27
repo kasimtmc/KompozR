@@ -112,7 +112,10 @@ mod slot {
     pub const CALL_OBJECT_METHOD_A: usize = 36;
     pub const CALL_BOOLEAN_METHOD_A: usize = 39;
     pub const CALL_INT_METHOD_A: usize = 51;
+    pub const CALL_FLOAT_METHOD_A: usize = 57;
     pub const CALL_VOID_METHOD_A: usize = 63;
+    pub const GET_STATIC_METHOD_ID: usize = 113;
+    pub const CALL_STATIC_OBJECT_METHOD_A: usize = 116;
     pub const GET_ARRAY_LENGTH: usize = 171;
     pub const NEW_BYTE_ARRAY: usize = 176;
     pub const NEW_INT_ARRAY: usize = 179;
@@ -451,6 +454,20 @@ impl<'a> Env<'a> {
         (!self.check()).then_some(result)
     }
 
+    /// `object.method(args)` of a method returning a float (none if it threw).
+    pub fn call_float(&self, object: JObject, method: MethodId, args: &[jvalue]) -> Option<jfloat> {
+        if object.is_null() {
+            return None;
+        }
+        // SAFETY: as call_void's, of a method returning a float.
+        let result = unsafe {
+            let call: unsafe extern "system" fn(*mut JNIEnv, jobject, jmethodID, *const jvalue) -> jfloat =
+                self.f(slot::CALL_FLOAT_METHOD_A);
+            call(self.raw, object.0, method.0, args.as_ptr())
+        };
+        (!self.check()).then_some(result)
+    }
+
     /// `object.method(args)` of a method returning an object (none for null, or if it threw).
     pub fn call_object(&self, object: JObject, method: MethodId, args: &[jvalue]) -> Option<Local<'a>> {
         if object.is_null() {
@@ -461,6 +478,33 @@ impl<'a> Env<'a> {
             let call: unsafe extern "system" fn(*mut JNIEnv, jobject, jmethodID, *const jvalue) -> jobject =
                 self.f(slot::CALL_OBJECT_METHOD_A);
             call(self.raw, object.0, method.0, args.as_ptr())
+        };
+        self.local(raw)
+    }
+
+    /// A class's static method by name and JNI signature (none if it isn't there: the exception cleared).
+    pub fn static_method(&self, class: &Local<'_>, name: &CStr, signature: &CStr) -> Option<MethodId> {
+        // SAFETY: GetStaticMethodID on a live class reference with NUL-terminated strings.
+        let id = unsafe {
+            let get: unsafe extern "system" fn(*mut JNIEnv, jclass, *const c_char, *const c_char) -> jmethodID =
+                self.f(slot::GET_STATIC_METHOD_ID);
+            get(self.raw, class.raw, name.as_ptr(), signature.as_ptr())
+        };
+        if self.check() || id.is_null() { None } else { Some(MethodId(id)) }
+    }
+
+    /// `class.method(args)` of a static method returning an object (none for null, or if it threw); `class` a
+    /// global reference of the class the method was found in.
+    pub fn call_static_object(&self, class: JObject, method: MethodId, args: &[jvalue]) -> Option<Local<'a>> {
+        if class.is_null() {
+            return None;
+        }
+        // SAFETY: CallStaticObjectMethodA of a live class's static method, with the arguments its signature takes
+        // (the caller's); the result a local reference, deleted by Local.
+        let raw = unsafe {
+            let call: unsafe extern "system" fn(*mut JNIEnv, jclass, jmethodID, *const jvalue) -> jobject =
+                self.f(slot::CALL_STATIC_OBJECT_METHOD_A);
+            call(self.raw, class.0, method.0, args.as_ptr())
         };
         self.local(raw)
     }

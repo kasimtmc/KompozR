@@ -1,7 +1,9 @@
 //! The view's Vulkan surface (C++'s openWindow's Vulkan part): `VK_KHR_android_surface` on the `ANativeWindow` the
 //! view's surface has now. Android gives the view another window each time the app comes back from the background
 //! (none while it is away): the device asks [`VulkanSurface::native_window`] which one it is before each frame and
-//! makes its surface again for a new one. An FFI module: its one `unsafe` block says why it holds.
+//! makes its surface again for a new one; its swapchain is made at the view's size as it last changed (the keyboard,
+//! a split screen, a rotation), the display's turn drawn by us. An FFI module: its one `unsafe` block says why it
+//! holds.
 
 #![allow(unsafe_code)]
 
@@ -29,5 +31,7 @@ pub(super) fn surface(window: Rc<Cell<usize>>) -> VulkanSurface {
             unsafe { loader.create_android_surface(&info, None) }.ok()
         }),
         native_window: Some(Box::new(move || window.get())),
+        // (The SurfaceView's size as surfaceChanged last told it: the loader's own keeps the last swapchain's.)
+        size_is_drawable: true,
     }
 }

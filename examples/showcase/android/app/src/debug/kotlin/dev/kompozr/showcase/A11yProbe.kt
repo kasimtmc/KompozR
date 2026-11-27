@@ -171,6 +171,29 @@ class A11yProbe : Instrumentation() {
                 out.append(" (extra data: ${n.availableExtraData})\n")
             }
             "wait" -> SystemClock.sleep(target.toLong())
+            // The system's clipboard as another app sets and reads it (KompozClipboard's side is the app's).
+            "setclip" -> {
+                val clipboard = targetContext.getSystemService(android.content.ClipboardManager::class.java)
+                runOnMainSync { clipboard.setPrimaryClip(android.content.ClipData.newPlainText("probe", rest)) }
+                out.append("clipboard set: ").append(rest).append('\n')
+            }
+            "getclip" -> {
+                val clipboard = targetContext.getSystemService(android.content.ClipboardManager::class.java)
+                var text: CharSequence? = null
+                runOnMainSync { text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(targetContext) }
+                out.append("clipboard holds: ").append(text).append('\n')
+            }
+            // KompozContent (the library's, internal: by reflection) as the image loader's threads call it.
+            "http" -> {
+                val content = Class.forName("dev.kompozr.KompozContent")
+                val body = content.getMethod("httpGet", ByteArray::class.java).invoke(null, rest.toByteArray()) as ByteArray?
+                val decode = content.getMethod(
+                    "decodeImage", ByteArray::class.java, Int::class.java, Int::class.java, Boolean::class.java,
+                )
+                val image = body?.let { decode.invoke(null, it, 0, 0, false) as IntArray? }
+                out.append(if (body == null) "FAIL " else "").append("http ${body?.size ?: 0} bytes")
+                out.append(image?.let { ", decoded ${it[0]}x${it[1]}" } ?: "").append('\n')
+            }
             "scrollcapture" -> scrollCapture(out)
             "has" -> {
                 val n = find(target)

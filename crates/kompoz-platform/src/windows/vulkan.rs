@@ -22,5 +22,6 @@ pub(super) fn surface(hwnd: Hwnd) -> VulkanSurface {
             unsafe { loader.create_win32_surface(&info, None) }.ok()
         }),
         native_window: None,
+        size_is_drawable: false,
     }
 }

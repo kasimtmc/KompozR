@@ -24,10 +24,13 @@
 //! and the full input (KompozIme), accessibility (KompozAccessibility: a node provider over virtual views, from the
 //! shared semantics snapshot), autofill (KompozAutofill), content capture and translation (KompozContentCapture),
 //! scroll capture (KompozScrollCapture) — the last four through `delegate` —, insets (KompozInsets), back
-//! (KompozBack) and the system's services (KompozServices).
+//! (KompozBack), the system's services (KompozServices), the clipboard (KompozClipboard) and drags
+//! (KompozDragAndDrop) — these through `services` —, and HTTP, `content://` and BitmapFactory (KompozContent,
+//! `network`).
 //!
-//! The input's decoding, the configuration, the saved state's guard, and what accessibility, content capture,
-//! autofill and scroll capture are told and do (`accessibility`, `capture`, `autofill`, `semantics`) are plain Rust,
+//! The input's decoding, the configuration, the saved state's guard, what accessibility, content capture,
+//! autofill and scroll capture are told and do (`accessibility`, `capture`, `autofill`, `semantics`), the insets,
+//! clips, drags and the system's mappings (`insets`, `clip`, `drag`, `system`) are plain Rust,
 //! built and tested on every host; the rest is Android's alone.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -35,12 +38,16 @@
 pub mod accessibility;
 pub mod autofill;
 pub mod capture;
+pub mod clip;
 mod configuration;
 mod devices;
+pub mod drag;
 pub mod ime;
 pub mod input;
+pub mod insets;
 mod saved_state;
 pub mod semantics;
+pub mod system;
 
 #[cfg(target_os = "android")]
 mod app;
@@ -53,7 +60,13 @@ mod natives;
 #[cfg(target_os = "android")]
 mod ndk;
 #[cfg(target_os = "android")]
+pub(crate) mod network;
+#[cfg(target_os = "android")]
+mod performance;
+#[cfg(target_os = "android")]
 mod platform;
+#[cfg(target_os = "android")]
+mod services;
 #[cfg(target_os = "android")]
 mod text_input;
 #[cfg(target_os = "android")]

@@ -48,6 +48,12 @@ pub struct VulkanSurface {
     /// `ANativeWindow`, a new one each time the app comes back from the background; 0 while it is away): the surface
     /// made again for a new one. None: the same for good.
     pub native_window: Option<Box<dyn Fn() -> usize>>,
+    /// The surface's size is the drawable's, whatever the surface's `currentExtent` says: Android's, where the
+    /// loader reports the size of the window's buffers as the last swapchain set them (its
+    /// `native_window_set_buffers_dimensions`), not the view's new size — a SurfaceView the keyboard or a split
+    /// screen resized would get a swapchain of the old size, stretched over it. False: `currentExtent`'s (the
+    /// drawable's only where the surface leaves it to the swapchain).
+    pub size_is_drawable: bool,
 }
 
 /// A surface presenting nowhere (`VK_EXT_headless_surface`, which lavapipe and Mesa's drivers have): the swapchain's
@@ -64,6 +70,7 @@ pub fn headless_surface() -> VulkanSurface {
             unsafe { loader.create_headless_surface(&info, None) }.ok()
         }),
         native_window: None,
+        size_is_drawable: false,
     }
 }
 

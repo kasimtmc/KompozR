@@ -24,5 +24,6 @@ pub(super) fn surface(connection: &Connection, surface: &WlSurface) -> VulkanSur
             unsafe { loader.create_wayland_surface(&info, None) }.ok()
         }),
         native_window: None,
+        size_is_drawable: false,
     }
 }

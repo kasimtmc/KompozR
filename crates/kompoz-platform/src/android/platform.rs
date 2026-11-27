@@ -3,7 +3,12 @@
 //! monotonic clock (System.nanoTime's, MotionEvent's and the choreographer's), the host's waker (the looper's
 //! eventfd), the state saved before a process death given back to the host as it starts; the input devices as the
 //! media info and the system's gesture thresholds as the view configuration; the input method, the pointer's icons
-//! and the text toolbar (`text_input`) as the host's callbacks.
+//! and the text toolbar (`text_input`) as the host's callbacks; and the system's services (`services`): the
+//! clipboard, the system bars' icons, URIs, haptics, the keyboard moved by hand, gesture exclusion and drags as the
+//! host's callbacks, the insets and deep links given to the host as it starts, the system's palettes and bold text
+//! as the metrics are read, and after each frame what the host asks of the window — back taken, the screen kept
+//! on, sensitive content, the refresh rate voted for (busy: the display's fastest) —, each frame's work told to the
+//! system's performance hints, the animator duration scale as the motion duration scale.
 //!
 //! What it keeps is [`Shared`] with the natives (`super::app`), which change it as the activity tells them; the core
 //! reads it through the platform. All on the UI thread.
@@ -11,16 +16,26 @@
 use super::autofill::Notice;
 use super::configuration::{Configuration, option_file, option_value};
 use super::delegate::{Pending, queue_autofill};
+use super::performance::{Hints, set_frame_rate};
+use super::services::Services;
+use super::system::{
+    AdjustedResolver, FrameRateVoter, animator_scale, category_index, dynamic_palette, surface_rate, wallpaper_palette,
+};
 use super::text_input::TextInput;
 use super::vulkan;
-use crate::app::{Metrics, Platform, WindowSpec};
+use crate::app::{Event, Metrics, Platform, WindowSpec};
 use crate::unix::waker::Waker;
 use kompoz_gpu::device::{Backend, Surface};
-use kompoz_graphics::Rect;
+use kompoz_graphics::{IntRect, Rect};
+use kompoz_text::font::FontFamilyResolver;
 use kompoz_ui::KompozHost;
+use kompoz_ui::clipboard::ClipEntry;
+use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
+use kompoz_ui::motion_duration_scale::MotionDurationScale;
 use kompoz_ui::platform::{
-    ImeOptions, PlatformCallbacks, PointerIcon, TextEditState, TextToolbarActions, ViewConfiguration,
+    HapticFeedbackType, ImeOptions, PlatformCallbacks, PointerIcon, SystemInsets, TextEditState, TextToolbarActions,
+    ViewConfiguration,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -46,18 +61,62 @@ pub(super) struct Shared {
     pub view_configuration: Cell<Option<ViewConfiguration>>,
     /// The input method's side (none: KompozView's methods weren't found; logged).
     pub text_input: Option<Rc<TextInput>>,
+    /// The system's services (KompozActivity's objects; none until it gave them, or if they weren't there).
+    pub services: RefCell<Option<Rc<Services>>>,
+    /// The insets as KompozInsets last told them (for the host as it starts).
+    pub insets: RefCell<Option<SystemInsets>>,
+    /// Links the app was opened with before its host was there.
+    pub deep_links: RefCell<Vec<String>>,
+    /// The animator duration scale as the system last said (what the motion duration scale reads).
+    pub animator_scale: Rc<Cell<f32>>,
+    /// The drop being taken: what it carries (read from its ClipData as a target asks), and whether a target took
+    /// it.
+    pub drop_entry: RefCell<Option<ClipEntry>>,
+    pub drop_taken: Cell<bool>,
+}
+
+impl Shared {
+    /// The system's services, if KompozActivity gave them.
+    pub fn services(&self) -> Option<Rc<Services>> {
+        self.services.borrow().clone()
+    }
+}
+
+/// What the platform last told the window, and its own state between frames (the UI thread's).
+#[derive(Default)]
+struct Told {
+    keep_screen_on: Option<bool>,
+    sensitive: Option<bool>,
+    wants_back: Option<bool>,
+    voter: FrameRateVoter,
+    /// The window the refresh rate was voted on (another: voted again).
+    voted_window: usize,
+    /// Fingers on the screen now (busy while there are).
+    fingers: i32,
+    /// The weight adjustment the host's fonts have, and the resolver it was put over.
+    font: Option<(i32, Rc<dyn FontFamilyResolver>)>,
+    hints: Option<Hints>,
 }
 
 /// The platform (one: Android gives an app one window, so a `Window` gets none).
 pub struct AndroidPlatform {
     pub(super) shared: Rc<Shared>,
+    told: Told,
 }
 
-/// What the host asks of the platform: the waker, the input method, the pointer's icons, the text toolbar (the
-/// clipboard, insets and the rest come with KompozServices and the others).
+impl AndroidPlatform {
+    pub(super) fn new(shared: Rc<Shared>) -> AndroidPlatform {
+        AndroidPlatform { shared, told: Told::default() }
+    }
+}
+
+/// What the host asks of the platform: the waker, the input method, the pointer's icons, the text toolbar, and the
+/// system's services (the clipboard, the system bars, URIs, haptics, the keyboard moved by hand, gesture exclusion,
+/// drags out of the window).
 struct AndroidCallbacks {
     waker: Arc<dyn Fn() + Send + Sync>,
     text_input: Option<Rc<TextInput>>,
+    shared: Rc<Shared>,
 }
 
 impl PlatformCallbacks for AndroidCallbacks {
@@ -125,6 +184,51 @@ impl PlatformCallbacks for AndroidCallbacks {
         if let Some(id) = autofill_id(id) {
             queue_autofill(Pending::Notice(Notice::Request { id, bounds }));
         }
+    }
+    // The system's services (Compose's AndroidClipboard, WindowInsetsController, UriHandler, HapticFeedback, …).
+    fn get_clip_entry(&self) -> Option<ClipEntry> {
+        self.shared.services()?.clip_entry()
+    }
+    fn set_clip_entry(&self, entry: Option<ClipEntry>) {
+        if let Some(s) = self.shared.services() {
+            s.set_clip_entry(entry.as_ref());
+        }
+    }
+    fn system_bars_appearance(&self, light_status_bars: bool, light_navigation_bars: bool) {
+        if let Some(s) = self.shared.services() {
+            s.system_bars_appearance(light_status_bars, light_navigation_bars);
+        }
+    }
+    fn open_uri(&self, uri: &str) {
+        if let Some(s) = self.shared.services() {
+            s.open_uri(uri);
+        }
+    }
+    fn haptic_feedback(&self, kind: HapticFeedbackType) {
+        if let Some(s) = self.shared.services() {
+            s.haptic(kind);
+        }
+    }
+    fn can_control_ime(&self) -> bool {
+        self.shared.services().is_some_and(|s| s.can_control_ime())
+    }
+    fn ime_control_by(&self, px: f32) {
+        if let Some(s) = self.shared.services() {
+            s.ime_control_by(px);
+        }
+    }
+    fn ime_control_end(&self, velocity: f32) {
+        if let Some(s) = self.shared.services() {
+            s.ime_control_end(velocity);
+        }
+    }
+    fn system_gesture_exclusion(&self, rects: &[IntRect]) {
+        if let Some(s) = self.shared.services() {
+            s.gesture_exclusion(rects);
+        }
+    }
+    fn start_drag_and_drop(&self, drag: &PlatformDragAndDrop) -> bool {
+        self.shared.services().is_some_and(|s| s.start_drag(drag))
     }
 }
 
@@ -220,30 +324,158 @@ impl Platform for AndroidPlatform {
     }
 
     fn attach(&mut self, _: &KompozHost) -> Rc<dyn PlatformCallbacks> {
-        Rc::new(AndroidCallbacks { waker: self.shared.waker.as_fn(), text_input: self.shared.text_input.clone() })
+        Rc::new(AndroidCallbacks {
+            waker: self.shared.waker.as_fn(),
+            text_input: self.shared.text_input.clone(),
+            shared: self.shared.clone(),
+        })
     }
 
-    /// The state saved before the process ended, back in the host (Compose's saved instance state restored).
+    /// The state saved before the process ended, back in the host (Compose's saved instance state restored); the
+    /// insets told so far, the links the app was opened with.
     fn started(&mut self, host: &KompozHost) {
         if let Some(state) = self.shared.restored.borrow_mut().take() {
             host.restore_state(&state);
         }
+        if let Some(insets) = self.shared.insets.borrow().clone() {
+            host.set_system_insets(insets);
+        }
+        for link in std::mem::take(&mut *self.shared.deep_links.borrow_mut()) {
+            host.open_deep_link(&link);
+        }
     }
 
     /// The system's gesture thresholds (touch slop, long press, double tap, flings, handwriting slop) as the
-    /// host's, over the defaults the density gave it.
+    /// host's, over the defaults the density gave it; the system's palettes and bold text read again.
     fn metrics_updated(&mut self, host: &KompozHost) {
         if let Some(configuration) = self.shared.view_configuration.get() {
             host.set_view_configuration(configuration);
         }
+        self.palettes(host);
+        self.font_weight(host);
+    }
+
+    /// The fingers on the screen counted (the app is busy while there are); the palettes read again as the
+    /// wallpaper's colours change; the performance hints' session closed in the background.
+    fn handled(&mut self, host: &KompozHost, event: &Event) {
+        match event {
+            Event::TouchDown { .. } => self.told.fingers += 1,
+            Event::TouchUp { .. } => self.told.fingers = (self.told.fingers - 1).max(0),
+            Event::TouchCancel | Event::WillEnterBackground => self.told.fingers = 0,
+            Event::WallpaperChanged => self.palettes(host),
+            Event::DidEnterBackground => self.told.hints = None,
+            _ => {}
+        }
     }
 
     /// The input method told where the field and its caret are now, and the field's state where its Editable
-    /// differs (a key typed, the app changed it); accessibility, content capture and autofill told what changed.
-    fn composed(&mut self, host: &KompozHost, redraw: bool, _: i64) {
+    /// differs (a key typed, the app changed it); accessibility, content capture and autofill told what changed;
+    /// the window told what the host asks of it as it changes (back taken, the screen kept on, sensitive content,
+    /// the refresh rate).
+    fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64) {
         if let Some(t) = &self.shared.text_input {
             t.sync(host);
         }
         super::delegate::composed(host, redraw);
+        self.tell_window(host, frame_time);
+    }
+
+    /// A frame's own work, told to the system's performance hints (a session opened for the UI thread on the
+    /// first, its target the display's beat).
+    fn frame_work(&mut self, ns: i64) {
+        let target = self.shared.configuration.borrow().frame_period_ns();
+        match &mut self.told.hints {
+            Some(hints) => hints.set_target(target),
+            None => self.told.hints = Hints::new(target),
+        }
+        if let Some(hints) = &self.told.hints {
+            hints.report(ns);
+        }
+    }
+
+    /// Back nothing in the app took: the system's (the activity finished, or its task moved back).
+    fn leave_app(&mut self) {
+        if let Some(s) = self.shared.services() {
+            s.leave();
+        }
+    }
+
+    /// The animator duration scale as the system has it now, read as each animation asks (Compose's window
+    /// MotionDurationScale over `Settings.Global.ANIMATOR_DURATION_SCALE`).
+    fn motion_duration_scale(&self) -> Option<MotionDurationScale> {
+        let scale = self.shared.animator_scale.clone();
+        Some(MotionDurationScale::from_fn(move || animator_scale(scale.get())))
+    }
+
+    fn take_drop_entry(&mut self) -> Option<ClipEntry> {
+        self.shared.drop_entry.borrow_mut().take()
+    }
+
+    fn drop_done(&mut self, taken: bool) {
+        self.shared.drop_taken.set(taken);
+    }
+}
+
+impl AndroidPlatform {
+    /// Android 12's system palette (and the wallpaper's colours' palettes) as the host's, read now.
+    fn palettes(&self, host: &KompozHost) {
+        let Some(s) = self.shared.services() else { return };
+        host.set_dynamic_tonal_palette(s.dynamic_colors().and_then(|c| dynamic_palette(&c)));
+        host.set_wallpaper_tonal_palette(s.wallpaper_colors().and_then(|c| wallpaper_palette(&c)));
+    }
+
+    /// Bold text: the host's fonts resolved heavier by the system's adjustment (Compose's
+    /// AndroidFontResolveInterceptor), or as they were when it is off again.
+    fn font_weight(&mut self, host: &KompozHost) {
+        let adjustment = self.shared.configuration.borrow().font_weight_adjustment;
+        if self.told.font.as_ref().map_or(0, |(a, _)| *a) == adjustment {
+            return;
+        }
+        let base = match self.told.font.take() {
+            Some((_, base)) => base,
+            None => host.font_family_resolver(),
+        };
+        if adjustment == 0 {
+            host.set_font_family_resolver(base);
+        } else {
+            host.set_font_family_resolver(Rc::new(AdjustedResolver { inner: base.clone(), adjustment }));
+            self.told.font = Some((adjustment, base));
+        }
+    }
+
+    /// What the host asks of the window, told as it changes: back (Android 13's callback while the app takes it),
+    /// the screen kept on, sensitive content (Android 15), and the refresh rate — the app's own preference, the
+    /// display's fastest while it is busy (a finger down, a frame wanted) and a second after — on the view's window
+    /// (`ANativeWindow_setFrameRate`, Android 11) and the view (Android 15's categories).
+    fn tell_window(&mut self, host: &KompozHost, frame_time: i64) {
+        let Some(s) = self.shared.services() else { return };
+        let told = &mut self.told;
+        let wants_back = host.wants_back();
+        if told.wants_back != Some(wants_back) {
+            told.wants_back = Some(wants_back);
+            s.set_back_enabled(wants_back);
+        }
+        let keep = host.keep_screen_on();
+        if told.keep_screen_on != Some(keep) {
+            told.keep_screen_on = Some(keep);
+            s.keep_screen_on(keep);
+        }
+        let sensitive = host.sensitive_content();
+        if told.sensitive != Some(sensitive) {
+            told.sensitive = Some(sensitive);
+            s.content_sensitive(sensitive);
+        }
+        let window = self.shared.window.get();
+        if window != told.voted_window {
+            told.voted_window = window;
+            told.voter.reset();
+        }
+        let busy = told.fingers > 0 || host.has_pending_work();
+        let vote = told.voter.vote(frame_time, busy, host.preferred_frame_rate(), host.preferred_frame_rate_category());
+        if let Some(vote) = vote {
+            let fastest = self.shared.configuration.borrow().fastest_refresh_rate;
+            set_frame_rate(window, surface_rate(vote, fastest));
+            s.frame_rate(vote.rate, category_index(vote.category));
+        }
     }
 }

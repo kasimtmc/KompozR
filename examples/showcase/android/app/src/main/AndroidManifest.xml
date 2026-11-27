@@ -12,7 +12,9 @@
     <!-- AsyncImage loads images from the network when asked to. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Back's callbacks (KompozBack) on Android 13+, its predictive gesture on 14+. -->
     <application
+        android:enableOnBackInvokedCallback="true"
         android:icon="@drawable/ic_launcher"
         android:label="KompozR"
         android:theme="@style/KompozTheme">
@@ -33,6 +35,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The showcase's deep links (`kompoz://places`, `kompoz://item/42`): its NavHost's destinations. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kompoz" />
             </intent-filter>
         </activity>
     </application>

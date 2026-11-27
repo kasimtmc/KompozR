@@ -260,12 +260,15 @@ fn forget(s: &mut CacheState, name: &str) {
 pub type HttpGet = fn(&str) -> Option<Vec<u8>>;
 
 /// The platform's own HTTP client, used until [`set_http_client`] says otherwise: libcurl on Linux (as C++ Kompoz's
-/// Linux builds link it, the headless platform's too), loaded when a URL is first fetched; WinHTTP on Windows.
+/// Linux builds link it, the headless platform's too), loaded when a URL is first fetched; WinHTTP on Windows;
+/// Java's HttpURLConnection on Android.
 #[cfg(target_os = "linux")]
 const PLATFORM_HTTP: Option<HttpGet> = Some(crate::linux::curl::http_get);
 #[cfg(windows)]
 const PLATFORM_HTTP: Option<HttpGet> = Some(crate::windows::http::http_get);
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "android")]
+const PLATFORM_HTTP: Option<HttpGet> = Some(crate::android::network::http_get);
+#[cfg(not(any(target_os = "linux", windows, target_os = "android")))]
 const PLATFORM_HTTP: Option<HttpGet> = None;
 
 static HTTP: RwLock<Option<HttpGet>> = RwLock::new(PLATFORM_HTTP);
@@ -291,9 +294,25 @@ fn decode_size(size: ImageRequestSize) -> DecodeSize {
     DecodeSize { width: size.width, height: size.height, fill: size.fill }
 }
 
-/// An image file's bytes decoded for `size` (C++'s `decodeImage`): scaled down as the request allows.
+/// What decodes a picture of a format KompozR's decoders don't have (Android's BitmapFactory: HEIF, AVIF, GIF's
+/// first frame), for `size` as [`decode`] is; none if it can't either. Called from the loader's threads.
+pub type FallbackDecoder = fn(&[u8], ImageRequestSize) -> Option<ImageBitmap>;
+
+static FALLBACK: RwLock<Option<FallbackDecoder>> = RwLock::new(None);
+
+/// The platform's decoder of the formats ours lack from now on (none: those don't load), as C++'s Android decodes
+/// with BitmapFactory what its own decoders can't.
+pub fn set_fallback_decoder(decoder: Option<FallbackDecoder>) {
+    *FALLBACK.write().unwrap_or_else(|e| e.into_inner()) = decoder;
+}
+
+/// An image file's bytes decoded for `size` (C++'s `decodeImage`): scaled down as the request allows; a format our
+/// decoders lack by the platform's ([`set_fallback_decoder`]).
 pub fn decode(bytes: &[u8], size: ImageRequestSize) -> Option<ImageBitmap> {
-    decode_image(bytes, decode_size(size))
+    decode_image(bytes, decode_size(size)).or_else(|| {
+        let fallback = *FALLBACK.read().unwrap_or_else(|e| e.into_inner());
+        fallback.and_then(|decode| decode(bytes, size))
+    })
 }
 
 /// `KOMPOZ_IMAGE_LOG`: where each image came from, how big.

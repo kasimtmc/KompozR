@@ -1,8 +1,9 @@
 //! The swapchain: made at the drawable's size (UNORM, sRGB non-linear, FIFO, turned as the display is), its image
 //! acquired lazily (waiting a while at most: a window the compositor holds every image of misses a frame instead of
 //! hanging the app), presented at the frame's end with how old what it holds is, made again when the drawable
-//! changes size, the display turns, a present says it no longer fits as well as it could (once: Wayland's after its
-//! buffers' best format changes), or the window gets another native window.
+//! changes size (at the drawable's size where the surface's own lags behind it: Android's), the display turns, a
+//! present says it no longer fits as well as it could (once: Wayland's after its buffers' best format changes), or
+//! the window gets another native window.
 
 use super::VulkanDevice;
 use super::texture::VkTexture;
@@ -113,7 +114,8 @@ impl VulkanDevice {
         else {
             return false;
         };
-        let extent = if caps.current_extent.width != u32::MAX {
+        let from_drawable = self.instance.window.as_ref().is_some_and(|w| w.size_is_drawable);
+        let extent = if caps.current_extent.width != u32::MAX && !from_drawable {
             caps.current_extent
         } else {
             vk::Extent2D {

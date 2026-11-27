@@ -2886,6 +2886,7 @@ pub fn vulkan_surface(display: &Rc<Display>, window: Window) -> VulkanSurface {
             unsafe { loader.create_xlib_surface(&info, None) }.ok()
         }),
         native_window: None,
+        size_is_drawable: false,
     }
 }
 

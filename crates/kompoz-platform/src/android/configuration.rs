@@ -21,6 +21,10 @@ pub struct Configuration {
     pub touchscreen: bool,
     /// A physical keyboard is there and open (`KEYBOARD_QWERTY`, not `HARDKEYBOARDHIDDEN_YES`).
     pub physical_keyboard: bool,
+    /// What bold text adds to the fonts' weights (`Configuration.fontWeightAdjustment`, Android 12: 300 when on).
+    pub font_weight_adjustment: i32,
+    /// The display's fastest refresh rate (its modes'), a second: what a high refresh rate vote asks for.
+    pub fastest_refresh_rate: f32,
     /// The user's languages, the first the most (`LocaleList`'s BCP 47 tags).
     pub languages: Vec<String>,
     /// The system's time zone (`TimeZone.getDefault().getID()`); empty: not told.
@@ -36,6 +40,8 @@ impl Default for Configuration {
             dark: false,
             touchscreen: true,
             physical_keyboard: false,
+            font_weight_adjustment: 0,
+            fastest_refresh_rate: 60.0,
             languages: Vec::new(),
             time_zone: String::new(),
         }
@@ -43,8 +49,9 @@ impl Default for Configuration {
 }
 
 impl Configuration {
-    /// KompozConfiguration's values (`[density, fontScale, refreshRate, dark, touchscreen, keyboard]`; what is
-    /// missing or out of range: the defaults'), its languages (one tag a line) and its time zone.
+    /// KompozConfiguration's values (`[density, fontScale, refreshRate, dark, touchscreen, keyboard,
+    /// fontWeightAdjustment, fastestRefreshRate]`; what is missing or out of range: the defaults'), its languages
+    /// (one tag a line) and its time zone.
     pub fn from_java(values: &[f32], languages: &str, time_zone: &str) -> Configuration {
         let d = Configuration::default();
         let at = |i: usize| values.get(i).copied().filter(|v| v.is_finite());
@@ -56,6 +63,8 @@ impl Configuration {
             dark: at(3).is_some_and(|v| v != 0.0),
             touchscreen: at(4).map_or(d.touchscreen, |v| v != 0.0),
             physical_keyboard: at(5).is_some_and(|v| v != 0.0),
+            font_weight_adjustment: at(6).map_or(0, |v| v.clamp(-1000.0, 1000.0) as i32),
+            fastest_refresh_rate: positive(7, d.fastest_refresh_rate).max(positive(2, d.refresh_rate)),
             languages: languages.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect(),
             time_zone: time_zone.trim().to_string(),
         }
@@ -111,8 +120,13 @@ mod tests {
 
     #[test]
     fn the_activitys_values_are_read() {
-        let c = Configuration::from_java(&[2.625, 1.15, 120.0, 1.0, 1.0, 0.0], "tr-TR\nen-US\n", " Europe/Istanbul ");
+        let c = Configuration::from_java(
+            &[2.625, 1.15, 120.0, 1.0, 1.0, 0.0, 300.0, 120.0],
+            "tr-TR\nen-US\n",
+            " Europe/Istanbul ",
+        );
         assert_eq!(c.density, 2.625);
+        assert_eq!((c.font_weight_adjustment, c.fastest_refresh_rate), (300, 120.0));
         assert_eq!(c.font_scale, 1.15);
         assert!(c.dark && c.touchscreen && !c.physical_keyboard);
         assert_eq!(c.languages, vec!["tr-TR".to_string(), "en-US".to_string()]);
