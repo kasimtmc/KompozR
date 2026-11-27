@@ -477,11 +477,17 @@ fn the_platforms_events_are_the_hosts_input() {
         ]
     );
     session.dispose();
-    // Files dropped from a file manager: a uri-list; text from a browser: plain text; nothing: it left.
+    // Files dropped from a file manager: a uri-list; text from a browser: plain text; nothing: it left. (A path as the
+    // system writes it: a drive's on Windows.)
+    let (dropped_path, dropped_uri) = if cfg!(windows) {
+        ("C:\\tmp\\a b.png", "file:///C:/tmp/a%20b.png")
+    } else {
+        ("/tmp/a b.png", "file:///tmp/a%20b.png")
+    };
     for e in [
         Event::DropBegin { x: 20.0, y: 20.0, mime_types: Vec::new() },
         Event::DropMove { x: 21.0, y: 20.0 },
-        Event::DropFile { x: 21.0, y: 20.0, path: "/tmp/a b.png".into() },
+        Event::DropFile { x: 21.0, y: 20.0, path: dropped_path.to_string() },
         Event::DropComplete { x: 21.0, y: 20.0 },
         Event::DropMove { x: 20.0, y: 20.0 },
         Event::DropText { x: 20.0, y: 20.0, text: "merhaba".into() },
@@ -494,8 +500,8 @@ fn the_platforms_events_are_the_hosts_input() {
     assert_eq!(
         taken(&log),
         [
-            "drop [\"text/uri-list\"] \"file:///tmp/a%20b.png\" [\"/tmp/a b.png\"]",
-            "drop [\"text/plain\"] \"merhaba\" []",
+            format!("drop [\"text/uri-list\"] {dropped_uri:?} [{dropped_path:?}]"),
+            "drop [\"text/plain\"] \"merhaba\" []".to_string(),
         ]
     );
     // A quit.

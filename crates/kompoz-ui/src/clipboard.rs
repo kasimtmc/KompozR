@@ -157,10 +157,12 @@ pub fn uris_in_uri_list(list: &str) -> Vec<String> {
         .collect()
 }
 
-/// The local path a `file:` URI names: a host before the path dropped, percent-decoded; none for another scheme.
+/// The local path a `file:` URI names: percent-decoded, a host before the path dropped (on Windows a share's: its
+/// `\\host\share\…` path), as the system writes paths (on Windows a drive's with backslashes: `C:\a b.txt` of
+/// `file:///C:/a%20b.txt`); none for another scheme.
 pub fn file_path_of_uri(uri: &str) -> Option<String> {
     let rest = uri.strip_prefix("file://").or_else(|| uri.strip_prefix("file:"))?;
-    let path = if rest.starts_with('/') { rest } else { &rest[rest.find('/')?..] };
+    let (host, path) = if rest.starts_with('/') { ("", rest) } else { rest.split_at(rest.find('/')?) };
     let bytes = path.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -178,7 +180,24 @@ pub fn file_path_of_uri(uri: &str) -> Option<String> {
         }
     }
     let path = String::from_utf8_lossy(&out).into_owned();
-    (!path.is_empty()).then_some(path)
+    (!path.is_empty()).then(|| native_path(host, path))
+}
+
+/// A URI's path (and host) as the system writes paths: on Windows a drive's without the slash before it and with
+/// backslashes, a share's after its host (`\\host\share`); elsewhere as it is (the host dropped).
+fn native_path(host: &str, path: String) -> String {
+    if cfg!(not(windows)) {
+        let _ = host;
+        return path;
+    }
+    let b = path.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
+        return path[1..].replace('/', "\\");
+    }
+    if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
+        return format!("\\\\{host}{}", path.replace('/', "\\"));
+    }
+    path.replace('/', "\\")
 }
 
 /// The local files a `text/uri-list` names (C++'s `filesInUriList`): its `file:` URIs as paths; other schemes left
@@ -801,7 +820,7 @@ mod tests {
         let e = ClipEntry::new(vec![
             ClipItem::with_html_text("kalın", "<b>kalın</b>"),
             ClipItem::with_image(image.clone()),
-            ClipItem::with_file("/tmp/a b.txt"),
+            ClipItem::with_file(FILE),
             ClipItem::with_text("iki"),
         ]);
         assert_eq!(e.clip_metadata().mime_types(), ["text/html", "text/plain", "image/png", "text/uri-list"]);
@@ -809,27 +828,45 @@ mod tests {
         assert_eq!(e.read_text().as_deref(), Some("kalın"));
         assert_eq!(e.read_plain_text().as_deref(), Some("kalın\niki"));
         assert_eq!(e.items()[0].html_text().as_deref(), Some("<b>kalın</b>"));
-        assert_eq!(e.first_uri_or_null().as_deref(), Some("file:///tmp/a%20b.txt"));
-        assert_eq!(e.files(), ["/tmp/a b.txt"]);
+        assert_eq!(e.first_uri_or_null().as_deref(), Some(FILE_URI));
+        assert_eq!(e.files(), [FILE]);
         assert_eq!(e.image(), Some(image.clone()));
         let png = e.items()[1].bytes("image/png").unwrap();
         assert_eq!(decode_to_image_bitmap(&png).unwrap().pixels().as_slice(), [255, 0, 0, 255]);
-        assert_eq!(e.coerce_to_text(), "kalın\nfile:///tmp/a%20b.txt\niki");
+        assert_eq!(e.coerce_to_text(), format!("kalın\n{FILE_URI}\niki"));
         assert_eq!(ClipEntry::with_uris(vec!["https://kompoz.dev".into()]).read_plain_text(), None);
         assert_eq!(e.materialized(), e); // (nothing to read)
         assert_ne!(ClipEntry::with_plain_text("a"), ClipEntry::with_plain_text("a")); // (by identity)
     }
 
+    /// A file, as the system writes its paths, and its URI.
+    #[cfg(not(windows))]
+    const FILE: &str = "/tmp/a b.txt";
+    #[cfg(not(windows))]
+    const FILE_URI: &str = "file:///tmp/a%20b.txt";
+    #[cfg(windows)]
+    const FILE: &str = "C:\\tmp\\a b.txt";
+    #[cfg(windows)]
+    const FILE_URI: &str = "file:///C:/tmp/a%20b.txt";
+
     #[test]
     fn uri_lists_and_file_uris() {
-        assert_eq!(file_uri("/home/kasim/Görüntü 1.png"), "file:///home/kasim/G%C3%B6r%C3%BCnt%C3%BC%201.png");
+        if cfg!(not(windows)) {
+            assert_eq!(file_uri("/home/kasim/Görüntü 1.png"), "file:///home/kasim/G%C3%B6r%C3%BCnt%C3%BC%201.png");
+        }
         assert_eq!(file_uri("C:\\a b"), "file:///C:/a%20b");
         let cwd = std::env::current_dir().unwrap();
         assert_eq!(file_path_of_uri(&file_uri("notes.txt")).unwrap(), cwd.join("notes.txt").to_string_lossy());
         let list = "# a comment\r\nfile:///home/kasim/G%C3%B6r%C3%BCnt%C3%BC.png\r\nhttps://example.org/x\r\n\
                     file://host/tmp/a%20b.txt\nfile:///bad%2\r\n";
         assert_eq!(uris_in_uri_list(list).len(), 4);
-        assert_eq!(files_in_uri_list(list), ["/home/kasim/Görüntü.png", "/tmp/a b.txt", "/bad%2"]);
+        if cfg!(windows) {
+            // (Windows' paths: rooted on the current drive, a share's, a drive's.)
+            assert_eq!(files_in_uri_list(list), ["\\home\\kasim\\Görüntü.png", "\\\\host\\tmp\\a b.txt", "\\bad%2"]);
+            assert_eq!(file_path_of_uri("file:///C:/Users/a%20b.txt").unwrap(), "C:\\Users\\a b.txt");
+        } else {
+            assert_eq!(files_in_uri_list(list), ["/home/kasim/Görüntü.png", "/tmp/a b.txt", "/bad%2"]);
+        }
         assert_eq!(file_path_of_uri("https://example.org/x"), None);
     }
 }

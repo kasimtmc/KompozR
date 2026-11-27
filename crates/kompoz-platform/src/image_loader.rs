@@ -260,10 +260,12 @@ fn forget(s: &mut CacheState, name: &str) {
 pub type HttpGet = fn(&str) -> Option<Vec<u8>>;
 
 /// The platform's own HTTP client, used until [`set_http_client`] says otherwise: libcurl on Linux (as C++ Kompoz's
-/// Linux builds link it, the headless platform's too), loaded when a URL is first fetched.
+/// Linux builds link it, the headless platform's too), loaded when a URL is first fetched; WinHTTP on Windows.
 #[cfg(target_os = "linux")]
 const PLATFORM_HTTP: Option<HttpGet> = Some(crate::linux::curl::http_get);
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+const PLATFORM_HTTP: Option<HttpGet> = Some(crate::windows::http::http_get);
+#[cfg(not(any(target_os = "linux", windows)))]
 const PLATFORM_HTTP: Option<HttpGet> = None;
 
 static HTTP: RwLock<Option<HttpGet>> = RwLock::new(PLATFORM_HTTP);

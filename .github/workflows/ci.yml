@@ -307,6 +307,11 @@ jobs:
           components: clippy
           targets: x86_64-pc-windows-gnu, aarch64-linux-android, x86_64-linux-android, aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+      # (The examples' Windows resources are compiled by their build scripts: MinGW-w64's windres.)
+      - name: MinGW-w64's binutils (windres)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils-mingw-w64-x86-64
       - name: Windows (x86_64-pc-windows-gnu)
         run: cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu
       - name: Android (aarch64-linux-android)
@@ -320,6 +325,88 @@ jobs:
             cargo clippy -p kompoz-runtime -p kompoz-text -p kompoz-gpu -p kompoz-platform --target "$target" \
               -- -A clippy::missing_const_for_thread_local
           done
+
+  # The Windows platform on windows-latest (MSVC, the runner's own target): clippy for Windows' cfg; then on Mesa's
+  # lavapipe as mesa-dist-win builds it for Windows (cached; registered as the system's Vulkan driver: the runner is
+  # elevated, so the loader ignores VK_DRIVER_FILES; the runner's own driver has no surfaces) the workspace's tests
+  # (the showcase's comparison with the C++ showcase's pictures left to Linux: it sets its text in the showcase's fonts
+  # through fontconfig; its composition tests run), and in real windows: the Counter and the Kotlin Counter (their
+  # shots the headless Counter's, pixel for pixel), the showcase (its window's shots its headless run's), the app's
+  # several windows, and the Counter by CI's script as the Linux display job runs it (its shots checked and kept). The Vulkan validation layers on Windows
+  # (LunarG's SDK) are package W8's: the device code is validated on Linux.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      MESA_DIST_WIN: "26.2.4"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (Windows' cfg)
+        run: cargo clippy --workspace --all-targets
+      - uses: actions/cache@v4
+        id: mesa
+        with:
+          path: mesa
+          key: mesa-dist-win-${{ env.MESA_DIST_WIN }}
+      - name: Mesa's lavapipe for Windows (mesa-dist-win)
+        if: steps.mesa.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o mesa.7z "https://github.com/pal1000/mesa-dist-win/releases/download/$MESA_DIST_WIN/mesa3d-$MESA_DIST_WIN-release-msvc.7z"
+          7z x -omesa mesa.7z > /dev/null
+      - name: Lavapipe registered as the system's Vulkan driver
+        run: |
+          icd="$(find "$PWD/mesa" -path '*x64*' -name 'lvp_icd*.json' | head -n 1)"
+          [ -n "$icd" ] || { echo "no lavapipe in mesa-dist-win's archive:"; find mesa -maxdepth 2 | head -n 40; exit 1; }
+          MSYS_NO_PATHCONV=1 reg add 'HKLM\SOFTWARE\Khronos\Vulkan\Drivers' /v "$(cygpath -w "$icd")" /t REG_DWORD /d 0 /f
+      - name: The workspace's tests (GPU tests on lavapipe)
+        if: success() || failure()
+        run: |
+          cargo test --workspace --no-fail-fast --exclude showcase
+          cargo test -p showcase --lib
+          cargo test -p showcase --test headless -- composes opens deep_links
+      - name: The Counters, the showcase and the app's windows in real windows (lavapipe)
+        if: success() || failure()
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_GPU_REQUIRED: "1"
+        run: |
+          cargo test -p counter --test windows
+          cargo test -p counter-kotlin --test windows
+          cargo test -p showcase --test windows
+          cargo test -p kompoz-platform --test win32_windows
+      - name: The Counter in a window by CI's script, clicked and resized (lavapipe)
+        if: success() || failure()
+        env:
+          KOMPOZ_SCALE: "1"
+        run: |
+          cargo build -p counter
+          mkdir -p shots
+          KOMPOZ_SCRIPT="wait 30;shot shots/before.png;click 70 70;wait 30;shot shots/after.png;resize 500 400;sleep 1500;wait 10;shot shots/resized.png;quit" \
+            target/debug/counter.exe 2>&1 | tee shots/counter.log
+          grep -q "kompoz: renderer: KompozR on vulkan" shots/counter.log || { echo "no renderer"; exit 1; }
+          size() { local hex; hex=$(od -An -j16 -N8 -tx1 "$1" | tr -d ' \n'); echo "$((16#${hex:0:8}))x$((16#${hex:8:8}))"; }
+          for shot in before after resized; do test -s "shots/$shot.png" || { echo "no $shot.png"; exit 1; }; done
+          if cmp -s shots/before.png shots/after.png; then echo "the click changed nothing"; exit 1; fi
+          test "$(size shots/before.png)" = 360x480 || { echo "before.png is $(size shots/before.png)"; exit 1; }
+          test "$(size shots/resized.png)" = 500x400 || { echo "resized.png is $(size shots/resized.png)"; exit 1; }
+      - name: The Counter's shots, the windows' test shots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-shots
+          path: |
+            shots/
+            target/tmp/counter-windows-*/
+            target/tmp/counter-kotlin-windows-*/
+            target/tmp/showcase-windows-*/
+            target/tmp/win32-windows/
+          if-no-files-found: ignore
 
   # macOS on Apple silicon (the runner's paravirtual Apple GPU), Metal: kompoz-gpu's tests against the same goldens
   # as lavapipe's, strictly (the renderer's y-up clip space runs here), Metal's API validation on (MTL_DEBUG_LAYER=1:

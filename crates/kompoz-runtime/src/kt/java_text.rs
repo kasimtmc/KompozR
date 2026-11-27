@@ -638,8 +638,10 @@ mod tests {
         }
         let f = SimpleDateFormat::with_locale("z|zzzz", JavaLocale::US);
         f.set_time_zone(berlin);
-        assert_eq!(f.format(at(2023, 1, 15, 12, 0, 0)), "CET|Central European Standard Time");
-        assert_eq!(f.format(at(2023, 7, 15, 12, 0, 0)), "CEST|Central European Summer Time");
+        // (Windows' zones have no abbreviations: the short names are their offsets, as Java's for such zones.)
+        let (cet, cest) = if cfg!(windows) { ("GMT+01:00", "GMT+02:00") } else { ("CET", "CEST") };
+        assert_eq!(f.format(at(2023, 1, 15, 12, 0, 0)), format!("{cet}|Central European Standard Time"));
+        assert_eq!(f.format(at(2023, 7, 15, 12, 0, 0)), format!("{cest}|Central European Summer Time"));
     }
 
     #[test]

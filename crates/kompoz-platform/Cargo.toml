@@ -9,19 +9,68 @@ repository.workspace = true
 [lints]
 workspace = true
 
+# The platforms (default); without them the crate is its `build` module alone: what an app's build script uses
+# (`default-features = false` among its build-dependencies: built in seconds, not with the whole of KompozR).
+[features]
+default = ["platform"]
+platform = [
+    "dep:kompoz-coroutines",
+    "dep:kompoz-foundation",
+    "dep:kompoz-gpu",
+    "dep:kompoz-graphics",
+    "dep:kompoz-lifecycle",
+    "dep:kompoz-runtime",
+    "dep:kompoz-text",
+    "dep:kompoz-ui",
+    "dep:libc",
+    "dep:windows",
+]
+
 [dependencies]
-kompoz-coroutines = { path = "../kompoz-coroutines" }
-kompoz-foundation = { path = "../kompoz-foundation" }
-kompoz-gpu = { path = "../kompoz-gpu" }
-kompoz-graphics = { path = "../kompoz-graphics" }
-kompoz-lifecycle = { path = "../kompoz-lifecycle" }
-kompoz-runtime = { path = "../kompoz-runtime" }
-kompoz-text = { path = "../kompoz-text" }
-kompoz-ui = { path = "../kompoz-ui" }
+kompoz-coroutines = { path = "../kompoz-coroutines", optional = true }
+kompoz-foundation = { path = "../kompoz-foundation", optional = true }
+kompoz-gpu = { path = "../kompoz-gpu", optional = true }
+kompoz-graphics = { path = "../kompoz-graphics", optional = true }
+kompoz-lifecycle = { path = "../kompoz-lifecycle", optional = true }
+kompoz-runtime = { path = "../kompoz-runtime", optional = true }
+kompoz-text = { path = "../kompoz-text", optional = true }
+kompoz-ui = { path = "../kompoz-ui", optional = true }
 
 # The unix module (Linux and Android): eventfd, timerfd, poll, dlopen.
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { version = "0.2", optional = true }
+
+# (stage 15) The Windows platform: Win32 through the `windows` crate's bindings (the version fontique's DirectWrite
+# backend already brings), every behaviour our own (windows/).
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62.2"
+optional = true
+features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Networking_WinHttp",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Power",
+    "Win32_System_Registry",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
 
 [dev-dependencies]
 kompoz-test = { path = "../kompoz-test" }
@@ -30,6 +79,7 @@ kompoz-test = { path = "../kompoz-test" }
 [[test]]
 name = "app_core"
 harness = false
+required-features = ["platform"]
 
 # The app's windows on the headless platform (a GPU device each): Window opened, drawn with the caller's locals and
 # closed, scripts by title, the main window's close, the state followed both ways, hidden windows kept,
@@ -37,54 +87,71 @@ harness = false
 [[test]]
 name = "windows"
 harness = false
+required-features = ["platform"]
 
 # The app's windows on X11 on a real display (KOMPOZ_DISPLAY_TESTS=1, DISPLAY: Xvfb in CI): one connection, a window and
 # a device each, a script reaching one by its title, the window manager's close, a state's size, place and placement.
 [[test]]
 name = "x11_windows"
 harness = false
+required-features = ["platform"]
+
+# The app's windows on Windows (KOMPOZ_DISPLAY_TESTS=1; under wine here): one message loop, a window and a device
+# each, a script reaching one by its title, its close, a state's size, place and placement.
+[[test]]
+name = "win32_windows"
+harness = false
+required-features = ["platform"]
 
 # KompozR's title bar (WindowFrame) in a test rule: its layout, its buttons as the desktop lays them out, what it
 # asks of the window, its labels, colors and direction.
 [[test]]
 name = "title_bar"
 harness = false
+required-features = ["platform"]
 
 # xkbcommon's keymaps, compose and the keysym table.
 [[test]]
 name = "xkb"
 harness = false
+required-features = ["platform"]
 
 # The event loop: wakes from other threads, timers, signals.
 [[test]]
 name = "event_loop"
 harness = false
+required-features = ["platform"]
 
 # Our D-Bus client, the settings portal, the desktop services and the AT-SPI bridge, on a dbus-daemon of their own
 # (skipped without one unless KOMPOZ_DBUS_REQUIRED=1).
 [[test]]
 name = "dbus"
 harness = false
+required-features = ["platform"]
 
 # The wallpaper's colors: KDE's config read, changes followed by inotify, stopping while a palette is worked out.
 [[test]]
 name = "wallpaper"
 harness = false
+required-features = ["platform"]
 
 # Images from http URLs through libcurl, against a server of the test's own on 127.0.0.1 (skipped without libcurl
 # unless KOMPOZ_CURL_REQUIRED=1).
 [[test]]
 name = "http_images"
 harness = false
+required-features = ["platform"]
 
 # The Wayland platform on a compositor of its own (kwin_wayland --virtual; KOMPOZ_TEST_COMPOSITOR=weston: Weston's
 # headless backend, as CI runs it), running the Counter: KOMPOZ_DISPLAY_TESTS=1.
 [[test]]
 name = "wayland_display"
 harness = false
+required-features = ["platform"]
 
 # Drags of the app's own out to other apps on real display servers (KOMPOZ_DISPLAY_TESTS=1): Wayland on a kwin of its
 # own (its fake input drives them; skipped on Weston, which has none), X11 on the X server DISPLAY names (XTEST).
 [[test]]
 name = "drag_display"
 harness = false
+required-features = ["platform"]

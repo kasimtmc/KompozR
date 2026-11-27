@@ -140,7 +140,9 @@ fn manifest(pkg: &Json, dir: &Path, shadow: &Path, workspace_root: &Path) -> Str
     let at = |p: &str| -> String {
         let p = Path::new(p);
         let moved = p.strip_prefix(dir).map(|r| shadow.join(r)).unwrap_or_else(|_| p.to_path_buf());
-        toml_str(&moved.to_string_lossy())
+        // (Windows' paths with forward slashes, as Cargo takes them too: one separator throughout.)
+        let moved = moved.to_string_lossy();
+        toml_str(&if cfg!(windows) { moved.replace('\\', "/") } else { moved.into_owned() })
     };
     let edition = pkg["edition"].str();
     let mut m =

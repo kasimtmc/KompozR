@@ -320,28 +320,33 @@ impl PosixRule {
 
     /// The UTC instant (seconds) of `date` of `year`, its time read at `offset`.
     fn instant(&self, date: &PosixDate, year: i32, offset: i32) -> i64 {
-        let jan1 = days_from_civil(year, 1, 1);
-        let day = match date.day {
-            PosixDay::Julian(n) => {
-                let leap_skip = is_leap(year) && n >= 60;
-                jan1 + n as i64 - 1 + leap_skip as i64
-            }
-            PosixDay::Zero(n) => jan1 + n as i64,
-            PosixDay::Month { month, week, weekday } => {
-                let first = days_from_civil(year, month, 1);
-                // (1970-01-01 was a Thursday, weekday 4)
-                let first_weekday = (first + 4).rem_euclid(7) as i32;
-                let mut day = first + (weekday - first_weekday).rem_euclid(7) as i64 + 7 * (week as i64 - 1);
-                let next_month =
-                    if month == 12 { days_from_civil(year + 1, 1, 1) } else { days_from_civil(year, month + 1, 1) };
-                while day >= next_month {
-                    day -= 7;
-                }
-                day
-            }
-        };
-        day * 86_400 + date.time as i64 - offset as i64
+        posix_instant(date, year, offset)
     }
+}
+
+/// The UTC instant (seconds) of `date` of `year`, its time read at `offset` (seconds east of UTC).
+fn posix_instant(date: &PosixDate, year: i32, offset: i32) -> i64 {
+    let jan1 = days_from_civil(year, 1, 1);
+    let day = match date.day {
+        PosixDay::Julian(n) => {
+            let leap_skip = is_leap(year) && n >= 60;
+            jan1 + n as i64 - 1 + leap_skip as i64
+        }
+        PosixDay::Zero(n) => jan1 + n as i64,
+        PosixDay::Month { month, week, weekday } => {
+            let first = days_from_civil(year, month, 1);
+            // (1970-01-01 was a Thursday, weekday 4)
+            let first_weekday = (first + 4).rem_euclid(7) as i32;
+            let mut day = first + (weekday - first_weekday).rem_euclid(7) as i64 + 7 * (week as i64 - 1);
+            let next_month =
+                if month == 12 { days_from_civil(year + 1, 1, 1) } else { days_from_civil(year, month + 1, 1) };
+            while day >= next_month {
+                day -= 7;
+            }
+            day
+        }
+    };
+    day * 86_400 + date.time as i64 - offset as i64
 }
 
 struct Cursor<'a> {
@@ -430,7 +435,11 @@ impl Cursor<'_> {
 
 /// A zone of the system's database by its IANA ID (`Europe/Istanbul`); none if it has none of that name. The
 /// platform's database first ([`set_time_zone_database`](crate::environment::set_time_zone_database): the web's),
-/// then the system's: Android's tzdata bundle, the TZif files under `TZDIR` and the usual directories elsewhere.
+/// then the system's: Android's tzdata bundle; the TZif files under `TZDIR` and (not on Windows) the usual
+/// directories; on Windows its own zones (its registry's, by CLDR's mapping of their names to IANA's, ICU4X's: the
+/// zones Windows has, each with its rules year by year — an IANA zone Windows has no zone of its own for, and history
+/// older than Windows keeps, aren't there; Windows names its zones, not their abbreviations, so their offsets stand
+/// in for them, `+02`, as tzdb's own do for zones without).
 pub(crate) fn load(id: &str) -> Option<Arc<ZoneRules>> {
     let valid = !id.is_empty()
         && !id.starts_with('/')
@@ -446,19 +455,25 @@ pub(crate) fn load(id: &str) -> Option<Arc<ZoneRules>> {
     if let Some(rules) = android::load(id) {
         return Some(rules);
     }
-    zoneinfo_dirs().into_iter().find_map(|dir| read(&dir.join(id)))
+    let files = zoneinfo_dirs().into_iter().find_map(|dir| read(&dir.join(id)));
+    #[cfg(windows)]
+    let files = files.or_else(|| windows::load(id));
+    files
 }
 
 fn read(path: &Path) -> Option<Arc<ZoneRules>> {
     ZoneRules::from_tzif(&std::fs::read(path).ok()?).map(Arc::new)
 }
 
+/// `TZDIR`, then (not on Windows, where those paths name nothing) the usual zoneinfo directories.
 fn zoneinfo_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> =
         crate::environment::var_os("TZDIR").filter(|d| !d.is_empty()).map(PathBuf::from).into_iter().collect();
-    dirs.extend(
-        ["/usr/share/zoneinfo", "/usr/lib/zoneinfo", "/usr/share/lib/zoneinfo", "/etc/zoneinfo"].map(PathBuf::from),
-    );
+    if cfg!(not(windows)) {
+        dirs.extend(
+            ["/usr/share/zoneinfo", "/usr/lib/zoneinfo", "/usr/share/lib/zoneinfo", "/etc/zoneinfo"].map(PathBuf::from),
+        );
+    }
     dirs
 }
 
@@ -602,12 +617,16 @@ mod android {
 }
 
 /// Windows' zone (`GetDynamicTimeZoneInformation`): its IANA ID (CLDR's mapping of Windows' zone names, ICU4X's,
-/// the user's region telling apart the zones one name has) and its rules as a POSIX rule.
+/// the user's region telling apart the zones one name has) and its rules as a POSIX rule; Windows' zones as the
+/// system's database (`load`).
 #[cfg(windows)]
 mod windows {
     #![allow(unsafe_code)]
 
-    use windows_sys::Win32::System::Time::{DYNAMIC_TIME_ZONE_INFORMATION, GetDynamicTimeZoneInformation};
+    use windows_sys::Win32::System::Time::{
+        DYNAMIC_TIME_ZONE_INFORMATION, EnumDynamicTimeZoneInformation, GetDynamicTimeZoneInformation,
+        GetDynamicTimeZoneInformationEffectiveYears, GetTimeZoneInformationForYear, TIME_ZONE_INFORMATION,
+    };
 
     /// `TIME_ZONE_ID_INVALID`.
     const INVALID: u32 = u32::MAX;
@@ -643,6 +662,106 @@ mod windows {
 
     fn wide(units: &[u16]) -> String {
         String::from_utf16_lossy(&units[..units.iter().position(|&u| u == 0).unwrap_or(units.len())])
+    }
+
+    /// Zone `id` (an IANA ID) as Windows has it: the Windows zone CLDR maps it to (`W. Europe Standard Time` for
+    /// `Europe/Berlin`, and for `Europe/Rome` by Italy's region), its rules for each year Windows keeps
+    /// (`GetTimeZoneInformationForYear`: its Dynamic DST years, else this year's), the last year's for the years
+    /// after. None if Windows has no zone CLDR maps to it.
+    pub(super) fn load(id: &str) -> Option<std::sync::Arc<super::ZoneRules>> {
+        // (UTC and the fixed `Etc/` zones are the runtime's own, with their names: not Windows' "UTC" zones.)
+        if id == "UTC" || id == "GMT" || id.starts_with("Etc/") {
+            return None;
+        }
+        let zone = icu_time::zone::iana::IanaParser::new().parse(id);
+        if zone.is_unknown() {
+            return None;
+        }
+        let key = keys().get(zone.0.as_str())?;
+        let dynamic = dynamic_zone(key)?;
+        let this_year = super::civil_year(crate::clock::unix_time().as_secs().div_euclid(86_400));
+        let (mut first, mut last) = (0u32, 0u32);
+        // SAFETY: the zone's information lives through the call; the years are written.
+        let told = unsafe { GetDynamicTimeZoneInformationEffectiveYears(&dynamic, &mut first, &mut last) } == 0;
+        let years = if told && first > 0 && last >= first { first as i32..=last as i32 } else { this_year..=this_year };
+        let mut rules = Vec::new();
+        for year in years {
+            // SAFETY: a zeroed TIME_ZONE_INFORMATION (integers and arrays of them) is a valid one to fill.
+            let mut info: TIME_ZONE_INFORMATION = unsafe { std::mem::zeroed() };
+            // SAFETY: both structures live through the call; `info` is written.
+            if unsafe { GetTimeZoneInformationForYear(year as u16, &dynamic, &mut info) } != 0 {
+                rules.push((
+                    year,
+                    year_of(info.Bias, info.StandardBias, &info.StandardDate, info.DaylightBias, &info.DaylightDate),
+                ));
+            }
+        }
+        if rules.is_empty() {
+            let d = &dynamic;
+            let year = year_of(d.Bias, d.StandardBias, &d.StandardDate, d.DaylightBias, &d.DaylightDate);
+            rules.push((this_year, if d.DynamicDaylightTimeDisabled { year.without_daylight() } else { year }));
+        }
+        super::windows_zone_rules(&rules).map(std::sync::Arc::new)
+    }
+
+    fn year_of(
+        bias: i32,
+        standard_bias: i32,
+        standard: &windows_sys::Win32::Foundation::SYSTEMTIME,
+        daylight_bias: i32,
+        daylight: &windows_sys::Win32::Foundation::SYSTEMTIME,
+    ) -> super::WindowsYear {
+        super::WindowsYear {
+            bias,
+            standard_bias,
+            standard: super::WindowsDate::of(standard),
+            daylight_bias,
+            daylight: super::WindowsDate::of(daylight),
+        }
+    }
+
+    /// Windows' zone of registry key name `key` (`EnumDynamicTimeZoneInformation`'s).
+    fn dynamic_zone(key: &str) -> Option<DYNAMIC_TIME_ZONE_INFORMATION> {
+        (0..).map_while(enumerate).find(|d| wide(&d.TimeZoneKeyName) == key)
+    }
+
+    /// Windows' zone `index` (none past the last).
+    fn enumerate(index: u32) -> Option<DYNAMIC_TIME_ZONE_INFORMATION> {
+        // SAFETY: a zeroed DYNAMIC_TIME_ZONE_INFORMATION (integers and arrays of them) is a valid one to fill.
+        let mut info: DYNAMIC_TIME_ZONE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` is a valid structure to write, living through the call.
+        (unsafe { EnumDynamicTimeZoneInformation(index, &mut info) } == 0).then_some(info)
+    }
+
+    /// Windows' zones by the BCP-47 zone CLDR maps them to (each IANA zone's own: `deber`), worked out once: each
+    /// zone's name for the world (`001`, the zone's own city) first, then for each region it names another zone
+    /// for (`W. Europe Standard Time` for Italy: `itrom`).
+    fn keys() -> &'static std::collections::HashMap<String, String> {
+        static KEYS: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
+        KEYS.get_or_init(|| {
+            let names: Vec<String> = (0..).map_while(enumerate).map(|d| wide(&d.TimeZoneKeyName)).collect();
+            let windows = icu_time::zone::WindowsParser::new();
+            let mut keys = std::collections::HashMap::new();
+            for name in &names {
+                if let Some(zone) = windows.parse(name, None) {
+                    keys.entry(zone.0.as_str().to_string()).or_insert_with(|| name.clone());
+                }
+            }
+            let letters = b'A'..=b'Z';
+            let regions: Vec<icu_locale_core::subtags::Region> = letters
+                .clone()
+                .flat_map(|a| letters.clone().map(move |b| [a, b]))
+                .filter_map(|code| icu_locale_core::subtags::Region::try_from_utf8(&code).ok())
+                .collect();
+            for name in &names {
+                for &region in &regions {
+                    if let Some(zone) = windows.parse(name, Some(region)) {
+                        keys.entry(zone.0.as_str().to_string()).or_insert_with(|| name.clone());
+                    }
+                }
+            }
+            keys
+        })
     }
 
     impl super::WindowsDate {
@@ -690,10 +809,7 @@ fn windows_posix_rule(
         let (sign, m) = if west < 0 { ('-', -west) } else { ('+', west) };
         if m % 60 == 0 { format!("{sign}{}", m / 60) } else { format!("{sign}{}:{:02}", m / 60, m % 60) }
     };
-    let name = |west: i32| {
-        let (sign, m) = if west > 0 { ('-', west) } else { ('+', -west) };
-        if m % 60 == 0 { format!("<{sign}{:02}>", m / 60) } else { format!("<{sign}{:02}{:02}>", m / 60, m % 60) }
-    };
+    let name = offset_name;
     let standard_west = bias + standard_bias;
     let mut rule = format!("{}{}", name(standard_west), offset(standard_west));
     // (no daylight time: none set, turned off, or one of a single year: `year` set)
@@ -708,6 +824,133 @@ fn windows_posix_rule(
     };
     rule.push_str(&format!("{}{},{},{}", name(daylight_west), offset(daylight_west), date(daylight), date(standard)));
     rule
+}
+
+/// A Windows zone's rules for a year (its `TIME_ZONE_INFORMATION` for that year): its biases (minutes west of UTC)
+/// and the days its daylight time starts and ends on.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Default)]
+struct WindowsYear {
+    bias: i32,
+    standard_bias: i32,
+    standard: WindowsDate,
+    daylight_bias: i32,
+    daylight: WindowsDate,
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl WindowsYear {
+    fn has_daylight(&self) -> bool {
+        self.daylight.month != 0 && self.standard.month != 0 && self.daylight_bias != self.standard_bias
+    }
+
+    fn without_daylight(self) -> WindowsYear {
+        WindowsYear { daylight: WindowsDate::default(), ..self }
+    }
+}
+
+/// The abbreviation tzdb gives a zone's offset where it has none of its own (`+03`, `-0330`), of `west` minutes
+/// west.
+fn offset_abbreviation(west: i32) -> String {
+    let (sign, m) = if west > 0 { ('-', west) } else { ('+', -west) };
+    if m % 60 == 0 { format!("{sign}{:02}", m / 60) } else { format!("{sign}{:02}{:02}", m / 60, m % 60) }
+}
+
+/// The same as a POSIX rule names it (`<+03>`).
+fn offset_name(west: i32) -> String {
+    format!("<{}>", offset_abbreviation(west))
+}
+
+/// A Windows date of `year` as POSIX's: weekday of week of month, or (a date of one year: `year` set) the day.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn posix_date_of(d: WindowsDate, year: i32) -> PosixDate {
+    let time = (d.hour as i32 * 60 + d.minute as i32) * 60 + d.second as i32;
+    let day = if d.year != 0 {
+        let n = days_from_civil(year, d.month as i32, d.week as i32) - days_from_civil(year, 1, 1);
+        PosixDay::Zero(n as i32)
+    } else {
+        PosixDay::Month { month: d.month as i32, week: d.week.clamp(1, 5) as i32, weekday: d.day_of_week as i32 }
+    };
+    PosixDate { day, time }
+}
+
+/// The zone of a Windows zone's `years` (each year's rules, in order): its transitions year by year — daylight time
+/// starting and ending, the standard offset changing as a year begins —, the first year's rules for the years before
+/// it from 1970 (as Windows takes them: its first year's for every year before), the last year's rule after (as a
+/// POSIX rule); none for no years.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_zone_rules(years: &[(i32, WindowsYear)]) -> Option<ZoneRules> {
+    let &(_, last) = years.last()?;
+    let &(first_year, first) = years.first()?;
+    let earlier: Vec<(i32, WindowsYear)> = (1970.min(first_year)..first_year).map(|y| (y, first)).collect();
+    let years: Vec<(i32, WindowsYear)> = earlier.into_iter().chain(years.iter().copied()).collect();
+    let mut types: Vec<LocalType> = Vec::new();
+    let mut transitions: Vec<(i64, usize)> = Vec::new();
+    let mut initial = None;
+    let mut current: Option<usize> = None;
+    for &(year, y) in &years {
+        let standard_west = y.bias + y.standard_bias;
+        let standard = local_type(&mut types, standard_west, false);
+        let mut changes: Vec<(i64, usize)> = Vec::new();
+        let mut at_start = standard;
+        if y.has_daylight() {
+            let daylight_west = y.bias + y.daylight_bias;
+            let daylight = local_type(&mut types, daylight_west, true);
+            let start = posix_instant(&posix_date_of(y.daylight, year), year, -standard_west * 60);
+            let end = posix_instant(&posix_date_of(y.standard, year), year, -daylight_west * 60);
+            if start > end {
+                at_start = daylight; // (the south: in daylight time as the year begins)
+            }
+            changes.push((start, daylight));
+            changes.push((end, standard));
+            changes.sort();
+        }
+        match current {
+            None => initial = Some(at_start),
+            // (A new offset from the year's start: its local midnight, at the offset before.)
+            Some(before) if before != at_start => {
+                transitions.push((days_from_civil(year, 1, 1) * 86_400 - types[before].offset as i64, at_start));
+            }
+            Some(_) => {}
+        }
+        current = Some(changes.last().map_or(at_start, |c| c.1));
+        transitions.extend(changes);
+    }
+    // The type before the first transition first (what `at` takes before them).
+    let initial = initial?;
+    if initial != 0 {
+        types.swap(0, initial);
+        for t in &mut transitions {
+            t.1 = if t.1 == 0 {
+                initial
+            } else if t.1 == initial {
+                0
+            } else {
+                t.1
+            };
+        }
+    }
+    let rule = PosixRule::parse(&windows_posix_rule(
+        last.bias,
+        last.standard_bias,
+        last.standard,
+        last.daylight_bias,
+        last.daylight,
+        !last.has_daylight(),
+    ));
+    Some(ZoneRules { transitions, types, rule })
+}
+
+/// The index of the local type of `west` minutes west of UTC (daylight time or not) in `types`, added if new.
+fn local_type(types: &mut Vec<LocalType>, west: i32, dst: bool) -> usize {
+    let offset = -west * 60;
+    match types.iter().position(|t| t.offset == offset && t.dst == dst) {
+        Some(i) => i,
+        None => {
+            types.push(LocalType { offset, dst, abbreviation: offset_abbreviation(west) });
+            types.len() - 1
+        }
+    }
 }
 
 /// The zone ID of a path in a zoneinfo directory (`/usr/share/zoneinfo/Europe/Istanbul` → `Europe/Istanbul`).
@@ -801,7 +1044,8 @@ mod tests {
         let Some(berlin) = load("Europe/Berlin") else { return };
         let utc = |y, m, d| days_from_civil(y, m, d) * 86_400;
         assert_eq!(berlin.at(utc(2026, 1, 15)).total, 3600);
-        assert_eq!(berlin.at(utc(2026, 7, 15)).abbreviation, "CEST");
+        // (Windows' zones have no abbreviations: their offsets stand in.)
+        assert_eq!(berlin.at(utc(2026, 7, 15)).abbreviation, if cfg!(windows) { "+02" } else { "CEST" });
         assert_eq!(berlin.at(utc(1990, 7, 15)).total, 7200);
         assert_eq!(berlin.raw_offset(), 3600);
         assert!(load("../etc/passwd").is_none() && load("Nowhere/Never").is_none());
@@ -822,6 +1066,80 @@ mod tests {
         assert_eq!(windows_posix_rule(-330, 0, date(0, 0, 0), 0, date(0, 0, 0), false), "<+0530>-5:30");
         assert_eq!(windows_posix_rule(480, 0, date(11, 1, 2), -60, date(3, 2, 2), true), "<-08>+8");
         assert_eq!(PosixRule::parse("<+0530>-5:30").unwrap().at(0).total, 19_800);
+    }
+
+    #[test]
+    fn windows_zones_are_ruled_year_by_year() {
+        let date =
+            |month, week, day_of_week, hour| WindowsDate { month, week, day_of_week, hour, ..WindowsDate::default() };
+        let utc = |y, m, d, h: i64| days_from_civil(y, m, d) * 86_400 + h * 3600;
+        // Pacific Standard Time: its rule before 2007 (April's first Sunday to October's last) and after.
+        let year =
+            |standard, daylight| WindowsYear { bias: 480, standard_bias: 0, standard, daylight_bias: -60, daylight };
+        let pacific = windows_zone_rules(&[
+            (2006, year(date(10, 5, 0, 2), date(4, 1, 0, 2))),
+            (2007, year(date(11, 1, 0, 2), date(3, 2, 0, 2))),
+        ])
+        .unwrap();
+        // (Before its years, from 1970: the first one's rule, as Windows takes it; before 1970 its standard time.)
+        assert_eq!(pacific.at(utc(2005, 7, 1, 0)).total, -7 * 3600);
+        assert_eq!(pacific.at(utc(1975, 1, 1, 0)).total, -8 * 3600);
+        assert_eq!(pacific.at(utc(1969, 7, 1, 0)).total, -8 * 3600);
+        assert_eq!(pacific.at(utc(2006, 3, 20, 12)).total, -8 * 3600);
+        assert_eq!(pacific.at(utc(2006, 4, 3, 12)).total, -7 * 3600);
+        assert_eq!(pacific.at(utc(2006, 10, 30, 12)).total, -8 * 3600);
+        assert_eq!(pacific.at(utc(2007, 3, 20, 12)).total, -7 * 3600); // (the new rule)
+        assert_eq!(pacific.at(utc(2030, 7, 1, 0)).abbreviation, "-07"); // (after: the last year's rule)
+        assert_eq!(pacific.at(utc(2030, 12, 1, 0)).total, -8 * 3600);
+        // The south: daylight time from October's first Sunday to April's, as the year begins too.
+        let sydney = windows_zone_rules(&[(
+            2026,
+            WindowsYear {
+                bias: -600,
+                standard_bias: 0,
+                standard: date(4, 1, 0, 3),
+                daylight_bias: -60,
+                daylight: date(10, 1, 0, 2),
+            },
+        )])
+        .unwrap();
+        assert_eq!(sydney.at(utc(2026, 1, 15, 0)).total, 11 * 3600);
+        assert_eq!(sydney.at(utc(2026, 6, 15, 0)).total, 10 * 3600);
+        assert_eq!(sydney.at(utc(2026, 12, 15, 0)).total, 11 * 3600);
+        // A standard offset changing as a year begins (Turkey's +2 with daylight time, then +3 without).
+        let none = WindowsDate::default();
+        let istanbul = windows_zone_rules(&[
+            (
+                2015,
+                WindowsYear {
+                    bias: -120,
+                    standard_bias: 0,
+                    standard: date(10, 5, 0, 4),
+                    daylight_bias: -60,
+                    daylight: date(3, 5, 0, 3),
+                },
+            ),
+            (2017, WindowsYear { bias: -180, standard_bias: 0, standard: none, daylight_bias: 0, daylight: none }),
+        ])
+        .unwrap();
+        assert_eq!(istanbul.at(utc(2015, 12, 31, 21)).total, 2 * 3600);
+        assert_eq!(istanbul.at(utc(2017, 1, 1, 0)).total, 3 * 3600);
+        assert_eq!(istanbul.at(utc(2026, 7, 1, 0)).total, 3 * 3600);
+        assert_eq!(istanbul.raw_offset(), 3 * 3600);
+        assert!(windows_zone_rules(&[]).is_none());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_has_the_zones_cldr_maps() {
+        let utc = |y, m, d| days_from_civil(y, m, d) * 86_400;
+        // (Every Windows has these zones; wine's registry has them too.)
+        let berlin = load("Europe/Berlin").expect("W. Europe Standard Time");
+        assert_eq!(berlin.at(utc(2026, 1, 15)).total, 3600);
+        assert_eq!(berlin.at(utc(2026, 7, 15)).total, 7200);
+        let tokyo = load("Asia/Tokyo").expect("Tokyo Standard Time");
+        assert_eq!(tokyo.at(utc(2026, 7, 15)).total, 9 * 3600);
+        assert!(load("Nowhere/Never").is_none());
     }
 
     #[test]

@@ -143,7 +143,10 @@ mod tests {
 
     #[test]
     fn dropped_paths_are_file_uris() {
-        assert_eq!(file_uri("/home/kasim/Görüntü 1.png"), "file:///home/kasim/G%C3%B6r%C3%BCnt%C3%BC%201.png");
+        if cfg!(not(windows)) {
+            // (A rooted path without a drive is the current drive's on Windows.)
+            assert_eq!(file_uri("/home/kasim/Görüntü 1.png"), "file:///home/kasim/G%C3%B6r%C3%BCnt%C3%BC%201.png");
+        }
         assert_eq!(file_uri("C:\\Users\\a.txt"), "file:///C:/Users/a.txt");
     }
 }

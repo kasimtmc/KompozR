@@ -192,6 +192,12 @@ impl FontFallback {
         }
         add(collection.fallback_families(script, None));
         add(collection.generic_families(typeface.fallback));
+        // (Characters of every script — digits, punctuation, symbols — where the system says no family of their own
+        // for them and its generic family has none of its fonts (wine's prefix without Arial, DirectWrite naming no
+        // family for a sample of no script): the system's Latin family's, which has them.)
+        if script == *b"Zyyy" || script == *b"Zinh" {
+            add(collection.fallback_families(*b"Latn", None));
+        }
         add(collection.emoji_families());
         add(collection.registered_families());
         let selector = cluster

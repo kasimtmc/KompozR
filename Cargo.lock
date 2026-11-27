@@ -88,6 +88,7 @@ name = "counter"
 version = "0.1.0"
 dependencies = [
  "kompoz-foundation",
+ "kompoz-gpu",
  "kompoz-graphics",
  "kompoz-platform",
  "kompoz-runtime",
@@ -102,6 +103,7 @@ dependencies = [
  "kompoz",
  "kompoz-foundation",
  "kompoz-graphics",
+ "kompoz-platform",
  "kompoz-runtime",
  "kompoz-text",
  "kompoz-ui",
@@ -849,6 +851,7 @@ dependencies = [
  "kompoz-text",
  "kompoz-ui",
  "libc",
+ "windows",
 ]
 
 [[package]]
@@ -1337,6 +1340,7 @@ name = "showcase"
 version = "0.1.0"
 dependencies = [
  "kompoz",
+ "kompoz-platform",
 ]
 
 [[package]]

@@ -24,6 +24,12 @@ use std::rc::Rc;
 
 type Log = Rc<RefCell<Vec<String>>>;
 
+/// A dropped file's path as the system writes paths.
+#[cfg(not(windows))]
+const FILE: &str = "/tmp/a b.png";
+#[cfg(windows)]
+const FILE: &str = "C:\\tmp\\a b.png";
+
 fn new_log() -> Log {
     Rc::new(RefCell::new(Vec::new()))
 }
@@ -263,12 +269,14 @@ fn drops_from_outside_the_app_reach_the_targets() {
     h.external_drag_moved(at(100.0, 300.0));
     h.external_drag_moved(at(100.0, 50.0));
     let data = DragAndDropTransferData {
-        clip_entry: ClipEntry::with_files(vec!["/tmp/a b.png".into()]),
+        // (A path as the system writes it: a drive's on Windows.)
+        clip_entry: ClipEntry::with_files(vec![FILE.into()]),
         ..Default::default()
     };
     assert!(h.external_drop(data, at(100.0, 60.0)));
     rule.wait_for_idle();
-    assert_eq!(taken(&log), ["should true", "started", "entered", "drop /tmp/a b.png at 100,60", "ended taken"]);
+    let dropped = format!("drop {FILE} at 100,60");
+    assert_eq!(taken(&log), ["should true", "started", "entered", dropped.as_str(), "ended taken"]);
     // Brought over and taken away again.
     h.external_drag_entered(vec!["text/uri-list".into(), "text/plain".into()]);
     h.external_drag_moved(at(100.0, 50.0));

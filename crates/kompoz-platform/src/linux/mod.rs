@@ -14,7 +14,7 @@ pub mod media;
 pub mod portal;
 pub mod status_notifier;
 pub mod sys;
-pub mod transfer;
+pub use crate::transfer; // (shared with Windows: the crate's own)
 pub mod wallpaper;
 pub mod wayland;
 pub mod x11;

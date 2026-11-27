@@ -190,7 +190,15 @@ impl DefaultResourceReader {
     pub fn uri_now(path: &str) -> Result<String, MissingResourceException> {
         let uri = |p: &std::path::Path| {
             let absolute = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-            format!("file://{}", percent_encode_path(&absolute.to_string_lossy()))
+            let text = absolute.to_string_lossy();
+            // (Windows: a canonical path is a verbatim one, `\\?\C:\…`: as a URI's, `/C:/…`.)
+            let path = if cfg!(windows) {
+                let path = text.strip_prefix(r"\\?\").unwrap_or(&text).replace('\\', "/");
+                if path.as_bytes().get(1) == Some(&b':') { format!("/{path}") } else { path }
+            } else {
+                text.into_owned()
+            };
+            format!("file://{}", percent_encode_path(&path))
         };
         if let Some(f) = embedded_file(path) {
             let source = std::path::Path::new(f.source);

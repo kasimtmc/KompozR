@@ -107,10 +107,12 @@ pub struct DisplayPlatform {
 }
 
 /// The display platforms built in, tried in this order when the app isn't headless (C++'s main: a Wayland
-/// session's, then X11's).
+/// session's, then X11's; Win32 on Windows).
 #[cfg(target_os = "linux")]
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::linux::wayland::PLATFORM, crate::linux::x11::PLATFORM];
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::windows::PLATFORM];
+#[cfg(not(any(target_os = "linux", windows)))]
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[];
 
 /// A KompozR app (C++'s Application and main): `App::new(title).size(w, h).run(content)`.

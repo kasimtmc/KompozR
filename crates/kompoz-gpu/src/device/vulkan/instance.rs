@@ -29,6 +29,8 @@ impl Instance {
     pub fn new(window: Option<VulkanSurface>) -> Result<Instance, String> {
         #[cfg(all(target_os = "linux", not(target_os = "android")))]
         keep_offload_driver_out();
+        #[cfg(windows)]
+        software_driver_fallback(window.as_ref().map(|w| w.instance_extensions.as_slice()).unwrap_or_default());
         // SAFETY: loads the system's Vulkan loader, whose initialisation is the platform's own.
         let entry = unsafe { ash::Entry::load() }.map_err(|e| format!("no Vulkan loader ({e})"))?;
         let mut validation = false;
@@ -213,6 +215,71 @@ fn keep_offload_driver_out() {
     });
 }
 
+/// Lavapipe (Mesa's Vulkan on the CPU: mesa-dist-win's `vulkan_lvp.dll` and its driver file, shipped beside the
+/// program) as the loader's driver where the system has no Vulkan device that can do what is asked (a virtual
+/// machine, a remote session, an old GPU: decision U9), before the process's first instance: through
+/// `VK_DRIVER_FILES`, set for the process once. Not where the user chose the loader's drivers (`VK_DRIVER_FILES`,
+/// `VK_ICD_FILENAMES`, `VK_ADD_DRIVER_FILES`, `KOMPOZ_GPU_DEVICE`), nor where the program has no lavapipe beside it.
+/// (An elevated process's loader ignores `VK_DRIVER_FILES`: there lavapipe is the system's to register.)
+#[cfg(windows)]
+fn software_driver_fallback(extensions: &[&'static CStr]) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+        let users = ["VK_DRIVER_FILES", "VK_ICD_FILENAMES", "VK_ADD_DRIVER_FILES", "KOMPOZ_GPU_DEVICE"];
+        if users.iter().any(|n| set(n)) {
+            return;
+        }
+        let Some(icd) = std::env::current_exe().ok().and_then(|exe| lavapipe_beside(exe.parent()?)) else { return };
+        if system_has_device(extensions) {
+            return;
+        }
+        // SAFETY: set once, on the thread making the process's first Vulkan instance, before the loader that
+        // reads it makes it; KompozR's other threads don't read or write the environment meanwhile (they read
+        // their settings as the app starts); on Windows the environment block is behind the system's own lock.
+        unsafe { std::env::set_var("VK_DRIVER_FILES", &icd) };
+        log(&format!("kompoz: GPU: no Vulkan device here: lavapipe (Mesa's, on the CPU) from {}", icd.display()));
+    });
+}
+
+/// Lavapipe's driver file in `dir` (mesa-dist-win names it `lvp_icd.x86_64.json`, or `lvp_icd.json`), with the
+/// library it names (`vulkan_lvp.dll`) there too.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn lavapipe_beside(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    if !dir.join("vulkan_lvp.dll").is_file() {
+        return None;
+    }
+    [format!("lvp_icd.{}.json", std::env::consts::ARCH), "lvp_icd.json".to_string()]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+}
+
+/// Whether the system's drivers have a Vulkan 1.1 device, and the instance `extensions` (a window's surface's), as
+/// the loader finds them now: a throwaway instance's.
+#[cfg(windows)]
+fn system_has_device(extensions: &[&'static CStr]) -> bool {
+    // SAFETY: the loader loaded and let go here (a later Entry::load loads it afresh); queries of it, and an
+    // instance made with the extensions it said it has, destroyed before the loader goes.
+    unsafe {
+        let Ok(entry) = ash::Entry::load() else { return false };
+        let available = entry.enumerate_instance_extension_properties(None).unwrap_or_default();
+        let has = |e: &CStr| available.iter().any(|a| a.extension_name_as_c_str() == Ok(e));
+        if !extensions.iter().all(|e| has(e)) {
+            return false;
+        }
+        let names: Vec<*const c_char> = extensions.iter().map(|e| e.as_ptr()).collect();
+        let app = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_1);
+        let info = vk::InstanceCreateInfo::default().application_info(&app).enabled_extension_names(&names);
+        let Ok(instance) = entry.create_instance(&info, None) else { return false };
+        let devices = instance.enumerate_physical_devices().unwrap_or_default();
+        let found =
+            devices.iter().any(|&d| instance.get_physical_device_properties(d).api_version >= vk::API_VERSION_1_1);
+        instance.destroy_instance(None);
+        found
+    }
+}
+
 /// A GPU with Vulkan 1.1 and a queue that draws (and presents to the surface, if there is one): the one
 /// `KOMPOZ_GPU_DEVICE` names part of, else as the app's [`GpuPriority`] says (C++'s b96a026): Auto, the one the
 /// screen is on where Linux tells, else an integrated one (it saves power), else a discrete one; Discrete, a discrete
@@ -275,5 +342,26 @@ pub(super) fn pick_physical_device(instance: &Instance) -> Option<Choice> {
             }
         }
         best.map(|(_, choice)| choice)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lavapipe_beside;
+
+    #[test]
+    fn lavapipe_is_found_beside_the_program_with_its_library() {
+        let dir = std::env::temp_dir().join(format!("kompoz-lavapipe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let json = dir.join(format!("lvp_icd.{}.json", std::env::consts::ARCH));
+        std::fs::write(&json, "{}").unwrap();
+        assert_eq!(lavapipe_beside(&dir), None); // (no library)
+        std::fs::write(dir.join("vulkan_lvp.dll"), "").unwrap();
+        assert_eq!(lavapipe_beside(&dir), Some(json.clone()));
+        std::fs::remove_file(&json).unwrap();
+        std::fs::write(dir.join("lvp_icd.json"), "{}").unwrap();
+        assert_eq!(lavapipe_beside(&dir), Some(dir.join("lvp_icd.json")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

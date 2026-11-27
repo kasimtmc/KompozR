@@ -17,3 +17,16 @@ kompoz-platform = { path = "../../crates/kompoz-platform" }
 kompoz-runtime = { path = "../../crates/kompoz-runtime" }
 kompoz-text = { path = "../../crates/kompoz-text" }
 kompoz-ui = { path = "../../crates/kompoz-ui" }
+
+# The program's Windows resources (icon, manifest, version): kompoz-platform's build helper alone (no platforms).
+[build-dependencies]
+kompoz-platform = { path = "../../crates/kompoz-platform", default-features = false }
+
+[dev-dependencies]
+kompoz-gpu = { path = "../../crates/kompoz-gpu" }
+
+# The Counter in a real window on Windows (KOMPOZ_DISPLAY_TESTS=1), its shots the headless Counter's drawn in the
+# test's process: one thread.
+[[test]]
+name = "windows"
+harness = false

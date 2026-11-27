@@ -1,10 +1,11 @@
-//! What the app offers other apps, as both Linux display servers offer it: its clipboard (a Wayland data source, the
-//! X11 CLIPBOARD selection) and its drags out of the window (WP5b: a drag within the app that left the window, handed
-//! to the platform — Wayland's data source, X11's XDND source). From a [`ClipEntry`]: the types it is offered as
-//! (files and URIs as a `text/uri-list` of percent-encoded URIs; text as UTF-8 under the names apps ask for it by,
-//! and as Latin-1 `STRING` on X11; HTML; an image as PNG; every other type the app gave as it is), the bytes each is
-//! served as (an image encoded once, when first asked for), the actions a drag's source allows, and a drag icon's
-//! pixels.
+//! What the app offers other apps, as the desktop platforms offer it: its clipboard (a Wayland data source, the X11
+//! CLIPBOARD selection, the Windows clipboard's formats) and its drags out of the window (WP5b: a drag within the app
+//! that left the window, handed to the platform — Wayland's data source, X11's XDND source). From a [`ClipEntry`]:
+//! the types it is offered as (files and URIs as a `text/uri-list` of percent-encoded URIs; text as UTF-8 under the
+//! names apps ask for it by, and as Latin-1 `STRING` on X11; HTML; an image as PNG; every other type the app gave as
+//! it is), the bytes each is served as (an image encoded once, when first asked for), the actions a drag's source
+//! allows, and a drag icon's pixels. (Linux's and Windows' both: Windows turns the types into its formats,
+//! `windows::clipboard`.)
 
 use kompoz_graphics::ImageBitmap;
 use kompoz_ui::clipboard::{
@@ -212,22 +213,33 @@ mod tests {
         p.bytes(mime, text_types).map(|b| b.to_vec())
     }
 
+    /// An absolute path as the system writes it: `/tmp/a` here, `C:\tmp\a` on Windows.
+    fn abs(unix: &str) -> String {
+        if cfg!(windows) { format!("C:{}", unix.replace('/', "\\")) } else { unix.to_string() }
+    }
+
+    /// Its `file:` URI's start: `file://` here, `file:///C:` on Windows (the path's own slash after).
+    fn file_scheme() -> &'static str {
+        if cfg!(windows) { "file:///C:" } else { "file://" }
+    }
+
     #[test]
     fn files_are_offered_first_as_a_percent_encoded_uri_list() {
-        let p = payload("", &["/home/kasim/a b.png", "/tmp/çay%.txt"], &["text/uri-list"]);
+        let p = payload("", &[&abs("/home/kasim/a b.png"), &abs("/tmp/çay%.txt")], &["text/uri-list"]);
         assert_eq!(p.offered(WAYLAND_TEXT_TYPES), ["text/uri-list"]);
-        let list = "file:///home/kasim/a%20b.png\r\nfile:///tmp/%C3%A7ay%25.txt\r\n";
+        let f = file_scheme();
+        let list = format!("{f}/home/kasim/a%20b.png\r\n{f}/tmp/%C3%A7ay%25.txt\r\n");
         assert_eq!(bytes(&p, "text/uri-list", WAYLAND_TEXT_TYPES).unwrap(), list.as_bytes());
         assert_eq!(bytes(&p, "text/plain", WAYLAND_TEXT_TYPES), None); // (no text)
         // (Back as the receiving side reads it.)
-        assert_eq!(files_in_uri_list(list), ["/home/kasim/a b.png", "/tmp/çay%.txt"]);
+        assert_eq!(files_in_uri_list(&list), [abs("/home/kasim/a b.png"), abs("/tmp/çay%.txt")]);
     }
 
     #[test]
     fn relative_paths_are_the_working_directorys() {
-        let p = payload("", &["notes.txt", "/etc/hosts"], &["text/uri-list"]);
+        let p = payload("", &["notes.txt", &abs("/etc/hosts")], &["text/uri-list"]);
         let cwd = std::env::current_dir().unwrap();
-        assert_eq!(p.entry().files(), [cwd.join("notes.txt").to_string_lossy().into_owned(), "/etc/hosts".into()]);
+        assert_eq!(p.entry().files(), [cwd.join("notes.txt").to_string_lossy().into_owned(), abs("/etc/hosts")]);
         let data = DragAndDropTransferData::default();
         assert_eq!(Payload::new(&data).actions.len(), 3); // (all three by default)
     }
@@ -247,12 +259,13 @@ mod tests {
         assert_eq!(bytes(&p, "STRING", WAYLAND_TEXT_TYPES), None); // (not offered on Wayland)
         assert_eq!(bytes(&p, "image/png", X11_TEXT_TYPES), None);
         // Text and files: both, files first; the uri-list from the files, the text as itself.
-        let p = payload("iki dosya", &["/a", "/b"], &["text/uri-list", "text/plain"]);
+        let p = payload("iki dosya", &[&abs("/a"), &abs("/b")], &["text/uri-list", "text/plain"]);
         assert_eq!(
             p.offered(WAYLAND_TEXT_TYPES)[..2],
             ["text/uri-list".to_string(), "text/plain;charset=utf-8".into()]
         );
-        assert_eq!(bytes(&p, "text/uri-list", WAYLAND_TEXT_TYPES).unwrap(), b"file:///a\r\nfile:///b\r\n");
+        let f = file_scheme();
+        assert_eq!(bytes(&p, "text/uri-list", WAYLAND_TEXT_TYPES).unwrap(), format!("{f}/a\r\n{f}/b\r\n").as_bytes());
         assert_eq!(bytes(&p, "text/plain", WAYLAND_TEXT_TYPES).unwrap(), b"iki dosya");
     }
 

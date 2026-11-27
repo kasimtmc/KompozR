@@ -364,10 +364,13 @@ fn drags_from_outside_reach_the_targets_under_them() {
     assert_eq!(taken(&log), ["outer entered", "outer moved 50,150", "files exited"]);
     h.external_drag_moved(at(50.0, 40.0));
     taken(&log);
-    let data =
-        DragAndDropTransferData { clip_entry: ClipEntry::with_files(vec!["/tmp/a.png".into()]), ..Default::default() };
+    // (A path as the system writes it: a drive's on Windows.)
+    let (file, uri) =
+        if cfg!(windows) { ("C:\\tmp\\a.png", "file:///C:/tmp/a.png") } else { ("/tmp/a.png", "file:///tmp/a.png") };
+    let data = DragAndDropTransferData { clip_entry: ClipEntry::with_files(vec![file.into()]), ..Default::default() };
     assert!(h.external_drop(data, at(50.0, 40.0)));
-    assert_eq!(taken(&log), ["files moved 50,40", "files drop file:///tmp/a.png", "outer ended", "files ended"]);
+    let drop = format!("files drop {uri}");
+    assert_eq!(taken(&log), ["files moved 50,40", drop.as_str(), "outer ended", "files ended"]);
     // Text comes and leaves without a drop.
     assert!(h.external_drag_entered(vec!["text/plain".into()]));
     h.external_drag_moved(at(20.0, 120.0));

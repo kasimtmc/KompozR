@@ -378,7 +378,9 @@ kompoz-runtime/runtime kompozable ContextUser - crates/kompoz-runtime/tests/runt
 * method CornerSizeTrack rrddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 kompoz-ui/tree kompozable Counted rr crates/kompoz-ui/tests/tree.rs
 counter/counter kompozable Counter - examples/counter/src/counter.rs
+counter/windows kompozable Counter - examples/counter/src/counter.rs
 counter-kotlin/headless kompozable Counter - examples/counter/src/counter.rs
+counter-kotlin/windows kompozable Counter - examples/counter/src/counter.rs
 kompoz-platform/app_core kompozable Counter r crates/kompoz-platform/tests/app_core.rs
 kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
@@ -2299,6 +2301,7 @@ kompoz-material3/lists kompozable TwoLineListItem - crates/kompoz-material3/test
 * kompozable TwoRowsTopAppBar rdddddddddd crates/kompoz-material3/src/app_bar.rs
 * kompozable TwoRowsTopAppBarImpl rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
 kompoz-platform/wayland_display kompozable TwoWindows - crates/kompoz-platform/tests/wayland_display.rs
+kompoz-platform/win32_windows kompozable TwoWindows - crates/kompoz-platform/tests/win32_windows.rs
 kompoz-platform/windows kompozable TwoWindows rrr crates/kompoz-platform/tests/windows.rs
 kompoz-platform/x11_windows kompozable TwoWindows - crates/kompoz-platform/tests/x11_windows.rs
 * fn Typography dddddddddddddddddddddddddddddd crates/kompoz-material3/src/typography.rs

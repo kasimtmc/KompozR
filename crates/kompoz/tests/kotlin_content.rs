@@ -211,9 +211,15 @@ fn a_box_takes_dropped_files() {
     let h = rule.host();
     assert!(h.external_drag_entered(vec!["text/uri-list".into()]));
     h.external_drag_moved(Offset::new(50.0, 50.0));
-    let entry = ClipEntry::with_files(vec!["/tmp/a b.png".into(), "/tmp/c.txt".into()]);
+    // (Paths as the system writes them: a drive's on Windows.)
+    let paths: Vec<String> = if cfg!(windows) {
+        vec!["C:\\tmp\\a b.png".into(), "C:\\tmp\\c.txt".into()]
+    } else {
+        vec!["/tmp/a b.png".into(), "/tmp/c.txt".into()]
+    };
+    let entry = ClipEntry::with_files(paths.clone());
     assert!(h.external_drop(dropped(entry), Offset::new(50.0, 50.0)));
-    assert_eq!(*files.borrow(), ["/tmp/a b.png", "/tmp/c.txt"]);
+    assert_eq!(*files.borrow(), paths);
     // Text, no files: given back whole, not taken.
     h.external_drag_entered(vec!["text/plain".into()]);
     assert!(!h.external_drop(dropped(ClipEntry::with_plain_text("x")), Offset::new(50.0, 50.0)));

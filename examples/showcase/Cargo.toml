@@ -13,6 +13,10 @@ workspace = true
 [dependencies]
 kompoz = { path = "../../crates/kompoz" }
 
+# The program's Windows resources (icon, manifest, version): kompoz-platform's build helper alone (no platforms).
+[build-dependencies]
+kompoz-platform = { path = "../../crates/kompoz-platform", default-features = false }
+
 [dev-dependencies]
 kompoz = { path = "../../crates/kompoz", features = ["test"] }
 
@@ -20,4 +24,9 @@ kompoz = { path = "../../crates/kompoz", features = ["test"] }
 # the Material screen: one thread, in sequence.
 [[test]]
 name = "headless"
+harness = false
+
+# The showcase in a real window on Windows (KOMPOZ_DISPLAY_TESTS=1), its shots its headless run's.
+[[test]]
+name = "windows"
 harness = false
