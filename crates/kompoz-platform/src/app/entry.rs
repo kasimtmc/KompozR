@@ -29,7 +29,8 @@ fn program_name() -> String {
 /// What the app's end does: the process ends with its code (Compose Desktop's `exitProcessOnExit`: nothing after the
 /// call runs, as `exitProcess` does), or it is returned to the program.
 fn ended(code: ExitCode, exit_process_on_exit: bool) -> ExitCode {
-    if exit_process_on_exit {
+    // (On the web the call returns as the app starts, the page running it on: nothing has ended.)
+    if exit_process_on_exit && !cfg!(all(target_family = "wasm", target_os = "unknown")) {
         std::process::exit(if code == ExitCode::SUCCESS { 0 } else { 1 });
     }
     code

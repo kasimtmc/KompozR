@@ -13,6 +13,8 @@ use crate::draw::GlyphColorKind;
 use crate::font::FontCollection;
 use crate::font::FontId;
 use crate::font::fallback::FontFallback;
+use crate::font::platform::{self, PlatformStyle};
+use crate::segment;
 use harfrust::{Buffer, BufferFlags, Direction, Feature, Language, Script, ShapeOptions, ShapePlan, ShaperFont, Tag};
 use kompoz_graphics::Rect;
 use std::cell::RefCell;
@@ -205,6 +207,9 @@ impl FontBackend for HarfrustBackend {
     }
 
     fn shape(&self, request: &ShapeRequest<'_>) -> ShapedRun {
+        if let Some(style) = platform::platform_style(request.font.font) {
+            return platform_shape(request, style);
+        }
         let range = request.range.clone();
         let key = RunKey {
             text: request.text[range.clone()].into(),
@@ -261,15 +266,93 @@ impl FontBackend for HarfrustBackend {
     }
 
     fn metrics(&self, font: &FontInstance) -> FontMetrics {
+        if let Some(style) = platform::platform_style(font.font) {
+            return platform_metrics(style, font.size);
+        }
         self.faces.get(font.font).map_or_else(FontMetrics::default, |f| f.metrics(&font.coords, font.size))
     }
 
     fn glyph_bounds(&self, font: &FontInstance, glyph: u32) -> Rect {
+        if let Some(style) = platform::platform_style(font.font) {
+            return platform::measure(glyph, style, font.size).ink;
+        }
         self.faces.get(font.font).map_or(Rect::Zero, |f| f.glyph_bounds(&font.coords, font.size, glyph, font.synthesis))
     }
 
+    /// (A platform font's: a colour bitmap for emoji, a mask as an outline's coverage otherwise.)
     fn color_kind(&self, font: FontId) -> GlyphColorKind {
+        if let Some(style) = platform::platform_style(font) {
+            return if style.color { GlyphColorKind::Bitmap } else { GlyphColorKind::Outline };
+        }
         self.faces.get(font).map_or(GlyphColorKind::Outline, |f| f.color)
+    }
+}
+
+/// Scripts whose letters join (a word drawn by the platform as one glyph, so that its letters join as the
+/// platform's text engine joins them).
+const JOINING: [&[u8; 4]; 13] = [
+    b"Arab", b"Syrc", b"Nkoo", b"Mand", b"Mong", b"Phag", b"Deva", b"Beng", b"Guru", b"Gujr", b"Orya", b"Taml", b"Telu",
+];
+
+/// A run of a platform font shaped: a glyph a grapheme cluster (a word of a script whose letters join), each
+/// measured by the platform, letter spacing as the fonts' runs have it, in visual order.
+fn platform_shape(request: &ShapeRequest<'_>, style: PlatformStyle) -> ShapedRun {
+    let range = request.range.clone();
+    let text = &request.text[range.clone()];
+    let mut pieces: Vec<std::ops::Range<usize>> = Vec::new();
+    for cluster in segment::graphemes(text) {
+        let joins = |r: &std::ops::Range<usize>| {
+            let s = &text[r.clone()];
+            !s.chars().all(char::is_whitespace) && JOINING.contains(&&segment::script_of(s))
+        };
+        match pieces.last_mut() {
+            Some(last) if last.end == cluster.start && joins(last) && joins(&cluster) => last.end = cluster.end,
+            _ => pieces.push(cluster),
+        }
+    }
+    let joined = JOINING.contains(&&segment::script_of(text));
+    let (before, after) =
+        if joined { (0.0, 0.0) } else { letter_spacing_sides(request.letter_spacing, request.scale_x, request.linear) };
+    let mut glyphs: Vec<ShapedGlyph> = pieces
+        .iter()
+        .map(|piece| {
+            let id = platform::glyph_id(&text[piece.clone()]);
+            let m = platform::measure(id, style, request.font.size);
+            ShapedGlyph {
+                id,
+                cluster: range.start + piece.start,
+                x_advance: m.advance * request.scale_x + before + after,
+                y_advance: 0.0,
+                x_offset: before,
+                y_offset: 0.0,
+                unsafe_to_break: false,
+            }
+        })
+        .collect();
+    if request.rtl {
+        glyphs.reverse();
+    }
+    let advance = glyphs.iter().map(|g| g.x_advance).sum();
+    ShapedRun { glyphs, advance }
+}
+
+/// A platform font's metrics at `size` px: its ascent and descent as the platform measures them, its lines'
+/// placing from them (the proportions of Noto Sans's).
+fn platform_metrics(style: PlatformStyle, size: f32) -> FontMetrics {
+    let (ascent, descent) = platform::font_metrics(style, size);
+    let (ascent, descent) = if ascent + descent > 0.0 { (ascent, descent) } else { (size * 1.069, size * 0.293) };
+    FontMetrics {
+        ascent,
+        descent,
+        leading: 0.0,
+        top: ascent,
+        bottom: descent,
+        underline_position: size * 0.125,
+        underline_thickness: size * 0.05,
+        strikeout_position: -size * 0.322,
+        strikeout_thickness: size * 0.05,
+        x_height: size * 0.536,
+        cap_height: size * 0.714,
     }
 }
 

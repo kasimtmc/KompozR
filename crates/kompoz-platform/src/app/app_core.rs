@@ -23,13 +23,15 @@ use super::script::{Command, Script, WindowEvent, parse_command};
 use super::title_bar::{WindowActions, WindowFrame};
 use super::windows::menu_item;
 use super::{AppConfig, Event, MenuBarShown, MouseButton, Platform, TitleBar, TrayImage, WindowAction, WindowSpec};
-use crate::image_loader::{load_image_async, load_image_file, save_pixels, start_image_disk_cache, stop_image_loader};
+use crate::image_loader::{load_image_async, load_image_file, start_image_disk_cache, stop_image_loader};
 use crate::system::{app_cache_directory, log, read_file};
 use kompoz_coroutines::CoroutineContext;
 use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{self, Backend, ClearColor, Device, Format, IRect, Surface, Texture, TextureUsage};
 use kompoz_gpu::renderer::RendererBitmaps;
-use kompoz_graphics::{Color, Density, Dp, DpSize, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
+use kompoz_graphics::{
+    Color, Density, Dp, DpSize, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size, encode_png,
+};
 use kompoz_lifecycle::LifecycleState;
 use kompoz_runtime::clock::Instant;
 use kompoz_runtime::{Content, MutableState, RecompositionStats, kompozable_lambda, mutable_state_of};
@@ -224,8 +226,13 @@ pub struct AppCore<P: Platform> {
     /// A drag of the app's own the platform has (it left the window): its MIME types (what the window is told it
     /// carries as it comes back over it).
     own_drag: Rc<RefCell<Option<Vec<String>>>>,
-    damage_frames: i32,
-    damage_wrong: i32,
+    /// `KOMPOZ_DAMAGE_CHECK`'s frames compared and those that differed (counted as the pixels come back).
+    damage_frames: Rc<Cell<i32>>,
+    damage_wrong: Rc<Cell<i32>>,
+    /// Pixels read back still to come (a screenshot's, a damage check's: WebGPU's come a turn or two later).
+    reading: Rc<Cell<usize>>,
+    /// Screenshots read back, to write (their paths and PNG bytes).
+    written: Rc<RefCell<Vec<(String, Option<Vec<u8>>)>>>,
     keep_frames: i32,
     keep_wrong: i32,
     traced: RecompositionStats,
@@ -287,8 +294,10 @@ impl<P: Platform> AppCore<P> {
             drop_offered: None,
             drop_entry: None,
             own_drag: Rc::default(),
-            damage_frames: 0,
-            damage_wrong: 0,
+            damage_frames: Rc::default(),
+            damage_wrong: Rc::default(),
+            reading: Rc::default(),
+            written: Rc::default(),
             keep_frames: 0,
             keep_wrong: 0,
             traced: RecompositionStats::default(),
@@ -1324,6 +1333,7 @@ impl<P: Platform> AppCore<P> {
             self.in_frame.set(false);
             gpu.bitmaps.set_in_frame(false);
             renderer.borrow_mut().end_frame();
+            self.finish_writes();
             if drawn.shown && !self.media_probed {
                 self.media_probed = true;
                 self.refresh_media();
@@ -1444,13 +1454,34 @@ impl<P: Platform> AppCore<P> {
         {
             r.draw_frame(full.id(), &self.display, false);
             r.flush();
+            // (Both read back, then compared: at once where the device waits for the GPU, a turn later on WebGPU.)
             let all = IRect::new(0, 0, pw, ph);
-            let kept = r.device_mut().read_pixels(frame, all);
-            let fresh = r.device_mut().read_pixels(full.id(), all);
-            self.damage_frames += 1;
-            if let Some(why) = compare_damage(&kept, &fresh, pw, ph, damage) {
-                self.damage_wrong += 1;
-                self.platform.log(&why);
+            let pair: Rc<RefCell<(Option<Vec<u8>>, Option<Vec<u8>>)>> = Rc::default();
+            for kept in [true, false] {
+                let (pair, frames, wrong, reading) =
+                    (pair.clone(), self.damage_frames.clone(), self.damage_wrong.clone(), self.reading.clone());
+                reading.set(reading.get() + 1);
+                let texture = if kept { frame } else { full.id() };
+                r.device_mut().read_pixels_async(
+                    texture,
+                    all,
+                    Box::new(move |pixels| {
+                        reading.set(reading.get() - 1);
+                        let mut p = pair.borrow_mut();
+                        if kept {
+                            p.0 = Some(pixels);
+                        } else {
+                            p.1 = Some(pixels);
+                        }
+                        if let (Some(kept), Some(fresh)) = (&p.0, &p.1) {
+                            frames.set(frames.get() + 1);
+                            if let Some(why) = compare_damage(kept, fresh, pw, ph, damage) {
+                                wrong.set(wrong.get() + 1);
+                                log(&why);
+                            }
+                        }
+                    }),
+                );
             }
         }
         let area = drawn_area(self.display.areas(), screen.width, screen.height);
@@ -1518,8 +1549,17 @@ impl<P: Platform> AppCore<P> {
         }
         r.flush();
         if let Some(path) = shot {
-            let pixels = r.device_mut().read_pixels(frame, IRect::new(0, 0, pw, ph));
-            save_pixels(path, pw, ph, &pixels);
+            // (Written once read back: at once where the device waits for the GPU, a turn later on WebGPU.)
+            let (written, reading, path) = (self.written.clone(), self.reading.clone(), path.to_string());
+            reading.set(reading.get() + 1);
+            r.device_mut().read_pixels_async(
+                frame,
+                IRect::new(0, 0, pw, ph),
+                Box::new(move |pixels| {
+                    reading.set(reading.get() - 1);
+                    written.borrow_mut().push((path, encode_png(pw, ph, &pixels)));
+                }),
+            );
         }
         Drawn { shown: swapchain.is_some(), area }
     }
@@ -1700,6 +1740,21 @@ impl<P: Platform> AppCore<P> {
     }
 
     // ---- Quitting ----
+
+    /// The screenshots read back since written through the platform ([`Platform::write_file`]: a file; the web's
+    /// page). A frame does it after drawing; the web's loop also as the GPU hands pixels back between frames.
+    pub fn finish_writes(&mut self) {
+        let written = std::mem::take(&mut *self.written.borrow_mut());
+        for (path, png) in written {
+            let saved = png.is_some_and(|png| self.platform.write_file(&path, &png));
+            self.logf(&format!("kompoz: screenshot {path} {}", if saved { "saved" } else { "not saved" }));
+        }
+    }
+
+    /// Whether pixels read back are still to come or to be written (an app ending waits for its screenshots).
+    pub fn writing(&self) -> bool {
+        self.reading.get() > 0 || !self.written.borrow().is_empty()
+    }
 
     /// The window's native surface went away or is another (between frames): what the device made for the old one
     /// let go of now.
@@ -1941,7 +1996,8 @@ impl<P: Platform> Drop for AppCore<P> {
         if self.flags.damage_check {
             self.logf(&format!(
                 "kompoz: damage check: {} of {} frames differed",
-                self.damage_wrong, self.damage_frames
+                self.damage_wrong.get(),
+                self.damage_frames.get()
             ));
         }
         if self.flags.keep_check {

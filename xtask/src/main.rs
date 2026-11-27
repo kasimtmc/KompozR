@@ -22,6 +22,12 @@
 //! cargo xtask web-gpu-test [--firefox] [--gpu] [--release] [names…]
 //!                                kompoz-gpu's GPU tests in a headless browser on WebGPU (Chrome's SwiftShader, the
 //!                                GPU with --gpu, or Firefox), built for the web on its nightly (web_gpu_test.rs)
+//! cargo xtask web build|serve <app> [--release] [--port <n>]
+//!                                an app (counter, showcase) built for the web with its page, served (web.rs)
+//! cargo xtask web test [--firefox] [--gpu] [--release] [apps…]
+//!                                the Counter's and the showcase's scripted shots in a headless browser against
+//!                                their headless native runs' (web.rs)
+//! cargo xtask tzdata [--check]   the web's time zone database from /usr/share/zoneinfo (tzdata.rs)
 //! ```
 //!
 //! Std, and syn to read Rust sources (the workspace's own, already built for its macros): building the workspace
@@ -38,9 +44,12 @@ mod kotlin_index;
 mod material3_strings;
 mod material3_tokens;
 mod material_icons;
+mod png;
 mod sha256;
 mod shaders;
+mod tzdata;
 mod wayland;
+mod web;
 mod web_gpu_test;
 mod xml;
 
@@ -53,7 +62,8 @@ const USAGE: &str = "usage: cargo xtask shaders [--check] | cargo xtask wayland 
                      showcase-shots compare [--showcase <binary>] [--out <dir>] | cargo xtask showcase-shots reference \
                      --cpp <binary> --revision <commit> | cargo xtask web-gpu-test [--firefox] [--gpu] [--release] \
                      [names…] | cargo xtask android build|install|shots|compare … (cargo xtask android for its \
-                     usage)";
+                     usage) | cargo xtask web build|serve <app> | cargo xtask web test [--firefox] [--gpu] \
+                     [--release] [apps…] | cargo xtask tzdata [--check]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -75,6 +85,9 @@ fn main() -> ExitCode {
         ["showcase-shots", rest @ ..] => showcase_shots(rest),
         ["web-gpu-test", rest @ ..] => web_gpu_test::run(&workspace(), rest),
         ["android", rest @ ..] => android::run(&workspace(), rest),
+        ["web", rest @ ..] => web::run(&workspace(), rest),
+        ["tzdata"] => tzdata::run(&workspace(), false),
+        ["tzdata", "--check"] => tzdata::run(&workspace(), true),
         ["help" | "--help" | "-h"] => {
             println!("{USAGE}");
             Ok(())

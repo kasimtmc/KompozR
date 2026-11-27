@@ -130,6 +130,11 @@ pub fn page_object(name: &str) -> Option<JsObject> {
     JsObject::from_raw(unsafe { page_find(name.as_ptr(), name.len()) })
 }
 
+/// Now on the page's monotonic clock (`performance.now()`), in ns: the clock its events' times are on.
+pub fn now_nanos() -> i64 {
+    (monotonic_millis() * 1e6) as i64
+}
+
 fn monotonic_millis() -> f64 {
     // SAFETY: no arguments; performance.now().
     unsafe { clock_monotonic() }
@@ -148,8 +153,8 @@ pub fn query_variables() -> Vec<(String, String)> {
 }
 
 /// Starts the glue's part of the runtime (once; later calls do nothing): the page's clocks, its query string as
-/// the environment, the browser's languages and time zone, and a panic hook writing panics to the console (the
-/// web's std writes nowhere). The web platform calls it first thing; so do the tests run in a browser.
+/// the environment, the browser's languages and time zone, the embedded time zone database, and a panic hook
+/// writing panics to the console (the web's std writes nowhere). The web platform calls it first thing; so do the tests run in a browser.
 pub fn start() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -165,6 +170,11 @@ pub fn start() {
         if let Some(zone) = take_string(unsafe { page_time_zone() }).filter(|z| !z.is_empty()) {
             kompoz_runtime::environment::set_system_time_zone(Some(zone));
         }
+        // The zones' rules: the bundle embedded (the web has no zoneinfo files).
+        static TZDATA: &[u8] = include_bytes!("../tzdata/tzdata");
+        kompoz_runtime::environment::set_time_zone_database(Some(Box::new(|id: &str| {
+            crate::zone_in(TZDATA, id).map(std::borrow::Cow::Borrowed)
+        })));
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             log(Level::Error, &info.to_string());

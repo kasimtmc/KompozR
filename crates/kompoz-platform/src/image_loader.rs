@@ -354,6 +354,20 @@ pub fn load_now(model: &str, size: ImageRequestSize) -> Option<ImageBitmap> {
 
 type Done = Box<dyn FnOnce(Option<ImageBitmap>) + Send>;
 
+/// What gets an image a platform's own loader loaded.
+pub type UrlLoadDone = Done;
+
+/// A platform's own loader of http(s) images, which fetches and decodes them itself and calls `done` when it has
+/// (the web's: the browser's fetch and `createImageBitmap`).
+pub type UrlLoader = fn(&str, ImageRequestSize, UrlLoadDone);
+
+static URL_LOADER: RwLock<Option<UrlLoader>> = RwLock::new(None);
+
+/// The platform's own loader of http(s) images from now on (none: fetched with the HTTP client and decoded here).
+pub fn set_url_loader(loader: Option<UrlLoader>) {
+    *URL_LOADER.write().unwrap_or_else(|e| e.into_inner()) = loader;
+}
+
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 struct Job {
     model: String,
@@ -405,12 +419,18 @@ fn work() {
 }
 
 /// Loads `model` (a path or an http(s) URL) for `size` away from the UI thread and calls `done` with it, from a
-/// worker thread (C++'s `loadImageAsync`): three workers take the loads in turn. On the web (no threads) the load
-/// is the coroutines' background work, which runs on the UI thread between frames
+/// worker thread (C++'s `loadImageAsync`): three workers take the loads in turn. A URL goes to the platform's own
+/// loader where it has one ([`set_url_loader`]: the web's browser). On the web (no threads) a path's load is the
+/// coroutines' background work, which runs on the UI thread between frames
 /// ([`run_in_background`](kompoz_coroutines::run_in_background)), `done` called there.
 pub fn load_image_async(model: &str, size: ImageRequestSize, done: Done) {
     if stopping() {
         return;
+    }
+    if is_url(model)
+        && let Some(loader) = *URL_LOADER.read().unwrap_or_else(|e| e.into_inner())
+    {
+        return loader(model, size, done);
     }
     #[cfg(all(target_family = "wasm", target_os = "unknown"))]
     {

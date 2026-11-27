@@ -23,8 +23,10 @@
 //!
 //! [`start`] gives the runtime what the web has instead of a process's: the page's clocks, its query string as the
 //! environment (`?KOMPOZ_GPU_VALIDATION=1&LANG=tr_TR`, as C++'s web build had it), the browser's languages and time
-//! zone; and objects the page made before the module started, by name ([`page_object`]: the `GPUDevice`, which is
-//! asked for asynchronously).
+//! zone, the time zone database (the web has no zoneinfo files: `tzdata/tzdata`, every zone of the IANA database in
+//! one bundle of Android's format, made by `cargo xtask tzdata` from a system's /usr/share/zoneinfo, embedded);
+//! and objects the page made before the module started, by name ([`page_object`]: the `GPUDevice`, which is asked
+//! for asynchronously).
 //!
 //! On every other target the crate is empty.
 
@@ -33,3 +35,37 @@ mod glue;
 
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 pub use glue::*;
+
+/// The TZif bytes of zone `id` in a bundle of Android's tzdata format (a header with the version and the index's
+/// and the data's offsets; the index's 52-byte entries: a zone's name, where its bytes are in the data and how
+/// many); none if it has no zone of that name.
+pub fn zone_in<'a>(bundle: &'a [u8], id: &str) -> Option<&'a [u8]> {
+    let int = |at: usize| Some(u32::from_be_bytes(bundle.get(at..at + 4)?.try_into().ok()?) as usize);
+    let (index, data) = (int(12)?, int(16)?);
+    let entries = bundle.get(index..data)?;
+    entries.as_chunks::<52>().0.iter().find_map(|entry| {
+        let name = &entry[..40];
+        let name = &name[..name.iter().position(|&b| b == 0).unwrap_or(40)];
+        if name != id.as_bytes() {
+            return None;
+        }
+        let start = u32::from_be_bytes(entry[40..44].try_into().ok()?) as usize;
+        let length = u32::from_be_bytes(entry[44..48].try_into().ok()?) as usize;
+        bundle.get(data.checked_add(start)?..data.checked_add(start)?.checked_add(length)?)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_bundles_zones_are_found_by_name() {
+        let bundle = include_bytes!("../tzdata/tzdata");
+        assert!(bundle.starts_with(b"tzdata"));
+        let istanbul = super::zone_in(bundle, "Europe/Istanbul").expect("Europe/Istanbul");
+        assert!(istanbul.starts_with(b"TZif"));
+        // (Links share their zone's bytes.)
+        assert_eq!(super::zone_in(bundle, "Turkey"), Some(istanbul));
+        assert!(super::zone_in(bundle, "UTC").is_some());
+        assert_eq!(super::zone_in(bundle, "Nowhere/Else"), None);
+    }
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>KompozR</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+  @media (prefers-color-scheme: dark) { html, body { background: #111; } }
+  #status { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+            font: 15px/1.4 system-ui, sans-serif; color: #666; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="status">Yükleniyor…</div>
+<canvas id="kompoz"></canvas>
+<script type="module" src="app.js"></script>
+</body>
+</html>

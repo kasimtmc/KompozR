@@ -35,6 +35,8 @@ jobs:
       - run: cargo fmt --all --check
       # The API index (the macros' api-index.txt, the Kotlin syntax's index/generated.rs) as the sources say.
       - run: cargo xtask kotlin-index --check
+      # (the web's time zone database against the runner's zoneinfo: skipped where its version is another)
+      - run: cargo xtask tzdata --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
         env:
@@ -598,6 +600,8 @@ jobs:
   # strict, as natively (WebGPU always validates: any error fails the run). Chrome on SwiftShader (its CPU WebGPU, as
   # lavapipe is natively); Firefox on Mesa's lavapipe through its own WebGPU (wgpu on Vulkan). The browsers are the
   # runner image's. What differs is kept: the pictures (`<name>.actual.png`, `<name>.diff.png`) and the browser's log.
+  # Then the web platform (`cargo xtask web test`): the Counter and the showcase in the browser, run by scripts, their
+  # shots against their headless runs' on lavapipe (the same scripts, fonts and environment), within the goldens' three.
   web-gpu:
     runs-on: ubuntu-latest
     strategy:
@@ -615,13 +619,15 @@ jobs:
       # (xtask itself on stable, the default after this)
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Vulkan (the loader, Mesa's lavapipe) for Firefox's WebGPU
-        if: matrix.browser == 'firefox'
+      # (Firefox's WebGPU, and the apps' native runs the web's shots are compared with)
+      - name: Vulkan (the loader, Mesa's lavapipe)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
       - name: The GPU tests in ${{ matrix.browser }}
         run: cargo xtask web-gpu-test ${{ matrix.browser == 'firefox' && '--firefox' || '' }}
+      - name: The apps in ${{ matrix.browser }}
+        run: cargo xtask web test ${{ matrix.browser == 'firefox' && '--firefox' || '' }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -629,6 +635,8 @@ jobs:
           path: |
             target/web-gpu-test/*.png
             target/web-gpu-test/browser.log
+            target/web-test/*/*.png
+            target/web-test/*/web/browser.log
           if-no-files-found: ignore
 
   # The VS Code extension: its unit and grammar tests, and its package (kept as an artifact; publishing is by hand).

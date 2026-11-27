@@ -10,6 +10,7 @@ pub mod feature;
 #[allow(clippy::module_inception)]
 mod font;
 mod matcher;
+pub mod platform;
 mod registry;
 mod resolver;
 mod resolver_impl;

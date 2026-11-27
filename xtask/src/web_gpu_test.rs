@@ -107,16 +107,22 @@ pub fn run(workspace: &Path, args: &[&str]) -> Result<(), String> {
     result
 }
 
-/// Builds the test binary for the web; its path.
-fn build(workspace: &Path, release: bool) -> Result<PathBuf, String> {
-    let toolchain = std::env::var("KOMPOZ_WEB_TOOLCHAIN").unwrap_or_else(|_| {
+/// The toolchain the web is built with: KOMPOZ_WEB_TOOLCHAIN, else the web's pinned nightly if installed, else
+/// nightly.
+pub(crate) fn web_toolchain() -> String {
+    std::env::var("KOMPOZ_WEB_TOOLCHAIN").unwrap_or_else(|_| {
         let installed = Command::new("rustup")
             .args(["toolchain", "list"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.starts_with(WEB_NIGHTLY)))
             .unwrap_or(false);
         if installed { WEB_NIGHTLY.to_string() } else { "nightly".to_string() }
-    });
+    })
+}
+
+/// Builds the test binary for the web; its path.
+fn build(workspace: &Path, release: bool) -> Result<PathBuf, String> {
+    let toolchain = web_toolchain();
     // (rustup's cargo for the toolchain: not the one running this task, which $CARGO names.)
     let mut cargo = Command::new("cargo");
     cargo
@@ -151,14 +157,14 @@ fn build(workspace: &Path, release: bool) -> Result<PathBuf, String> {
 }
 
 /// A string field of a line of cargo's JSON (paths have no escapes but backslashes, Windows' only).
-fn json_string(line: &str, field: &str) -> Option<String> {
+pub(crate) fn json_string(line: &str, field: &str) -> Option<String> {
     let key = format!("\"{field}\":\"");
     let start = line.find(&key)? + key.len();
     let end = start + line[start..].find('"')?;
     Some(line[start..end].replace("\\\\", "\\"))
 }
 
-fn percent_encoded(s: &str) -> String {
+pub(crate) fn percent_encoded(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b',' => (b as char).to_string(),
@@ -167,7 +173,7 @@ fn percent_encoded(s: &str) -> String {
         .collect()
 }
 
-fn percent_decoded(s: &str) -> String {
+pub(crate) fn percent_decoded(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -198,7 +204,7 @@ fn browser_log(out: &Path) -> Result<Stdio, String> {
 
 /// Headless Chrome on WebGPU: SwiftShader's (Vulkan on the CPU, shipped with Chrome), or with `gpu` the machine's
 /// GPU (Vulkan), as the C++ Kompoz's web tests ran it.
-fn open_chrome(out: &Path, url: &str, gpu: bool) -> Result<Child, String> {
+pub(crate) fn open_chrome(out: &Path, url: &str, gpu: bool) -> Result<Child, String> {
     let binary = std::env::var_os("KOMPOZ_CHROME")
         .map(PathBuf::from)
         .or_else(|| on_path(&["google-chrome-stable", "google-chrome", "chromium", "chromium-browser"]))
@@ -210,12 +216,17 @@ fn open_chrome(out: &Path, url: &str, gpu: bool) -> Result<Child, String> {
         .arg("--headless=new")
         .arg(format!("--user-data-dir={}", profile.display()))
         .args(["--no-first-run", "--no-default-browser-check", "--disable-extensions", "--no-sandbox"])
+        // (Room for an app's window, its pixels the CSS pixels.)
+        .args(["--window-size=1000,1000", "--force-device-scale-factor=1"])
         .args(["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--disable-gpu-watchdog"]);
+    // (A canvas WebGPU presents to is shared with the compositor: only a compositor on Vulkan too (ANGLE's) shares
+    // it in headless Chrome; on GL its device is lost as the canvas is first configured.)
+    chrome.arg("--use-angle=vulkan");
     if gpu {
-        // (Headless Chrome keeps to software unless told the GPU is fine: its blocklist, ANGLE on Vulkan.)
+        // (Headless Chrome keeps to software unless told the GPU is fine: its blocklist.)
         chrome.args(["--ignore-gpu-blocklist", "--enable-gpu"]);
     } else {
-        chrome.arg("--use-webgpu-adapter=swiftshader");
+        chrome.args(["--use-webgpu-adapter=swiftshader", "--use-vulkan=swiftshader"]);
     }
     let log = browser_log(out)?;
     chrome.arg(url).stdout(Stdio::null()).stderr(log).spawn().map_err(|e| format!("Chrome: {e}"))
@@ -223,7 +234,7 @@ fn open_chrome(out: &Path, url: &str, gpu: bool) -> Result<Child, String> {
 
 /// Headless Firefox with WebGPU on (its own pref, and past the blocklist: a CI machine's GPU is a software one),
 /// JSPI and wasm's exception references, in a profile of its own.
-fn open_firefox(out: &Path, url: &str) -> Result<Child, String> {
+pub(crate) fn open_firefox(out: &Path, url: &str) -> Result<Child, String> {
     let binary = std::env::var_os("KOMPOZ_FIREFOX")
         .map(PathBuf::from)
         .or_else(|| on_path(&["firefox", "firefox-esr"]))
@@ -246,7 +257,7 @@ fn open_firefox(out: &Path, url: &str) -> Result<Child, String> {
     std::fs::write(profile.join("user.js"), user).map_err(|e| format!("user.js: {e}"))?;
     let log = browser_log(out)?;
     Command::new(binary)
-        .args(["--headless", "--no-remote", "--profile"])
+        .args(["--headless", "--no-remote", "--width=1000", "--height=1000", "--profile"])
         .arg(&profile)
         .arg(url)
         .stdout(Stdio::null())

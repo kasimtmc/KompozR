@@ -1,0 +1,5 @@
+NotoSans-Regular.ttf, NotoSans-Medium.ttf, NotoSans-Bold.ttf = Noto Sans Regular, Medium and Bold (2.015)
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+Licensed under the SIL Open Font License, Version 1.1: the full text is in OFL.txt.
+Copied from the C++ Kompoz's assets/fonts (the fonts its web build bundled): the web platform's default family,
+embedded in an app's module (the web has no fonts of the system's to read); what they lack the browser draws.

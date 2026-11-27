@@ -6,14 +6,15 @@
 //! [`accessibility`]), what Linux and Android share of the kernel (`unix`: eventfds, timerfds, the monotonic clock,
 //! the waker), on Linux what its platforms share: the event loop, the kernel's other facilities, keyboards through
 //! xkbcommon (`linux`); what the app offers other apps through the clipboard and drags (`transfer`, Linux's,
-//! Windows' and macOS's); the Windows platform (`windows`: Win32); the macOS platform (`macos`: AppKit); and the
-//! Android platform ([`android`]: the app's library, its natives, the activity's surface, frames and lifecycle; its
-//! input's decoding built on every target).
+//! Windows', macOS's and the web's); the Windows platform (`windows`: Win32); the macOS platform (`macos`: AppKit);
+//! the web platform (`web`: the page's canvas, WebGPU, our own JavaScript glue); and the Android platform
+//! ([`android`]: the app's library, its natives, the activity's surface, frames and lifecycle; its input's decoding
+//! built on every target).
 //!
 //! `unsafe` code is confined to `unix::sys`, `linux::sys`, `windows::sys` and the FFI modules (`linux::xkb`'s,
 //! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface and
-//! WinHTTP, `android`'s JNI, NDK, natives and Vulkan surface) and the macOS platform's that define or call
-//! Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:` comment; everything else is safe.
+//! WinHTTP, `android`'s JNI, NDK, natives and Vulkan surface, `web::sys`) and the macOS platform's that define or
+//! call Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:` comment; everything else is safe.
 
 //!
 //! What an app's build script adds to its program for a platform (the Windows program's resources) is [`build`]'s,
@@ -40,10 +41,20 @@ pub mod linux;
 pub mod macos;
 #[cfg(feature = "platform")]
 pub mod system;
-#[cfg(all(feature = "platform", any(target_os = "linux", windows, target_os = "macos")))]
+#[cfg(all(
+    feature = "platform",
+    any(target_os = "linux", windows, target_os = "macos", all(target_family = "wasm", target_os = "unknown"))
+))]
 pub mod transfer;
 #[cfg(all(feature = "platform", any(target_os = "linux", target_os = "android")))]
 pub mod unix;
+// (The web's: on its target, and its parts that are plain Rust in the tests on Linux and Windows, which have the
+// clipboard's `transfer` it shares.)
+#[cfg(all(
+    feature = "platform",
+    any(all(target_family = "wasm", target_os = "unknown"), all(test, any(target_os = "linux", windows)))
+))]
+pub mod web;
 #[cfg(all(feature = "platform", windows))]
 pub mod windows;
 

@@ -14,6 +14,9 @@
 //!   that was a color font.
 //! - Control characters stay in the typeface's own face.
 //!
+//! - What no font has, the platform draws where it has a text engine of its own (the web's browser: a [platform
+//!   font](super::platform), in colour for emoji); else the typeface's own face (its missing glyph).
+//!
 //! The candidates, in order: the fallback families for the cluster's script in each of the text's locales that
 //! writes it its own way (Persian's Arabic, Japanese Han), then in none (fontconfig's choice for the system's
 //! fonts), the typeface's generic family (all its fonts, the
@@ -157,6 +160,16 @@ impl FontFallback {
                     },
                 };
                 (FontInstance { font: face.font, coords, size: request.size, synthesis }, read)
+            }
+            // No font has it: the platform's text engine's, where it has one.
+            None if !has && super::platform::platform_glyphs().is_some() => {
+                let style = super::platform::PlatformStyle {
+                    weight: typeface.weight.weight.clamp(1, 1000) as u16,
+                    italic: typeface.style == FontStyle::Italic,
+                    color: emoji,
+                };
+                let font = super::platform::platform_font(style);
+                (FontInstance { font, coords: Rc::from([]), size: request.size, synthesis: GlyphSynthesis::None }, None)
             }
             None => (primary.clone(), primary_face.cloned()),
         }

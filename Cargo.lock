@@ -854,6 +854,7 @@ dependencies = [
  "kompoz-test",
  "kompoz-text",
  "kompoz-ui",
+ "kompoz-web",
  "libc",
  "objc2",
  "objc2-app-kit",

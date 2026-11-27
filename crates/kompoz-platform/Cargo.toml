@@ -1,6 +1,6 @@
 [package]
 name = "kompoz-platform"
-description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts, its own title bar), the app entry, the headless platform, and on Linux the event loop, keyboards, desktop services and the Wayland (with its own decorations) and X11 platforms"
+description = "KompozR's platforms: the app core (frames, events, the kept frame drawn by the GPU renderer, scripts, its own title bar), the app entry, the headless platform, on Linux the event loop, keyboards, desktop services and the Wayland (with its own decorations) and X11 platforms, the Windows platform, and the web platform (the page's canvas through our own JavaScript glue)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -22,6 +22,7 @@ platform = [
     "dep:kompoz-runtime",
     "dep:kompoz-text",
     "dep:kompoz-ui",
+    "dep:kompoz-web",
     "dep:libc",
     "dep:windows",
     "dep:block2",
@@ -47,6 +48,10 @@ kompoz-ui = { path = "../kompoz-ui", optional = true }
 # The unix module (Linux and Android): eventfd, timerfd, poll, dlopen.
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }
+
+# (stage 15) The web platform: the page through our own JavaScript glue (kompoz-web), as the WebGPU device's.
+[target.'cfg(target_family = "wasm")'.dependencies]
+kompoz-web = { path = "../kompoz-web", optional = true }
 
 # (stage 15) The Windows platform: Win32 through the `windows` crate's bindings (the version fontique's DirectWrite
 # backend already brings), every behaviour our own (windows/).

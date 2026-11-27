@@ -17,6 +17,7 @@ use super::outline::{GlyphStroke, GlyphStyle, Hinting, glyf_tags, hint_engine, l
 use super::raster::{Coverage, FixedOutline};
 use kompoz_graphics::{DrawStyle, Offset, PathEffect, StrokeCap, StrokeJoin};
 use kompoz_text::draw::{GlyphColorKind, GlyphRun, TextDraw};
+use kompoz_text::font::platform::{self, PlatformStyle};
 use kompoz_text::font::{FontBytes, FontId, FontRegistry};
 use kompoz_text::style::Linearity;
 use skrifa::font::glyph::outline::OutlineSource;
@@ -414,6 +415,9 @@ impl GlyphCache {
         k: f32,
         out: &mut Vec<GlyphQuad>,
     ) {
+        if let Some(style) = platform::platform_style(run.font) {
+            return self.layout_platform_run(run, style, blur, request, k, out);
+        }
         let Some(face) = self.face(run.font, &run.coords) else {
             return;
         };
@@ -477,6 +481,108 @@ impl GlyphCache {
                 color: cached.color,
             });
         }
+    }
+
+    /// A run of a platform font (kompoz-text's [`platform`]: what no font has, drawn by the platform's text engine,
+    /// the web's browser): its glyphs' pixels as the platform draws them at the size drawn, a mask (its coverage
+    /// tinted as an outline glyph's, blurred for a shadow) or colour (emoji), placed on whole pixels.
+    fn layout_platform_run(
+        &mut self,
+        run: &GlyphRun,
+        style: PlatformStyle,
+        blur: Option<u32>,
+        request: &GlyphRequest,
+        k: f32,
+        out: &mut Vec<GlyphQuad>,
+    ) {
+        let px = ((run.size * k).round() as i64).max(1) as u32;
+        let at = if k != 1.0 && run.size > 0.0 { px as f32 / run.size } else { k };
+        let mut spec = GlyphSpec::new(px);
+        spec.blur = blur;
+        // (A face number of its own for each platform style: past every font's.)
+        let face = usize::MAX - (platform::platform_font(style).0 & 0xFFFF) as usize;
+        for g in &run.glyphs {
+            let Some(cached) = self.platform_glyph(face, style, g.id, &spec) else { continue };
+            let Some((slot, _)) = cached.slot else { continue };
+            if request.shadow.is_some() && cached.color {
+                continue;
+            }
+            self.atlas.use_page(slot.page);
+            let x0 = (request.origin.x * k + g.x * at).round() + cached.left as f32;
+            let y0 = (request.origin.y * k + g.y * at).round() - cached.top as f32;
+            out.push(GlyphQuad {
+                x0,
+                y0,
+                x1: x0 + cached.width as f32,
+                y1: y0 + cached.height as f32,
+                page: slot.page,
+                u: slot.u,
+                v: slot.v,
+                width: cached.width,
+                height: cached.height,
+                color: cached.color,
+            });
+        }
+    }
+
+    /// A platform font's glyph, from the cache while it is on the atlas, else drawn by the platform and put there.
+    fn platform_glyph(
+        &mut self,
+        face: usize,
+        style: PlatformStyle,
+        glyph: u32,
+        spec: &GlyphSpec,
+    ) -> Option<CachedGlyph> {
+        let key = GlyphKey::new(face, glyph, spec);
+        if let Some(g) = self.glyphs.get(&key).copied()
+            && g.slot.is_none_or(|(slot, generation)| self.atlas.valid(slot.page, generation))
+        {
+            return Some(g);
+        }
+        let engine = platform::platform_glyphs()?;
+        let text = platform::glyph_text(glyph)?;
+        let image = engine.draw(&text, style, spec.px);
+        self.rasterized += 1;
+        let mut cached =
+            CachedGlyph { left: 0, top: 0, width: 0, height: 0, slot: None, color: false, uses_foreground: false };
+        let image = image.filter(|i| i.width > 0 && i.height > 0 && i.rgba.len() >= i.width * i.height * 4);
+        let image = image.map(|i| {
+            if style.color {
+                GlyphImage::Color(ColorImage {
+                    left: i.left,
+                    top: i.top,
+                    width: i.width,
+                    height: i.height,
+                    rgba: i.rgba,
+                })
+            } else {
+                let alpha = i.rgba.as_chunks::<4>().0.iter().map(|p| p[3]).collect();
+                let c = Coverage { left: i.left, top: i.top, width: i.width, height: i.height, alpha };
+                GlyphImage::Coverage(match spec.blur {
+                    Some(radius) if radius > 0 => blurred(&c, radius),
+                    _ => c,
+                })
+            }
+        });
+        if let Some(image) = image {
+            let (format, left, top, w, h, pixels, color) = match &image {
+                GlyphImage::Coverage(c) => (PageFormat::Coverage, c.left, c.top, c.width, c.height, &c.alpha, false),
+                GlyphImage::Color(c) => (PageFormat::Rgba, c.left, c.top, c.width, c.height, &c.rgba, true),
+            };
+            if let Some(slot) = self.atlas.add(format, pixels, w as u32, h as u32) {
+                cached = CachedGlyph {
+                    left,
+                    top,
+                    width: w as u32,
+                    height: h as u32,
+                    slot: Some((slot, self.atlas.generation(slot.page))),
+                    color,
+                    uses_foreground: false,
+                };
+            }
+        }
+        self.glyphs.insert(key, cached);
+        Some(cached)
     }
 
     /// Glyph `glyph` of face `face` as `spec` asks, from the cache if it is still on the atlas, else rasterized and

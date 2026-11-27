@@ -114,7 +114,14 @@ pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::linux::wayland::PLATF
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::windows::PLATFORM];
 #[cfg(target_os = "macos")]
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::macos::PLATFORM];
-#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::web::PLATFORM];
+#[cfg(not(any(
+    target_os = "linux",
+    windows,
+    target_os = "macos",
+    all(target_family = "wasm", target_os = "unknown")
+)))]
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[];
 
 /// A KompozR app (C++'s Application and main): `App::new(title).size(w, h).run(content)`.
@@ -162,7 +169,7 @@ impl App {
 
     /// Runs the app until it quits; what the program returns (C++'s main): headless with `KOMPOZ_HEADLESS=1`, else
     /// on the display platforms built in, in order (`KOMPOZ_PLATFORM=x11` and the like: that one only), the first
-    /// that can run here.
+    /// that can run here. On the web it returns as the app starts (the page runs it on: [`web`](crate::web)).
     pub fn run(self, content: impl Content + 'static) -> ExitCode {
         self.run_content(AppContent::Window(Rc::new(content)))
     }
