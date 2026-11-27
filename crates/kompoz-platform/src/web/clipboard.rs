@@ -145,10 +145,14 @@ mod tests {
         let items = [item(true, "text/csv", "a.csv"), item(false, "text/uri-list", "")];
         let data = [b"1,2".to_vec(), b"https://example.org/".to_vec()];
         let entry = entry_of(&items, "drop", |i| data.get(i).cloned()).unwrap();
-        let files = entry.items()[0].files();
-        assert_eq!(files.len(), 1);
-        assert!(files[0].starts_with("/drop/") && files[0].ends_with("/a.csv"), "{files:?}");
-        assert_eq!(files::read(&files[0]), Some(b"1,2".to_vec()));
+        // (Its URI's path the web's memory's; read here as the web reads it, since the host running these tests
+        // writes paths its own way — Windows' with a drive and backslashes.)
+        let uris = entry.items()[0].uris();
+        assert_eq!(uris.len(), 1);
+        let path = uris[0].find("/drop/").map_or("", |at| &uris[0][at..]);
+        assert!(path.ends_with("/a.csv"), "{uris:?}");
+        assert_eq!(entry.items()[0].files().len(), 1);
+        assert_eq!(files::read(path), Some(b"1,2".to_vec()));
         assert_eq!(entry.items()[0].bytes("text/csv").as_deref(), Some(&b"1,2"[..]));
         assert_eq!(entry.items().len(), 1, "a file's drop's links are its files'");
 

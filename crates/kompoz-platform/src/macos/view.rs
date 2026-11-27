@@ -19,8 +19,8 @@ use objc2::runtime::{AnyObject, NSObject, ProtocolObject, Sel};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingSession,
-    NSDraggingSource, NSEvent, NSResponder, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSDraggingSource, NSEvent, NSResponder, NSScreen, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView,
+    NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSAttributedString, NSAttributedStringKey, NSNotification, NSObjectProtocol, NSPoint, NSRange,
@@ -572,7 +572,7 @@ pub struct WindowIvars {
 }
 
 define_class!(
-    // SAFETY: NSWindow's subclassing rules are kept (only two questions answered); no Drop.
+    // SAFETY: NSWindow's subclassing rules are kept (two questions answered, the frame's constraint refined); no Drop.
     #[unsafe(super(NSWindow, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "KompozWindow"]
@@ -588,6 +588,17 @@ define_class!(
         #[unsafe(method(canBecomeMainWindow))]
         fn can_become_main_window(&self) -> bool {
             self.ivars().focusable.get()
+        }
+
+        /// AppKit's own constraint for where the window goes (its title bar kept below the menu bar, on a screen),
+        /// its size kept as asked: a window taller than the screen reaches below it, as on Windows and X11, rather
+        /// than being cut to the screen (the app's size, a script's resize, are what it draws at).
+        #[unsafe(method(constrainFrameRect:toScreen:))]
+        fn constrain_frame_rect(&self, rect: NSRect, screen: Option<&NSScreen>) -> NSRect {
+            // SAFETY: NSWindow's own method, with the arguments AppKit gave this override.
+            let placed: NSRect = unsafe { msg_send![super(self), constrainFrameRect: rect, toScreen: screen] };
+            let top = placed.origin.y + placed.size.height;
+            NSRect::new(NSPoint::new(placed.origin.x, top - rect.size.height), rect.size)
         }
     }
 
