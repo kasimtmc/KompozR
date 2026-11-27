@@ -15,6 +15,10 @@
 //! cargo xtask showcase-shots compare|reference …
 //!                                the showcase's shots against the C++ Kompoz showcase's: builds the showcase
 //!                                (release) and runs its showcase-shots with the rest (examples/showcase, shots.rs)
+//! cargo xtask android build|install|shots|compare …
+//!                                the showcase on Android: its APK built (Gradle offline, the library by
+//!                                cargo-ndk), installed, run by a script on a device or emulator, its shots pulled
+//!                                and compared with its headless run's on the device (android.rs)
 //! cargo xtask web-gpu-test [--firefox] [--gpu] [--release] [names…]
 //!                                kompoz-gpu's GPU tests in a headless browser on WebGPU (Chrome's SwiftShader, the
 //!                                GPU with --gpu, or Firefox), built for the web on its nightly (web_gpu_test.rs)
@@ -25,6 +29,7 @@
 
 // (the API index's text format, shared with kompoz-macros, which reads it)
 mod adaptive_strings;
+mod android;
 #[path = "../../crates/kompoz-macros/src/api_index.rs"]
 mod api_index;
 mod compose_l10n;
@@ -47,7 +52,8 @@ const USAGE: &str = "usage: cargo xtask shaders [--check] | cargo xtask wayland 
                      cargo xtask adaptive-strings [--check] | cargo xtask material-icons [--check] | cargo xtask \
                      showcase-shots compare [--showcase <binary>] [--out <dir>] | cargo xtask showcase-shots reference \
                      --cpp <binary> --revision <commit> | cargo xtask web-gpu-test [--firefox] [--gpu] [--release] \
-                     [names…]";
+                     [names…] | cargo xtask android build|install|shots|compare … (cargo xtask android for its \
+                     usage)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -68,6 +74,7 @@ fn main() -> ExitCode {
         ["material-icons", "--check"] => material_icons::run(&workspace(), true),
         ["showcase-shots", rest @ ..] => showcase_shots(rest),
         ["web-gpu-test", rest @ ..] => web_gpu_test::run(&workspace(), rest),
+        ["android", rest @ ..] => android::run(&workspace(), rest),
         ["help" | "--help" | "-h"] => {
             println!("{USAGE}");
             Ok(())

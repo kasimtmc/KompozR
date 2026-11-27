@@ -1,0 +1,2 @@
+# Gradle's builds of the module (from an app's project that includes it)
+/build/

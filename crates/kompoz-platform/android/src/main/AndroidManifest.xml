@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- KompozR's Android side declares no component of its own: an app's manifest declares its activity
+     (KompozActivity or its own extending it). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -1,3 +1,5 @@
 # LF everywhere, Windows checkouts too: the sources are read as text by tests and macros (shaders, Kotlin goldens,
 # icon data, the checked-in index) that compare them byte for byte.
 * text=auto eol=lf
+# Windows batch files keep CRLF (cmd.exe reads them by lines ending so).
+*.bat text eol=crlf

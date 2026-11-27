@@ -53,6 +53,8 @@ pub use kompoz_navigation3 as navigation3;
 // (stage 13: androidx.navigationevent and androidx.navigationevent.compose)
 pub use kompoz_navigationevent as navigationevent;
 pub use kompoz_platform as platform;
+// (stage 15 A0: an app's entry on Android, JNI_OnLoad for its library: `kompoz::android_app!(App::new(…), Content)`)
+pub use kompoz_platform::android_app;
 // (stage 13 WP-R: Compose Multiplatform's resources; Coil's AsyncImage)
 pub use kompoz_coil as coil;
 pub use kompoz_resources as resources;

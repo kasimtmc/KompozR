@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- KompozR draws with Vulkan 1.1 (Android 10, the app's minSdk, has it on every 64-bit device it launched on). -->
+    <uses-feature
+        android:name="android.hardware.vulkan.version"
+        android:required="true"
+        android:version="0x401000" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <!-- AsyncImage loads images from the network when asked to. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:icon="@drawable/ic_launcher"
+        android:label="KompozR"
+        android:theme="@style/KompozTheme">
+
+        <!-- configChanges keeps the activity (and the app in it) across rotation, the window's size, the density,
+             dark mode, the language, the text size and the keyboard: KompozR lays out again. -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="density|fontScale|fontWeightAdjustment|grammaticalGender|keyboard|keyboardHidden|layoutDirection|locale|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:preferMinimalPostProcessing="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- The app's library: libshowcase.so (KompozActivity loads it). -->
+            <meta-data
+                android:name="dev.kompozr.library"
+                android:value="showcase" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

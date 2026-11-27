@@ -97,3 +97,7 @@ pub use text_fields::*;
 
 /// Where the app runs, for what differs (a phone has no hardware keyboard): the C++ showcase's `kOnAndroid`.
 pub const on_android: bool = cfg!(target_os = "android");
+
+// The showcase on Android: this library built as the app's `libshowcase.so` (a cdylib, by cargo-ndk from the Gradle
+// project in android/: `cargo xtask android`), its activity showing what the desktop program's window does.
+kompoz::android_app!(kompoz::platform::App::new("Kompoz Showcase"), ShowcaseApp);

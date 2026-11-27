@@ -326,6 +326,63 @@ jobs:
               -- -A clippy::missing_const_for_thread_local
           done
 
+  # Android (stage 15 A0): clippy for both of the app's targets, strict; then the showcase's APK as an app builds it
+  # (examples/showcase/android: Gradle with AGP 9.5.1 and Kotlin 2.4.21, its caches kept between runs; KompozR's
+  # Kotlin side, the `:kompoz` module; the showcase's library for arm64-v8a and x86_64 by cargo-ndk from the app's
+  # build, in the `android` profile), kept as an artifact. Running it on an emulator is the android-emulator job's
+  # (A4).
+  android:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "29.0.14206865"
+      CARGO_NDK_VERSION: "4.1.2"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-linux-android, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (aarch64-linux-android, x86_64-linux-android)
+        run: |
+          for target in aarch64-linux-android x86_64-linux-android; do
+            cargo clippy --workspace --all-targets --target "$target" -- -D warnings -A clippy::missing_const_for_thread_local
+          done
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/cache@v4
+        id: ndk
+        with:
+          # (the runner's ANDROID_HOME: the env context has only the workflow's own variables)
+          path: /usr/local/lib/android/sdk/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}
+      - name: The NDK (the app's ndkVersion), the SDK's platform 36
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          packages=("platforms;android-36")
+          [ -d "$ANDROID_HOME/ndk/$NDK_VERSION" ] || packages+=("ndk;$NDK_VERSION")
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "${packages[@]}" > /dev/null
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --version "$CARGO_NDK_VERSION" --locked
+      - name: The showcase's APK (both ABIs)
+        working-directory: examples/showcase/android
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Its library's natives registered by name (JNI_OnLoad exported, the Kotlin classes' natives in it)
+        run: |
+          for abi in arm64-v8a x86_64; do
+            so=examples/showcase/android/app/build/rustJniLibs/$abi/libshowcase.so
+            "$ANDROID_HOME/ndk/$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D --defined-only "$so" \
+              | grep -q ' T JNI_OnLoad$' || { echo "$so: no JNI_OnLoad"; exit 1; }
+          done
+          unzip -l examples/showcase/android/app/build/outputs/apk/debug/app-debug.apk | grep -E 'lib/(arm64-v8a|x86_64)/libshowcase.so'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kompozr-showcase-android
+          path: examples/showcase/android/app/build/outputs/apk/debug/app-debug.apk
+
   # The Windows platform on windows-latest (MSVC, the runner's own target): clippy for Windows' cfg; then on Mesa's
   # lavapipe as mesa-dist-win builds it for Windows (cached; registered as the system's Vulkan driver: the runner is
   # elevated, so the loader ignores VK_DRIVER_FILES; the runner's own driver has no surfaces) the workspace's tests

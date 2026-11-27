@@ -6,12 +6,14 @@
 //! [`accessibility`]), what Linux and Android share of the kernel (`unix`: eventfds, timerfds, the monotonic clock,
 //! the waker), on Linux what its platforms share: the event loop, the kernel's other facilities, keyboards through
 //! xkbcommon (`linux`); what the app offers other apps through the clipboard and drags (`transfer`, Linux's,
-//! Windows' and macOS's); the Windows platform (`windows`: Win32); and the macOS platform (`macos`: AppKit).
+//! Windows' and macOS's); the Windows platform (`windows`: Win32); the macOS platform (`macos`: AppKit); and the
+//! Android platform ([`android`]: the app's library, its natives, the activity's surface, frames and lifecycle; its
+//! input's decoding built on every target).
 //!
 //! `unsafe` code is confined to `unix::sys`, `linux::sys`, `windows::sys` and the FFI modules (`linux::xkb`'s,
 //! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface and
-//! WinHTTP) and the macOS platform's that define or call Objective-C classes through objc2 (`macos`), each block
-//! with a `// SAFETY:` comment; everything else is safe.
+//! WinHTTP, `android`'s JNI, NDK, natives and Vulkan surface) and the macOS platform's that define or call
+//! Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:` comment; everything else is safe.
 
 //!
 //! What an app's build script adds to its program for a platform (the Windows program's resources) is [`build`]'s,
@@ -21,6 +23,8 @@
 
 #[cfg(feature = "platform")]
 pub mod accessibility;
+#[cfg(feature = "platform")]
+pub mod android;
 #[cfg(feature = "platform")]
 pub mod app;
 pub mod build;

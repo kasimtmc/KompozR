@@ -20,3 +20,10 @@ type_complexity = "allow"
 # Animation specs (and anchors) are shared as `Arc<dyn …>` whatever they hold, as Compose's are any objects: a spec
 # of a value that isn't `Send` (or wrapping a shared spec) is an `Arc` that isn't `Send` either, and that's as meant.
 arc_with_non_send_sync = "allow"
+
+# (stage 15 A0) The Android app's library, built by cargo-ndk from its Gradle project (examples/showcase/android):
+# optimized as a release build (an unoptimized one can't keep up with the display), its line tables kept for the
+# backtraces a panic logs (the APK's copy is stripped by AGP; this one symbolizes them with llvm-addr2line).
+[profile.android]
+inherits = "release"
+debug = "line-tables-only"
