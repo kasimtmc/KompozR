@@ -358,6 +358,7 @@ fn the_platforms_events_are_the_hosts_input() {
                 match label {
                     "scroll" => entry += &format!(" d{},{}", c.scroll_delta.x, c.scroll_delta.y),
                     "scale" => entry += &format!(" x{:.4} r{}", c.scale_factor, c.rotation),
+                    "pan" => entry += &format!(" o{},{}", c.pan_offset.x, c.pan_offset.y),
                     _ => entry += &format!(" {:?}", c.r#type),
                 }
                 if matches!(c.r#type, PointerType::Stylus | PointerType::Eraser) {
@@ -378,6 +379,7 @@ fn the_platforms_events_are_the_hosts_input() {
             .on_pointer_event(PointerEventType::Release, on_event = record("release"))
             .on_pointer_event(PointerEventType::Scroll, on_event = record("scroll"))
             .on_pointer_event(PointerEventType::ScaleChange, on_event = record("scale"))
+            .on_pointer_event(PointerEventType::PanMove, on_event = record("pan"))
             .drag_and_drop_target(|_: &DragAndDropEvent| true, drops.clone()));
     });
     let mut core = started(platform, 300.0, 300.0, content);
@@ -411,6 +413,11 @@ fn the_platforms_events_are_the_hosts_input() {
     core.handle(&Event::PinchEnd { x: 20.0, y: 20.0 });
     assert_eq!(taken(&log), ["scale 15,30 x1.2100 r0", "scale 15,30 x1.0000 r-15", "scale 30,30 x1.5000 r10"]);
     assert_eq!(core.host().unwrap().keyboard_modifiers(), ctrl | KeyModifiers::Shift); // (what the wheel carried)
+    // A touchpad's pan (Windows' DirectManipulation): its offsets in px, about the pointer.
+    core.handle(&Event::PanBegin { x: 20.0, y: 20.0 });
+    core.handle(&Event::Pan { x: 20.0, y: 20.0, dx: 2.0, dy: -4.0 });
+    core.handle(&Event::PanEnd { x: 20.0, y: 20.0 });
+    assert_eq!(taken(&log), ["pan 30,30 o3,-6"]);
     // A finger: pressed and lifted (and hovering no more).
     core.handle(&Event::TouchDown { pointer: 3, x: 40.0, y: 40.0, time: -1 });
     core.handle(&Event::TouchUp { pointer: 3, x: 40.0, y: 40.0, time: -1 });

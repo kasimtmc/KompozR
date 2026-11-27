@@ -60,7 +60,8 @@ pub mod web;
 pub mod windows;
 
 // The Windows platform's transfer formats (the clipboard's and drag and drop's), its input methods' translations
-// (what they see of a field, what they do to it) and UI Automation's view of the semantics tree, tested on every host.
+// (what they see of a field, what they do to it), UI Automation's view of the semantics tree, its pens' and fingers'
+// reports and its touchpads' gestures as events, tested on every host.
 #[cfg(all(test, feature = "platform", not(windows)))]
 #[allow(dead_code)]
 #[path = "windows"]
@@ -69,6 +70,8 @@ mod windows_tested_here {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     mod formats;
     mod ime;
+    mod manipulation;
+    mod pointer;
     mod uia;
 }
 

@@ -1751,6 +1751,7 @@ kompoz-runtime/macros kompozable ScopeItems r crates/kompoz-runtime/tests/macros
 * super ScopeObserver - LifecycleObserver
 kompoz-navigation3/navigation3 kompozable Screen r crates/kompoz-navigation3/tests/navigation3.rs
 kompoz-platform/ole_windows kompozable Screen - crates/kompoz-platform/tests/ole_windows.rs
+kompoz-platform/pointer_windows kompozable Screen - crates/kompoz-platform/tests/pointer_windows.rs
 kompoz-platform/uia_windows kompozable Screen - crates/kompoz-platform/tests/uia_windows.rs
 * kompozable Scrim rdddd crates/kompoz-material3/src/scrim.rs
 * super ScrollLayoutElement - ModifierNodeElement

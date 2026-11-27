@@ -1107,6 +1107,15 @@ impl<P: Platform> AppCore<P> {
             &Event::PinchEnd { x, y } => {
                 host.scale(self.to_px(x, y), PointerEventType::ScaleEnd, 1.0, 0.0);
             }
+            &Event::PanBegin { x, y } => {
+                host.pan(self.to_px(x, y), PointerEventType::PanStart, Offset::Zero);
+            }
+            &Event::Pan { x, y, dx, dy } => {
+                host.pan(self.to_px(x, y), PointerEventType::PanMove, self.to_px(dx, dy));
+            }
+            &Event::PanEnd { x, y } => {
+                host.pan(self.to_px(x, y), PointerEventType::PanEnd, Offset::Zero);
+            }
             Event::Text(text) => {
                 host.text_input(text);
             }
@@ -1989,6 +1998,9 @@ fn is_input(e: &Event) -> bool {
                 | Event::PinchBegin { .. }
                 | Event::Pinch { .. }
                 | Event::PinchEnd { .. }
+                | Event::PanBegin { .. }
+                | Event::Pan { .. }
+                | Event::PanEnd { .. }
                 | Event::Text(_)
                 | Event::Preedit { .. }
                 | Event::DeleteSurroundingText { .. }

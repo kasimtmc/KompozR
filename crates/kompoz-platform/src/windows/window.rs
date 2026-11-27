@@ -12,7 +12,9 @@ use super::clipboard::Clipboard;
 use super::event_loop::{EventLoop, Waker};
 use super::input_method::{self, InputMethod};
 use super::keyboard::{self, Characters, VK_CONTROL, VK_F4, VK_MENU, VK_SPACE};
+use super::manipulation::{self, Manipulation};
 use super::ole::{self, DropAnswers, DropTarget, OwnDrag};
+use super::pointer::{self, PointerInput};
 use super::sys::{self, Cursor, Hwnd, Icon, Placed, WindowHandler, WindowMessage};
 use super::uia_bridge::{UiaAction, UiaBridge};
 use super::{Route, StepKind, now, route};
@@ -368,6 +370,12 @@ pub struct WindowState {
     /// Its semantics tree to publish to UI Automation (it changed), and when it was last (the platform's clock).
     uia_dirty: Cell<bool>,
     uia_last: Cell<Option<i64>>,
+    /// Its pens and fingers (WM_POINTER).
+    pointer: PointerInput,
+    /// The icon a pen hovering over it shows (the host's; none: the mouse's).
+    stylus_icon: Cell<Option<PointerIcon>>,
+    /// Its touchpads' pinches and pans while it is open (none: DirectManipulation isn't there, or is off).
+    manipulation: RefCell<Option<Manipulation>>,
 }
 
 impl WindowState {
@@ -399,6 +407,9 @@ impl WindowState {
             drop: Rc::default(),
             uia_dirty: Cell::new(true),
             uia_last: Cell::new(None),
+            pointer: PointerInput::default(),
+            stylus_icon: Cell::new(None),
+            manipulation: RefCell::new(None),
         }
     }
 
@@ -459,6 +470,9 @@ impl WindowState {
     /// The mouse (C++'s `mouse`): moves (WM_MOUSELEAVE asked for as it comes in), its buttons (the mouse captured
     /// while any is held: their release comes outside the window too).
     fn mouse(&self, hwnd: Hwnd, message: u32, w: usize, l: isize) -> isize {
+        if pointer::made_of_a_pen_or_a_finger(sys::message_extra_info()) {
+            return 0; // (had as WM_POINTER already)
+        }
         let (x, y) = point_of(l);
         let (x, y, modifiers, time) = self.modifiers_event_at(x, y);
         if message == wm::WM_MOUSEMOVE {
@@ -702,10 +716,46 @@ impl WindowHandler for WindowState {
                 if l & 0xffff != HTCLIENT {
                     return None;
                 }
-                if let Some(c) = shared.cursor(self.cursor.get()) {
+                // (A pen's hover icon while one is near, unless the mouse moved: what it sets the cursor for.)
+                let by = ((l >> 16) & 0xffff) as u32;
+                let icon = if self.pointer.pen_near() && !(wm::WM_MOUSEFIRST..=wm::WM_MOUSELAST).contains(&by) {
+                    self.stylus_icon.get().unwrap_or(self.cursor.get())
+                } else {
+                    self.cursor.get()
+                };
+                if let Some(c) = shared.cursor(icon) {
                     c.show();
                 }
                 Some(1)
+            }
+            // Pens and fingers; a touchpad's contacts to DirectManipulation.
+            wm::WM_POINTERDOWN
+            | wm::WM_POINTERUPDATE
+            | wm::WM_POINTERUP
+            | wm::WM_POINTERENTER
+            | wm::WM_POINTERLEAVE
+            | wm::WM_POINTERCAPTURECHANGED => {
+                let events = self.pointer.message(hwnd, message, w)?;
+                let pen = events.iter().any(|e| matches!(e, Event::Stylus { .. }));
+                for e in events {
+                    self.push(e);
+                }
+                if pen
+                    && let Some(icon) = self.stylus_icon.get()
+                    && let Some(c) = shared.cursor(icon)
+                {
+                    c.show();
+                }
+                Some(0)
+            }
+            // (A pen's or a finger's touch activates the window as a click does, unless it isn't to take the focus.)
+            wm::WM_POINTERACTIVATE => {
+                let no_activate = hwnd.ex_style().0 & wm::WS_EX_NOACTIVATE.0 != 0;
+                Some(if no_activate { wm::PA_NOACTIVATE } else { wm::PA_ACTIVATE } as isize)
+            }
+            wm::DM_POINTERHITTEST => {
+                let taken = self.manipulation.borrow().as_ref().is_some_and(|m| m.hit_test((w & 0xffff) as u32, now()));
+                taken.then_some(0)
             }
             wm::WM_MOUSEMOVE
             | wm::WM_LBUTTONDOWN
@@ -818,6 +868,12 @@ impl Win32Window {
         self.state.ime.clone()
     }
 
+    /// Its pens and fingers (tests: their reports' source).
+    #[cfg(test)]
+    pub(super) fn pointer_input(&self) -> &PointerInput {
+        &self.state.pointer
+    }
+
     /// px per dp: `KOMPOZ_SCALE`, else the window's DPI / 96.
     fn scale(&self) -> f64 {
         self.option("KOMPOZ_SCALE")
@@ -868,6 +924,19 @@ impl PlatformCallbacks for Win32Callbacks {
         if !hwnd.is_none()
             && hwnd.under_cursor()
             && let Some(c) = self.shared.cursor(icon)
+        {
+            c.show();
+        }
+    }
+
+    /// Shown at once where a pen hovers over the window, else as it comes (WM_SETCURSOR, its reports).
+    fn stylus_hover_icon(&self, icon: Option<PointerIcon>) {
+        self.state.stylus_icon.set(icon);
+        let hwnd = self.state.hwnd.get();
+        if !hwnd.is_none()
+            && self.state.pointer.pen_near()
+            && hwnd.under_cursor()
+            && let Some(c) = self.shared.cursor(icon.unwrap_or(self.state.cursor.get()))
         {
             c.show();
         }
@@ -970,6 +1039,22 @@ impl Platform for Win32Window {
             let site = WindowDrops { state: Rc::downgrade(state), shared: Rc::downgrade(&self.shared) };
             ole::register(hwnd, DropTarget::create(Box::new(site), state.drop.clone(), self.shared.clipboard.formats));
         }
+        state.pointer.attach(hwnd);
+        if self.shared.ole.get() && manipulation::enabled() {
+            // (COM is OLE's: DirectManipulation's objects live in the UI thread's apartment.)
+            let weak = Rc::downgrade(state);
+            let sink = Box::new(move |gesture| {
+                let Some(state) = weak.upgrade() else { return };
+                let hwnd = state.hwnd.get();
+                // (About the mouse: a touchpad's gestures don't move it.)
+                let (x, y) = sys::cursor_position().map_or((0, 0), |(x, y)| hwnd.screen_to_client(x, y));
+                state.push(manipulation::event_of(gesture, x as f32, y as f32));
+            });
+            match Manipulation::new(hwnd, sink) {
+                Ok(m) => *state.manipulation.borrow_mut() = Some(m),
+                Err(why) => manipulation::unavailable(&why),
+            }
+        }
         state.dpi.set(hwnd.dpi());
         let scale = self.scale();
         let width = ((spec.width.0 as f64 * scale).round() as i32).max(1);
@@ -1016,6 +1101,8 @@ impl Platform for Win32Window {
         self.state.tracking_leave.set(false);
         self.state.windowed.set(None);
         self.state.ime.detach();
+        self.state.manipulation.borrow_mut().take();
+        self.state.pointer.clear();
         let bridge = self.state.uia.borrow_mut().take();
         if let Some(bridge) = bridge {
             bridge.close();
@@ -1127,6 +1214,10 @@ impl Platform for Win32Window {
         if self.state.keep_on.replace(on) != on {
             self.shared.keep_display_on();
         }
+        // (DirectManipulation's update manager on the frames, while a touchpad's gesture goes on.)
+        if let Some(m) = self.state.manipulation.borrow().as_ref() {
+            m.update(now());
+        }
         let Some(bridge) = self.state.uia().filter(UiaBridge::active) else { return };
         let requested = bridge.take_tree_request();
         let state = &self.state;
@@ -1154,9 +1245,11 @@ impl Platform for Win32Window {
         self.state.drop.over(wanted);
     }
 
-    /// One more frame publishes the tree to UI Automation (it changed, or a client wants it).
+    /// One more frame publishes the tree to UI Automation (it changed, or a client wants it); a touchpad's gesture
+    /// runs DirectManipulation's update manager on each.
     fn wants_frames(&self) -> bool {
-        self.state.uia().is_some_and(|b| b.active()) && self.state.uia_dirty.get()
+        (self.state.uia().is_some_and(|b| b.active()) && self.state.uia_dirty.get())
+            || self.state.manipulation.borrow().as_ref().is_some_and(|m| m.active(now()))
     }
 
     fn set_title(&mut self, title: &str) {
@@ -1273,6 +1366,7 @@ impl Platform for Win32Window {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::windows::Win32::UI::Input::Pointer::{POINTER_INFO, POINTER_PEN_INFO, POINTER_TOUCH_INFO};
     use kompoz_graphics::{Dp, ImageBitmap};
     use kompoz_ui::clipboard::{ClipItem, ClipValue};
     use kompoz_ui::input::{Key, KeyModifiers};
@@ -1433,6 +1527,168 @@ mod tests {
         assert_eq!(texts, ["a", "😀"]);
         // (The keys held as the messages were sent: none.)
         assert!(got.iter().all(|e| e.modifiers().is_none_or(|m| m == KeyModifiers::None)));
+        drop(w);
+        shared.close();
+    }
+
+    /// A test's pointer reports, what WM_POINTER messages sent to a window are read with (the seam: wine's user32
+    /// reports no pens or touch screens of its own): each pointer's device, the touch frame, the pen's report, the
+    /// histories; how many frames were done with.
+    #[derive(Default)]
+    struct Reports {
+        kinds: RefCell<std::collections::HashMap<u32, pointer::Kind>>,
+        frame: RefCell<Vec<POINTER_TOUCH_INFO>>,
+        pen: RefCell<Option<POINTER_PEN_INFO>>,
+        history: RefCell<std::collections::HashMap<u32, Vec<POINTER_INFO>>>,
+        skipped: Cell<u32>,
+    }
+
+    impl pointer::Source for Reports {
+        fn kind(&self, id: u32) -> pointer::Kind {
+            self.kinds.borrow().get(&id).copied().unwrap_or(pointer::Kind::Other)
+        }
+        fn touch_frame(&self, _: u32) -> Vec<POINTER_TOUCH_INFO> {
+            self.frame.borrow().clone()
+        }
+        fn pen(&self, _: u32) -> Option<POINTER_PEN_INFO> {
+            *self.pen.borrow()
+        }
+        fn history(&self, id: u32, count: u32) -> Vec<POINTER_INFO> {
+            self.history.borrow().get(&id).map(|h| h.iter().take(count as usize).copied().collect()).unwrap_or_default()
+        }
+        fn device_rects(&self, _: ::windows::Win32::Foundation::HANDLE) -> Option<([i32; 4], [i32; 4])> {
+            None
+        }
+        fn skip_frame(&self, _: u32) {
+            self.skipped.set(self.skipped.get() + 1);
+        }
+    }
+
+    /// The events with their times left out (the platform's clock's at the message).
+    fn timeless(events: Vec<Event>) -> Vec<Event> {
+        events
+            .into_iter()
+            .map(|e| match e {
+                Event::TouchDown { pointer, x, y, .. } => Event::TouchDown { pointer, x, y, time: 0 },
+                Event::TouchUp { pointer, x, y, .. } => Event::TouchUp { pointer, x, y, time: 0 },
+                Event::TouchMoves { moves, .. } => Event::TouchMoves { moves, time: 0 },
+                Event::History { pointer, samples } => {
+                    Event::History { pointer, samples: samples.into_iter().map(|(x, y, _)| (x, y, 0)).collect() }
+                }
+                Event::Stylus { pointer, eraser, x, y, down, pressure, buttons, .. } => {
+                    Event::Stylus { pointer, eraser, x, y, down, pressure, buttons, time: 0 }
+                }
+                e => e,
+            })
+            .filter(|e| !matches!(e, Event::MouseMove { .. } | Event::PointerLeft)) // (the real mouse's, under wine)
+            .collect()
+    }
+
+    #[test]
+    fn pens_and_fingers_become_events() {
+        use ::windows::Win32::Foundation::POINT;
+        use ::windows::Win32::UI::Input::Pointer::POINTER_FLAGS;
+        let shared = Shared::connect(WindowId::MAIN).expect("the platform");
+        let w = open(&shared, WindowId::MAIN, "Kalem");
+        let hwnd = w.handle();
+        let reports = Rc::new(Reports::default());
+        w.pointer_input().set_source(reports.clone());
+        events(&shared, WindowId::MAIN);
+        let (ox, oy) = hwnd.client_origin();
+        const DOWN: u32 = pointer::flag::DOWN | pointer::flag::INRANGE | pointer::flag::INCONTACT;
+        const MOVE: u32 = pointer::flag::UPDATE | pointer::flag::INRANGE | pointer::flag::INCONTACT;
+        const UP: u32 = pointer::flag::UP | pointer::flag::INRANGE;
+        let info = |id: u32, frame: u32, flags: u32, x: i32, y: i32, ms: u32| POINTER_INFO {
+            pointerType: wm::PT_TOUCH,
+            pointerId: id,
+            frameId: frame,
+            pointerFlags: POINTER_FLAGS(flags),
+            ptPixelLocation: POINT { x: ox + x, y: oy + y },
+            dwTime: ms,
+            historyCount: 1,
+            ..Default::default()
+        };
+        let touch = |info: POINTER_INFO| POINTER_TOUCH_INFO { pointerInfo: info, ..Default::default() };
+        reports.kinds.borrow_mut().extend([(5, pointer::Kind::Touch), (6, pointer::Kind::Touch)]);
+        // Two fingers down in a frame (each one's message: the frame once).
+        *reports.frame.borrow_mut() = vec![touch(info(5, 1, DOWN, 10, 20, 100)), touch(info(6, 1, DOWN, 30, 40, 100))];
+        assert_eq!(hwnd.send(wm::WM_POINTERDOWN, 5, 0), 0);
+        hwnd.send(wm::WM_POINTERDOWN, 6, 0);
+        // Both move, the first through a point between.
+        let mut moved = info(5, 2, MOVE, 12, 22, 116);
+        moved.historyCount = 2;
+        *reports.frame.borrow_mut() = vec![touch(moved), touch(info(6, 2, MOVE, 31, 40, 116))];
+        reports.history.borrow_mut().insert(5, vec![moved, info(5, 0, MOVE, 11, 21, 108)]);
+        hwnd.send(wm::WM_POINTERUPDATE, 5, 0);
+        // The first lifted; the second's capture lost: called off.
+        *reports.frame.borrow_mut() = vec![touch(info(5, 3, UP, 12, 22, 132)), touch(info(6, 3, MOVE, 31, 40, 132))];
+        hwnd.send(wm::WM_POINTERUP, 5, 0);
+        hwnd.send(wm::WM_POINTERLEAVE, 5, 0);
+        hwnd.send(wm::WM_POINTERCAPTURECHANGED, 6, 0);
+        assert_eq!(
+            timeless(events(&shared, WindowId::MAIN)),
+            [
+                Event::TouchDown { pointer: 6, x: 10.0, y: 20.0, time: 0 },
+                Event::TouchDown { pointer: 7, x: 30.0, y: 40.0, time: 0 },
+                Event::History { pointer: 6, samples: vec![(11.0, 21.0, 0)] },
+                Event::TouchMoves { moves: vec![(6, 12.0, 22.0), (7, 31.0, 40.0)], time: 0 },
+                Event::TouchUp { pointer: 6, x: 12.0, y: 22.0, time: 0 },
+                Event::TouchCancel,
+            ]
+        );
+        assert_eq!(reports.skipped.get(), 4); // (each frame's messages after the one handled dropped)
+        // A pen hovering with its barrel button, touching at half its pressure, leaving.
+        reports.kinds.borrow_mut().insert(9, pointer::Kind::Pen);
+        let pen = |flags: u32, pressure: u32| POINTER_PEN_INFO {
+            pointerInfo: POINTER_INFO { pointerType: wm::PT_PEN, ..info(9, 0, flags, 50, 60, 200) },
+            penFlags: wm::PEN_FLAG_BARREL,
+            penMask: wm::PEN_MASK_PRESSURE,
+            pressure,
+            ..Default::default()
+        };
+        *reports.pen.borrow_mut() = Some(pen(pointer::flag::INRANGE | pointer::flag::UPDATE, 0));
+        hwnd.send(wm::WM_POINTERENTER, 9, 0);
+        assert!(w.state.pointer.pen_near());
+        *reports.pen.borrow_mut() = Some(pen(DOWN, 512));
+        hwnd.send(wm::WM_POINTERDOWN, 9, 0);
+        hwnd.send(wm::WM_POINTERLEAVE, 9, 0);
+        let stylus = |down, pressure| Event::Stylus {
+            pointer: 10,
+            eraser: false,
+            x: 50.0,
+            y: 60.0,
+            down,
+            pressure,
+            buttons: 1,
+            time: 0,
+        };
+        assert_eq!(
+            timeless(events(&shared, WindowId::MAIN)),
+            [stylus(false, 0.0), stylus(true, 0.5), Event::StylusLeft { pointer: 10 }]
+        );
+        // The mouse's pointer messages are Windows' (its mouse messages follow them); those it makes of a pen or a
+        // finger are left out.
+        reports.kinds.borrow_mut().insert(1, pointer::Kind::Mouse);
+        hwnd.send(wm::WM_POINTERUPDATE, 1, 0);
+        let at = |x: i32, y: i32| ((y as isize) << 16) | (x as isize & 0xffff);
+        sys::set_message_extra_info(0xFF51_5780u32 as i32 as isize); // (a finger's mouse message)
+        let made = pointer::made_of_a_pen_or_a_finger(sys::message_extra_info());
+        hwnd.send(wm::WM_LBUTTONDOWN, 1, at(3, 4));
+        hwnd.send(wm::WM_LBUTTONUP, 0, at(3, 4));
+        sys::set_message_extra_info(0);
+        let left_out = timeless(events(&shared, WindowId::MAIN));
+        if made {
+            assert_eq!(left_out, [], "the mouse messages made of a finger");
+        } else {
+            eprintln!("(no SetMessageExtraInfo here: the signature's check is the pure test's)");
+        }
+        // A touch activates the window, unless it isn't to take the focus.
+        assert_eq!(hwnd.send(wm::WM_POINTERACTIVATE, 5, 0), wm::PA_ACTIVATE as isize);
+        // DirectManipulation's viewport where COM has it (wine's partial one may refuse): a hit test of no
+        // touchpad's contact is Windows' own.
+        eprintln!("(DirectManipulation {})", if w.state.manipulation.borrow().is_some() { "made" } else { "not here" });
+        hwnd.send(wm::DM_POINTERHITTEST, 77, 0);
+        assert_eq!(timeless(events(&shared, WindowId::MAIN)), []);
         drop(w);
         shared.close();
     }

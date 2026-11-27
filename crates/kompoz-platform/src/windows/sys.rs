@@ -943,6 +943,25 @@ pub fn message_extra_info() -> isize {
     unsafe { GetMessageExtraInfo() }.0
 }
 
+/// The address of user32's function `name` where this system's user32 has it (one of Windows 8's that wine's lacks:
+/// imported, its call would end the process there), none otherwise; the caller transmutes it to its signature.
+pub fn user32_function(name: ::windows::core::PCSTR) -> Option<usize> {
+    let user32 = wide("user32.dll");
+    // SAFETY: user32 is loaded in every GUI process; the names live through the calls.
+    unsafe {
+        let module = GetModuleHandleW(PCWSTR(user32.as_ptr())).ok()?;
+        GetProcAddress(module, name).map(|f| f as usize)
+    }
+}
+
+/// The thread's message extra information set to `extra` (tests: what Windows sets for the mouse messages it makes
+/// of a pen or a finger).
+#[cfg(test)]
+pub fn set_message_extra_info(extra: isize) {
+    // SAFETY: the thread's own value set.
+    unsafe { ::windows::Win32::UI::WindowsAndMessaging::SetMessageExtraInfo(LPARAM(extra)) };
+}
+
 /// A message box with `text`, the error icon and OK (C++'s `showError`).
 pub fn message_box(owner: Option<Hwnd>, title: &str, text: &str) {
     let (title, text) = (wide(title), wide(text));

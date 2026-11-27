@@ -458,6 +458,14 @@ jobs:
           KOMPOZ_DISPLAY_TESTS: "1"
           KOMPOZ_GPU_REQUIRED: "1"
         run: cargo test -p kompoz-platform --test ole_windows
+      # (The runner has no touch screen nor pen: a synthetic digitizer's fingers and pen, InjectSyntheticPointerInput,
+      # as WM_POINTER messages to the app's window: a tap clicks once, a pen presses with its pressure and leaves.)
+      - name: Fingers and a pen injected into the app in its window (lavapipe)
+        if: success() || failure()
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_GPU_REQUIRED: "1"
+        run: cargo test -p kompoz-platform --test pointer_windows
       - name: The Counter in a window by CI's script, clicked and resized (lavapipe)
         if: success() || failure()
         env:

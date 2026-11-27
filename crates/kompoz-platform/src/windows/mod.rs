@@ -34,7 +34,13 @@
 //! Drags in and out through OLE (`ole`, its formats the clipboard's: `formats`): drop targets answered by the app,
 //! read lazily; the app's drags out by DoDragDrop with their image.
 //!
-//! What comes in later packages: pen and touch (WM_POINTER), the desktop's accent, wallpaper and text size, KompozR's
+//! Pens and touch screens through WM_POINTER (`pointer`): fingers by their ids, each frame of theirs one move of all
+//! with the positions they passed through, cancels; a pen's pressure, eraser, barrel button and hovering, its hover
+//! icon; the mouse messages Windows makes of them left out. A precision touchpad's pinches and pans through
+//! DirectManipulation (`manipulation`: Compose's trackpad pinch and pan events; the mouse's wheel and Ctrl+wheel as
+//! they were).
+//!
+//! What comes in later packages: the desktop's accent, wallpaper and text size, KompozR's
 //! own title bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and WM_NCHITTEST, where `window` leaves the frame to
 //! the system), the tray.
 
@@ -46,7 +52,9 @@ mod ime;
 mod imm;
 mod input_method;
 mod keyboard;
+mod manipulation;
 mod ole;
+mod pointer;
 pub mod sys;
 mod tsf;
 mod uia;

@@ -100,6 +100,24 @@ pub enum Event {
         x: f32,
         y: f32,
     },
+    /// A touchpad's two-finger pan began, went on (by `dx`, `dy` points since the last: the scroll the fingers make,
+    /// the opposite of their movement — fingers up, `dy` positive — as Compose's `panOffset`), ended (its fling is
+    /// the app's, from the pan's velocity), around (x, y): Compose's trackpad pan events, what a touchpad's own
+    /// gestures give where the platform tells them apart from a wheel's turns (Windows' DirectManipulation).
+    PanBegin {
+        x: f32,
+        y: f32,
+    },
+    Pan {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
+    PanEnd {
+        x: f32,
+        y: f32,
+    },
     /// A finger on the screen (`pointer` its id).
     TouchDown {
         pointer: i64,
