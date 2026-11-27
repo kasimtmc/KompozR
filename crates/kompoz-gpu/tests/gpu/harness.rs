@@ -394,10 +394,11 @@ impl Gpu {
     }
 
     /// Whether the device keeps its pipelines in the file it is given: Vulkan's where the driver's pipeline cache
-    /// holds them (lavapipe's and SwiftShader's hold nothing); Metal and the browser keep their own.
+    /// holds them (lavapipe's and SwiftShader's hold nothing), and Metal's (its binary archive, written there); the
+    /// browser keeps WebGPU's pipelines itself, out of the app's reach.
     pub fn keeps_pipelines(&self) -> bool {
         let name = self.device.device_name();
-        self.device.backend() == Backend::Vulkan && !name.contains("llvmpipe") && !name.contains("SwiftShader")
+        self.device.backend() != Backend::WebGpu && !name.contains("llvmpipe") && !name.contains("SwiftShader")
     }
 
     /// `draw` with the test pipelines on a w x h px target cleared to `clear` at `scale` px per dp, in a frame of its
