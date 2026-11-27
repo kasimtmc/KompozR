@@ -15,6 +15,9 @@
 //! cargo xtask showcase-shots compare|reference …
 //!                                the showcase's shots against the C++ Kompoz showcase's: builds the showcase
 //!                                (release) and runs its showcase-shots with the rest (examples/showcase, shots.rs)
+//! cargo xtask web-gpu-test [--firefox] [--gpu] [--release] [names…]
+//!                                kompoz-gpu's GPU tests in a headless browser on WebGPU (Chrome's SwiftShader, the
+//!                                GPU with --gpu, or Firefox), built for the web on its nightly (web_gpu_test.rs)
 //! ```
 //!
 //! Std, and syn to read Rust sources (the workspace's own, already built for its macros): building the workspace
@@ -33,6 +36,7 @@ mod material_icons;
 mod sha256;
 mod shaders;
 mod wayland;
+mod web_gpu_test;
 mod xml;
 
 use std::path::PathBuf;
@@ -42,7 +46,8 @@ const USAGE: &str = "usage: cargo xtask shaders [--check] | cargo xtask wayland 
                      [--check] | cargo xtask material3-tokens [--check] | cargo xtask material3-strings [--check] | \
                      cargo xtask adaptive-strings [--check] | cargo xtask material-icons [--check] | cargo xtask \
                      showcase-shots compare [--showcase <binary>] [--out <dir>] | cargo xtask showcase-shots reference \
-                     --cpp <binary> --revision <commit>";
+                     --cpp <binary> --revision <commit> | cargo xtask web-gpu-test [--firefox] [--gpu] [--release] \
+                     [names…]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -62,6 +67,7 @@ fn main() -> ExitCode {
         ["material-icons"] => material_icons::run(&workspace(), false),
         ["material-icons", "--check"] => material_icons::run(&workspace(), true),
         ["showcase-shots", rest @ ..] => showcase_shots(rest),
+        ["web-gpu-test", rest @ ..] => web_gpu_test::run(&workspace(), rest),
         ["help" | "--help" | "-h"] => {
             println!("{USAGE}");
             Ok(())

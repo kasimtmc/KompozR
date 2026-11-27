@@ -632,6 +632,7 @@ dependencies = [
  "kompoz-runtime",
  "kompoz-text",
  "kompoz-ui",
+ "kompoz-web",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",
@@ -924,6 +925,13 @@ dependencies = [
  "kompoz-test",
  "kompoz-text",
  "parking_lot",
+]
+
+[[package]]
+name = "kompoz-web"
+version = "0.1.0"
+dependencies = [
+ "kompoz-runtime",
 ]
 
 [[package]]

@@ -43,19 +43,19 @@ const MSL: bool = cfg!(target_vendor = "apple");
 pub static QUAD_VERTEX: ShaderCode = ShaderCode {
     spirv: include_bytes!("shaders/quad.vert.spv"),
     msl: include_str!("shaders/quad.vert.metal"),
-    wgsl: "",
+    wgsl: include_str!("shaders/quad.wgsl"),
     entry: if MSL { "quad_vertex" } else { "main" },
 };
 pub static COLOR_FRAGMENT: ShaderCode = ShaderCode {
     spirv: include_bytes!("shaders/color.frag.spv"),
     msl: include_str!("shaders/color.frag.metal"),
-    wgsl: "",
+    wgsl: include_str!("shaders/color.wgsl"),
     entry: if MSL { "color_fragment" } else { "main" },
 };
 pub static TEXTURE_FRAGMENT: ShaderCode = ShaderCode {
     spirv: include_bytes!("shaders/texture.frag.spv"),
     msl: include_str!("shaders/texture.frag.metal"),
-    wgsl: "",
+    wgsl: include_str!("shaders/texture.wgsl"),
     entry: if MSL { "texture_fragment" } else { "main" },
 };
 
@@ -128,7 +128,7 @@ impl Pipelines {
 /// top, right, bottom) across each.
 pub fn draw_quads(device: &mut dyn Device, pipeline: PipelineId, target: TextureId, quads: &[Quad], source: [f32; 4]) {
     let (w, h) = (target.width() as f32, target.height() as f32);
-    // (Into clip space as the renderer's: flipped where y goes down in it.)
+    // (Clip space y down or up as the device's is, as the renderer's projection.)
     let to_clip = kompoz_gpu::shaders::to_clip(w, h, device.clip_y_down());
     let uniforms: Vec<u8> = to_clip.iter().chain(&source).flat_map(|v| v.to_ne_bytes()).collect();
     let instances: Vec<u8> =
@@ -248,13 +248,19 @@ macro_rules! passed_on {
             self.$($field).+.borrow_mut().copy_texture(source, region, destination, x, y)
         }
         fn read_pixels(&mut self, texture: TextureId, region: IRect) -> Vec<u8> {
-            self.$($field).+.borrow_mut().read_pixels(texture, region)
+            read_now(&mut **self.$($field).+.borrow_mut(), texture, region)
         }
         fn reads_pixels_at_once(&self) -> bool {
             self.$($field).+.borrow().reads_pixels_at_once()
         }
+        /// (At once, as natively: on WebGPU the run waits for it, as [`read_now`] does.)
         fn read_pixels_async(&mut self, texture: TextureId, region: IRect, done: Box<dyn FnOnce(Vec<u8>)>) {
-            self.$($field).+.borrow_mut().read_pixels_async(texture, region, done)
+            let mut device = self.$($field).+.borrow_mut();
+            device.read_pixels_async(texture, region, done);
+            #[cfg(target_family = "wasm")]
+            if !device.reads_pixels_at_once() {
+                crate::web::wait_for_gpu();
+            }
         }
         fn end_frame(&mut self, present: bool) {
             self.$($field).+.borrow_mut().end_frame(present)
@@ -269,6 +275,20 @@ macro_rules! passed_on {
             self.$($field).+.borrow_mut().wait_idle()
         }
     };
+}
+
+/// A texture's pixels at once, as the tests read them: the device's own where it can wait for the GPU; on WebGPU read
+/// asynchronously, the run waiting for them (web.rs: JSPI, the tests' alone).
+pub fn read_now(device: &mut dyn Device, texture: TextureId, region: IRect) -> Vec<u8> {
+    if device.reads_pixels_at_once() {
+        return device.read_pixels(texture, region);
+    }
+    let pixels = Rc::new(RefCell::new(Vec::new()));
+    let got = pixels.clone();
+    device.read_pixels_async(texture, region, Box::new(move |p| *got.borrow_mut() = p));
+    #[cfg(target_family = "wasm")]
+    crate::web::wait_for_gpu();
+    pixels.take()
 }
 
 /// The one device, shared by the tests and the renderers drawing on it (as C++'s tests hand a renderer a `Device&`).
@@ -373,11 +393,11 @@ impl Gpu {
         render_by(&mut self.renderer, w, h, draw, clear)
     }
 
-    /// Whether the device keeps its pipelines in the file it is given: where the driver's pipeline cache holds them
-    /// (lavapipe's and SwiftShader's hold nothing).
+    /// Whether the device keeps its pipelines in the file it is given: Vulkan's where the driver's pipeline cache
+    /// holds them (lavapipe's and SwiftShader's hold nothing); Metal and the browser keep their own.
     pub fn keeps_pipelines(&self) -> bool {
         let name = self.device.device_name();
-        !name.contains("llvmpipe") && !name.contains("SwiftShader")
+        self.device.backend() == Backend::Vulkan && !name.contains("llvmpipe") && !name.contains("SwiftShader")
     }
 
     /// `draw` with the test pipelines on a w x h px target cleared to `clear` at `scale` px per dp, in a frame of its

@@ -1,0 +1,13 @@
+[package]
+name = "kompoz-web"
+description = "KompozR's JavaScript glue on the web: the page's objects as handles, strings and bytes through the wasm memory, the loader every web part's imports join (the WebGPU device's, the web platform's)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kompoz-runtime = { path = "../kompoz-runtime" }

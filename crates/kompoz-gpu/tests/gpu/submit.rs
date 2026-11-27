@@ -35,7 +35,11 @@ pub fn variants_fall_back_to_the_whole_shader(g: &mut Gpu) {
 /// The pipelines a renderer made are listed in the file it is given, and a renderer warming them from that list
 /// (on a thread of its own) draws as the first did, listing none again.
 pub fn pipelines_are_warmed_from_their_list(g: &mut Gpu) {
-    let list = std::env::temp_dir().join(format!("kompoz_gpu_tests_pipeline_list_{}", std::process::id()));
+    if cfg!(target_family = "wasm") {
+        println!("  (the web has no files to keep the list in: a native app's)");
+        return;
+    }
+    let list = crate::files::temp_path("kompoz_gpu_tests_pipeline_list");
     let _ = std::fs::remove_file(&list);
     let scenes: [fn(&mut Renderer); 3] = [rects, blend_modes, paths];
     let pictures = |renderer: &mut Renderer| -> Vec<Pixels> {

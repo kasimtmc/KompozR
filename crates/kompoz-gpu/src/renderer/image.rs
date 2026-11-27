@@ -6,7 +6,8 @@
 //!
 //! Bitmaps are drawn into here too (a canvas over an ImageBitmap: kompoz-ui's BitmapRenderer, which
 //! [`RendererBitmaps`] is): into a texture of their own, kept as the bitmap's where its config keeps 8 or 16 bits a
-//! channel with alpha (its pixels read back from it when they are read), else read back into it at once.
+//! channel with alpha (its pixels read back from it when they are read), else read back into it: at once where the
+//! device can wait for the GPU, else as soon as it has them (WebGPU maps buffers asynchronously).
 
 use super::{Inputs, Renderer};
 use crate::device::{ClearColor, Filter, Format, IRect, Sampler, Texture, TextureId, TextureUsage};
@@ -44,6 +45,9 @@ pub(super) struct ImageState {
     /// Shared with the renderer's [`RendererBitmaps`]: drawn into their bitmaps before anything is drawn from a
     /// bitmap, read back from one or flushed.
     waiting: Waiting,
+    /// The bitmaps (by id) drawn into whose pixels are being read back (asynchronously: WebGPU's), with what was
+    /// drawn into them since, to draw once they are back (into `waiting`).
+    reading: Rc<RefCell<HashMap<u64, Vec<Picture>>>>,
 }
 
 /// A float as a half float's bits, rounded to the nearest.
@@ -246,9 +250,15 @@ impl Renderer {
     /// A bitmap drawn into (a canvas over an ImageBitmap): `draws` over what it holds, a unit a pixel, into a new
     /// texture of its own; kept here where the bitmap keeps 8 or 16 bits a channel with alpha (Argb8888, Gpu, F16:
     /// the bitmap told its pixels are the renderer's, read back when they are read) and Alpha8 (its alpha alone,
-    /// black, as it reads back and is sampled), else read back into it at once (flushing what is recorded), kept as
-    /// its config keeps it. [`flush`](Renderer::flush) submits the drawing.
+    /// black, as it reads back and is sampled), else read back into it (flushing what is recorded: at once where the
+    /// device can wait for the GPU, else once it has them), kept as its config keeps it. [`flush`](Renderer::flush)
+    /// submits the drawing.
     pub fn draw_into_bitmap(&mut self, bitmap: &ImageBitmap, draws: &Picture) {
+        // (Its pixels being read back still, a draw before this one's: this one drawn over them once they are.)
+        if let Some(after) = self.images.reading.borrow_mut().get_mut(&bitmap.id()) {
+            after.push(draws.clone());
+            return;
+        }
         let (w, h) = (bitmap.width(), bitmap.height());
         let config = bitmap.config();
         let f16 = config == ImageBitmapConfig::F16;
@@ -294,31 +304,50 @@ impl Renderer {
             return;
         }
         self.flush();
-        let pixels = self.device.read_pixels(fresh.id(), IRect::new(0, 0, w, h));
-        if f16 {
-            bitmap.store_floats(&halves_to_floats(&pixels), true);
-        } else {
-            bitmap.store(&pixels, true);
-        }
+        // Read back (at once where the device can wait for the GPU; on WebGPU once its buffer is mapped, the bitmap
+        // holding what it held until then, and what is drawn into it meanwhile waiting for it, in order, so that it
+        // is drawn over what this drew).
+        let id = bitmap.id();
+        self.images.reading.borrow_mut().insert(id, Vec::new());
+        let (target, reading, waiting) = (bitmap.clone(), self.images.reading.clone(), self.images.waiting.clone());
+        let done = move |pixels: Vec<u8>| {
+            if f16 {
+                target.store_floats(&halves_to_floats(&pixels), true);
+            } else {
+                target.store(&pixels, true);
+            }
+            let after = reading.borrow_mut().remove(&id).unwrap_or_default();
+            waiting.borrow_mut().extend(after.into_iter().map(|draws| (target.downgrade(), draws)));
+        };
+        self.device.read_pixels_async(fresh.id(), IRect::new(0, 0, w, h), Box::new(done));
         self.images.retired.push(fresh);
     }
 
     /// The pixels of a bitmap only this renderer has, read back into it (flushing what is recorded); what waits to be
-    /// drawn into bitmaps drawn first.
+    /// drawn into bitmaps drawn first. At once where the device can wait for the GPU; on WebGPU once its buffer is
+    /// mapped (the bitmap's pixels read meanwhile are those it held before), unless it was drawn into since (a later
+    /// read has that).
     pub fn read_back_bitmap(&mut self, bitmap: &ImageBitmap) {
         self.draw_waiting_bitmaps();
         let Some(t) = self.images.textures.get(&bitmap.id()) else { return };
-        if t.version != bitmap.version() {
+        let version = bitmap.version();
+        if t.version != version {
             return;
         }
         let texture = t.texture.id();
         self.flush();
-        let pixels = self.device.read_pixels(texture, IRect::new(0, 0, bitmap.width(), bitmap.height()));
-        if texture.format() == Format::Rgba16f {
-            bitmap.store_floats(&halves_to_floats(&pixels), false);
-        } else {
-            bitmap.store(&pixels, false);
-        }
+        let target = bitmap.clone();
+        let done = move |pixels: Vec<u8>| {
+            if target.version() != version {
+                return;
+            }
+            if texture.format() == Format::Rgba16f {
+                target.store_floats(&halves_to_floats(&pixels), false);
+            } else {
+                target.store(&pixels, false);
+            }
+        };
+        self.device.read_pixels_async(texture, IRect::new(0, 0, bitmap.width(), bitmap.height()), Box::new(done));
     }
 
     /// Every bitmap's pixels that only this renderer has, read back into them (before it goes).

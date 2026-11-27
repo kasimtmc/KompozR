@@ -13,8 +13,8 @@ use kompoz_gpu::device::{
     BlendFactor, BlendOp, BlendState, ClearColor, Device, Filter, Format, IRect, Sampler, TextureUsage, fnv1a,
     read_pipeline_cache, write_pipeline_cache,
 };
+use kompoz_runtime::clock::Instant;
 use std::path::PathBuf;
-use std::time::Instant;
 
 const TARGET: TextureUsage = TextureUsage::RENDER_TARGET.union(TextureUsage::SAMPLED);
 
@@ -472,7 +472,7 @@ pub fn textures_come_and_go(g: &mut Gpu) {
 pub fn pipelines_are_kept_between_runs() {
     // (FNV-1a's own.)
     check!(fnv1a(b"a") == 0xaf63dc4c8601ec8c);
-    let file = std::env::temp_dir().join(format!("kompoz_gpu_tests_pipelines_{}", std::process::id()));
+    let file = crate::files::temp_path("kompoz_gpu_tests_pipelines");
     let pictures = |keeps: &mut bool| -> Vec<Pixels> {
         let mut g = match Gpu::start(Some(file.clone())) {
             Ok(g) => g,
@@ -532,7 +532,7 @@ pub fn pipelines_are_kept_between_runs() {
             check!(!again.is_empty() && again != written);
         }
     }
-    let _ = std::fs::remove_file(&file);
+    crate::files::remove(&file);
 }
 
 /// The golden comparison: every picture there is read, of its size; a picture matches itself, and pixels off by 3
@@ -576,8 +576,8 @@ pub fn goldens_compare_as_they_should() {
     }
     check!(golden::difference(&rects, &off) == Some(Difference { worst: 4, count: 5 }));
 
-    let dir = std::env::temp_dir().join(format!("kompoz_gpu_tests_goldens_{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
+    let dir = crate::files::temp_path("kompoz_gpu_tests_goldens");
+    crate::files::create_dir(&dir);
     check!(golden::save(&dir.join("rects.png"), &rects));
     check!(golden::match_golden_in(&dir, "rects", &rects, false) == Outcome::Matches(Difference::default()));
     check!(golden::match_golden_in(&dir, "rects", &off, false) == Outcome::Differs(Difference { worst: 4, count: 5 }));
@@ -590,5 +590,5 @@ pub fn goldens_compare_as_they_should() {
     check!(golden::match_golden_in(&dir, "none", &rects, false) == Outcome::NoPicture);
     check!(golden::match_golden_in(&dir, "rects", &off, true) == Outcome::Written);
     check!(golden::load_png(&dir.join("rects.png")).as_ref() == Some(&off));
-    let _ = std::fs::remove_dir_all(&dir);
+    crate::files::remove_dir(&dir);
 }

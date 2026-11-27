@@ -246,7 +246,8 @@ fn compile(
 /// constants) without a binding and splits each combined sampler into its texture at the sampler's binding and its
 /// sampler at the next, where the next texture is. The uniforms go to binding 0, texture slot i (binding i + 1 in
 /// the source) to bindings 2i + 1 (the texture) and 2i + 2 (its sampler). And derivatives are taken in non-uniform
-/// control flow, as every other target allows: WGSL's uniformity diagnostic for them is turned off.
+/// control flow, as every other target allows: WGSL's uniformity diagnostic for them is turned off. (`@interpolate`
+/// is left out where WGSL refuses it: see below.)
 fn rebind_wgsl(text: &str) -> Result<String, String> {
     const BINDING: &str = "@binding(";
     const GROUP: &str = ") @group(0) var ";
@@ -270,9 +271,19 @@ fn rebind_wgsl(text: &str) -> Result<String, String> {
         out
     }
 
-    // Uniforms: binding 0.
+    // Uniforms: binding 0. And `@interpolate` only on what is a stage's input or output (`@location`): Slang puts it
+    // on the members of a fragment shader's own copy of its varyings too, which WGSL refuses (Chrome's Tint since
+    // the C++ Kompoz's web build: "'@interpolate' can only be used with '@location'"); there it says nothing.
     let mut s = String::with_capacity(text.len() + 64);
     for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let line = match trimmed.strip_prefix("@interpolate(").and_then(|rest| rest.split_once(')')) {
+            Some((_, member)) if !member.contains("@location(") => {
+                format!("{}{}", &line[..line.len() - trimmed.len()], member.trim_start())
+            }
+            _ => line.to_string(),
+        };
+        let line = line.as_str();
         match line.strip_prefix("var<uniform> ") {
             Some(rest) => {
                 s.push_str("@binding(0) @group(0) var<uniform> ");
@@ -398,6 +409,15 @@ mod tests {
              @binding(1) @group(0) var source_texture_0 : texture_2d<f32>;\n\
              @binding(2) @group(0) var source_sampler_0 : sampler;\n\
              fn f() { var<uniform> x; }\n"
+        );
+        // `@interpolate` kept where it is an output's (or an input's), left out on a struct's own member.
+        assert_eq!(
+            rebind_wgsl(
+                "struct V\n{\n    @interpolate(flat) @location(4) a : f32,\n    @interpolate(flat)  b : f32,\n};\n"
+            )
+            .unwrap(),
+            "diagnostic(off, derivative_uniformity);\n\
+             struct V\n{\n    @interpolate(flat) @location(4) a : f32,\n    b : f32,\n};\n"
         );
         // A sampler without its texture: an error (shaders.py's KeyError).
         assert!(rebind_wgsl("@binding(2) @group(0) var lone_sampler_0 : sampler;\n").is_err());

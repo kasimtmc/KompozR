@@ -14,11 +14,32 @@
 //!   KOMPOZ_GPU_REQUIRED=1 cargo test -p kompoz-gpu --test gpu
 //! Arguments name the tests to run (those whose names have one of them): `cargo test -p kompoz-gpu --test gpu --
 //! readback`.
+//!
+//! In a browser, on WebGPU (tests/gpu/web.rs): `cargo xtask web-gpu-test [--firefox] [names…]` builds this for the
+//! web and runs it in headless Chrome (SwiftShader's WebGPU) or Firefox, the variables above and the names
+//! (`KOMPOZ_GPU_TESTS=a,b`) in the page's query.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static CHECKS: AtomicUsize = AtomicUsize::new(0);
 static FAILURES: AtomicUsize = AtomicUsize::new(0);
+
+/// A line of the run's output: printed natively; on the web the page's (the web's std prints nowhere).
+macro_rules! println {
+    () => {
+        $crate::say(String::new())
+    };
+    ($($arg:tt)*) => {
+        $crate::say(format!($($arg)*))
+    };
+}
+
+fn say(line: String) {
+    #[cfg(not(target_family = "wasm"))]
+    std::println!("{line}");
+    #[cfg(target_family = "wasm")]
+    kompoz_web::log(kompoz_web::Level::Info, &line);
+}
 
 /// A check, counted; where it fails, what failed (and the message, if given) is printed and the run fails.
 macro_rules! check {
@@ -41,6 +62,7 @@ macro_rules! check {
 
 mod device;
 mod exact;
+mod files;
 mod fonts;
 mod frames;
 mod golden;
@@ -50,6 +72,8 @@ mod layers;
 mod scenes;
 mod stretch;
 mod submit;
+#[cfg(target_family = "wasm")]
+mod web;
 
 use harness::Gpu;
 use kompoz_gpu::device::Device;
@@ -131,19 +155,30 @@ fn run<T>(name: &str, test: impl FnOnce() -> T) {
 }
 
 fn main() {
+    #[cfg(target_family = "wasm")]
+    kompoz_web::start();
+    // (Natively the arguments; on the web the page's KOMPOZ_GPU_TESTS=a,b.)
+    #[cfg(not(target_family = "wasm"))]
     let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
+    #[cfg(target_family = "wasm")]
+    let filters: Vec<String> = kompoz_runtime::environment::var("KOMPOZ_GPU_TESTS")
+        .map(|names| names.split(',').filter(|n| !n.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default();
     let selected = |name: &str| filters.is_empty() || filters.iter().any(|f| name.contains(f.as_str()));
     match Gpu::start(None) {
         Err(why) => {
             println!("skipped: {why}");
-            std::process::exit(if kompoz_gpu::device::gpu_required() { 1 } else { 0 });
+            if kompoz_gpu::device::gpu_required() {
+                FAILURES.fetch_add(1, Ordering::Relaxed);
+            }
+            return finish();
         }
         Ok(mut g) => {
             println!("device: {}", g.device.device_name());
             for (name, test) in ON_THE_DEVICE.iter().filter(|(name, _)| selected(name)) {
                 run(name, || test(&mut g));
             }
-            // (Counted with KOMPOZ_GPU_VALIDATION=1.)
+            // (Counted with KOMPOZ_GPU_VALIDATION=1; WebGPU always validates.)
             let errors = g.device.validation_errors();
             check!(errors == 0, "  {errors} validation errors");
         }
@@ -151,7 +186,15 @@ fn main() {
     for (name, test) in ON_THEIR_OWN.iter().filter(|(name, _)| selected(name)) {
         run(name, test);
     }
+    finish();
+}
+
+/// The checks and failures said, and the run's exit status theirs (on the web: told the page, which has no exit).
+fn finish() {
     let (checks, failures) = (CHECKS.load(Ordering::Relaxed), FAILURES.load(Ordering::Relaxed));
     println!("{checks} checks, {failures} failed");
+    #[cfg(not(target_family = "wasm"))]
     std::process::exit(if failures == 0 { 0 } else { 1 });
+    #[cfg(target_family = "wasm")]
+    web::finish(checks, failures);
 }

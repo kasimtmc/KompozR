@@ -41,6 +41,8 @@ pub mod metal;
 mod pipeline_cache;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 pub mod vulkan;
+#[cfg(target_family = "wasm")]
+pub mod webgpu;
 
 pub use pipeline_cache::{
     FNV1A_BASIS, fnv1a, fnv1a_from, pipeline_cache_contents, pipeline_cache_file, read_pipeline_cache,
@@ -70,12 +72,12 @@ pub const NATIVE_BACKEND: Backend = if cfg!(target_vendor = "apple") {
 };
 
 /// Whether this build of KompozR has a device for `backend` (Vulkan's where it is the target's API, Metal's on Apple's
-/// systems; WebGPU's once its module is in).
+/// systems, WebGPU's on the web).
 pub const fn has_backend(backend: Backend) -> bool {
     match backend {
         Backend::Vulkan => cfg!(not(any(target_family = "wasm", target_vendor = "apple"))),
         Backend::Metal => cfg!(target_vendor = "apple"),
-        Backend::WebGpu => false,
+        Backend::WebGpu => cfg!(target_family = "wasm"),
     }
 }
 
@@ -755,6 +757,10 @@ pub fn create(backend: Backend, surface: Surface) -> Result<Box<dyn Device>, Str
     if backend == Backend::Metal {
         return Ok(Box::new(metal::MetalDevice::new(surface)?));
     }
+    #[cfg(target_family = "wasm")]
+    if backend == Backend::WebGpu {
+        return Ok(Box::new(webgpu::WebGpuDevice::new(surface)?));
+    }
     drop(surface);
     Err(format!("this build of KompozR has no {} backend", backend.name()))
 }
@@ -786,7 +792,7 @@ mod tests {
         let native = NATIVE_BACKEND;
         assert_eq!(native, if cfg!(target_os = "linux") { Backend::Vulkan } else { native });
         assert_eq!(has_backend(Backend::Metal), cfg!(target_vendor = "apple"));
-        assert!(!has_backend(Backend::WebGpu));
+        assert_eq!(has_backend(Backend::WebGpu), cfg!(target_family = "wasm"));
         for missing in [Backend::Vulkan, Backend::Metal, Backend::WebGpu].into_iter().filter(|&b| !has_backend(b)) {
             let why = create(missing, Surface::default()).err().unwrap();
             assert_eq!(why, format!("this build of KompozR has no {} backend", missing.name()));

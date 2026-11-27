@@ -7,29 +7,29 @@
 //!   KOMPOZ_GOLDEN_DIR=<dir>  the pictures from there
 
 use crate::harness::Pixels;
-use kompoz_graphics::{decode_png, save_png};
+use kompoz_graphics::{decode_png, encode_png};
 use std::path::{Path, PathBuf};
 
 /// Where the pictures are: `KOMPOZ_GOLDEN_DIR`, else the crate's tests/golden.
 pub fn golden_dir() -> PathBuf {
-    std::env::var_os("KOMPOZ_GOLDEN_DIR")
+    kompoz_runtime::environment::var_os("KOMPOZ_GOLDEN_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden"))
+        .unwrap_or_else(|| crate::files::crate_dir().join("tests").join("golden"))
 }
 
 /// `KOMPOZ_GOLDEN_UPDATE=1`: the pictures written anew.
 pub fn updating() -> bool {
-    std::env::var_os("KOMPOZ_GOLDEN_UPDATE").is_some_and(|v| v == "1")
+    kompoz_runtime::environment::flag("KOMPOZ_GOLDEN_UPDATE")
 }
 
 /// A PNG file's pixels, as they are stored (the pictures are read-back pixels, premultiplied, written as they are).
 pub fn load_png(path: &Path) -> Option<Pixels> {
-    let image = decode_png(&std::fs::read(path).ok()?)?;
+    let image = decode_png(&crate::files::read(path)?)?;
     Some(Pixels { width: image.width, height: image.height, rgba: image.rgba })
 }
 
 pub fn save(path: &Path, pixels: &Pixels) -> bool {
-    save_png(path, pixels.width, pixels.height, &pixels.rgba).is_ok()
+    encode_png(pixels.width, pixels.height, &pixels.rgba).is_some_and(|png| crate::files::write(path, &png))
 }
 
 pub use kompoz_gpu::golden::Difference;

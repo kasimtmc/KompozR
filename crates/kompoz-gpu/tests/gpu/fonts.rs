@@ -10,7 +10,6 @@ use kompoz_text::font::{FontFamilyResolverImpl, FontId};
 use kompoz_text::shape::{FontRunRequest, ShapeRequest};
 use kompoz_text::style::TextMotion;
 use kompoz_text::*;
-use std::path::Path;
 use std::rc::Rc;
 
 /// A font as C++'s tests gave one (Font{size}, its weight and letter spacing set): dp.
@@ -41,10 +40,10 @@ impl Font {
 thread_local! {
     static RESOLVER: Rc<FontFamilyResolverImpl> = {
         let resolver = Rc::new(FontFamilyResolverImpl::registered_only());
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fonts");
+        let dir = crate::files::crate_dir().join("tests").join("fonts");
         let c = resolver.collection();
         for f in ["Regular.ttf", "Medium.ttf", "Bold.ttf"] {
-            c.register_file(dir.join(f)).expect("a bundled font");
+            c.register(std::sync::Arc::new(crate::files::read(&dir.join(f)).expect("a bundled font")));
         }
         c.set_generic_families(GenericFontFamily::SansSerif, &["Noto Sans"]);
         resolver

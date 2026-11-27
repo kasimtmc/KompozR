@@ -31,6 +31,10 @@ objc2-foundation = "0.3.2"
 objc2-metal = "0.3.2"
 objc2-quartz-core = "0.3.2"
 
+# (stage 15) The web's: WebGPU through our own JavaScript glue (kompoz-web).
+[target.'cfg(target_family = "wasm")'.dependencies]
+kompoz-web = { path = "../kompoz-web" }
+
 # The GPU tests: one binary on one device, the tests in sequence (harness = false), as the C++ Kompoz's gpu_tests.
 [[test]]
 name = "gpu"
