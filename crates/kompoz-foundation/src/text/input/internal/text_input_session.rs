@@ -18,7 +18,7 @@ use crate::content::{PlatformTransferableContent, TransferableContent, Transfera
 use crate::text::input::text_field_buffer::adjust_text_range;
 use crate::text::input::{TextFieldBuffer, TextFieldCharSequence};
 use kompoz_graphics::Offset;
-use kompoz_text::input::{EditCommand, TextFieldValue};
+use kompoz_text::input::{EditCommand, OffsetMapping, TextFieldValue};
 use kompoz_text::segment::{find_following_break, find_preceding_break};
 use kompoz_text::{TextLayoutResult, TextRange};
 use kompoz_ui::clipboard::ClipEntry;
@@ -26,6 +26,8 @@ use kompoz_ui::platform::{ImeAction, ImeOptions};
 use kompoz_ui::platform_text_input::{
     PlatformTextInputMethodRequest, PlatformTextInputSessionScope, SessionFuture, TextEditingScope, TextEditorState,
 };
+use kompoz_ui::platform_text_layout::window_transform;
+use kompoz_ui::text_input::TextHighlightType;
 use std::rc::Rc;
 
 /// A field's value as the input method sees it: its untransformed text, selection and composition.
@@ -254,9 +256,16 @@ pub fn platform_specific_text_input_session(
     let value_state = state.clone();
     let edit_state = state.clone();
     let text_state = state.clone();
-    let (l1, l2, l3, l4, l5) =
-        (layout_state.clone(), layout_state.clone(), layout_state.clone(), layout_state.clone(), layout_state);
+    let (l1, l2, l3, l4, l5, l6) = (
+        layout_state.clone(),
+        layout_state.clone(),
+        layout_state.clone(),
+        layout_state.clone(),
+        layout_state.clone(),
+        layout_state,
+    );
     let rect_state = state.clone();
+    let (mapping_state, highlight_state) = (state.clone(), state.clone());
     let request = PlatformTextInputMethodRequest {
         value: Rc::new(move || to_text_field_value(&value_state.untransformed_text())),
         state: Rc::new(FieldEditorState(state)),
@@ -279,6 +288,26 @@ pub fn platform_specific_text_input_session(
         text_field_rect_in_root: Rc::new(move || l3.decorator_node_coordinates().map(|c| c.bounds_in_root())),
         text_clipping_rect_in_root: Rc::new(move || l4.core_node_coordinates().map(|c| c.bounds_in_root())),
         unclipped_text_offset_in_root: Rc::new(move || l5.text_layout_node_coordinates().map(|c| c.position_in_root())),
+        text_layout_to_root_transform: Rc::new(move || {
+            l6.text_layout_node_coordinates().filter(|c| c.is_attached()).map(|c| window_transform(&c))
+        }),
+        offset_mapping: Rc::new(move || {
+            if !mapping_state.is_transformed() {
+                return OffsetMapping::Identity;
+            }
+            let (to, from) = (mapping_state.clone(), mapping_state.clone());
+            OffsetMapping::new(move |o| to.map_to_transformed(o).min(), move |o| from.map_from_transformed(o).min())
+        }),
+        // (Compose's HandwritingGesture previews: `highlightCharsIn`, an empty range clearing it.)
+        highlight_chars_in: Some(Rc::new(move |highlight_type: TextHighlightType, range: TextRange| {
+            highlight_state.edit_untransformed_text_as_user(false, |buffer| {
+                if range.collapsed() {
+                    buffer.clear_highlight();
+                } else {
+                    buffer.set_highlight(highlight_type, range.min(), range.max());
+                }
+            });
+        })),
         edit_text: Rc::new(move |block: &mut dyn FnMut(&mut dyn TextEditingScope)| {
             text_state.edit_untransformed_text_as_user(false, |buffer| block(&mut BufferEditingScope(buffer)));
         }),

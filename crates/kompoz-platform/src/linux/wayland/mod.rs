@@ -68,6 +68,7 @@ use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
+use kompoz_ui::platform_text_layout::{PlatformTextLayout, caret_area};
 use kompoz_ui::window::{Notification, WindowId, WindowPlacement, WindowRequest};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -254,6 +255,9 @@ pub(crate) struct Shared {
     text: RefCell<TextInput>,
     /// Each window's field as its host last told it, and the window the input method is on (its field told).
     fields: RefCell<HashMap<WindowId, Field>>,
+    /// Each window's field's caret box (px) as its host told it, and its text layout while its session is open:
+    /// where the input method's cursor rectangle goes (the caret's glyph, where the layout is known).
+    field_places: RefCell<HashMap<WindowId, (Rect, Option<PlatformTextLayout>)>>,
     text_window: Cell<Option<WindowId>>,
     tablet: RefCell<Tablets>,
     clipboard: RefCell<Clipboard>,
@@ -277,6 +281,14 @@ struct WaylandCallbacks {
     scale: Rc<Cell<f64>>,
 }
 
+impl WaylandCallbacks {
+    /// A box in px as text-input-v3's cursor rectangle: in points (the window's scale), rounded.
+    fn cursor_rectangle(&self, area: Rect) -> [i32; 4] {
+        let k = 1.0 / self.scale.get().max(1e-3) as f32;
+        [area.left * k, area.top * k, area.width() * k, area.height() * k].map(|v| v.round() as i32)
+    }
+}
+
 impl std::ops::Deref for WaylandCallbacks {
     type Target = Rc<Shared>;
     fn deref(&self) -> &Rc<Shared> {
@@ -292,8 +304,17 @@ impl PlatformCallbacks for WaylandCallbacks {
     /// (C++'s textInput: the area from px to points.) Kept as the window's field; told the input method while it is
     /// on this window.
     fn text_input(&self, active: bool, area: Rect, state: &TextEditState, options: &ImeOptions) {
-        let k = 1.0 / self.scale.get().max(1e-3) as f32;
-        let area = [area.left * k, area.top * k, area.width() * k, area.height() * k].map(|v| v.round() as i32);
+        let layout = {
+            let mut places = self.shared.field_places.borrow_mut();
+            let place = places.entry(self.window).or_insert((area, None));
+            place.0 = area;
+            if !active {
+                // (The session closed: its layout goes with it.)
+                place.1 = None;
+            }
+            place.1.clone()
+        };
+        let area = self.cursor_rectangle(caret_area(area, state, layout.as_ref()));
         self.shared.fields.borrow_mut().insert(self.window, (active, area, state.clone(), options.clone()));
         if self.shared.text_window.get().is_none_or(|w| w == self.window) {
             self.shared.text.borrow_mut().set(active, area, state, options);
@@ -302,13 +323,39 @@ impl PlatformCallbacks for WaylandCallbacks {
     }
 
     fn text_input_changed(&self, state: &TextEditState) {
-        if let Some(field) = self.shared.fields.borrow_mut().get_mut(&self.window) {
-            field.2 = state.clone();
-        }
+        let place = self.shared.field_places.borrow().get(&self.window).cloned();
+        let area = place.map(|(area, layout)| self.cursor_rectangle(caret_area(area, state, layout.as_ref())));
+        let field = {
+            let mut fields = self.shared.fields.borrow_mut();
+            fields.get_mut(&self.window).map(|field| {
+                field.2 = state.clone();
+                field.1 = area.unwrap_or(field.1);
+                field.clone()
+            })
+        };
         if self.shared.text_window.get().is_none_or(|w| w == self.window) {
-            self.shared.text.borrow_mut().changed(state);
+            let mut text = self.shared.text.borrow_mut();
+            match field {
+                // (The caret moved with the text: the cursor rectangle with it.)
+                Some((active, area, state, options)) if active => text.set(active, area, &state, &options),
+                _ => text.changed(state),
+            }
             let _ = self.shared.connection.flush();
         }
+    }
+
+    /// The focused field was laid out again or moved: the input method's cursor rectangle goes to its caret's
+    /// glyph.
+    fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        let area = {
+            let mut places = self.shared.field_places.borrow_mut();
+            let Some(place) = places.get_mut(&self.window) else { return };
+            place.1 = Some(layout.clone());
+            place.0
+        };
+        let field = self.shared.fields.borrow().get(&self.window).cloned();
+        let Some((true, _, state, options)) = field else { return };
+        self.text_input(true, area, &state, &options);
     }
 
     /// Kept as the window's cursor; shown while the pointer is in this window.
@@ -553,6 +600,7 @@ impl WaylandPlatform {
             pointer_window: Cell::new(None),
             text: RefCell::new(TextInput::default()),
             fields: RefCell::new(HashMap::new()),
+            field_places: RefCell::new(HashMap::new()),
             text_window: Cell::new(None),
             tablet: RefCell::new(Tablets::new(connection.clone())),
             clipboard: RefCell::new(Clipboard::default()),

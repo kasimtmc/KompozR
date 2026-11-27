@@ -509,6 +509,15 @@ mod on_macos {
             });
             assert_eq!((count, line), (7, 0), "its characters, its caret's line");
             assert!(caret_box > 0.0, "the caret's box");
+            // Its characters where they are laid out (its text layout): the first narrower than the whole text.
+            let (first, all) = ax::on_main(|mtm| {
+                let e = ax::find(mtm, is_field).expect("the field");
+                (ax::frame_for_range(&e, 0, 1), ax::frame_for_range(&e, 0, 7))
+            });
+            assert!(
+                first.size.width > 0.0 && first.size.width < all.size.width && first.origin.x <= all.origin.x + 0.5,
+                "the first character's frame {first:?}, the text's {all:?}"
+            );
             // Its selection set: read back, its text.
             ax::on_main(|mtm| ax::find(mtm, is_field).map(|e| ax::select(&e, 1, 3)));
             let selected = until("the selection set", |mtm| {

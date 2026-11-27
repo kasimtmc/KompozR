@@ -8,10 +8,12 @@ use super::properties::{
     AccessibilityAction, ActionFn, CollectionInfo, CollectionItemInfo, LiveRegionMode, ProgressBarRangeInfo, Role,
     ScrollAxisRange, SemanticsActions, SemanticsProperties,
 };
+use crate::platform_text_layout::PlatformTextLayout;
 use crate::state::ToggleableState;
 use kompoz_graphics::{LayoutDirection, Rect};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// A node as accessibility sees it (C++'s SemanticsNode): a node of the merged tree that tells accessibility
 /// something, summed up. Bounds are in the host's window, px.
@@ -85,6 +87,12 @@ pub struct AccessibilityNode {
     pub horizontal_scroll: Option<ScrollPosition>,
     /// How far it has scrolled up and down (Compose's `verticalScrollAxisRange`), where it says.
     pub vertical_scroll: Option<ScrollPosition>,
+    /// Where its text's characters and lines are (Compose's `GetTextLayoutResult`, read as the tree is made): a
+    /// text's or a field's own layout, what a screen reader's character and line extents and hit tests are of. Its
+    /// text is what is shown (a field's `value`, a text's text); the focused field's is its input session's (where
+    /// its text is exactly, its decoration around it). None where it has no layout of its own (a node merging a
+    /// text below it).
+    pub text_layout: Option<Arc<PlatformTextLayout>>,
 }
 
 /// Where a scrollable is along an axis as the tree was made (a [`ScrollAxisRange`](super::ScrollAxisRange) read):
@@ -357,7 +365,27 @@ fn summarize(
         }),
         horizontal_scroll: config.get(SemanticsProperties::HorizontalScrollAxisRange).map(scroll_position),
         vertical_scroll: config.get(SemanticsProperties::VerticalScrollAxisRange).map(scroll_position),
+        text_layout: text_layout_of(node),
     }
+}
+
+/// Where its own text's characters are, from its own `GetTextLayoutResult` (a merging node's would be of a text
+/// below it, at another place): its text laid out at its inner coordinates, cut to its bounds.
+fn text_layout_of(node: &SemanticsNode) -> Option<Arc<PlatformTextLayout>> {
+    if node.is_fake() {
+        return None;
+    }
+    let get = node.unmerged_config().get(SemanticsActions::GetTextLayoutResult)?.action?;
+    let mut out = Vec::new();
+    if !get(&mut out) {
+        return None;
+    }
+    let layout = out.into_iter().next()?;
+    let coordinates = node.layout_node().inner_coordinates();
+    if !coordinates.is_attached() {
+        return None;
+    }
+    Some(Arc::new(PlatformTextLayout::of_text(&layout, &coordinates, node.bounds_in_window())))
 }
 
 /// A scroll axis's range as it is now.

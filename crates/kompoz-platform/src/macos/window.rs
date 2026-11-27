@@ -14,7 +14,7 @@ use super::clipboard::{self, Items};
 use super::display_link::{DisplayLink, Tick};
 use super::keyboard;
 use super::services;
-use super::text_input::{Ime, NOT_FOUND, utf16_of_byte};
+use super::text_input::{Ime, NOT_FOUND};
 use super::types;
 use super::view::{KompozView, KompozWindow};
 use super::{StepKind, now};
@@ -562,25 +562,38 @@ impl WindowState {
     }
 
     /// The field's area in the view's points (where the input method's candidates go: below it).
-    pub fn ime_area_points(&self) -> NSRect {
-        let area = self.ime.borrow().area;
+    /// Where the part of UTF-16 range `range` on its first line is, points in the view, and the range that part is
+    /// (`firstRectForCharacterRange:actualRange:`).
+    pub fn ime_first_rect_points(&self, range: (usize, usize)) -> (NSRect, (usize, usize)) {
+        let (rect, actual) = self.ime.borrow().first_rect(range.0, range.1);
         let k = 1.0 / self.px_per_point.get();
-        NSRect::new(
-            NSPoint::new(area.left as f64 * k, area.top as f64 * k),
-            NSSize::new(area.width() as f64 * k, area.height() as f64 * k),
-        )
+        let rect = NSRect::new(
+            NSPoint::new(rect.left as f64 * k, rect.top as f64 * k),
+            NSSize::new(rect.width() as f64 * k, rect.height() as f64 * k),
+        );
+        (rect, actual)
     }
 
-    /// The character at a point of the view: the caret's (UTF-16) where it is in the field, none elsewhere.
+    /// The character (UTF-16) at a point of the view (points), as the field is laid out; none elsewhere.
     pub fn ime_index_at(&self, x: f64, y: f64) -> usize {
-        let ime = self.ime.borrow();
         let ppp = self.px_per_point.get() as f32;
-        let (x, y) = (x as f32 * ppp, y as f32 * ppp);
-        let a = ime.area;
-        if !ime.active || x < a.left || x > a.right || y < a.top || y > a.bottom {
-            return NOT_FOUND;
+        self.ime.borrow().index_at(kompoz_graphics::Offset::new(x as f32 * ppp, y as f32 * ppp))
+    }
+
+    /// The focused field was laid out again or moved: where its characters are, the input context told they moved.
+    pub fn set_text_layout(&self, layout: &kompoz_ui::platform_text_layout::PlatformTextLayout) {
+        {
+            let mut ime = self.ime.borrow_mut();
+            if !ime.active || ime.layout.as_ref() == Some(layout) {
+                return;
+            }
+            ime.layout = Some(layout.clone());
         }
-        utf16_of_byte(&ime.state.text, ime.state.selection_end)
+        if let Some(view) = self.view()
+            && let Some(context) = view.inputContext()
+        {
+            context.invalidateCharacterCoordinates();
+        }
     }
 
     /// The field as the host tells it (focused or not, where, its text): the input methods' marked text dropped
@@ -592,6 +605,9 @@ impl WindowState {
             ime.active = active;
             ime.area = area;
             ime.state = state.clone();
+            if !active {
+                ime.layout = None; // (the session closed: its layout goes with it)
+            }
             had && (!active || state.composition.is_none())
         };
         if let Some(view) = self.view()
@@ -875,6 +891,10 @@ impl PlatformCallbacks for MacCallbacks {
     fn text_input(&self, active: bool, area: Rect, state: &TextEditState, options: &ImeOptions) {
         self.state.a11y.set_field_multi_line(active && !options.single_line);
         self.state.set_text_input(active, area, state);
+    }
+
+    fn update_text_layout_result(&self, layout: &kompoz_ui::platform_text_layout::PlatformTextLayout) {
+        self.state.set_text_layout(layout);
     }
 
     fn text_input_changed(&self, state: &TextEditState) {

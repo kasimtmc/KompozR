@@ -28,9 +28,11 @@ use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
 use kompoz_platform::App;
 use kompoz_runtime::*;
-use kompoz_text::TextStyle;
+use kompoz_text::input::{OffsetMapping, TextFieldValue};
+use kompoz_text::{TextRange, TextStyle};
 use kompoz_ui::platform::{ImeOptions, KeyboardType, PointerIcon, TextEditState};
 use kompoz_ui::semantics::Role;
+use kompoz_ui::text::remember_text_measurer;
 use kompoz_ui::text_input::{EditCommand, LocalTextInputService, TextInputSession};
 use kompoz_ui::{Alignment, Modifier};
 use std::cell::RefCell;
@@ -261,14 +263,17 @@ fn check_windows(work: &Path, out: &str) {
 
 /// An editor's input sessions, as a focused text field opens them: one for a field holding "merhaba"; at the first
 /// typing, its caret's place told and its text replaced by the app (6003 bytes, the caret at the end); then another
-/// field's (an e-mail address's) closing it; closed as the editor goes. A stylus's icon over all of it.
+/// field's (an e-mail address's) closing it, its text layout told (at 30, 40: the caret's glyph after "a@b" is where
+/// the input method's cursor rectangle goes; printed for the check); closed as the editor goes. A stylus's icon
+/// over all of it.
 #[kompozable]
 fn Editor() {
     let service = LocalTextInputService.current();
+    let measurer = remember_text_measurer();
     Box(modifier = Modifier.fill_max_size().background(Color::White).stylus_hover_icon(PointerIcon::Crosshair));
     DisposableEffect(0, move || {
         let open: Rc<RefCell<Option<TextInputSession>>> = Rc::default();
-        let (o, s) = (open.clone(), service.clone());
+        let (o, s, m) = (open.clone(), service.clone(), measurer.clone());
         let first = service.start_input(
             TextEditState::caret_at_end("merhaba"),
             ImeOptions::default(),
@@ -278,6 +283,13 @@ fn Editor() {
                 first.update_state(&TextEditState::caret_at_end("ğ".repeat(3000) + "son"));
                 let email = ImeOptions { keyboard_type: KeyboardType::Email, ..ImeOptions::default() };
                 let next = s.start_input(TextEditState::caret_at_end("a@b"), email, |_: &[EditCommand]| {}, |_| {});
+                let layout = named_args!(m.measure("a@b"));
+                let caret = Rect::translate(layout.get_cursor_rect(3), Offset::new(30.0, 40.0));
+                eprintln!("caret glyph: {} {} 1 {}", caret.left.round(), caret.top.round(), caret.height().round());
+                let to_window = |matrix: &mut Matrix| matrix.translate(30.0, 40.0, 0.0);
+                let bounds = Rect::new(0.0, 0.0, 200.0, 20.0);
+                let value = TextFieldValue::from_text("a@b", TextRange::at(3), None);
+                next.update_text_layout_result(&value, &OffsetMapping::Identity, &layout, &to_window, bounds, bounds);
                 *o.borrow_mut() = Some(next);
             },
             |_| {},
@@ -533,6 +545,9 @@ fn check_editor(out: &str) {
     }
     let entered = out.lines().any(|l| !l.contains(" -> ") && l.contains("zwp_text_input_v3") && l.contains(".enter("));
     assert!(entered, "the compositor's text input entered the window");
+    // Where the second field's caret glyph is (the child printed it), as its cursor rectangle.
+    let caret = out.lines().find_map(|l| l.strip_prefix("caret glyph: ")).expect("the caret glyph printed");
+    let caret = format!("set_cursor_rectangle({})", caret.split(' ').collect::<Vec<_>>().join(", "));
     // The text input's requests, in order (a long text's end only).
     let requests: Vec<String> = out
         .lines()
@@ -569,6 +584,9 @@ fn check_editor(out: &str) {
             "enable()",
             "set_surrounding_text(\"a@b\", 3, 3)",
             "set_content_type(3, 6)",
+            "commit()",
+            // Its text layout told: the cursor rectangle at the caret's glyph (after "a@b").
+            caret.as_str(),
             "commit()",
             // Disabled as the app quits, the text input destroyed with the platform.
             "disable()",

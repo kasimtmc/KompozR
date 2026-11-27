@@ -39,8 +39,14 @@ use std::rc::{Rc, Weak};
 pub trait Owner {
     /// A text service's edit is done (its lock released): the document as the core is to have it.
     fn edited(&self, presented: TextEditState);
-    /// The caret's box, px in the window's client area.
-    fn caret(&self) -> Rect;
+    /// The box UTF-16 units `start..end` of the field's text take, px in the client area, and whether part of it
+    /// is out of sight (GetTextExt).
+    fn range(&self, start: usize, end: usize) -> (Rect, bool);
+    /// The unit a caret goes before at `point` (px in the client area), as GetACPFromPoint's `flags` say; none
+    /// where no character is.
+    fn acp_from_point(&self, point: kompoz_graphics::Offset, flags: u32) -> Option<usize>;
+    /// What shows of the field, px in the client area, where it is laid out (GetScreenExt; else the window's).
+    fn document(&self) -> Option<Rect>;
 }
 
 // ---- The thread manager -----------------------------------------------------------------------------------------
@@ -474,13 +480,6 @@ impl TextStore {
         self.tell();
     }
 
-    /// The caret's box on the screen.
-    fn caret_on_screen(&self) -> RECT {
-        let area = self.owner.upgrade().map_or(Rect::default(), |o| o.caret());
-        let p = ime::char_position(area, self.hwnd.client_origin());
-        RECT { left: p.left, top: p.top, right: p.right, bottom: p.bottom }
-    }
-
     /// The text store's static flags: no hidden text; the touch keyboard's corrections and predictions where the
     /// field wants them.
     fn status(&self) -> TS_STATUS {
@@ -736,38 +735,52 @@ impl TextStore {
         Ok(())
     }
 
-    fn text_ext(&self, clipped: *mut BOOL, rect: *mut RECT) -> Result<()> {
+    /// Where UTF-16 units `start..end` (`end` -1: the text's end) are on the screen, and whether part of them is out
+    /// of sight: their characters' boxes as the field's text layout has them (the caret's box until it is laid out).
+    fn text_ext(&self, start: i32, end: i32, clipped: *mut BOOL, rect: *mut RECT) -> Result<()> {
         self.check(false)?;
-        let r = self.caret_on_screen();
+        let length = self.document.borrow().end() as i32;
+        let end = if end < 0 { length } else { end };
+        if start < 0 || start > end || end > length {
+            return Err(TS_E_INVALIDPOS.into());
+        }
+        let (area, out_of_sight) =
+            self.owner.upgrade().map_or((Rect::default(), false), |o| o.range(start as usize, end as usize));
+        let p = ime::char_position(area, self.hwnd.client_origin());
         // SAFETY: TSF's out parameters.
         unsafe {
             if !rect.is_null() {
-                *rect = r;
+                *rect = RECT { left: p.left, top: p.top, right: p.right, bottom: p.bottom };
             }
             if !clipped.is_null() {
-                *clipped = false.into();
+                *clipped = out_of_sight.into();
             }
         }
         Ok(())
     }
 
+    /// What shows of the field on the screen where it is laid out, else the window's client area.
     fn screen_ext(&self) -> RECT {
         let (x, y) = self.hwnd.client_origin();
+        if let Some(r) = self.owner.upgrade().and_then(|o| o.document()) {
+            let p = ime::char_position(r, (x, y));
+            return RECT { left: p.left, top: p.top, right: p.right, bottom: p.bottom };
+        }
         let (w, h) = self.hwnd.client_size();
         RECT { left: x, top: y, right: x + w, bottom: y + h }
     }
 
-    /// The character at a point of the screen: the caret's where it is in its box, none elsewhere (KompozR's text
-    /// layout isn't the platform's to ask).
-    fn acp_from_point(&self, point: *const POINT) -> Result<i32> {
+    /// The unit at a point of the screen: the character there as the field's text layout has it (GXFPF_* `flags`),
+    /// the caret's where it is in its box until the field is laid out; TS_E_INVALIDPOINT where none is.
+    fn acp_from_point(&self, point: *const POINT, flags: u32) -> Result<i32> {
         self.check(false)?;
         // SAFETY: TSF passes a point.
         let p = unsafe { *point };
-        let r = self.caret_on_screen();
-        if p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom {
-            Ok(self.document.borrow().selection().1 as i32)
-        } else {
-            Err(TS_E_INVALIDPOINT.into())
+        let (x, y) = self.hwnd.client_origin();
+        let at = kompoz_graphics::Offset::new((p.x - x) as f32 + 0.5, (p.y - y) as f32 + 0.5);
+        match self.owner.upgrade().and_then(|o| o.acp_from_point(at, flags)) {
+            Some(acp) => Ok(acp as i32),
+            None => Err(TS_E_INVALIDPOINT.into()),
         }
     }
 
@@ -950,11 +963,11 @@ impl ITextStoreACP_Impl for TextStore_Impl {
     fn GetActiveView(&self) -> Result<u32> {
         Ok(0)
     }
-    fn GetACPFromPoint(&self, _view: u32, point: *const POINT, _flags: u32) -> Result<i32> {
-        self.acp_from_point(point)
+    fn GetACPFromPoint(&self, _view: u32, point: *const POINT, flags: u32) -> Result<i32> {
+        self.acp_from_point(point, flags)
     }
-    fn GetTextExt(&self, _view: u32, _start: i32, _end: i32, rect: *mut RECT, clipped: *mut BOOL) -> Result<()> {
-        self.text_ext(clipped, rect)
+    fn GetTextExt(&self, _view: u32, start: i32, end: i32, rect: *mut RECT, clipped: *mut BOOL) -> Result<()> {
+        self.text_ext(start, end, clipped, rect)
     }
     fn GetScreenExt(&self, _view: u32) -> Result<RECT> {
         Ok(self.screen_ext())
@@ -1070,11 +1083,11 @@ impl ITextStoreACP2_Impl for TextStore_Impl {
     fn GetActiveView(&self) -> Result<u32> {
         Ok(0)
     }
-    fn GetACPFromPoint(&self, _view: u32, point: *const POINT, _flags: u32) -> Result<i32> {
-        self.acp_from_point(point)
+    fn GetACPFromPoint(&self, _view: u32, point: *const POINT, flags: u32) -> Result<i32> {
+        self.acp_from_point(point, flags)
     }
-    fn GetTextExt(&self, _view: u32, _start: i32, _end: i32, rect: *mut RECT, clipped: *mut BOOL) -> Result<()> {
-        self.text_ext(clipped, rect)
+    fn GetTextExt(&self, _view: u32, start: i32, end: i32, rect: *mut RECT, clipped: *mut BOOL) -> Result<()> {
+        self.text_ext(start, end, clipped, rect)
     }
     fn GetScreenExt(&self, _view: u32) -> Result<RECT> {
         Ok(self.screen_ext())
@@ -1230,14 +1243,25 @@ mod tests {
             let events = self.field.borrow_mut().send(events);
             self.events.borrow_mut().extend(events);
         }
-        fn caret(&self) -> Rect {
-            Rect::new(10.0, 20.0, 11.0, 40.0)
+        fn range(&self, start: usize, end: usize) -> (Rect, bool) {
+            self.field.borrow().place().range(start, end)
+        }
+        fn acp_from_point(&self, point: kompoz_graphics::Offset, flags: u32) -> Option<usize> {
+            self.field.borrow().place().acp_from_point(point, flags)
+        }
+        fn document(&self) -> Option<Rect> {
+            None
         }
     }
 
     fn owner(state: &TextEditState) -> Rc<TestOwner> {
         Rc::new(TestOwner {
-            field: RefCell::new(Field { active: true, state: state.clone(), ..Field::default() }),
+            field: RefCell::new(Field {
+                active: true,
+                area: Rect::new(10.0, 20.0, 11.0, 40.0),
+                state: state.clone(),
+                ..Field::default()
+            }),
             events: RefCell::new(Vec::new()),
         })
     }

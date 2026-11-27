@@ -58,6 +58,7 @@ use kompoz_ui::clipboard::{ClipDataReader, ClipEntry, ClipItem, ClipMetadata, is
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
+use kompoz_ui::platform_text_layout::{PlatformTextLayout, caret_area};
 use kompoz_ui::window::{Notification, WindowId, WindowPlacement, WindowRequest};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -594,6 +595,34 @@ struct X11Callbacks {
     field: Rc<Cell<(bool, XPoint)>>,
     /// The X window the input method's context is on (the focused one).
     ime_window: Rc<Cell<Window>>,
+    /// The field's caret box (px) and text as its host told them, and its text layout while its session is open:
+    /// where the spot goes (under the caret's glyph, where the layout is known).
+    place: RefCell<(Rect, TextEditState, Option<PlatformTextLayout>)>,
+}
+
+impl X11Callbacks {
+    /// The input method's spot for the field: under its caret (its glyph's, where its layout is known).
+    fn spot(&self) -> XPoint {
+        let place = self.place.borrow();
+        let area = caret_area(place.0, &place.1, place.2.as_ref());
+        let spot = |v: f32| v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        XPoint { x: spot(area.left), y: spot(area.bottom) }
+    }
+
+    /// The field (taking typing or not) at `at` told the input method, if its context is on this window.
+    fn tell_field(&self, active: bool, at: XPoint) {
+        self.field.set((active, at));
+        if self.ime_window.get() != self.window.get() {
+            return; // (told it as the window gets the focus)
+        }
+        let mut ime = self.shared.ime.borrow_mut();
+        if !active && ime.active {
+            ime.reset();
+        }
+        ime.active = active;
+        ime.spot = at;
+        ime.tell();
+    }
 }
 
 impl std::ops::Deref for X11Callbacks {
@@ -610,25 +639,32 @@ impl PlatformCallbacks for X11Callbacks {
 
     /// The input method's context focused while a field takes typing, what is composed shown under the field's
     /// caret (`area`, px: the window's pixels); what it composed for a field that no longer takes typing given up.
-    fn text_input(&self, active: bool, area: Rect, _: &TextEditState, _: &ImeOptions) {
-        let spot = |v: f32| v.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
-        let at = XPoint { x: spot(area.left), y: spot(area.bottom) };
-        self.field.set((active, at));
-        if self.ime_window.get() != self.window.get() {
-            return; // (told it as the window gets the focus)
+    fn text_input(&self, active: bool, area: Rect, state: &TextEditState, _: &ImeOptions) {
+        {
+            let mut place = self.place.borrow_mut();
+            (place.0, place.1) = (area, state.clone());
+            if !active {
+                place.2 = None; // (the session closed: its layout goes with it)
+            }
         }
-        let mut ime = self.shared.ime.borrow_mut();
-        if !active && ime.active {
-            ime.reset();
+        self.tell_field(active, self.spot());
+    }
+
+    /// The focused field was laid out again or moved: the spot goes under its caret's glyph.
+    fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        self.place.borrow_mut().2 = Some(layout.clone());
+        if self.field.get().0 {
+            self.tell_field(true, self.spot());
         }
-        ime.active = active;
-        ime.spot = at;
-        ime.tell();
     }
 
     /// The app changed the field's text: what the input method composes on the spot given up unless the field
-    /// still holds it as its composition.
+    /// still holds it as its composition; the spot follows the caret.
     fn text_input_changed(&self, state: &TextEditState) {
+        self.place.borrow_mut().1 = state.clone();
+        if self.field.get().0 {
+            self.tell_field(true, self.spot());
+        }
         if self.ime_window.get() != self.window.get() {
             return;
         }
@@ -1500,6 +1536,7 @@ impl Platform for X11Platform {
             window: self.win.x.clone(),
             field: self.win.field.clone(),
             ime_window: self.ime_window.clone(),
+            place: RefCell::new((Rect::Zero, TextEditState::default(), None)),
         })
     }
 

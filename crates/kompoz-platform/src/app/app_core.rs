@@ -2126,6 +2126,9 @@ impl PlatformCallbacks for AppCallbacks {
     fn text_input_changed(&self, state: &TextEditState) {
         self.platform.text_input_changed(state);
     }
+    fn update_text_layout_result(&self, layout: &kompoz_ui::platform_text_layout::PlatformTextLayout) {
+        self.platform.update_text_layout_result(layout);
+    }
     fn cursor(&self, icon: PointerIcon) {
         self.platform.cursor(icon);
     }

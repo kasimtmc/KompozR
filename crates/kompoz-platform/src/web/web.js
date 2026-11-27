@@ -947,15 +947,61 @@ class WebPlatform {
         // (A clickable's own listener: browsers tell screen readers an element with one can be clicked.)
         el.onclick = a.has("data-click") ? ariaClickable : null;
         const text = linked ? "" : a.get("#text") || "";
-        if (text) {
+        const lines = text ? a.get("#lines") || "" : "";
+        // (Laid out: a line each where the canvas draws it, its text stretched to the line's width, so that what a
+        // screen reader highlights and its characters' extents are there; else one text node flowing.)
+        const shape = lines ? `${text}\u0000${lines}` : "";
+        if (text && !lines) {
+            if (k.text && k.text.nodeType !== Node.TEXT_NODE) {
+                k.text.remove();
+                k.text = null;
+            }
             if (!k.text) {
                 k.text = document.createTextNode("");
                 el.insertBefore(k.text, el.firstChild);
             }
             if (k.text.data !== text) k.text.data = text;
+            k.shape = "";
+        } else if (text) {
+            if (k.text && k.text.nodeType === Node.TEXT_NODE) {
+                k.text.remove();
+                k.text = null;
+            }
+            if (!k.text) {
+                k.text = document.createElement("span");
+                el.insertBefore(k.text, el.firstChild);
+            }
+            if (k.shape !== shape) {
+                k.shape = shape;
+                k.text.replaceChildren(
+                    ...lines.split(";").map((line) => {
+                        const [start, end, lx, ly, lw, lh] = line.split(" ").map(Number);
+                        const span = document.createElement("span");
+                        span.textContent = text.slice(start, end);
+                        Object.assign(span.style, {
+                            position: "absolute",
+                            left: `${lx}px`,
+                            top: `${ly}px`,
+                            height: `${lh}px`,
+                            lineHeight: `${lh}px`,
+                            fontSize: `${Math.max(1, lh * 0.8)}px`,
+                            whiteSpace: "pre",
+                            transformOrigin: "0 0",
+                        });
+                        span._kzWidth = lw;
+                        return span;
+                    }),
+                );
+                // (Its own width measured once it is in the page: scaled to the line's.)
+                for (const span of k.text.children) {
+                    const natural = span.getBoundingClientRect().width;
+                    span.style.transform = natural > 0 ? `scaleX(${span._kzWidth / natural})` : "";
+                }
+            }
         } else if (k.text) {
             k.text.remove();
             k.text = null;
+            k.shape = "";
         }
         const [x, y, w, h] = (a.get("#rect") || "0 0 0 0").split(" ").map(Number);
         const p = el.parentElement;

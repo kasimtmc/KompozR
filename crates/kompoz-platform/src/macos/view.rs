@@ -376,23 +376,23 @@ define_class!(
             NSArray::new()
         }
 
-        /// Where the field is on the screen: where the input method shows its candidates.
+        /// Where the range's part on its first line is on the screen (its characters' boxes as the field is laid
+        /// out; the caret's box until it is), the actual range that part is: where the input method shows its
+        /// candidates, what dictation and the accent menu point at.
         #[unsafe(method(firstRectForCharacterRange:actualRange:))]
         fn first_rect_for_character_range(&self, range: NSRange, actual: NSRangePointer) -> NSRect {
+            let Some(state) = self.state() else { return NSRect::ZERO };
+            let (rect, (location, length)) = state.ime_first_rect_points((range.location, range.length));
             if !actual.is_null() {
                 // SAFETY: AppKit passes a valid NSRange to write the actual range to, or null (checked).
-                unsafe { *actual = range };
+                unsafe { *actual = NSRange::new(location, length) };
             }
-            let Some(state) = self.state() else { return NSRect::ZERO };
-            let rect = state.ime_area_points();
             let in_window = self.convertRect_toView(rect, None);
             self.window().map_or(NSRect::ZERO, |w| w.convertRectToScreen(in_window))
         }
 
-        /// The character at a point of the screen: the caret's where it is in the field's caret box, none elsewhere
-        /// (as Windows' text services' `GetACPFromPoint`). A glyph's own would need the field's text layout, which
-        /// doesn't reach the platform: the host's text input service keeps `update_text_layout_result` to itself
-        /// (only the caret's rectangle, `notify_focused_rect`, comes out as the field's area).
+        /// The character at a point of the screen: the one whose box holds it as the field is laid out (its text
+        /// layout, told while its session is open); none elsewhere.
         #[unsafe(method(characterIndexForPoint:))]
         fn character_index_for_point(&self, point: NSPoint) -> NSUInteger {
             let (Some(state), Some(window)) = (self.state(), self.window()) else { return NOT_FOUND };

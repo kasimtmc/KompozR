@@ -18,7 +18,7 @@
 //!
 //! `KOMPOZ_ARIA=0` turns the mirror off.
 
-use crate::accessibility::text::text_of;
+use crate::accessibility::text::{layout_for, lines_of, text_of};
 use crate::accessibility::{Change, Snapshot, changes};
 use kompoz_ui::semantics::{AccessibilityNode, ProgressBarRangeInfo, Role, SemanticsAction, ToggleableState};
 use std::collections::{BTreeMap, HashMap};
@@ -197,6 +197,33 @@ fn rect_of(tree: &Snapshot, n: &AccessibilityNode, k: f32) -> String {
     format!("{} {} {} {}", r(left), r(top), r(b.width().max(0.0)), r(b.height().max(0.0)))
 }
 
+/// Where the lines of an element's text (`text`, its `#text`) are as the node's text layout lays them out, its
+/// text being the layout's (a field's: character for character): a line each, `start end left top width height`
+/// (UTF-16 units of the text; CSS pixels from the element's corner, `k` a px), `;` between them — web.js puts each
+/// line where the canvas draws it, so that what a screen reader highlights, and its character extents, are there.
+/// None without a layout (the text then flows in the element).
+fn lines_in(n: &AccessibilityNode, text: &str, k: f32) -> Option<String> {
+    let layout = layout_for(n, text).filter(|l| n.editable || l.text == text)?;
+    let units: Vec<usize> = std::iter::once(0)
+        .chain(text.chars().scan(0, |at, c| {
+            *at += c.len_utf16();
+            Some(*at)
+        }))
+        .collect();
+    let r = |v: f32| (v * k * 100.0).round() / 100.0;
+    let lines: Vec<String> = lines_of(layout)
+        .into_iter()
+        .zip(&layout.lines)
+        .map(|((s, e), line)| {
+            let b = line.rect;
+            let (start, end) = (units[s.max(0) as usize], units[(e.max(s) as usize).min(units.len() - 1)]);
+            let (left, top) = (b.left - n.bounds.left, b.top - n.bounds.top);
+            format!("{start} {end} {} {} {} {}", r(left), r(top), r(b.width().max(0.0)), r(b.height().max(0.0)))
+        })
+        .collect();
+    Some(lines.join(";"))
+}
+
 /// A node's element (see [`View`]), `k` CSS pixels a px.
 pub fn view_of(tree: &Snapshot, n: &AccessibilityNode, k: f32) -> View {
     let mut v = View::new();
@@ -217,9 +244,16 @@ pub fn view_of(tree: &Snapshot, n: &AccessibilityNode, k: f32) -> View {
         if !name.is_empty() {
             set("aria-label", name);
         }
-        set("#text", text_of(n));
+        let text = text_of(n);
+        if let Some(lines) = lines_in(n, &text, k) {
+            set("#lines", lines);
+        }
+        set("#text", text);
     } else if leaf && named_by_content(role) {
         if !name.is_empty() {
+            if let Some(lines) = lines_in(n, &name, k) {
+                set("#lines", lines);
+            }
             set("#text", name);
         }
     } else if !name.is_empty() {
@@ -590,6 +624,22 @@ mod tests {
             ]
         );
         assert_eq!(attrs(&view(6)), [("#rect", "0 150 200 20"), ("#text", "Başlık"), ("role", "heading")]);
+        // A text laid out: its lines where they are drawn (five characters a line), from its corner.
+        let mut text = node(12, None, Rect::new(10.0, 40.0, 210.0, 80.0));
+        text.label = "Uzun başlık".into();
+        let layout = crate::accessibility::text::test_layout(
+            "Uzun başlık",
+            kompoz_graphics::Offset::new(12.0, 40.0),
+            8.0,
+            20.0,
+            5,
+        );
+        text.text_layout = Some(layout.into());
+        let t2 = tree(vec![node(1, None, full), text]);
+        assert_eq!(
+            view_of(&t2, t2.node(12), 0.5).get("#lines").map(String::as_str),
+            Some("0 5 1 0 20 10;5 10 1 10 20 10;10 11 1 20 4 10")
+        );
         assert_eq!(
             attrs(&view(7)),
             [("#rect", "0 200 200 200"), ("aria-label", "Pencere"), ("aria-modal", "true"), ("role", "dialog")]

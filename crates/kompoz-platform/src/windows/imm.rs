@@ -251,6 +251,16 @@ pub fn confirmed_reconversion(m: &WindowMessage) -> Option<Vec<u8>> {
     }
 }
 
+/// The character an IMR_QUERYCHARPOSITION asks about: its dwCharPos (UTF-16 units from the composition's start).
+pub fn char_position_asked(m: &WindowMessage) -> Option<usize> {
+    if Request::of(m) != Some(Request::CharPosition) || m.l() == 0 {
+        return None;
+    }
+    // SAFETY: the request's lParam points to the input method's IMECHARPOSITION (its dwSize and dwCharPos set),
+    // valid while the message is handled; only read.
+    Some(unsafe { (*(m.l() as *const IMECHARPOSITION)).dwCharPos } as usize)
+}
+
 /// An IMR_QUERYCHARPOSITION answered: the character's top left, its line's height and the document's rectangle
 /// (screen coordinates); 1 (answered).
 pub fn answer_char_position(m: &WindowMessage, at: CharPosition, document: CharPosition) -> isize {

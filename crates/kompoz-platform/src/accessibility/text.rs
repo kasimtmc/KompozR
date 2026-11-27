@@ -1,7 +1,10 @@
 //! A text's pieces as screen readers ask for them: by code points (AT-SPI's offsets; UI Automation's and Android's
 //! are UTF-16 units: [`utf16_len`] converts), a character, a word or the whole line around an offset, and a node's
-//! text as it is said (a password's hidden).
+//! text as it is said (a password's hidden); where they are, from the node's text layout ([`layout_for`]: each
+//! character's box, each line's, hit tests — Compose's `GetTextLayoutResult`).
 
+use kompoz_graphics::{Offset, Rect};
+use kompoz_ui::platform_text_layout::PlatformTextLayout;
 use kompoz_ui::semantics::AccessibilityNode;
 
 /// A text field's text as it is said: a password's hidden (a bullet a character).
@@ -66,6 +69,73 @@ pub fn segment(s: &str, at: &[usize], offset: i32, unit: Unit) -> (i32, i32) {
     (start, end)
 }
 
+/// The text layout of `n`'s text as a bridge reads it (`text`: [`text_of`]'s for a field), where it lays out as many
+/// characters as `text` has — its character `i` is `text`'s code point `i` (a password's bullet for what was typed).
+/// None where it has none (the bridge falls back on the node's box).
+pub fn layout_for<'a>(n: &'a AccessibilityNode, text: &str) -> Option<&'a PlatformTextLayout> {
+    n.text_layout.as_deref().filter(|l| l.characters.len() == text.chars().count())
+}
+
+/// The byte of `layout`'s text code point `offset` starts at (its end past the last).
+fn byte_of(layout: &PlatformTextLayout, offset: i32) -> usize {
+    usize::try_from(offset).ok().and_then(|i| layout.characters.get(i)).map_or(layout.text.len(), |c| c.start)
+}
+
+/// The code point byte `at` of `layout`'s text is in.
+fn code_point_of(layout: &PlatformTextLayout, at: usize) -> i32 {
+    layout.characters.partition_point(|c| c.end <= at) as i32
+}
+
+/// Where code point `offset` is, px in the window: its character's box; at the text's end, the caret's there (no
+/// wide). None past the end.
+pub fn character_box(layout: &PlatformTextLayout, offset: i32) -> Option<Rect> {
+    let n = layout.characters.len() as i32;
+    match offset {
+        o if (0..n).contains(&o) => Some(layout.characters[o as usize].rect),
+        o if o == n => Some(layout.end_cursor),
+        _ => None,
+    }
+}
+
+/// The boxes code points `from..to` take, px in the window: one per line, top to bottom (UI Automation's
+/// GetBoundingRectangles); none for an empty range.
+pub fn range_boxes(layout: &PlatformTextLayout, from: i32, to: i32) -> Vec<Rect> {
+    layout.range_rects(byte_of(layout, from.min(to)), byte_of(layout, from.max(to)))
+}
+
+/// The box code points `from..to` take, px in the window (their characters' together); the caret's for an empty
+/// range.
+pub fn range_box(layout: &PlatformTextLayout, from: i32, to: i32) -> Rect {
+    layout.range_bounds(byte_of(layout, from.min(to)), byte_of(layout, from.max(to)))
+}
+
+/// The code point whose character's box holds `point` (px in the window), if one does (AT-SPI's
+/// GetOffsetAtPoint).
+pub fn offset_at_point(layout: &PlatformTextLayout, point: Offset) -> Option<i32> {
+    layout.character_at(point).map(|i| i as i32)
+}
+
+/// The code point a caret goes before for `point` (px in the window; the nearest on the line at its height: UI
+/// Automation's RangeFromPoint, Compose's getOffsetForPosition).
+pub fn caret_for_point(layout: &PlatformTextLayout, point: Offset) -> i32 {
+    code_point_of(layout, layout.offset_for_position(point))
+}
+
+/// The line around code point `offset` as the text is laid out (its soft wraps too): [start, end) in code points,
+/// the end with what ends it.
+pub fn line_around(layout: &PlatformTextLayout, offset: i32) -> (i32, i32) {
+    let line = layout.line_for_offset(byte_of(layout, offset.max(0)));
+    match layout.lines.get(line) {
+        Some(l) => (code_point_of(layout, l.start), code_point_of(layout, l.end)),
+        None => (0, layout.characters.len() as i32),
+    }
+}
+
+/// Each line of `layout`'s text as it is laid out (soft wraps too): [start, end) in code points, top to bottom.
+pub fn lines_of(layout: &PlatformTextLayout) -> Vec<(i32, i32)> {
+    layout.lines.iter().map(|l| (code_point_of(layout, l.start), code_point_of(layout, l.end))).collect()
+}
+
 /// What was typed or taken away from `before` to `after`: what lies between the same start and the same end, as
 /// (start, what went, what came), in code points; none if nothing changed.
 pub fn edit(before: &str, after: &str) -> Option<(usize, String, String)> {
@@ -88,9 +158,81 @@ pub fn edit(before: &str, after: &str) -> Option<(usize, String, String)> {
     Some((head as usize, gone, came))
 }
 
+/// A text laid out for the platforms' tests: `advance` px a character from `origin`, `line_height` px lines, a new
+/// line after each `wrap` characters (and after a line break), left to right.
+#[cfg(test)]
+pub(crate) fn test_layout(
+    text: &str,
+    origin: Offset,
+    advance: f32,
+    line_height: f32,
+    wrap: usize,
+) -> PlatformTextLayout {
+    use kompoz_ui::platform_text_layout::{CharacterBounds, LineBounds};
+    let (mut characters, mut lines) = (Vec::new(), Vec::new());
+    let (mut line, mut column, mut line_start) = (0, 0, 0);
+    let line_box = |line: usize, columns: usize| {
+        let top = origin.y + line_height * line as f32;
+        Rect::new(origin.x, top, origin.x + advance * columns as f32, top + line_height)
+    };
+    for (start, c) in text.char_indices() {
+        let end = start + c.len_utf8();
+        let (x, y) = (origin.x + advance * column as f32, origin.y + line_height * line as f32);
+        characters.push(CharacterBounds {
+            start,
+            end,
+            rect: Rect::new(x, y, x + advance, y + line_height),
+            rtl: false,
+            line,
+        });
+        column += 1;
+        if c == '\n' || column == wrap {
+            let rect = line_box(line, column);
+            lines.push(LineBounds { start: line_start, end, rect, baseline: rect.bottom - 4.0, rtl: false });
+            (line, column, line_start) = (line + 1, 0, end);
+        }
+    }
+    let rect = line_box(line, column);
+    lines.push(LineBounds { start: line_start, end: text.len(), rect, baseline: rect.bottom - 4.0, rtl: false });
+    let end_cursor = Rect::new(rect.right, rect.top, rect.right, rect.bottom);
+    let all = lines.iter().fold(lines[0].rect, |a, l| a.union(l.rect));
+    PlatformTextLayout {
+        text: text.to_string(),
+        characters,
+        lines,
+        end_cursor,
+        inner_text_field_bounds: all,
+        decoration_box_bounds: all,
+        transform: Default::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn where_a_texts_characters_are_by_code_points() {
+        // "héllo wörld" wrapped after "héllo ", 8 px a character from 10, 100.
+        let layout = test_layout("héllo wörld", Offset::new(10.0, 100.0), 8.0, 20.0, 6);
+        let n =
+            AccessibilityNode { value: "héllo wörld".into(), text_layout: Some(layout.into()), ..Default::default() };
+        let layout = layout_for(&n, &text_of(&n)).expect("as many characters");
+        assert!(layout_for(&n, "kısa").is_none());
+        assert_eq!(character_box(layout, 1), Some(Rect::new(18.0, 100.0, 26.0, 120.0)));
+        assert_eq!(character_box(layout, 11), Some(Rect::new(50.0, 120.0, 50.0, 140.0)));
+        assert_eq!(character_box(layout, 12), None);
+        assert_eq!(
+            range_boxes(layout, 4, 8),
+            [Rect::new(42.0, 100.0, 58.0, 120.0), Rect::new(10.0, 120.0, 26.0, 140.0)]
+        );
+        assert_eq!(range_box(layout, 4, 8), Rect::new(10.0, 100.0, 58.0, 140.0));
+        assert_eq!(offset_at_point(layout, Offset::new(20.0, 130.0)), Some(7));
+        assert_eq!(offset_at_point(layout, Offset::new(200.0, 130.0)), None);
+        assert_eq!(caret_for_point(layout, Offset::new(25.0, 130.0)), 8);
+        assert_eq!(line_around(layout, 7), (6, 11));
+        assert_eq!(lines_of(layout), [(0, 6), (6, 11)]);
+    }
 
     #[test]
     fn texts_are_cut_by_code_points_and_words() {

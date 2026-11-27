@@ -857,6 +857,10 @@ impl PlatformCallbacks for Win32Callbacks {
         self.state.ime.text_input_changed(state);
     }
 
+    fn update_text_layout_result(&self, layout: &kompoz_ui::platform_text_layout::PlatformTextLayout) {
+        self.state.ime.update_text_layout_result(layout);
+    }
+
     /// Shown at once where the mouse is over the window, else as it comes in (WM_SETCURSOR).
     fn cursor(&self, icon: PointerIcon) {
         self.state.cursor.set(icon);

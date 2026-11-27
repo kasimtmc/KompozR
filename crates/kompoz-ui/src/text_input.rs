@@ -26,6 +26,7 @@
 
 use crate::clipboard::ClipEntry;
 use crate::platform::{ImeAction, ImeOptions, PlatformHandle, TextEditState};
+use crate::platform_text_layout::PlatformTextLayout;
 use kompoz_graphics::{Matrix, Rect};
 use kompoz_runtime::KompozitionLocal;
 use kompoz_text::input::OffsetMapping;
@@ -152,6 +153,21 @@ struct SessionState {
     /// What takes content the input method commits (images, files: Android's `commitContent`), and the MIME types
     /// it takes (Android's `EditorInfo.contentMimeTypes`); none: text only.
     content: RefCell<Option<ContentReceiver>>,
+    /// How the editor's text is laid out and where, as last told (none before it was laid out).
+    layout: RefCell<Option<PlatformTextLayout>>,
+    /// What shows an input method's preview of a handwriting gesture over the editor's text (a reading session's
+    /// request's).
+    highlight: RefCell<Option<Rc<dyn Fn(TextHighlightType, TextRange)>>>,
+}
+
+/// A range of an editor's text an input method highlights (Compose's TextHighlightType): what an ongoing stylus
+/// handwriting gesture would select or delete (Android 14's `previewHandwritingGesture`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum TextHighlightType {
+    /// Previews the range an ongoing stylus handwriting select gesture would select.
+    HandwritingSelectPreview,
+    /// Previews the range an ongoing stylus handwriting delete gesture would delete.
+    HandwritingDeletePreview,
 }
 
 /// What an editor takes besides text from the input method: of `mime_types`, given to `on_commit_content` (the
@@ -257,6 +273,8 @@ impl TextInputService {
             value: reads,
             version: kompoz_runtime::mutable_state_of(0),
             content: RefCell::new(None),
+            layout: RefCell::new(None),
+            highlight: RefCell::new(None),
         });
         let before = self.0.session.replace(Some(session.clone()));
         if self.0.platform_service.is_some() {
@@ -328,6 +346,51 @@ impl TextInputService {
     /// `EditorInfo.contentMimeTypes`): empty if it takes text only, or none is open.
     pub fn session_content_mime_types(&self) -> Vec<String> {
         self.current().and_then(|s| s.content.borrow().as_ref().map(|c| c.mime_types.clone())).unwrap_or_default()
+    }
+
+    /// How the open session's editor lays its text out and where (Compose's `updateTextLayoutResult`, what
+    /// Android's CursorAnchorInfo is made of): each character's and line's box in the window, by the editor's value's
+    /// offsets; none if none is open or it wasn't laid out yet.
+    pub fn session_text_layout(&self) -> Option<PlatformTextLayout> {
+        self.current().and_then(|s| s.layout.borrow().clone())
+    }
+
+    /// Highlights `range` (bytes of the open session's editor's value) as `highlight_type`, or takes the highlight
+    /// away for an empty range (an input method's preview of a handwriting gesture: Compose's `highlightCharsIn`,
+    /// `setSelectionPreviewHighlight`); false if none is open or its editor shows none. The highlight goes as the
+    /// editor's text or selection changes.
+    pub fn highlight_chars_in(&self, highlight_type: TextHighlightType, range: TextRange) -> bool {
+        let Some(session) = self.current() else { return false };
+        let highlight = session.highlight.borrow().clone();
+        let Some(highlight) = highlight else { return false };
+        let len = session.state.borrow().text.len();
+        highlight(highlight_type, TextRange::new(range.min().min(len), range.max().min(len)));
+        true
+    }
+
+    /// The open `session` shows highlights with `highlight` (the 1.7+ API's request).
+    pub(crate) fn set_highlight(
+        &self,
+        session: &TextInputSession,
+        highlight: Option<Rc<dyn Fn(TextHighlightType, TextRange)>>,
+    ) {
+        *session.session.highlight.borrow_mut() = highlight;
+    }
+
+    /// The open session's editor was laid out again or moved: the platform is told where its text is now (only
+    /// where that changed).
+    pub(crate) fn update_open_text_layout(&self, layout: PlatformTextLayout) {
+        if let Some(session) = self.current() {
+            self.update_text_layout(&session, layout);
+        }
+    }
+
+    fn update_text_layout(&self, session: &SessionState, layout: PlatformTextLayout) {
+        if !session.open.get() || session.layout.borrow().as_ref() == Some(&layout) {
+            return;
+        }
+        self.0.platform.get().update_text_layout_result(&layout);
+        *session.layout.borrow_mut() = Some(layout);
     }
 
     /// Content the input method commits (an image or a file a keyboard sends: Android's
@@ -522,8 +585,10 @@ impl TextInputSession {
     }
 
     /// The editor's text was laid out again or moved (Compose's `updateTextLayoutResult`), told to the service it
-    /// goes to (the host's own learns where the editor is from [`notify_focused_rect`](Self::notify_focused_rect));
-    /// false if the session isn't open.
+    /// goes to; the host's own tells the platform where each character and line is
+    /// ([`PlatformCallbacks::update_text_layout_result`](crate::platform::PlatformCallbacks::update_text_layout_result)).
+    /// `text_field_to_root_transform` takes the inner field's coordinates to the window's. False if the session
+    /// isn't open.
     pub fn update_text_layout_result(
         &self,
         text_field_value: &TextFieldValue,
@@ -545,7 +610,21 @@ impl TextInputSession {
                 inner_text_field_bounds,
                 decoration_box_bounds,
             );
+            return true;
         }
+        // The host's own: the platform is told where the text is (Compose's platforms make their CursorAnchorInfo
+        // of it).
+        let mut transform = Matrix::new();
+        text_field_to_root_transform(&mut transform);
+        let layout = PlatformTextLayout::new(
+            text_field_value.text(),
+            offset_mapping,
+            text_layout_result,
+            transform,
+            transform.map_rect(inner_text_field_bounds),
+            transform.map_rect(decoration_box_bounds),
+        );
+        self.service.update_text_layout(&self.session, layout);
         true
     }
 

@@ -12,6 +12,7 @@ use kompoz_text::{AnnotatedStringBuilder, SpanStyle, TextDecoration, TextLayoutR
 use kompoz_ui::draw::{DefaultBlendMode, DrawScope, DrawStyle};
 use kompoz_ui::layout::LayoutCoordinates;
 use kompoz_ui::platform::{ImeAction, ImeOptions, TextEditState};
+use kompoz_ui::platform_text_layout::window_transform;
 use kompoz_ui::text_input::{TextInputService, TextInputSession};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -134,12 +135,9 @@ pub fn update_text_layout_result(
         return;
     }
     let Some(decoration) = text_layout_result.decoration_box_coordinates() else { return };
+    // (To the window's: a popup's root is placed in the host's window, as `bounds_in_root` places it.)
     let transform_inner = inner.clone();
-    let to_root = move |matrix: &mut Matrix| {
-        if transform_inner.is_attached() {
-            transform_inner.find_root_coordinates().transform_from(&transform_inner, matrix);
-        }
-    };
+    let to_root = move |matrix: &mut Matrix| *matrix = window_transform(&transform_inner);
     let visible = super::selection::visible_bounds(&inner);
     let decoration_bounds = inner.local_bounding_box_of(&decoration, false);
     text_input_session.update_text_layout_result(

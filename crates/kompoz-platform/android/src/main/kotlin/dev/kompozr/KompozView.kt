@@ -273,6 +273,26 @@ open class KompozView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private fun imeCursor(rects: FloatArray) = ime.cursor(rects)
 
     @Suppress("unused") // (the app's)
+    private fun imeLayout(
+        characters: FloatArray,
+        flags: IntArray,
+        lines: FloatArray,
+        marker: FloatArray,
+        markerFlags: Int,
+        editor: FloatArray,
+    ) = ime.layout(characters, flags, lines, marker, markerFlags, editor)
+
+    /** A handwriting gesture's hit test by the app (KompozIme's native, with this view). */
+    internal fun handwritingGesture(
+        ime: KompozIme,
+        session: Int,
+        kind: Int,
+        values: FloatArray,
+        margin: Float,
+        preview: Boolean,
+    ): IntArray = ime.nativeHandwritingGesture(this, session, kind, values, margin, preview)
+
+    @Suppress("unused") // (the app's)
     private fun imeStartHandwriting() = ime.startStylusHandwriting()
 
     @Suppress("unused") // (the app's)

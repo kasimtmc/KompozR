@@ -5,9 +5,12 @@
 //! events, a window coming and going too.
 
 pub use crate::accessibility::Window;
-pub use crate::accessibility::text::{Unit, code_points, segment, slice, text_of};
+pub use crate::accessibility::text::{
+    Unit, character_box, code_points, layout_for, line_around, offset_at_point, range_box, segment, slice, text_of,
+};
 
 use crate::accessibility::{Change, Snapshot, changes};
+use kompoz_graphics::{Offset, Rect};
 use kompoz_ui::semantics::{AccessibilityNode, ProgressBarRangeInfo, Role, SemanticsAction};
 
 pub const ROOT_PATH: &str = "/org/a11y/atspi/accessible/root";
@@ -413,7 +416,34 @@ impl Tree {
 
     /// Where it is, in points: on the screen, in the window, or from its parent's corner (AtspiCoordType).
     pub fn extents_of(&self, o: Object, coord_type: u32) -> Extents {
-        let mut r = self.on_screen(o);
+        let r = self.on_screen(o);
+        self.extents_in(o, r, coord_type)
+    }
+
+    /// Where `rect` (px in `o`'s window: a character's, a range's of its text) is, in points, as
+    /// [`extents_of`](Self::extents_of) says where `o` is.
+    pub fn rect_extents(&self, o: Object, rect: Rect, coord_type: u32) -> Extents {
+        let Some(w) = self.window_of(o) else { return Extents::default() };
+        let k = w.px_to_points;
+        self.extents_in(o, [w.x + rect.left * k, w.y + rect.top * k, rect.width() * k, rect.height() * k], coord_type)
+    }
+
+    /// A point given in `coord_type`'s coordinates (as `o`'s extents are given), px in `o`'s window.
+    pub fn point_in_window(&self, o: Object, x: i32, y: i32, coord_type: u32) -> Offset {
+        let Some(w) = self.window_of(o) else { return Offset::Zero };
+        let (mut x, mut y) = (x as f32, y as f32);
+        if coord_type == COORD_PARENT && matches!(o, Object::Node(..)) {
+            let p = self.on_screen(self.parent_of(o));
+            (x, y) = (x + p[0], y + p[1]);
+        } else if coord_type != COORD_WINDOW {
+            (x, y) = (x - w.x, y - w.y);
+        }
+        let k = w.px_to_points.max(f32::MIN_POSITIVE);
+        Offset::new(x / k, y / k)
+    }
+
+    /// Screen points `r` (left, top, width, height) in `coord_type`'s coordinates, rounded.
+    fn extents_in(&self, o: Object, mut r: [f32; 4], coord_type: u32) -> Extents {
         if coord_type == COORD_WINDOW
             && let Some(w) = self.window_of(o)
         {

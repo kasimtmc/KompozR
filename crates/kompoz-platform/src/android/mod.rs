@@ -42,6 +42,7 @@ pub mod clip;
 mod configuration;
 mod devices;
 pub mod drag;
+pub mod handwriting;
 pub mod ime;
 pub mod input;
 pub mod insets;

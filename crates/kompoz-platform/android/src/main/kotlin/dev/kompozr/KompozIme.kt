@@ -1,22 +1,37 @@
 package dev.kompozr
 
 import android.graphics.Matrix
+import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
 import android.os.LocaleList
 import android.text.Editable
 import android.text.InputType
 import android.text.Selection
 import android.text.TextUtils
 import android.view.inputmethod.BaseInputConnection
+import android.view.ViewConfiguration
 import android.view.inputmethod.CursorAnchorInfo
+import android.view.inputmethod.DeleteGesture
+import android.view.inputmethod.DeleteRangeGesture
 import android.view.inputmethod.EditorBoundsInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedText
 import android.view.inputmethod.ExtractedTextRequest
+import android.view.inputmethod.HandwritingGesture
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.InsertGesture
+import android.view.inputmethod.JoinOrSplitGesture
+import android.view.inputmethod.PreviewableHandwritingGesture
+import android.view.inputmethod.RemoveSpaceGesture
+import android.view.inputmethod.SelectGesture
+import android.view.inputmethod.SelectRangeGesture
+import java.util.concurrent.Executor
+import java.util.function.IntConsumer
 
 /**
  * The input method's side of a KompozR app (C++ Kompoz's KompozInput IME, Compose's TextInputServiceAndroid and
@@ -27,7 +42,11 @@ import android.view.inputmethod.InputMethodManager
  * ([KompozInputConnection]). The app tells it again when the field ends up elsewhere (it changed its text, a key
  * typed, a filter took an edit back): the input method is restarted for a new text, its selection updated
  * otherwise. Where the caret and the field are goes to the input method as its cursor anchor and editor bounds; the
- * extracted text is reported while it monitors it; stylus handwriting is started for the field (Android 14).
+ * extracted text is reported while it monitors it; stylus handwriting is started for the field (Android 14). Once
+ * the field is laid out (the app's text layout of it, Compose's `updateTextLayoutResult`), the cursor anchor has its
+ * characters' boxes, its visible lines and the caret's glyph, and the editor bounds its decoration box (Compose's
+ * CursorAnchorInfoBuilder); Android 14's handwriting gestures and their previews are hit-tested against it by the app
+ * (Compose's HandwritingGesture.android.kt) and made through the input connection, as the input method's own edits.
  *
  * Sessions are numbered by the app; edits come back with theirs, so that an old one's are dropped there. A session
  * closed and another opened at once (the focus moving to another field) keep the keyboard up.
@@ -68,6 +87,18 @@ internal class KompozIme(private val view: KompozView) {
     /** The caret and the field, px in the view (the field's: none if unknown). */
     private val caret = RectF()
     private var editor: RectF? = null
+
+    /**
+     * The field's layout, px in the view (none until it is laid out): each UTF-16 unit's box (`l, t, r, b`) and its
+     * CursorAnchorInfo flags, the visible lines' boxes, the caret's glyph (`x, top, baseline, bottom`) and its flags,
+     * the decoration box.
+     */
+    private var characterBounds = FloatArray(0)
+    private var characterFlags = IntArray(0)
+    private var lineBounds = FloatArray(0)
+    private var marker = FloatArray(0)
+    private var markerFlags = 0
+    private var decoration = FloatArray(0)
 
     /** The input method follows the cursor anchor (`requestCursorUpdates` with `CURSOR_UPDATE_MONITOR`). */
     var cursorMonitor = false
@@ -129,6 +160,7 @@ internal class KompozIme(private val view: KompozView) {
         if (session != this.session) return
         this.session = 0
         pendingUpdate = null
+        layout(FloatArray(0), IntArray(0), FloatArray(0), FloatArray(0), 0, FloatArray(0))
         connection?.closeConnection()
         connection = null
         val hide = Runnable {
@@ -157,6 +189,24 @@ internal class KompozIme(private val view: KompozView) {
         if (rects.size < 8) return
         caret.set(rects[0], rects[1], rects[2], rects[3])
         editor = if (rects[4].isNaN()) null else RectF(rects[4], rects[5], rects[6], rects[7])
+        if (cursorMonitor) cursorAnchorInfo()
+    }
+
+    /** The field's layout as the app has it (empty arrays: not laid out for the Editable's text). */
+    fun layout(
+        characters: FloatArray,
+        flags: IntArray,
+        lines: FloatArray,
+        marker: FloatArray,
+        markerFlags: Int,
+        editor: FloatArray,
+    ) {
+        characterBounds = characters
+        characterFlags = flags
+        lineBounds = lines
+        this.marker = marker
+        this.markerFlags = markerFlags
+        decoration = editor
         if (cursorMonitor) cursorAnchorInfo()
     }
 
@@ -194,8 +244,116 @@ internal class KompozIme(private val view: KompozView) {
         }
         val c = KompozInputConnection(view, this)
         connection = c
+        // (Android 14's handwriting gestures, over the connection: made through it.)
+        if (Build.VERSION.SDK_INT >= 34) return Gestures(c)
         return c
     }
+
+    /** The connection with Android 14's handwriting gestures and their previews (Compose's). */
+    @android.annotation.TargetApi(34)
+    private inner class Gestures(private val c: KompozInputConnection) : InputConnectionWrapper(c, false) {
+        override fun performHandwritingGesture(gesture: HandwritingGesture, executor: Executor?, consumer: IntConsumer?) {
+            val result = handwritingGesture(c, gesture)
+            if (consumer == null) return
+            if (executor != null) executor.execute { consumer.accept(result) } else consumer.accept(result)
+        }
+
+        override fun previewHandwritingGesture(
+            gesture: PreviewableHandwritingGesture,
+            cancellationSignal: CancellationSignal?,
+        ): Boolean {
+            val (kind, values) = encode(gesture) ?: return false
+            if (cancellationSignal?.isCanceled == true) return false
+            val previewed = view.handwritingGesture(this@KompozIme, session, kind, values, 0f, true).isNotEmpty()
+            cancellationSignal?.setOnCancelListener {
+                view.handwritingGesture(this@KompozIme, session, CANCEL_PREVIEW, FloatArray(0), 0f, true)
+            }
+            return previewed
+        }
+    }
+
+    /** A gesture as the app reads it: its kind, its areas or points in the view, its granularity; none: unknown. */
+    private fun encode(gesture: HandwritingGesture): Pair<Int, FloatArray>? {
+        if (Build.VERSION.SDK_INT < 34) return null
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        val (x, y) = location[0].toFloat() to location[1].toFloat()
+        fun rect(r: RectF) = floatArrayOf(r.left - x, r.top - y, r.right - x, r.bottom - y)
+        fun point(p: PointF) = floatArrayOf(p.x - x, p.y - y)
+        fun granularity(g: Int) = floatArrayOf(if (g == HandwritingGesture.GRANULARITY_WORD) 1f else 2f)
+        return when (gesture) {
+            is SelectGesture -> SELECT to rect(gesture.selectionArea) + granularity(gesture.granularity)
+            is DeleteGesture -> DELETE to rect(gesture.deletionArea) + granularity(gesture.granularity)
+            is SelectRangeGesture -> SELECT_RANGE to
+                rect(gesture.selectionStartArea) + rect(gesture.selectionEndArea) + granularity(gesture.granularity)
+            is DeleteRangeGesture -> DELETE_RANGE to
+                rect(gesture.deletionStartArea) + rect(gesture.deletionEndArea) + granularity(gesture.granularity)
+            is JoinOrSplitGesture -> JOIN_OR_SPLIT to point(gesture.joinOrSplitPoint)
+            is InsertGesture -> INSERT to point(gesture.insertionPoint)
+            is RemoveSpaceGesture -> REMOVE_SPACE to point(gesture.startPoint) + point(gesture.endPoint)
+            else -> null
+        }
+    }
+
+    /**
+     * A handwriting gesture hit-tested by the app against the field's layout and made through the connection, a
+     * batch of edits (selecting, deleting, inserting the gesture's text or a space, taking spaces out; its fallback
+     * text committed where it does nothing): its `HANDWRITING_GESTURE_RESULT_*`.
+     */
+    private fun handwritingGesture(c: InputConnection, gesture: HandwritingGesture): Int {
+        if (Build.VERSION.SDK_INT < 34) return InputConnection.HANDWRITING_GESTURE_RESULT_UNSUPPORTED
+        if (!active) return InputConnection.HANDWRITING_GESTURE_RESULT_FAILED
+        val (kind, values) = encode(gesture) ?: return InputConnection.HANDWRITING_GESTURE_RESULT_UNSUPPORTED
+        val margin = ViewConfiguration.get(view.context).scaledHandwritingGestureLineMargin.toFloat()
+        val outcome = view.handwritingGesture(this, session, kind, values, margin, false)
+        if (outcome.size < 3) return InputConnection.HANDWRITING_GESTURE_RESULT_FAILED
+        val (what, a, b) = Triple(outcome[0], outcome[1], outcome[2])
+        val length = editable.length
+        if (a !in 0..length || b !in a..length) return InputConnection.HANDWRITING_GESTURE_RESULT_FAILED
+        c.beginBatchEdit()
+        c.finishComposingText()
+        val result = when (what) {
+            1 -> c.setSelection(a, b).let { InputConnection.HANDWRITING_GESTURE_RESULT_SUCCESS }
+            2 -> {
+                c.setSelection(b, b)
+                c.deleteSurroundingText(b - a, 0)
+                InputConnection.HANDWRITING_GESTURE_RESULT_SUCCESS
+            }
+            3, 4 -> {
+                val text = if (what == 3) (gesture as InsertGesture).textToInsert else " "
+                c.setSelection(a, a)
+                c.commitText(text, 1)
+                InputConnection.HANDWRITING_GESTURE_RESULT_SUCCESS
+            }
+            5 -> {
+                val kept = editable.subSequence(a, b).filterNot { it.isWhitespace() }
+                c.setSelection(a, b)
+                c.commitText(kept, 1)
+                InputConnection.HANDWRITING_GESTURE_RESULT_SUCCESS
+            }
+            else -> {
+                val fallback = gesture.fallbackText
+                if (fallback != null) {
+                    c.commitText(fallback, 1)
+                    InputConnection.HANDWRITING_GESTURE_RESULT_FALLBACK
+                } else {
+                    InputConnection.HANDWRITING_GESTURE_RESULT_FAILED
+                }
+            }
+        }
+        c.endBatchEdit()
+        return result
+    }
+
+    /** The app's hit test of a handwriting gesture (`text_input`'s `handwriting_gesture`). */
+    external fun nativeHandwritingGesture(
+        view: KompozView,
+        session: Int,
+        kind: Int,
+        values: FloatArray,
+        margin: Float,
+        preview: Boolean,
+    ): IntArray
 
     /** A connection closed (the input method let it go). */
     fun closed(c: KompozInputConnection) {
@@ -270,7 +428,28 @@ internal class KompozIme(private val view: KompozView) {
         val o = offsets()
         b.setSelectionRange(o[0], o[1])
         if (o[2] >= 0 && o[3] > o[2]) b.setComposingText(o[2], editable.subSequence(o[2], o[3]))
-        if (!caret.isEmpty || caret.height() > 0f) {
+        if (marker.size >= 4) {
+            // (Laid out: the caret's glyph, the composing text's characters, the lines that show.)
+            b.setInsertionMarkerLocation(marker[0], marker[1], marker[2], marker[3], markerFlags)
+            if (o[2] >= 0 && o[3] > o[2]) {
+                for (i in o[2] until minOf(o[3], characterFlags.size)) {
+                    val r = 4 * i
+                    b.addCharacterBounds(
+                        i,
+                        characterBounds[r],
+                        characterBounds[r + 1],
+                        characterBounds[r + 2],
+                        characterBounds[r + 3],
+                        characterFlags[i],
+                    )
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 34) {
+                for (r in 0 until lineBounds.size / 4) {
+                    b.addVisibleLineBounds(lineBounds[4 * r], lineBounds[4 * r + 1], lineBounds[4 * r + 2], lineBounds[4 * r + 3])
+                }
+            }
+        } else if (!caret.isEmpty || caret.height() > 0f) {
             b.setInsertionMarkerLocation(
                 caret.left,
                 caret.top,
@@ -279,7 +458,7 @@ internal class KompozIme(private val view: KompozView) {
                 CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION,
             )
         }
-        val field = editor
+        val field = if (decoration.size >= 4) RectF(decoration[0], decoration[1], decoration[2], decoration[3]) else editor
         if (field != null && Build.VERSION.SDK_INT >= 33) {
             b.setEditorBoundsInfo(EditorBoundsInfo.Builder().setEditorBounds(field).setHandwritingBounds(field).build())
         }
@@ -287,6 +466,16 @@ internal class KompozIme(private val view: KompozView) {
     }
 
     companion object {
+        /** The handwriting gestures' kinds as the app reads them (`handwriting::kind`). */
+        private const val SELECT = 1
+        private const val DELETE = 2
+        private const val SELECT_RANGE = 3
+        private const val DELETE_RANGE = 4
+        private const val JOIN_OR_SPLIT = 5
+        private const val INSERT = 6
+        private const val REMOVE_SPACE = 7
+        private const val CANCEL_PREVIEW = 8
+
         /** EditorInfoCompat's extra for stylus handwriting before Android 15. */
         private const val HANDWRITING_EXTRA = "androidx.core.view.inputmethod.EditorInfoCompat.STYLUS_HANDWRITING_ENABLED"
     }

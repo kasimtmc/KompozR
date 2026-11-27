@@ -8,18 +8,24 @@
 //! around the caret, the extracted text); [`TextInput`] keeps what that Editable holds (`known`) and tells it the
 //! field's state whenever the field's differs: the app changed it, a hardware key typed into it, a filter took an
 //! edit back. Each session (the field focused, its keyboard shown) has a number; what comes back from an older one
-//! is dropped. Where the caret is (the host's focused rect: what Linux's input methods get) and the focused field's
-//! bounds (its layout node's, as accessibility gives a node's) go to the input method as its cursor anchor and
-//! editor bounds.
+//! is dropped. Where the caret is (the host's focused rect) and the focused field's bounds (its layout node's) go to
+//! the input method as its cursor anchor and editor bounds; once the field is laid out (its session's text layout,
+//! Compose's `updateTextLayoutResult`), its characters' boxes, its visible lines, the caret's glyph and the
+//! decoration box do (Compose's CursorAnchorInfoBuilder), and Android 14's handwriting gestures are hit-tested
+//! against it (`handwriting`: KompozIme's `nativeHandwritingGesture`, registered on its class here).
 
+use super::handwriting::{self, Gesture, kind};
 use super::ime::{EditorConfig, Utf16State, commands_of, decode_ops, ime_action_of};
-use super::jni::{Env, Global, JObject, MethodId, Vm, jvalue};
+use super::jni::{Env, Global, JNIEnv, JObject, MethodId, Vm, jboolean, jfloat, jint, jvalue, native};
 use kompoz_graphics::Rect;
+use kompoz_text::TextRange;
 use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::{ClipEntry, ClipItem, ClipMetadata};
 use kompoz_ui::platform::{
     ImeOptions, PointerIcon, TextEditState, TextToolbarActions, is_stylus_handwriting_supported,
 };
+use kompoz_ui::platform_text_layout::PlatformTextLayout;
+use kompoz_ui::text_input::TextHighlightType;
 use std::cell::{Cell, RefCell};
 
 /// KompozView's methods KompozR calls (looked up as the app is made: the view's class is the app's).
@@ -31,6 +37,7 @@ struct ViewCalls {
     ime_hide: MethodId,
     ime_hide_keyboard: MethodId,
     ime_cursor: MethodId,
+    ime_layout: MethodId,
     ime_start_handwriting: MethodId,
     set_pointer_icon: MethodId,
     set_stylus_pointer_icon: MethodId,
@@ -50,6 +57,7 @@ impl ViewCalls {
             ime_hide: m(c"imeHide", c"(I)V")?,
             ime_hide_keyboard: m(c"imeHideKeyboard", c"()V")?,
             ime_cursor: m(c"imeCursor", c"([F)V")?,
+            ime_layout: m(c"imeLayout", c"([F[I[F[FI[F)V")?,
             ime_start_handwriting: m(c"imeStartHandwriting", c"()V")?,
             set_pointer_icon: m(c"setPointerIconType", c"(I)V")?,
             set_stylus_pointer_icon: m(c"setStylusPointerIconType", c"(I)V")?,
@@ -116,6 +124,10 @@ pub(super) struct TextInput {
     content: Cell<bool>,
     /// The text toolbar's actions while it shows.
     toolbar: RefCell<TextToolbarActions>,
+    /// The field's text layout as last told (none before it is laid out, or without a session).
+    layout: RefCell<Option<PlatformTextLayout>>,
+    /// The layout and the Editable's state KompozIme's cursor anchor was last told of.
+    told_layout: RefCell<Option<(PlatformTextLayout, TextEditState)>>,
 }
 
 impl TextInput {
@@ -131,7 +143,10 @@ impl TextInput {
             told_cursor: Cell::new(None),
             content: Cell::new(false),
             toolbar: RefCell::new(TextToolbarActions::default()),
+            layout: RefCell::new(None),
+            told_layout: RefCell::new(None),
         })
+        .inspect(|_| register_ime_natives(env))
     }
 
     /// The host's `text_input`: a session opened (shown, the keyboard with it as its options say), shown again (the
@@ -145,6 +160,8 @@ impl TextInput {
                 *self.known.borrow_mut() = None;
                 *self.options.borrow_mut() = None;
                 self.told_cursor.set(None);
+                *self.layout.borrow_mut() = None;
+                *self.told_layout.borrow_mut() = None;
                 self.calls.call(self.calls.ime_hide, &[session.into()]);
             }
             return;
@@ -200,7 +217,101 @@ impl TextInput {
             env.call_void(view, method, &args).then_some(())
         });
         self.told_cursor.set(None);
+        *self.told_layout.borrow_mut() = None;
         self.tell_cursor();
+        self.tell_layout();
+    }
+
+    /// The host's `update_text_layout_result`: the field laid out again or moved; KompozIme's cursor anchor told
+    /// where its characters are.
+    pub fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        if self.session.get() == 0 {
+            return;
+        }
+        *self.layout.borrow_mut() = Some(layout.clone());
+        self.tell_layout();
+    }
+
+    /// The field's layout as KompozIme's cursor anchor reads it (its characters, visible lines, the caret's glyph,
+    /// the decoration box: `handwriting::anchor_info`), where it or the Editable's text and caret changed since it
+    /// was told; empty arrays where it isn't laid out for the Editable's text.
+    fn tell_layout(&self) {
+        let (Some(layout), Some(known)) = (self.layout.borrow().clone(), self.known.borrow().clone()) else { return };
+        let now = (layout, known);
+        if self.told_layout.borrow().as_ref() == Some(&now) {
+            return;
+        }
+        let info = handwriting::anchor_info(&now.1.text, now.1.selection_end, &now.0);
+        *self.told_layout.borrow_mut() = Some(now);
+        let method = self.calls.ime_layout;
+        self.calls.with(|env, view| {
+            let none: (&[f32], &[i32]) = (&[], &[]);
+            let (characters, flags, lines, marker, marker_flags, editor) = match &info {
+                Some(i) => (
+                    &i.characters[..],
+                    &i.character_flags[..],
+                    &i.lines[..],
+                    &i.marker[..],
+                    i.marker_flags,
+                    &i.editor[..],
+                ),
+                None => (none.0, none.1, none.0, none.0, 0, none.0),
+            };
+            let (characters, flags, lines) =
+                (env.new_floats(characters)?, env.new_ints(flags)?, env.new_floats(lines)?);
+            let (marker, editor) = (env.new_floats(marker)?, env.new_floats(editor)?);
+            let args = [
+                characters.object().into(),
+                flags.object().into(),
+                lines.object().into(),
+                marker.object().into(),
+                marker_flags.into(),
+                editor.object().into(),
+            ];
+            env.call_void(view, method, &args).then_some(())
+        });
+    }
+
+    /// A handwriting gesture of session `session` (KompozIme's encoding: `handwriting::Gesture::decode`), or its
+    /// preview, hit-tested against the field's text layout: what it does (`Outcome::encode`, for KompozIme to make
+    /// through its connection), or for a preview whether it highlights something (`[1]`; `[]`: nothing to preview);
+    /// a preview's cancellation takes its highlight away. Empty: no session, or not a gesture.
+    pub fn handwriting_gesture(
+        &self,
+        host: &KompozHost,
+        session: i32,
+        gesture: i32,
+        values: &[f32],
+        margin: f32,
+        preview: bool,
+    ) -> Vec<i32> {
+        if session == 0 || session != self.session.get() {
+            return Vec::new();
+        }
+        let service = host.text_input_service();
+        if gesture == kind::CANCEL_PREVIEW {
+            service.highlight_chars_in(TextHighlightType::HandwritingSelectPreview, TextRange::Zero);
+            return Vec::new();
+        }
+        let Some(gesture) = Gesture::decode(gesture, values) else { return Vec::new() };
+        let text = self.known.borrow().as_ref().map(|k| k.text.clone()).unwrap_or_default();
+        let layout = self.layout.borrow().clone();
+        if preview {
+            let Some(layout) = layout else { return Vec::new() };
+            return match handwriting::preview(&text, &layout, gesture) {
+                Some((highlight, range)) => {
+                    service.highlight_chars_in(highlight, range);
+                    vec![1]
+                }
+                None => Vec::new(),
+            };
+        }
+        // (Done: a preview's highlight goes.)
+        service.highlight_chars_in(TextHighlightType::HandwritingSelectPreview, TextRange::Zero);
+        match layout {
+            Some(layout) => handwriting::perform(&text, &layout, gesture, margin).encode().to_vec(),
+            None => handwriting::Outcome::Fallback.encode().to_vec(),
+        }
     }
 
     /// The field's state, told to the input method where its Editable holds something else (the app changed it,
@@ -250,6 +361,7 @@ impl TextInput {
         self.update(&state);
         self.editor.set(host.focused_node().map(|n| n.coordinates().bounds_in_root()));
         self.tell_cursor();
+        self.tell_layout();
     }
 
     /// The caret and the field to the input method (its cursor anchor and editor bounds), if they moved.
@@ -378,4 +490,44 @@ impl TextInput {
             _ => None,
         }
     }
+}
+
+/// KompozIme's natives registered on its class (its handwriting gestures' hit tests); logged if they can't be (the
+/// gestures then fail, as in a field that doesn't take them).
+fn register_ime_natives(env: &Env<'_>) {
+    let methods = [native(
+        c"nativeHandwritingGesture",
+        c"(Ldev/kompozr/KompozView;II[FFZ)[I",
+        native_handwriting_gesture as *mut std::ffi::c_void,
+    )];
+    let registered = env.find_class(c"dev/kompozr/KompozIme").is_some_and(|c| env.register_natives(&c, &methods));
+    if !registered {
+        crate::system::log("kompoz: KompozIme's natives couldn't be registered: no handwriting gestures");
+    }
+}
+
+/// `nativeHandwritingGesture(view, session, kind, values, margin, preview): IntArray`: an input method's handwriting
+/// gesture (or its preview) over the field of `view`'s app (`TextInput::handwriting_gesture`).
+#[allow(clippy::too_many_arguments, unsafe_code)] // (a native's entry: the env the VM passed it)
+extern "system" fn native_handwriting_gesture(
+    raw: *mut JNIEnv,
+    _ime: JObject,
+    view: JObject,
+    session: jint,
+    gesture: jint,
+    values: JObject,
+    margin: jfloat,
+    preview: jboolean,
+) -> JObject {
+    super::natives::guard("nativeHandwritingGesture", JObject::null(), || {
+        // SAFETY: a native method's env.
+        let env = unsafe { super::natives::env(raw) };
+        let values = env.floats(values);
+        let out = super::app::with_view(&env, view, |app| {
+            app.with_text_input(|t, host| t.handwriting_gesture(host, session, gesture, &values, margin, preview != 0))
+        })
+        .flatten()
+        .unwrap_or_default();
+        env.new_ints(&out).map_or(JObject::null(), |a| a.into_object())
+    })
 }

@@ -22,6 +22,7 @@ mod linux {
     use kompoz_platform::linux::wallpaper::WallpaperOptions;
     use kompoz_runtime::*;
     use kompoz_ui::input::{Key as UiKey, KeyModifiers};
+    use kompoz_ui::platform_text_layout::{CharacterBounds, LineBounds, PlatformTextLayout};
     use kompoz_ui::semantics::{AccessibilityNode, LiveRegionMode, ProgressBarRangeInfo, Role, SemanticsAction};
     use kompoz_ui::window::{MenuItemKind, Notification, NotificationType, WindowId};
     use kompoz_ui::{KompozHost, Modifier};
@@ -968,6 +969,7 @@ mod linux {
                 label: "Name".into(),
                 value: "héllo wörld".into(),
                 editable: true,
+                text_layout: Some(Arc::new(field_layout())),
                 ..n(3)
             },
             AccessibilityNode {
@@ -992,6 +994,37 @@ mod linux {
                 ..n(7)
             },
         ]
+    }
+
+    /// "héllo wörld" laid out 8 px a character from 10, 110, wrapped after "héllo " (20 px lines).
+    fn field_layout() -> PlatformTextLayout {
+        let text = "héllo wörld";
+        let characters = text
+            .char_indices()
+            .enumerate()
+            .map(|(i, (start, c))| {
+                let (line, column) = if i < 6 { (0, i) } else { (1, i - 6) };
+                let (x, y) = (10.0 + 8.0 * column as f32, 110.0 + 20.0 * line as f32);
+                let rect = Rect::new(x, y, x + 8.0, y + 20.0);
+                CharacterBounds { start, end: start + c.len_utf8(), rect, rtl: false, line }
+            })
+            .collect();
+        let line = |start, end, y: f32, right| LineBounds {
+            start,
+            end,
+            rect: Rect::new(10.0, y, right, y + 20.0),
+            baseline: y + 16.0,
+            rtl: false,
+        };
+        PlatformTextLayout {
+            text: text.into(),
+            characters,
+            lines: vec![line(0, 7, 110.0, 58.0), line(7, 13, 130.0, 50.0)],
+            end_cursor: Rect::new(50.0, 130.0, 50.0, 150.0),
+            inner_text_field_bounds: rect(0.0, 100.0, 200.0, 56.0),
+            decoration_box_bounds: rect(0.0, 100.0, 200.0, 56.0),
+            transform: Default::default(),
+        }
     }
 
     fn window(focused: bool, title: &str) -> Window {
@@ -1087,7 +1120,8 @@ mod linux {
         assert_eq!(peer.text(&node(3), text, "GetStringAtOffset", vec![i(1), u(0)]), "é 1 2");
         assert_eq!(peer.text(&node(3), text, "GetTextAfterOffset", vec![i(1), u(1)]), "wörld 6 11");
         assert_eq!(peer.text(&node(3), text, "GetTextBeforeOffset", vec![i(7), u(1)]), "héllo  0 6");
-        assert_eq!(peer.text(&node(3), text, "GetTextAtOffset", vec![i(3), u(5)]), "héllo wörld 0 11");
+        // (its line as laid out: wrapped after "héllo ")
+        assert_eq!(peer.text(&node(3), text, "GetTextAtOffset", vec![i(3), u(5)]), "héllo  0 6");
         assert_eq!(peer.ask(&node(3), text, "GetCharacterAtOffset", vec![i(1)])[0], i(0xE9));
         assert!(peer.boolean(&node(3), editable, "SetTextContents", vec![s("x")]));
         assert!(peer.boolean(&node(3), editable, "DeleteText", vec![i(0), i(6)]));
@@ -1106,6 +1140,22 @@ mod linux {
                 Request { window: 0, id: 1, action: SemanticsAction::Focus },
             ]
         );
+        // Where its characters are (its text layout: px to points, from the screen or the window), which one is at
+        // a point, its lines as laid out (soft wrapped after "héllo ").
+        let extents = |peer: &mut Peer, method: &str, args: Vec<Value>| {
+            let reply = peer.ask(&node(3), text, method, args);
+            reply.iter().map(|v| v.as_i32().unwrap().to_string()).collect::<Vec<_>>().join(" ")
+        };
+        assert_eq!(extents(&mut peer, "GetCharacterExtents", vec![i(1), u(1)]), "36 220 16 40");
+        assert_eq!(extents(&mut peer, "GetCharacterExtents", vec![i(1), u(0)]), "136 270 16 40");
+        assert_eq!(extents(&mut peer, "GetCharacterExtents", vec![i(11), u(1)]), "100 260 0 40"); // the end's caret
+        assert_eq!(extents(&mut peer, "GetRangeExtents", vec![i(4), i(8), u(1)]), "20 220 96 80");
+        assert_eq!(extents(&mut peer, "GetCharacterExtents", vec![i(40), u(1)]), "0 200 400 112"); // past it: the field
+        assert_eq!(peer.ask(&node(3), text, "GetOffsetAtPoint", vec![i(44), i(280), u(1)])[0], i(7));
+        assert_eq!(peer.ask(&node(3), text, "GetOffsetAtPoint", vec![i(144), i(330), u(0)])[0], i(7));
+        assert_eq!(peer.ask(&node(3), text, "GetOffsetAtPoint", vec![i(390), i(280), u(1)])[0], i(-1));
+        assert_eq!(peer.text(&node(3), text, "GetTextAtOffset", vec![i(7), u(5)]), "wörld 6 11");
+        assert_eq!(peer.text(&node(3), text, "GetTextAtOffset", vec![i(2), u(5)]), "héllo  0 6");
         // A password field: what is typed isn't said.
         assert_eq!(peer.role(&node(7)), 40);
         assert_eq!(peer.text(&node(7), text, "GetText", vec![i(0), i(-1)]), "•••");

@@ -11,9 +11,10 @@
 //! AppKit's names are its constants' strings (`NSAccessibilityButtonRole` is `AXButton`; a test on macOS checks
 //! each against AppKit's own), so that all of this is plain Rust, tested on every host.
 
-use super::text_input::{byte_of_utf16, utf16_len};
-use crate::accessibility::text::text_of;
+use super::text_input::{byte_of_utf16, utf16_len, utf16_of_byte};
+use crate::accessibility::text::{layout_for, line_around, lines_of, range_box, text_of};
 use crate::accessibility::{Change, Snapshot, changes};
+use kompoz_graphics::{Offset, Rect};
 use kompoz_ui::semantics::{AccessibilityNode, ProgressBarRangeInfo, Role, SemanticsAction, ToggleableState};
 
 /// AppKit's roles (`NSAccessibility…Role`).
@@ -423,6 +424,52 @@ pub fn line_range(text: &str, line: usize) -> Option<(usize, usize)> {
     (line == 0 || (line == text.matches('\n').count() && text.ends_with('\n'))).then_some((start, 0))
 }
 
+/// The code point UTF-16 unit `unit` of `text` is in.
+fn code_point_of_utf16(text: &str, unit: usize) -> i32 {
+    text[..byte_of_utf16(text, unit)].chars().count() as i32
+}
+
+/// Where code point `code_point` of `text` starts, UTF-16.
+fn utf16_of_code_point(text: &str, code_point: i32) -> usize {
+    let byte = text.char_indices().nth(code_point.max(0) as usize).map_or(text.len(), |(i, _)| i);
+    utf16_of_byte(text, byte)
+}
+
+/// Where UTF-16 range (`location`, `length`) of node `n`'s text (`text`, as it is said) is, px in the window
+/// (`accessibilityFrameForRange:`): its characters' boxes together as its text layout has them (the caret's there
+/// for an empty range); none where it has no layout.
+pub fn frame_for_range(n: &AccessibilityNode, text: &str, location: usize, length: usize) -> Option<Rect> {
+    let layout = layout_for(n, text)?;
+    let len = utf16_len(text);
+    let (a, b) = (location.min(len), location.saturating_add(length).min(len));
+    Some(range_box(layout, code_point_of_utf16(text, a), code_point_of_utf16(text, b)))
+}
+
+/// The character (its UTF-16 index) of node `n`'s text at `point` (px in the window:
+/// `accessibilityRangeForPosition:`), as its text layout has them; none where none is, or it has no layout.
+pub fn index_for_position(n: &AccessibilityNode, text: &str, point: Offset) -> Option<usize> {
+    let layout = layout_for(n, text)?;
+    layout.character_at(point).map(|i| utf16_of_byte(text, layout.characters[i].start))
+}
+
+/// The line UTF-16 offset `offset` of node `n`'s text is on: as its text layout lays the lines out (soft wraps
+/// too), else split at line ends.
+pub fn line_of_laid_out(n: &AccessibilityNode, text: &str, offset: usize) -> usize {
+    let Some(layout) = layout_for(n, text) else { return line_of(text, offset) };
+    let cp = code_point_of_utf16(text, offset.min(utf16_len(text)));
+    let (start, _) = line_around(layout, cp);
+    lines_of(layout).iter().position(|&(s, _)| s == start).unwrap_or(0)
+}
+
+/// Line `line`'s UTF-16 range of node `n`'s text: as its text layout lays the lines out, else split at line ends;
+/// none past the last.
+pub fn line_range_laid_out(n: &AccessibilityNode, text: &str, line: usize) -> Option<(usize, usize)> {
+    let Some(layout) = layout_for(n, text) else { return line_range(text, line) };
+    let &(s, e) = lines_of(layout).get(line)?;
+    let (a, b) = (utf16_of_code_point(text, s), utf16_of_code_point(text, e));
+    Some((a, b - a))
+}
+
 /// Who a notification is posted on: a node's element, the window's view, the application.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
@@ -755,6 +802,25 @@ mod tests {
         assert_eq!(line_range(text, 2), Some((7, 0)));
         assert_eq!(line_range(text, 3), None);
         assert_eq!(line_range("", 0), Some((0, 0)));
+        // Laid out (8 px a character from 10, 20, wrapped after "ağaç "): the boxes, a point's character, the lines
+        // as they are laid out.
+        let text = "ağaç dalı";
+        let layout = crate::accessibility::text::test_layout(text, Offset::new(10.0, 20.0), 8.0, 20.0, 5);
+        let field = AccessibilityNode {
+            value: text.into(),
+            editable: true,
+            text_layout: Some(layout.into()),
+            ..Default::default()
+        };
+        assert_eq!(frame_for_range(&field, text, 1, 2), Some(Rect::new(18.0, 20.0, 34.0, 40.0)));
+        assert_eq!(frame_for_range(&field, text, 3, 3), Some(Rect::new(10.0, 20.0, 50.0, 60.0)));
+        assert_eq!(index_for_position(&field, text, Offset::new(20.0, 50.0)), Some(6));
+        assert_eq!(index_for_position(&field, text, Offset::new(200.0, 50.0)), None);
+        assert_eq!((line_of_laid_out(&field, text, 3), line_of_laid_out(&field, text, 6)), (0, 1));
+        assert_eq!(line_range_laid_out(&field, text, 1), Some((5, 4)));
+        assert_eq!(line_range_laid_out(&field, text, 2), None);
+        let plain = AccessibilityNode { value: "a\nb".into(), ..Default::default() };
+        assert_eq!((frame_for_range(&plain, "a\nb", 0, 1), line_of_laid_out(&plain, "a\nb", 2)), (None, 1));
     }
 
     #[test]

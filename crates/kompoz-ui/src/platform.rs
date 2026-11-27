@@ -220,6 +220,13 @@ pub trait PlatformCallbacks {
     fn text_input_changed(&self, state: &TextEditState) {
         let _ = state;
     }
+    /// The focused field's text was laid out again or moved, while its input session is open (Compose's
+    /// `updateTextLayoutResult`, what Android's CursorAnchorInfo is made of): where each character and line of what
+    /// the input method sees is, in the window. Told only when it changed; it holds until the session closes
+    /// (`text_input` inactive) — before the first, only the caret's box (`text_input`'s area) is known.
+    fn update_text_layout_result(&self, layout: &crate::platform_text_layout::PlatformTextLayout) {
+        let _ = layout;
+    }
     fn cursor(&self, icon: PointerIcon) {
         let _ = icon;
     }

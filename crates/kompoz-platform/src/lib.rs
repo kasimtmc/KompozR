@@ -13,9 +13,9 @@
 //!
 //! `unsafe` code is confined to `unix::sys`, `linux::sys`, `windows::sys` and the FFI modules (`linux::xkb`'s,
 //! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface, WinHTTP,
-//! IMM32, TSF, UI Automation's providers and OLE's drag and drop, `android`'s JNI, NDK, natives and Vulkan
-//! surface, `web::sys`) and the macOS platform's that define or call Objective-C classes through objc2 (`macos`),
-//! each block with a `// SAFETY:` comment; everything else is safe.
+//! IMM32, TSF, UI Automation's providers and OLE's drag and drop, `android`'s JNI, NDK, natives (and the input
+//! method's own native, in `text_input`) and Vulkan surface, `web::sys`) and the macOS platform's that define or
+//! call Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:` comment; everything else is safe.
 
 //!
 //! What an app's build script adds to its program for a platform (the Windows program's resources) is [`build`]'s,

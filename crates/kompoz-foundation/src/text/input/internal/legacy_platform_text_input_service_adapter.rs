@@ -21,7 +21,7 @@ use kompoz_ui::platform_text_input::{
     PlatformTextInputMethodRequest, PlatformTextInputModifierNode, PlatformTextInputSessionScope, SessionFuture,
     TextEditingScope, TextEditorState, establish_text_input_session,
 };
-use kompoz_ui::text_input::PlatformTextInputService;
+use kompoz_ui::text_input::{PlatformTextInputService, TextHighlightType};
 use kompoz_ui::{Modifier, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, node_capabilities};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -57,6 +57,8 @@ pub struct LegacyPlatformTextInputServiceAdapter {
     text_field_rect_in_root: MutableState<Option<Rect>>,
     text_clipping_rect_in_root: MutableState<Option<Rect>>,
     unclipped_text_offset_in_root: MutableState<Option<Offset>>,
+    text_layout_to_root_transform: MutableState<Option<Matrix>>,
+    offset_mapping: MutableState<OffsetMapping>,
 }
 
 impl LegacyPlatformTextInputServiceAdapter {
@@ -71,6 +73,8 @@ impl LegacyPlatformTextInputServiceAdapter {
             text_field_rect_in_root: mutable_state_of!(None::<Rect>),
             text_clipping_rect_in_root: mutable_state_of!(None::<Rect>),
             unclipped_text_offset_in_root: mutable_state_of!(None::<Offset>),
+            text_layout_to_root_transform: mutable_state_of!(None::<Matrix>),
+            offset_mapping: mutable_state_of!(OffsetMapping::Identity),
         })
     }
 
@@ -116,6 +120,15 @@ impl LegacyPlatformTextInputServiceAdapter {
             self.text_clipping_rect_in_root.clone(),
             self.unclipped_text_offset_in_root.clone(),
         );
+        let (transform, mapping) = (self.text_layout_to_root_transform.clone(), self.offset_mapping.clone());
+        // (Compose's legacy HandwritingGesture previews: the selection manager's preview highlights.)
+        let manager = self.node().and_then(|n| n.text_field_selection_manager());
+        let highlight_chars_in = manager.map(|manager| {
+            Rc::new(move |highlight_type: TextHighlightType, range: TextRange| match highlight_type {
+                TextHighlightType::HandwritingSelectPreview => manager.set_selection_preview_highlight(range),
+                TextHighlightType::HandwritingDeletePreview => manager.set_deletion_preview_highlight(range),
+            }) as Rc<dyn Fn(TextHighlightType, TextRange)>
+        });
         PlatformTextInputMethodRequest {
             value: Rc::new(move || value.get()),
             state: Rc::new(AdapterEditorState(state_value)),
@@ -127,6 +140,9 @@ impl LegacyPlatformTextInputServiceAdapter {
             text_field_rect_in_root: Rc::new(move || field.get()),
             text_clipping_rect_in_root: Rc::new(move || clipping.get()),
             unclipped_text_offset_in_root: Rc::new(move || unclipped.get()),
+            text_layout_to_root_transform: Rc::new(move || transform.get()),
+            offset_mapping: Rc::new(move || mapping.get()),
+            highlight_chars_in,
             edit_text,
             // (the legacy field takes text only: Compose's takes no content)
             content_mime_types: Vec::new(),
@@ -186,8 +202,10 @@ impl PlatformTextInputService for LegacyPlatformTextInputServiceAdapter {
     ) {
         self.text_field_value.set(text_field_value.clone());
         self.text_layout_result.set(Some(text_layout_result.clone()));
+        self.offset_mapping.set(offset_mapping.clone());
         let mut matrix = Matrix::new();
         text_field_to_root_transform(&mut matrix);
+        self.text_layout_to_root_transform.set(Some(matrix));
         self.text_field_rect_in_root.set(Some(matrix.map_rect(decoration_box_bounds)));
         let clipping = matrix.map_rect(inner_text_field_bounds);
         self.text_clipping_rect_in_root.set(Some(clipping));

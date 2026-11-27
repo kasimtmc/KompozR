@@ -394,6 +394,14 @@ impl Running {
         self.deliver(Event::MetricsChanged); // (the view configuration set on the host again)
     }
 
+    /// `f` with the input method's side and the host (`text_input`'s own natives), a frame asked for after.
+    pub(super) fn with_text_input<R>(&mut self, f: impl FnOnce(&TextInput, &kompoz_ui::KompozHost) -> R) -> Option<R> {
+        let (Some(t), Some(host)) = (self.shared.text_input.clone(), self.core.host()) else { return None };
+        let r = f(&t, host);
+        self.request_frame();
+        Some(r)
+    }
+
     /// A batch of the input connection's edits (`text_input`'s `edit`).
     pub fn ime_edit(&mut self, session: i32, ops: &[i32], texts: &[u8], text: String, offsets: &[i32]) {
         let (Some(t), Some(host)) = (self.shared.text_input.clone(), self.core.host()) else { return };

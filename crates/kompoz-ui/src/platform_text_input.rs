@@ -14,13 +14,16 @@
 use crate::clipboard::ClipEntry;
 use crate::modifier::{ModifierNode, NodeCx};
 use crate::platform::{ImeAction, ImeOptions};
-use crate::text_input::{ContentReceiver, EditCommand, LocalTextInputService, TextInputService, TextInputSession};
+use crate::platform_text_layout::PlatformTextLayout;
+use crate::text_input::{
+    ContentReceiver, EditCommand, LocalTextInputService, TextHighlightType, TextInputService, TextInputSession,
+};
 use kompoz_coroutines::{CoroutineScope, CoroutineStart, Job, coroutine_scope, current_job, snapshot_flow};
-use kompoz_graphics::{Offset, Rect};
+use kompoz_graphics::{Matrix, Offset, Rect};
 use kompoz_runtime::{
     KompozitionLocal, KompozitionLocalProvider, MutableState, mutable_confined_state_of, remember_keyed,
 };
-use kompoz_text::input::TextFieldValue;
+use kompoz_text::input::{OffsetMapping, TextFieldValue};
 use kompoz_text::{TextLayoutResult, TextRange};
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -134,6 +137,15 @@ pub struct PlatformTextInputMethodRequest {
     pub text_clipping_rect_in_root: Rc<dyn Fn() -> Option<Rect>>,
     /// Where the text's layout's top left is in the root (it moves as the field scrolls), if laid out.
     pub unclipped_text_offset_in_root: Rc<dyn Fn() -> Option<Offset>>,
+    /// What takes the text layout's coordinates to the root's (the window's; Compose's
+    /// `textFieldToRootTransform`: it moves as the field scrolls), if laid out.
+    pub text_layout_to_root_transform: Rc<dyn Fn() -> Option<Matrix>>,
+    /// How offsets of the editor's value map to those of the text laid out (what shows of it: an output or visual
+    /// transformation's).
+    pub offset_mapping: Rc<dyn Fn() -> OffsetMapping>,
+    /// Highlights a range of the editor's value (bytes) as an input method's preview of a handwriting gesture, an
+    /// empty one taking it away (Compose's `highlightCharsIn`, `setSelectionPreviewHighlight`); none: it shows none.
+    pub highlight_chars_in: Option<Rc<dyn Fn(TextHighlightType, TextRange)>>,
     /// Edits the text: what the block does through its scope is applied together after it.
     pub edit_text: Rc<dyn Fn(&mut dyn FnMut(&mut dyn TextEditingScope))>,
     /// The MIME types of content the editor takes from the input method besides text (Android's
@@ -142,6 +154,22 @@ pub struct PlatformTextInputMethodRequest {
     /// What takes content the input method commits (an image a keyboard sends: Android's `commitContent`), given it
     /// and its link URI: whether it took it. None: text only.
     pub on_commit_content: Option<Rc<dyn Fn(ClipEntry, Option<String>) -> bool>>,
+}
+
+impl PlatformTextInputMethodRequest {
+    /// How the editor's text is laid out and where, as the platform reads it (read in a snapshot): none until it is
+    /// laid out and placed.
+    pub fn platform_text_layout(&self) -> Option<PlatformTextLayout> {
+        let layout = (self.text_layout_result)()?;
+        let transform = (self.text_layout_to_root_transform)()?;
+        let value = (self.value)();
+        let mapping = (self.offset_mapping)();
+        let field = (self.text_field_rect_in_root)();
+        let clipping = (self.text_clipping_rect_in_root)()
+            .or(field)
+            .unwrap_or_else(|| transform.map_rect(Rect::from_offset_size(Offset::Zero, layout.size.to_size())));
+        Some(PlatformTextLayout::new(value.text(), &mapping, &layout, transform, clipping, field.unwrap_or(clipping)))
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -295,6 +323,7 @@ impl TextInputService {
                 on_commit_content,
             });
             service.set_content_receiver(&session, content);
+            service.set_highlight(&session, request.highlight_chars_in.clone());
             let _close = CloseOnDrop(session);
             coroutine_scope(move |scope| async move {
                 // What the editor holds, followed: the input method told where it differs from what it sees. (With
@@ -307,6 +336,15 @@ impl TextInputService {
                 scope.launch(snapshot_flow(move || rect()).collect(move |r| {
                     if let Some(r) = r {
                         s.notify_open_focused_rect(r);
+                    }
+                }));
+                // How its text is laid out and where, followed (Compose's `updateTextLayoutResult` on each layout
+                // and move): the platform answers the input method's and accessibility's questions about characters
+                // with it.
+                let (layout_request, s) = (request.clone(), service.clone());
+                scope.launch(snapshot_flow(move || layout_request.platform_text_layout()).collect(move |layout| {
+                    if let Some(layout) = layout {
+                        s.update_open_text_layout(layout);
                     }
                 }));
                 // A selection leaving the composition (a click elsewhere) finishes it. (Compose desktop finishes it

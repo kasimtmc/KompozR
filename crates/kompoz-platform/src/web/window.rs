@@ -21,6 +21,7 @@ use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::motion_duration_scale::MotionDurationScale;
 use kompoz_ui::platform::{HapticFeedbackType, ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
+use kompoz_ui::platform_text_layout::{PlatformTextLayout, caret_area};
 use kompoz_ui::window::{WindowId, WindowPlacement};
 use kompoz_web::JsObject;
 use std::cell::{Cell, RefCell};
@@ -46,6 +47,10 @@ pub(super) struct Shared {
     field_active: Cell<bool>,
     /// The text area's place over the field (CSS pixels) and its keyboard, as last set.
     text_input: RefCell<((f64, f64, f64, f64), String)>,
+    /// The field's caret box (px) and text as the host told them, and its text layout while its session is open:
+    /// where the text area goes (over the caret's glyph, where the layout is known: the input method's candidates
+    /// and a phone's selection handles follow it).
+    field_place: RefCell<(Rect, TextEditState, Option<PlatformTextLayout>)>,
     /// What the clipboard holds as far as the app knows: what it copied, or what a paste brought.
     pub(super) clip: RefCell<Option<ClipEntry>>,
     /// A copy or cut event is being handled (what the app copies goes into it).
@@ -92,6 +97,7 @@ impl Shared {
             text_area: RefCell::new(TextArea::default()),
             field_active: Cell::new(false),
             text_input: RefCell::new(((0.0, 0.0, 0.0, 0.0), "text enter off on".into())),
+            field_place: RefCell::new((Rect::Zero, TextEditState::default(), None)),
             clip: RefCell::new(None),
             in_clip_event: Cell::new(false),
             drop_entry: RefCell::new(None),
@@ -211,6 +217,32 @@ struct WebCallbacks {
     shared: Rc<Shared>,
 }
 
+impl Shared {
+    /// A box of px as CSS pixels (left, top, width, height).
+    fn css_of(&self, area: Rect) -> (f64, f64, f64, f64) {
+        let k = 1.0 / self.point_to_px().max(1e-3);
+        (area.left as f64 * k, area.top as f64 * k, area.width() as f64 * k, area.height() as f64 * k)
+    }
+
+    /// The text area placed over the focused field's caret (its glyph, where the field is laid out), where it moved.
+    fn place_text_area(&self) {
+        let area = {
+            let place = self.field_place.borrow();
+            caret_area(place.0, &place.1, place.2.as_ref())
+        };
+        let css = self.css_of(area);
+        let kind = {
+            let mut told = self.text_input.borrow_mut();
+            if told.0 == css {
+                return;
+            }
+            told.0 = css;
+            told.1.clone()
+        };
+        sys::text_input(true, css, &kind);
+    }
+}
+
 impl PlatformCallbacks for WebCallbacks {
     /// A turn of the loop at the next animation frame (from any thread: the web has one).
     fn waker(&self) -> Option<Arc<dyn Fn() + Send + Sync>> {
@@ -220,8 +252,15 @@ impl PlatformCallbacks for WebCallbacks {
     /// The text area over the field (its area from px to CSS pixels), its keyboard for the field's options, the
     /// field's text and selection in it; or let go of (the on-screen keyboard hidden).
     fn text_input(&self, active: bool, area: Rect, state: &TextEditState, options: &ImeOptions) {
-        let k = 1.0 / self.shared.point_to_px().max(1e-3);
-        let css = (area.left as f64 * k, area.top as f64 * k, area.width() as f64 * k, area.height() as f64 * k);
+        let area = {
+            let mut place = self.shared.field_place.borrow_mut();
+            (place.0, place.1) = (area, state.clone());
+            if !active {
+                place.2 = None; // (the session closed: its layout goes with it)
+            }
+            caret_area(area, state, place.2.as_ref())
+        };
+        let css = self.shared.css_of(area);
         self.shared.field_active.set(active);
         let contents = if active {
             self.shared.text_area.borrow_mut().field(state)
@@ -252,6 +291,17 @@ impl PlatformCallbacks for WebCallbacks {
         if let Some(c) = self.shared.text_area.borrow_mut().field(state) {
             sys::text_set(&c.text, c.start, c.end);
         }
+        self.shared.field_place.borrow_mut().1 = state.clone();
+        self.shared.place_text_area();
+    }
+
+    /// The focused field was laid out again or moved: the text area goes over its caret's glyph.
+    fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        if !self.shared.field_active.get() {
+            return;
+        }
+        self.shared.field_place.borrow_mut().2 = Some(layout.clone());
+        self.shared.place_text_area();
     }
 
     fn cursor(&self, icon: PointerIcon) {

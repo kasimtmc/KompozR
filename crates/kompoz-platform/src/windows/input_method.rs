@@ -24,6 +24,7 @@ use crate::app::Event;
 use ::windows::Win32::UI::WindowsAndMessaging as wm;
 use kompoz_graphics::Rect;
 use kompoz_ui::platform::{ImeOptions, TextEditState};
+use kompoz_ui::platform_text_layout::PlatformTextLayout;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
@@ -115,7 +116,7 @@ impl InputMethod {
     /// ranges at the caret).
     pub fn caret_box(&self) -> Option<Rect> {
         let f = self.field.borrow();
-        f.active.then_some(f.area)
+        f.active.then(|| f.place().caret())
     }
 
     /// The field as the input method sees it (tests).
@@ -154,8 +155,14 @@ impl InputMethod {
             return;
         }
         if !was_active {
-            *self.field.borrow_mut() =
-                Field { active, area, options: options.clone(), state: ime::normalized(state), unanswered: false };
+            *self.field.borrow_mut() = Field {
+                active,
+                area,
+                options: options.clone(),
+                state: ime::normalized(state),
+                unanswered: false,
+                layout: None,
+            };
             self.begin_field(state, options);
             return;
         }
@@ -171,6 +178,19 @@ impl InputMethod {
             self.moved();
         }
         self.changed(state);
+    }
+
+    /// The host's `update_text_layout_result`: the field was laid out again or moved; what the input method asks of
+    /// its characters is answered from where they are, its windows placed at the caret's glyph.
+    pub fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        {
+            let mut f = self.field.borrow_mut();
+            if !f.active || f.layout.as_ref() == Some(layout) {
+                return;
+            }
+            f.layout = Some(layout.clone());
+        }
+        self.moved();
     }
 
     /// The host's `text_input_changed`: the app changed the field.
@@ -340,7 +360,7 @@ impl InputMethod {
     }
 
     fn place_now(&self) {
-        let area = self.field.borrow().area;
+        let area = self.field.borrow().place().caret();
         let (point, exclude) = ime::placement(area);
         if let Some(c) = Context::of(self.hwnd.get()) {
             c.place((point.left, point.top), exclude);
@@ -419,7 +439,7 @@ impl InputMethod {
     fn request(&self, hwnd: Hwnd, m: &WindowMessage) -> Option<isize> {
         let request = Request::of(m)?;
         let field = self.field.borrow().clone();
-        let (point, exclude) = ime::placement(field.area);
+        let (point, exclude) = ime::placement(field.place().caret());
         Some(match request {
             Request::CompositionWindow | Request::CandidateWindow => {
                 imm::answer_window(m, (point.left, point.top), exclude)
@@ -446,8 +466,11 @@ impl InputMethod {
                 1
             }
             Request::CharPosition => {
-                let at = ime::char_position(field.area, hwnd.client_origin());
-                imm::answer_char_position(m, at, at)
+                // (The character asked about where it is laid out; the caret's box until the field is.)
+                let index = imm::char_position_asked(m).unwrap_or(0);
+                let (at, document) = field.place().query_char_position(index);
+                let origin = hwnd.client_origin();
+                imm::answer_char_position(m, ime::char_position(at, origin), ime::char_position(document, origin))
             }
         })
     }
@@ -482,8 +505,17 @@ impl tsf::Owner for InputMethod {
         self.send(events);
     }
 
-    fn caret(&self) -> Rect {
-        self.field.borrow().area
+    fn range(&self, start: usize, end: usize) -> (Rect, bool) {
+        self.field.borrow().place().range(start, end)
+    }
+
+    fn acp_from_point(&self, point: kompoz_graphics::Offset, flags: u32) -> Option<usize> {
+        self.field.borrow().place().acp_from_point(point, flags)
+    }
+
+    fn document(&self) -> Option<Rect> {
+        let f = self.field.borrow();
+        f.place().is_laid_out().then(|| f.layout.as_ref().map(|l| l.inner_text_field_bounds)).flatten()
     }
 }
 
@@ -493,7 +525,7 @@ mod tests {
     use super::*;
     use crate::app::{Platform, WindowSpec};
     use kompoz_gpu::device::Backend;
-    use kompoz_graphics::Dp;
+    use kompoz_graphics::{Dp, Offset};
     use kompoz_ui::window::WindowId;
 
     fn pump() {
@@ -638,6 +670,23 @@ mod tests {
             hwnd.send(wm::WM_IME_REQUEST, imm32::IMR_CONFIRMRECONVERTSTRING as usize, r.as_mut_ptr() as isize);
         assert_eq!(confirmed, 1);
         assert_eq!(typed(&shared), [Event::SetSelection { start: 0, end: 10 }]);
+        // Its text laid out (8 px a character from 30, 50): its windows at the caret's glyph, a character asked about
+        // (the third from the caret, nothing composed) where it is.
+        ime.answer(Some(state("kanji desu", (3, 3), None)));
+        let layout = crate::accessibility::text::test_layout("kanji desu", Offset::new(30.0, 50.0), 8.0, 20.0, 100);
+        ime.update_text_layout_result(&layout);
+        assert_eq!(c.composition_window(), Some((imm32::CFS_POINT, (54, 50))));
+        let mut position = imm32::IMECHARPOSITION {
+            dwSize: std::mem::size_of::<imm32::IMECHARPOSITION>() as u32,
+            dwCharPos: 2,
+            ..Default::default()
+        };
+        let answered =
+            hwnd.send(wm::WM_IME_REQUEST, imm32::IMR_QUERYCHARPOSITION as usize, &mut position as *mut _ as isize);
+        let (x, y) = hwnd.client_origin();
+        assert_eq!(answered, 1);
+        assert_eq!((position.pt.x, position.pt.y, position.cLineHeight), (x + 70, y + 50, 20));
+        assert_eq!((position.rcDocument.left, position.rcDocument.right), (x + 30, x + 110));
         // The app ends a composition: the input method's cancelled, nothing more of it sent.
         if composes {
             ime.answer(Some(state("kanji desu", (10, 10), None)));

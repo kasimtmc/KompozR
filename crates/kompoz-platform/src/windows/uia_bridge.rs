@@ -28,7 +28,7 @@ use ::windows::Win32::System::Ole::{SafeArrayCreateVector, SafeArrayPutElement};
 use ::windows::Win32::System::Variant::{VARENUM, VARIANT, VT_I4, VT_R8, VT_UNKNOWN};
 use ::windows::Win32::UI::Accessibility::*;
 use ::windows_core::{BOOL, BSTR, Error, HRESULT, IUnknown, IUnknownImpl, Interface, PCWSTR, Ref, Result, implement};
-use kompoz_graphics::Rect;
+use kompoz_graphics::{Offset, Rect};
 use kompoz_ui::semantics::{AccessibilityNode, SemanticsAction};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1204,9 +1204,12 @@ impl ITextProvider_Impl for NodeProvider_Impl {
         ITextProvider_Impl::DocumentRange(self)
     }
 
-    /// (Where each character is isn't known: the caret.)
-    fn RangeFromPoint(&self, _: &UiaPoint) -> Result<ITextRangeProvider> {
-        let (_, caret) = self.field(|n| Ok(uia::caret_of(n)))?;
+    /// Before the character nearest the point, as the field's text layout has them (the caret, without one).
+    fn RangeFromPoint(&self, point: &UiaPoint) -> Result<ITextRangeProvider> {
+        let inner = self.inner.upgrade().ok_or_else(not_available)?;
+        let (x, y) = inner.origin();
+        let at = Offset::new((point.x - x) as f32, (point.y - y) as f32);
+        let caret = self.field(|n| Ok(uia::caret_at_point(n, at)))?;
         Ok(self.text_range(caret, caret))
     }
 
@@ -1260,7 +1263,7 @@ impl TextRange {
         let inner = self.inner.upgrade().ok_or_else(not_available)?;
         let mut state = inner.state();
         let node = state.node(self.id).filter(|n| n.editable).cloned().ok_or_else(not_available)?;
-        let text = Text::new(&text_of(&node));
+        let text = Text::of(&node);
         let mut ends = self.ends();
         let n = text.len();
         *ends = (ends.0.min(n), ends.1.min(n));
@@ -1345,14 +1348,13 @@ impl ITextRangeProvider_Impl for TextRange_Impl {
         })
     }
 
-    /// The field's box, the caret's where the range is collapsed at the caret of the focused field (the boxes the
-    /// host knows: AT-SPI's text extents are the field's).
+    /// A rectangle per line the range is on, as the field's text layout has its characters; without one, the
+    /// field's box (the caret's where the range is collapsed at the caret of the focused field).
     fn GetBoundingRectangles(&self) -> Result<*mut SAFEARRAY> {
         let rects = self.with(|inner, state, n, _, ends| {
-            let field = inner.on_screen(n.bounds);
             let at_caret = ends.0 == ends.1 && n.focused && uia::caret_of(n).1 == ends.0;
-            let caret = state.caret.filter(|_| at_caret).map(|c| inner.on_screen(c));
-            Ok(uia::range_rects(field, caret, ends.0 == ends.1))
+            let caret = state.caret.filter(|_| at_caret);
+            Ok(uia::range_rects(n, ends.0, ends.1, caret).into_iter().map(|r| inner.on_screen(r)).collect::<Vec<_>>())
         })?;
         f64_array(&rects.concat())
     }
@@ -1799,7 +1801,8 @@ mod tests {
                     assert_eq!(selection.Length().unwrap(), 1);
                     let caret = selection.GetElement(0).unwrap();
                     caret.ExpandToEnclosingUnit(TextUnit_Word).unwrap();
-                    assert_eq!(caret.GetText(-1).unwrap().to_string(), "dünya"); // (the caret after the space)
+                    // (the caret before the space: the word it ends, with its space, as UI Automation's words are)
+                    assert_eq!(caret.GetText(-1).unwrap().to_string(), "héllo ");
                 }
                 Err(e) => {
                     assert!(crate::windows::sys::under_wine(), "the text pattern ({e})");
@@ -1887,6 +1890,10 @@ mod tests {
             let from_start =
                 caret.CompareEndpoints(TextPatternRangeEndpoint_Start, &all, TextPatternRangeEndpoint_Start);
             assert_eq!(from_start.unwrap(), 5);
+            // The word the caret ends (before the space): it with its space, as Windows' client gives it too.
+            let word = caret.Clone().unwrap();
+            word.ExpandToEnclosingUnit(TextUnit_Word).unwrap();
+            assert_eq!(word.GetText(-1).unwrap().to_string(), "héllo ");
             assert_eq!(caret.Move(TextUnit_Word, 1).unwrap(), 1);
             assert_eq!(caret.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, 3).unwrap(), 3);
             assert_eq!(caret.GetText(-1).unwrap().to_string(), "dün");

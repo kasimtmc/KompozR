@@ -650,19 +650,19 @@ define_class!(
         fn accessibility_insertion_point_line_number(&self) -> NSInteger {
             self.read(|r| {
                 let caret = r.field_selection().map_or(0, |(l, n)| l + n);
-                ax::line_of(&r.text(), caret) as NSInteger
+                ax::line_of_laid_out(r.n, &r.text(), caret) as NSInteger
             })
             .unwrap_or(0)
         }
 
         #[unsafe(method(accessibilityLineForIndex:))]
         fn accessibility_line_for_index(&self, index: NSInteger) -> NSInteger {
-            self.read(|r| ax::line_of(&r.text(), index.max(0) as usize) as NSInteger).unwrap_or(0)
+            self.read(|r| ax::line_of_laid_out(r.n, &r.text(), index.max(0) as usize) as NSInteger).unwrap_or(0)
         }
 
         #[unsafe(method(accessibilityRangeForLine:))]
         fn accessibility_range_for_line(&self, line: NSInteger) -> NSRange {
-            self.read(|r| ax::line_range(&r.text(), line.max(0) as usize).map(ns_range))
+            self.read(|r| ax::line_range_laid_out(r.n, &r.text(), line.max(0) as usize).map(ns_range))
                 .flatten()
                 .unwrap_or(NSRange::new(NOT_FOUND, 0))
         }
@@ -677,24 +677,34 @@ define_class!(
             })
         }
 
-        /// Where a range of its text is on the screen: the caret's box in the focused field, else the field's (the
-        /// text's layout isn't the platform's to ask, as AT-SPI's character extents).
+        /// Where a range of its text is on the screen: its characters' boxes as its text layout has them; without
+        /// one, the caret's box in the focused field, else the field's.
         #[unsafe(method(accessibilityFrameForRange:))]
-        fn accessibility_frame_for_range(&self, _range: NSRange) -> NSRect {
+        fn accessibility_frame_for_range(&self, range: NSRange) -> NSRect {
             self.read(|r| {
+                if let Some(rect) = ax::frame_for_range(r.n, &r.text(), range.location, range.length) {
+                    return on_screen(r.state, rect);
+                }
                 let caret = r.field_selection().and_then(|_| r.state.field_selection()).map(|(_, area)| area);
                 on_screen(r.state, caret.unwrap_or(r.n.bounds))
             })
             .unwrap_or(NSRect::ZERO)
         }
 
-        /// The range at a point of the screen: the caret where it is in the focused field (as the input methods'
-        /// `characterIndexForPoint:`), none elsewhere.
+        /// The range at a point of the screen: the character there as its text layout has them; without one, the
+        /// caret where the point is in the focused field's caret box; none elsewhere.
         #[unsafe(method(accessibilityRangeForPosition:))]
         fn accessibility_range_for_position(&self, point: NSPoint) -> NSRange {
             self.read(|r| {
-                let ((location, length), area) = r.field_selection().and_then(|_| r.state.field_selection())?;
                 let (x, y) = in_window(r.state, point)?;
+                let text = r.text();
+                if r.n.text_layout.is_some() {
+                    let at = ax::index_for_position(r.n, &text, kompoz_graphics::Offset::new(x, y))?;
+                    let next = byte_of_utf16(&text, at);
+                    let len = text[next..].chars().next().map_or(0, char::len_utf16);
+                    return Some(NSRange::new(at, len));
+                }
+                let ((location, length), area) = r.field_selection().and_then(|_| r.state.field_selection())?;
                 let inside = x >= area.left && x <= area.right && y >= area.top && y <= area.bottom;
                 inside.then(|| NSRange::new(location + length, 0))
             })

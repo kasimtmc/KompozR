@@ -30,6 +30,7 @@ pub(crate) mod navigationevent;
 pub mod node;
 pub mod platform;
 pub mod platform_text_input;
+pub mod platform_text_layout;
 pub mod semantics;
 pub mod spatial;
 pub mod state;

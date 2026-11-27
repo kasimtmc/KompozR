@@ -1250,8 +1250,17 @@ impl KompozHost {
     }
 
     /// The nodes accessibility sees (C++'s `semanticsTree`): see [`SemanticsOwner::accessibility_tree`].
+    /// The focused field's text layout is its input session's (where its text is exactly: its decoration around it),
+    /// where that one says where each character the node shows is.
     pub fn accessibility_tree(&self) -> Vec<AccessibilityNode> {
-        self.semantics_owner().accessibility_tree()
+        let mut tree = self.semantics_owner().accessibility_tree();
+        if let Some(layout) = self.text_input.session_text_layout()
+            && let Some(field) = tree.iter_mut().find(|n| n.focused && n.editable)
+            && let Some(shown) = layout.with_text(&field.value)
+        {
+            field.text_layout = Some(std::sync::Arc::new(shown));
+        }
+        tree
     }
 
     /// Performs an accessibility action on the semantics node with `id` (C++'s `performSemanticsAction`);

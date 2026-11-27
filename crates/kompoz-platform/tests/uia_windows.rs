@@ -71,6 +71,27 @@ mod on_windows {
         );
     }
 
+    /// A SAFEARRAY of doubles read (and destroyed).
+    fn doubles(array: *mut windows::Win32::System::Com::SAFEARRAY) -> Vec<f64> {
+        use windows::Win32::System::Ole::{SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetUBound};
+        if array.is_null() {
+            return Vec::new();
+        }
+        // SAFETY: a one-dimension VT_R8 array UI Automation gave, read in its bounds, destroyed once.
+        unsafe {
+            let upper = SafeArrayGetUBound(array, 1).unwrap_or(-1);
+            let out = (0..=upper)
+                .map(|i| {
+                    let mut v = 0f64;
+                    let _ = SafeArrayGetElement(array, &i, &mut v as *mut f64 as *mut _);
+                    v
+                })
+                .collect();
+            let _ = SafeArrayDestroy(array);
+            out
+        }
+    }
+
     fn under_wine() -> bool {
         // SAFETY: queries of the process's ntdll.
         unsafe {
@@ -223,25 +244,52 @@ mod on_windows {
             if field.CurrentControlType().map(|t| t.0) != Ok(UIA_EditControlTypeId.0) {
                 return Err("\"Ad\" isn't an edit".into());
             }
-            let (read, first) = match field.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
-                Ok(text) => {
-                    let all = text.DocumentRange().map_err(|e| format!("document range: {e}"))?;
-                    let word = all.Clone().unwrap();
-                    word.ExpandToEnclosingUnit(TextUnit_Word).map_err(|e| format!("expand: {e}"))?;
-                    said.push("ok read through the client's TextPattern".into());
-                    (all.GetText(-1).unwrap().to_string(), word.GetText(-1).unwrap().to_string())
-                }
-                Err(e) if lacking(&e) => {
-                    let p = provider(&root, "Ad").ok_or("no \"Ad\" provider")?;
-                    let text: ITextProvider = pattern(&p, UIA_TextPatternId).ok_or("no text pattern")?;
-                    let all = text.DocumentRange().map_err(|e| format!("document range: {e}"))?;
-                    let word = all.Clone().unwrap();
-                    word.ExpandToEnclosingUnit(TextUnit_Word).map_err(|e| format!("expand: {e}"))?;
-                    said.push("(wine) read through its provider's TextPattern".into());
-                    (all.GetText(-1).unwrap().to_string(), word.GetText(-1).unwrap().to_string())
-                }
-                Err(e) => return Err(format!("no text pattern: {e}")),
+            // (Its first word's and first character's rectangles too: where they are laid out.)
+            let (read, first, word_rects, char_rects) =
+                match field.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
+                    Ok(text) => {
+                        let all = text.DocumentRange().map_err(|e| format!("document range: {e}"))?;
+                        let word = all.Clone().unwrap();
+                        word.ExpandToEnclosingUnit(TextUnit_Word).map_err(|e| format!("expand: {e}"))?;
+                        let char = all.Clone().unwrap();
+                        char.ExpandToEnclosingUnit(TextUnit_Character).map_err(|e| format!("expand: {e}"))?;
+                        said.push("ok read through the client's TextPattern".into());
+                        (
+                            all.GetText(-1).unwrap().to_string(),
+                            word.GetText(-1).unwrap().to_string(),
+                            doubles(word.GetBoundingRectangles().map_err(|e| format!("rectangles: {e}"))?),
+                            doubles(char.GetBoundingRectangles().map_err(|e| format!("rectangles: {e}"))?),
+                        )
+                    }
+                    Err(e) if lacking(&e) => {
+                        let p = provider(&root, "Ad").ok_or("no \"Ad\" provider")?;
+                        let text: ITextProvider = pattern(&p, UIA_TextPatternId).ok_or("no text pattern")?;
+                        let all = text.DocumentRange().map_err(|e| format!("document range: {e}"))?;
+                        let word = all.Clone().unwrap();
+                        word.ExpandToEnclosingUnit(TextUnit_Word).map_err(|e| format!("expand: {e}"))?;
+                        let char = all.Clone().unwrap();
+                        char.ExpandToEnclosingUnit(TextUnit_Character).map_err(|e| format!("expand: {e}"))?;
+                        said.push("(wine) read through its provider's TextPattern".into());
+                        (
+                            all.GetText(-1).unwrap().to_string(),
+                            word.GetText(-1).unwrap().to_string(),
+                            doubles(word.GetBoundingRectangles().map_err(|e| format!("rectangles: {e}"))?),
+                            doubles(char.GetBoundingRectangles().map_err(|e| format!("rectangles: {e}"))?),
+                        )
+                    }
+                    Err(e) => return Err(format!("no text pattern: {e}")),
+                };
+            // A rectangle each (one line): the character inside the word, the word inside the field, narrower than it.
+            let field_box = field.CurrentBoundingRectangle().map_err(|e| format!("field's box: {e}"))?;
+            let field_width = (field_box.right - field_box.left) as f64;
+            let ([wx, _, ww, wh], [cx, _, cw, _]) = match (word_rects.as_slice(), char_rects.as_slice()) {
+                ([a, b, c, d], [e, f, g, h]) => ([*a, *b, *c, *d], [*e, *f, *g, *h]),
+                _ => return Err(format!("the word's rectangles {word_rects:?}, its character's {char_rects:?}")),
             };
+            if !(cw > 0.0 && cw < ww && ww < field_width && wh > 0.0 && cx >= wx && wx >= field_box.left as f64) {
+                return Err(format!("the word at {word_rects:?}, its character at {char_rects:?}, in {field_box:?}"));
+            }
+            said.push(format!("ok the first word {ww:.0} px wide, its first character {cw:.0} px: laid out"));
             if (read.as_str(), first.as_str()) != ("merhaba dünya", "merhaba ") {
                 return Err(format!("the field's text read \"{read}\", its first word \"{first}\""));
             }

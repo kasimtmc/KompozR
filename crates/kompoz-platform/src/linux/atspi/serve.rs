@@ -324,9 +324,16 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
         }
         TEXT => {
             let Object::Node(window, id) = o else { return None };
-            let text = text_of(tree.node(window, id));
+            let node = tree.node(window, id);
+            let text = text_of(node);
             let cps = code_points(&text);
             let count = cps.len() as i32 - 1;
+            let layout = layout_for(node, &text);
+            // (A line is as the text is laid out, its soft wraps too, where it is.)
+            let segment = |text: &str, cps: &[usize], offset: i32, unit: Unit| match (unit, layout) {
+                (Unit::Line, Some(l)) if (0..count).contains(&offset) => line_around(l, offset),
+                _ => segment(text, cps, offset, unit),
+            };
             let range = |(from, to): (i32, i32)| {
                 vec![Value::str(slice(&text, &cps, from, to)), Value::Int32(from), Value::Int32(to)]
             };
@@ -373,14 +380,25 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
                 "GetAttributes" | "GetAttributeRun" => vec![no_attributes(), Value::Int32(0), Value::Int32(count)],
                 "GetDefaultAttributes" | "GetDefaultAttributeSet" => vec![no_attributes()],
                 "GetCharacterExtents" | "GetRangeExtents" => {
-                    args.i32();
-                    if member == "GetRangeExtents" {
-                        args.i32();
-                    }
-                    let r = tree.extents_of(o, args.u32());
+                    let from = args.i32();
+                    let to = if member == "GetRangeExtents" { args.i32() } else { from + 1 };
+                    let coord_type = args.u32();
+                    // Where its characters are laid out (the node's text layout); without one, the node's box.
+                    let laid_out = layout.and_then(|l| match member {
+                        "GetCharacterExtents" => character_box(l, from),
+                        _ => Some(range_box(l, from.clamp(0, count), to.clamp(0, count))),
+                    });
+                    let r = match laid_out {
+                        Some(rect) => tree.rect_extents(o, rect, coord_type),
+                        None => tree.extents_of(o, coord_type),
+                    };
                     vec![Value::Int32(r.x), Value::Int32(r.y), Value::Int32(r.width), Value::Int32(r.height)]
                 }
-                "GetOffsetAtPoint" => vec![Value::Int32(-1)],
+                "GetOffsetAtPoint" => {
+                    let (x, y, coord_type) = (args.i32(), args.i32(), args.u32());
+                    let at = layout.and_then(|l| offset_at_point(l, tree.point_in_window(o, x, y, coord_type)));
+                    vec![Value::Int32(at.unwrap_or(-1))]
+                }
                 _ => return None,
             })
         }

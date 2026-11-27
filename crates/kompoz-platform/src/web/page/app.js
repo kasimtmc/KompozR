@@ -98,7 +98,7 @@ function drive(glue, spec) {
 // A mirrored element's name: its `aria-label`, else its own text.
 function nameOf(el) {
     if (!el._kz) return el.getAttribute("aria-label") ?? el.textContent;
-    return el.getAttribute("aria-label") ?? (el._kz.text ? el._kz.text.data : "");
+    return el.getAttribute("aria-label") ?? (el._kz.text ? el._kz.text.textContent : "");
 }
 
 // The ARIA mirror as a screen reader reads it: a line an element (its role, name, place and size on the canvas,

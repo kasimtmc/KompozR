@@ -11,11 +11,16 @@
 //! services do), wherever it is; the inserted or composed text then takes the selection's place, as AppKit's own
 //! text views do.
 //!
+//! Where its characters are (`firstRectForCharacterRange:`, `characterIndexForPoint:`) comes from the field's text
+//! layout while its session is open (`PlatformCallbacks::update_text_layout_result`); the caret's box the host
+//! tells stands for them until the field is laid out.
+//!
 //! Plain Rust: tested on every host.
 
 use crate::app::Event;
-use kompoz_graphics::Rect;
+use kompoz_graphics::{Offset, Rect};
 use kompoz_ui::platform::TextEditState;
+use kompoz_ui::platform_text_layout::{PlatformTextLayout, caret_area};
 use kompoz_ui::text_input::EditCommand;
 
 /// Foundation's NSNotFound (NSIntegerMax): no range.
@@ -57,11 +62,59 @@ pub struct Ime {
     /// Where the field (its caret) is, px in the window.
     pub area: Rect,
     pub state: TextEditState,
+    /// Its text layout as last told (none before it was laid out, or once its session closed).
+    pub layout: Option<PlatformTextLayout>,
 }
 
 impl Ime {
     fn text(&self) -> &str {
         &self.state.text
+    }
+
+    /// Its text layout, where it is laid out for the text the input methods see.
+    fn laid_out(&self) -> Option<&PlatformTextLayout> {
+        self.layout.as_ref().filter(|l| l.text == self.state.text)
+    }
+
+    /// Where the part of UTF-16 range (`location`, `length`) on its first line is, px in the window, and the range
+    /// that part is (`firstRectForCharacterRange:actualRange:`): its characters' boxes on that line (the caret's at
+    /// an empty range: at its glyph); the caret's box for the range asked for until the field is laid out.
+    pub fn first_rect(&self, location: usize, length: usize) -> (Rect, (usize, usize)) {
+        let Some(layout) = self.laid_out() else { return (self.area, (location, length)) };
+        let text = self.text();
+        let start = byte_of_utf16(text, location.min(utf16_len(text)));
+        let end = byte_of_utf16(text, location.saturating_add(length).min(utf16_len(text)));
+        if start == end {
+            return (
+                caret_area(self.area, &TextEditState { selection_end: start, ..self.state.clone() }, Some(layout)),
+                (utf16_of_byte(text, start), 0),
+            );
+        }
+        let (rect, until) = layout.first_rect(start, end);
+        let (a, b) = (utf16_of_byte(text, start), utf16_of_byte(text, until));
+        (rect, (a, b - a))
+    }
+
+    /// The character (its UTF-16 index) at `point` (px in the window: `characterIndexForPoint:`): the one whose
+    /// box holds it as the field is laid out, none elsewhere; until it is laid out, the caret's where the point is in
+    /// the caret's box.
+    pub fn index_at(&self, point: Offset) -> usize {
+        if !self.active {
+            return NOT_FOUND;
+        }
+        match self.laid_out() {
+            Some(layout) => {
+                layout.character_at(point).map_or(NOT_FOUND, |i| utf16_of_byte(self.text(), layout.characters[i].start))
+            }
+            None if self.area.left <= point.x
+                && point.x <= self.area.right
+                && self.area.top <= point.y
+                && point.y <= self.area.bottom =>
+            {
+                utf16_of_byte(self.text(), self.state.selection_end)
+            }
+            None => NOT_FOUND,
+        }
     }
 
     /// The selection, UTF-16 (location, length).
@@ -179,7 +232,32 @@ mod tests {
                 selection_end: selection.1,
                 composition,
             },
+            layout: None,
         }
+    }
+
+    #[test]
+    fn where_characters_are_comes_from_the_layout() {
+        // "ağaç dalı", 8 px a character from 10, 20, wrapped after "ağaç " (20 px lines).
+        let mut i = ime("ağaç dalı", (1, 1), None);
+        i.area = Rect::new(18.0, 20.0, 26.0, 40.0);
+        // Not laid out: the caret's box for any range, the caret where the point is in it.
+        assert_eq!(i.first_rect(2, 3), (i.area, (2, 3)));
+        assert_eq!(i.index_at(Offset::new(20.0, 30.0)), 1);
+        assert_eq!(i.index_at(Offset::new(60.0, 30.0)), NOT_FOUND);
+        let layout = crate::accessibility::text::test_layout("ağaç dalı", Offset::new(10.0, 20.0), 8.0, 20.0, 5);
+        i.layout = Some(layout);
+        // The first line's part of "ğaç da": "ğaç " (four units), its box; an empty range's: the caret's glyph.
+        assert_eq!(i.first_rect(1, 6), (Rect::new(18.0, 20.0, 50.0, 40.0), (1, 4)));
+        assert_eq!(i.first_rect(6, 2), (Rect::new(18.0, 40.0, 34.0, 60.0), (6, 2)));
+        assert_eq!(i.first_rect(2, 0), (Rect::new(26.0, 20.0, 27.0, 40.0), (2, 0)));
+        // A point's character, by real hit-testing.
+        assert_eq!(i.index_at(Offset::new(31.0, 30.0)), 2);
+        assert_eq!(i.index_at(Offset::new(20.0, 50.0)), 6);
+        assert_eq!(i.index_at(Offset::new(300.0, 30.0)), NOT_FOUND);
+        // Laid out for another text (it changed since): not read.
+        i.state.text.push('!');
+        assert_eq!(i.first_rect(1, 6).0, i.area);
     }
 
     #[test]

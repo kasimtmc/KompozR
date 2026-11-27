@@ -10,14 +10,9 @@ use std::sync::Arc;
 /// An annotation placed on a range of a field's text (Compose's PlacedAnnotation).
 pub type PlacedAnnotation = Range<Annotation>;
 
-/// A text range highlight type (Compose's TextHighlightType): a handwriting gesture's preview.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum TextHighlightType {
-    /// Previews the range an ongoing stylus handwriting select gesture would select.
-    HandwritingSelectPreview,
-    /// Previews the range an ongoing stylus handwriting delete gesture would delete.
-    HandwritingDeletePreview,
-}
+/// A text range highlight type (Compose's TextHighlightType): a handwriting gesture's preview — kompoz-ui's, which
+/// the platform's input method gives an open session's editor.
+pub use kompoz_ui::text_input::TextHighlightType;
 
 /// A field's contents at a moment (Compose's TextFieldCharSequence): cheap to clone. The selection, composition and
 /// highlight are kept within the text.

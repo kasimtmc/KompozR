@@ -12,8 +12,11 @@
 //! The ids are UIAutomationClient.h's (stable numbers: UIA_*PropertyId, UIA_*PatternId, UIA_*EventId,
 //! UIA_*ControlTypeId). Offsets in a field's text are code points (a range's ends: UI Automation never sees them).
 
-use crate::accessibility::text::{Unit, code_points, segment, text_of};
+use crate::accessibility::text::{
+    Unit, caret_for_point, code_points, layout_for, lines_of, range_box, range_boxes, segment, text_of,
+};
 use crate::accessibility::{Change, Snapshot, changes};
+use kompoz_graphics::{Offset, Rect};
 use kompoz_ui::semantics::{
     AccessibilityNode, LiveRegionMode, ProgressBarRangeInfo, Role, ScrollPosition, SemanticsAction, ToggleableState,
 };
@@ -687,16 +690,25 @@ impl TextUnit {
     }
 }
 
-/// A field's text as its ranges read it: by code points (the shared word boundaries; lines end after their line
-/// breaks: a field knows no other).
+/// A field's text as its ranges read it: by code points (the shared word boundaries; lines as its text layout
+/// lays them out, soft wraps too, else ending after their line breaks).
 pub struct Text {
     s: String,
     at: Vec<usize>,
+    /// Its lines as laid out, [start, end) in code points (none: not laid out).
+    lines: Option<Vec<(usize, usize)>>,
 }
 
 impl Text {
     pub fn new(s: &str) -> Text {
-        Text { s: s.to_string(), at: code_points(s) }
+        Text { s: s.to_string(), at: code_points(s), lines: None }
+    }
+
+    /// `n`'s text as it is said, its lines from its text layout where it has one.
+    pub fn of(n: &AccessibilityNode) -> Text {
+        let s = text_of(n);
+        let lines = layout_for(n, &s).map(|l| lines_of(l).into_iter().map(|(a, b)| (a as usize, b as usize)).collect());
+        Text { lines, ..Text::new(&s) }
     }
 
     /// Its length, in code points.
@@ -731,6 +743,11 @@ impl Text {
             TextUnit::Word => {
                 let (s, e) = segment(&self.s, &self.at, pos as i32, Unit::Word);
                 (s as usize, e as usize)
+            }
+            TextUnit::Line if self.lines.as_ref().is_some_and(|l| !l.is_empty()) => {
+                let lines = self.lines.as_deref().unwrap_or_default();
+                let i = lines.iter().position(|&(_, e)| pos < e).unwrap_or(lines.len() - 1);
+                lines[i]
             }
             TextUnit::Line => {
                 let mut start = pos;
@@ -822,12 +839,29 @@ impl Text {
     }
 }
 
-/// Where a field's range is on the screen, as its bounding rectangles (left, top, width, height): the field's box
-/// (the caret's where the range is collapsed and the caret's box is known), as AT-SPI's text extents are.
-pub fn range_rects(field: [f64; 4], caret: Option<[f64; 4]>, collapsed: bool) -> Vec<[f64; 4]> {
+/// Where a field's range (code points `start..end` of its text as said) is, as its bounding rectangles (px in the
+/// window): one per line it is on, from the field's text layout (a collapsed range's: the caret's there); without
+/// a layout, the field's box (the caret's, `caret`, where the range is collapsed at the focused field's caret), as
+/// AT-SPI's text extents fall back on.
+pub fn range_rects(n: &AccessibilityNode, start: usize, end: usize, caret: Option<Rect>) -> Vec<Rect> {
+    let said = text_of(n);
+    if let Some(layout) = layout_for(n, &said) {
+        let (s, e) = (start as i32, end as i32);
+        return if s == e { vec![range_box(layout, s, s)] } else { range_boxes(layout, s, e) };
+    }
     match caret {
-        Some(c) if collapsed => vec![c],
-        _ => vec![field],
+        Some(c) if start == end => vec![c],
+        _ => vec![n.bounds],
+    }
+}
+
+/// Where a caret goes for a point (px in the window) in field `n` (RangeFromPoint): before the character nearest it
+/// as its text layout has them; without a layout, the field's caret.
+pub fn caret_at_point(n: &AccessibilityNode, point: Offset) -> usize {
+    let said = text_of(n);
+    match layout_for(n, &said) {
+        Some(layout) => caret_for_point(layout, point).max(0) as usize,
+        None => caret_of(n).1,
     }
 }
 
@@ -1156,10 +1190,28 @@ mod tests {
         assert_eq!(caret_of(&field), ((1, 3), 1));
         field.text_selection = Some((9, 9));
         assert_eq!(caret_of(&field), ((3, 3), 3));
-        let (box_, caret) = ([10.0, 20.0, 200.0, 40.0], [50.0, 25.0, 1.0, 30.0]);
-        assert_eq!(range_rects(box_, Some(caret), true), [caret]);
-        assert_eq!(range_rects(box_, Some(caret), false), [box_]);
-        assert_eq!(range_rects(box_, None, true), [box_]);
+        // Without a text layout: the field's box, the caret's for a collapsed range at it.
+        field.bounds = Rect::new(10.0, 20.0, 210.0, 60.0);
+        let caret = Rect::new(50.0, 25.0, 51.0, 55.0);
+        assert_eq!(range_rects(&field, 3, 3, Some(caret)), [caret]);
+        assert_eq!(range_rects(&field, 0, 3, Some(caret)), [field.bounds]);
+        assert_eq!(range_rects(&field, 3, 3, None), [field.bounds]);
+        assert_eq!(caret_at_point(&field, Offset::new(0.0, 0.0)), 3);
+        // With one: a rectangle a line, lines as laid out (soft wrapped), a point's character.
+        let mut field = node(1, None);
+        field.editable = true;
+        field.value = "héllo wörld".into();
+        let layout = crate::accessibility::text::test_layout(&field.value, Offset::new(10.0, 100.0), 8.0, 20.0, 6);
+        field.text_layout = Some(layout.into());
+        assert_eq!(
+            range_rects(&field, 4, 8, None),
+            [Rect::new(42.0, 100.0, 58.0, 120.0), Rect::new(10.0, 120.0, 26.0, 140.0)]
+        );
+        assert_eq!(range_rects(&field, 2, 2, None), [Rect::new(26.0, 100.0, 26.0, 120.0)]);
+        assert_eq!(caret_at_point(&field, Offset::new(25.0, 130.0)), 8);
+        let t = Text::of(&field);
+        assert_eq!((t.enclosing(2, Line), t.enclosing(7, Line)), ((0, 6), (6, 11)));
+        assert_eq!(t.move_range(1, 2, Line, 1), (6, 11, 1));
         assert_eq!(runtime_id(0x1_0000_0002), [APPEND_RUNTIME_ID, 1, 2]);
     }
 }

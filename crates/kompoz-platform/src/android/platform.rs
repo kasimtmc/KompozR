@@ -133,6 +133,11 @@ impl PlatformCallbacks for AndroidCallbacks {
             t.update(state);
         }
     }
+    fn update_text_layout_result(&self, layout: &kompoz_ui::platform_text_layout::PlatformTextLayout) {
+        if let Some(t) = &self.text_input {
+            t.update_text_layout_result(layout);
+        }
+    }
     fn hide_software_keyboard(&self) {
         if let Some(t) = &self.text_input {
             t.hide_keyboard();

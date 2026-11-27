@@ -32,7 +32,9 @@ use kompoz_ui::platform::{
     HapticFeedbackType, ImeAction, ImeOptions, LocalCursorBlinkEnabled, PlatformCallbacks, TextEditState,
     TextToolbarActions,
 };
+use kompoz_ui::platform_text_layout::PlatformTextLayout;
 use kompoz_ui::semantics::*;
+use kompoz_ui::text_input::TextHighlightType;
 use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -62,6 +64,7 @@ struct Ime {
     hidden: Cell<i32>,
     toolbar: RefCell<Option<(Rect, TextToolbarActions)>>,
     haptics: RefCell<Vec<HapticFeedbackType>>,
+    layouts: RefCell<Vec<PlatformTextLayout>>,
 }
 
 impl PlatformCallbacks for Ime {
@@ -88,6 +91,9 @@ impl PlatformCallbacks for Ime {
     }
     fn haptic_feedback(&self, kind: HapticFeedbackType) {
         self.haptics.borrow_mut().push(kind);
+    }
+    fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        self.layouts.borrow_mut().push(layout.clone());
     }
 }
 
@@ -1450,8 +1456,66 @@ fn multi_line_field_paragraphs_go_their_own_way() {
     assert_eq!(state.selection(), TextRange::new(4, 4));
 }
 
+/// A value field shown through `transformation`, focused.
+fn transformed_rule(initial: &str, transformation: VisualTransformation) -> (KompozTestRule, Rc<Ime>) {
+    let value = mutable_state_of(initial.to_string());
+    let v = value.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let v2 = v.clone();
+        BasicTextFieldString(
+            v.get(),
+            move |it: String| v2.set(it),
+            modifier = Modifier.width(300.dp()).test_tag("f"),
+            text_style = style16(),
+            visual_transformation = transformation.clone(),
+        );
+    }));
+    let p = ime(&rule);
+    rule.on_node_with_tag("f").perform_click();
+    rule.wait_for_idle();
+    (rule, p)
+}
+
+/// The value-based field's text layout reaches the platform too (Compose's TextFieldDelegate
+/// `updateTextLayoutResult`), by its value's offsets where a visual transformation shows something else: a
+/// password's bullets for what was typed, a phone number's separators skipped.
+fn the_focused_fields_text_layout_reaches_the_platform() {
+    let (rule, p) = transformed_rule("şifre", PasswordVisualTransformation());
+    let field = bounds(&rule, "f");
+    let layout = p.layouts.borrow().last().cloned().expect("a text layout told");
+    assert_eq!(layout.text, "şifre");
+    let starts: Vec<usize> = layout.characters.iter().map(|c| c.start).collect();
+    assert_eq!(starts, [0, 2, 3, 4, 5]);
+    for (i, c) in layout.characters.iter().enumerate() {
+        assert!(near(c.rect.left, field.left + 8.0 * i as f32, 0.5) && near(c.rect.width(), 8.0, 0.5), "{c:?}");
+    }
+    // Accessibility's text is the bullets: the same boxes, by its offsets.
+    let tree = rule.host().accessibility_tree();
+    let node = tree.iter().find(|n| n.editable).expect("the field");
+    let shown = node.text_layout.clone().expect("its layout");
+    assert_eq!(shown.text, "•••••");
+    assert_eq!(shown.characters[1].start, 3);
+    assert_eq!(shown.characters[1].rect, layout.characters[1].rect);
+    // An input method's deletion preview is drawn over "if".
+    let service = rule.host().text_input_service();
+    assert!(service.highlight_chars_in(TextHighlightType::HandwritingDeletePreview, TextRange::new(2, 4)));
+    rule.wait_for_idle();
+    let over = Rect::new(field.left + 8.0, field.top, field.left + 24.0, field.top + 20.0);
+    let c = rule.draw();
+    assert!(c.paths.iter().any(|r| near(r.left, over.left, 0.5) && near(r.right, over.right, 0.5)), "{:?}", c.paths);
+    // A phone number's: "5551234567" shown "555-123-4567", its "1" the fifth shown.
+    let (rule, p) = transformed_rule("5551234567", phone());
+    let field = bounds(&rule, "f");
+    let layout = p.layouts.borrow().last().cloned().expect("a text layout told");
+    assert_eq!(layout.characters.len(), 10);
+    assert!(near(layout.characters[3].rect.left, field.left + 32.0, 0.5), "{:?}", layout.characters[3]);
+    assert!(near(layout.characters[9].rect.left, field.left + 88.0, 0.5), "{:?}", layout.characters[9]);
+    assert_eq!((layout.lines[0].start, layout.lines[0].end), (0, 10));
+}
+
 tests!(
     default_key_mapping;
+    the_focused_fields_text_layout_reaches_the_platform,
     multi_line_field_paragraphs_go_their_own_way,
     typing_goes_through_the_input_session_in_utf8,
     input_method_compositions_and_corrections,

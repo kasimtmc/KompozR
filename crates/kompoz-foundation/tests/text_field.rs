@@ -22,7 +22,9 @@ use kompoz_ui::focus::FocusRequester;
 use kompoz_ui::input::*;
 use kompoz_ui::platform::ImeAction;
 use kompoz_ui::platform::{HapticFeedbackType, LocalCursorBlinkEnabled, PlatformCallbacks, PointerIcon};
+use kompoz_ui::platform_text_layout::{PlatformTextLayout, TextGranularity};
 use kompoz_ui::semantics::*;
+use kompoz_ui::text_input::TextHighlightType;
 use kompoz_ui::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -53,6 +55,7 @@ struct TestPlatform {
     text_inputs: RefCell<Vec<bool>>,
     stylus_icons: RefCell<Vec<Option<PointerIcon>>>,
     handwriting: Cell<i32>,
+    layouts: RefCell<Vec<PlatformTextLayout>>,
 }
 
 impl PlatformCallbacks for TestPlatform {
@@ -85,6 +88,9 @@ impl PlatformCallbacks for TestPlatform {
     }
     fn start_stylus_handwriting(&self) {
         self.handwriting.set(self.handwriting.get() + 1);
+    }
+    fn update_text_layout_result(&self, layout: &PlatformTextLayout) {
+        self.layouts.borrow_mut().push(layout.clone());
     }
 }
 
@@ -1512,8 +1518,219 @@ fn a_scrolled_text_field_draws_its_text_where_it_scrolled() {
     assert!(near(width - scrolled, field.width(), 3.0), "{width} {scrolled} {field:?}");
 }
 
+/// What the platform was last told of the focused field's text layout.
+fn last_layout(p: &TestPlatform) -> PlatformTextLayout {
+    p.layouts.borrow().last().cloned().expect("a text layout told")
+}
+
+/// A field 20 px from the window's corner, its text 16 sp (8 px a character, 20 px lines), focused.
+fn layout_rule(state: &TextFieldState, width: f32, single_line: bool) -> (KompozTestRule, Rc<TestPlatform>) {
+    let s = state.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        Box(
+            modifier = Modifier.padding(20.dp()),
+            content = {
+                let s = s.clone();
+                move || {
+                    BasicTextField(
+                        s.clone(),
+                        modifier = Modifier.width(width.dp()).test_tag("f"),
+                        text_style = style16(),
+                        line_limits = if single_line {
+                            TextFieldLineLimits::SingleLine
+                        } else {
+                            TextFieldLineLimits::MultiLine { min_height_in_lines: 1, max_height_in_lines: 10 }
+                        },
+                    );
+                }
+            },
+        );
+    }));
+    let p = platform(&rule);
+    rule.on_node_with_tag("f").perform_click();
+    rule.wait_for_idle();
+    (rule, p)
+}
+
+/// The focused field's text layout reaches the platform (Compose's `updateTextLayoutResult`): a box per character
+/// and per line in the window, the caret's, hit tests; told again as it changes, only while its session is open.
+fn the_focused_fields_text_layout_reaches_the_platform() {
+    let state = TextFieldState::new("abc");
+    let (rule, p) = layout_rule(&state, 200.0, true);
+    let layout = last_layout(&p);
+    let field = bounds(&rule, "f");
+    assert_eq!(layout.text, "abc");
+    assert_eq!(layout.characters.len(), 3);
+    for (i, c) in layout.characters.iter().enumerate() {
+        let left = field.left + 8.0 * i as f32;
+        assert!(near(c.rect.left, left, 0.5) && near(c.rect.width(), 8.0, 0.5), "{i}: {c:?} {field:?}");
+        assert!(near(c.rect.top, field.top, 0.5) && near(c.rect.height(), 20.0, 0.5), "{c:?}");
+        assert!(!c.rtl && c.line == 0 && c.start == i && c.end == i + 1);
+    }
+    assert_eq!(layout.lines.len(), 1);
+    let line = layout.lines[0].rect;
+    assert!(near(line.left, field.left, 0.5) && near(line.right, field.left + 24.0, 0.5), "{line:?}");
+    assert!(near(layout.cursor_rect(3).left, field.left + 24.0, 0.5));
+    assert!(near(layout.cursor_rect(1).left, field.left + 8.0, 0.5));
+    assert!(near(layout.inner_text_field_bounds.left, field.left, 0.5), "{:?}", layout.inner_text_field_bounds);
+    assert_eq!(layout.decoration_box_bounds, field);
+    // Hit tests: a point over "b" is "b"; its right half puts the caret after it.
+    let y = field.top + 10.0;
+    assert_eq!(layout.character_at(at(field.left + 10.0, y)), Some(1));
+    assert_eq!(layout.character_at(at(field.left + 30.0, y)), None);
+    assert_eq!(layout.offset_for_position(at(field.left + 14.0, y)), 2);
+    assert_eq!(layout.offset_for_position(at(field.left + 9.0, y)), 1);
+    assert_eq!(layout.offset_for_position(at(field.left + 100.0, y)), 3);
+    assert_eq!(layout.range_bounds(0, 2), Rect::new(field.left, field.top, field.left + 16.0, field.top + 20.0));
+    assert_eq!(rule.host().text_input_service().session_text_layout(), Some(layout.clone()));
+    // Typing lays it out again: told again.
+    type_text(&rule, "d");
+    assert_eq!(last_layout(&p).text, "abcd");
+    // The same layout isn't told twice.
+    let told = p.layouts.borrow().len();
+    rule.advance_frame();
+    rule.wait_for_idle();
+    assert_eq!(p.layouts.borrow().len(), told);
+    // Accessibility reads the focused field's layout as its own.
+    let tree = rule.host().accessibility_tree();
+    let node = tree.iter().find(|n| n.editable).expect("the field");
+    let own = node.text_layout.clone().expect("the field's text layout");
+    assert_eq!(own.characters.len(), 4);
+    assert_eq!(own.characters[0].rect, last_layout(&p).characters[0].rect);
+    // Its session closed, none is offered.
+    rule.host().clear_focus(true);
+    rule.wait_for_idle();
+    assert_eq!(rule.host().text_input_service().session_text_layout(), None);
+}
+
+/// A right-to-left text's characters go from the right (each a right-to-left run's, the caret at its right edge).
+fn a_right_to_left_fields_characters_go_from_the_right() {
+    let state = TextFieldState::new("مرحبا");
+    let (rule, p) = layout_rule(&state, 200.0, true);
+    let layout = last_layout(&p);
+    let field = bounds(&rule, "f");
+    assert_eq!(layout.characters.len(), 5);
+    assert!(layout.characters.iter().all(|c| c.rtl), "{:?}", layout.characters);
+    // (Its paragraph goes as the layout does, left to right: Compose's unspecified text direction is the layout's.)
+    assert!(!layout.lines[0].rtl, "{:?}", layout.lines);
+    for pair in layout.characters.windows(2) {
+        assert!(pair[0].rect.left > pair[1].rect.left, "{:?}", layout.characters);
+        assert!(near(pair[0].rect.left, pair[1].rect.right, 0.5));
+    }
+    // (The run starts at its right: its first character at the line's right end.)
+    let line = layout.lines[0].rect;
+    assert!(near(line.left, field.left, 0.5) && near(line.right, field.left + 40.0, 0.5), "{line:?} {field:?}");
+    assert!(near(layout.characters[0].rect.right, line.right, 0.5), "{:?} {line:?}", layout.characters[0]);
+    assert!(near(layout.cursor_rect(0).left, layout.characters[0].rect.right, 0.5));
+    let first = layout.characters[0].rect;
+    let y = first.center().y;
+    assert_eq!(layout.character_at(first.center()), Some(0));
+    // Its leading half (the right) leaves the caret before it.
+    assert_eq!(layout.offset_for_position(at(first.right - 1.0, y)), 0);
+    assert_eq!(layout.offset_for_position(at(first.left + 1.0, y)), layout.characters[0].end);
+}
+
+/// A field's soft-wrapped lines: a box per line, the characters on each, a range's rectangles one per line.
+fn a_wrapped_fields_lines_have_their_own_boxes() {
+    // (40 px: five characters a line.)
+    let state = TextFieldState::new("abcd efgh ij");
+    let (rule, p) = layout_rule(&state, 40.0, false);
+    let layout = last_layout(&p);
+    let field = bounds(&rule, "f");
+    assert_eq!(layout.lines.len(), 3, "{:?}", layout.lines);
+    assert_eq!((layout.lines[0].start, layout.lines[1].start, layout.lines[2].start), (0, 5, 10));
+    for (i, line) in layout.lines.iter().enumerate() {
+        assert!(near(line.rect.top, field.top + 20.0 * i as f32, 0.5), "{line:?}");
+    }
+    let e = layout.characters[5];
+    assert_eq!(e.line, 1);
+    assert!(near(e.rect.left, field.left, 0.5) && near(e.rect.top, field.top + 20.0, 0.5), "{e:?}");
+    let rects = layout.range_rects(2, 12);
+    assert_eq!(rects.len(), 3, "{rects:?}");
+    assert!(near(rects[0].left, field.left + 16.0, 0.5) && near(rects[2].top, field.top + 40.0, 0.5));
+    let (first, until) = layout.first_rect(2, 12);
+    assert_eq!((first, until), (rects[0], 5));
+    assert_eq!(layout.line_for_offset(7), 1);
+    assert_eq!(layout.offset_for_position(at(field.left + 1.0, field.top + 45.0)), 10);
+    // A rectangle over "efgh" and "ij" takes them; by words, whole ones.
+    let over = Rect::new(field.left, field.top + 25.0, field.left + 20.0, field.top + 55.0);
+    assert_eq!(layout.range_for_rect(over, TextGranularity::Character), Some(TextRange::new(5, 12)));
+    let over = Rect::new(field.left + 10.0, field.top + 5.0, field.left + 20.0, field.top + 15.0);
+    assert_eq!(layout.range_for_rect(over, TextGranularity::Word), Some(TextRange::new(0, 4)));
+}
+
+/// A scrolled field's characters are where they are drawn (its scroll in the transform), what shows of it its
+/// inner bounds; told again as it scrolls.
+fn a_scrolled_fields_layout_moves_with_its_text() {
+    let state = TextFieldState::new("");
+    let (rule, p) = layout_rule(&state, 60.0, true);
+    state.set_text_and_place_cursor_at_end("abcdefghijklmnopqrstuvwxyz");
+    rule.wait_for_idle();
+    let field = bounds(&rule, "f");
+    let layout = last_layout(&p);
+    let c = rule.draw();
+    let i = c.texts.iter().position(|t| t == "abcdefghijklmnopqrstuvwxyz").expect("the text drawn");
+    let first = layout.characters[0].rect;
+    assert!(near(first.left, c.baselines[i].x, 0.5), "{first:?} {:?}", c.baselines);
+    assert!(first.left < field.left - 100.0);
+    // (The caret at the end, in view.)
+    assert!(near(layout.end_cursor.left, field.right, 3.0), "{:?} {field:?}", layout.end_cursor);
+    let inner = layout.inner_text_field_bounds;
+    assert!(near(inner.left, field.left, 0.5) && near(inner.right, field.right, 0.5), "{inner:?} {field:?}");
+    let z = layout.characters[25].rect;
+    assert_eq!(layout.character_at(z.center()), Some(25));
+    // Back to its start: the layout told again, where it shows now.
+    key(&rule, Key::MoveHome, NONE);
+    let layout = last_layout(&p);
+    assert!(near(layout.characters[0].rect.left, field.left, 0.5), "{:?}", layout.characters[0]);
+}
+
+/// An input method's handwriting preview highlights a range of the field's text, an empty range taking it away.
+fn an_input_methods_preview_highlights_the_fields_text() {
+    let state = TextFieldState::new("abcdef");
+    let (rule, _p) = layout_rule(&state, 200.0, true);
+    let service = rule.host().text_input_service();
+    assert!(service.highlight_chars_in(TextHighlightType::HandwritingDeletePreview, TextRange::new(1, 3)));
+    rule.wait_for_idle();
+    let highlight = state.value().highlight();
+    assert_eq!(highlight, Some((TextHighlightType::HandwritingDeletePreview, TextRange::new(1, 3))));
+    assert!(service.highlight_chars_in(TextHighlightType::HandwritingSelectPreview, TextRange::new(0, 0)));
+    rule.wait_for_idle();
+    assert_eq!(state.value().highlight(), None);
+}
+
+/// A text's layout comes with the accessibility tree (Compose's `GetTextLayoutResult`): its characters' boxes in
+/// the window, cut to its bounds.
+fn a_texts_layout_comes_with_its_accessibility_node() {
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        Box(
+            modifier = Modifier.padding(30.dp()),
+            content = || {
+                BasicText("merhaba", modifier = Modifier.test_tag("t"), style = style16());
+            },
+        );
+    }));
+    rule.wait_for_idle();
+    let text = bounds(&rule, "t");
+    let tree = rule.host().accessibility_tree();
+    let node = tree.iter().find(|n| n.test_tag.as_deref() == Some("t")).expect("the text");
+    let layout = node.text_layout.clone().expect("its layout");
+    assert_eq!(layout.text, "merhaba");
+    assert_eq!(layout.characters.len(), 7);
+    assert!(near(layout.characters[2].rect.left, text.left + 16.0, 0.5), "{:?} {text:?}", layout.characters[2]);
+    assert!(near(layout.characters[2].rect.top, text.top, 0.5));
+    assert_eq!(layout.inner_text_field_bounds, node.bounds);
+    assert_eq!(layout.character_at(layout.characters[4].rect.center()), Some(4));
+}
+
 tests!(
     default_key_mapping;
+    a_texts_layout_comes_with_its_accessibility_node,
+    the_focused_fields_text_layout_reaches_the_platform,
+    a_right_to_left_fields_characters_go_from_the_right,
+    a_wrapped_fields_lines_have_their_own_boxes,
+    a_scrolled_fields_layout_moves_with_its_text,
+    an_input_methods_preview_highlights_the_fields_text,
     a_stylus_writing_over_a_field_starts_handwriting,
     a_scrolled_text_field_draws_its_text_where_it_scrolled,
     basic_text_field_types_and_draws_its_cursor,

@@ -20,12 +20,15 @@
 //! around the selection ([`Event::DeleteSurroundingText`]), a selection set ([`Event::SetSelection`]). [`apply`] is
 //! what the core does with each, so that what an input method asks next is answered from the field as it will be.
 //!
-//! What the host tells of a field's place is its caret's box (Compose's focusedRectInRoot, the one rectangle Linux's
-//! text-input and macOS's input client are given too): each character's rectangle a request asks for is that box.
+//! Where a request's characters are comes from the field's text layout (Compose's `updateTextLayoutResult`, told
+//! while its session is open: each character's box, each line's — [`FieldPlace`]: IMR_QUERYCHARPOSITION's
+//! character, TSF's GetTextExt for a range and GetACPFromPoint's hit test), the caret's box the host tells (Compose's
+//! focusedRectInRoot) standing for every character until the field is laid out.
 
 use crate::app::Event;
-use kompoz_graphics::Rect;
+use kompoz_graphics::{Offset, Rect};
 use kompoz_ui::platform::{ImeAction, ImeOptions, KeyboardType, TextEditState};
+use kompoz_ui::platform_text_layout::{PlatformTextLayout, caret_area};
 use kompoz_ui::text_input::EditCommand;
 
 // ---- UTF-16 offsets ---------------------------------------------------------------------------------------------
@@ -136,6 +139,8 @@ pub struct Field {
     pub state: TextEditState,
     /// Events were sent that the core hasn't handled yet.
     pub unanswered: bool,
+    /// Its text layout as last told (none before it was laid out, or once its session closed).
+    pub layout: Option<PlatformTextLayout>,
 }
 
 /// What the field the core has after it handled what was sent (or after the app changed it) is to the input
@@ -343,9 +348,8 @@ pub fn reconversion(state: &TextEditState, feed: bool, max: usize) -> Option<Rec
     })
 }
 
-/// Where a character is for an input method (IMR_QUERYCHARPOSITION's IMECHARPOSITION, TSF's GetTextExt): its top
-/// left, its line's height and the document's rectangle, on the screen (`origin`: the client area's top left on
-/// it) — every character's the caret's box (what the host tells), at least a pixel wide and high.
+/// A box in the client area (px) on the screen (`origin`: the client area's top left on it), whole pixels around
+/// it, at least a pixel wide and high.
 pub fn char_position(area: Rect, origin: (i32, i32)) -> CharPosition {
     let (left, top) = (area.left.floor() as i32 + origin.0, area.top.floor() as i32 + origin.1);
     let (right, bottom) =
@@ -368,6 +372,95 @@ pub struct CharPosition {
 pub fn placement(area: Rect) -> (CharPosition, CharPosition) {
     let r = char_position(area, (0, 0));
     (CharPosition { left: r.left, top: r.top, right: r.left, bottom: r.top }, r)
+}
+
+/// TSF's GetACPFromPoint flags: the nearest character boundary (GXFPF_ROUND_NEAREST), a character even outside
+/// every character's box (GXFPF_NEAREST).
+pub const GXFPF_ROUND_NEAREST: u32 = 0x1;
+pub const GXFPF_NEAREST: u32 = 0x2;
+
+/// Where the field's characters are, for its input method (px in the client area): from its text layout where it
+/// is laid out for the text the input method sees, else the caret's box for every one of them.
+pub struct FieldPlace<'a> {
+    field: &'a Field,
+    layout: Option<&'a PlatformTextLayout>,
+}
+
+impl Field {
+    /// Where its characters are.
+    pub fn place(&self) -> FieldPlace<'_> {
+        let layout = self.layout.as_ref().filter(|l| l.text == self.state.text);
+        FieldPlace { field: self, layout }
+    }
+}
+
+impl FieldPlace<'_> {
+    /// Whether the text layout is known (else every box is the caret's).
+    pub fn is_laid_out(&self) -> bool {
+        self.layout.is_some()
+    }
+
+    /// The caret's box: at its glyph where the layout is known (where the input method's windows go).
+    pub fn caret(&self) -> Rect {
+        caret_area(self.field.area, &self.field.state, self.layout)
+    }
+
+    /// The box UTF-16 units `start..end` of the text take (TSF's GetTextExt): their characters' together, the
+    /// caret's there for an empty range; and whether part of it is out of sight (scrolled out of the field).
+    pub fn range(&self, start: usize, end: usize) -> (Rect, bool) {
+        let Some(layout) = self.layout else { return (self.field.area, false) };
+        let text = &self.field.state.text;
+        let (a, b) = (byte_of_utf16(text, start.min(end)), byte_of_utf16(text, start.max(end)));
+        let r = layout.range_bounds(a, b);
+        let visible = layout.inner_text_field_bounds;
+        let clipped = r.left < visible.left - 0.5
+            || r.right > visible.right + 0.5
+            || r.top < visible.top - 0.5
+            || r.bottom > visible.bottom + 0.5;
+        (r, clipped)
+    }
+
+    /// IMR_QUERYCHARPOSITION's character `index` (UTF-16 units from the composition's start, the selection's where
+    /// nothing is composed): its box (the caret's after the text), and the document's box (what shows of the
+    /// field), px in the client area.
+    pub fn query_char_position(&self, index: usize) -> (Rect, Rect) {
+        let Some(layout) = self.layout else { return (self.field.area, self.field.area) };
+        let state = &self.field.state;
+        let from = composition(state).map_or(selection(state).0, |c| c.0);
+        let at = byte_of_utf16_from(&state.text, from, index);
+        let r = layout.bounding_box(at).filter(|_| at < state.text.len()).unwrap_or_else(|| layout.cursor_rect(at));
+        (r, layout.inner_text_field_bounds)
+    }
+
+    /// The UTF-16 unit before which a caret goes for `point` (px in the client area: TSF's GetACPFromPoint): the
+    /// character whose box holds it (its nearer boundary with GXFPF_ROUND_NEAREST); with GXFPF_NEAREST the nearest
+    /// even off every box; none where no character is (TS_E_INVALIDPOINT). Without the layout: the caret, within
+    /// its box.
+    pub fn acp_from_point(&self, point: Offset, flags: u32) -> Option<usize> {
+        let state = &self.field.state;
+        let Some(layout) = self.layout else {
+            return self.field.area.contains(point).then(|| utf16_of_byte(&state.text, selection(state).1));
+        };
+        let at = match layout.character_at(point) {
+            Some(i) if flags & GXFPF_ROUND_NEAREST != 0 => {
+                let c = layout.characters[i];
+                layout.offset_for_position(point).clamp(c.start, c.end)
+            }
+            Some(i) => layout.characters[i].start,
+            None if flags & GXFPF_NEAREST != 0 => {
+                let nearest = layout.offset_for_position(point);
+                if flags & GXFPF_ROUND_NEAREST != 0 {
+                    nearest
+                } else {
+                    // (Not rounded: the start of the character beside it on its side, its end the text's.)
+                    let i = layout.characters.partition_point(|c| c.end <= nearest);
+                    layout.characters.get(i).map_or(nearest, |c| c.start)
+                }
+            }
+            None => return None,
+        };
+        Some(utf16_of_byte(&state.text, at))
+    }
 }
 
 // ---- TSF --------------------------------------------------------------------------------------------------------
@@ -713,6 +806,55 @@ pub fn hides_text(options: &ImeOptions) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A field holding "ağaç" (8 px a character from 10, 20; 20 px lines), its caret after "a", its layout told.
+    fn laid_out_field(composition: Option<(usize, usize)>) -> Field {
+        let text = "ağaç dalı";
+        let layout = crate::accessibility::text::test_layout(text, Offset::new(10.0, 20.0), 8.0, 20.0, 5);
+        Field {
+            active: true,
+            area: Rect::new(18.0, 20.0, 26.0, 40.0),
+            state: state(text, (1, 1), composition),
+            layout: Some(layout),
+            ..Field::default()
+        }
+    }
+
+    #[test]
+    fn character_positions_come_from_the_fields_layout() {
+        let field = laid_out_field(None);
+        let place = field.place();
+        assert!(place.is_laid_out());
+        // The caret's glyph (a px wide) where the input method's windows go.
+        assert_eq!(place.caret(), Rect::new(18.0, 20.0, 19.0, 40.0));
+        // IMR_QUERYCHARPOSITION: from the selection's start (nothing composed), then from the composition's.
+        assert_eq!(place.query_char_position(0).0, Rect::new(18.0, 20.0, 26.0, 40.0));
+        assert_eq!(place.query_char_position(2).0, Rect::new(34.0, 20.0, 42.0, 40.0));
+        let composing = laid_out_field(Some((3, 6)));
+        assert_eq!(composing.place().query_char_position(1).0, Rect::new(34.0, 20.0, 42.0, 40.0));
+        assert_eq!(place.query_char_position(0).1, Rect::new(10.0, 20.0, 50.0, 60.0));
+        // TSF's GetTextExt: units 1..7 ("ğaç da"), over two lines; a range past what shows is clipped.
+        assert_eq!(place.range(1, 7), (Rect::new(10.0, 20.0, 50.0, 60.0), false));
+        assert_eq!(place.range(2, 2).0, Rect::new(26.0, 20.0, 26.0, 40.0));
+        let mut scrolled = laid_out_field(None);
+        scrolled.layout.as_mut().unwrap().inner_text_field_bounds = Rect::new(10.0, 20.0, 30.0, 40.0);
+        assert!(scrolled.place().range(1, 4).1 && !scrolled.place().range(0, 2).1);
+        // GetACPFromPoint: a character's start; its nearer boundary when rounded; outside every one only when
+        // asked for the nearest.
+        let p = Offset::new(31.0, 30.0);
+        assert_eq!(place.acp_from_point(p, 0), Some(2));
+        assert_eq!(place.acp_from_point(p, GXFPF_ROUND_NEAREST), Some(3));
+        let below = Offset::new(31.0, 300.0);
+        assert_eq!(place.acp_from_point(Offset::new(300.0, 30.0), 0), None);
+        assert_eq!(place.acp_from_point(below, GXFPF_NEAREST | GXFPF_ROUND_NEAREST), Some(8));
+        // Not laid out (or laid out for another text): the caret's box for every character.
+        let mut stale = laid_out_field(None);
+        stale.state.text.push('!');
+        assert!(!stale.place().is_laid_out());
+        assert_eq!(stale.place().query_char_position(3).0, stale.area);
+        assert_eq!(stale.place().range(0, 4), (stale.area, false));
+        assert_eq!(stale.place().acp_from_point(Offset::new(20.0, 30.0), 0), Some(1));
+    }
 
     fn state(text: &str, selection: (usize, usize), composition: Option<(usize, usize)>) -> TextEditState {
         TextEditState { text: text.into(), selection_start: selection.0, selection_end: selection.1, composition }
