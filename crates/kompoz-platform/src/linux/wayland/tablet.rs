@@ -456,7 +456,7 @@ impl WaylandPlatform {
     /// rotation and slider aren't told on (Compose's pointer events have no place for them).
     pub(super) fn on_tablet_tool(&mut self, sender: ObjectId, e: ZwpTabletToolV2Event) {
         type E = ZwpTabletToolV2Event;
-        let window = self.window.as_ref().map(|w| w.surface.id());
+        let window = self.win.window.as_ref().map(|w| w.surface.id());
         let modifiers = self.keyboard.modifiers();
         let mut tablets = self.shared.tablet.borrow_mut();
         let Some(i) = tablets.tools.iter().position(|t| t.tool.id() == sender) else { return };
@@ -522,14 +522,14 @@ impl WaylandPlatform {
             | E::Slider { .. } => Vec::new(),
         };
         drop(tablets);
-        self.events.extend(events);
+        self.win.events.extend(events);
     }
 
     /// A pad's event: its buttons as keys while it is on the window (its focus follows the keyboard's), held ones
     /// let go as it leaves or goes. Its groups (rings, strips, modes) are let go as they come: Compose has nothing
     /// they could be.
     pub(super) fn on_tablet_pad(&mut self, sender: ObjectId, e: ZwpTabletPadV2Event) {
-        let window = self.window.as_ref().map(|w| w.surface.id());
+        let window = self.win.window.as_ref().map(|w| w.surface.id());
         let modifiers = self.keyboard.modifiers();
         let time = sys::monotonic_now();
         let key = |button: u32, down: bool| {
@@ -571,7 +571,7 @@ impl WaylandPlatform {
             | ZwpTabletPadV2Event::Done => {}
         }
         drop(tablets);
-        self.events.extend(events);
+        self.win.events.extend(events);
     }
 }
 

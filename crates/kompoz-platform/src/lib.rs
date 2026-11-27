@@ -25,6 +25,7 @@ pub mod system;
 pub mod unix;
 
 pub use app::{
-    App, AppConfig, AppCore, DISPLAY_PLATFORMS, DisplayPlatform, Event, Metrics, MouseButton, Next, Platform, TitleBar,
-    TitleBarColors, WindowAction, WindowActions, WindowButton, WindowFrame, button_action, button_icon,
+    App, AppConfig, AppContent, AppCore, AppWindows, DISPLAY_PLATFORMS, DisplayPlatform, Event, GpuPriority,
+    MakeWindow, Metrics, MouseButton, Next, Platform, TitleBar, TitleBarColors, TrayIcon, TrayImage, TrayMenuItem,
+    WindowAction, WindowActions, WindowButton, WindowFrame, WindowSpec, application, button_action, button_icon,
 };

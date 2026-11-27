@@ -468,7 +468,7 @@ impl WaylandPlatform {
     /// The pointer's event (C++'s pointer listener): on the window's surface the app's; over one of KompozR's edges
     /// ([`decorations`](super::decorations)) the resize cursor, the left button resizing the window by it.
     pub(super) fn on_pointer(&mut self, e: WlPointerEvent) {
-        let window = self.window.as_ref().map(|w| w.surface.id());
+        let window = self.win.window.as_ref().map(|w| w.surface.id());
         let on_window = |id| window.is_some_and(|w| w == id);
         let time = sys::monotonic_now();
         let modifiers = self.keyboard.modifiers();
@@ -479,19 +479,28 @@ impl WaylandPlatform {
                     self.over_edge(edge, surface_x, surface_y, Some(serial));
                     return;
                 }
-                self.shared.cursor.borrow_mut().entered(serial);
+                // (This window's cursor, at its scale.)
+                let icon = self.shared.icons.borrow().get(&self.win.id).copied().unwrap_or_default();
+                let scale = self.scale().ceil() as i32;
+                {
+                    let mut cursor = self.shared.cursor.borrow_mut();
+                    cursor.set_scale(scale);
+                    cursor.set_icon(icon);
+                    cursor.entered(serial);
+                }
+                self.shared.tablet.borrow_mut().set_pointer_icon(icon);
                 if !on_window(surface) {
                     return;
                 }
                 (self.pointer_x, self.pointer_y) = (surface_x, surface_y);
                 let (x, y) = (surface_x as f32, surface_y as f32);
-                self.events.push_back(Event::MouseMove { x, y, modifiers, time });
+                self.win.events.push_back(Event::MouseMove { x, y, modifiers, time });
             }
             WlPointerEvent::Leave { surface, .. } => {
                 self.pointer_on = Default::default();
                 self.shared.cursor.borrow_mut().left();
                 if on_window(surface) {
-                    self.events.push_back(Event::PointerLeft);
+                    self.win.events.push_back(Event::PointerLeft);
                 }
             }
             WlPointerEvent::Motion { surface_x, surface_y, .. } => {
@@ -504,7 +513,7 @@ impl WaylandPlatform {
                 }
                 (self.pointer_x, self.pointer_y) = (surface_x, surface_y);
                 let (x, y) = (surface_x as f32, surface_y as f32);
-                self.events.push_back(Event::MouseMove { x, y, modifiers, time });
+                self.win.events.push_back(Event::MouseMove { x, y, modifiers, time });
             }
             WlPointerEvent::Button { serial, button, state, .. } => {
                 self.last_serial = serial;
@@ -521,7 +530,7 @@ impl WaylandPlatform {
                 if self.edge_of(self.pointer_on).is_some() {
                     // (An edge: the left button resizes the window by it.)
                     if pressed && mouse_button(button) == Some(MouseButton::Left) {
-                        self.resize_from_edge(serial, self.edge_x, self.edge_y);
+                        self.resize_from_edge(serial, self.win.edge_x, self.win.edge_y);
                     }
                     return;
                 }
@@ -530,7 +539,7 @@ impl WaylandPlatform {
                 }
                 let Some(button) = mouse_button(button) else { return };
                 let (x, y) = (self.pointer_x as f32, self.pointer_y as f32);
-                self.events.push_back(if pressed {
+                self.win.events.push_back(if pressed {
                     Event::MouseDown { x, y, button, modifiers, time }
                 } else {
                     Event::MouseUp { x, y, button, modifiers, time }
@@ -544,7 +553,7 @@ impl WaylandPlatform {
                     && on_window(self.pointer_on)
                 {
                     let (x, y) = (self.pointer_x as f32, self.pointer_y as f32);
-                    self.events.push_back(Event::Wheel { x, y, dx, dy, modifiers, time });
+                    self.win.events.push_back(Event::Wheel { x, y, dx, dy, modifiers, time });
                 }
             }
             _ => {}
@@ -558,13 +567,13 @@ impl WaylandPlatform {
         match e {
             ZwpPointerGesturePinchV1Event::Begin { .. } => {
                 self.pinch.begin();
-                self.events.push_back(Event::PinchBegin { x, y });
+                self.win.events.push_back(Event::PinchBegin { x, y });
             }
             ZwpPointerGesturePinchV1Event::Update { scale, rotation, .. } => {
                 let scale = self.pinch.update(scale);
-                self.events.push_back(Event::Pinch { x, y, scale, rotation: rotation as f32 });
+                self.win.events.push_back(Event::Pinch { x, y, scale, rotation: rotation as f32 });
             }
-            ZwpPointerGesturePinchV1Event::End { .. } => self.events.push_back(Event::PinchEnd { x, y }),
+            ZwpPointerGesturePinchV1Event::End { .. } => self.win.events.push_back(Event::PinchEnd { x, y }),
         }
     }
 
@@ -583,12 +592,12 @@ impl WaylandPlatform {
             }
             WlKeyboardEvent::Enter { serial, .. } => {
                 self.last_serial = serial;
-                self.events.push_back(Event::FocusGained);
+                self.win.events.push_back(Event::FocusGained);
             }
             WlKeyboardEvent::Leave { .. } => {
                 let timer = self.keyboard.leave();
                 self.repeat(timer);
-                self.events.push_back(Event::FocusLost);
+                self.win.events.push_back(Event::FocusLost);
             }
             WlKeyboardEvent::Key { serial, key, state, .. } => {
                 self.last_serial = serial;
@@ -604,7 +613,7 @@ impl WaylandPlatform {
                 let typing = self.shared.text.borrow().active;
                 // (evdev's codes are 8 below X's, which xkbcommon takes.)
                 let (events, timer) = self.keyboard.key(key + 8, down, sys::monotonic_now(), typing);
-                self.events.extend(events);
+                self.win.events.extend(events);
                 self.repeat(timer);
             }
             WlKeyboardEvent::Modifiers { mods_depressed, mods_latched, mods_locked, group, .. } => {
@@ -622,17 +631,17 @@ impl WaylandPlatform {
             WlTouchEvent::Down { serial, surface, id, x, y, .. } => {
                 self.last_serial = serial;
                 if let Some(edge) = self.edge_of(surface) {
-                    let [ex, ey, ..] = self.window.as_ref().map_or([0; 4], |w| w.edges.place(edge));
+                    let [ex, ey, ..] = self.win.window.as_ref().map_or([0; 4], |w| w.edges.place(edge));
                     self.resize_from_edge(serial, ex as f64 + x, ey as f64 + y);
                     return;
                 }
-                if !self.window.as_ref().is_some_and(|w| w.surface.id() == surface) {
+                if !self.win.window.as_ref().is_some_and(|w| w.surface.id() == surface) {
                     return;
                 }
                 self.press_serial = serial;
                 self.press_touch = Some(id);
                 self.touches.insert(id, (x, y));
-                self.events.push_back(Event::TouchDown { pointer: id as i64, x: x as f32, y: y as f32, time });
+                self.win.events.push_back(Event::TouchDown { pointer: id as i64, x: x as f32, y: y as f32, time });
             }
             WlTouchEvent::Up { id, .. } => {
                 if self.outgoing.is_some() && self.press_touch == Some(id) {
@@ -640,16 +649,16 @@ impl WaylandPlatform {
                 }
                 // (Not one of the window's (an edge's), or one let go for a move.)
                 let Some((x, y)) = self.touches.remove(&id) else { return };
-                self.events.push_back(Event::TouchUp { pointer: id as i64, x: x as f32, y: y as f32, time });
+                self.win.events.push_back(Event::TouchUp { pointer: id as i64, x: x as f32, y: y as f32, time });
             }
             WlTouchEvent::Motion { id, x, y, .. } => {
                 let Some(at) = self.touches.get_mut(&id) else { return };
                 *at = (x, y);
-                self.events.push_back(Event::TouchMove { pointer: id as i64, x: x as f32, y: y as f32, time });
+                self.win.events.push_back(Event::TouchMove { pointer: id as i64, x: x as f32, y: y as f32, time });
             }
             WlTouchEvent::Cancel => {
                 let lifted = self.touches_lifted();
-                self.events.extend(lifted);
+                self.win.events.extend(lifted);
             }
             _ => {}
         }
@@ -668,7 +677,7 @@ impl WaylandPlatform {
     /// An input method's typing (text-input-v3): gathered until its `done`; it coming to the window (on the window's
     /// surface: told the field) and leaving it.
     pub(super) fn on_text_input(&mut self, e: ZwpTextInputV3Event) {
-        let window = self.window.as_ref().map(|w| w.surface.id());
+        let window = self.win.window.as_ref().map(|w| w.surface.id());
         let mut text = self.shared.text.borrow_mut();
         let events = match e {
             ZwpTextInputV3Event::Enter { surface } => {
@@ -695,7 +704,7 @@ impl WaylandPlatform {
             ZwpTextInputV3Event::Done { serial } => text.done(serial),
         };
         drop(text);
-        self.events.extend(events);
+        self.win.events.extend(events);
     }
 
     /// After the core handled typing (an input method's, or the keyboard's): the input method told the field as it

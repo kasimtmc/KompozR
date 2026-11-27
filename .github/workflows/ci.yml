@@ -122,6 +122,7 @@ jobs:
         run: |
           cargo test -p kompoz-platform --test wayland_display
           xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p kompoz-platform --lib display_tests
+          xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p kompoz-platform --test x11_windows
           KOMPOZ_X11_XTEST=1 xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p kompoz-platform --test drag_display
           xvfb-run -a -s "-screen 0 1280x1024x24" cargo test -p counter --test x11
       - name: The Wayland display tests' runs that failed

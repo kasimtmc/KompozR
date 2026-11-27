@@ -107,9 +107,15 @@ impl Renderer {
         {
             return Some(t.texture.id());
         }
-        // (Read back here rather than through the bitmap, which would ask the renderer set for it: this one, busy.)
+        // (Read back here rather than through the bitmap, which would ask the renderer set for it: this one, busy.
+        // One another renderer drew into — the app's, set for its bitmaps, as a window of its own draws it — through
+        // the bitmap: that one isn't busy.)
         if !image.pixels_current() {
-            self.read_back_bitmap(image);
+            if self.images.textures.get(&image.id()).is_some_and(|t| t.version == version) {
+                self.read_back_bitmap(image);
+            } else {
+                image.pixels();
+            }
         }
         let (w, h) = (image.width(), image.height());
         let f16 = image.config() == ImageBitmapConfig::F16;

@@ -22,7 +22,7 @@ use crate::semantics::{AccessibilityNode, SemanticsAction, SemanticsOwner};
 use crate::strings::{LocalStrings, Strings};
 use crate::text_input::{EditCommand, LocalTextInputService, TextInputService};
 use crate::unit::Constraints;
-use crate::window::Overlays;
+use crate::window::{LocalWindowRegistry, Overlays, WindowRegistry};
 use kompoz_coroutines::{CoroutineContext, Dispatcher, LocalDispatcher, LocalEffectCoroutineContext};
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Density, Dp, IntOffset, IntSize, LayoutDirection, Offset};
@@ -35,9 +35,10 @@ use kompoz_lifecycle::{
 };
 use kompoz_navigationevent::{NavigationEventDispatcher, NavigationEventDispatcherOwner};
 use kompoz_runtime::{
-    Composition, Content, KompozitionLocalProvider, MutableState, ProvideSaveableStateRegistry, RecompositionStats,
-    SaveableStateRegistry, SavedValue, Snapshot, global_snapshot_changed, kompozable_block,
-    mutable_confined_state_of_with_policy, mutable_state_of, never_equal_policy, restartable,
+    Composition, Content, KompozitionLocalContext, KompozitionLocalProvider, KompozitionLocalProviderContext,
+    MutableState, ProvideSaveableStateRegistry, RecompositionStats, SaveableStateRegistry, SavedValue, Snapshot,
+    global_snapshot_changed, kompozable_block, mutable_confined_state_of_with_policy, mutable_state_of,
+    never_equal_policy, restartable,
 };
 use kompoz_text::FontFamilyResolver;
 use parking_lot::Mutex;
@@ -278,7 +279,20 @@ pub struct KompozHost {
     /// (LocalLifecycleOwner, LocalViewModelStoreOwner, LocalSavedStateRegistryOwner and
     /// LocalNavigationEventDispatcherOwner at the root): a state, as `restore_state` makes it again.
     architecture: MutableState<Rc<HostArchitectureComponentsOwner>>,
+    /// The windows and tray icons its composition asks for (LocalWindowRegistry at the root).
+    windows: WindowRegistry,
+    /// The app's own host (its dispatcher Kotlin's Dispatchers.Main, its waker the snapshots' global write
+    /// observer), not a window's of its own ([`new_window`](KompozHost::new_window)).
+    main: bool,
+    /// A window's: the composition locals where its `Window` is composed, provided under the host's own.
+    parent_locals: Option<MutableState<KompozitionLocalContext>>,
+    /// A window's key handlers (Compose Desktop's window's `onPreviewKeyEvent` and `onKeyEvent`), around the focused
+    /// path.
+    window_keys: RefCell<Option<WindowKeyHandlers>>,
 }
+
+/// A window's key handlers: before the focused path sees a key, after it left it; true takes the key.
+pub type WindowKeyHandlers = (Rc<dyn Fn(&KeyEvent) -> bool>, Rc<dyn Fn(&KeyEvent) -> bool>);
 
 impl KompozHost {
     /// A host composing `content`, headless until given callbacks; its viewport 0 by 0 until set.
@@ -293,9 +307,32 @@ impl KompozHost {
         content: impl Content + 'static,
         effect_coroutine_context: CoroutineContext,
     ) -> KompozHost {
+        KompozHost::build(content, effect_coroutine_context, None)
+    }
+
+    /// A host for a window of the app's own (a `Window`'s: C++'s per-window AppCore host): composing `content`
+    /// with `parent_locals` (the locals where its `Window` is composed, read live) provided under the host's own
+    /// root locals (its density, focus, lifecycle and the like are its own; the theme and the app's locals the
+    /// caller's). Its dispatcher isn't Kotlin's Dispatchers.Main (the app's host's is), nor is its waker the
+    /// snapshots' global write observer (all of an app's windows share one loop: the app's wakes it).
+    pub fn new_window(
+        content: impl Content + 'static,
+        parent_locals: MutableState<KompozitionLocalContext>,
+    ) -> KompozHost {
+        KompozHost::build(content, CoroutineContext::new(), Some(parent_locals))
+    }
+
+    fn build(
+        content: impl Content + 'static,
+        effect_coroutine_context: CoroutineContext,
+        parent_locals: Option<MutableState<KompozitionLocalContext>>,
+    ) -> KompozHost {
         let dispatcher = Dispatcher::new();
+        let main = parent_locals.is_none();
         // (what a lifecycle's or a ViewModel's scope launches on: Kotlin's Dispatchers.Main)
-        dispatcher.make_main();
+        if main {
+            dispatcher.make_main();
+        }
         let owner = Owner::new(dispatcher.clone());
         owner.set_effect_coroutine_context(effect_coroutine_context);
         let root = LayoutNode::new();
@@ -368,6 +405,10 @@ impl KompozHost {
                 HostArchitectureComponentsOwner::new(None, WindowNavigation::new()),
                 never_equal_policy(),
             ),
+            windows: WindowRegistry::default(),
+            main,
+            parent_locals,
+            window_keys: RefCell::new(None),
         };
         // (resumed from the start, as C++'s and CMP's on a focused window; the platform moves it)
         host.architecture.peek().set_lifecycle_state(LifecycleState::Resumed);
@@ -401,6 +442,8 @@ impl KompozHost {
         let idle_work = self.idle_work.clone();
         let autofill = self.owner.autofill().map(|a| crate::autofill::AutofillManager(Rc::downgrade(&a)));
         let architecture = self.architecture.clone();
+        let windows = self.windows.clone();
+        let parent_locals = self.parent_locals.clone();
         move || {
             let env = environment.get();
             let owner = architecture.get();
@@ -440,14 +483,19 @@ impl KompozHost {
                 LocalLifecycleOwner.provides(owner.clone() as Rc<dyn LifecycleOwner>),
                 LocalViewModelStoreOwner.provides(owner.clone() as Rc<dyn ViewModelStoreOwner>),
                 LocalSavedStateRegistryOwner.provides(owner as Rc<dyn SavedStateRegistryOwner>),
+                LocalWindowRegistry.provides(Some(windows.clone())),
             ];
             let same_generation: fn(&u64, &u64) -> bool = |a, b| a == b;
             let g = generation.get();
             let saveable = saveable.clone();
+            // (A window's: the caller's locals first, its own over them.)
+            let parent = parent_locals.as_ref().map(MutableState::get).unwrap_or_default();
             kompozable_block!({
-                KompozitionLocalProvider(&values, move || {
-                    ProvideSaveableStateRegistry(&saveable, move || {
-                        restartable(g, Some(same_generation), move |_| content())
+                KompozitionLocalProviderContext(&parent, move || {
+                    KompozitionLocalProvider(&values, move || {
+                        ProvideSaveableStateRegistry(&saveable, move || {
+                            restartable(g, Some(same_generation), move |_| content())
+                        })
                     })
                 })
             })
@@ -497,12 +545,26 @@ impl KompozHost {
     pub fn set_callbacks(&self, callbacks: Rc<dyn PlatformCallbacks>) {
         let waker = callbacks.waker();
         *self.handle.waker.lock() = waker.clone();
+        self.windows.set_wake(waker.clone());
         if let Some(w) = waker {
             let notify = w.clone();
             self.dispatcher.set_notify(move || notify());
-            kompoz_runtime::set_global_write_observer(move || w());
+            if self.main {
+                kompoz_runtime::set_global_write_observer(move || w());
+            }
         }
         self.platform.set(callbacks);
+    }
+
+    /// The windows and tray icons its composition asks for (`Window`, `Tray`), as the platform's app core reads
+    /// them.
+    pub fn window_registry(&self) -> &WindowRegistry {
+        &self.windows
+    }
+
+    /// A window's key handlers (its `Window`'s `onPreviewKeyEvent` and `onKeyEvent`), or none.
+    pub fn set_window_key_handlers(&self, handlers: Option<WindowKeyHandlers>) {
+        *self.window_keys.borrow_mut() = handlers;
     }
 
     /// What other threads use to post tasks and ask for frames.
@@ -1001,7 +1063,17 @@ impl KompozHost {
     /// A key event (with the platform's character): along the focused path (previews down, events up), then the
     /// default (the root's: Tab and arrows move the focus; Escape and Back go back). Whether it was taken.
     pub fn send_key_event(&self, event: KeyEvent) -> bool {
-        crate::input::key_event(self, event)
+        // (A window's own handlers around it, as Compose Desktop's ComposeWindow has them.)
+        let handlers = self.window_keys.borrow().clone();
+        if let Some((preview, _)) = &handlers
+            && preview(&event)
+        {
+            return true;
+        }
+        if crate::input::key_event(self, event) {
+            return true;
+        }
+        handlers.is_some_and(|(_, after)| after(&event))
     }
 
     /// A rotary scroll (a crown, a wheel over the focused node) along the focused path; whether a node took it.

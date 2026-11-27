@@ -15,6 +15,7 @@ pub mod tablet_v2;
 pub mod text_input_unstable_v3;
 pub mod viewporter;
 pub mod wayland;
+pub mod xdg_activation_v1;
 pub mod xdg_decoration_unstable_v1;
 pub mod xdg_shell;
 
@@ -26,6 +27,7 @@ pub use self::tablet_v2::*;
 pub use self::text_input_unstable_v3::*;
 pub use self::viewporter::*;
 pub use self::wayland::*;
+pub use self::xdg_activation_v1::*;
 pub use self::xdg_decoration_unstable_v1::*;
 pub use self::xdg_shell::*;
 
@@ -61,6 +63,7 @@ pub enum Event {
     WlKeyboard(WlKeyboardEvent),
     WlTouch(WlTouchEvent),
     WlOutput(WlOutputEvent),
+    XdgActivationTokenV1(XdgActivationTokenV1Event),
     ZxdgToplevelDecorationV1(ZxdgToplevelDecorationV1Event),
     XdgWmBase(XdgWmBaseEvent),
     XdgSurface(XdgSurfaceEvent),
@@ -114,6 +117,9 @@ impl Event {
             b"wl_keyboard" => Event::WlKeyboard(WlKeyboardEvent::decode(opcode, &mut args)?),
             b"wl_touch" => Event::WlTouch(WlTouchEvent::decode(opcode, &mut args)?),
             b"wl_output" => Event::WlOutput(WlOutputEvent::decode(opcode, &mut args)?),
+            b"xdg_activation_token_v1" => {
+                Event::XdgActivationTokenV1(XdgActivationTokenV1Event::decode(opcode, &mut args)?)
+            }
             b"zxdg_toplevel_decoration_v1" => {
                 Event::ZxdgToplevelDecorationV1(ZxdgToplevelDecorationV1Event::decode(opcode, &mut args)?)
             }

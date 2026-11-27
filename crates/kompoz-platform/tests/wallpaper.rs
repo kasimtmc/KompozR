@@ -231,6 +231,7 @@ PreviewImage=/ignored.png
             portal: PortalOptions { address: None, accent: false },
             atspi: AtspiOptions { forced: Some(false), ..AtspiOptions::default() },
             wallpaper: WallpaperOptions { config_home: home.clone(), desktop: "KDE".into(), enabled: true },
+            tray: None,
         };
         let wake = Arc::new(move || {
             n.fetch_add(1, Ordering::SeqCst);

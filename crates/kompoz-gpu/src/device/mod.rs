@@ -634,6 +634,34 @@ pub fn gpu_required() -> bool {
     env_is_one("KOMPOZ_GPU_REQUIRED")
 }
 
+/// Which GPU the devices made from here on draw on where there are two (C++'s Application `gpuPriority`, b96a026;
+/// Skiko's `skiko.gpu.priority`): the one the screen is on where Linux tells (its firmware's VGA device), else an
+/// integrated one ([`Auto`](GpuPriority::Auto)); an integrated one ([`Integrated`](GpuPriority::Integrated)); a
+/// discrete one, else an integrated one ([`Discrete`](GpuPriority::Discrete)). `KOMPOZ_GPU_DEVICE` names one instead.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum GpuPriority {
+    #[default]
+    Auto,
+    Integrated,
+    Discrete,
+}
+
+static GPU_PRIORITY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The GPU the devices made from here on draw on (the app's, set as it starts).
+pub fn set_gpu_priority(priority: GpuPriority) {
+    GPU_PRIORITY.store(priority as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The GPU the devices made from here on draw on.
+pub fn gpu_priority() -> GpuPriority {
+    match GPU_PRIORITY.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => GpuPriority::Integrated,
+        2 => GpuPriority::Discrete,
+        _ => GpuPriority::Auto,
+    }
+}
+
 /// The hardware layer: one per window (or none, drawing only into textures), used from the thread that made it.
 pub trait Device {
     fn backend(&self) -> Backend;

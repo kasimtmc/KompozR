@@ -103,6 +103,9 @@ pub const XA_ATOM: Atom = 4;
 pub const XA_CARDINAL: Atom = 6;
 pub const XA_STRING: Atom = 31;
 pub const XA_WM_NAME: Atom = 39;
+pub const XA_WM_HINTS: Atom = 35;
+pub const XA_WM_NORMAL_HINTS: Atom = 40;
+pub const XA_WM_SIZE_HINTS: Atom = 41;
 
 // Window creation.
 const CW_BACK_PIXEL: c_ulong = 1 << 1;
@@ -1174,6 +1177,13 @@ impl XEvent {
         unsafe { self.0.type_ }
     }
 
+    /// The window it is for (every core event's `window`, after its header).
+    pub fn window(&self) -> Window {
+        // SAFETY: every core X event begins with XAnyEvent's fields (its type, serial, send_event, display,
+        // window); a generic (XInput 2) event's window isn't there: its cookie's data has it (`xi_event_in`).
+        unsafe { self.0.any.window }
+    }
+
     /// Its parts, as its type says.
     pub fn decode(&self) -> Decoded {
         let e = &self.0;
@@ -1642,6 +1652,11 @@ impl Display {
 
     /// The XInput 2 event `e` is, if it is one: its data fetched, read and freed.
     pub fn xi_event(&self, e: &XEvent) -> Option<XiEvent> {
+        self.xi_event_in(e).map(|(event, _)| event)
+    }
+
+    /// The same, with the window it is for (its `event` window; none for the devices' hierarchy).
+    pub fn xi_event_in(&self, e: &XEvent) -> Option<(XiEvent, Window)> {
         if e.kind() != GENERIC_EVENT {
             return None;
         }
@@ -1652,10 +1667,10 @@ impl Display {
         }
         // SAFETY: the cookie of an event read from this display; its data, once got, is freed below.
         if unsafe { (self.x.x.get_event_data)(self.raw, &mut cookie) } == 0 || cookie.data.is_null() {
-            return Some(XiEvent::Other);
+            return Some((XiEvent::Other, NONE));
         }
         // SAFETY: libXi's data for the cookie's event type is the struct XInput2.h gives that type.
-        let decoded = unsafe { decode_xi(cookie.evtype, cookie.data) };
+        let decoded = unsafe { (decode_xi(cookie.evtype, cookie.data), xi_window(cookie.evtype, cookie.data)) };
         // SAFETY: the data got above, freed once.
         unsafe { (self.x.x.free_event_data)(self.raw, &mut cookie) };
         Some(decoded)
@@ -2216,6 +2231,26 @@ impl Drop for Display {
     fn drop(&mut self) {
         // SAFETY: the display, closed once; nothing made on it is used after (its holders are gone: they hold it).
         unsafe { (self.x.x.close_display)(self.raw) };
+    }
+}
+
+/// The window an XInput 2 event is for (its `event`; none for the hierarchy and the others).
+///
+/// # Safety
+/// As [`decode_xi`]'s.
+unsafe fn xi_window(evtype: c_int, data: *mut c_void) -> Window {
+    match evtype {
+        XI_MOTION | XI_BUTTON_PRESS | XI_BUTTON_RELEASE | XI_TOUCH_BEGIN | XI_TOUCH_UPDATE | XI_TOUCH_END => {
+            // SAFETY: these types' data is an XIDeviceEvent (the caller's word).
+            unsafe { (*data.cast::<XiDeviceEvent>()).event }
+        }
+        // SAFETY: these types' data is an XIEnterEvent.
+        XI_ENTER | XI_LEAVE => unsafe { (*data.cast::<XiEnterEvent>()).event },
+        XI_GESTURE_PINCH_BEGIN | XI_GESTURE_PINCH_UPDATE | XI_GESTURE_PINCH_END => {
+            // SAFETY: these types' data is an XIGesturePinchEvent.
+            unsafe { (*data.cast::<XiGesturePinchEvent>()).event }
+        }
+        _ => NONE,
     }
 }
 

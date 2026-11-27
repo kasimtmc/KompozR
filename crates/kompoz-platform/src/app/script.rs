@@ -9,11 +9,12 @@
 //! `wait n` (frames), `sleep ms` (real time, for other threads), `realtime` (the rest in real time), `click x y`,
 //! `rclick x y`, `mclick x y`, `down x y`, `up x y`, `move x y`, `fdown id x y`, `fmove id x y`, `fup id x y`,
 //! `drag x1 y1 x2 y2`, `mdrag x1 y1 x2 y2` (with the mouse), `swipe x1 y1 x2 y2 frames`, `wheel x y notches`,
-//! `zoom x y factor`, `dropfile x y path`, `droptext x y text`, `window focuslost|focusgained|minimized|restored`,
-//! `type text`, `key [ctrl+][shift+][alt+]name` (enter, backspace, escape, tab, space, up, down, left, right, home,
-//! end, delete, pageup, pagedown, a letter, a digit, f1–f24), `resize w h` (window points), `shot path.png`,
-//! `quit`. Time is virtual while a script runs (16.7 ms a frame), so animations are deterministic; then it goes on
-//! in real time.
+//! `zoom x y factor`, `dropfile x y path`, `droptext x y text`,
+//! `window focuslost|focusgained|minimized|restored|close`, `type text`, `key [ctrl+][shift+][alt+]name` (enter,
+//! backspace, escape, tab, space, up, down, left, right, home, end, delete, pageup, pagedown, a letter, a digit,
+//! f1–f24), `resize w h` (window points), `shot path.png`, `quit`; `@Title: command` runs `command` in the app's
+//! window of that title (a `Window`'s), at its next frame. Time is virtual while a script runs (16.7 ms a frame), so
+//! animations are deterministic (the app's windows' frames follow it); then it goes on in real time.
 
 use crate::keys::{DIGITS, FUNCTION_KEYS, LETTERS};
 use kompoz_graphics::Offset;
@@ -64,6 +65,8 @@ pub(crate) enum WindowEvent {
     FocusGained,
     Minimized,
     Restored,
+    /// The user closing it (the window manager's close).
+    Close,
 }
 
 /// A script's command.
@@ -187,6 +190,7 @@ pub(crate) fn parse_command(line: &str) -> Option<Command> {
             Some("focusgained") => Some(WindowEvent::FocusGained),
             Some("minimized") => Some(WindowEvent::Minimized),
             Some("restored") => Some(WindowEvent::Restored),
+            Some("close") => Some(WindowEvent::Close),
             _ => None,
         }),
         "type" => Command::Type(w.rest()),

@@ -6,7 +6,11 @@
 //! PopupProperties(focusable = false))`) through `kompoz!`; and from a `.kt` file
 //! (kompoz_file!) scrollbars of a scroll state and a lazy list (`rememberScrollbarAdapter`), `Modifier.onDrag`, a
 //! `ContextMenuDataProvider`, a text field's own menu and a value-based field's scroll state. The same components the
-//! Rust syntax's tests check (crates/kompoz-foundation/tests/desktop.rs).
+//! Rust syntax's tests check (crates/kompoz-foundation/tests/desktop.rs). And Compose Desktop's windows and tray as
+//! an app writes them (`Window(onCloseRequest =, state = rememberWindowState(…), …) { … window.title … }`,
+//! `WindowPosition(Alignment.Center)`, `Tray(icon =, state = rememberTrayState(), …) { Item(…); CheckboxItem(…);
+//! Separator(); Menu(…) { … } }`, `trayState.sendNotification(Notification(…, Notification.Type.Info))`,
+//! `exitApplication()`), the requests they make checked (what the platform's app core opens: its own tests run them).
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -15,7 +19,12 @@ mod common;
 use kompoz::prelude::*;
 use kompoz::test::{KompozTestRule, RecordingCanvas};
 use kompoz::ui::input::{PointerButton, PointerEventType, PointerKeyboardModifiers, PointerType};
-use kompoz::ui::window::{Popup, PopupPositionProvider, PopupProperties};
+use kompoz::ui::window::{
+    ApplicationScope, ComposeWindow, FrameWindowScope, KeyShortcut, MenuItemKind, Notification, NotificationType,
+    Popup, PopupPositionProvider, PopupProperties, WindowPosition,
+};
+use std::cell::Cell;
+use std::rc::Rc;
 
 fn bounds(rule: &KompozTestRule, tag: &str) -> Rect {
     rule.on_node_with_tag_unmerged(tag).get_unclipped_bounds_in_root()
@@ -181,4 +190,136 @@ fn scrollbars_on_drag_and_menus_from_a_kt_file() {
     rule.on_node_with_text("Copy").assert_is_enabled();
 }
 
-tests![input_forms_as_compose_writes_them, scrollbars_on_drag_and_menus_from_a_kt_file,];
+// ---- windows_and_tray_as_compose_writes_them (Compose Desktop's Window, Tray, notifications) ---------------------
+
+kompoz! {
+    @Composable
+    fun Windows(app: ApplicationScope) {
+        var open by remember { mutableStateOf(true) }
+        var count by remember { mutableStateOf(0) }
+        val state = rememberWindowState(position = WindowPosition(Alignment.Center), size = DpSize(400.dp, 300.dp))
+        val trayState = rememberTrayState()
+        Tray(icon = ColorPainter(Color.Red), state = trayState, tooltip = "Pencereler", onAction = { open = true }) {
+            Item("Aç", mnemonic = 'A', shortcut = KeyShortcut(Key.O, ctrl = true), onClick = { open = true })
+            CheckboxItem("Sayaç", checked = count > 0, onCheckedChange = { count = if (it) 1 else 0 })
+            Separator()
+            Menu("Daha") {
+                Item("Çık", onClick = { app.exitApplication() })
+            }
+        }
+        if (open) {
+            Window(onCloseRequest = { open = false }, state = state, title = "Mesajlar $count", resizable = false,
+                   alwaysOnTop = true, onKeyEvent = { false }) {
+                Column {
+                    Text("pencere: ${window.title}")
+                    Button(onClick = { trayState.sendNotification(Notification("Başlık", "İleti", Notification.Type.Info)) }) {
+                        Text("bildir")
+                    }
+                }
+            }
+        }
+    }
+}
+
+kompoz! {
+    @Composable
+    fun ApplicationScope.Single() {
+        Window(onCloseRequest = ::exitApplication, title = "Tek") {
+            Text("tek")
+        }
+    }
+}
+
+/// The single-window app as Compose Desktop's samples write it: an extension of the application's scope, its close
+/// request `::exitApplication`.
+fn a_single_window_app_exits_on_close() {
+    let exited = Rc::new(Cell::new(false));
+    let scope = {
+        let exited = exited.clone();
+        ApplicationScope::new(Rc::new(move || exited.set(true)))
+    };
+    let rule = KompozTestRule::with_viewport(kompozable_lambda!(move || scope.Single()), IntSize::new(100, 100));
+    rule.wait_for_idle();
+    let windows = rule.host().window_registry().windows();
+    assert_eq!(windows.len(), 1);
+    assert_eq!(windows[0].title(), "Tek");
+    windows[0].close_requested();
+    assert!(exited.get(), "::exitApplication");
+}
+
+fn windows_and_tray_as_compose_writes_them() {
+    let exited = Rc::new(Cell::new(false));
+    let scope = {
+        let exited = exited.clone();
+        ApplicationScope::new(Rc::new(move || exited.set(true)))
+    };
+    let rule =
+        KompozTestRule::with_viewport(kompozable_lambda!(move || Windows(scope.clone())), IntSize::new(400, 400));
+    rule.wait_for_idle();
+    let registry = rule.host().window_registry().clone();
+    let windows = registry.windows();
+    assert_eq!(windows.len(), 1);
+    let w = windows[0].clone();
+    assert_eq!(w.title(), "Mesajlar 0");
+    let p = w.properties();
+    assert!(!p.resizable && p.always_on_top && p.visible && !p.undecorated);
+    assert_eq!(w.state().size(), DpSize(400.dp(), 300.dp()));
+    assert_eq!(w.state().position(), WindowPosition::Aligned(Alignment::Center));
+    // The tray icon's menu, as the platform shows it.
+    let trays = registry.trays();
+    assert_eq!(trays.len(), 1);
+    let t = trays[0].clone();
+    assert_eq!(t.tooltip().as_deref(), Some("Pencereler"));
+    let menu = t.menu();
+    let texts: Vec<&str> = menu.iter().map(|i| i.text.as_str()).collect();
+    assert_eq!(texts, ["Aç", "Sayaç", "", "Daha"]);
+    assert_eq!(menu[0].mnemonic, Some('A'));
+    assert_eq!(menu[0].shortcut, Some(KeyShortcut { key: Key::O, ctrl: true, meta: false, alt: false, shift: false }));
+    assert_eq!(menu[1].kind, MenuItemKind::Checkbox { checked: false });
+    assert_eq!(menu[2].kind, MenuItemKind::Separator);
+    assert_eq!(menu[3].items[0].text, "Çık");
+    // The checkbox toggled: the window's title follows (the request kept up to date).
+    menu[1].click();
+    rule.wait_for_idle();
+    assert_eq!(w.title(), "Mesajlar 1");
+    assert_eq!(registry.trays()[0].menu()[1].kind, MenuItemKind::Checkbox { checked: true });
+    // The window's content in a host of its own, as the platform's app core composes it: its scope's window.
+    let r = w.clone();
+    let host = KompozHost::new_window(
+        kompozable_lambda!(move || {
+            let content = r.content();
+            content(&FrameWindowScope::new(ComposeWindow::new(&r)));
+        }),
+        w.locals(),
+    );
+    host.set_viewport_size(IntSize::new(400, 300));
+    host.frame(0);
+    let tree = host.accessibility_tree();
+    assert!(tree.iter().any(|n| n.label == "pencere: Mesajlar 1"), "{tree:?}");
+    let button = tree.iter().find(|n| n.clickable).expect("the button");
+    assert!(host.perform_semantics_action(button.id, kompoz::ui::semantics::SemanticsAction::Click));
+    host.frame(16_000_000);
+    assert_eq!(
+        t.take_notifications(),
+        [Notification::new("Başlık", "İleti", NotificationType::Info)],
+        "sent through the tray icon's state"
+    );
+    drop(host);
+    // The user closing it: its onCloseRequest takes it out; the icon's click brings it back.
+    w.close_requested();
+    rule.wait_for_idle();
+    assert!(registry.windows().is_empty());
+    t.action();
+    rule.wait_for_idle();
+    assert_eq!(registry.windows().len(), 1);
+    // The submenu's item ends the app.
+    registry.trays()[0].menu()[3].items[0].click();
+    assert!(exited.get());
+}
+
+tests![
+    input_forms_as_compose_writes_them,
+    scrollbars_on_drag_and_menus_from_a_kt_file,
+    windows_and_tray_as_compose_writes_them,
+    a_single_window_app_exits_on_close,
+];

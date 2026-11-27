@@ -1,16 +1,98 @@
 //! What a KompozR app asks of the platform it runs on, and what the platform asks of the app core (C++'s
-//! platform.hpp): its window (one), its events turned into [`Event`]s, its frames on the display's beat, and what it
-//! adds to the host (text input, the clipboard, cursors, insets, screen readers). Each platform has its own; it
-//! lives on the UI thread (not `Send`).
+//! platform.hpp): a window, its events turned into [`Event`]s, its frames on the display's beat, and what it adds to
+//! the host (text input, the clipboard, cursors, insets, screen readers); the app's tray icons and notifications.
+//!
+//! A [`Platform`] is one window's (each app core has its own: the main window's, a `Window`'s, the app's
+//! composition's that has none): the platform's windows by their [`WindowId`], the display's connection shared
+//! between them (Wayland's, X11's: each window's `Platform` a handle on it and its own window), the events it reads
+//! routed to the core of the window they are for ([`AppWindows`](super::AppWindows)). Each platform has its own; it
+//! lives on the UI thread (not `Send`). Platforms that give an app one window (Android, the web) make none for a
+//! `Window` (their factory makes no `Platform`).
 
-use super::{AppConfig, Event};
+use super::Event;
 use kompoz_gpu::device::{Backend, Surface};
-use kompoz_graphics::Rect;
+use kompoz_graphics::{Dp, Rect};
 use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
+use kompoz_ui::input::KeyModifiers;
 use kompoz_ui::media_query::MediaInfo;
 use kompoz_ui::platform::PlatformCallbacks;
+use kompoz_ui::window::{MenuItemKind, Notification, WindowId, WindowPlacement};
 use std::rc::Rc;
+
+/// A window as it is opened (the app's from its configuration, a `Window`'s from its request and state): its
+/// title, its size in dp, where it goes (none: where the platform puts it; dp from the screen's top left), how it is
+/// placed, whether it starts minimized, and what it is ([`Window`](kompoz_ui::window::Window)'s parameters).
+#[derive(Clone, PartialEq, Debug)]
+pub struct WindowSpec {
+    pub id: WindowId,
+    pub title: String,
+    pub width: Dp,
+    pub height: Dp,
+    /// Where on the screen, dp from its top left (none: the platform's place; an aligned one is worked out by the
+    /// app core where the platform tells the screen's size: [`Platform::screen_size`]).
+    pub position: Option<(Dp, Dp)>,
+    pub placement: WindowPlacement,
+    pub minimized: bool,
+    pub undecorated: bool,
+    pub resizable: bool,
+    pub focusable: bool,
+    pub always_on_top: bool,
+    /// The app's name (its cache directory's, its window class's): the app's title, whichever window this is.
+    pub app_title: String,
+}
+
+impl WindowSpec {
+    /// The main window of the app titled `title`, `width` by `height` dp.
+    pub fn main(title: &str, width: Dp, height: Dp) -> WindowSpec {
+        WindowSpec {
+            id: WindowId::MAIN,
+            title: title.to_string(),
+            width,
+            height,
+            position: None,
+            placement: WindowPlacement::Floating,
+            minimized: false,
+            undecorated: false,
+            resizable: true,
+            focusable: true,
+            always_on_top: false,
+            app_title: title.to_string(),
+        }
+    }
+}
+
+/// A tray icon's picture, RGBA (straight), the top row first.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct TrayImage {
+    pub width: i32,
+    pub height: i32,
+    pub rgba: Vec<u8>,
+}
+
+/// A tray menu's item as the platform shows it (a `MenuItem` without its callbacks: a click comes back as an
+/// [`Event::TrayMenuItem`] by where it is).
+#[derive(Clone, PartialEq, Debug)]
+pub struct TrayMenuItem {
+    pub kind: MenuItemKind,
+    pub text: String,
+    pub enabled: bool,
+    pub mnemonic: Option<char>,
+    /// Its shortcut's keys: the modifiers held, and the key's name (xkb's: "q", "F4", "Delete").
+    pub shortcut: Option<(KeyModifiers, String)>,
+    pub icon: Option<TrayImage>,
+    pub items: Vec<TrayMenuItem>,
+}
+
+/// A tray icon as the platform shows it: its id (what its events name), its pictures (the sizes the tray may
+/// ask for), its tooltip, its menu.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct TrayIcon {
+    pub id: u64,
+    pub images: Vec<TrayImage>,
+    pub tooltip: String,
+    pub menu: Vec<TrayMenuItem>,
+}
 
 /// A button of the title bar KompozR draws.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -107,9 +189,10 @@ pub trait Platform {
     fn now(&self) -> i64;
     /// The GPU backends `KOMPOZ_GPU=auto` tries here, the best first.
     fn backends(&self) -> Vec<Backend>;
-    /// The window, made to be drawn into with `backend`: what the device needs of it (the surface; its pipeline
-    /// cache is the core's); why not if it can't be. Once only, or after `close_window`.
-    fn open_window(&mut self, app: &AppConfig, backend: Backend) -> Result<Surface, String>;
+    /// The window, as `window` says, made to be drawn into with `backend`: what the device needs of it (the surface;
+    /// its pipeline cache is the core's); why not if it can't be. Once only, or after `close_window` (a window
+    /// hidden and shown again).
+    fn open_window(&mut self, window: &WindowSpec, backend: Backend) -> Result<Surface, String>;
     /// The window goes (after the device drawing into it is gone).
     fn close_window(&mut self);
     /// What ended the app, to the user.
@@ -166,4 +249,67 @@ pub trait Platform {
     }
     /// Back went unused: the system's own (Android leaves the app).
     fn leave_app(&mut self) {}
+
+    // ---- The window as the app sets it (a `Window`'s state and parameters; the app core calls these between
+    // frames where they changed) ----
+
+    /// Its title.
+    fn set_title(&mut self, title: &str) {
+        let _ = title;
+    }
+    /// Maximized, full screen or neither.
+    fn set_placement(&mut self, placement: WindowPlacement) {
+        let _ = placement;
+    }
+    /// Minimized or restored. (Wayland can't restore a window from the app: only bring it forward, `to_front`.)
+    fn set_minimized(&mut self, minimized: bool) {
+        let _ = minimized;
+    }
+    /// Moved to `x`, `y` on the screen, its points (where the platform lets an app place its windows: not Wayland).
+    fn set_position(&mut self, x: i32, y: i32) {
+        let _ = (x, y);
+    }
+    /// To the front, given the keyboard's focus (Wayland: through an xdg-activation token).
+    fn to_front(&mut self) {}
+    /// Whether the user can resize it.
+    fn set_resizable(&mut self, resizable: bool) {
+        let _ = resizable;
+    }
+    /// Kept above the others.
+    fn set_always_on_top(&mut self, on_top: bool) {
+        let _ = on_top;
+    }
+    /// Its icon (none: the app's).
+    fn set_icon(&mut self, icon: Option<&TrayImage>) {
+        let _ = icon;
+    }
+    /// Where it is on the screen, its points (none: not told, as on Wayland).
+    fn window_position(&self) -> Option<(i32, i32)> {
+        None
+    }
+    /// How the window manager placed it, as it last said (none: not told).
+    fn window_placement(&self) -> Option<WindowPlacement> {
+        None
+    }
+    /// The size of the screen it is on, its points (none: not told): what an aligned position is worked out in.
+    fn screen_size(&self) -> Option<(i32, i32)> {
+        None
+    }
+
+    // ---- The app's tray icons and notifications (the app core's platform: the main window's, or the app's
+    // composition's) ----
+
+    /// Whether this platform shows tray icons (a StatusNotifierItem host on Linux).
+    fn tray_supported(&self) -> bool {
+        false
+    }
+    /// The app's tray icons as they are now (all of them, each time any changed): shown, changed or taken away.
+    fn sync_trays(&mut self, trays: &[TrayIcon]) {
+        let _ = trays;
+    }
+    /// A notification of the desktop's, sent through tray icon `tray` (its icon the notification's where its type
+    /// is None).
+    fn send_notification(&mut self, tray: &TrayIcon, notification: &Notification) {
+        let _ = (tray, notification);
+    }
 }

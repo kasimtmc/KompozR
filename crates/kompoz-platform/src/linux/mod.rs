@@ -12,6 +12,7 @@ pub mod desktop;
 pub mod event_loop;
 pub mod media;
 pub mod portal;
+pub mod status_notifier;
 pub mod sys;
 pub mod transfer;
 pub mod wallpaper;

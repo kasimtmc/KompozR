@@ -3,8 +3,9 @@
 //! buttons as the desktop lays them out, and the desktop's services ([`DesktopServices`]), each on a thread of its
 //! own that wakes the platform's loop: the accent color, the light or dark preference, GNOME's window buttons and
 //! the system's text size (the settings portal: [`portal`](super::portal)), the wallpaper's colors
-//! ([`wallpaper`](super::wallpaper)), the screen readers (AT-SPI: [`atspi`](super::atspi)); the screen saver held
-//! off over D-Bus, a microphone and a camera ([`media`](super::media)).
+//! ([`wallpaper`](super::wallpaper)), the screen readers (AT-SPI: [`atspi`](super::atspi)), the app's tray icons and
+//! the desktop's notifications ([`status_notifier`](super::status_notifier)); the screen saver held off over D-Bus,
+//! a microphone and a camera ([`media`](super::media)).
 //!
 //! # How a platform runs them
 //!
@@ -37,13 +38,15 @@ use super::atspi::{AtspiBridge, AtspiOptions, Window as AtspiWindow};
 use super::dbus::Connection;
 use super::media::MediaDevices;
 use super::portal::{DesktopSettings, PortalOptions, Settings};
+use super::status_notifier::StatusNotifier;
 use super::wallpaper::{WallpaperColors, WallpaperOptions};
-use crate::app::{Event, TitleBar, WindowButton};
+use crate::app::{Event, TitleBar, TrayIcon, WindowButton};
 use crate::system::log;
 use kompoz_graphics::Rect;
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_ui::KompozHost;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
+use kompoz_ui::window::Notification;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -79,6 +82,8 @@ pub struct DesktopOptions {
     pub portal: PortalOptions,
     pub atspi: AtspiOptions,
     pub wallpaper: WallpaperOptions,
+    /// The session bus the tray icons and notifications go to (none: none shown).
+    pub tray: Option<String>,
 }
 
 impl DesktopOptions {
@@ -88,6 +93,7 @@ impl DesktopOptions {
             portal: PortalOptions::from_env(),
             atspi: AtspiOptions::from_env(),
             wallpaper: WallpaperOptions::from_env(),
+            tray: super::dbus::session_bus_address(),
         }
     }
 }
@@ -98,6 +104,7 @@ struct Told {
     settings: AtomicBool,
     wallpaper: AtomicBool,
     accessibility: AtomicBool,
+    tray: AtomicBool,
 }
 
 /// The desktop's services a Linux platform runs (C++'s DesktopServices): see the module's documentation for the
@@ -109,6 +116,7 @@ pub struct DesktopServices {
     known: Settings,
     wallpaper: Option<WallpaperColors>,
     a11y: Option<AtspiBridge>,
+    tray: Option<StatusNotifier>,
     focused: bool,
     semantics_dirty: bool,
     last_semantics: Option<i64>,
@@ -132,6 +140,7 @@ impl DesktopServices {
             known: Settings::default(),
             wallpaper: None,
             a11y: None,
+            tray: None,
             focused: false,
             semantics_dirty: true,
             last_semantics: None,
@@ -158,11 +167,13 @@ impl DesktopServices {
         self.settings = Some(DesktopSettings::new(notify(|t| &t.settings), options.portal));
         self.wallpaper = Some(WallpaperColors::new(self.dark_theme(), notify(|t| &t.wallpaper), options.wallpaper));
         self.a11y = Some(AtspiBridge::new(title, notify(|t| &t.accessibility), options.atspi));
+        self.tray = Some(StatusNotifier::new(title, notify(|t| &t.tray), options.tray));
     }
 
     /// What they told since, as events for the app core: AccentChanged when the accent color changed,
     /// MetricsChanged when the light or dark preference, the window buttons or the text size did, WallpaperChanged,
-    /// AccessibilityRequest (an assistive technology's requests, or its wish for the tree).
+    /// AccessibilityRequest (an assistive technology's requests, or its wish for the tree), what the user did with
+    /// the tray icons (TrayAction, TrayMenuItem).
     pub fn take_events(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
         if self.told.settings.swap(false, Ordering::SeqCst)
@@ -186,7 +197,31 @@ impl DesktopServices {
         if self.told.accessibility.swap(false, Ordering::SeqCst) {
             events.push(Event::AccessibilityRequest);
         }
+        if self.told.tray.swap(false, Ordering::SeqCst)
+            && let Some(tray) = &self.tray
+        {
+            events.extend(tray.take_actions());
+        }
         events
+    }
+
+    /// `Platform::tray_supported`: a StatusNotifierWatcher on the session bus (a tray shows the icons).
+    pub fn tray_supported(&self) -> bool {
+        self.tray.as_ref().is_some_and(StatusNotifier::available)
+    }
+
+    /// `Platform::sync_trays`: the app's tray icons as they are now.
+    pub fn sync_trays(&mut self, trays: &[TrayIcon]) {
+        if let Some(tray) = &self.tray {
+            tray.sync(trays);
+        }
+    }
+
+    /// `Platform::send_notification`: a notification of the desktop's, for tray icon `tray`.
+    pub fn send_notification(&mut self, tray: &TrayIcon, notification: &Notification) {
+        if let Some(t) = &self.tray {
+            t.notify(tray, notification);
+        }
     }
 
     /// The desktop's accent color, as the app was last told it.
@@ -325,6 +360,7 @@ impl DesktopServices {
     /// still being worked out told to stop and not waited for (it wakes nothing).
     pub fn stop(&mut self) {
         self.keep_screen_on(false, "");
+        self.tray = None;
         self.a11y = None;
         self.wallpaper = None;
         self.settings = None;

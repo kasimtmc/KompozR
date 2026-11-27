@@ -8,8 +8,8 @@
 
 use kompoz_graphics::ImageBitmap;
 use kompoz_ui::clipboard::{
-    ClipEntry, ClipValue, MIMETYPE_IMAGE_PNG, MIMETYPE_TEXT_HTML, MIMETYPE_TEXT_URILIST, encode_text,
-    is_plain_text_type,
+    ClipEntry, ClipValue, MIMETYPE_IMAGE_PNG, MIMETYPE_TEXT_HTML, MIMETYPE_TEXT_URILIST, PASSWORD_MANAGER_HINT,
+    encode_text, is_plain_text_type,
 };
 use kompoz_ui::draganddrop::{DragAndDropTransferAction, DragAndDropTransferData};
 use std::cell::RefCell;
@@ -36,6 +36,8 @@ enum Source {
     Image,
     /// An item's own type: its bytes as they are.
     Item(usize, String),
+    /// A sensitive entry's password managers' hint ("secret": histories leave it out).
+    Secret,
 }
 
 /// What the app offers (its clipboard, or what a drag of its own carries), as other apps are given it.
@@ -92,6 +94,9 @@ impl Payload {
                     sources.push((m.clone(), Source::Item(index, m)));
                 }
             }
+        }
+        if entry.clip_metadata().is_sensitive() {
+            sources.push((PASSWORD_MANAGER_HINT.into(), Source::Secret));
         }
         Payload { entry, sources, actions: Vec::new(), encoded: RefCell::default() }
     }
@@ -150,6 +155,7 @@ impl Payload {
                 bytes
             }
             Source::Item(index, name) => self.entry.items().get(*index)?.bytes(name)?,
+            Source::Secret => b"secret".as_slice().into(),
         };
         Some(bytes)
     }

@@ -6,8 +6,9 @@
 
 use super::generated::*;
 use super::{OutputObject, WaylandPlatform, Window};
-use crate::app::{AppConfig, Event, TitleBar, WindowAction};
+use crate::app::{Event, TitleBar, WindowAction, WindowSpec};
 use crate::linux::wayland::ffi::{Object, ObjectId};
+use kompoz_ui::window::WindowPlacement;
 
 /// An output's scale and refresh rate, and whether the window is on it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -98,10 +99,14 @@ impl WaylandPlatform {
     /// The window made and configured (C++'s openWindow before its backend's part): its surface (with a viewport and
     /// fractional scale where the compositor has them), its toplevel titled, its decorations asked for, committed
     /// bare, and the compositor's first configure acknowledged before anything is drawn.
-    pub(super) fn make_window(&mut self, app: &AppConfig) -> Result<(), String> {
-        self.title = app.title.clone();
-        self.width = (app.width.0.round() as i32).max(1);
-        self.height = (app.height.0.round() as i32).max(1);
+    pub(super) fn make_window(&mut self, app: &WindowSpec) -> Result<(), String> {
+        self.win.title = app.title.clone();
+        self.win.width = (app.width.0.round() as i32).max(1);
+        self.win.height = (app.height.0.round() as i32).max(1);
+        self.win.undecorated = app.undecorated;
+        self.win.configured = false;
+        self.win.state = WindowState::default();
+        self.win.pending_state = WindowState::default();
         let g = &self.globals;
         let compositor = g.compositor.as_ref().ok_or("no wl_compositor")?;
         let wm_base = g.wm_base.as_ref().ok_or("no xdg_wm_base")?;
@@ -113,24 +118,34 @@ impl WaylandPlatform {
         };
         let xdg_surface = wm_base.get_xdg_surface(&surface).ok_or("no xdg_surface")?;
         let toplevel = xdg_surface.get_toplevel().ok_or("no xdg_toplevel")?;
-        toplevel.set_title(&self.title);
+        toplevel.set_title(&self.win.title);
         toplevel.set_app_id("dev.kompoz.app");
-        // The compositor's decorations where it has them (unless KOMPOZ_DECORATIONS=kompoz), else KompozR's own: as
-        // the decoration's configure says.
+        // The compositor's decorations where it has them (unless KOMPOZ_DECORATIONS=kompoz, or the window is
+        // undecorated: client side, KompozR drawing none), else KompozR's own: as the decoration's configure says.
         let decoration = g.decorations.as_ref().and_then(|d| d.get_toplevel_decoration(&toplevel));
         match &decoration {
             Some(d) => {
-                let own = std::env::var("KOMPOZ_DECORATIONS").is_ok_and(|v| v == "kompoz");
+                let own = app.undecorated || std::env::var("KOMPOZ_DECORATIONS").is_ok_and(|v| v == "kompoz");
                 d.set_mode(if own {
                     ZxdgToplevelDecorationV1Mode::CLIENT_SIDE
                 } else {
                     ZxdgToplevelDecorationV1Mode::SERVER_SIDE
                 });
             }
-            None => self.own_decorations = true,
+            None => self.win.own_decorations = true,
+        }
+        // How it is placed, as it opens (its first configure says what the compositor did).
+        match app.placement {
+            WindowPlacement::Maximized => toplevel.set_maximized(),
+            WindowPlacement::Fullscreen => toplevel.set_fullscreen(None),
+            WindowPlacement::Floating => {}
+        }
+        if !app.resizable {
+            toplevel.set_min_size(self.win.width, self.win.height);
+            toplevel.set_max_size(self.win.width, self.win.height);
         }
         surface.commit();
-        self.window = Some(Window {
+        self.win.window = Some(Window {
             edges: Default::default(),
             frame_callback: None,
             inhibitor: None,
@@ -143,28 +158,42 @@ impl WaylandPlatform {
         });
         // (The first configure, acknowledged before anything is drawn.)
         for _ in 0..1000 {
-            if self.configured {
+            if self.win.configured {
                 break;
             }
             self.roundtrip().map_err(|why| format!("the compositor didn't configure the window ({why})"))?;
         }
-        if !self.configured {
+        if !self.win.configured {
             return Err("the compositor didn't configure the window".into());
         }
         self.apply_size();
         self.update_edges();
+        if app.minimized
+            && let Some(w) = &self.win.window
+        {
+            w.toplevel.set_minimized();
+            self.win.events.push_back(Event::Minimized);
+        }
         Ok(())
     }
 
-    /// The window's scale, px per point.
+    /// The window's scale, px per point (a window without a surface — the app's composition, a hidden window —
+    /// the outputs' largest).
     pub(super) fn scale(&self) -> f64 {
-        let viewport = self.window.as_ref().is_some_and(|w| w.viewport.is_some());
-        window_scale(self.scale120, viewport, self.buffer_scale)
+        let Some(w) = &self.win.window else {
+            return self.outputs.iter().map(|o| o.info.scale).max().unwrap_or(1).max(1) as f64;
+        };
+        window_scale(self.win.scale120, w.viewport.is_some(), self.win.buffer_scale)
+    }
+
+    /// The outputs as the window is on them.
+    fn window_outputs(&self) -> Vec<Output> {
+        let on = |o: &OutputObject| self.win.entered.contains(&o.output.id());
+        self.outputs.iter().map(|o| Output { entered: on(o), ..o.info }).collect()
     }
 
     pub(super) fn refresh_rate(&self) -> f32 {
-        let outputs: Vec<Output> = self.outputs.iter().map(|o| o.info).collect();
-        refresh_rate(&outputs)
+        refresh_rate(&self.window_outputs())
     }
 
     /// The surface's size for its scale (C++'s applySize): the drawable's, and the viewport's destination (the
@@ -172,37 +201,39 @@ impl WaylandPlatform {
     /// with the new scale is never an error), else the whole buffer scale.
     pub(super) fn apply_size(&mut self) {
         let scale = self.scale();
-        self.shared.scale.set(scale);
-        self.drawable.set((pixels(self.width, scale), pixels(self.height, scale)));
-        self.shared.cursor.borrow_mut().set_scale(scale.ceil() as i32);
-        self.shared.tablet.borrow_mut().set_scale(scale.ceil() as i32);
-        let Some(w) = &self.window else { return };
+        self.win.scale_cell.set(scale);
+        self.win.drawable.set((pixels(self.win.width, scale), pixels(self.win.height, scale)));
+        // (The cursors at the scale of the window the pointer is in.)
+        if self.pointer_window.is_none_or(|w| w == self.win.id) {
+            self.shared.cursor.borrow_mut().set_scale(scale.ceil() as i32);
+            self.shared.tablet.borrow_mut().set_scale(scale.ceil() as i32);
+        }
+        let Some(w) = &self.win.window else { return };
         match &w.viewport {
             Some(viewport) => {
                 w.surface.set_buffer_scale(1);
-                viewport.set_destination(self.width, self.height);
+                viewport.set_destination(self.win.width, self.win.height);
             }
-            None => w.surface.set_buffer_scale(self.buffer_scale.max(1)),
+            None => w.surface.set_buffer_scale(self.win.buffer_scale.max(1)),
         }
     }
 
     fn scale_changed(&mut self) {
         self.apply_size();
         self.update_edges(); // (their shadows drawn at the new scale)
-        self.events.push_back(Event::MetricsChanged);
-        self.events.push_back(Event::Resized);
+        self.win.events.push_back(Event::MetricsChanged);
+        self.win.events.push_back(Event::Resized);
     }
 
     /// Without fractional-scale or the surface's preferred scale: the largest scale of the outputs it is on.
-    fn output_scale_changed(&mut self) {
-        let preferred = self.window.as_ref().is_some_and(|w| w.surface.version() >= 6);
-        if self.scale120 > 0 || preferred {
+    pub(super) fn output_scale_changed(&mut self) {
+        let preferred = self.win.window.as_ref().is_some_and(|w| w.surface.version() >= 6);
+        if self.win.scale120 > 0 || preferred || self.win.window.is_none() {
             return;
         }
-        let outputs: Vec<Output> = self.outputs.iter().map(|o| o.info).collect();
-        let best = output_scale(&outputs);
-        if best != self.buffer_scale {
-            self.buffer_scale = best;
+        let best = output_scale(&self.window_outputs());
+        if best != self.win.buffer_scale {
+            self.win.buffer_scale = best;
             self.scale_changed();
         }
     }
@@ -224,34 +255,31 @@ impl WaylandPlatform {
                 if let Some(o) = self.output(sender) {
                     o.info.scale = factor;
                 }
-                self.output_scale_changed();
             }
             _ => {}
         }
     }
 
     pub(super) fn on_surface(&mut self, sender: ObjectId, e: WlSurfaceEvent) {
-        if !self.window.as_ref().is_some_and(|w| w.surface.id() == sender) {
+        if !self.win.window.as_ref().is_some_and(|w| w.surface.id() == sender) {
             return;
         }
         match e {
             WlSurfaceEvent::Enter { output } => {
-                if let Some(o) = self.output(output) {
-                    o.info.entered = true;
+                if !self.win.entered.contains(&output) {
+                    self.win.entered.push(output);
                 }
                 self.output_scale_changed();
-                self.events.push_back(Event::MetricsChanged); // (its refresh rate)
+                self.win.events.push_back(Event::MetricsChanged); // (its refresh rate)
             }
             WlSurfaceEvent::Leave { output } => {
-                if let Some(o) = self.output(output) {
-                    o.info.entered = false;
-                }
+                self.win.entered.retain(|&o| o != output);
                 self.output_scale_changed();
             }
             WlSurfaceEvent::PreferredBufferScale { factor } => {
-                if factor != self.buffer_scale {
-                    self.buffer_scale = factor.max(1);
-                    if self.scale120 == 0 {
+                if factor != self.win.buffer_scale {
+                    self.win.buffer_scale = factor.max(1);
+                    if self.win.scale120 == 0 {
                         self.scale_changed();
                     }
                 }
@@ -262,8 +290,8 @@ impl WaylandPlatform {
 
     pub(super) fn on_fractional_scale(&mut self, e: WpFractionalScaleV1Event) {
         let WpFractionalScaleV1Event::PreferredScale { scale } = e;
-        if scale != self.scale120 {
-            self.scale120 = scale;
+        if scale != self.win.scale120 {
+            self.win.scale120 = scale;
             self.scale_changed();
         }
     }
@@ -271,53 +299,53 @@ impl WaylandPlatform {
     /// A configure done (C++'s xdg_surface listener): acknowledged, the toplevel's size and state taken.
     pub(super) fn on_xdg_surface(&mut self, e: XdgSurfaceEvent) {
         let XdgSurfaceEvent::Configure { serial } = e;
-        let Some(w) = &self.window else { return };
+        let Some(w) = &self.win.window else { return };
         w.xdg_surface.ack_configure(serial);
         let mut resized = false;
-        if self.pending_width <= 0
-            && self.pending_height <= 0
-            && self.pending_state.floating()
-            && !self.state.floating()
-            && self.floating_width > 0
+        if self.win.pending_width <= 0
+            && self.win.pending_height <= 0
+            && self.win.pending_state.floating()
+            && !self.win.state.floating()
+            && self.win.floating_width > 0
         {
             // Back from maximized, fullscreen or tiled with the size left to the app: the size it floated at.
-            self.pending_width = self.floating_width;
-            self.pending_height = self.floating_height;
+            self.win.pending_width = self.win.floating_width;
+            self.win.pending_height = self.win.floating_height;
         }
-        if self.pending_width > 0
-            && self.pending_height > 0
-            && (self.pending_width != self.width || self.pending_height != self.height)
+        if self.win.pending_width > 0
+            && self.win.pending_height > 0
+            && (self.win.pending_width != self.win.width || self.win.pending_height != self.win.height)
         {
-            self.width = self.pending_width;
-            self.height = self.pending_height;
+            self.win.width = self.win.pending_width;
+            self.win.height = self.win.pending_height;
             resized = true;
         }
-        let was = self.state;
-        self.state = self.pending_state;
-        let state_changed = was != self.state;
-        if self.state.floating() {
-            (self.floating_width, self.floating_height) = (self.width, self.height);
+        let was = self.win.state;
+        self.win.state = self.win.pending_state;
+        let state_changed = was != self.win.state;
+        if self.win.state.floating() {
+            (self.win.floating_width, self.win.floating_height) = (self.win.width, self.win.height);
         }
-        if !self.configured {
-            self.configured = true;
-            self.events.push_back(Event::Shown);
-            self.events.push_back(Event::Resized);
-            if self.state.suspended {
-                self.events.push_back(Event::Hidden); // (mapped where it can't be seen: no frames come until it is)
+        if !self.win.configured {
+            self.win.configured = true;
+            self.win.events.push_back(Event::Shown);
+            self.win.events.push_back(Event::Resized);
+            if self.win.state.suspended {
+                self.win.events.push_back(Event::Hidden); // (mapped where it can't be seen: no frames come until it is)
             }
             return;
         }
         if resized {
             self.apply_size();
-            self.events.push_back(Event::Resized);
+            self.win.events.push_back(Event::Resized);
         }
         if resized || state_changed {
             self.update_edges(); // (where they are, whether they are, how active their shadows are)
         }
         if state_changed {
-            self.events.push_back(Event::MetricsChanged); // (the title bar's)
-            if self.state.suspended != was.suspended {
-                self.events.push_back(if self.state.suspended { Event::Hidden } else { Event::Shown });
+            self.win.events.push_back(Event::MetricsChanged); // (the title bar's)
+            if self.win.state.suspended != was.suspended {
+                self.win.events.push_back(if self.win.state.suspended { Event::Hidden } else { Event::Shown });
             }
         }
     }
@@ -325,18 +353,18 @@ impl WaylandPlatform {
     pub(super) fn on_toplevel(&mut self, e: XdgToplevelEvent) {
         match e {
             XdgToplevelEvent::Configure { width, height, states } => {
-                self.pending_width = width; // (0: the app's own size)
-                self.pending_height = height;
-                self.pending_state = WindowState::from_states(&states);
+                self.win.pending_width = width; // (0: the app's own size)
+                self.win.pending_height = height;
+                self.win.pending_state = WindowState::from_states(&states);
             }
-            XdgToplevelEvent::Close => self.events.push_back(Event::Quit),
+            XdgToplevelEvent::Close => self.win.events.push_back(Event::CloseRequest),
             XdgToplevelEvent::ConfigureBounds { .. } => {}
             XdgToplevelEvent::WmCapabilities { capabilities } => {
                 let told: Vec<XdgToplevelWmCapabilities> =
                     words(&capabilities).map(XdgToplevelWmCapabilities).collect();
-                self.can_minimize = told.contains(&XdgToplevelWmCapabilities::MINIMIZE);
-                self.can_maximize = told.contains(&XdgToplevelWmCapabilities::MAXIMIZE);
-                self.events.push_back(Event::MetricsChanged);
+                self.win.can_minimize = told.contains(&XdgToplevelWmCapabilities::MINIMIZE);
+                self.win.can_maximize = told.contains(&XdgToplevelWmCapabilities::MAXIMIZE);
+                self.win.events.push_back(Event::MetricsChanged);
             }
         }
     }
@@ -345,26 +373,26 @@ impl WaylandPlatform {
     pub(super) fn on_decoration(&mut self, e: ZxdgToplevelDecorationV1Event) {
         let ZxdgToplevelDecorationV1Event::Configure { mode } = e;
         let own = mode == ZxdgToplevelDecorationV1Mode::CLIENT_SIDE;
-        if own == self.own_decorations {
+        if own == self.win.own_decorations {
             return;
         }
-        self.own_decorations = own;
-        if self.configured {
+        self.win.own_decorations = own;
+        if self.win.configured {
             self.update_edges();
-            self.events.push_back(Event::MetricsChanged);
+            self.win.events.push_back(Event::MetricsChanged);
         }
     }
 
     /// The title bar KompozR draws: its buttons as the desktop lays them out, those the window manager does,
     /// maximized or not.
     pub(super) fn title_bar(&self) -> TitleBar {
-        self.desktop.title_bar(self.state.maximized, self.can_minimize, self.can_maximize)
+        self.desktop.title_bar(self.win.state.maximized, self.win.can_minimize, self.win.can_maximize)
     }
 
     /// What KompozR's title bar asks of the window (C++'s windowAction): moved by the press it was dragged with,
     /// minimized, maximized or restored, closed, its menu.
     pub(super) fn act(&mut self, action: WindowAction, x: f32, y: f32) {
-        let Some(w) = &self.window else { return };
+        let Some(w) = &self.win.window else { return };
         let seat = self.globals.seat.as_ref();
         match action {
             WindowAction::Move => {
@@ -374,13 +402,13 @@ impl WaylandPlatform {
             }
             WindowAction::Minimize => w.toplevel.set_minimized(),
             WindowAction::ToggleMaximize => {
-                if self.state.maximized {
+                if self.win.state.maximized {
                     w.toplevel.unset_maximized();
                 } else {
                     w.toplevel.set_maximized();
                 }
             }
-            WindowAction::Close => self.events.push_back(Event::Quit),
+            WindowAction::Close => self.win.events.push_back(Event::CloseRequest),
             WindowAction::Menu => {
                 if let Some(seat) = seat {
                     w.toplevel.show_window_menu(seat, self.press_serial, x as i32, y as i32);
@@ -396,7 +424,7 @@ impl WaylandPlatform {
         match self.press_touch {
             None => {
                 let modifiers = self.keyboard.modifiers();
-                self.events.push_back(Event::MouseUp {
+                self.win.events.push_back(Event::MouseUp {
                     x: self.pointer_x as f32,
                     y: self.pointer_y as f32,
                     button: crate::app::MouseButton::Left,
@@ -406,7 +434,7 @@ impl WaylandPlatform {
             }
             Some(id) => {
                 if let Some((x, y)) = self.touches.remove(&id) {
-                    self.events.push_back(Event::TouchUp { pointer: id as i64, x: x as f32, y: y as f32, time });
+                    self.win.events.push_back(Event::TouchUp { pointer: id as i64, x: x as f32, y: y as f32, time });
                 }
             }
         }

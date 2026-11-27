@@ -211,11 +211,11 @@ impl WaylandPlatform {
     /// it isn't shown; buffers the compositor is done with let go; the window's geometry its surface.
     pub(super) fn update_edges(&mut self) {
         let surface_scale = self.scale().ceil().max(1.0) as i32;
-        let shown = shown_edges(self.own_decorations, &self.state);
-        let places = edge_places(self.width, self.height, shown);
-        let (width, height, activated) = (self.width, self.height, self.state.activated);
+        let shown = shown_edges(self.win.own_decorations, &self.win.state);
+        let places = edge_places(self.win.width, self.win.height, shown);
+        let (width, height, activated) = (self.win.width, self.win.height, self.win.state.activated);
         let g = &self.globals;
-        let Some(w) = &mut self.window else { return };
+        let Some(w) = &mut self.win.window else { return };
         w.edges.buffers.retain(|b| !b.retired || b.busy); // (a buffer dropped is destroyed)
         for (i, place) in places.into_iter().enumerate() {
             let edges = &mut w.edges;
@@ -273,12 +273,12 @@ impl WaylandPlatform {
 
     /// Which edge of the window `surface` is.
     pub(super) fn edge_of(&self, surface: ObjectId) -> Option<usize> {
-        self.window.as_ref()?.edges.edge_of(surface)
+        self.win.window.as_ref()?.edges.edge_of(surface)
     }
 
     /// The compositor is done with a buffer (an edge's).
     pub(super) fn buffer_released(&mut self, buffer: ObjectId) {
-        if let Some(w) = &mut self.window {
+        if let Some(w) = &mut self.win.window {
             w.edges.released(buffer);
         }
     }
@@ -286,11 +286,11 @@ impl WaylandPlatform {
     /// The pointer over edge `i` at (x, y) of it (entered with `serial`, or moved): where it is in the window's points
     /// kept for a press, the resize cursor for where it would resize from shown.
     pub(super) fn over_edge(&mut self, i: usize, x: f64, y: f64, entered: Option<u32>) {
-        let Some(w) = &self.window else { return };
+        let Some(w) = &self.win.window else { return };
         let [ex, ey, ..] = w.edges.place(i);
-        self.edge_x = ex as f64 + x;
-        self.edge_y = ey as f64 + y;
-        let edge = resize_edge_at(self.edge_x, self.edge_y, self.width, self.height);
+        self.win.edge_x = ex as f64 + x;
+        self.win.edge_y = ey as f64 + y;
+        let edge = resize_edge_at(self.win.edge_x, self.win.edge_y, self.win.width, self.win.height);
         let mut cursor = self.shared.cursor.borrow_mut();
         match entered {
             Some(serial) => cursor.entered_edge(serial, edge),
@@ -301,8 +301,8 @@ impl WaylandPlatform {
     /// A press on an edge (the pointer's left button, or a finger, with `serial`) at (x, y) in the window's points:
     /// the window manager resizes the window by it.
     pub(super) fn resize_from_edge(&self, serial: u32, x: f64, y: f64) {
-        let (Some(w), Some(seat)) = (&self.window, &self.globals.seat) else { return };
-        w.toplevel.resize(seat, serial, resize_edge_at(x, y, self.width, self.height));
+        let (Some(w), Some(seat)) = (&self.win.window, &self.globals.seat) else { return };
+        w.toplevel.resize(seat, serial, resize_edge_at(x, y, self.win.width, self.win.height));
     }
 }
 

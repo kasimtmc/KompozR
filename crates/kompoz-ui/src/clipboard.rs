@@ -478,30 +478,54 @@ impl ClipItem {
 // ---------------------------------------------------------------------------------------------------------------
 // Metadata and entries
 
+/// The type a Linux password manager (KeePassXC, Klipper's, …) offers beside a password it copies, asking that it
+/// be kept out of clipboard histories and syncs ("secret").
+pub const PASSWORD_MANAGER_HINT: &str = "x-kde-passwordManagerHint";
+
 /// What a clip holds, described without reading it (Compose's ClipMetadata over Android's ClipDescription): its
-/// MIME types.
+/// MIME types, and whether it is sensitive (a password: Android's `EXTRA_IS_SENSITIVE`, a Linux password manager's
+/// [`PASSWORD_MANAGER_HINT`]; C++'s `isSensitive`, b7ebe27).
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct ClipMetadata {
     mime_types: Vec<String>,
+    is_sensitive: bool,
 }
 
 impl ClipMetadata {
     pub fn new(mime_types: Vec<String>) -> ClipMetadata {
-        ClipMetadata { mime_types }
+        ClipMetadata { mime_types, is_sensitive: false }
+    }
+
+    /// The same, sensitive or not: what the app copies so is offered with the password managers' hint (other apps'
+    /// histories leave it out).
+    pub fn with_sensitive(mut self, sensitive: bool) -> ClipMetadata {
+        self.is_sensitive = sensitive;
+        self
+    }
+
+    /// Whether it is a password or the like, its source asking for it not to be kept or shown (C++'s and Compose's
+    /// `isSensitive`).
+    pub fn is_sensitive(&self) -> bool {
+        self.is_sensitive
     }
 
     /// What another app offers, as the platform lists it: its types as they are, X11's targets that aren't data
     /// (TARGETS, TIMESTAMP, …) left out, and `text/plain` added where text is offered only by X11's names
     /// (`UTF8_STRING`, `STRING`) — as Android describes text.
     pub fn of_offered(types: &[String]) -> ClipMetadata {
-        let mut mime_types: Vec<String> =
-            types.iter().filter(|t| !X11_NON_DATA_TARGETS.contains(&t.as_str())).cloned().collect();
+        // (A password manager's hint: the clip sensitive, the hint itself no data.)
+        let is_sensitive = types.iter().any(|t| t == PASSWORD_MANAGER_HINT);
+        let mut mime_types: Vec<String> = types
+            .iter()
+            .filter(|t| !X11_NON_DATA_TARGETS.contains(&t.as_str()) && *t != PASSWORD_MANAGER_HINT)
+            .cloned()
+            .collect();
         if mime_types.iter().any(|t| X11_TEXT_NAMES.contains(&t.as_str()))
             && !mime_types.iter().any(|t| essence(t) == MIMETYPE_TEXT_PLAIN)
         {
             mime_types.push(MIMETYPE_TEXT_PLAIN.into());
         }
-        ClipMetadata { mime_types }
+        ClipMetadata { mime_types, is_sensitive }
     }
 
     /// Its MIME types.
@@ -575,7 +599,7 @@ impl ClipEntry {
                 }
             }
         }
-        ClipEntry::with_metadata(items, ClipMetadata { mime_types })
+        ClipEntry::with_metadata(items, ClipMetadata::new(mime_types))
     }
 
     /// An entry of `items` described by `metadata` (another app's, as it lists its types).
@@ -694,6 +718,18 @@ impl ClipEntry {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn a_password_managers_clip_is_sensitive() {
+        let offered =
+            |types: &[&str]| ClipMetadata::of_offered(&types.iter().map(|t| t.to_string()).collect::<Vec<_>>());
+        let types = ["text/plain;charset=utf-8", "text/html"];
+        assert!(!offered(&types).is_sensitive());
+        let secret = offered(&["text/plain;charset=utf-8", PASSWORD_MANAGER_HINT]);
+        assert!(secret.is_sensitive(), "the hint marks it");
+        assert_eq!(secret.mime_types(), ["text/plain;charset=utf-8"], "the hint is no data");
+        assert!(ClipMetadata::new(vec!["text/plain".into()]).with_sensitive(true).is_sensitive());
+    }
 
     #[test]
     fn mime_types_match_as_androids_with_parameters_left_out() {

@@ -22,9 +22,12 @@ pub enum MouseButton {
 /// A platform's event.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Event {
-    /// The app is to end (the window closed, a signal, the session ending).
+    /// The app is to end (a signal, the session ending), whatever its windows' own closing does.
     Quit,
     // The window.
+    /// The user closes the window (its title bar's ×, the window manager's close, Alt+F4): the main window's ends
+    /// the app (C++'s), a `Window`'s calls its `on_close_request`.
+    CloseRequest,
     FocusGained,
     FocusLost,
     Shown,
@@ -213,6 +216,16 @@ pub enum Event {
     AccessibilityRequest,
     /// Asked for by the host's waker (work for the next frame).
     Wake,
+    // The app's tray icons (to the app's core, whichever window they come through).
+    /// Tray icon `tray` clicked (activated): its `on_action`.
+    TrayAction {
+        tray: u64,
+    },
+    /// An item of tray icon `tray`'s menu clicked: where it is, an index at each level (a submenu's items below it).
+    TrayMenuItem {
+        tray: u64,
+        path: Vec<usize>,
+    },
 }
 
 impl Event {
@@ -223,6 +236,7 @@ impl Event {
             self,
             Event::FocusGained
                 | Event::FocusLost
+                | Event::CloseRequest
                 | Event::Shown
                 | Event::Hidden
                 | Event::Minimized

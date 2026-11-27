@@ -16,18 +16,24 @@ mod profile;
 pub mod regions;
 mod script;
 mod title_bar;
+mod windows;
 
-pub use app_core::{AppCore, DeviceFactory, Next, lifecycle_state_of};
+pub use app_core::{AppCore, DeviceFactory, Next, lifecycle_state_of, paint_image};
 pub use event::{Event, MouseButton};
-pub use platform::{Metrics, Platform, TitleBar, WindowAction, WindowButton};
+pub use kompoz_gpu::device::GpuPriority;
+pub use platform::{
+    Metrics, Platform, TitleBar, TrayIcon, TrayImage, TrayMenuItem, WindowAction, WindowButton, WindowSpec,
+};
 pub use title_bar::{
     TITLE_BAR_BUTTON, TITLE_BAR_GAP, TITLE_BAR_HEIGHT, TITLE_BAR_ID, TitleBarColors, WindowActions, WindowFrame,
     button_action, button_icon,
 };
+pub use windows::{AppWindows, MakeWindow, key_name};
 
 use crate::system::log;
 use kompoz_graphics::Dp;
 use kompoz_runtime::Content;
+use kompoz_ui::window::ApplicationScope;
 use std::process::ExitCode;
 use std::rc::Rc;
 
@@ -43,6 +49,8 @@ pub struct AppConfig {
     pub image_disk_cache_bytes: u64,
     /// The program's arguments (the first its name): an address in them is a deep link.
     pub args: Vec<String>,
+    /// Which GPU draws where there are two (C++'s Application `gpuPriority`; `KOMPOZ_GPU_PRIORITY` instead).
+    pub gpu_priority: GpuPriority,
 }
 
 impl AppConfig {
@@ -54,13 +62,33 @@ impl AppConfig {
             height: Dp(800.0),
             image_disk_cache_bytes: 64 << 20,
             args: std::env::args().collect(),
+            gpu_priority: GpuPriority::Auto,
+        }
+    }
+}
+
+/// What an app composes: its main window's content (`App::run`: closing that window ends the app), or a
+/// composition without a window of its own (`application { }`: its `Window`s and `Tray`s; it ends with
+/// `exit_application` or when nothing is left in it).
+#[derive(Clone)]
+pub enum AppContent {
+    Window(Rc<dyn Content>),
+    Application(Rc<dyn Fn(&ApplicationScope)>),
+}
+
+impl AppContent {
+    /// The app's root core for it on `platform` (not started).
+    pub fn core<P: Platform>(&self, platform: P, config: &AppConfig) -> AppCore<P> {
+        match self {
+            AppContent::Window(content) => AppCore::new(platform, config.clone(), content.clone()),
+            AppContent::Application(content) => AppCore::application(platform, config.clone(), content.clone()),
         }
     }
 }
 
 /// A display platform's entry point: runs the app on it until it quits (what the program returns), or none if it
 /// can't run here (no display: the next is tried).
-pub type DisplayPlatformRun = fn(&AppConfig, Rc<dyn Content>) -> Option<ExitCode>;
+pub type DisplayPlatformRun = fn(&AppConfig, AppContent) -> Option<ExitCode>;
 
 /// A display platform built in.
 #[derive(Clone, Copy, Debug)]
@@ -108,6 +136,14 @@ impl App {
         self
     }
 
+    /// Which GPU draws where there are two (C++'s Application `gpuPriority`: Auto, the screen's, else the
+    /// integrated one; Integrated; Discrete, else the integrated one). `KOMPOZ_GPU_PRIORITY=auto|integrated|discrete`
+    /// overrides it, `KOMPOZ_GPU_DEVICE` both.
+    pub fn gpu_priority(mut self, priority: GpuPriority) -> App {
+        self.config.gpu_priority = priority;
+        self
+    }
+
     pub fn config(&self) -> &AppConfig {
         &self.config
     }
@@ -116,7 +152,18 @@ impl App {
     /// on the display platforms built in, in order (`KOMPOZ_PLATFORM=x11` and the like: that one only), the first
     /// that can run here.
     pub fn run(self, content: impl Content + 'static) -> ExitCode {
-        let content: Rc<dyn Content> = Rc::new(content);
+        self.run_content(AppContent::Window(Rc::new(content)))
+    }
+
+    /// Runs the app as Compose Desktop's `application { }` does: `content` composed without a window of its own,
+    /// given the app's scope (`exit_application`), its `Window`s and `Tray`s shown; until it exits or nothing is
+    /// left in it. What the program returns.
+    pub fn application(self, content: impl Fn(&ApplicationScope) + 'static) -> ExitCode {
+        self.run_content(AppContent::Application(Rc::new(content)))
+    }
+
+    /// Runs `content` as [`run`](App::run) does (headless, or on the first display platform that can).
+    pub fn run_content(self, content: AppContent) -> ExitCode {
         if crate::headless::headless_requested() {
             return crate::headless::run_headless(&self.config, content);
         }
@@ -141,4 +188,26 @@ impl App {
         ));
         ExitCode::FAILURE
     }
+}
+
+/// Compose Desktop's `application { }`: `content` composed without a window of its own, given the app's scope
+/// ([`ApplicationScope::exit_application`]), its `Window`s and `Tray`s shown, until it exits or nothing is left in
+/// it (no window, no tray icon); what the program returns. The app's title (its caches', its window class's) is the
+/// program's name; `App::new(title)….application(content)` gives another and the rest of its configuration.
+///
+/// ```text
+/// fn main() -> ExitCode {
+///     application(|app: &ApplicationScope| {
+///         let app = app.clone();
+///         Window(on_close_request = move || app.exit_application(), content = |_: &FrameWindowScope| App());
+///     })
+/// }
+/// ```
+pub fn application(content: impl Fn(&ApplicationScope) + 'static) -> ExitCode {
+    let name = std::env::args()
+        .next()
+        .and_then(|a| std::path::Path::new(&a).file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "KompozR".into());
+    App::new(name).application(content)
 }

@@ -31,6 +31,19 @@ kompoz-test = { path = "../kompoz-test" }
 name = "app_core"
 harness = false
 
+# The app's windows on the headless platform (a GPU device each): Window opened, drawn with the caller's locals and
+# closed, scripts by title, the main window's close, the state followed both ways, hidden windows kept,
+# application { } ending, the tray icon's menu and notifications.
+[[test]]
+name = "windows"
+harness = false
+
+# The app's windows on X11 on a real display (KOMPOZ_DISPLAY_TESTS=1, DISPLAY: Xvfb in CI): one connection, a window and
+# a device each, a script reaching one by its title, the window manager's close, a state's size, place and placement.
+[[test]]
+name = "x11_windows"
+harness = false
+
 # KompozR's title bar (WindowFrame) in a test rule: its layout, its buttons as the desktop lays them out, what it
 # asks of the window, its labels, colors and direction.
 [[test]]

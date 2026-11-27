@@ -254,7 +254,7 @@ impl WaylandPlatform {
         let mask = actions_mask(&payload.actions);
         let source = {
             let clipboard = self.shared.clipboard.borrow();
-            match (&clipboard.manager, &clipboard.device, &self.window) {
+            match (&clipboard.manager, &clipboard.device, &self.win.window) {
                 (Some(manager), Some(_), Some(_)) if manager.version() >= 3 && mask != Action::NONE => {
                     manager.create_data_source()
                 }
@@ -262,7 +262,7 @@ impl WaylandPlatform {
             }
         };
         let Some(source) = source else {
-            self.events.push_back(Event::OwnDragEnded { action: None });
+            self.win.events.push_back(Event::OwnDragEnded { action: None });
             return;
         };
         for mime in payload.offered(WAYLAND_TEXT_TYPES) {
@@ -272,7 +272,7 @@ impl WaylandPlatform {
         let icon = self.make_icon(&drag);
         {
             let clipboard = self.shared.clipboard.borrow();
-            let (Some(device), Some(w)) = (&clipboard.device, &self.window) else { return };
+            let (Some(device), Some(w)) = (&clipboard.device, &self.win.window) else { return };
             device.start_drag(Some(&source), &w.surface, icon.as_ref().map(|i| &i.surface), self.press_serial);
         }
         self.outgoing = Some(OutgoingDrag { state: SourceState::new(payload), check: None, source, icon, drag });
@@ -312,7 +312,7 @@ impl WaylandPlatform {
         if icon.viewport.is_some() {
             let scale120 = match icon.drawn {
                 Some(IconScale::Fractional(s)) => s,
-                _ if self.scale120 > 0 => self.scale120,
+                _ if self.win.scale120 > 0 => self.win.scale120,
                 _ => (self.scale() * 120.0).round() as u32,
             };
             return Some(IconScale::Fractional(scale120));
@@ -465,7 +465,7 @@ impl WaylandPlatform {
         if let SourceStep::Ended(action) = step {
             self.outgoing = None; // (the source and the icon destroyed)
             self.shared.dragging.set(false);
-            self.events.push_back(Event::OwnDragEnded { action });
+            self.win.events.push_back(Event::OwnDragEnded { action });
             let _ = self.connection.flush();
         }
     }

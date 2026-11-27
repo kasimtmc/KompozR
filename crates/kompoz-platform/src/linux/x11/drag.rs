@@ -168,7 +168,7 @@ impl X11Platform {
         }
         let window = self.window();
         let (Some(pointer), true) = (self.pointer, window != NONE) else {
-            self.events.push_back(Event::OwnDragEnded { action: None });
+            self.win.events.push_back(Event::OwnDragEnded { action: None });
             return;
         };
         let d = self.shared.display.clone();
@@ -176,7 +176,7 @@ impl X11Platform {
         let time = pointer.time;
         d.set_selection_owner(a.XdndSelection, window, time);
         if d.selection_owner(a.XdndSelection) != window {
-            self.events.push_back(Event::OwnDragEnded { action: None });
+            self.win.events.push_back(Event::OwnDragEnded { action: None });
             return;
         }
         let payload = Payload::new(&drag.transfer_data);
@@ -456,7 +456,7 @@ impl X11Platform {
         }
         d.flush();
         self.shared.dragging.set(false);
-        self.events.push_back(Event::OwnDragEnded { action });
+        self.win.events.push_back(Event::OwnDragEnded { action });
     }
 
     /// A target's `XdndStatus` or `XdndFinished` (whether it is the drag's).

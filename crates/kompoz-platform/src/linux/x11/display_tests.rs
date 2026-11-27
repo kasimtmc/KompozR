@@ -24,9 +24,9 @@ fn enabled() -> bool {
 
 /// A platform on the display with a window of its own, not shown.
 fn platform() -> X11Platform {
-    let p = X11Platform::connect().expect("an X display (KOMPOZ_DISPLAY_TESTS=1)");
+    let mut p = X11Platform::connect().expect("an X display (KOMPOZ_DISPLAY_TESTS=1)");
     let window = p.display().create_window(100, 100, ffi::PROPERTY_CHANGE_MASK).expect("a window");
-    p.shared.window.set(window);
+    p.adopt(window);
     p
 }
 
@@ -235,7 +235,7 @@ fn drops_come_from_another_client() {
     let deadline = sys::monotonic_now() + 10_000_000_000;
     while !events.iter().any(|e| matches!(e, Event::DropComplete { .. })) && sys::monotonic_now() < deadline {
         t.pump();
-        events.extend(t.take_events());
+        events.extend(t.take_events().into_iter().map(|(_, e)| e));
         t.wait(Some(Duration::from_millis(5)));
     }
     let mime_types = vec!["text/uri-list".to_string(), "text/html".into()];

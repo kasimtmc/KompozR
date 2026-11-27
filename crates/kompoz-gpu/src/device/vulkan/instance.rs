@@ -1,7 +1,7 @@
 //! The instance (with validation's messenger, and the window's surface) and the GPU picked on it.
 
 use super::VulkanSurface;
-use crate::device::{env_is_one, log};
+use crate::device::{GpuPriority, env_is_one, gpu_priority, log};
 use ash::vk;
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -27,6 +27,8 @@ impl Instance {
     /// The instance (Vulkan 1.1, validation's layer and messenger with `KOMPOZ_GPU_VALIDATION=1` where the layer is
     /// there) and the window's surface, if there is a window.
     pub fn new(window: Option<VulkanSurface>) -> Result<Instance, String> {
+        #[cfg(all(target_os = "linux", not(target_os = "android")))]
+        keep_offload_driver_out();
         // SAFETY: loads the system's Vulkan loader, whose initialisation is the platform's own.
         let entry = unsafe { ash::Entry::load() }.map_err(|e| format!("no Vulkan loader ({e})"))?;
         let mut validation = false;
@@ -150,11 +152,78 @@ impl Choice {
     }
 }
 
+/// The computer's GPUs as Linux has them (its PCI display devices): the vendor of the one the screen is on (the
+/// firmware's VGA device; 0: none told), and whether an NVIDIA GPU with NVIDIA's own driver is beside it, the screen
+/// not on it (a laptop's Optimus GPU, put to sleep while nothing uses it).
+#[cfg(all(target_os = "linux", not(target_os = "android")))]
+#[derive(Clone, Copy, Debug, Default)]
+struct PciGpus {
+    screen_vendor: u32,
+    nvidia_offload: bool,
+}
+
+#[cfg(all(target_os = "linux", not(target_os = "android")))]
+fn pci_gpus() -> PciGpus {
+    let mut gpus = PciGpus::default();
+    let (mut nvidia, mut nvidia_shows) = (false, false);
+    let Ok(entries) = std::fs::read_dir("/sys/bus/pci/devices") else { return gpus };
+    for entry in entries.flatten() {
+        let read = |name: &str| std::fs::read_to_string(entry.path().join(name)).unwrap_or_default().trim().to_string();
+        if !read("class").starts_with("0x03") {
+            continue; // (not a display controller)
+        }
+        let vendor = u32::from_str_radix(read("vendor").trim_start_matches("0x"), 16).unwrap_or(0);
+        let shows = read("boot_vga") == "1";
+        if shows {
+            gpus.screen_vendor = vendor;
+        }
+        let driver = std::fs::read_link(entry.path().join("driver")).ok();
+        if vendor == 0x10de && driver.as_deref().and_then(|d| d.file_name()).is_some_and(|n| n == "nvidia") {
+            nvidia = true;
+            nvidia_shows |= shows;
+        }
+    }
+    gpus.nvidia_offload = nvidia && !nvidia_shows && gpus.screen_vendor != 0;
+    gpus
+}
+
+/// Before the process's first instance (C++'s `keepOffloadDriverOut`): an Optimus GPU's driver left out of it
+/// unless it may draw (Discrete, `KOMPOZ_GPU_DEVICE`) or the loader's drivers are the user's to choose. Loaded,
+/// NVIDIA's wakes its sleeping GPU as the instance is made and again as it goes or the process ends (some 2 s each),
+/// though the integrated GPU draws. Through the loader's own filter, set for the process once, before the loader
+/// reads it.
+#[cfg(all(target_os = "linux", not(target_os = "android")))]
+fn keep_offload_driver_out() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
+        if gpu_priority() == GpuPriority::Discrete || set("KOMPOZ_GPU_DEVICE") {
+            return;
+        }
+        let users = ["VK_LOADER_DRIVERS_SELECT", "VK_LOADER_DRIVERS_DISABLE", "VK_DRIVER_FILES", "VK_ICD_FILENAMES"];
+        if users.iter().chain(&["VK_ADD_DRIVER_FILES"]).any(|n| set(n)) || !pci_gpus().nvidia_offload {
+            return;
+        }
+        // SAFETY: set once, on the thread making the process's first Vulkan instance, before the loader (which
+        // reads it) is loaded; KompozR's other threads don't read or write the environment meanwhile (they read
+        // their settings as the app starts).
+        unsafe { std::env::set_var("VK_LOADER_DRIVERS_DISABLE", "*nvidia*") };
+        log("kompoz: GPU: NVIDIA's Vulkan driver left unloaded: the screen is on the other GPU \
+             (KOMPOZ_GPU_PRIORITY=discrete to draw on it)");
+    });
+}
+
 /// A GPU with Vulkan 1.1 and a queue that draws (and presents to the surface, if there is one): the one
-/// `KOMPOZ_GPU_DEVICE` names part of, else an integrated one (it saves power), else a discrete one, else any, a
-/// CPU's last.
+/// `KOMPOZ_GPU_DEVICE` names part of, else as the app's [`GpuPriority`] says (C++'s b96a026): Auto, the one the
+/// screen is on where Linux tells, else an integrated one (it saves power), else a discrete one; Discrete, a discrete
+/// one, else an integrated one; Integrated, an integrated one, else a discrete one; else any, a CPU's last.
 pub(super) fn pick_physical_device(instance: &Instance) -> Option<Choice> {
     let wanted = kompoz_runtime::environment::var("KOMPOZ_GPU_DEVICE").filter(|w| !w.is_empty());
+    let asked = gpu_priority();
+    #[cfg(all(target_os = "linux", not(target_os = "android")))]
+    let screen_vendor = if asked == GpuPriority::Auto { pci_gpus().screen_vendor } else { 0 };
+    #[cfg(not(all(target_os = "linux", not(target_os = "android"))))]
+    let screen_vendor = 0u32;
     let surface = instance.surface_fn.as_ref().map(|f| (f, instance.surface));
     // SAFETY: queries of the instance's physical devices.
     unsafe {
@@ -183,15 +252,20 @@ pub(super) fn pick_physical_device(instance: &Instance) -> Option<Choice> {
                     continue;
                 }
                 let name = properties.device_name_as_c_str().map(CStr::to_string_lossy).unwrap_or_default();
+                let integrated = properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU;
+                let discrete = properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU;
                 let rank = if wanted.as_deref().is_some_and(|w| name.contains(w)) {
                     10
+                } else if screen_vendor != 0 && properties.vendor_id == screen_vendor && (integrated || discrete) {
+                    5 // (Auto: the screen's)
+                } else if integrated {
+                    if asked == GpuPriority::Discrete { 3 } else { 4 }
+                } else if discrete {
+                    if asked == GpuPriority::Discrete { 4 } else { 3 }
+                } else if properties.device_type == vk::PhysicalDeviceType::CPU {
+                    0
                 } else {
-                    match properties.device_type {
-                        vk::PhysicalDeviceType::INTEGRATED_GPU => 3,
-                        vk::PhysicalDeviceType::DISCRETE_GPU => 2,
-                        vk::PhysicalDeviceType::CPU => 0,
-                        _ => 1,
-                    }
+                    1
                 };
                 if best.as_ref().is_none_or(|(r, _)| rank > *r) {
                     let timestamps_valid = family.timestamp_valid_bits > 0 && properties.limits.timestamp_period > 0.0;

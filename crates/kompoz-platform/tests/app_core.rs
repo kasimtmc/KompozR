@@ -19,7 +19,8 @@ use kompoz_graphics::*;
 use kompoz_lifecycle::{LifecycleEvent, LifecycleObserver, LifecycleOwner, LifecycleState};
 use kompoz_platform::headless::{EventQueue, HeadlessPlatform, run_core};
 use kompoz_platform::{
-    AppConfig, AppCore, Event, Metrics, MouseButton, Platform, TitleBar, WindowAction, WindowButton,
+    AppConfig, AppCore, Event, GpuPriority, Metrics, MouseButton, Platform, TitleBar, WindowAction, WindowButton,
+    WindowSpec,
 };
 use kompoz_runtime::*;
 use kompoz_ui::KompozHost;
@@ -103,7 +104,7 @@ impl Platform for TestPlatform {
     fn backends(&self) -> Vec<Backend> {
         self.inner.backends()
     }
-    fn open_window(&mut self, app: &AppConfig, backend: Backend) -> Result<Surface, String> {
+    fn open_window(&mut self, app: &WindowSpec, backend: Backend) -> Result<Surface, String> {
         self.inner.open_window(app, backend)
     }
     fn close_window(&mut self) {
@@ -156,6 +157,7 @@ fn config(width: f32, height: f32) -> AppConfig {
         height: Dp(height),
         image_disk_cache_bytes: 0,
         args: vec!["test".into(), "kompoz://item/1".into()],
+        gpu_priority: GpuPriority::Auto,
     }
 }
 

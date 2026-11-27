@@ -14,7 +14,10 @@
 //! ending the app. And an editor's input sessions (what a focused text field opens) on the compositor's text-input-v3, the protocol's traffic logged
 //! (`WAYLAND_DEBUG`): enabled with the field's text, kind and caret, its changes (more than the protocol's 4000 bytes:
 //! cut around the caret) told and committed, another field enabled afresh, disabled at the end; the tablet seat asked
-//! for. (No input method or tablet can be scripted on the compositor: what they send is unit-tested.)
+//! for. (No input method or tablet can be scripted on the compositor: what they send is unit-tested.) And two
+//! windows on one connection: a click opening a `Window` of its own (its own toplevel, drawn by a device of its own,
+//! at its state's size), a script reaching it by its title, its own title bar's close (KompozR's decorations) its
+//! `on_close_request`, the main window going on.
 
 #![allow(non_snake_case)]
 
@@ -61,6 +64,49 @@ fn Counter() {
             );
         },
     );
+}
+
+/// Two windows: the main one white, a click on it opening "İkinci" (200 by 150 dp, red), whose close request takes it
+/// out.
+#[kompozable]
+fn TwoWindows() {
+    let shown = remember(|| mutable_state_of(false));
+    let toggle = shown.clone();
+    Box(modifier = Modifier.fill_max_size().background(Color::White).clickable(on_click = move || toggle.set(true)));
+    if shown.get() {
+        let hide = shown.clone();
+        kompoz_ui::window::Window(
+            on_close_request = move || hide.set(false),
+            title = "İkinci".to_string(),
+            state = kompoz_ui::window::remember_window_state(size = DpSize(200.dp(), 150.dp())),
+            content = |_: &kompoz_ui::window::FrameWindowScope| {
+                Box(modifier = Modifier.fill_max_size().background(Color::Red));
+            },
+        );
+    }
+}
+
+/// The two windows' script: a click opens the second; shots of both; the second's own title bar's close (KompozR's
+/// decorations: Close's middle 22 dp from its end) closes it; a shot of the main one after.
+fn windows_script(work: &Path) -> String {
+    format!(
+        "wait 30;click 100 100;wait 60;@İkinci: shot {0}/second.png;wait 5;shot {0}/main.png;@İkinci: click 178 20;\
+         wait 60;shot {0}/after.png;quit",
+        work.display()
+    )
+}
+
+/// The two windows' run checked: the second its size and red (below its title bar), the main one white, closed by
+/// its title bar (the app going on), nothing wrong logged.
+fn check_windows(work: &Path, out: &str) {
+    for line in ["the connection broke", "GPU validation:", "no window", "couldn't be opened", "no window titled"] {
+        assert!(!out.lines().any(|l| l.contains(line)), "logged '{line}':\n{out}");
+    }
+    assert_eq!(png_size(&work.join("second.png")), (200, 150), "the second window at its state's size");
+    assert!(near(pixel(&work.join("second.png"), 100, 120), 0xffff0000), "the second window's content");
+    assert!(near(pixel(&work.join("main.png"), 300, 400), 0xffffffff), "the main window's own");
+    assert!(work.join("after.png").exists(), "the main window went on after the second closed");
+    assert_eq!(out.matches("renderer: KompozR on vulkan").count(), 2, "a device each:\n{out}");
 }
 
 /// An editor's input sessions, as a focused text field opens them: one for a field holding "merhaba"; at the first
@@ -191,6 +237,7 @@ enum Drive {
     Counter,
     TitleBar,
     Editor,
+    Windows,
 }
 
 /// The Counter's script: shots before and after a click on its button (70, 70 dp: in it with a title bar above it
@@ -394,6 +441,9 @@ fn main() -> ExitCode {
         if child == "editor" {
             return App::new("Düzenleyici").size(360.dp(), 480.dp()).run(Editor);
         }
+        if child == "windows" {
+            return App::new("Pencereler").size(360.dp(), 480.dp()).run(TwoWindows);
+        }
         return App::new("Sayaç").size(360.dp(), 480.dp()).run(Counter);
     }
     if std::env::var("KOMPOZ_DISPLAY_TESTS").as_deref() != Ok("1") {
@@ -429,6 +479,11 @@ fn main() -> ExitCode {
         vec![("VK_DRIVER_FILES", lavapipe), ("KOMPOZ_DECORATIONS", "kompoz")],
     ));
     runs.push((
+        "windows: lavapipe, KompozR's decorations",
+        Drive::Windows,
+        vec![("VK_DRIVER_FILES", lavapipe), ("KOMPOZ_DECORATIONS", "kompoz")],
+    ));
+    runs.push((
         "editor: lavapipe, the protocol logged",
         Drive::Editor,
         vec![("VK_DRIVER_FILES", lavapipe), ("WAYLAND_DEBUG", "1")],
@@ -461,6 +516,10 @@ fn main() -> ExitCode {
                 Drive::Editor => {
                     let out = run_app(&compositor, &work, "editor", "wait 30;type a;wait 10;quit", &env);
                     check_editor(&out);
+                }
+                Drive::Windows => {
+                    let out = run_app(&compositor, &work, "windows", &windows_script(&work), &env);
+                    check_windows(&work, &out);
                 }
             }
         })

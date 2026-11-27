@@ -20,13 +20,13 @@ use super::profile::{DrawCounts, Profile};
 use super::regions::{ShownChanges, drawn_area, frame_changes};
 use super::script::{Command, Script, WindowEvent, parse_command};
 use super::title_bar::{WindowActions, WindowFrame};
-use super::{AppConfig, Event, MouseButton, Platform, TitleBar, WindowAction};
+use super::{AppConfig, Event, MouseButton, Platform, TitleBar, TrayImage, WindowAction, WindowSpec};
 use crate::image_loader::{load_image_async, load_image_file, save_pixels, start_image_disk_cache, stop_image_loader};
 use crate::system::{app_cache_directory, log, read_file};
 use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{self, Backend, ClearColor, Device, Format, IRect, Surface, Texture, TextureUsage};
 use kompoz_gpu::renderer::RendererBitmaps;
-use kompoz_graphics::{Color, Density, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
+use kompoz_graphics::{Color, Density, Dp, DpSize, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
 use kompoz_lifecycle::LifecycleState;
 use kompoz_runtime::clock::Instant;
 use kompoz_runtime::{Content, MutableState, RecompositionStats, kompozable_lambda, mutable_state_of};
@@ -40,6 +40,9 @@ use kompoz_ui::platform::{
 };
 use kompoz_ui::strings::{Strings, is_rtl_language};
 use kompoz_ui::text_input::EditCommand;
+use kompoz_ui::window::{
+    ApplicationScope, ComposeWindow, FrameWindowScope, WindowPlacement, WindowPosition, WindowProperties, WindowRequest,
+};
 use kompoz_ui::{DisplayList, KompozHost};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -67,8 +70,6 @@ pub type DeviceFactory = Box<dyn Fn(Backend, Surface) -> Result<Box<dyn Device>,
 struct Gpu {
     renderer: Rc<RefCell<Renderer>>,
     bitmaps: Rc<RendererBitmaps>,
-    /// Between the device's begin_frame and end_frame (what is drawn into bitmaps then is drawn in that frame).
-    in_frame: Rc<Cell<bool>>,
     /// The kept frame.
     frame: Option<Texture>,
     timed: bool,
@@ -110,17 +111,65 @@ pub fn lifecycle_state_of(focused: bool, minimized: bool, hidden: bool) -> Lifec
     }
 }
 
-/// The app core on platform `P` (C++'s AppCore): made with the app's configuration and content, then
-/// [`start`](AppCore::start)ed; the platform's loop hands it events ([`handle`](AppCore::handle)) and asks it for
-/// frames ([`frame`](AppCore::frame)), pacing them by [`frame_due`](AppCore::frame_due); [`quit`](AppCore::quit) as
-/// it goes.
+/// Which of the app's compositions a core runs.
+#[derive(Clone)]
+enum Kind {
+    /// The app's own window (`App::run`): closing it ends the app (C++'s).
+    Main,
+    /// The app's composition without a window (`application { }`, Compose Desktop's): its GPU device draws only into
+    /// textures (the app's bitmaps, its tray icons).
+    Application,
+    /// A `Window` of the app's: its request's content in a host of its own.
+    Window(Rc<WindowRequest>),
+}
+
+/// What of a `Window`'s request and state the platform's window was last given (or reported).
+#[derive(Clone, Debug, Default)]
+struct Applied {
+    title: String,
+    size: DpSize,
+    minimized: bool,
+    placement: WindowPlacement,
+    position: WindowPosition,
+    front: u64,
+    properties: Option<WindowProperties>,
+}
+
+/// The app core on platform `P` (C++'s AppCore): made with the app's configuration and content (the main window's,
+/// [`new`](AppCore::new); the app's composition's without one, [`application`](AppCore::application); a `Window`'s,
+/// [`window`](AppCore::window)), then [`start`](AppCore::start)ed; the platform's loop hands it events
+/// ([`handle`](AppCore::handle)) and asks it for frames ([`frame`](AppCore::frame)), pacing them by
+/// [`frame_due`](AppCore::frame_due); [`quit`](AppCore::quit) as it goes. The app's cores together:
+/// [`AppWindows`](super::AppWindows).
 pub struct AppCore<P: Platform> {
     platform: P,
     config: AppConfig,
     content: Rc<dyn Content>,
+    kind: Kind,
     host: Option<KompozHost>,
     gpu: Option<Gpu>,
+    /// The renderer, for the host's callbacks (another as a hidden window is shown again).
+    renderer_slot: Rc<RefCell<Weak<RefCell<Renderer>>>>,
+    /// Between the device's begin_frame and end_frame (what is drawn into bitmaps then is drawn in that frame).
+    in_frame: Rc<Cell<bool>>,
     window_open: bool,
+    /// A `Window`'s: shown (its `visible`); hidden, its host goes on without a GPU device or a platform window.
+    shown: bool,
+    applied: Applied,
+    /// The window's title (KompozR's title bar shows it).
+    title: MutableState<String>,
+    /// `exit_application` asked (the app ends after this frame).
+    exit: Rc<Cell<bool>>,
+    /// The host's handle once started (what `exit_application` wakes the loop with).
+    exit_wake: Rc<RefCell<Option<kompoz_ui::HostHandle>>>,
+    /// A script's "@Title: command"s, for the windows they name (the app's `AppWindows` hands them on).
+    script_out: Vec<(String, String)>,
+    /// The app's virtual clock while its script runs: a window's frames are at its times (none: its own clock).
+    virtual_clock: Option<i64>,
+    /// A `Window`'s icon given to the platform once.
+    icon_told: bool,
+    /// Frames so far.
+    frames: u64,
     /// The frame recorded; only what changed in it is drawn again into the kept frame.
     display: DisplayList,
     /// What changed in each frame shown (for a swapchain image holding an earlier frame).
@@ -182,13 +231,26 @@ impl<P: Platform> AppCore<P> {
         let mut display = DisplayList::new();
         display.set_allow_moves(true); // (the kept frame moves its pixels)
         display.set_keep_nodes(true); // (nodes that didn't change aren't drawn again)
+        let title = mutable_state_of(config.title.clone());
         AppCore {
             platform,
             config,
             content,
+            kind: Kind::Main,
             host: None,
             gpu: None,
+            renderer_slot: Rc::new(RefCell::new(Weak::new())),
+            in_frame: Rc::new(Cell::new(false)),
             window_open: false,
+            shown: true,
+            applied: Applied::default(),
+            title,
+            exit: Rc::new(Cell::new(false)),
+            exit_wake: Rc::default(),
+            script_out: Vec::new(),
+            virtual_clock: None,
+            icon_told: false,
+            frames: 0,
             display,
             shown_changes: ShownChanges::default(),
             scale: 1.0,
@@ -224,6 +286,91 @@ impl<P: Platform> AppCore<P> {
             traced: RecompositionStats::default(),
             device_factory: None,
         }
+    }
+
+    /// A core for the app's composition without a window of its own (`application { }`, Compose Desktop's): `content`
+    /// given the app's scope (its `exit_application` ends the app after the frame it is asked in), on `platform`
+    /// (the app's: its tray icons, its notifications); its windows are `Window`s ([`AppWindows`](super::AppWindows)
+    /// opens them). Not started.
+    pub fn application(platform: P, config: AppConfig, content: Rc<dyn Fn(&ApplicationScope)>) -> AppCore<P> {
+        let exit = Rc::new(Cell::new(false));
+        let exit_wake: Rc<RefCell<Option<kompoz_ui::HostHandle>>> = Rc::default();
+        let scope = {
+            let (exit, wake) = (exit.clone(), exit_wake.clone());
+            ApplicationScope::new(Rc::new(move || {
+                exit.set(true);
+                if let Some(h) = wake.borrow().as_ref() {
+                    h.wake();
+                }
+            }))
+        };
+        let content: Rc<dyn Content> = Rc::new(kompozable_lambda!(move || content(&scope)));
+        let mut core = AppCore::new(platform, config, content);
+        core.kind = Kind::Application;
+        core.exit = exit;
+        core.exit_wake = exit_wake;
+        core
+    }
+
+    /// A core for a `Window` of the app's (C++'s per-window AppCore): its request's content in a host of its own
+    /// (the caller's locals provided), on `platform` (the window's), its title and state kept as the request has
+    /// them ([`sync_window`](AppCore::sync_window)), the user closing it its `on_close_request`. `app`: the app's
+    /// configuration (its title names the caches). Not started.
+    pub fn window(platform: P, app: &AppConfig, request: Rc<WindowRequest>) -> AppCore<P> {
+        let mut config = app.clone();
+        let size = request.state().size();
+        if size.is_specified() {
+            (config.width, config.height) = (size.width, size.height);
+        }
+        let content: Rc<dyn Content> = {
+            let request = request.clone();
+            let scope = FrameWindowScope::new(ComposeWindow::new(&request));
+            Rc::new(kompozable_lambda!(move || {
+                let content = request.content();
+                content(&scope);
+            }))
+        };
+        let mut core = AppCore::new(platform, config, content);
+        core.title.set(request.title());
+        core.applied.title = request.title();
+        core.shown = request.visible();
+        core.kind = Kind::Window(request);
+        core
+    }
+
+    /// Whether this is the app's root core (the main window's, or the app's composition's): what is the process's
+    /// (the GPU layer's log, the image caches, the bitmaps' renderer, the state file, deep links, the script) is its
+    /// own.
+    fn is_root(&self) -> bool {
+        !matches!(self.kind, Kind::Window(_))
+    }
+
+    /// A `Window`'s request (none: the main window's core, the app's composition's).
+    pub fn request(&self) -> Option<&Rc<WindowRequest>> {
+        match &self.kind {
+            Kind::Window(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Whether it is the app's composition without a window (`application { }`).
+    pub fn is_application(&self) -> bool {
+        matches!(self.kind, Kind::Application)
+    }
+
+    /// The window's title now.
+    pub fn title(&self) -> String {
+        self.title.peek()
+    }
+
+    /// Frames so far.
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// What `exit_application` sets (the app ends after the frame it is set in).
+    pub fn exit_flag(&self) -> Rc<Cell<bool>> {
+        self.exit.clone()
     }
 
     /// Makes the GPU device with `factory` instead of kompoz-gpu's `device::create` (before `start`).
@@ -314,8 +461,23 @@ impl<P: Platform> AppCore<P> {
     /// The app's window opened and the GPU renderer started on the first backend that does, the host made and
     /// given its callbacks (C++'s `start`); false if the app can't run (logged, and shown when not scripted).
     pub fn start(&mut self) -> bool {
-        device::set_logger(Some(log));
-        start_image_disk_cache(&self.config.title, self.config.image_disk_cache_bytes);
+        if self.is_root() {
+            device::set_logger(Some(log));
+            start_image_disk_cache(&self.config.title, self.config.image_disk_cache_bytes);
+            // Which GPU draws, for all the app's windows (its gpu_priority; KOMPOZ_GPU_PRIORITY instead).
+            let mut priority = self.config.gpu_priority;
+            if let Some(asked) = self.platform.option("KOMPOZ_GPU_PRIORITY") {
+                match asked.trim() {
+                    "auto" => priority = device::GpuPriority::Auto,
+                    "integrated" => priority = device::GpuPriority::Integrated,
+                    "discrete" => priority = device::GpuPriority::Discrete,
+                    other => self.logf(&format!(
+                        "kompoz: KOMPOZ_GPU_PRIORITY={other}: not auto, integrated or discrete: the app's own"
+                    )),
+                }
+            }
+            device::set_gpu_priority(priority);
+        }
         self.flags = Flags {
             trace: self.flag("KOMPOZ_TRACE"),
             profile: self.flag("KOMPOZ_PROFILE"),
@@ -324,6 +486,11 @@ impl<P: Platform> AppCore<P> {
             damage_show: self.flag("KOMPOZ_DAMAGE_SHOW"),
             full_redraw: self.flag("KOMPOZ_FULL_REDRAW"),
         };
+        // (The platform's scale before the window opens: a `Window`'s place is worked out in dp from it.)
+        if matches!(self.kind, Kind::Window(_)) {
+            let m = self.platform.metrics();
+            (self.scale, self.point_to_px) = (if m.scale > 0.0 { m.scale } else { 1.0 }, m.point_to_px.max(1e-3));
+        }
         let scripted = self.flag("KOMPOZ_SCRIPT"); // (an error is logged, not shown in a box to close)
         // KOMPOZ_GPU's first word.
         let choice = self.platform.option("KOMPOZ_GPU").unwrap_or_default();
@@ -349,43 +516,124 @@ impl<P: Platform> AppCore<P> {
         let gpu = self.gpu.as_ref().expect("a renderer");
         // The pipelines it made in earlier runs, made again ahead of the frames that need them.
         let backend = gpu.renderer.borrow().device().backend();
-        if let Some(dir) = app_cache_directory(&self.config.title) {
+        if let Some(dir) = app_cache_directory(&self.config.title)
+            && self.is_root()
+        {
             gpu.renderer.borrow_mut().warm_pipelines(&dir.join(format!("pipelines-{}.list", backend.name())));
         }
-        kompoz_ui::draw::set_bitmap_renderer(Some(gpu.bitmaps.clone()));
+        if self.is_root() {
+            // (The app's bitmaps drawn by its root's renderer, which lives as long as the app: a window's draws them
+            // read back from it.)
+            kompoz_ui::draw::set_bitmap_renderer(Some(gpu.bitmaps.clone()));
+        }
         // The app's content in the window's frame: below KompozR's title bar while the platform reports one, what
-        // the bar asks of the window queued for the core to do once the host is done.
+        // the bar asks of the window queued for the core to do once the host is done. (The app's composition
+        // without a window: as it is.)
         let content = self.content.clone();
-        let (title_bar, title) = (self.title_bar.clone(), self.config.title.clone());
+        let (title_bar, title) = (self.title_bar.clone(), self.title.clone());
         let queue = self.window_actions.clone();
         let act: WindowActions = Rc::new(move |action, at| queue.borrow_mut().push((action, at)));
-        let host = KompozHost::new(kompozable_lambda!(move || {
-            WindowFrame(title_bar.get(), title.clone(), act.clone(), content.clone());
-        }));
+        let framed = kompozable_lambda!(move || {
+            WindowFrame(title_bar.get(), title.get(), act.clone(), content.clone());
+        });
+        let host = match &self.kind {
+            Kind::Main => KompozHost::new(framed),
+            Kind::Application => {
+                let content = self.content.clone();
+                KompozHost::new(kompozable_lambda!(move || content.compose()))
+            }
+            Kind::Window(request) => {
+                let host = KompozHost::new_window(framed, request.locals());
+                let (preview, after) = (Rc::downgrade(request), Rc::downgrade(request));
+                host.set_window_key_handlers(Some((
+                    Rc::new(move |e| preview.upgrade().is_some_and(|r| r.on_preview_key_event(e))),
+                    Rc::new(move |e| after.upgrade().is_some_and(|r| r.on_key_event(e))),
+                )));
+                host
+            }
+        };
         let callbacks = AppCallbacks {
             platform: self.platform.attach(&host),
-            renderer: Rc::downgrade(&gpu.renderer),
-            in_frame: gpu.in_frame.clone(),
+            renderer: self.renderer_slot.clone(),
+            in_frame: self.in_frame.clone(),
             own_drag: self.own_drag.clone(),
         };
         host.set_callbacks(Rc::new(callbacks));
         host.set_keep_check(self.flags.keep_check);
-        // Deep links: an address given on the command line.
-        for arg in self.config.args.iter().skip(1) {
-            if arg.contains("://") {
-                host.open_deep_link(arg);
+        *self.exit_wake.borrow_mut() = Some(host.handle());
+        if self.is_root() {
+            // Deep links: an address given on the command line.
+            for arg in self.config.args.iter().skip(1) {
+                if arg.contains("://") {
+                    host.open_deep_link(arg);
+                }
             }
-        }
-        if let Some(path) = self.platform.option("KOMPOZ_STATE_FILE")
-            && let Some(state) = read_file(&path)
-        {
-            host.restore_state(&state);
+            if let Some(path) = self.platform.option("KOMPOZ_STATE_FILE")
+                && let Some(state) = read_file(&path)
+            {
+                host.restore_state(&state);
+            }
         }
         self.platform.started(&host);
         self.host = Some(host);
-        self.script = Script::parse(&self.platform.option("KOMPOZ_SCRIPT").unwrap_or_default());
+        if self.is_root() {
+            self.script = Script::parse(&self.platform.option("KOMPOZ_SCRIPT").unwrap_or_default());
+        }
+        if let Kind::Window(request) = &self.kind {
+            let state = request.state();
+            let (placement, minimized, position, size) = state.peek();
+            self.applied = Applied {
+                title: request.title(),
+                size,
+                minimized,
+                placement,
+                position,
+                front: state.to_front_requests(),
+                properties: Some(request.properties()),
+            };
+        }
         self.update_metrics();
         true
+    }
+
+    /// The window as it opens: the main one's from the app's configuration, a `Window`'s from its request and state
+    /// (an aligned position worked out in the screen the platform tells).
+    fn window_spec(&self) -> WindowSpec {
+        let mut spec = WindowSpec::main(&self.config.title, self.config.width, self.config.height);
+        if let Kind::Window(request) = &self.kind {
+            let p = request.properties();
+            let (placement, minimized, position, size) = request.state().peek();
+            spec.id = request.id();
+            spec.title = p.title;
+            if size.is_specified() {
+                (spec.width, spec.height) = (size.width, size.height);
+            }
+            spec.placement = placement;
+            spec.minimized = minimized;
+            spec.undecorated = p.undecorated;
+            spec.resizable = p.resizable;
+            spec.focusable = p.focusable;
+            spec.always_on_top = p.always_on_top;
+            spec.position = self.position_on_screen(&position, spec.width, spec.height);
+        }
+        spec
+    }
+
+    /// Where `position` puts a window of `width` by `height` dp: dp from the screen's top left (none: the platform's
+    /// place, or an aligned one where the screen's size isn't told).
+    fn position_on_screen(&self, position: &WindowPosition, width: Dp, height: Dp) -> Option<(Dp, Dp)> {
+        match position {
+            WindowPosition::PlatformDefault => None,
+            &WindowPosition::Absolute { x, y } => Some((x, y)),
+            WindowPosition::Aligned(alignment) => {
+                let (sw, sh) = self.platform.screen_size()?;
+                let k = self.point_to_px / self.scale; // (dp per point)
+                let screen = IntSize::new((sw as f32 * k) as i32, (sh as f32 * k) as i32);
+                let size = IntSize::new(width.0 as i32, height.0 as i32);
+                let at = alignment.align(size, screen, LayoutDirection::Ltr);
+                Some((Dp(at.x as f32), Dp(at.y as f32)))
+            }
+        }
     }
 
     /// KOMPOZ_GPU's backends, in the order they are tried: a name is that one; "auto" (or nothing) the platform's
@@ -406,14 +654,19 @@ impl<P: Platform> AppCore<P> {
     /// The renderer's device on `backend`, in a window the platform opens for it; false (and the window closed
     /// again) if it can't be made.
     fn start_gpu(&mut self, backend: Backend) -> bool {
-        let mut surface = match self.platform.open_window(&self.config, backend) {
-            Ok(surface) => surface,
-            Err(why) => {
-                self.logf(&format!("kompoz: no window for {}: {why}", backend.name()));
-                return false;
+        // (The app's composition without a window: a device that draws only into textures.)
+        let mut surface = if self.is_application() {
+            Surface::default()
+        } else {
+            match self.platform.open_window(&self.window_spec(), backend) {
+                Ok(surface) => surface,
+                Err(why) => {
+                    self.logf(&format!("kompoz: no window for {}: {why}", backend.name()));
+                    return false;
+                }
             }
         };
-        self.window_open = true;
+        self.window_open = !self.is_application();
         // The compiled pipelines beside the downloaded images, a file for each backend and build of the shaders;
         // another's goes (a driver keeps what it was given: an older build's pipelines would stay in it, read at
         // every start, the file growing with each update).
@@ -451,16 +704,83 @@ impl<P: Platform> AppCore<P> {
                 }
                 let renderer = Rc::new(RefCell::new(renderer));
                 let bitmaps = RendererBitmaps::new(&renderer);
-                self.gpu = Some(Gpu { renderer, bitmaps, in_frame: Rc::new(Cell::new(false)), frame: None, timed });
+                *self.renderer_slot.borrow_mut() = Rc::downgrade(&renderer);
+                self.gpu = Some(Gpu { renderer, bitmaps, frame: None, timed });
                 true
             }
             Err(why) => {
                 self.logf(&format!("kompoz: no {} device: {why}", backend.name()));
-                self.platform.close_window();
+                if self.window_open {
+                    self.platform.close_window();
+                }
                 self.window_open = false;
                 false
             }
         }
+    }
+
+    /// The GPU device let go (its frames done), then the window (a `Window` hidden; the core going).
+    fn release_gpu(&mut self) {
+        if let Some(gpu) = self.gpu.take() {
+            let Gpu { renderer, bitmaps, frame, .. } = gpu;
+            if self.is_root() {
+                // What only the renderer has of bitmaps still about: back into them.
+                kompoz_ui::draw::set_bitmap_renderer(None);
+            }
+            drop(bitmaps);
+            drop(frame);
+            if let Ok(mut r) = renderer.try_borrow_mut() {
+                r.device_mut().wait_idle();
+                // (KOMPOZ_GPU_VALIDATION=1: what the API's validation found, for scripted runs to fail on.)
+                let errors = r.device().validation_errors();
+                if errors > 0 {
+                    self.platform.log(&format!("kompoz: GPU validation: {errors} errors"));
+                }
+            }
+            drop(renderer);
+        }
+        if self.window_open {
+            self.platform.close_window();
+            self.window_open = false;
+        }
+    }
+
+    /// A `Window` shown or hidden (its `visible`): hidden, its GPU device and platform window let go, its host going
+    /// on (its state kept, Compose Desktop's); shown again, a window and a device made afresh, all of it drawn.
+    /// False if it can't be shown again (logged).
+    pub fn set_visible(&mut self, visible: bool) -> bool {
+        if visible == self.shown || self.host.is_none() {
+            self.shown = visible;
+            return true;
+        }
+        self.shown = visible;
+        if !visible {
+            self.release_gpu();
+            self.hidden = true;
+            self.update_lifecycle();
+            return true;
+        }
+        let choice = self.platform.option("KOMPOZ_GPU").unwrap_or_default();
+        let backends = self.gpu_order(choice.split_whitespace().next().unwrap_or(""));
+        if !backends.iter().any(|&b| self.start_gpu(b)) {
+            self.logf("kompoz: the window couldn't be shown again: no GPU device");
+            return false;
+        }
+        self.hidden = false;
+        self.update_lifecycle();
+        self.display.invalidate();
+        self.shown_changes = ShownChanges::default();
+        self.show_frame = true;
+        self.metrics_changed = true;
+        if let Some(host) = &self.host {
+            host.request_redraw();
+        }
+        true
+    }
+
+    /// Whether it is shown (a hidden `Window`'s isn't).
+    pub fn is_shown(&self) -> bool {
+        self.shown
     }
 
     // ---- Metrics ----
@@ -502,6 +822,20 @@ impl<P: Platform> AppCore<P> {
             host.set_system_insets(insets);
         }
         host.set_system_dark_theme(m.dark_theme);
+        // A `Window`'s size as the user (or the window manager) left it, back into its state (dp).
+        if let Kind::Window(r) = &self.kind
+            && self.window_open
+        {
+            let k = self.point_to_px / scale;
+            let size = DpSize(Dp(m.point_width as f32 * k), Dp(m.point_height as f32 * k));
+            if (size.width.0 - self.applied.size.width.0).abs() >= 0.5
+                || (size.height.0 - self.applied.size.height.0).abs() >= 0.5
+            {
+                self.applied.size = size;
+                r.state().set_size(size);
+            }
+        }
+        let Some(host) = &self.host else { return };
         if self.title_bar.peek() != m.title_bar {
             self.title_bar.set(m.title_bar.clone());
         }
@@ -570,11 +904,23 @@ impl<P: Platform> AppCore<P> {
             }
             return;
         };
+        // (A `Window` not enabled takes no input.)
+        if let Kind::Window(r) = &self.kind
+            && is_input(e)
+            && !r.properties().enabled
+        {
+            return;
+        }
         if let Some(modifiers) = e.modifiers() {
             host.set_keyboard_modifiers(modifiers); // (pointer events carry the keys held down)
         }
         match e {
             Event::Quit => self.quit = true,
+            Event::CloseRequest => match &self.kind {
+                Kind::Main => self.quit = true,
+                Kind::Window(r) => r.clone().close_requested(),
+                Kind::Application => {}
+            },
             Event::FocusGained | Event::FocusLost => {
                 self.focused = matches!(e, Event::FocusGained);
                 host.set_window_focused(self.focused);
@@ -582,6 +928,7 @@ impl<P: Platform> AppCore<P> {
             }
             Event::Minimized | Event::Maximized => {
                 self.minimized = matches!(e, Event::Minimized);
+                self.minimized_by_user(self.minimized);
                 self.update_lifecycle();
             }
             Event::Hidden => {
@@ -608,7 +955,10 @@ impl<P: Platform> AppCore<P> {
                 }
                 match e {
                     Event::Shown => self.hidden = false,
-                    Event::Restored => self.minimized = false,
+                    Event::Restored => {
+                        self.minimized = false;
+                        self.minimized_by_user(false);
+                    }
                     _ => {}
                 }
                 self.update_lifecycle();
@@ -815,6 +1165,9 @@ impl<P: Platform> AppCore<P> {
     /// the last one's time: a scroll or an animation would stand still in it and jump two beats in the next); none:
     /// now. A script in virtual time has its frames at once.
     pub fn frame_due(&self) -> Option<i64> {
+        if self.virtual_clock.is_some() {
+            return None; // (the app's script's frames, at once)
+        }
         let last = self.last_frame_time?;
         if self.script.running() && !self.script.realtime {
             return None;
@@ -837,9 +1190,17 @@ impl<P: Platform> AppCore<P> {
     /// beat.
     pub fn frame(&mut self, display_time: Option<i64>) -> Next {
         let frame_start = self.now();
+        self.frames += 1;
+        if let Some(t) = self.virtual_clock {
+            self.script.clock = self.script.clock.max(t);
+        }
         let scripted = self.script.running();
         let shot = if self.script.enabled() { self.step_script() } else { None };
-        let now = if scripted && !self.script.realtime {
+        let now = if let Some(t) = self.virtual_clock {
+            // (The app's script's virtual time: this window's frames at its frames' times.)
+            self.last_frame_time = Some(t);
+            t
+        } else if scripted && !self.script.realtime {
             self.script.clock += SCRIPT_FRAME_NS;
             self.script.clock
         } else {
@@ -899,13 +1260,16 @@ impl<P: Platform> AppCore<P> {
         }
         let mut drawn = Drawn::default();
         let mut waited = 0;
-        if redraw || shot.is_some() || self.show_frame {
-            let gpu = self.gpu.as_ref().expect("a renderer");
+        // (Drawn where there is a window to show it in: not the app's composition's, nor a hidden window's.)
+        if (redraw || shot.is_some() || self.show_frame)
+            && self.window_open
+            && let Some(gpu) = self.gpu.as_ref()
+        {
             let renderer = gpu.renderer.clone();
             let before = self.now();
             renderer.borrow_mut().device_mut().begin_frame(); // (waits for the GPU to be done with a frame before)
             waited = self.now().saturating_sub(before);
-            gpu.in_frame.set(true);
+            self.in_frame.set(true);
             gpu.bitmaps.set_in_frame(true);
             self.profile.acquire_ns = 0; // (a frame with nothing to show asks for no image)
             drawn = self.draw_frame(shot.as_deref());
@@ -915,7 +1279,7 @@ impl<P: Platform> AppCore<P> {
             t2 = if self.flags.profile { self.now() } else { 0 };
             let gpu = self.gpu.as_ref().expect("a renderer");
             renderer.borrow_mut().device_mut().end_frame(drawn.shown);
-            gpu.in_frame.set(false);
+            self.in_frame.set(false);
             gpu.bitmaps.set_in_frame(false);
             renderer.borrow_mut().end_frame();
             if drawn.shown && !self.media_probed {
@@ -961,7 +1325,7 @@ impl<P: Platform> AppCore<P> {
         }
         self.profile.busy = due;
         let wake_at = host.next_deadline().map(|deadline| deadline - self.clock_offset + 1_000_000);
-        Next { busy, wake_at, quit: self.quit }
+        Next { busy, wake_at, quit: self.quit || self.exit.get() }
     }
 
     /// The renderer's and the display list's counts of the frame just drawn.
@@ -1156,6 +1520,14 @@ impl<P: Platform> AppCore<P> {
         while self.script.next < self.script.commands.len() {
             let line = self.script.commands[self.script.next].clone();
             self.script.next += 1;
+            // "@Title: command": the command in the app's window of that title (a `Window`'s), at its next frame.
+            if let Some(rest) = line.trim_start().strip_prefix('@') {
+                match rest.split_once(':') {
+                    Some((title, command)) => self.script_out.push((title.to_string(), command.to_string())),
+                    None => self.logf(&format!("kompoz: script: '{line}' names no command (@Title: command)")),
+                }
+                continue;
+            }
             let Some(command) = parse_command(&line) else { continue };
             let host = self.host.as_ref()?;
             match command {
@@ -1248,6 +1620,7 @@ impl<P: Platform> AppCore<P> {
                         Some(WindowEvent::FocusGained) => Some(Event::FocusGained),
                         Some(WindowEvent::Minimized) => Some(Event::Minimized),
                         Some(WindowEvent::Restored) => Some(Event::Restored),
+                        Some(WindowEvent::Close) => Some(Event::CloseRequest),
                         None => None,
                     };
                     if let Some(e) = e {
@@ -1305,15 +1678,214 @@ impl<P: Platform> AppCore<P> {
         }
     }
 
-    /// Whether the app asked to quit (a script's `quit`, the window closed).
+    /// Whether the app asked to quit (a script's `quit`, the main window closed, `exit_application`).
     pub fn quitting(&self) -> bool {
-        self.quit
+        self.quit || self.exit.get()
     }
+
+    /// The app's script's virtual time while it runs in virtual time (none: real time, or no script): what the
+    /// app's windows' frames follow ([`set_virtual_clock`](AppCore::set_virtual_clock)).
+    pub fn virtual_time(&self) -> Option<i64> {
+        (self.script.running() && !self.script.realtime).then_some(self.script.clock)
+    }
+
+    /// A window's frames at the app's script's virtual times (none: its own clock again).
+    pub fn set_virtual_clock(&mut self, time: Option<i64>) {
+        if self.virtual_clock.is_some() && time.is_none() {
+            // (Real time from here, never back.)
+            if let Some(t) = self.last_frame_time {
+                self.clock_offset = self.clock_offset.max(t - self.platform.now());
+            }
+        }
+        self.virtual_clock = time;
+    }
+
+    /// Whether its next frame is due whatever the platform says: a script of its own runs, or the app's runs in
+    /// virtual time (its windows' frames follow it, one each of its).
+    pub fn scripted(&self) -> bool {
+        self.script.running() || self.virtual_clock.is_some()
+    }
+
+    /// The script's "@Title: command"s since, taken (for the windows they name).
+    pub fn take_script_forwards(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.script_out)
+    }
+
+    /// A script's command for this window (another's "@Title: command"), run at its next frame.
+    pub fn run_script(&mut self, command: &str) {
+        self.script.commands.push(command.to_string());
+        if let Some(host) = &self.host {
+            host.request_redraw(); // (a frame for it: a platform frames a window only when something asks)
+            host.wake();
+        }
+    }
+
+    /// The user minimized or restored a `Window`: its state told (once each way).
+    fn minimized_by_user(&mut self, minimized: bool) {
+        if let Kind::Window(r) = &self.kind
+            && self.applied.minimized != minimized
+        {
+            self.applied.minimized = minimized;
+            r.state().set_is_minimized(minimized);
+        }
+    }
+
+    /// A `Window`'s title, state and parameters as its request has them now, given to the platform where they
+    /// changed (between frames: C++'s `syncWindow`); how the window manager placed it and where read back into its
+    /// state.
+    pub fn sync_window(&mut self) {
+        let Kind::Window(request) = &self.kind else { return };
+        let request = request.clone();
+        let p = request.properties();
+        let state = request.state();
+        let (placement, minimized, position, size) = state.peek();
+        if p.title != self.applied.title {
+            self.applied.title = p.title.clone();
+            self.title.set(p.title.clone()); // (KompozR's own title bar shows it)
+            self.platform.set_title(&p.title);
+        }
+        if !self.window_open {
+            return; // (hidden: the rest as it is shown again)
+        }
+        // What the window manager did, back into the state first (then what the app set since is told).
+        if let Some(placed) = self.platform.window_placement()
+            && placed != self.applied.placement
+            && placement == self.applied.placement
+        {
+            self.applied.placement = placed;
+            state.set_placement(placed);
+        }
+        let k = self.point_to_px / self.scale; // (dp per point)
+        if let Some((x, y)) = self.platform.window_position() {
+            let at = WindowPosition::Absolute { x: Dp((x as f32 * k).round()), y: Dp((y as f32 * k).round()) };
+            if at != self.applied.position && position == self.applied.position {
+                self.applied.position = at.clone();
+                state.set_position(at);
+            }
+        }
+        let (placement, minimized, position, size) = if state.peek() != (placement, minimized, position.clone(), size) {
+            state.peek()
+        } else {
+            (placement, minimized, position, size)
+        };
+        let points = |v: Dp| ((v.0 / k).round() as i32).max(1);
+        if size.is_specified()
+            && ((size.width.0 - self.applied.size.width.0).abs() >= 0.5
+                || (size.height.0 - self.applied.size.height.0).abs() >= 0.5)
+        {
+            self.applied.size = size;
+            if placement == WindowPlacement::Floating {
+                self.platform.set_window_size(points(size.width), points(size.height));
+            }
+        }
+        if minimized != self.applied.minimized {
+            self.applied.minimized = minimized;
+            self.platform.set_minimized(minimized);
+        }
+        if placement != self.applied.placement {
+            self.applied.placement = placement;
+            self.platform.set_placement(placement);
+        }
+        if position != self.applied.position {
+            self.applied.position = position.clone();
+            if let Some((x, y)) = self.position_on_screen(&position, size.width, size.height) {
+                self.platform.set_position(points(x), points(y));
+            }
+        }
+        let front = state.to_front_requests();
+        if front != self.applied.front {
+            self.applied.front = front;
+            self.platform.to_front();
+        }
+        let before = self.applied.properties.replace(p.clone()).unwrap_or_default();
+        if before.resizable != p.resizable {
+            self.platform.set_resizable(p.resizable);
+        }
+        if before.always_on_top != p.always_on_top {
+            self.platform.set_always_on_top(p.always_on_top);
+        }
+        let same_icon = match (&before.icon, &p.icon) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.painter_eq(&**b),
+            _ => false,
+        };
+        if !same_icon || !self.icon_told {
+            self.icon_told = true;
+            let image = p.icon.as_ref().and_then(|icon| self.painted(&**icon, 64));
+            self.platform.set_icon(image.as_ref());
+        }
+    }
+
+    /// `painter` drawn at `size` by `size` px (its intrinsic aspect kept, centered), as a tray or a title bar shows
+    /// it: by the app's renderer (the bitmaps' own), read back; none without one.
+    pub fn painted(&self, painter: &dyn kompoz_ui::draw::Painter, size: i32) -> Option<TrayImage> {
+        paint_image(painter, size)
+    }
+}
+
+/// Whether `e` is input (what a `Window` that isn't enabled leaves out).
+fn is_input(e: &Event) -> bool {
+    e.modifiers().is_some()
+        || matches!(
+            e,
+            Event::MouseMove { .. }
+                | Event::MouseDown { .. }
+                | Event::MouseUp { .. }
+                | Event::TouchDown { .. }
+                | Event::TouchMove { .. }
+                | Event::TouchUp { .. }
+                | Event::Stylus { .. }
+                | Event::Wheel { .. }
+                | Event::PinchBegin { .. }
+                | Event::Pinch { .. }
+                | Event::PinchEnd { .. }
+                | Event::Text(_)
+                | Event::Preedit { .. }
+                | Event::DeleteSurroundingText { .. }
+                | Event::DropBegin { .. }
+                | Event::DropMove { .. }
+                | Event::DropComplete { .. }
+        )
+}
+
+/// `painter` drawn into a bitmap of `size` by `size` px (its intrinsic aspect kept, centered) by the renderer set for
+/// the app's bitmaps, its pixels read back (none where there is none, or nothing drew).
+pub fn paint_image(painter: &dyn kompoz_ui::draw::Painter, size: i32) -> Option<TrayImage> {
+    use kompoz_ui::draw::{Canvas, DrawScope};
+    let size = size.max(1);
+    let bitmap = ImageBitmap::new(
+        size,
+        size,
+        kompoz_graphics::ImageBitmapConfig::Argb8888,
+        true,
+        &kompoz_graphics::colorspace::ColorSpaces::Srgb,
+    );
+    {
+        let mut canvas = Canvas::from_image(&bitmap);
+        let intrinsic = painter.intrinsic_size();
+        let s = size as f32;
+        let (w, h) = if intrinsic.is_specified() && intrinsic.width > 0.0 && intrinsic.height > 0.0 {
+            let k = (s / intrinsic.width).min(s / intrinsic.height);
+            (intrinsic.width * k, intrinsic.height * k)
+        } else {
+            (s, s)
+        };
+        let mut scope =
+            DrawScope::over_canvas(&mut canvas, Size::new(s, s), LayoutDirection::Ltr, Density::new(1.0, 1.0));
+        scope.translate_with((s - w) / 2.0, (s - h) / 2.0, |scope| painter.draw(scope, Size::new(w, h), 1.0, None));
+    }
+    if bitmap.version() > 0 {
+        let rgba = bitmap.pixels();
+        return Some(TrayImage { width: size, height: size, rgba: rgba.to_vec() });
+    }
+    None
 }
 
 impl<P: Platform> Drop for AppCore<P> {
     fn drop(&mut self) {
-        stop_image_loader(); // (its threads end before the rest goes)
+        if self.is_root() {
+            stop_image_loader(); // (its threads end before the rest goes)
+        }
         if self.flags.damage_check {
             self.logf(&format!(
                 "kompoz: damage check: {} of {} frames differed",
@@ -1327,25 +1899,7 @@ impl<P: Platform> Drop for AppCore<P> {
             ));
         }
         self.host.take(); // (runs effect cleanups while the window still exists)
-        if let Some(gpu) = self.gpu.take() {
-            // What only the renderer has of bitmaps still about: back into them.
-            kompoz_ui::draw::set_bitmap_renderer(None);
-            let Gpu { renderer, bitmaps, frame, .. } = gpu;
-            drop(bitmaps);
-            drop(frame);
-            if let Ok(mut r) = renderer.try_borrow_mut() {
-                r.device_mut().wait_idle();
-                // (KOMPOZ_GPU_VALIDATION=1: what the API's validation found, for scripted runs to fail on.)
-                let errors = r.device().validation_errors();
-                if errors > 0 {
-                    self.platform.log(&format!("kompoz: GPU validation: {errors} errors"));
-                }
-            }
-            drop(renderer);
-        }
-        if self.window_open {
-            self.platform.close_window();
-        }
+        self.release_gpu();
     }
 }
 
@@ -1403,7 +1957,8 @@ fn unpremultiplied(width: i32, height: i32, mut pixels: Vec<u8>) -> Option<Image
 /// AppCore callbacks with the platform's `attach`ed).
 struct AppCallbacks {
     platform: Rc<dyn PlatformCallbacks>,
-    renderer: Weak<RefCell<Renderer>>,
+    /// The core's renderer (another as a hidden window is shown again; none while it is hidden).
+    renderer: Rc<RefCell<Weak<RefCell<Renderer>>>>,
     in_frame: Rc<Cell<bool>>,
     /// The MIME types of the app's own drag the platform took, until it ends (`Event::OwnDragEnded`).
     own_drag: Rc<RefCell<Option<Vec<String>>>>,
@@ -1464,7 +2019,7 @@ impl PlatformCallbacks for AppCallbacks {
     /// `draw` (px, from 0, 0) into a texture of `size` at the window's density, read back (GraphicsLayer's
     /// `toImageBitmap`): in the frame going on, or one of its own between frames; none while the renderer is busy.
     fn render_image(&self, size: Size, draw: &dyn Fn(&mut dyn GraphicsContext)) -> Option<ImageBitmap> {
-        let renderer = self.renderer.upgrade()?;
+        let renderer = self.renderer.borrow().upgrade()?;
         let mut r = renderer.try_borrow_mut().ok()?;
         let (w, h) = ((size.width.ceil() as i32).max(1), (size.height.ceil() as i32).max(1));
         if w > kompoz_graphics::MAX_IMAGE_DIMENSION || h > kompoz_graphics::MAX_IMAGE_DIMENSION {

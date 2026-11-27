@@ -235,7 +235,7 @@ impl WaylandPlatform {
                 if let Some(old) = self.drag.take() {
                     self.forget_offer(old);
                 }
-                let on_window = self.window.as_ref().is_some_and(|w| w.surface.id() == surface);
+                let on_window = self.win.window.as_ref().is_some_and(|w| w.surface.id() == surface);
                 let Some(id) = id else { return };
                 if !on_window {
                     self.forget_offer(id); // (over another surface: not the window's to take)
@@ -264,21 +264,21 @@ impl WaylandPlatform {
                     }
                 }
                 let (x, y) = (x as f32, y as f32);
-                self.events.push_back(Event::DropBegin { x, y, mime_types });
-                self.events.push_back(Event::DropMove { x, y });
+                self.win.events.push_back(Event::DropBegin { x, y, mime_types });
+                self.win.events.push_back(Event::DropMove { x, y });
             }
             WlDataDeviceEvent::Leave => {
                 let Some(id) = self.drag.take() else { return };
                 self.forget_offer(id);
                 let (x, y) = (self.drag_x as f32, self.drag_y as f32);
-                self.events.push_back(Event::DropComplete { x, y });
+                self.win.events.push_back(Event::DropComplete { x, y });
             }
             WlDataDeviceEvent::Motion { x, y, .. } => {
                 if self.drag.is_none() {
                     return;
                 }
                 (self.drag_x, self.drag_y) = (x, y);
-                self.events.push_back(Event::DropMove { x: x as f32, y: y as f32 });
+                self.win.events.push_back(Event::DropMove { x: x as f32, y: y as f32 });
             }
             // Dropped: what it carries given to be read as it is asked for (the app's own: nothing to read, ours would
             // wait on ourselves), finished or let go once the core says whether a target took it (`finish_drop`).
@@ -289,16 +289,16 @@ impl WaylandPlatform {
                     self.forget_offer(old);
                 }
                 if std::mem::take(&mut self.drag_own) {
-                    self.events.push_back(Event::DropOwn { x, y });
+                    self.win.events.push_back(Event::DropOwn { x, y });
                 } else {
                     let weak = Rc::downgrade(&self.shared);
                     self.dropped_entry =
                         self.shared.clipboard.borrow().offers.get(&id).and_then(|o| offer_entry(&weak, id, o));
                     if self.dropped_entry.is_some() {
-                        self.events.push_back(Event::DropData { x, y });
+                        self.win.events.push_back(Event::DropData { x, y });
                     }
                 }
-                self.events.push_back(Event::DropComplete { x, y });
+                self.win.events.push_back(Event::DropComplete { x, y });
             }
         }
     }

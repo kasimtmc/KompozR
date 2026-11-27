@@ -2,7 +2,9 @@
 //! abstract socket: nothing of the desktop's is touched), as C++'s platform tests: connections (authentication,
 //! calls, errors, timeouts, signals, serving), the settings portal (a fake one: ReadOne, an older portal's Read,
 //! SettingChanged), the desktop services' events, and the AT-SPI bridge, where the tests play the AT-SPI registry,
-//! the accessibility bus's launcher and a screen reader. One thread, in sequence.
+//! the accessibility bus's launcher and a screen reader; the tray icons (StatusNotifierItem and dbusmenu) and the
+//! notifications, where the tests play the tray's StatusNotifierWatcher, its host and the notifications' server.
+//! One thread, in sequence.
 //!
 //! Without dbus-daemon they are skipped, unless `KOMPOZ_DBUS_REQUIRED=1` (CI) makes that a failure.
 
@@ -10,15 +12,18 @@
 mod linux {
     use kompoz_foundation::prelude::*;
     use kompoz_graphics::{Color, IntSize, Rect, UnitExt};
-    use kompoz_platform::app::{Event, WindowButton};
+    use kompoz_platform::app::{Event, TrayIcon, TrayImage, TrayMenuItem, WindowButton};
     use kompoz_platform::linux::atspi::{AtspiBridge, AtspiOptions, Request, Window};
     use kompoz_platform::linux::dbus::message::NO_REPLY_EXPECTED;
     use kompoz_platform::linux::dbus::{Connection, Error, MatchRule, Message, MessageType, Type, Value};
     use kompoz_platform::linux::desktop::{DesktopOptions, DesktopServices, Notify};
     use kompoz_platform::linux::portal::{DesktopSettings, PortalOptions};
+    use kompoz_platform::linux::status_notifier::StatusNotifier;
     use kompoz_platform::linux::wallpaper::WallpaperOptions;
     use kompoz_runtime::*;
+    use kompoz_ui::input::{Key as UiKey, KeyModifiers};
     use kompoz_ui::semantics::{AccessibilityNode, LiveRegionMode, ProgressBarRangeInfo, Role, SemanticsAction};
+    use kompoz_ui::window::{MenuItemKind, Notification, NotificationType};
     use kompoz_ui::{KompozHost, Modifier};
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -121,6 +126,210 @@ mod linux {
                 c.fetch_add(1, Ordering::SeqCst);
             }),
         )
+    }
+
+    // ---- The tray ----
+
+    /// What the tray's side heard: icons registered (the item's sender and path), notifications (their arguments).
+    #[derive(Debug)]
+    enum Heard {
+        Registered(String, String),
+        Notified(Vec<Value>),
+    }
+
+    /// The tray's StatusNotifierWatcher and the notifications' server on one connection of the test's own, until
+    /// `stop`; what it heard sent.
+    fn tray_side(address: String, stop: Arc<AtomicBool>, heard: mpsc::Sender<Heard>) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let mut b = Connection::open(&address).unwrap();
+            assert_eq!(b.request_name("org.kde.StatusNotifierWatcher", 4).unwrap(), 1);
+            assert_eq!(b.request_name("org.freedesktop.Notifications", 4).unwrap(), 1);
+            while !stop.load(Ordering::SeqCst) {
+                let Some(m) = b.read(Some(Duration::from_millis(50)), None).unwrap() else { continue };
+                if m.kind != MessageType::MethodCall || b.answer_peer(&m).unwrap() {
+                    continue;
+                }
+                match m.member.as_deref().unwrap() {
+                    "RegisterStatusNotifierItem" => {
+                        let path = m.arg(0).and_then(Value::as_str).unwrap_or("").to_string();
+                        heard.send(Heard::Registered(m.sender.clone().unwrap_or_default(), path)).unwrap();
+                        b.reply(&m, vec![]).unwrap();
+                    }
+                    "Notify" => {
+                        heard.send(Heard::Notified(m.body.clone())).unwrap();
+                        b.reply(&m, vec![Value::Uint32(1)]).unwrap();
+                    }
+                    _ => b.reply_error(&m, "org.freedesktop.DBus.Error.UnknownMethod", "no").unwrap(),
+                }
+            }
+        })
+    }
+
+    /// A tray icon as the app core gives it: a red picture, a tooltip, a menu (an item with a mnemonic and a
+    /// shortcut, a checkbox checked, a separator, a submenu).
+    fn tray_icon(tooltip: &str) -> TrayIcon {
+        let item = |kind, text: &str, items| TrayMenuItem {
+            kind,
+            text: text.to_string(),
+            enabled: true,
+            mnemonic: None,
+            shortcut: None,
+            icon: None,
+            items,
+        };
+        let mut open = item(MenuItemKind::Item, "Open", vec![]);
+        open.mnemonic = Some('O');
+        open.shortcut = Some((KeyModifiers::Ctrl, kompoz_platform::app::key_name(UiKey::Q)));
+        TrayIcon {
+            id: 7,
+            images: vec![TrayImage { width: 2, height: 1, rgba: vec![255, 0, 0, 255, 255, 0, 0, 255] }],
+            tooltip: tooltip.into(),
+            menu: vec![
+                open,
+                item(MenuItemKind::Checkbox { checked: true }, "Check", vec![]),
+                item(MenuItemKind::Separator, "", vec![]),
+                item(MenuItemKind::Menu, "More", vec![item(MenuItemKind::Item, "Quit", vec![])]),
+            ],
+        }
+    }
+
+    /// The tray icon registered with a watcher that came after it (its NameOwnerChanged), its properties and menu
+    /// read by the tray's host as KDE's reads them, its activation and its items' clicks told to the app (by where
+    /// they are in the menu), a change signalled (no second registration), its notifications sent (a type's icon by
+    /// its name; without one, the icon's picture).
+    pub fn tray_icons_and_notifications_on_the_bus() {
+        let Some(bus) = TestBus::start() else { return };
+        drop(bus.connect()); // (the bus listening)
+        let (woken, notify) = counter();
+        let tray = StatusNotifier::new("KompozR test", notify, Some(bus.address.clone()));
+        tray.sync(&[tray_icon("KompozR")]);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!tray.available(), "no watcher yet");
+        let (heard, hear) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let side = tray_side(bus.address.clone(), stop.clone(), heard);
+        let Ok(Heard::Registered(sender, path)) = hear.recv_timeout(TIMEOUT) else { panic!("not registered") };
+        assert_eq!(path, "/StatusNotifierItem/7");
+        assert!(wait_for(TIMEOUT, || tray.available()), "the watcher seen");
+        // The host reads the item.
+        let mut host = bus.connect();
+        let rule = MatchRule::signal().sender(&sender);
+        host.add_match(&rule).unwrap();
+        let get = |host: &mut Connection, path: &str, iface: &str, name: &str| {
+            host.get_property(&sender, path, iface, name, TIMEOUT).unwrap().unwrap_variants().clone()
+        };
+        let item = "org.kde.StatusNotifierItem";
+        let tip = get(&mut host, &path, item, "ToolTip");
+        assert_eq!(tip.fields().unwrap()[2].as_str(), Some("KompozR"));
+        assert_eq!(get(&mut host, &path, item, "Status").as_str(), Some("Active"));
+        let menu_path = match get(&mut host, &path, item, "Menu") {
+            Value::ObjectPath(p) => p,
+            other => panic!("{other:?}"),
+        };
+        let pixmaps = get(&mut host, &path, item, "IconPixmap");
+        let first = &pixmaps.items().unwrap()[0];
+        let [w, h, argb] = first.fields().unwrap() else { panic!("{first:?}") };
+        assert_eq!((w.as_i32(), h.as_i32()), (Some(2), Some(1)));
+        let bytes: Vec<u8> = argb.items().unwrap().iter().filter_map(Value::as_u8).collect();
+        assert_eq!(bytes, [255, 255, 0, 0, 255, 255, 0, 0], "ARGB, network order");
+        let all = host
+            .call_method(&sender, &path, "org.freedesktop.DBus.Properties", "GetAll", vec![Value::str(item)], TIMEOUT)
+            .unwrap();
+        assert!(all[0].get("IconPixmap").is_some() && all[0].get("Menu").is_some());
+        // Its menu, as dbusmenu lays it out.
+        let menu = "com.canonical.dbusmenu";
+        let layout_of = |host: &mut Connection| {
+            let args = vec![Value::Int32(0), Value::Int32(-1), Value::array(Type::String, vec![])];
+            host.call_method(&sender, &menu_path, menu, "GetLayout", args, TIMEOUT).unwrap()
+        };
+        let layout = layout_of(&mut host);
+        assert_eq!(layout[0].as_u32(), Some(1), "its revision");
+        let [_, _, children] = layout[1].fields().unwrap() else { panic!() };
+        let children: Vec<Value> = children.items().unwrap().iter().map(|c| c.unwrap_variants().clone()).collect();
+        assert_eq!(children.len(), 4);
+        let props = |i: usize| children[i].fields().unwrap()[1].clone();
+        assert_eq!(props(0).get("label").map(|v| v.unwrap_variants().clone()), Some(Value::str("_Open")));
+        let shortcut = props(0).get("shortcut").unwrap().unwrap_variants().clone();
+        let keys: Vec<&str> = shortcut.items().unwrap()[0].items().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(keys, ["Control", "q"]);
+        assert_eq!(props(1).get("toggle-type").map(|v| v.unwrap_variants().clone()), Some(Value::str("checkmark")));
+        assert_eq!(props(1).get("toggle-state").map(|v| v.unwrap_variants().clone()), Some(Value::Int32(1)));
+        assert_eq!(props(2).get("type").map(|v| v.unwrap_variants().clone()), Some(Value::str("separator")));
+        let sub = children[3].fields().unwrap()[2].items().unwrap()[0].unwrap_variants().clone();
+        assert_eq!(
+            sub.fields().unwrap()[1].get("label").map(|v| v.unwrap_variants().clone()),
+            Some(Value::str("Quit"))
+        );
+        let sub_id = sub.fields().unwrap()[0].as_i32().unwrap();
+        // Clicks: an item's, the submenu's item's, the icon's activation.
+        let event = |host: &mut Connection, id: i32| {
+            let args = vec![Value::Int32(id), Value::str("clicked"), Value::variant(Value::Int32(0)), Value::Uint32(0)];
+            host.call_method(&sender, &menu_path, menu, "Event", args, TIMEOUT).unwrap();
+        };
+        let id_of = |i: usize| children[i].fields().unwrap()[0].as_i32().unwrap();
+        event(&mut host, id_of(0));
+        event(&mut host, sub_id);
+        event(&mut host, id_of(2)); // (a separator: nothing)
+        host.call_method(&sender, &path, item, "Activate", vec![Value::Int32(0), Value::Int32(0)], TIMEOUT).unwrap();
+        let mut actions = Vec::new();
+        assert!(wait_for(TIMEOUT, || {
+            actions.extend(tray.take_actions());
+            actions.len() >= 3
+        }));
+        assert!(woken.load(Ordering::SeqCst) > 0, "the platform's loop woken");
+        assert_eq!(
+            actions,
+            [
+                Event::TrayMenuItem { tray: 7, path: vec![0] },
+                Event::TrayMenuItem { tray: 7, path: vec![3, 0] },
+                Event::TrayAction { tray: 7 },
+            ]
+        );
+        // A change: signalled, its menu's revision moved on, not registered again.
+        tray.sync(&[tray_icon("KompozR 2")]);
+        let mut signals = Vec::new();
+        assert!(
+            wait_for(TIMEOUT, || {
+                while let Ok(Some(m)) = host.read(Some(Duration::from_millis(10)), None) {
+                    if m.kind == MessageType::Signal {
+                        signals.push(m.member.clone().unwrap_or_default());
+                    }
+                }
+                signals.iter().any(|s| s == "LayoutUpdated") && signals.iter().any(|s| s == "NewToolTip")
+            }),
+            "{signals:?}"
+        );
+        assert_eq!(layout_of(&mut host)[0].as_u32(), Some(2));
+        let tip = get(&mut host, &path, item, "ToolTip");
+        assert_eq!(tip.fields().unwrap()[2].as_str(), Some("KompozR 2"));
+        // Notifications: Info's icon by its name; None's the tray icon's picture.
+        tray.notify(&tray_icon("KompozR 2"), &Notification::new("Başlık", "İleti", NotificationType::Info));
+        tray.notify(&tray_icon("KompozR 2"), &Notification::new("Plain", "text", NotificationType::None));
+        let mut notified = Vec::new();
+        while notified.len() < 2 {
+            match hear.recv_timeout(TIMEOUT) {
+                Ok(Heard::Notified(args)) => notified.push(args),
+                Ok(other) => panic!("registered again: {other:?}"),
+                Err(e) => panic!("no notification: {e}"),
+            }
+        }
+        let info = &notified[0];
+        assert_eq!(info[0].as_str(), Some("KompozR test"));
+        assert_eq!(info[2].as_str(), Some("dialog-information"));
+        assert_eq!((info[3].as_str(), info[4].as_str()), (Some("Başlık"), Some("İleti")));
+        assert!(info[6].get("image-data").is_none());
+        assert_eq!(info[7], Value::Int32(-1));
+        let plain = &notified[1];
+        assert_eq!(plain[2].as_str(), Some(""));
+        let data = plain[6].get("image-data").expect("the icon's picture").unwrap_variants().clone();
+        let f = data.fields().unwrap();
+        assert_eq!(
+            (f[0].as_i32(), f[1].as_i32(), f[2].as_i32(), f[3].as_bool()),
+            (Some(2), Some(1), Some(8), Some(true))
+        );
+        drop(tray);
+        stop.store(true, Ordering::SeqCst);
+        side.join().unwrap();
     }
 
     // ---- The client ----
@@ -411,6 +620,7 @@ mod linux {
             portal: PortalOptions { address: Some(bus.address.clone()), accent: true },
             atspi: AtspiOptions { forced: Some(false), ..AtspiOptions::default() },
             wallpaper: WallpaperOptions { config_home: PathBuf::new(), desktop: String::new(), enabled: false },
+            tray: None,
         };
         desktop.start_with("Test app", wake, options);
         let mut events = Vec::new();
@@ -994,6 +1204,7 @@ mod linux {
             portal: PortalOptions { address: None, accent: true },
             atspi: AtspiOptions { forced: Some(true), ..options_for(&bus) },
             wallpaper: WallpaperOptions { config_home: PathBuf::new(), desktop: String::new(), enabled: false },
+            tray: None,
         };
         desktop.start_with("Test app", wake, options);
         // The platform's loop: what the services told handled, a frame composed, the window 400 by 300 points at
@@ -1052,6 +1263,7 @@ fn main() {
             ("atspi_bridge_serves_the_tree", linux::atspi_bridge_serves_the_tree),
             ("atspi_bridge_follows_the_desktop", linux::atspi_bridge_follows_the_desktop),
             ("desktop_services_serve_the_hosts_tree", linux::desktop_services_serve_the_hosts_tree),
+            ("tray_icons_and_notifications_on_the_bus", linux::tray_icons_and_notifications_on_the_bus),
         ];
         let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
         let mut failed = 0;
