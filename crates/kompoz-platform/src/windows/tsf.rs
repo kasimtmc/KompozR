@@ -1450,9 +1450,12 @@ mod tests {
         assert_eq!(answer.ok(), Some(HRESULT(0)));
         assert_eq!(o.events.take(), [Event::Text("şu".into())]);
         assert_eq!(field.store().document().state, state_of("abşu"));
+        // (The field answered first, as input_method.rs does: a text service that reads and sets the selection back
+        // when told — Windows' do, wine's don't — finds what the core has, so nothing is sent.)
+        let _ = o.field.borrow_mut().answer(&state_of("x"));
         field.changed_by_app(&state_of("x"));
         assert_eq!(field.store().document().state, state_of("x"));
-        assert!(o.events.take().is_empty());
+        assert_eq!(o.events.take(), []);
         field.set_options(&ImeOptions { keyboard_type: kompoz_ui::platform::KeyboardType::Password, ..options });
         drop(field);
     }
