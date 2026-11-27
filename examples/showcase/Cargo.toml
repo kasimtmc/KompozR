@@ -30,3 +30,8 @@ harness = false
 [[test]]
 name = "windows"
 harness = false
+
+# The showcase in a real window on macOS (KOMPOZ_DISPLAY_TESTS=1), its shots its headless run's.
+[[test]]
+name = "macos"
+harness = false

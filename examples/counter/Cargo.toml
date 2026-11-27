@@ -30,3 +30,9 @@ kompoz-gpu = { path = "../../crates/kompoz-gpu" }
 [[test]]
 name = "windows"
 harness = false
+
+# The Counter in a real window on macOS (KOMPOZ_DISPLAY_TESTS=1), its shots the headless Counter's drawn in the test's
+# process: one thread.
+[[test]]
+name = "macos"
+harness = false

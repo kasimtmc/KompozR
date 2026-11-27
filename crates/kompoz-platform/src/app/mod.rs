@@ -112,7 +112,9 @@ pub struct DisplayPlatform {
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::linux::wayland::PLATFORM, crate::linux::x11::PLATFORM];
 #[cfg(windows)]
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::windows::PLATFORM];
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[crate::macos::PLATFORM];
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 pub const DISPLAY_PLATFORMS: &[DisplayPlatform] = &[];
 
 /// A KompozR app (C++'s Application and main): `App::new(title).size(w, h).run(content)`.

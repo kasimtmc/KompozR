@@ -24,6 +24,14 @@ platform = [
     "dep:kompoz-ui",
     "dep:libc",
     "dep:windows",
+    "dep:block2",
+    "dep:dispatch2",
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:objc2-core-foundation",
+    "dep:objc2-core-video",
+    "dep:objc2-foundation",
+    "dep:objc2-quartz-core",
 ]
 
 [dependencies]
@@ -70,6 +78,65 @@ features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+]
+
+# (stage 15) The macOS platform: AppKit through objc2's thin bindings (its classes of our own defined with them: the
+# view, the delegates, the pasteboard's data provider), Grand Central Dispatch's main queue to wake the loop and its
+# signal sources, Core Video's display link before macOS 14's; every behaviour our own (macos/).
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { version = "0.6.2", optional = true }
+dispatch2 = { version = "0.3.1", optional = true }
+objc2 = { version = "0.6.5", optional = true }
+objc2-core-foundation = { version = "0.3.2", optional = true }
+objc2-core-video = { version = "0.3.2", optional = true, default-features = false, features = ["std", "CVBase", "CVDisplayLink", "CVReturn"] }
+objc2-foundation = { version = "0.3.2", optional = true }
+objc2-quartz-core = { version = "0.3.2", optional = true, default-features = false, features = ["std", "objc2-core-foundation", "CADisplayLink", "CALayer", "CAMetalLayer"] }
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
+version = "0.3.2"
+optional = true
+default-features = false
+features = [
+    "std",
+    "bitflags",
+    "block2",
+    "objc2-core-foundation",
+    "objc2-quartz-core",
+    "NSAccessibility",
+    "NSAlert",
+    "NSAppearance",
+    "NSApplication",
+    "NSBitmapImageRep",
+    "NSButton",
+    "NSCell",
+    "NSColor",
+    "NSColorSpace",
+    "NSControl",
+    "NSCursor",
+    "NSDragging",
+    "NSDraggingItem",
+    "NSDraggingSession",
+    "NSEvent",
+    "NSGraphics",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
+    "NSMenu",
+    "NSMenuItem",
+    "NSPanel",
+    "NSPasteboard",
+    "NSPasteboardItem",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSScreen",
+    "NSText",
+    "NSTextInputClient",
+    "NSTextInputContext",
+    "NSTrackingArea",
+    "NSUserInterfaceValidation",
+    "NSView",
+    "NSWindow",
+    "NSWorkspace",
 ]
 
 [dev-dependencies]
@@ -146,6 +213,13 @@ required-features = ["platform"]
 # headless backend, as CI runs it), running the Counter: KOMPOZ_DISPLAY_TESTS=1.
 [[test]]
 name = "wayland_display"
+harness = false
+required-features = ["platform"]
+
+# The macOS platform on a real display (KOMPOZ_DISPLAY_TESTS=1; CI's macos runner): the Counter by CI's script, the
+# app's windows, a transparent borderless window with an icon and a native menu bar.
+[[test]]
+name = "macos_display"
 harness = false
 required-features = ["platform"]
 

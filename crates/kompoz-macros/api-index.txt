@@ -378,10 +378,12 @@ kompoz-runtime/runtime kompozable ContextUser - crates/kompoz-runtime/tests/runt
 * method CornerSizeTrack rrddddddd crates/kompoz-material3/src/slider/defaults.rs SliderDefaults
 kompoz-ui/tree kompozable Counted rr crates/kompoz-ui/tests/tree.rs
 counter/counter kompozable Counter - examples/counter/src/counter.rs
+counter/macos kompozable Counter - examples/counter/src/counter.rs
 counter/windows kompozable Counter - examples/counter/src/counter.rs
 counter-kotlin/headless kompozable Counter - examples/counter/src/counter.rs
 counter-kotlin/windows kompozable Counter - examples/counter/src/counter.rs
 kompoz-platform/app_core kompozable Counter r crates/kompoz-platform/tests/app_core.rs
+kompoz-platform/macos_display kompozable Counter - crates/kompoz-platform/tests/macos_display.rs
 kompoz-platform/wayland_display kompozable Counter - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-runtime/macros kompozable Counter - crates/kompoz-runtime/tests/macros.rs
 kompoz-navigation/nav_host kompozable CounterView r crates/kompoz-navigation/tests/nav_host.rs
@@ -698,6 +700,7 @@ kompoz-material3/floating_toolbar kompozable ExpandableVerticalFloatingToolbarSa
 * kompozable ExtendedFloatingActionButton rddddddr crates/kompoz-material3/src/floating_action_button.rs
 * super ExternalPaddingScopeExt - ExternalPaddingScope
 kompoz-material3-adaptive/samples kompozable ExtraPaneContent rrrddr crates/kompoz-material3-adaptive/tests/samples.rs
+kompoz-platform/macos_display kompozable Extras - crates/kompoz-platform/tests/macos_display.rs
 kompoz-platform/wayland_display kompozable Extras - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-platform/x11_windows kompozable Extras - crates/kompoz-platform/tests/x11_windows.rs
 kompoz-material3/scaffold kompozable Fab - crates/kompoz-material3/tests/scaffold.rs
@@ -2300,6 +2303,7 @@ kompoz-material3/lists kompozable TwoLineListItem - crates/kompoz-material3/test
 * super TwoPaneExpansionStateKeyImpl - Saveable
 * kompozable TwoRowsTopAppBar rdddddddddd crates/kompoz-material3/src/app_bar.rs
 * kompozable TwoRowsTopAppBarImpl rrrrrrrrrrrrrrrrrr crates/kompoz-material3/src/app_bar.rs
+kompoz-platform/macos_display kompozable TwoWindows - crates/kompoz-platform/tests/macos_display.rs
 kompoz-platform/wayland_display kompozable TwoWindows - crates/kompoz-platform/tests/wayland_display.rs
 kompoz-platform/win32_windows kompozable TwoWindows - crates/kompoz-platform/tests/win32_windows.rs
 kompoz-platform/windows kompozable TwoWindows rrr crates/kompoz-platform/tests/windows.rs

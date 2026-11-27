@@ -25,6 +25,7 @@ use super::windows::menu_item;
 use super::{AppConfig, Event, MenuBarShown, MouseButton, Platform, TitleBar, TrayImage, WindowAction, WindowSpec};
 use crate::image_loader::{load_image_async, load_image_file, save_pixels, start_image_disk_cache, stop_image_loader};
 use crate::system::{app_cache_directory, log, read_file};
+use kompoz_coroutines::CoroutineContext;
 use kompoz_gpu::Renderer;
 use kompoz_gpu::device::{self, Backend, ClearColor, Device, Format, IRect, Surface, Texture, TextureUsage};
 use kompoz_gpu::renderer::RendererBitmaps;
@@ -550,14 +551,16 @@ impl<P: Platform> AppCore<P> {
         let framed = kompozable_lambda!(move || {
             WindowFrame(title_bar.get(), title.get(), act.clone(), menu_bar.clone(), content.clone());
         });
+        // (The system's word on animations' durations, where it has one: the effects' coroutine context's.)
+        let effects = self.platform.motion_duration_scale().map(CoroutineContext::from).unwrap_or_default();
         let host = match &self.kind {
-            Kind::Main => KompozHost::new(framed),
+            Kind::Main => KompozHost::with_effect_coroutine_context(framed, effects),
             Kind::Application => {
                 let content = self.content.clone();
-                KompozHost::new(kompozable_lambda!(move || content.compose()))
+                KompozHost::with_effect_coroutine_context(kompozable_lambda!(move || content.compose()), effects)
             }
             Kind::Window(request) => {
-                let host = KompozHost::new_window(framed, request.locals());
+                let host = KompozHost::new_window_with_effect_coroutine_context(framed, request.locals(), effects);
                 // The window's keys: an open menu of the drawn menu bar's first (it has the keyboard), then the
                 // window's own handlers around its focused path, then the menu bar's shortcuts and mnemonics
                 // (where the platform's own menu doesn't run the shortcuts).

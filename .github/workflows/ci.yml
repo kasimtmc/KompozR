@@ -415,7 +415,9 @@ jobs:
   # an error it finds aborts the run; KOMPOZ_GPU_VALIDATION=1 counts what Metal reports to the device), then the app
   # core and the Counters and the showcase on the headless platform (Metal drawing only into the kept frame, as C++'s
   # headless Metal step; the showcase's sections, not its pictures against the C++ one's: those are of fontconfig's
-  # fonts narrowed to its own, and macOS's text is set in CoreText's), then the workspace's tests. Each step runs
+  # fonts narrowed to its own, and macOS's text is set in CoreText's), then the macOS platform in real windows on
+  # the runner's display (its own tests, the Counter's and the showcase's window shots against their headless runs',
+  # the Counter by CI's script), then the workspace's tests. Each step runs
   # whether those before failed or not (each tells something of its own); the pictures that differ are kept.
   macos:
     runs-on: macos-latest
@@ -464,6 +466,36 @@ jobs:
           KOMPOZ_GPU_VALIDATION: "1"
           MTL_DEBUG_LAYER: "1"
         run: cargo test -p showcase --test headless
+      # The macOS platform (AppKit) in real windows on the runner's display: the Counter by CI's script, the app's
+      # windows, a transparent borderless one with a native menu bar; the Counter's and the showcase's window shots
+      # their headless runs', pixel for pixel.
+      - name: The macOS platform in real windows (Metal, validated)
+        if: success() || failure()
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+        run: |
+          cargo test -p kompoz-platform --test macos_display
+          cargo test -p counter --test macos
+          cargo test -p showcase --test macos
+      - name: The Counter in a window by CI's script, clicked and resized
+        if: success() || failure()
+        env:
+          KOMPOZ_SCALE: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+        run: |
+          mkdir -p shots
+          KOMPOZ_SCRIPT="wait 30;shot shots/before.png;click 70 70;wait 30;shot shots/after.png;resize 500 400;sleep 1500;wait 10;shot shots/resized.png;quit" \
+            target/debug/counter 2>&1 | tee shots/counter.log
+          grep -q "kompoz: renderer: KompozR on metal" shots/counter.log || { echo "no renderer"; exit 1; }
+          if grep -q "GPU validation" shots/counter.log; then exit 1; fi
+          for shot in before after resized; do test -s "shots/$shot.png" || { echo "no $shot.png"; exit 1; }; done
+          if cmp -s shots/before.png shots/after.png; then echo "the click changed nothing"; exit 1; fi
+          test "$(sips -g pixelWidth -g pixelHeight shots/before.png | awk '/pixel/ {print $2}' | paste -sd x -)" = 360x480
+          test "$(sips -g pixelWidth -g pixelHeight shots/resized.png | awk '/pixel/ {print $2}' | paste -sd x -)" = 500x400
       - name: The workspace's tests
         if: success() || failure()
         run: cargo test --workspace --no-fail-fast
@@ -480,6 +512,10 @@ jobs:
             target/tmp/showcase-shots/*/s*.png
             target/tmp/showcase-shots/*/top*.png
             target/tmp/showcase-shots/*/bottom*.png
+            shots/
+            target/tmp/macos-display/
+            target/tmp/counter-macos-*/
+            target/tmp/showcase-macos-*/
           if-no-files-found: ignore
 
   # The web's workspace (wasm32-unknown-unknown) as its build makes it: the pinned nightly (the web's only toolchain:

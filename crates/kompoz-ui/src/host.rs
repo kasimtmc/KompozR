@@ -322,6 +322,16 @@ impl KompozHost {
         KompozHost::build(content, CoroutineContext::new(), Some(parent_locals))
     }
 
+    /// The same, the composition's effects and the modifier nodes' coroutines running with
+    /// `effect_coroutine_context` (a window's `MotionDurationScale`, as its platform gives it).
+    pub fn new_window_with_effect_coroutine_context(
+        content: impl Content + 'static,
+        parent_locals: MutableState<KompozitionLocalContext>,
+        effect_coroutine_context: CoroutineContext,
+    ) -> KompozHost {
+        KompozHost::build(content, effect_coroutine_context, Some(parent_locals))
+    }
+
     fn build(
         content: impl Content + 'static,
         effect_coroutine_context: CoroutineContext,

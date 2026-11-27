@@ -12,12 +12,12 @@
 use super::Event;
 use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::{Dp, Rect};
-use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::input::KeyModifiers;
 use kompoz_ui::media_query::MediaInfo;
 use kompoz_ui::platform::PlatformCallbacks;
 use kompoz_ui::window::{MenuItemKind, Notification, WindowId, WindowPlacement};
+use kompoz_ui::{KompozHost, MotionDurationScale};
 use std::rc::Rc;
 
 /// A window as it is opened (the app's from its configuration, a `Window`'s from its request and state): its
@@ -267,6 +267,12 @@ pub trait Platform {
     }
     /// Back went unused: the system's own (Android leaves the app).
     fn leave_app(&mut self) {}
+    /// How long the app's animations take as the system asks (a window's `MotionDurationScale`, read as each
+    /// animation asks: macOS's reduced motion ends them at once); none: the system says nothing (they play in real
+    /// time). Asked once, as the host is made.
+    fn motion_duration_scale(&self) -> Option<MotionDurationScale> {
+        None
+    }
 
     // ---- The window as the app sets it (a `Window`'s state and parameters; the app core calls these between
     // frames where they changed) ----
