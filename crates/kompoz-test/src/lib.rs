@@ -30,6 +30,7 @@ mod text_actions;
 
 pub use input::{
     EVENT_PERIOD_MILLIS, InjectionScope, KeyInjectionScope, MouseInjectionScope, ScrollWheel, TouchInjectionScope,
+    shortcut_modifier,
 };
 pub use interaction::{
     SelectionResult, SemanticsNodeInteraction, SemanticsNodeInteractionCollection, SemanticsSelector, print_node,

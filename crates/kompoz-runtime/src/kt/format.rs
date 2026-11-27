@@ -148,7 +148,7 @@ pub fn format(format: &str, args: &[&dyn KtToString]) -> String {
                 FormatArg::Null => "null".to_string(),
                 v => conversion_error(conversion, v),
             },
-            'e' | 'f' | 'g' => match value {
+            'e'..='g' => match value {
                 FormatArg::Float(v) => float(v, conversion.to_ascii_lowercase(), precision, width, &flags),
                 FormatArg::Null => "null".to_string(),
                 v => conversion_error(conversion, v),

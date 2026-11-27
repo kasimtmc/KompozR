@@ -10,6 +10,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Line tables only (a panic's backtrace keeps its files and lines): the workspace's tests built with whole debug
+  # info filled the runner's disk (the linux job's `cargo test --workspace` ran out of space).
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   linux:
@@ -322,8 +325,9 @@ jobs:
   # as lavapipe's, strictly (the renderer's y-up clip space runs here), Metal's API validation on (MTL_DEBUG_LAYER=1:
   # an error it finds aborts the run; KOMPOZ_GPU_VALIDATION=1 counts what Metal reports to the device), then the app
   # core and the Counters and the showcase on the headless platform (Metal drawing only into the kept frame, as C++'s
-  # headless Metal step), then the workspace's tests. Each step runs whether those before failed or not (each tells
-  # something of its own); the pictures that differ are kept.
+  # headless Metal step; the showcase's sections, not its pictures against the C++ one's: those are of fontconfig's
+  # fonts narrowed to its own, and macOS's text is set in CoreText's), then the workspace's tests. Each step runs
+  # whether those before failed or not (each tells something of its own); the pictures that differ are kept.
   macos:
     runs-on: macos-latest
     steps:
@@ -364,7 +368,7 @@ jobs:
           KOMPOZ_GPU_VALIDATION: "1"
           MTL_DEBUG_LAYER: "1"
         run: cargo test -p counter-kotlin --test headless
-      - name: The showcase, headless, against the C++ showcase's pictures
+      - name: The showcase, headless
         if: success() || failure()
         env:
           KOMPOZ_GPU_REQUIRED: "1"

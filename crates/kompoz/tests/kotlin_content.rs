@@ -13,9 +13,9 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::KompozTestRule;
+use kompoz::test::{KompozTestRule, shortcut_modifier};
 use kompoz::ui::draganddrop::DragAndDropTransferData;
-use kompoz::ui::input::{Key, KeyModifiers};
+use kompoz::ui::input::Key;
 use kompoz::ui::platform::PlatformCallbacks;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -167,8 +167,8 @@ fn content_receivers_as_compose_writes_them() {
     *p.clipboard.borrow_mut() = Some(ClipEntry::with_html_text("kalın", "<b>kalın</b>"));
     rule.on_node_with_tag("alan").perform_click();
     rule.wait_for_idle();
-    rule.host().key_down(Key::V, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::V, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::V, shortcut_modifier());
+    rule.host().key_up(Key::V, shortcut_modifier());
     rule.wait_for_idle();
     assert_eq!(*images.borrow(), ["content://resim/7", "html"]);
     rule.on_node_with_text("metin yazı").assert_exists();
@@ -187,15 +187,15 @@ fn a_field_takes_pasted_images_through_its_receiver() {
     rule.on_node_with_tag("alan").perform_click();
     rule.wait_for_idle();
     *p.clipboard.borrow_mut() = Some(ClipEntry::new(vec![ClipItem::with_image(red()), ClipItem::with_text("yazı")]));
-    rule.host().key_down(Key::V, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::V, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::V, shortcut_modifier());
+    rule.host().key_up(Key::V, shortcut_modifier());
     rule.wait_for_idle();
     assert_eq!(*images.borrow(), [(3, 2)]);
     assert_eq!(text_with(&rule, "alan:"), "alan: yazı");
     // Text alone isn't the listener's: given back, pasted.
     *p.clipboard.borrow_mut() = Some(ClipEntry::with_plain_text("!"));
-    rule.host().key_down(Key::V, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::V, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::V, shortcut_modifier());
+    rule.host().key_up(Key::V, shortcut_modifier());
     rule.wait_for_idle();
     assert_eq!(text_with(&rule, "alan:"), "alan: yazı!");
     assert_eq!(images.borrow().len(), 1);

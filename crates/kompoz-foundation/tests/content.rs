@@ -179,13 +179,13 @@ fn pasting_an_image_into_a_field_under_a_receiver() {
     // An image and text: the image the listener's, the text the field's.
     let entry = ClipEntry::new(vec![ClipItem::with_image(red()), ClipItem::with_text("yazı")]);
     *p.clipboard.borrow_mut() = Some(entry);
-    key(&rule, Key::V, KeyModifiers::Ctrl);
+    key(&rule, Key::V, shortcut_modifier());
     assert_eq!(taken(&log), ["received Source.Clipboard"]);
     assert_eq!(*images.borrow(), [(2, 2)]);
     assert_eq!(state.text(), "yazı");
     // Text alone: given to the listener first (it gives it back), pasted.
     *p.clipboard.borrow_mut() = Some(ClipEntry::with_plain_text(" ve"));
-    key(&rule, Key::V, KeyModifiers::Ctrl);
+    key(&rule, Key::V, shortcut_modifier());
     assert_eq!(taken(&log), ["received Source.Clipboard"]);
     assert_eq!(state.text(), "yazı ve");
     // An image alone: the listener takes it all, nothing pasted. The field's menu offers Paste for it (a receiver
@@ -203,8 +203,8 @@ fn pasting_an_image_into_a_field_under_a_receiver() {
     key(&rule, Key::Escape, KeyModifiers::None);
     rule.on_node_with_tag("alan").perform_click();
     rule.wait_for_idle();
-    key(&rule, Key::A, KeyModifiers::Ctrl);
-    key(&rule, Key::C, KeyModifiers::Ctrl);
+    key(&rule, Key::A, shortcut_modifier());
+    key(&rule, Key::C, shortcut_modifier());
     let copied = p.clipboard.borrow().clone().unwrap();
     assert_eq!(copied.read_annotated_string().map(|t| t.text().to_string()).as_deref(), Some("yazı ve"));
     assert_eq!(copied.clip_metadata().mime_types(), ["text/plain"]);
@@ -448,11 +448,11 @@ fn the_value_based_field_isnt_a_receiver() {
     rule.on_node_with_tag("eski").perform_click();
     rule.wait_for_idle();
     *p.clipboard.borrow_mut() = Some(ClipEntry::new(vec![ClipItem::with_image(red()), ClipItem::with_text("eski")]));
-    key(&rule, Key::V, KeyModifiers::Ctrl);
+    key(&rule, Key::V, shortcut_modifier());
     assert_eq!(value.get(), "");
     // (Its paste is the first item's text, as Compose's `readAnnotatedString`: the image has none.)
     *p.clipboard.borrow_mut() = Some(ClipEntry::with_plain_text("eski"));
-    key(&rule, Key::V, KeyModifiers::Ctrl);
+    key(&rule, Key::V, shortcut_modifier());
     assert_eq!(value.get(), "eski");
     assert!(taken(&log).is_empty());
     assert!(!rule.host().commit_content(ClipEntry::with_image(red()), None));

@@ -129,10 +129,19 @@ impl MetalDevice {
         let row = region.width as usize * id.format().bytes_per_texel();
         let rows = region.height as usize;
         assert!(row_bytes >= row && pixels.len() >= row_bytes * (rows - 1) + row, "upload: too few pixels");
-        // The rows packed into the frame's memory, copied from there.
+        // The rows packed into the frame's memory, copied from there; a `Bgra8` texture's given as RGBA (as every
+        // backend takes them, and reads them back), swapped into its order here.
+        let swap = id.format() == Format::Bgra8;
         let staged = self.write_with(row * rows, 16, |memory| {
             for (y, out) in memory.chunks_exact_mut(row).enumerate() {
-                out.copy_from_slice(&pixels[y * row_bytes..y * row_bytes + row]);
+                let source = &pixels[y * row_bytes..y * row_bytes + row];
+                if swap {
+                    for (o, s) in out.as_chunks_mut::<4>().0.iter_mut().zip(source.as_chunks::<4>().0) {
+                        *o = [s[2], s[1], s[0], s[3]];
+                    }
+                } else {
+                    out.copy_from_slice(source);
+                }
             }
         });
         let Some(staged) = staged else { return };

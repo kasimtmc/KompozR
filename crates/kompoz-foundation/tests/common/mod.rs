@@ -28,8 +28,24 @@ pub fn run(tests: &[(&str, fn())]) {
     }
 }
 
+/// Gives this thread's fields Compose's default key mapping (Linux's) whatever the platform: the tests of keys
+/// ported from C++ Kompoz's press its keys (Ctrl by words and for shortcuts, Ctrl+Shift+Z redoing, Home and End by
+/// lines), which macOS's mapping (Cmd shortcuts, Option by words) gives other commands. The platforms' own mappings
+/// are text_input's `key_mappings_follow_the_platform`'s.
+pub fn use_the_default_key_mapping() {
+    use kompoz_foundation::text::{DesktopPlatform, create_platform_default_key_mapping, set_key_mapping_override};
+    set_key_mapping_override(Some(create_platform_default_key_mapping(DesktopPlatform::Linux)));
+}
+
 #[macro_export]
 macro_rules! tests {
+    // (the tests of keys: with Compose's default key mapping on every platform, `use_the_default_key_mapping`)
+    (default_key_mapping; $($name:ident),* $(,)?) => {
+        fn main() {
+            use_the_default_key_mapping();
+            run(&[$((stringify!($name), $name as fn())),*]);
+        }
+    };
     ($($name:ident),* $(,)?) => {
         fn main() {
             run(&[$((stringify!($name), $name as fn())),*]);

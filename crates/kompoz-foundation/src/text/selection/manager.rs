@@ -15,6 +15,7 @@ use crate::gestures::{
 use crate::text::context_menu::{TextContextMenuComponent, TextContextMenuData, TextContextMenuItems};
 use crate::text::long_press_text_drag_observer::{Handle, TextDragObserver};
 use crate::text::modifiers::DefaultMouseSelectionObserver;
+use crate::text::{KeyCommand, platform_default_key_mapping};
 use kompoz_coroutines::{CoroutineScope, CoroutineStart};
 use kompoz_graphics::{IntSize, Offset, Rect, Size};
 use kompoz_runtime::{MutableState, mutable_state_of, mutable_state_of_with_policy, named_args, never_equal_policy};
@@ -454,8 +455,9 @@ impl SelectionManager {
         })
     }
 
-    /// The keys a container takes (Compose's copy key event, and C++ Kompoz's select all and Escape): Ctrl+C (or
-    /// Ctrl+Insert, Copy) copies, Ctrl+A selects all, Escape clears.
+    /// The keys a container takes (Compose's copy key event, and C++ Kompoz's select all and Escape): the platform's
+    /// copy (Ctrl+C, Ctrl+Insert or Copy; Cmd+C on macOS) copies, its select all (Ctrl+A; Cmd+A) selects all, Escape
+    /// clears.
     fn on_key_event(&self, event: &KeyEvent) -> bool {
         if event.r#type != KeyEventType::KeyDown {
             return false;
@@ -464,7 +466,7 @@ impl SelectionManager {
             self.copy();
             return true;
         }
-        if event.modifiers == KeyModifiers::Ctrl && event.key == Key::A {
+        if platform_default_key_mapping().map(event) == Some(KeyCommand::SELECT_ALL) {
             self.select_all();
             return true;
         }
@@ -1305,14 +1307,10 @@ impl TextDragObserver for HandleDragObserver {
     }
 }
 
-/// Whether the key event copies (Compose's `isCopyKeyEvent`, the default key mapping's COPY): Ctrl+C,
-/// Ctrl+Insert, or the Copy key.
+/// Whether the key event copies (Compose desktop's `isCopyKeyEvent`: the platform's key mapping's COPY): Ctrl+C,
+/// Ctrl+Insert or the Copy key; on macOS Cmd+C or the Copy key.
 pub fn is_copy_key_event(event: &KeyEvent) -> bool {
-    match event.modifiers {
-        KeyModifiers::Ctrl => matches!(event.key, Key::C | Key::Insert | Key::NumPadInsert),
-        KeyModifiers::None => event.key == Key::Copy,
-        _ => false,
-    }
+    platform_default_key_mapping().map(event) == Some(KeyCommand::COPY)
 }
 
 /// The anchor at an offset into the container's texts taken end to end (Compose's `findAnchorForGlobalOffset`).

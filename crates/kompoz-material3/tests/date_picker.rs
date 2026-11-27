@@ -18,7 +18,7 @@ use kompoz_material3::prelude::*;
 use kompoz_material3::testing::set_today_for_tests;
 use kompoz_runtime::kt::{LocalDate, YearMonth};
 use kompoz_runtime::*;
-use kompoz_test::KompozTestRule;
+use kompoz_test::{KompozTestRule, shortcut_modifier};
 use kompoz_ui::input::{Key, KeyModifiers, PointerType};
 use kompoz_ui::platform::LocalLayoutDirection;
 use kompoz_ui::strings::{LocalStrings, Strings};
@@ -133,8 +133,8 @@ fn says(rule: &KompozTestRule, text: &str) -> bool {
 }
 
 fn select_all_and_type(rule: &KompozTestRule, digits: &str) {
-    rule.host().key_down(Key::A, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::A, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::A, shortcut_modifier());
+    rule.host().key_up(Key::A, shortcut_modifier());
     rule.wait_for_idle();
     rule.host().text_input(digits);
     rule.wait_for_idle();

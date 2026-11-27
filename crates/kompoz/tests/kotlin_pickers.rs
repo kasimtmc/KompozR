@@ -7,7 +7,7 @@
 mod common;
 
 use kompoz::prelude::*;
-use kompoz::test::KompozTestRule;
+use kompoz::test::{KompozTestRule, shortcut_modifier};
 use kompoz::ui::window::PopupPositionProvider;
 
 // ==== date pickers ===================================================================================================
@@ -90,11 +90,11 @@ fn tap_at(rule: &KompozTestRule, at: Offset) {
 }
 
 fn type_digits(rule: &KompozTestRule, field: &str, digits: &str) {
-    use kompoz::ui::input::{Key, KeyModifiers};
+    use kompoz::ui::input::Key;
     let at = rule.on_node_with_content_description(field).get_unclipped_bounds_in_root().center();
     tap_at(rule, at);
-    rule.host().key_down(Key::A, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::A, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::A, shortcut_modifier());
+    rule.host().key_up(Key::A, shortcut_modifier());
     rule.wait_for_idle();
     rule.host().text_input(digits);
     rule.wait_for_idle();

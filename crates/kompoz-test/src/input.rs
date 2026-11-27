@@ -6,6 +6,7 @@
 //! carries over to the next `perform_*`.
 
 use crate::{FRAME_NANOS, KompozTestRule, SemanticsNodeInteraction};
+use kompoz_foundation::text::DesktopPlatform;
 use kompoz_graphics::{Density, IntSize, Offset, Rect, lerp_offset};
 use kompoz_runtime::named;
 use kompoz_ui::input::{Key, KeyEvent, KeyEventType, KeyModifiers, PointerButton, PointerButtons, PointerType};
@@ -13,6 +14,13 @@ use kompoz_ui::platform::{LocalViewConfiguration, ViewConfiguration};
 
 /// The time between two events of a gesture, ms (Compose's `InputDispatcher.eventPeriodMillis`).
 pub const EVENT_PERIOD_MILLIS: i64 = 16;
+
+/// The modifier the platform's shortcuts are pressed with: Cmd on macOS, Ctrl elsewhere — what copy, cut, paste,
+/// select all and undo take in its key mapping
+/// ([`platform_default_key_mapping`](kompoz_foundation::text::platform_default_key_mapping)).
+pub fn shortcut_modifier() -> KeyModifiers {
+    if DesktopPlatform::current() == DesktopPlatform::MacOS { KeyModifiers::Meta } else { KeyModifiers::Ctrl }
+}
 
 // (Compose's swipeWithVelocity checks it as it swipes: a constant here, checked once)
 const _: () = assert!(

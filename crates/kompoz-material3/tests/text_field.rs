@@ -18,7 +18,7 @@ use kompoz_graphics::*;
 use kompoz_material_icons_extended::Icons;
 use kompoz_material3::prelude::*;
 use kompoz_runtime::*;
-use kompoz_test::{KompozTestRule, RecordingCanvas};
+use kompoz_test::{KompozTestRule, RecordingCanvas, shortcut_modifier};
 use kompoz_text::TextRange;
 use kompoz_text::input::{TextFieldValue, VisualTransformation};
 use kompoz_ui::focus::FocusRequester;
@@ -289,7 +289,7 @@ fn text_field_colors_follow_focus_and_error() {
     }
     assert!(cursor, "the cursor");
     // The selection: its highlight.
-    key(&rule, Key::A, KeyModifiers::Ctrl);
+    key(&rule, Key::A, shortcut_modifier());
     assert!(has(&rule.draw().path_colors, c(0.10)));
     key(&rule, Key::MoveEnd, KeyModifiers::None);
 
@@ -317,7 +317,7 @@ fn text_field_colors_follow_focus_and_error() {
         cursor |= has(&rule.draw().path_colors, c(0.30));
     }
     assert!(cursor);
-    key(&rule, Key::A, KeyModifiers::Ctrl);
+    key(&rule, Key::A, shortcut_modifier());
     assert!(has(&rule.draw().path_colors, c(0.32)));
 }
 

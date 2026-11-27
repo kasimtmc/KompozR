@@ -340,7 +340,7 @@ impl<T: PartialEq> KtSet<T> {
     }
     /// Adds it unless it is there: whether it was added.
     pub fn add(&mut self, element: T) -> bool {
-        if self.items.as_slice().contains(&element) {
+        if <[_]>::contains(&self.items, &element) {
             return false;
         }
         self.items.push(element);
@@ -357,7 +357,7 @@ impl<T: PartialEq> KtSet<T> {
         }
     }
     pub fn contains(&self, element: T) -> bool {
-        self.items.as_slice().contains(&element)
+        <[_]>::contains(&self.items, &element)
     }
 }
 
@@ -381,7 +381,7 @@ impl<T> KtSet<T> {
 
 impl<T: PartialEq> PartialEq for KtSet<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.items.len() == other.items.len() && self.items.iter().all(|e| other.items.as_slice().contains(e))
+        self.items.len() == other.items.len() && self.items.iter().all(|e| <[_]>::contains(&other.items, e))
     }
 }
 
@@ -626,17 +626,17 @@ impl<T: PartialEq> KtContains<T> for [T] {
 }
 impl<T: PartialEq> KtContains<T> for Vec<T> {
     fn kt_contains(&self, value: &T) -> bool {
-        self.as_slice().contains(value)
+        <[T]>::contains(self, value)
     }
 }
 impl<T: PartialEq, const N: usize> KtContains<T> for [T; N] {
     fn kt_contains(&self, value: &T) -> bool {
-        self.as_slice().contains(value)
+        <[T]>::contains(self, value)
     }
 }
 impl<T: PartialEq> KtContains<T> for KtSet<T> {
     fn kt_contains(&self, value: &T) -> bool {
-        self.items.as_slice().contains(value)
+        <[_]>::contains(&self.items, value)
     }
 }
 impl<T: Ord> KtContains<T> for BTreeSet<T> {
@@ -1090,7 +1090,7 @@ pub trait KtList: KtIterable {
     {
         let mut out: Vec<Self::Item> = Vec::new();
         for v in self.kt_iter() {
-            if !out.as_slice().contains(&v) {
+            if !<[_]>::contains(&out, &v) {
                 out.push(v);
             }
         }
@@ -1102,7 +1102,7 @@ pub trait KtList: KtIterable {
         let mut out = Vec::new();
         for v in self.kt_iter() {
             let k = selector(v.clone());
-            if !keys.as_slice().contains(&k) {
+            if !<[_]>::contains(&keys, &k) {
                 keys.push(k);
                 out.push(v);
             }
@@ -1273,7 +1273,7 @@ pub trait KtList: KtIterable {
         Self::Item: PartialEq,
     {
         let gone: Vec<_> = elements.kt_iter().collect();
-        self.kt_iter().filter(|v| !gone.as_slice().contains(v)).collect()
+        self.kt_iter().filter(|v| !<[_]>::contains(&gone, v)).collect()
     }
     /// Kotlin: `toList(): List<T>`
     fn to_list(&self) -> Vec<Self::Item> {
@@ -1761,7 +1761,7 @@ pub trait KtList: KtIterable {
         let mut out = Vec::new();
         for v in self.kt_iter() {
             let k = selector(v.clone()).await;
-            if !keys.as_slice().contains(&k) {
+            if !<[_]>::contains(&keys, &k) {
                 keys.push(k);
                 out.push(v);
             }
@@ -2165,7 +2165,7 @@ impl<T: Clone> KtMutableList for Vec<T> {
         self.pop().unwrap_or_else(|| panic_kt("NoSuchElementException", "List is empty."))
     }
     fn reverse(&mut self) {
-        self.as_mut_slice().reverse();
+        <[T]>::reverse(self);
     }
 }
 
@@ -2207,7 +2207,7 @@ impl<T: Clone + 'static> SnapshotStateList<T> {
     /// Kotlin: `removeAll(predicate: (E) -> Boolean): Boolean`
     pub fn remove_all(&self, mut predicate: impl FnMut(T) -> bool) -> bool {
         let gone: Vec<bool> = self.with(|v| v.iter().map(|e| predicate(e.clone())).collect());
-        if !gone.as_slice().contains(&true) {
+        if !<[_]>::contains(&gone, &true) {
             return false;
         }
         self.update(|v| {

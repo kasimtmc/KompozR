@@ -6,7 +6,7 @@
 
 #![allow(non_snake_case)]
 
-use kompoz::gpu::device::{self, Backend, Surface};
+use kompoz::gpu::device::{self, NATIVE_BACKEND, Surface};
 use kompoz::platform::AppCore;
 use kompoz::platform::headless::{HeadlessPlatform, run_core};
 use kompoz::prelude::*;
@@ -100,7 +100,8 @@ fn it_draws_as_the_rust_counter() {
     let (rust, kotlin) = (shots_dir("rust"), shots_dir("kotlin"));
     run_rust_counter(&rust);
     let log = run_kotlin_counter(&kotlin);
-    assert!(log.contains("kompoz: renderer: KompozR on vulkan"), "no renderer:\n{log}");
+    let renderer = format!("kompoz: renderer: KompozR on {}", NATIVE_BACKEND.name());
+    assert!(log.contains(&renderer), "no renderer:\n{log}");
     assert!(!log.contains("GPU validation"), "validation errors:\n{log}");
     for name in ["before.png", "after.png"] {
         let (r, k) = (shot(&rust, name), shot(&kotlin, name));
@@ -117,7 +118,7 @@ fn main() {
     kompoz::runtime::set_ui_thread();
     let mut tests: Vec<(&str, fn())> = vec![("the_kotlin_counter_counts", the_kotlin_counter_counts)];
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
-    match device::create(Backend::Vulkan, Surface::default()) {
+    match device::create(NATIVE_BACKEND, Surface::default()) {
         Ok(d) => {
             println!("device: {}", d.device_name());
             tests.push(("it_draws_as_the_rust_counter", it_draws_as_the_rust_counter));

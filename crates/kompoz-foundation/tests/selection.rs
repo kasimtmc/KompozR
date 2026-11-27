@@ -189,11 +189,11 @@ fn drag(rule: &KompozTestRule, from: Offset, to: Offset, pointer_type: PointerTy
     rule.wait_for_idle();
 }
 
-/// Ctrl+C: what it copied (empty if nothing).
+/// Copy (Ctrl+C; Cmd+C on macOS): what it copied (empty if nothing).
 fn copy_keys(rule: &KompozTestRule, p: &TestPlatform) -> String {
     p.take();
-    rule.host().key_down(Key::C, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::C, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::C, shortcut_modifier());
+    rule.host().key_up(Key::C, shortcut_modifier());
     rule.wait_for_idle();
     p.take()
 }
@@ -933,17 +933,17 @@ fn a_selection_runs_across_several_texts() {
 }
 
 fn keys_and_accessibility_copy_and_select_all() {
-    // Ctrl+A selects all the container's texts, Ctrl+C (and Ctrl+Insert) copies them; Escape clears. Accessibility
-    // copies and sets the selection (a range of its texts end to end) through the container's semantics.
+    // Ctrl+A selects all the container's texts, Ctrl+C (and Ctrl+Insert) copies them (Cmd on macOS); Escape clears.
+    // Accessibility copies and sets the selection (a range of its texts end to end) through the container's semantics.
     let toolbar = Rc::new(RecordingToolbar::default());
     let rule = three_texts(toolbar.clone(), None);
     let p = platform(&rule);
     clicks(&rule, char_at(&rule, "1", 1, 0), 1); // a click focuses the container (a collapsed selection)
-    rule.host().key_down(Key::A, KeyModifiers::Ctrl);
-    rule.host().key_up(Key::A, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::A, shortcut_modifier());
+    rule.host().key_up(Key::A, shortcut_modifier());
     rule.wait_for_idle();
     assert_eq!(copy_keys(&rule, &p), "bir iki\nüç dört\nbeş altı");
-    rule.host().key_down(Key::Insert, KeyModifiers::Ctrl);
+    rule.host().key_down(Key::Insert, shortcut_modifier());
     rule.wait_for_idle();
     assert_eq!(p.take(), "bir iki\nüç dört\nbeş altı");
     rule.host().key_down(Key::Escape, KeyModifiers::None);

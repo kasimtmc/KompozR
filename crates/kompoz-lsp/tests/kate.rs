@@ -283,8 +283,16 @@ fn highlighting() {
 #[test]
 fn install() {
     let home = TempDir::new("kate-install");
-    let data = home.0.join("data");
-    let config = home.0.join("config");
+    // Where Kate reads them on this system (Qt's generic data and config locations, as `--kate` writes there): the
+    // XDG directories given, macOS's in the home's Library, Windows's local application data.
+    let local = home.0.join("local");
+    let (data, config) = if cfg!(windows) {
+        (local.clone(), local.clone())
+    } else if cfg!(target_os = "macos") {
+        (home.0.join("Library/Application Support"), home.0.join("Library/Preferences"))
+    } else {
+        (home.0.join("data"), home.0.join("config"))
+    };
     let settings = config.join("kate").join("lspclient").join("settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     let mine = Json::object([
@@ -307,6 +315,7 @@ fn install() {
             .env("HOME", &home.0)
             .env("XDG_DATA_HOME", &data)
             .env("XDG_CONFIG_HOME", &config)
+            .env("LOCALAPPDATA", &local)
             .output()
             .unwrap()
     };

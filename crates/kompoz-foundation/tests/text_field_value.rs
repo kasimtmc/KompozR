@@ -1444,6 +1444,7 @@ fn multi_line_field_paragraphs_go_their_own_way() {
 }
 
 tests!(
+    default_key_mapping;
     multi_line_field_paragraphs_go_their_own_way,
     typing_goes_through_the_input_session_in_utf8,
     input_method_compositions_and_corrections,

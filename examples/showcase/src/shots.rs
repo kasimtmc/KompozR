@@ -18,6 +18,7 @@
 //! `cargo run -p showcase --release --bin showcase-shots -- compare` (or `reference --cpp <binary> --revision <rev>`
 //! to write the C++ pictures anew), or `cargo xtask showcase-shots …`.
 
+use kompoz::gpu::device::{Backend, NATIVE_BACKEND};
 use kompoz::gpu::golden::{self, Difference};
 use kompoz::graphics::{decode_png, save_png};
 use std::fmt::Write as _;
@@ -115,6 +116,11 @@ pub fn places_script(config: Config, showcase: Showcase) -> String {
     s
 }
 
+/// Whether the app's text is set in fontconfig's fonts here (fontique's system fonts are fontconfig's on Linux; on
+/// Apple's systems CoreText's, on Windows DirectWrite's, which no configuration narrows to [`fonts_dir`]'s): only
+/// then is its text set in the C++ showcase's fonts alone, as the comparison with its pictures needs.
+pub const FONTS_BY_FONTCONFIG: bool = cfg!(target_os = "linux");
+
 /// The directory of the fonts both showcases set their text in (examples/showcase/fonts).
 pub fn fonts_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts")
@@ -160,8 +166,13 @@ pub fn run(
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut command = Command::new(binary);
     command.args(args);
-    // (on lavapipe, the CPU's Vulkan, unless the environment names a driver: every machine draws alike)
-    if std::env::var_os("VK_DRIVER_FILES").is_none() && std::env::var_os("VK_ICD_FILENAMES").is_none() {
+    // (on lavapipe, the CPU's Vulkan, unless the environment names a driver: every machine draws alike; where Metal
+    // is the API, on the system's GPU, whose pictures are lavapipe's within the goldens' three, as kompoz-gpu's tests
+    // check)
+    if NATIVE_BACKEND == Backend::Vulkan
+        && std::env::var_os("VK_DRIVER_FILES").is_none()
+        && std::env::var_os("VK_ICD_FILENAMES").is_none()
+    {
         command.env("VK_DRIVER_FILES", lavapipe().ok_or("no lavapipe (/usr/share/vulkan/icd.d/lvp_icd*.json)")?);
     }
     let mut child = command
@@ -211,7 +222,8 @@ pub fn run(
 }
 
 /// The runs of `showcase` (its `binary`) in `config` — the Material tab's pages, then the places screen —, shot into
-/// `dir` (made anew), on lavapipe, checked for the validation layers' errors.
+/// `dir` (made anew), on lavapipe (where Vulkan is the API; else on the target's), checked for the validation layers'
+/// errors.
 pub fn shoot(binary: &Path, showcase: Showcase, config: Config, dir: &Path) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -219,8 +231,12 @@ pub fn shoot(binary: &Path, showcase: Showcase, config: Config, dir: &Path) -> R
     let runs = [(script(config, showcase), Vec::new()), (places_script(config, showcase), vec![PLACES_LINK])];
     for (script, args) in runs {
         let log = run(binary, &args, dir, &script, config, &fontconfig)?;
-        if !log.contains("llvmpipe") {
+        if NATIVE_BACKEND == Backend::Vulkan && !log.contains("llvmpipe") {
             return Err(format!("{}: not drawn on lavapipe:\n{log}", config.name()));
+        }
+        let renderer = format!("kompoz: renderer: KompozR on {}", NATIVE_BACKEND.name());
+        if !log.contains(&renderer) {
+            return Err(format!("{}: not drawn with {}:\n{log}", config.name(), NATIVE_BACKEND.name()));
         }
         if log.contains("GPU validation") {
             return Err(format!("{}: validation errors:\n{log}", config.name()));

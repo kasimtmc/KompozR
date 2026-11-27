@@ -361,11 +361,11 @@ fn right_click_opens_context_menus() {
     host.key_up(kompoz_ui::input::Key::Escape, KeyModifiers::None);
     rule.wait_for_idle();
     // A selection container's: copy only (Compose desktop's SelectionManager text manager), enabled once text is
-    // selected (a double click selects a word).
+    // selected (a double click selects a word; on macOS the right click itself selects the word clicked).
     let metin = bounds(&rule, "metin");
     secondary_click(&rule, metin.center());
     assert!(!rule.on_node_with_text("Cut").exists() && !rule.on_node_with_text("Select all").exists());
-    rule.on_node_with_text("Copy").assert_is_not_enabled();
+    assert_enabled(&rule, "Copy", on_macos());
     host.key_down(kompoz_ui::input::Key::Escape, KeyModifiers::None);
     host.key_up(kompoz_ui::input::Key::Escape, KeyModifiers::None);
     rule.wait_for_idle();
@@ -621,8 +621,9 @@ fn value_based_field_has_its_context_menu_and_scrollbar() {
     let all = "bir\niki\nüç\ndört\nbeş\naltı\nyedi\nsekiz";
     secondary_click(&rule, at(field.left + 10.0, field.top + 10.0));
     assert_eq!(rule.host().overlay_count(), 1);
-    rule.on_node_with_text("Cut").assert_is_not_enabled();
-    rule.on_node_with_text("Copy").assert_is_not_enabled();
+    // (on macOS the word clicked selected first: "bir", to cut or copy)
+    assert_enabled(&rule, "Cut", on_macos());
+    assert_enabled(&rule, "Copy", on_macos());
     rule.on_node_with_text("Paste").assert_is_enabled();
     rule.on_node_with_text("Select all").perform_click();
     rule.wait_for_idle();
@@ -641,6 +642,22 @@ fn value_based_field_has_its_context_menu_and_scrollbar() {
     rule.wait_for_idle();
     assert_eq!(value.peek().text(), all);
     assert_eq!(rule.host().overlay_count(), 0);
+}
+
+/// Whether this is macOS, whose right click in a text selects the word clicked before its menu opens (Compose
+/// desktop's `TextContextMenuArea`).
+fn on_macos() -> bool {
+    kompoz_foundation::text::DesktopPlatform::current() == kompoz_foundation::text::DesktopPlatform::MacOS
+}
+
+/// The menu item labelled `text`, enabled or not as `enabled` says.
+fn assert_enabled(rule: &KompozTestRule, text: &str, enabled: bool) {
+    let item = rule.on_node_with_text(text);
+    if enabled {
+        item.assert_is_enabled();
+    } else {
+        item.assert_is_not_enabled();
+    }
 }
 
 fn on_drag_follows_the_matched_pointer() {

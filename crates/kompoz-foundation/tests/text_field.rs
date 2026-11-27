@@ -1429,6 +1429,7 @@ fn a_scrolled_text_field_draws_its_text_where_it_scrolled() {
 }
 
 tests!(
+    default_key_mapping;
     a_scrolled_text_field_draws_its_text_where_it_scrolled,
     basic_text_field_types_and_draws_its_cursor,
     basic_text_field_is_just_the_text,

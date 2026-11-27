@@ -41,6 +41,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 tests!(
+    default_key_mapping;
     text_fields_line_up_by_their_baselines_too,
     basic_text_fields_take_a_decorator_and_fields_line_limits,
     tap_places_the_caret_and_password_shows_dots,

@@ -10,7 +10,7 @@
 
 #![allow(non_snake_case)]
 
-use kompoz::gpu::device::{self, Backend, Surface};
+use kompoz::gpu::device::{self, NATIVE_BACKEND, Surface};
 use kompoz::prelude::*;
 use kompoz::test::{InjectionScope, KompozTestRule};
 use kompoz::ui::input::{Key, KeyModifiers};
@@ -196,7 +196,15 @@ fn main() {
         ("deep_links_open_their_screens", deep_links_open_their_screens),
     ];
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
-    match device::create(Backend::Vulkan, Surface::default()) {
+    match device::create(NATIVE_BACKEND, Surface::default()) {
+        // (The C++ showcase's pictures are of its text in examples/showcase/fonts alone, which the app's text is set
+        // in only where fontconfig gives its fonts: elsewhere the system's fonts would be told apart, not the
+        // drawing. The device is still made, so a missing one fails as `KOMPOZ_GPU_REQUIRED` asks.)
+        Ok(d) if !shots::FONTS_BY_FONTCONFIG => println!(
+            "device: {}; skipped it_draws_as_the_cpp_showcase: the system's fonts here aren't fontconfig's, which \
+             alone are narrowed to the C++ showcase's",
+            d.device_name()
+        ),
         Ok(d) => {
             println!("device: {}", d.device_name());
             tests.push(("it_draws_as_the_cpp_showcase", it_draws_as_the_cpp_showcase));

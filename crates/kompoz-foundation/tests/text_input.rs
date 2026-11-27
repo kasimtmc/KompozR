@@ -1296,8 +1296,16 @@ fn key_mappings_follow_the_platform() {
     // Another platform's mapping for this thread's fields.
     set_key_mapping_override(Some(Rc::new(mac_os_key_mapping())));
     assert_eq!(platform_default_key_mapping().map(&down(Key::Z, KeyModifiers::Meta)), Some(UNDO));
+    // None: the running platform's own.
     set_key_mapping_override(None);
-    assert_eq!(platform_default_key_mapping().map(&down(Key::MoveHome, CTRL)), Some(HOME));
+    let own = create_platform_default_key_mapping(DesktopPlatform::current());
+    for event in
+        [down(Key::MoveHome, CTRL), down(Key::Z, KeyModifiers::Meta), down(Key::DirectionLeft, KeyModifiers::Alt)]
+    {
+        assert_eq!(platform_default_key_mapping().map(&event), own.map(&event), "{event:?}");
+    }
+    // (back to the mapping these tests press keys in)
+    use_the_default_key_mapping();
 }
 
 /// Android's dead keys: an accent then a letter types the accented letter; the accent twice or then a space types
@@ -1484,6 +1492,7 @@ fn test_rule_text_actions() {
 }
 
 tests!(
+    default_key_mapping;
     text_field_buffer_edits_and_moves_the_selection,
     change_lists_merge_touching_changes,
     offset_mapping_maps_both_ways,

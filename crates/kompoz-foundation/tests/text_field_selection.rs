@@ -749,6 +749,7 @@ fn selection_handles_point_at_their_end_and_hold_its_line_by_the_middle() {
 }
 
 tests!(
+    default_key_mapping;
     long_press_selects_a_word_with_handles_and_a_toolbar,
     caret_handle_for_fingers_double_click_for_the_mouse,
     a_double_click_takes_letters_digits_underscores_and_what_is_beyond_ascii,

@@ -189,14 +189,14 @@ impl<T: Clone + 'static> MutableList<T> {
     /// Kotlin: `removeAll(predicate: (E) -> Boolean): Boolean`
     pub fn remove_all(&self, mut predicate: impl FnMut(T) -> bool) -> bool {
         let gone: Vec<bool> = self.to_vec().into_iter().map(&mut predicate).collect();
-        if !gone.as_slice().contains(&true) {
+        if !<[_]>::contains(&gone, &true) {
             return false;
         }
         self.update(|v| {
             let mut i = 0;
             v.retain(|_| {
                 i += 1;
-                !gone.as_slice().get(i - 1).copied().unwrap_or(false)
+                !<[bool]>::get(&gone, i - 1).copied().unwrap_or(false)
             });
         });
         true
@@ -479,7 +479,7 @@ impl<T: Clone + 'static> IntoIterator for &ListView<T> {
 }
 impl<T: PartialEq + Clone + 'static> KtContains<T> for ListView<T> {
     fn kt_contains(&self, value: &T) -> bool {
-        self.to_vec().as_slice().contains(value)
+        <[_]>::contains(&self.to_vec(), value)
     }
 }
 impl<T: PartialEq + Clone + 'static> PartialEq for ListView<T> {

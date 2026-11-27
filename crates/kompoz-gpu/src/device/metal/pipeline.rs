@@ -186,6 +186,11 @@ impl PipelineCache {
         }
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let out = beside(&self.file, "out");
+        // (Metal writes the archive only into a directory there is — "Output URL is invalid" — and the cache's isn't
+        // yet in the first run: it is made here, as writing the cache would.)
+        if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let _ = std::fs::remove_file(&out);
         match self.archive.0.serializeToURL_error(&file_url(&out)) {
             Ok(()) => match std::fs::read(&out) {

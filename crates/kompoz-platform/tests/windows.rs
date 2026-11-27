@@ -9,7 +9,7 @@
 #![allow(non_snake_case, non_upper_case_globals)]
 
 use kompoz_foundation::prelude::*;
-use kompoz_gpu::device::{self, Backend, Surface};
+use kompoz_gpu::device::{self, NATIVE_BACKEND, Surface};
 use kompoz_graphics::*;
 use kompoz_platform::headless::{HeadlessPlatform, HeadlessShared, headless_windows, run_windows};
 use kompoz_platform::{AppConfig, AppContent, Event, GpuPriority, TrayMenuItem};
@@ -460,7 +460,7 @@ fn a_window_in_a_window_opens_too() {
 fn main() {
     kompoz_runtime::set_ui_thread();
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
-    match device::create(Backend::Vulkan, Surface::default()) {
+    match device::create(NATIVE_BACKEND, Surface::default()) {
         Ok(d) => println!("device: {}", d.device_name()),
         Err(why) => {
             println!("skipped: {why}");

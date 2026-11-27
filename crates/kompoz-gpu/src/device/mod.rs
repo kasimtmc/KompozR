@@ -711,7 +711,8 @@ pub trait Device {
     /// `data` copied into this frame's memory (at a multiple of `alignment`, 16 at least), for [`draw`](Device::draw);
     /// none if there is no memory for it.
     fn write_frame_data(&mut self, data: &[u8], alignment: usize) -> Option<BufferRef>;
-    /// Texels (in the texture's format, `row_bytes` apart) into part of a texture; outside passes.
+    /// Texels (in the texture's format, RGBA8 for `Bgra8` as [`read_pixels`](Device::read_pixels) gives them back;
+    /// `row_bytes` apart) into part of a texture; outside passes.
     fn upload(&mut self, texture: TextureId, region: IRect, pixels: &[u8], row_bytes: usize);
     /// Draws into `target` (cleared first if `clear`), sampling `reads` (each read before by what was drawn into
     /// it). A pass starts with nothing bound: its pipeline, uniforms and textures are set in it (as Metal's and
