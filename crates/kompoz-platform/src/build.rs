@@ -2,9 +2,9 @@
 //! on Windows its resources ([`windows_resources`]) — the program's icon (Explorer's, the taskbar's before a window
 //! sets its own, the window class's: resource id 1), its manifest (per-monitor DPI awareness v2 before the program
 //! starts, UTF-8 as the process's code page, Windows 10 and 11 as the systems it is made for, long paths, run as the
-//! user who starts it) and its version information — compiled by the toolchain's resource compiler (MinGW's
-//! `windres` or LLVM's for the GNU target; the Windows SDK's `rc.exe` or `llvm-rc` for MSVC's) and linked into the
-//! program's binaries. Nothing for the other targets.
+//! user who starts it), its version information and its main thread's stack (8 MiB, as Linux's) — compiled by the
+//! toolchain's resource compiler (MinGW's `windres` or LLVM's for the GNU target; the Windows SDK's `rc.exe` or
+//! `llvm-rc` for MSVC's) and linked into the program's binaries. Nothing for the other targets.
 //!
 //! ```text
 //! // build.rs, with `kompoz-platform = { path = "…", default-features = false }` among the build-dependencies
@@ -75,6 +75,9 @@ pub fn windows_resources(resources: &WindowsResources) {
         // (The manifest is the resource's: the linker makes none of its own beside it.)
         println!("cargo:rustc-link-arg-bins=/MANIFEST:NO");
     }
+    // The main thread's stack as Linux's, 8 MiB (Windows' default is 1 MiB): a deep composition in a debug build
+    // fits as it does there.
+    println!("cargo:rustc-link-arg-bins={}", if msvc { "/STACK:8388608" } else { "-Wl,--stack,8388608" });
     println!("cargo:rerun-if-env-changed=RC");
     println!("cargo:rerun-if-env-changed=WINDRES");
 }
@@ -194,27 +197,37 @@ fn compile_gnu(rc: &Path, out: &Path) -> PathBuf {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "x86_64".into());
     let mut tools: Vec<PathBuf> = std::env::var_os("WINDRES").map(PathBuf::from).into_iter().collect();
     tools.extend([format!("{arch}-w64-mingw32-windres"), "windres".into(), "llvm-windres".into()].map(PathBuf::from));
+    // Each with its own preprocessor (MinGW-w64's gcc, which binutils alone doesn't bring), else the host's: the
+    // script includes nothing, so any C preprocessor reads it as MinGW's would.
+    let preprocessors: [&[&str]; 3] = [
+        &[],
+        &["--preprocessor=cpp", "--preprocessor-arg=-xc", "--preprocessor-arg=-DRC_INVOKED"],
+        &["--preprocessor=clang", "--preprocessor-arg=-E", "--preprocessor-arg=-xc", "--preprocessor-arg=-DRC_INVOKED"],
+    ];
+    let target = if arch == "x86_64" { "pe-x86-64" } else { "pe-i386" };
     let mut failures = Vec::new();
     for tool in &tools {
-        let target = if arch == "x86_64" { "pe-x86-64" } else { "pe-i386" };
-        let args = [
-            "--input-format=rc".as_ref(),
-            "--output-format=coff".as_ref(),
-            "--target".as_ref(),
-            target.as_ref(),
-            "-c".as_ref(),
-            "65001".as_ref(),
-            rc.as_os_str(),
-            object.as_os_str(),
-        ];
-        match run(tool, &args) {
-            Ok(()) => return object,
-            Err(why) => failures.push(why),
+        for preprocessor in preprocessors {
+            let mut args: Vec<&std::ffi::OsStr> = preprocessor.iter().map(|a| a.as_ref()).collect();
+            args.extend([
+                "--input-format=rc".as_ref(),
+                "--output-format=coff".as_ref(),
+                "--target".as_ref(),
+                target.as_ref(),
+                "-c".as_ref(),
+                "65001".as_ref(),
+                rc.as_os_str(),
+                object.as_os_str(),
+            ]);
+            match run(tool, &args) {
+                Ok(()) => return object,
+                Err(why) => failures.push(why),
+            }
         }
     }
     panic!(
         "the program's Windows resources couldn't be compiled: no resource compiler worked (MinGW-w64's binutils' \
-         windres, or LLVM's llvm-windres; WINDRES names another):\n{}",
+         windres with its gcc or the host's cpp or clang, or LLVM's llvm-windres; WINDRES names another):\n{}",
         failures.join("\n")
     );
 }

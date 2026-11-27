@@ -1416,6 +1416,10 @@ impl Platform for WaylandPlatform {
                 Some((name, path)) => {
                     if w.appmenu.is_none() {
                         w.appmenu = self.globals.appmenu.as_ref().and_then(|m| m.create(&w.surface));
+                        if w.appmenu.is_some() {
+                            // (Once a window, as its bar leaves it: what tells a drawn bar's absence from a bug.)
+                            crate::system::log("kompoz: Wayland: the menu bar is the desktop's global menu");
+                        }
                     }
                     if let Some(appmenu) = &w.appmenu {
                         appmenu.set_address(&name, &path);

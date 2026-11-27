@@ -11,3 +11,12 @@ check-web = [
     "-Zbuild-std=std,panic_unwind",
     "--config", "target.wasm32-unknown-unknown.rustflags = ['-Cpanic=unwind', '-Cllvm-args=-wasm-use-legacy-eh=false']",
 ]
+
+# Windows gives a program's main thread 1 MiB of stack, Linux 8 MiB: the tests (and the examples) on the main thread
+# as on Linux. (Apps get the same from kompoz_platform::build::windows_resources.)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-Clink-arg=/STACK:8388608"]
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-Clink-arg=/STACK:8388608"]
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-Clink-arg=-Wl,--stack,8388608"]

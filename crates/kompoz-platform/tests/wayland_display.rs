@@ -143,7 +143,8 @@ fn extras_script(work: &Path, menu: bool) -> String {
 /// drawn) its menu bar opaque; its icon and menu bar given to the compositor without a protocol error (the connection
 /// never broke); the menu's item run; with a global menu, the bar not drawn (the desktop shows it).
 #[cfg(target_os = "linux")]
-fn check_extras(work: &Path, out: &str, drawn: bool) {
+fn check_extras(work: &Path, out: &str, drawn: bool, opened: bool) {
+    assert!(!(opened && !drawn), "a menu opened in a bar that isn't drawn");
     for line in ["the connection broke", "GPU validation:", "no window", "couldn't be opened"] {
         assert!(!out.lines().any(|l| l.contains(line)), "logged '{line}':\n{out}");
     }
@@ -154,7 +155,9 @@ fn check_extras(work: &Path, out: &str, drawn: bool) {
     if drawn {
         assert!(near(pixel(&third, 150, 10), 0xfff2f2f2), "the menu bar drawn at its top");
         assert_eq!(pixel(&third, 40, 45)[3], 0, "nothing below the bar before");
-        assert_eq!(pixel(&work.join("menu.png"), 40, 45)[3], 255, "its menu open below it");
+        if opened {
+            assert_eq!(pixel(&work.join("menu.png"), 40, 45)[3], 255, "its menu open below it");
+        }
     } else {
         assert_eq!(pixel(&third, 150, 10)[3], 0, "the menu bar the desktop's: not drawn");
     }
@@ -689,7 +692,13 @@ fn main() -> ExitCode {
                         env.push(("DBUS_SESSION_BUS_ADDRESS", bus.address.as_str()));
                     }
                     let out = run_app(&compositor, &work, "extras", &extras_script(&work, !global), &env);
-                    check_extras(&work, &out, !global);
+                    // (The global menu only where the compositor takes the bar's address — KDE's appmenu, which
+                    // kwin has and weston hasn't: elsewhere the bar is drawn, its shortcut still the window's.)
+                    let exported = out.contains("the menu bar is the desktop's global menu");
+                    if global && !exported {
+                        println!("  (no appmenu on this compositor: the bar drawn, the registrar's export unseen)");
+                    }
+                    check_extras(&work, &out, !exported, !global);
                 }
             }
         })
