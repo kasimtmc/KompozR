@@ -1155,7 +1155,8 @@ impl<P: Platform> AppCore<P> {
                     self.dropping = true;
                     host.external_drag_entered(self.drop_types());
                 }
-                host.external_drag_moved(self.to_px(x, y));
+                let wanted = host.external_drag_moved(self.to_px(x, y));
+                self.platform.drop_over(wanted);
             }
             Event::DropFile { x, y, path } => {
                 if !path.is_empty() {

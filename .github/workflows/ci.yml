@@ -450,6 +450,14 @@ jobs:
           KOMPOZ_DISPLAY_TESTS: "1"
           KOMPOZ_GPU_REQUIRED: "1"
         run: cargo test -p kompoz-platform --test uia_windows
+      # (Drops through the window's registered drop target as a source makes them, the effect the app's answer; the
+      # app's drag out by DoDragDrop to a window of the test's.)
+      - name: OLE drag and drop both ways with the app in its window (lavapipe)
+        if: success() || failure()
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_GPU_REQUIRED: "1"
+        run: cargo test -p kompoz-platform --test ole_windows
       - name: The Counter in a window by CI's script, clicked and resized (lavapipe)
         if: success() || failure()
         env:

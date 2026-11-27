@@ -13,9 +13,9 @@
 //!
 //! `unsafe` code is confined to `unix::sys`, `linux::sys`, `windows::sys` and the FFI modules (`linux::xkb`'s,
 //! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface, WinHTTP,
-//! IMM32, TSF and UI Automation's providers, `android`'s JNI, NDK, natives and Vulkan surface, `web::sys`) and the
-//! macOS platform's that define or call Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:`
-//! comment; everything else is safe.
+//! IMM32, TSF, UI Automation's providers and OLE's drag and drop, `android`'s JNI, NDK, natives and Vulkan
+//! surface, `web::sys`) and the macOS platform's that define or call Objective-C classes through objc2 (`macos`),
+//! each block with a `// SAFETY:` comment; everything else is safe.
 
 //!
 //! What an app's build script adds to its program for a platform (the Windows program's resources) is [`build`]'s,
@@ -59,12 +59,15 @@ pub mod web;
 #[cfg(all(feature = "platform", windows))]
 pub mod windows;
 
-// The Windows platform's input methods' translations (what they see of a field, what they do to it) and UI
-// Automation's view of the semantics tree, tested on every host.
+// The Windows platform's transfer formats (the clipboard's and drag and drop's), its input methods' translations
+// (what they see of a field, what they do to it) and UI Automation's view of the semantics tree, tested on every host.
 #[cfg(all(test, feature = "platform", not(windows)))]
 #[allow(dead_code)]
 #[path = "windows"]
 mod windows_tested_here {
+    // (on the hosts with the clipboard's `transfer` it shares)
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    mod formats;
     mod ime;
     mod uia;
 }

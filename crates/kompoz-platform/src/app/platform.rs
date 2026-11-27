@@ -253,6 +253,12 @@ pub trait Platform {
     fn take_drop_entry(&mut self) -> Option<ClipEntry> {
         None
     }
+    /// Whether a drag from another app (or the app's own, back over the window), where it is now (the core handled
+    /// its `DropMove`), is over a target that wants it: what a platform whose drag source asks as it moves is told
+    /// (OLE's DragOver effect: none where nothing would take it).
+    fn drop_over(&mut self, wanted: bool) {
+        let _ = wanted;
+    }
     /// A drop the platform reported (its `DropComplete`) handled: whether a target in the app took it — what the
     /// platform tells the drag's source (XDND's `XdndFinished`, a Wayland offer finished or let go).
     fn drop_done(&mut self, taken: bool) {

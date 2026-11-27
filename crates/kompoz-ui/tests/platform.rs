@@ -416,12 +416,13 @@ fn drags_from_outside_reach_the_targets_under_them() {
     // Files come: the targets that want them are told; over the files' box, then the window's, then off it.
     assert!(h.external_drag_entered(vec!["text/uri-list".into()]));
     assert_eq!(taken(&log), ["outer started", "files started"]);
-    h.external_drag_moved(at(50.0, 50.0));
+    // (Over a target that wants them: what a platform's source is told.)
+    assert!(h.external_drag_moved(at(50.0, 50.0)));
     // (Into the window's target, and at once into its child's, as Compose's nodes go.)
     assert_eq!(taken(&log), ["outer entered", "files entered", "files moved 50,50", "outer exited"]);
     h.external_drag_moved(at(60.0, 50.0));
     assert_eq!(taken(&log), ["files moved 60,50"]);
-    h.external_drag_moved(at(50.0, 150.0)); // (the text box doesn't want files)
+    assert!(h.external_drag_moved(at(50.0, 150.0))); // (the text box doesn't want files: the window's target does)
     assert_eq!(taken(&log), ["outer entered", "outer moved 50,150", "files exited"]);
     h.external_drag_moved(at(50.0, 40.0));
     taken(&log);
@@ -458,6 +459,11 @@ fn drags_from_outside_reach_the_targets_under_them() {
     assert!(
         log.contains(&"text drop merhaba".to_string()) && log.ends_with(&["outer ended".into(), "text ended".into()])
     );
+    // Past the window's target no target wants it: nothing would take it there.
+    assert!(h.external_drag_entered(vec!["text/plain".into()]));
+    assert!(h.external_drag_moved(at(50.0, 150.0)));
+    assert!(!h.external_drag_moved(at(350.0, 450.0)));
+    h.external_drag_left();
 }
 
 fn strings_and_right_to_left_languages() {

@@ -12,6 +12,7 @@ use super::clipboard::Clipboard;
 use super::event_loop::{EventLoop, Waker};
 use super::input_method::{self, InputMethod};
 use super::keyboard::{self, Characters, VK_CONTROL, VK_F4, VK_MENU, VK_SPACE};
+use super::ole::{self, DropAnswers, DropTarget, OwnDrag};
 use super::sys::{self, Cursor, Hwnd, Icon, Placed, WindowHandler, WindowMessage};
 use super::uia_bridge::{UiaAction, UiaBridge};
 use super::{Route, StepKind, now, route};
@@ -22,6 +23,7 @@ use kompoz_gpu::device::{Backend, Surface};
 use kompoz_graphics::{Color, Rect};
 use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
+use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
 use kompoz_ui::semantics::{SemanticsAction, SemanticsProperties};
@@ -57,12 +59,18 @@ const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
 const DWMSBT_MAINWINDOW: u32 = 2; // (Mica)
 
 /// What the platform's windows share: the loop's wait, the platform's own window, the clipboard, the cursors, the
-/// windows' states (by their cores' ids), the platform's own events, the stepper of Windows' modal loops.
+/// windows' states (by their cores' ids), the platform's own events, the stepper of Windows' modal loops, OLE's drags.
 pub struct Shared {
     pub(super) event_loop: EventLoop,
     /// The platform's own hidden window: it owns the clipboard and hears the system's broadcasts.
     helper: Cell<Hwnd>,
     clipboard: Clipboard,
+    /// OLE initialized on the thread (drags in and out; none without it).
+    ole: Cell<bool>,
+    /// A drag of the app's own a window's host handed to the platform, to run once the step that asked is over.
+    drag_request: RefCell<Option<(Rc<WindowState>, PlatformDragAndDrop)>>,
+    /// The app's own drag running (OLE's modal loop), and the window it is from.
+    outgoing: RefCell<Option<(WindowId, OwnDrag)>>,
     windows: RefCell<Vec<Rc<WindowState>>>,
     routed: RefCell<VecDeque<(Route, Event)>>,
     stepper: RefCell<Option<Rc<dyn Fn(StepKind)>>>,
@@ -90,6 +98,9 @@ impl Shared {
             event_loop,
             helper: Cell::new(Hwnd::NONE),
             clipboard: Clipboard::new(),
+            ole: Cell::new(ole::initialize()),
+            drag_request: RefCell::new(None),
+            outgoing: RefCell::new(None),
             windows: RefCell::new(Vec::new()),
             routed: RefCell::new(VecDeque::new()),
             stepper: RefCell::new(None),
@@ -106,11 +117,15 @@ impl Shared {
     }
 
     /// The platform's own window gone (what the app put on the clipboard rendered first: WM_RENDERALLFORMATS), the
-    /// display let sleep again, TSF deactivated.
+    /// display let sleep again, TSF deactivated, OLE let go.
     pub fn close(&self) {
         let helper = self.helper.replace(Hwnd::NONE);
         if !helper.is_none() {
             helper.destroy();
+        }
+        self.drag_request.borrow_mut().take();
+        if self.ole.replace(false) {
+            ole::uninitialize();
         }
         if self.kept_on.replace(false) {
             sys::keep_display_on(false);
@@ -143,6 +158,40 @@ impl Shared {
 
     pub(super) fn push(&self, route: Route, event: Event) {
         self.routed.borrow_mut().push_back((route, event));
+    }
+
+    /// The app's drag a window's host handed to the platform (it left the window) run through OLE, the step that
+    /// queued it over (C++ had none): Windows' modal loop until it is dropped or called off, the app's frames stepped
+    /// meanwhile by the window's modal timer; then the window's core told the mouse's release (OLE's loop took it)
+    /// and how the drag ended. Whether one ran.
+    pub(super) fn run_drag(&self) -> bool {
+        let Some((state, drag)) = self.drag_request.borrow_mut().take() else { return false };
+        let hwnd = state.hwnd.get();
+        if hwnd.is_none() {
+            state.push(Event::OwnDragEnded { action: None });
+            return true;
+        }
+        let was_modal = state.modal.replace(true);
+        if !was_modal {
+            hwnd.set_timer(MODAL_TIMER, MODAL_TIMER_MS);
+        }
+        let id = state.id;
+        let action = ole::drag(self.clipboard.formats, &drag, |own| *self.outgoing.borrow_mut() = Some((id, own)));
+        self.outgoing.borrow_mut().take();
+        if !was_modal {
+            state.modal.set(false);
+            hwnd.kill_timer(MODAL_TIMER);
+        }
+        state.buttons.set(0);
+        if state.hwnd.get() == hwnd
+            && let Some((sx, sy)) = sys::cursor_position()
+        {
+            let (x, y) = hwnd.screen_to_client(sx, sy);
+            let (x, y, modifiers, time) = state.modifiers_event_at(x, y);
+            state.push(Event::MouseUp { x, y, button: MouseButton::Left, modifiers, time });
+        }
+        state.push(Event::OwnDragEnded { action });
+        true
     }
 
     /// The events gathered since, each for its window.
@@ -314,6 +363,8 @@ pub struct WindowState {
     keep_on: Cell<bool>,
     /// Its UI Automation bridge while it is open (none: `KOMPOZ_UIA=0`).
     uia: RefCell<Option<UiaBridge>>,
+    /// What its core answered of a drag over it, for its drop target.
+    drop: Rc<DropAnswers>,
     /// Its semantics tree to publish to UI Automation (it changed), and when it was last (the platform's clock).
     uia_dirty: Cell<bool>,
     uia_last: Cell<Option<i64>>,
@@ -345,6 +396,7 @@ impl WindowState {
             icon: RefCell::new(None),
             keep_on: Cell::new(false),
             uia: RefCell::new(None),
+            drop: Rc::default(),
             uia_dirty: Cell::new(true),
             uia_last: Cell::new(None),
         }
@@ -709,6 +761,33 @@ impl WindowHandler for WindowState {
     }
 }
 
+/// A window's side of its drop target: its handle, its core stepped as a drag's source asks, the app's own drag.
+struct WindowDrops {
+    state: Weak<WindowState>,
+    shared: Weak<Shared>,
+}
+
+impl ole::DropSite for WindowDrops {
+    fn hwnd(&self) -> Hwnd {
+        self.state.upgrade().map_or(Hwnd::NONE, |s| s.hwnd.get())
+    }
+
+    /// The events pushed, then the app stepped at once (as a modal loop's timer steps it: nothing while a step runs).
+    fn deliver(&self, events: Vec<Event>) {
+        let (Some(state), Some(shared)) = (self.state.upgrade(), self.shared.upgrade()) else { return };
+        for e in events {
+            state.push(e);
+        }
+        shared.step(StepKind::Frame);
+    }
+
+    fn own_drag(&self) -> Option<OwnDrag> {
+        let (state, shared) = (self.state.upgrade()?, self.shared.upgrade()?);
+        let outgoing = shared.outgoing.borrow();
+        outgoing.as_ref().filter(|(id, _)| *id == state.id).map(|(_, own)| own.clone())
+    }
+}
+
 /// A window of the app's (the root core's, or a `Window`'s): its state, the platform it shares.
 pub struct Win32Window {
     shared: Rc<Shared>,
@@ -798,6 +877,23 @@ impl PlatformCallbacks for Win32Callbacks {
         self.shared.clipboard.set(self.shared.helper.get(), entry);
     }
 
+    /// The app's drag that left the window taken by OLE: queued, run once the step that asked is over
+    /// (`Shared::run_drag`); not where OLE isn't there, the window is closed, the source allows no action, or a drag
+    /// runs already.
+    fn start_drag_and_drop(&self, drag: &PlatformDragAndDrop) -> bool {
+        let s = &self.shared;
+        if !s.ole.get()
+            || self.state.hwnd.get().is_none()
+            || drag.transfer_data.supported_actions.is_empty()
+            || s.drag_request.borrow().is_some()
+            || s.outgoing.borrow().is_some()
+        {
+            return false;
+        }
+        *s.drag_request.borrow_mut() = Some((self.state.clone(), drag.clone()));
+        true
+    }
+
     /// Opened by the shell (C++'s `ShellExecuteW`).
     fn open_uri(&self, uri: &str) {
         if !sys::shell_open(uri) {
@@ -865,6 +961,11 @@ impl Platform for Win32Window {
             state.uia_dirty.set(true);
             state.uia_last.set(None);
         }
+        if self.shared.ole.get() {
+            // (drags from other apps, and the app's own back over it)
+            let site = WindowDrops { state: Rc::downgrade(state), shared: Rc::downgrade(&self.shared) };
+            ole::register(hwnd, DropTarget::create(Box::new(site), state.drop.clone(), self.shared.clipboard.formats));
+        }
         state.dpi.set(hwnd.dpi());
         let scale = self.scale();
         let width = ((spec.width.0 as f64 * scale).round() as i32).max(1);
@@ -915,6 +1016,8 @@ impl Platform for Win32Window {
         if let Some(bridge) = bridge {
             bridge.close();
         }
+        ole::revoke(hwnd);
+        self.state.drop.done(false); // (a drop under way let go)
         hwnd.destroy();
     }
 
@@ -1030,6 +1133,21 @@ impl Platform for Win32Window {
             state.uia_dirty.set(false);
             bridge.publish(host.accessibility_tree(), state.ime.caret_box());
         }
+    }
+
+    /// What a drop over the window carries (read from its data object as targets ask, until `drop_done`).
+    fn take_drop_entry(&mut self) -> Option<ClipEntry> {
+        self.state.drop.take_entry()
+    }
+
+    /// The drop handled: its source answered with the effect (none unless taken), its data let go.
+    fn drop_done(&mut self, taken: bool) {
+        self.state.drop.done(taken);
+    }
+
+    /// Whether a target under the drag wants it: its source answered with the effect (none where nothing would).
+    fn drop_over(&mut self, wanted: bool) {
+        self.state.drop.over(wanted);
     }
 
     /// One more frame publishes the tree to UI Automation (it changed, or a client wants it).
@@ -1172,6 +1290,16 @@ mod tests {
         }
     }
 
+    /// Messages handled until `done` (at most two seconds): under wine the host's window manager answers a size or
+    /// a placement asked for later than Windows, which does it at once.
+    fn settle(mut done: impl FnMut() -> bool) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !done() && std::time::Instant::now() < until {
+            pump();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     fn events(shared: &Shared, id: WindowId) -> Vec<Event> {
         pump();
         shared.take_events().into_iter().filter(|(w, _)| *w == id).map(|(_, e)| e).collect()
@@ -1201,7 +1329,12 @@ mod tests {
         assert_eq!(w.metrics().point_to_px, 1.0);
         // Resized by the core: Resized, the new size.
         w.set_window_size(300, 220);
-        assert!(events(&shared, WindowId::MAIN).contains(&Event::Resized));
+        let mut resized = Vec::new();
+        settle(|| {
+            resized.extend(events(&shared, WindowId::MAIN));
+            hwnd.client_size() == (300, 220)
+        });
+        assert!(resized.contains(&Event::Resized), "{resized:?}");
         assert_eq!(w.pixel_size(), (300, 220));
         assert_eq!(hwnd.client_size(), (300, 220));
         // The close button: a close request, the window still there.
@@ -1218,7 +1351,10 @@ mod tests {
         hwnd.send(wm::WM_MOUSEWHEEL, 60usize << 16, at(sx + 7, sy + 8));
         hwnd.send(wm::WM_MOUSEHWHEEL, (-120i16 as u16 as usize) << 16, at(sx + 7, sy + 8));
         hwnd.send(super::WM_MOUSELEAVE, 0, 0);
-        let mouse = events(&shared, WindowId::MAIN);
+        let mut mouse = events(&shared, WindowId::MAIN);
+        // (The real mouse's moves over the window — on a desktop where someone moves it, as wine's runs on — aren't
+        // the ones sent.)
+        mouse.retain(|e| !matches!(e, Event::MouseMove { x, y, .. } if (*x, *y) != (10.0, 20.0)));
         let kinds: Vec<String> =
             mouse.iter().map(|e| format!("{e:?}").split([' ', '{']).next().unwrap().to_string()).collect();
         // (The real mouse isn't over the window: Windows' own WM_MOUSELEAVE may come too.)
@@ -1234,10 +1370,19 @@ mod tests {
         hwnd.show(wm::SW_RESTORE);
         assert!(events(&shared, WindowId::MAIN).contains(&Event::Restored));
         w.set_placement(WindowPlacement::Maximized);
-        assert!(events(&shared, WindowId::MAIN).contains(&Event::Maximized));
-        assert_eq!(w.window_placement(), Some(WindowPlacement::Maximized));
+        let mut maximized = Vec::new();
+        settle(|| {
+            maximized.extend(events(&shared, WindowId::MAIN));
+            w.window_placement() == Some(WindowPlacement::Maximized) && maximized.contains(&Event::Maximized)
+        });
+        assert!(maximized.contains(&Event::Maximized), "{maximized:?}");
+        // (Under wine the host's window manager may give the maximized window back floating afterwards — a
+        // minimized and restored one, on KWin —: the placement is Windows' to keep, CI's runner checks it.)
+        if !sys::under_wine() {
+            assert_eq!(w.window_placement(), Some(WindowPlacement::Maximized));
+        }
         w.set_placement(WindowPlacement::Floating);
-        pump();
+        settle(|| w.window_placement() == Some(WindowPlacement::Floating));
         assert_eq!(w.window_placement(), Some(WindowPlacement::Floating));
         // Its title, its place.
         w.set_title("Başlık");

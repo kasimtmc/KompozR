@@ -87,6 +87,38 @@ pub fn narrow(w: &[u16]) -> String {
     String::from_utf16_lossy(&w[..end])
 }
 
+/// Text in the ANSI code page (`CF_TEXT`'s: what it can't say as its default character), without a 0.
+pub fn ansi_of(text: &str) -> Vec<u8> {
+    use ::windows::Win32::Globalization::{CP_ACP, WideCharToMultiByte};
+    let units: Vec<u16> = text.encode_utf16().collect();
+    if units.is_empty() {
+        return Vec::new();
+    }
+    // SAFETY: the first call measures (no buffer), the second writes up to the buffer's length.
+    unsafe {
+        let n = WideCharToMultiByte(CP_ACP, 0, &units, None, ::windows::core::PCSTR::null(), None);
+        let mut out = vec![0u8; n.max(0) as usize];
+        let n = WideCharToMultiByte(CP_ACP, 0, &units, Some(&mut out), ::windows::core::PCSTR::null(), None);
+        out.truncate(n.max(0) as usize);
+        out
+    }
+}
+
+/// Text in the ANSI code page as Unicode.
+pub fn text_of_ansi(bytes: &[u8]) -> String {
+    use ::windows::Win32::Globalization::{CP_ACP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS, MultiByteToWideChar};
+    if bytes.is_empty() {
+        return String::new();
+    }
+    // SAFETY: the first call measures (no buffer), the second writes up to the buffer's length.
+    unsafe {
+        let n = MultiByteToWideChar(CP_ACP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0), bytes, None);
+        let mut out = vec![0u16; n.max(0) as usize];
+        let n = MultiByteToWideChar(CP_ACP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0), bytes, Some(&mut out));
+        String::from_utf16_lossy(&out[..n.max(0) as usize])
+    }
+}
+
 /// `GetLastError`'s code, as the log shows it.
 pub fn last_error() -> String {
     // SAFETY: reads the thread's last error.
@@ -928,6 +960,13 @@ pub fn message_box(owner: Option<Hwnd>, title: &str, text: &str) {
 
 // ---- The keyboard ------------------------------------------------------------------------------------------------
 
+/// Where the mouse's cursor is on the screen (none where Windows can't say: another desktop has the input).
+pub fn cursor_position() -> Option<(i32, i32)> {
+    let mut p = POINT::default();
+    // SAFETY: writes the point.
+    unsafe { GetCursorPos(&mut p) }.ok().map(|()| (p.x, p.y))
+}
+
 /// Whether virtual key `vk` is down now (as of the message being handled: `GetKeyState`'s top bit).
 pub fn key_down(vk: u16) -> bool {
     // SAFETY: a query.
@@ -1163,7 +1202,7 @@ pub fn set_clipboard_data(format: u32, bytes: Option<&[u8]>) -> bool {
 }
 
 /// A global block's bytes (all of it: its size may be rounded up past what was put there).
-fn global_bytes(memory: HGLOBAL) -> Option<Vec<u8>> {
+pub fn global_bytes(memory: HGLOBAL) -> Option<Vec<u8>> {
     // SAFETY: the block is locked while it is read, its size as Windows tells it.
     unsafe {
         let p = GlobalLock(memory);
@@ -1176,8 +1215,8 @@ fn global_bytes(memory: HGLOBAL) -> Option<Vec<u8>> {
     }
 }
 
-/// `bytes` in a new movable global block.
-fn global_of(bytes: &[u8]) -> Option<HGLOBAL> {
+/// `bytes` in a new movable global block (the caller's to give away or free).
+pub fn global_of(bytes: &[u8]) -> Option<HGLOBAL> {
     // SAFETY: a new block of at least one byte, written while locked.
     unsafe {
         let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len().max(1)).ok()?;

@@ -1192,15 +1192,18 @@ impl DragAndDropManager {
         accepted
     }
 
-    /// It moved over the window to `position`: the targets it enters, moves over and leaves told.
-    pub(crate) fn external_moved(&self, position: Offset) {
-        let Some(mime_types) = self.external.borrow().clone() else { return };
-        let Some(root) = self.root() else { return };
+    /// It moved over the window to `position`: the targets it enters, moves over and leaves told. Whether it is over
+    /// a target that wants it now (what a platform whose source asks as the drag moves tells it: OLE's effect).
+    pub(crate) fn external_moved(&self, position: Offset) -> bool {
+        let Some(mime_types) = self.external.borrow().clone() else { return false };
+        let Some(root) = self.root() else { return false };
         let transfer_data = self.handed_off.borrow().as_ref().map(|h| h.data.clone());
         let event =
             DragAndDropEvent { mime_types, position_in_root: position, transfer_data, ..DragAndDropEvent::default() };
         let interested = self.interested.borrow().clone();
         moved(&root, &event, &interested);
+        // (the root's own target, or the interested node it is in now: `moved` keeps the one it entered)
+        is_interested(&interested, &root) || parts(&root).1.is_some()
     }
 
     /// It was dropped at `position` with `data` (the app's own drag back from the platform: with what it carries):

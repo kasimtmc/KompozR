@@ -1629,9 +1629,9 @@ impl KompozHost {
     }
 
     /// It moved over the window, to `position` (px): the targets it enters, moves over and leaves are told (C++'s
-    /// `externalDragMoved`).
-    pub fn external_drag_moved(&self, position: Offset) {
-        self.drag_and_drop.external_moved(position);
+    /// `externalDragMoved`). Whether a target that wants it is under it now (what a drop there would be offered to).
+    pub fn external_drag_moved(&self, position: Offset) -> bool {
+        self.drag_and_drop.external_moved(position)
     }
 
     /// It was dropped at `position` (px) with `data` (C++'s `externalDrop`): the target under it takes it, then

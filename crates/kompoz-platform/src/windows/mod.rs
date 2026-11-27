@@ -31,17 +31,22 @@
 //! and its ranges too —, the tree's changes as events), at the AT-SPI bridge's parity; `KOMPOZ_UIA=0` turns them
 //! off.
 //!
-//! What comes in later packages: pen and touch (WM_POINTER), drags in and out (OLE), the desktop's accent, wallpaper and text size, KompozR's own title
-//! bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and WM_NCHITTEST, where `window` leaves the frame to the
-//! system), the tray.
+//! Drags in and out through OLE (`ole`, its formats the clipboard's: `formats`): drop targets answered by the app,
+//! read lazily; the app's drags out by DoDragDrop with their image.
+//!
+//! What comes in later packages: pen and touch (WM_POINTER), the desktop's accent, wallpaper and text size, KompozR's
+//! own title bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and WM_NCHITTEST, where `window` leaves the frame to
+//! the system), the tray.
 
 mod clipboard;
 mod event_loop;
+mod formats;
 pub mod http;
 mod ime;
 mod imm;
 mod input_method;
 mod keyboard;
+mod ole;
 pub mod sys;
 mod tsf;
 mod uia;
@@ -49,6 +54,7 @@ mod uia_bridge;
 mod vulkan;
 mod window;
 
+pub use ole::drop_target;
 pub use uia_bridge::root_provider as uia_root_provider;
 pub use window::Win32Window;
 
@@ -145,6 +151,7 @@ pub(crate) enum StepKind {
 }
 
 /// What one step of the loop says.
+#[derive(PartialEq)]
 enum Step {
     /// The app is done.
     Quit,
@@ -184,7 +191,13 @@ impl Loop {
             if self.done.get() {
                 break;
             }
-            match self.step(shared) {
+            let step = self.step(shared);
+            // (A drag the step handed to OLE runs now, out of it: its modal loop steps the app.)
+            if step != Step::Quit && shared.run_drag() {
+                sys::resume_panic();
+                continue;
+            }
+            match step {
                 Step::Quit => break,
                 Step::Again => continue,
                 Step::Wait(timeout) => shared.wait(timeout),
