@@ -205,6 +205,9 @@ impl Message {
     pub fn wparam(&self) -> usize {
         self.0.wParam.0
     }
+    pub fn lparam(&self) -> isize {
+        self.0.lParam.0
+    }
 }
 
 /// The next message of the thread's queue, taken off it (sent messages are delivered to their windows meanwhile);
@@ -825,6 +828,26 @@ impl Hwnd {
     pub fn post(self, message: u32, w: usize, l: isize) {
         // SAFETY: see the module's notes on handles.
         let _ = unsafe { PostMessageW(Some(self.raw()), message, WPARAM(w), LPARAM(l)) };
+    }
+
+    /// The keyboard's focus given to it (its thread's: its input context made active).
+    #[cfg(test)]
+    pub fn focus(self) {
+        // SAFETY: see the module's notes on handles.
+        let _ = unsafe { ::windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(self.raw())) };
+    }
+
+    /// Whether it has the keyboard's focus.
+    pub fn has_focus(self) -> bool {
+        // SAFETY: a query of the thread's focus.
+        !self.is_none() && unsafe { ::windows::Win32::UI::Input::KeyboardAndMouse::GetFocus() } == self.raw()
+    }
+
+    /// Windows' own handling of a message (`DefWindowProcW`), with parameters of the platform's (WM_IME_SETCONTEXT's
+    /// without the input method's composition window).
+    pub fn default_procedure(self, message: u32, w: usize, l: isize) -> isize {
+        // SAFETY: see the module's notes on handles; the parameters are the message's (or plain flags).
+        unsafe { DefWindowProcW(self.raw(), message, WPARAM(w), LPARAM(l)) }.0
     }
 
     /// A message sent to it (its procedure called now).

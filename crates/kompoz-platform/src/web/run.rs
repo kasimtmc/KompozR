@@ -7,6 +7,7 @@ use super::{clipboard, files, images, keys, sys, text};
 use crate::app::{AppConfig, AppContent, AppWindows, DisplayPlatform, Event};
 use crate::system::{set_asset_reader, set_log_sink};
 use kompoz_ui::input::Key;
+use kompoz_ui::semantics::SemanticsAction;
 use kompoz_ui::window::{WindowId, WindowRequest};
 use std::cell::RefCell;
 use std::process::ExitCode;
@@ -311,7 +312,30 @@ impl Loop {
                 }
             }
             Record::Leaving => self.save(),
+            Record::Aria { node, action } => {
+                let action = self.shared.aria.borrow().as_ref().and_then(|a| a.mirror.action(node, action));
+                if let Some(action) = action {
+                    self.perform(node, action);
+                }
+            }
+            Record::Select { start, end } => {
+                let field = self.shared.aria.borrow().as_ref().and_then(|a| a.mirror.linked());
+                let moved = self.shared.text_area.borrow_mut().select(start, end);
+                if let (Some(node), Some((start, end))) = (field, moved) {
+                    let (start, end) = (start as i32, end as i32);
+                    self.perform(node, SemanticsAction::SetSelection { start, end, relative_to_original_text: true });
+                }
+            }
         }
+    }
+
+    /// A screen reader's action on node `id` of the canvas's window (the ARIA mirror's).
+    fn perform(&mut self, id: u64, action: SemanticsAction) {
+        let target = self.target();
+        if let Some(host) = self.windows.core(target).and_then(|c| c.host()) {
+            host.perform_semantics_action(id, action);
+        }
+        self.need_frame = true;
     }
 
     /// A drag over the canvas: one from outside (its types told as it enters, what it brings at its drop), or the

@@ -21,16 +21,24 @@
 //! (`OutputDebugStringW`), Ctrl+C in that console a quit (the app writes its state on the way out), and the session
 //! ending too. Images from http URLs come through WinHTTP (`http`).
 //!
-//! What comes in later packages: pen and touch (WM_POINTER), the input methods' composition in the field (IMM32,
-//! TSF), drags in and out (OLE), UI Automation, the desktop's accent, wallpaper and text size, KompozR's own title
+//! The input methods (`input_method`): TSF's text services through a text store of the focused field's where TSF
+//! can be activated, IMM32's input methods otherwise (`KOMPOZ_WIN_IME=imm32`: always) — their composition drawn in
+//! the field, their requests (reconversion, the text around, where characters are) answered, the field's input
+//! scopes told.
+//!
+//! What comes in later packages: pen and touch (WM_POINTER), drags in and out (OLE), UI Automation, the desktop's accent, wallpaper and text size, KompozR's own title
 //! bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and WM_NCHITTEST, where `window` leaves the frame to the
 //! system), the tray.
 
 mod clipboard;
 mod event_loop;
 pub mod http;
+mod ime;
+mod imm;
+mod input_method;
 mod keyboard;
 pub mod sys;
+mod tsf;
 mod vulkan;
 mod window;
 
@@ -158,6 +166,10 @@ impl Loop {
                 if message.id() == ::windows::Win32::UI::WindowsAndMessaging::WM_QUIT {
                     self.done.set(true);
                 }
+                // (A key a text service eats is its own: not translated, not the window's.)
+                if tsf::keystroke(&message) {
+                    continue;
+                }
                 sys::dispatch(&message);
             }
             sys::resume_panic();
@@ -184,10 +196,26 @@ impl Loop {
         let mut need_frame = self.need_frame.borrow_mut();
         let mut busy = self.busy.borrow_mut();
         let mut quit = false;
+        let mut typed = Vec::new();
         for (id, e) in shared.take_events() {
             quit |= e == Event::Quit;
+            if matches!(
+                e,
+                Event::Text(_)
+                    | Event::Preedit { .. }
+                    | Event::DeleteSurroundingText { .. }
+                    | Event::SetSelection { .. }
+            ) && !typed.contains(&id)
+            {
+                typed.push(id);
+            }
             windows.handle(id, &e);
             need_frame.insert(id, true);
+        }
+        for id in typed {
+            // (The input method told the field as the typing left it: what the core took of it.)
+            let state = windows.core(id).and_then(|c| c.host()).and_then(|h| h.text_input_service().session_state());
+            shared.answer_input_method(id, state);
         }
         if quit {
             self.done.set(true);

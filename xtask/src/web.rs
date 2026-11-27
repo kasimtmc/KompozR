@@ -12,6 +12,10 @@
 //!   page sends back is the native run's within the GPU goldens' three a channel (as Linux's display tests compare
 //!   a window's shots with the headless run's; kompoz-gpu's golden tests hold WebGPU to lavapipe the same way).
 //!   What differs is kept in target/web-test/<app>/ (`<shot>.web.png`, `<shot>.diff.png`), with the browser's log.
+//!   The screen readers' mirror is checked too: dumped by the page as a screen reader reads it (its elements' roles,
+//!   names, places and states: target/web-test/<app>/web/*.aria.txt) where the script says, each holding what it
+//!   must, and the Counter's button activated through it as a screen reader does (its shot as natively the second
+//!   click's).
 //!
 //! The environment: KOMPOZ_CHROME, KOMPOZ_FIREFOX, KOMPOZ_WEB_TOOLCHAIN, KOMPOZ_WEB_TIMEOUT as `web-gpu-test` reads
 //! them. Nothing is downloaded: the browsers are the machine's.
@@ -272,6 +276,9 @@ struct Run {
     /// showcase's own comparison fonts, which it registers there).
     fonts: PathBuf,
     shots: Vec<&'static str>,
+    /// The screen readers' mirror as the page dumped it (`aria:<file>` among the page's actions): each file's lines
+    /// that must be there (a line holding each: its pieces between ` … `, in that order).
+    aria: Vec<(&'static str, Vec<&'static str>)>,
 }
 
 fn runs(workspace: &Path, names: &[&str]) -> Result<Vec<Run>, String> {
@@ -279,21 +286,28 @@ fn runs(workspace: &Path, names: &[&str]) -> Result<Vec<Run>, String> {
     names
         .into_iter()
         .map(|name| match name {
-            // Linux's display tests' script: a shot, a click (the count changed), a resize (the new size). On the web
-            // the click is the page's: a pointer's events on the canvas, before the frame the script clicks in (its
-            // 33rd: the resize and the wait, the shot, then the click).
+            // Linux's display tests' script: a shot, a click (the count changed), a resize (the new size); then a
+            // second click. On the web the first click is the page's: a pointer's events on the canvas, before the
+            // frame the script clicks in (its 33rd: the resize and the wait, the shot, then the click); the second
+            // a screen reader's, on the button's mirrored element (frame 80, a few after shot c), the mirror dumped
+            // before it and after.
             "counter" => Ok(Run {
                 app: app_of("counter"),
                 script: "resize 360 480;wait 30;shot a.png;click 70 70;wait 30;shot b.png;resize 500 400;wait 10;\
-                         shot c.png;quit"
+                         shot c.png;click 70 70;wait 30;shot d.png;quit"
                     .into(),
                 web: Some((
-                    "resize 360 480;wait 30;shot a.png;wait 30;shot b.png;resize 500 400;wait 10;shot c.png;quit"
+                    "resize 360 480;wait 30;shot a.png;wait 30;shot b.png;resize 500 400;wait 10;shot c.png;wait 30;\
+                     shot d.png;quit"
                         .into(),
-                    "33:click:70,70".into(),
+                    "33:click:70,70;74:aria:c.aria.txt;80:ariaclick:button:+1;104:aria:d.aria.txt".into(),
                 )),
                 fonts: workspace.join("crates/kompoz-platform/src/web/fonts"),
-                shots: vec!["a.png", "b.png", "c.png"],
+                shots: vec!["a.png", "b.png", "c.png", "d.png"],
+                aria: vec![
+                    ("c.aria.txt", vec!["button \"+1\" @24,24 120x80", "\"Sayaç: 1\""]),
+                    ("d.aria.txt", vec!["button \"+1\" @24,24 120x80", "\"Sayaç: 2\""]),
+                ],
             }),
             // The Windows test's: the Material tab's first page, the next as the page is dragged up, then the
             // theme switched (the app bar's moon) and the page again.
@@ -304,12 +318,75 @@ fn runs(workspace: &Path, names: &[&str]) -> Result<Vec<Run>, String> {
                     s.push_str(&format!("move 10 {}; wait 1; ", 700 - 50 * k));
                 }
                 s.push_str("wait 6; up 10 100; wait 60; shot 01.png; click 316 32; wait 60; shot 02.png; quit");
+                // On the web the mirror is dumped before each shot's frame (73, 167, 229); then, after the last shot
+                // (the web's script waits before it quits), a screen reader activates the e-mail field and types into
+                // it (the text area linked to it), then the password field (a password input linked), then a message
+                // row's custom action (its button beside the row: the count of unread messages, a live region, said).
+                let web = s.replace("shot 02.png; quit", "shot 02.png; wait 90; quit");
+                let drive = "72:aria:00.aria.txt;166:aria:01.aria.txt;228:aria:02.aria.txt;\
+                             232:ariaclick:textbox:E-posta E-posta;240:type:ali@ornek.com;250:aria:03.aria.txt;\
+                             252:ariaclick:textbox:Şifre Şifre;260:type:gizli;275:aria:04.aria.txt;\
+                             280:ariaclick:button:Okundu say;300:aria:05.aria.txt"
+                    .to_string();
                 Ok(Run {
                     app: app_of("showcase"),
                     script: s,
-                    web: None,
+                    web: Some((web, drive)),
                     fonts: workspace.join("examples/showcase/fonts"),
                     shots: vec!["00.png", "01.png", "02.png"],
+                    // (Roles, names, places and states; the places after the page was dragged up as it moved.)
+                    aria: vec![
+                        (
+                            "00.aria.txt",
+                            vec![
+                                "button \"Koyu tema\" @296,12 40x40",
+                                "textbox \"Arama Ara Şehir ara\" @36,124 368x56",
+                                "checkbox \"Üst\" @36,476 56x32 aria-checked=true",
+                                "combobox \"Meyve\" @36,692 368x57",
+                                "tab \"Material\" @330,795 110x65 aria-posinset=4 aria-selected=true aria-setsize=4",
+                                "radio \"Öğle\" … aria-checked=true aria-posinset=2 aria-setsize=3",
+                                "switch \"Hatırlatmalar\" … aria-checked=true",
+                                "slider \"Aralık başlangıcı\" … aria-valuemax=800 aria-valuemin=0 aria-valuenow=200",
+                                "checkbox \"\" … aria-checked=mixed",
+                                "textbox \"Kilitli Müşteri no (enabled = false) … aria-disabled=true",
+                                "listitem \"Satır 1\" … aria-setsize=40",
+                                "img \"Tutamak\"",
+                                "button \"Arşivle\" (custom action)",
+                                "region \"Gezinme menüsü\"",
+                            ],
+                        ),
+                        (
+                            "01.aria.txt",
+                            vec![
+                                "combobox \"Meyve\" @36,128 368x57",
+                                "button \"Tarih seç\" @36,349 126x40",
+                                "checkbox \"12 saat\" @170,517 81x32 aria-checked=false",
+                                "tab \"Material\" @330,795 110x65 aria-posinset=4 aria-selected=true",
+                            ],
+                        ),
+                        (
+                            "02.aria.txt",
+                            vec!["button \"Tarih seç\" @36,349 126x40", "tab \"Material\" @330,795 110x65"],
+                        ),
+                        (
+                            "03.aria.txt",
+                            vec![
+                                "none \"\" @",
+                                "  textbox \"E-posta E-posta … value=\"ali@ornek.com\" (text area) focused",
+                            ],
+                        ),
+                        (
+                            "04.aria.txt",
+                            vec![
+                                "  textbox \"Şifre Şifre … value=\"•••••\" (password input) focused",
+                                "textbox \"E-posta E-posta",
+                            ],
+                        ),
+                        (
+                            "05.aria.txt",
+                            vec!["\"Ayşe: Toplantı yarın 10'da Son eylem: okundu\"", "polite: 2 okunmamış ileti"],
+                        ),
+                    ],
                 })
             }
             other => Err(format!("web test: no script for {other} (counter, showcase)")),
@@ -446,6 +523,43 @@ fn run_web(dist: &Path, run: &Run, dir: &Path, firefox: bool, gpu: bool) -> Resu
     Ok(())
 }
 
+/// The screen readers' mirror as the page dumped it: each file there, holding what it must.
+fn check_aria(run: &Run, web: &Path) -> Vec<String> {
+    let mut failures = Vec::new();
+    for (file, wanted) in &run.aria {
+        let dump = match std::fs::read_to_string(web.join(file)) {
+            Ok(d) => d,
+            Err(e) => {
+                failures.push(format!("{}: the mirror's {file}: {e}", run.app.name));
+                continue;
+            }
+        };
+        // (A line holding the pieces between ` … `, in order.)
+        let holds = |line: &str, wanted: &str| {
+            let mut rest = line;
+            wanted.split(" … ").all(|piece| match rest.find(piece) {
+                Some(at) => {
+                    rest = &rest[at + piece.len()..];
+                    true
+                }
+                None => false,
+            })
+        };
+        let missing: Vec<&str> = wanted.iter().copied().filter(|w| !dump.lines().any(|l| holds(l, w))).collect();
+        if missing.is_empty() {
+            println!("web: {}: the mirror's {file} as it must be", run.app.name);
+        } else {
+            failures.push(format!(
+                "{}: the mirror's {file} has no line with {} (it is in {})",
+                run.app.name,
+                missing.iter().map(|m| format!("`{m}`")).collect::<Vec<_>>().join(", "),
+                web.join(file).display()
+            ));
+        }
+    }
+    failures
+}
+
 /// The web run's shots against the native run's: the same size, every channel within [`TOLERANCE`]. What differs
 /// kept beside the native ones.
 fn compare(run: &Run, native: &Path, web: &Path, out: &Path) -> Vec<String> {
@@ -520,6 +634,7 @@ fn test(workspace: &Path, args: &[&str], names: &[&str], release: bool) -> Resul
             continue;
         }
         failures.extend(compare(&run, &native, &web, &out));
+        failures.extend(check_aria(&run, &web));
     }
     if failures.is_empty() {
         println!("web test: every shot as natively");

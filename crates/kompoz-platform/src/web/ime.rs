@@ -42,6 +42,8 @@ pub struct TextArea {
     composition_start: usize,
     /// The field as the app said it while a composition was under way: set once it ends.
     deferred: Option<TextEditState>,
+    /// Where `text` begins in the field (bytes: a long field's window around its caret).
+    from: usize,
 }
 
 /// The byte offset of UTF-16 offset `utf16` in `text` (at a character's start; the end past it).
@@ -78,7 +80,8 @@ impl TextArea {
             self.deferred = Some(state.clone());
             return None;
         }
-        let (text, selection) = window(state);
+        let (text, selection, from) = window(state);
+        self.from = from;
         if text == self.text && selection == self.selection {
             return None;
         }
@@ -119,6 +122,21 @@ impl TextArea {
         events
     }
 
+    /// The text area's selection moved by itself (a screen reader set it: no key, no input), to `start`..`end`
+    /// (UTF-16): where that is in the field (bytes), if it isn't where the text area's was (none while a composition
+    /// is under way).
+    pub fn select(&mut self, start: u32, end: u32) -> Option<(usize, usize)> {
+        if self.composing {
+            return None;
+        }
+        let selection = TextArea::read(&self.text, start, end);
+        if selection == self.selection {
+            return None;
+        }
+        self.selection = selection;
+        Some((self.from + selection.0, self.from + selection.1))
+    }
+
     /// `compositionstart`: the composition replaces the selection.
     pub fn composition_start(&mut self) {
         self.composing = true;
@@ -155,18 +173,18 @@ impl TextArea {
 }
 
 /// What of a field the text area holds: all of it, or the window around its selection a long one's (whole
-/// characters), and the selection in it.
-fn window(state: &TextEditState) -> (String, (usize, usize)) {
+/// characters), the selection in it, and where it begins in the field.
+fn window(state: &TextEditState) -> (String, (usize, usize), usize) {
     let text = &state.text;
     let (s, e) = (state.selection_start.min(state.selection_end), state.selection_start.max(state.selection_end));
     let (s, e) = (floor_boundary(text, s), floor_boundary(text, e));
     if text.len() <= WINDOW {
-        return (text.clone(), (s, e));
+        return (text.clone(), (s, e), 0);
     }
     let half = WINDOW / 2;
     let from = floor_boundary(text, s.saturating_sub(half));
     let to = floor_boundary(text, (e + half).min(text.len()));
-    (text[from..to].to_string(), (s - from, e - from))
+    (text[from..to].to_string(), (s - from, e - from), from)
 }
 
 /// The field's edits that make `old` (its selection `selection`) into `new`: the part that differs, widened to
@@ -297,5 +315,19 @@ mod tests {
         let caret = byte_offset(&set.text, set.start);
         typed.insert(caret, 'a');
         assert_eq!(a.input(&typed, set.start + 1, set.start + 1), [text("a")]);
+        // A screen reader's selection there: the field's bytes.
+        let from = at - byte_offset(&set.text, set.start);
+        assert_eq!(a.select(0, 2), Some((from, from + 4)));
+    }
+
+    #[test]
+    fn a_selection_moved_on_the_page_is_the_fields_unless_it_is_where_it_was() {
+        let mut a = TextArea::default();
+        a.field(&field("çiçek", 2, 2));
+        assert_eq!(a.select(1, 1), None);
+        assert_eq!(a.select(0, 3), Some((0, 5)));
+        assert_eq!(a.select(3, 0), None);
+        a.composition_start();
+        assert_eq!(a.select(1, 1), None);
     }
 }

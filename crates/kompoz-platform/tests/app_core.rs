@@ -464,6 +464,8 @@ fn the_platforms_events_are_the_hosts_input() {
     core.handle(&Event::Preedit { text: "kar".into(), cursor: Some((1, 3)) });
     core.handle(&Event::Preedit { text: String::new(), cursor: None });
     core.handle(&Event::DeleteSurroundingText { before: 1, after: 0 });
+    // A text service's selection (the part it reconverts).
+    core.handle(&Event::SetSelection { start: 0, end: 1 });
     assert_eq!(
         taken(&edits),
         [
@@ -474,6 +476,7 @@ fn the_platforms_events_are_the_hosts_input() {
             "[SetComposingText { text: \"kar\", new_cursor_position: 1 }, SetSelection { start: 3, end: 5 }]",
             "[SetComposingText { text: \"\", new_cursor_position: 1 }]",
             "[DeleteSurroundingText { before: 1, after: 0 }]",
+            "[SetSelection { start: 0, end: 1 }]",
         ]
     );
     session.dispose();

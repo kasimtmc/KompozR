@@ -1,19 +1,25 @@
 //! The app core's platform on Android (C++'s `AndroidPlatform : Platform`): the view's window to draw into with
 //! Vulkan, its size, the activity's configuration as the metrics, the options from the app's files, logcat, the
 //! monotonic clock (System.nanoTime's, MotionEvent's and the choreographer's), the host's waker (the looper's
-//! eventfd), the state saved before a process death given back to the host as it starts.
+//! eventfd), the state saved before a process death given back to the host as it starts; the input devices as the
+//! media info and the system's gesture thresholds as the view configuration; the input method, the pointer's icons
+//! and the text toolbar (`text_input`) as the host's callbacks.
 //!
 //! What it keeps is [`Shared`] with the natives (`super::app`), which change it as the activity tells them; the core
 //! reads it through the platform. All on the UI thread.
 
 use super::configuration::{Configuration, option_file, option_value};
+use super::text_input::TextInput;
 use super::vulkan;
 use crate::app::{Metrics, Platform, WindowSpec};
 use crate::unix::waker::Waker;
 use kompoz_gpu::device::{Backend, Surface};
+use kompoz_graphics::Rect;
 use kompoz_ui::KompozHost;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
-use kompoz_ui::platform::PlatformCallbacks;
+use kompoz_ui::platform::{
+    ImeOptions, PlatformCallbacks, PointerIcon, TextEditState, TextToolbarActions, ViewConfiguration,
+};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -32,6 +38,12 @@ pub(super) struct Shared {
     /// The state saved before the process ended, for the host as it starts.
     pub restored: RefCell<Option<Vec<u8>>>,
     pub waker: Waker,
+    /// The input devices as KompozInputDevices told them (none yet: the configuration's touchscreen and keyboard).
+    pub media: Cell<Option<MediaInfo>>,
+    /// The system's gesture thresholds (none yet: the defaults at the density).
+    pub view_configuration: Cell<Option<ViewConfiguration>>,
+    /// The input method's side (none: KompozView's methods weren't found; logged).
+    pub text_input: Option<Rc<TextInput>>,
 }
 
 /// The platform (one: Android gives an app one window, so a `Window` gets none).
@@ -39,15 +51,56 @@ pub struct AndroidPlatform {
     pub(super) shared: Rc<Shared>,
 }
 
-/// What the host asks of the platform (A0: the waker; the input methods, the clipboard, insets and the rest come
-/// with KompozIme, KompozServices and the others).
+/// What the host asks of the platform: the waker, the input method, the pointer's icons, the text toolbar (the
+/// clipboard, insets and the rest come with KompozServices and the others).
 struct AndroidCallbacks {
     waker: Arc<dyn Fn() + Send + Sync>,
+    text_input: Option<Rc<TextInput>>,
 }
 
 impl PlatformCallbacks for AndroidCallbacks {
     fn waker(&self) -> Option<Arc<dyn Fn() + Send + Sync>> {
         Some(self.waker.clone())
+    }
+    fn text_input(&self, active: bool, area: Rect, state: &TextEditState, options: &ImeOptions) {
+        if let Some(t) = &self.text_input {
+            t.text_input(active, area, state, options);
+        }
+    }
+    fn text_input_changed(&self, state: &TextEditState) {
+        if let Some(t) = &self.text_input {
+            t.update(state);
+        }
+    }
+    fn hide_software_keyboard(&self) {
+        if let Some(t) = &self.text_input {
+            t.hide_keyboard();
+        }
+    }
+    fn start_stylus_handwriting(&self) {
+        if let Some(t) = &self.text_input {
+            t.start_stylus_handwriting();
+        }
+    }
+    fn cursor(&self, icon: PointerIcon) {
+        if let Some(t) = &self.text_input {
+            t.cursor(icon);
+        }
+    }
+    fn stylus_hover_icon(&self, icon: Option<PointerIcon>) {
+        if let Some(t) = &self.text_input {
+            t.stylus_hover_icon(icon);
+        }
+    }
+    fn show_text_toolbar(&self, rect: Rect, actions: &TextToolbarActions) {
+        if let Some(t) = &self.text_input {
+            t.show_text_toolbar(rect, actions);
+        }
+    }
+    fn hide_text_toolbar(&self) {
+        if let Some(t) = &self.text_input {
+            t.hide_text_toolbar();
+        }
     }
 }
 
@@ -122,9 +175,13 @@ impl Platform for AndroidPlatform {
     /// (The system sizes the activity's window.)
     fn set_window_size(&mut self, _: i32, _: i32) {}
 
-    /// The touchscreen and the keyboard as the configuration says (the input devices themselves, a mouse's
-    /// precision, the dock: KompozIme's media info, A1).
+    /// The input devices as KompozInputDevices told them (the most precise pointer, a physical keyboard, a
+    /// microphone, a camera, a TV's or a car's distance); before it has, the touchscreen and the keyboard as the
+    /// configuration says.
     fn media(&mut self, _probe: bool) -> MediaInfo {
+        if let Some(media) = self.shared.media.get() {
+            return media;
+        }
         let c = self.shared.configuration.borrow();
         MediaInfo {
             pointer_precision: if c.touchscreen { PointerPrecision::Coarse } else { PointerPrecision::None },
@@ -134,7 +191,7 @@ impl Platform for AndroidPlatform {
     }
 
     fn attach(&mut self, _: &KompozHost) -> Rc<dyn PlatformCallbacks> {
-        Rc::new(AndroidCallbacks { waker: self.shared.waker.as_fn() })
+        Rc::new(AndroidCallbacks { waker: self.shared.waker.as_fn(), text_input: self.shared.text_input.clone() })
     }
 
     /// The state saved before the process ended, back in the host (Compose's saved instance state restored).
@@ -144,5 +201,19 @@ impl Platform for AndroidPlatform {
         }
     }
 
-    fn composed(&mut self, _: &KompozHost, _: bool, _: i64) {}
+    /// The system's gesture thresholds (touch slop, long press, double tap, flings, handwriting slop) as the
+    /// host's, over the defaults the density gave it.
+    fn metrics_updated(&mut self, host: &KompozHost) {
+        if let Some(configuration) = self.shared.view_configuration.get() {
+            host.set_view_configuration(configuration);
+        }
+    }
+
+    /// The input method told where the field and its caret are now, and the field's state where its Editable
+    /// differs (a key typed, the app changed it).
+    fn composed(&mut self, host: &KompozHost, _: bool, _: i64) {
+        if let Some(t) = &self.shared.text_input {
+            t.sync(host);
+        }
+    }
 }

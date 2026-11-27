@@ -10,11 +10,12 @@
 //! call of ours) has its events kept and handed over when that call is done.
 
 use super::configuration::Configuration;
-use super::input::key_events;
+use super::input::{Motion, MotionDecoder, key_events};
 use super::jni::{Env, Global, JObject, MethodId, Vm};
-use super::ndk::{Assets, Looper, NativeWindow, post_frame_callback};
+use super::ndk::{Assets, Looper, NativeWindow, api_level, post_frame_callback};
 use super::platform::{AndroidPlatform, Shared};
 use super::saved_state;
+use super::text_input::TextInput;
 use super::{AndroidApp, log_error, log_line};
 use crate::app::{AppCore, Event};
 use crate::system::{set_asset_reader, set_cache_directory};
@@ -42,6 +43,9 @@ thread_local! {
     static APP: RefCell<Option<Running>> = const { RefCell::new(None) };
     /// Events that came while the app was busy, for when it is done.
     static LATE: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+    /// The view's motion events' decoder (a touchpad's gesture under way): apart from the app, so that what comes
+    /// while it is busy is decoded in order too.
+    static MOTION: RefCell<MotionDecoder> = RefCell::new(MotionDecoder::default());
 }
 
 /// Each activity's app its number: what the callbacks posted for an app carry, so that one of an app gone is
@@ -126,6 +130,13 @@ impl Running {
             return None;
         }
         let restored = saved_state::restore(c.saved.as_deref(), &c.files_dir);
+        // The input method's side of the view; stylus handwriting where the system has it (Android 14).
+        let text_input = TextInput::new(&env, c.view).map(Rc::new);
+        if text_input.is_none() {
+            log_error("kompoz: KompozView's input methods aren't there: no text input");
+        }
+        kompoz_ui::platform::set_stylus_handwriting_supported(api_level() >= 34);
+        MOTION.with(|m| *m.borrow_mut() = MotionDecoder::default());
         let shared = Rc::new(Shared {
             window: Rc::new(Cell::new(0)),
             size: Cell::new((0, 0)),
@@ -134,6 +145,9 @@ impl Running {
             external_files_dir: c.external_files_dir,
             restored: RefCell::new(restored),
             waker: Waker::new(wake),
+            media: Cell::new(None),
+            view_configuration: Cell::new(None),
+            text_input,
         });
         let made = entry();
         let mut config = made.config;
@@ -269,6 +283,47 @@ impl Running {
         self.deliver(event.clone());
     }
 
+    /// The input devices (KompozInputDevices' media info) and the system's gesture thresholds, as they start and
+    /// as devices come and go or the configuration changes.
+    pub fn devices(&mut self, media: &[i32], view_configuration: &[f32]) {
+        self.shared.media.set(Some(super::devices::media_info(media)));
+        let density = self.shared.configuration.borrow().density;
+        self.shared.view_configuration.set(Some(super::devices::view_configuration(view_configuration, density)));
+        self.deliver(Event::DevicesChanged);
+        self.deliver(Event::MetricsChanged); // (the view configuration set on the host again)
+    }
+
+    /// A batch of the input connection's edits (`text_input`'s `edit`).
+    pub fn ime_edit(&mut self, session: i32, ops: &[i32], texts: &[u8], text: String, offsets: &[i32]) {
+        let (Some(t), Some(host)) = (self.shared.text_input.clone(), self.core.host()) else { return };
+        t.edit(host, session, ops, texts, text, offsets);
+        self.request_frame();
+    }
+
+    /// The input method's action key.
+    pub fn ime_action(&mut self, session: i32, editor_action: i32) {
+        let (Some(t), Some(host)) = (self.shared.text_input.clone(), self.core.host()) else { return };
+        t.action(host, session, editor_action);
+        self.request_frame();
+    }
+
+    /// Content the keyboard commits; whether the field took it.
+    pub fn ime_content(&mut self, session: i32, mime_types: &str, uri: String, link: Option<String>) -> bool {
+        let (Some(t), Some(host)) = (self.shared.text_input.clone(), self.core.host()) else { return false };
+        let taken = t.content(host, session, mime_types, uri, link);
+        self.request_frame();
+        taken
+    }
+
+    /// A text toolbar item clicked: its action.
+    pub fn toolbar_action(&mut self, item: i32) {
+        let action = self.shared.text_input.as_ref().and_then(|t| t.toolbar_action(item));
+        if let Some(action) = action {
+            action();
+            self.request_frame();
+        }
+    }
+
     /// A key; whether KompozR took it (every key is Compose's, so all of them).
     pub fn key(&mut self, code: i32, down: bool, meta: i32, typed: &str, time: i64) -> bool {
         for event in key_events(code, down, meta, typed, time) {
@@ -372,14 +427,15 @@ pub(super) fn with_view<R>(env: &Env<'_>, view: JObject, f: impl FnOnce(&mut Run
     with_app(|app| app.is_view(env, view).then(|| f(app))).flatten()
 }
 
-/// The view's input: handed to the app, or kept while it is busy.
-pub(super) fn view_events(env: &Env<'_>, view: JObject, events: impl FnOnce() -> Vec<Event>) {
+/// The view's motion event: decoded, its events handed to the app, or kept while it is busy.
+pub(super) fn view_motion(env: &Env<'_>, view: JObject, motion: &Motion) {
+    let events = MOTION.with(|m| m.borrow_mut().events(motion));
     if busy() {
-        later(events());
+        later(events);
         return;
     }
     with_view(env, view, |app| {
-        for event in events() {
+        for event in events {
             app.deliver(event);
         }
     });

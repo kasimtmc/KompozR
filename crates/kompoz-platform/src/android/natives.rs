@@ -8,10 +8,10 @@
 
 #![allow(unsafe_code)]
 
-use super::app::{self, Created, ENTRY, Running, VM, view_events, with_activity, with_generation, with_view};
+use super::app::{self, Created, ENTRY, Running, VM, view_motion, with_activity, with_generation, with_view};
 use super::configuration::Configuration;
 use super::input::Motion;
-use super::jni::{Env, JNI_VERSION_1_6, JNIEnv, JObject, Local, Vm, jboolean, jfloat, jint, jlong, native};
+use super::jni::{Env, JNI_VERSION_1_6, JNIEnv, JObject, Local, Vm, jboolean, jint, jlong, native};
 use super::{AndroidApp, log_error, log_line};
 use crate::unix::sys;
 use std::ffi::{CStr, c_int, c_void};
@@ -94,8 +94,13 @@ fn natives() -> Vec<(&'static CStr, Vec<super::jni::JNINativeMethod>)> {
             c"dev/kompozr/KompozView",
             vec![
                 native(c"nativeSurface", c"(Landroid/view/Surface;II)V", native_surface as *mut c_void),
-                native(c"nativeMotion", c"(II[I[FJIIFFI)V", native_motion as *mut c_void),
+                native(c"nativeMotion", c"([I[I[I[F[F[F[J[FJ)V", native_motion as *mut c_void),
                 native(c"nativeKey", c"(IZI[BJ)Z", native_key as *mut c_void),
+                native(c"nativeDevices", c"([I[F)V", native_devices as *mut c_void),
+                native(c"nativeImeEdit", c"(I[I[B[B[I)V", native_ime_edit as *mut c_void),
+                native(c"nativeImeAction", c"(II)V", native_ime_action as *mut c_void),
+                native(c"nativeImeContent", c"(I[B[B[B)Z", native_ime_content as *mut c_void),
+                native(c"nativeToolbarAction", c"(I)V", native_toolbar_action as *mut c_void),
             ],
         ),
     ]
@@ -200,38 +205,53 @@ extern "system" fn native_surface(raw: *mut JNIEnv, view: JObject, surface: JObj
     })
 }
 
-/// `nativeMotion(action, index, ids, xy, timeNanos, toolType, actionButton, scrollX, scrollY, meta)`.
+/// `nativeMotion(state, ids, tools, xy, pressure, axes, historyTimes, historyXY, timeNanos)`: KompozView's
+/// `motion` (its `state`: the masked action, the action's pointer index, the action button, the button state, the
+/// meta state, the classification; its `axes`: the wheel's two, a touchpad swipe's distances, its pinch's scale,
+/// the density).
 #[allow(clippy::too_many_arguments)]
 extern "system" fn native_motion(
     raw: *mut JNIEnv,
     view: JObject,
-    action: jint,
-    index: jint,
+    state: JObject,
     ids: JObject,
+    tools: JObject,
     xy: JObject,
+    pressure: JObject,
+    axes: JObject,
+    history_times: JObject,
+    history_xy: JObject,
     time: jlong,
-    tool: jint,
-    button: jint,
-    scroll_x: jfloat,
-    scroll_y: jfloat,
-    meta: jint,
 ) {
     guard("nativeMotion", (), || {
         // SAFETY: a native method's env.
         let env = unsafe { env(raw) };
+        let state = env.ints(state);
+        let axes = env.floats(axes);
+        let int = |i: usize| state.get(i).copied().unwrap_or(0);
+        let axis = |i: usize, default: f32| axes.get(i).copied().filter(|v| v.is_finite()).unwrap_or(default);
         let motion = Motion {
-            action,
-            index: index.max(0) as usize,
+            action: int(0),
+            index: int(1).max(0) as usize,
+            button: int(2),
+            buttons: int(3),
+            meta: int(4),
+            classification: int(5),
             ids: env.ints(ids),
+            tools: env.ints(tools),
             xy: env.floats(xy),
+            pressure: env.floats(pressure),
+            scroll_x: axis(0, 0.0),
+            scroll_y: axis(1, 0.0),
+            gesture_scroll_x: axis(2, 0.0),
+            gesture_scroll_y: axis(3, 0.0),
+            pinch_scale: axis(4, 1.0),
+            density: axis(5, 1.0),
+            history_times: env.longs(history_times),
+            history_xy: env.floats(history_xy),
             time,
-            tool,
-            button,
-            scroll_x,
-            scroll_y,
-            meta,
         };
-        view_events(&env, view, || super::input::motion_events(&motion));
+        view_motion(&env, view, &motion);
     })
 }
 
@@ -251,6 +271,76 @@ extern "system" fn native_key(
         let typed = env.utf8(typed).unwrap_or_default();
         let taken = with_view(&env, view, |app| app.key(code, down != 0, meta, &typed, time));
         taken.unwrap_or(false) as jboolean
+    })
+}
+
+/// `nativeDevices(mediaInfo, viewConfiguration)`: KompozInputDevices' (as the view is attached, as devices come
+/// and go, as the configuration changes).
+extern "system" fn native_devices(raw: *mut JNIEnv, view: JObject, media: JObject, configuration: JObject) {
+    guard("nativeDevices", (), || {
+        // SAFETY: a native method's env.
+        let env = unsafe { env(raw) };
+        let (media, configuration) = (env.ints(media), env.floats(configuration));
+        with_view(&env, view, |app| app.devices(&media, &configuration));
+    })
+}
+
+/// `nativeImeEdit(session, ops, texts, text, offsets)`: a batch of KompozInputConnection's edits and what they left
+/// in its Editable.
+extern "system" fn native_ime_edit(
+    raw: *mut JNIEnv,
+    view: JObject,
+    session: jint,
+    ops: JObject,
+    texts: JObject,
+    text: JObject,
+    offsets: JObject,
+) {
+    guard("nativeImeEdit", (), || {
+        // SAFETY: a native method's env.
+        let env = unsafe { env(raw) };
+        let (ops, texts) = (env.ints(ops), env.bytes(texts).unwrap_or_default());
+        let (text, offsets) = (env.utf8(text).unwrap_or_default(), env.ints(offsets));
+        with_view(&env, view, |app| app.ime_edit(session, &ops, &texts, text, &offsets));
+    })
+}
+
+/// `nativeImeAction(session, editorAction)`: the input method's action key.
+extern "system" fn native_ime_action(raw: *mut JNIEnv, view: JObject, session: jint, action: jint) {
+    guard("nativeImeAction", (), || {
+        // SAFETY: a native method's env.
+        let env = unsafe { env(raw) };
+        with_view(&env, view, |app| app.ime_action(session, action));
+    })
+}
+
+/// `nativeImeContent(session, mimeTypes, uri, linkUri): Boolean`: content the keyboard commits (answered at once:
+/// the keyboard waits; false while the app is busy).
+extern "system" fn native_ime_content(
+    raw: *mut JNIEnv,
+    view: JObject,
+    session: jint,
+    mime_types: JObject,
+    uri: JObject,
+    link: JObject,
+) -> jboolean {
+    guard("nativeImeContent", 0, || {
+        // SAFETY: a native method's env.
+        let env = unsafe { env(raw) };
+        let mime_types = env.utf8(mime_types).unwrap_or_default();
+        let Some(uri) = env.utf8(uri) else { return 0 };
+        let link = env.utf8(link);
+        let taken = with_view(&env, view, |app| app.ime_content(session, &mime_types, uri, link));
+        taken.unwrap_or(false) as jboolean
+    })
+}
+
+/// `nativeToolbarAction(item)`: a text toolbar item clicked (KompozTextToolbar's `ITEM_*`).
+extern "system" fn native_toolbar_action(raw: *mut JNIEnv, view: JObject, item: jint) {
+    guard("nativeToolbarAction", (), || {
+        // SAFETY: a native method's env.
+        let env = unsafe { env(raw) };
+        with_view(&env, view, |app| app.toolbar_action(item));
     })
 }
 

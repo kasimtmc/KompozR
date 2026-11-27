@@ -6,6 +6,7 @@
 //! text layout node inside it; and the selection state's handles, magnifier and toolbar.
 
 use super::core_text_field::{CoreTextFieldArgs, DecorationBox, core_text_field};
+use super::handwriting::StylusHandwritingModifiers;
 use super::input::internal::selection::{
     TextFieldMagnifierElement, TextFieldSelectionState, TextToolbarHandler, TextToolbarState,
 };
@@ -43,9 +44,10 @@ use kompoz_text::input::{TextFieldValue, VisualTransformation};
 use kompoz_ui::draw::Fill;
 use kompoz_ui::input::PointerInputScope;
 use kompoz_ui::platform::{
-    LocalClipboard, LocalDensity, LocalHapticFeedback, LocalLayoutDirection, LocalTextToolbar, LocalWindowInfo,
-    PointerIcon, TextToolbar, TextToolbarAction, TextToolbarStatus,
+    KeyboardType, LocalClipboard, LocalDensity, LocalHapticFeedback, LocalLayoutDirection, LocalTextToolbar,
+    LocalWindowInfo, PointerIcon, TextToolbar, TextToolbarAction, TextToolbarStatus,
 };
+use kompoz_ui::text_input::LocalTextInputService;
 use kompoz_ui::{Alignment, Modifier};
 use std::rc::Rc;
 
@@ -305,7 +307,24 @@ pub(crate) fn basic_text_field_impl(args: BasicTextFieldArgs) {
         let window_and_field_focused = is_window_and_text_field_focused.get();
         let drag_hovered = is_drag_hovered.get();
 
+        // A stylus writing over the field: the input method's handwriting, started for the field's session (now if
+        // it has one, else as the focus opens it); not for a password, where the field only takes the focus.
+        let handwriting_enabled = !is_password
+            && !matches!(
+                resolved_keyboard_options.keyboard_type,
+                KeyboardType::Password | KeyboardType::NumberPassword
+            );
+        let text_input_service = LocalTextInputService.current();
         let decoration_modifiers = modifier
+            .stylus_handwriting(
+                enabled,
+                handwriting_enabled,
+                Rc::new(move || {
+                    if handwriting_enabled {
+                        text_input_service.start_stylus_handwriting();
+                    }
+                }),
+            )
             .then_element(TextFieldDecoratorModifier {
                 text_field_state: transformed_state.clone(),
                 text_layout_state: text_layout_state.clone(),

@@ -7,7 +7,10 @@
 // `KOMPOZ_WEB_DRIVE=<frame>:<action>:<arguments>;…` acts on the page as a user would, before the animation frame of
 // that number (the app's script's frame, while a script runs): `click:x,y` (a mouse's press and release on the
 // canvas, CSS pixels), `key:code,key` (a key pressed and let go where the keyboard's focus is), `type:text` (text
-// typed into the focused field's text area, as a phone's keyboard does: its input event).
+// typed into the focused field's text area, as a phone's keyboard does: its input event), `aria:<file>` (the ARIA
+// mirror as a screen reader reads it — each element's role, name, place on the canvas and states, indented by
+// depth — written to the file, as the app's files are), `ariaclick:<role>:<name>` (the mirrored element of that role
+// whose name begins so activated, as a screen reader does: its click).
 
 import { instantiate } from "./kompoz.js";
 import { gpuImports, requestGpu } from "./webgpu.js";
@@ -72,6 +75,17 @@ function drive(glue, spec) {
                 const [code, key] = a.args.split(",");
                 const target = document.activeElement || canvas;
                 for (const type of ["keydown", "keyup"]) target.dispatchEvent(new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }));
+            } else if (a.kind === "aria") {
+                send(`/file?path=${encodeURIComponent(a.args)}`, ariaDump(glue));
+            } else if (a.kind === "ariaclick") {
+                const [role, ...rest] = a.args.split(":");
+                const name = rest.join(":");
+                // (The nodes' elements, then the buttons of their custom actions.)
+                const m = glue.platform.aria;
+                const nodes = m ? [...m.nodes.values(), ...m.root.querySelectorAll("[data-kz-action]")] : [];
+                const el = nodes.find((n) => n.getAttribute("role") === role && nameOf(n).startsWith(name));
+                if (el) el.click();
+                else send("/log", `ariaclick: no ${role} "${name}" in the mirror`);
             } else if (a.kind === "type") {
                 const start = area.selectionStart;
                 area.setRangeText(a.args, start, area.selectionEnd, "end");
@@ -79,6 +93,50 @@ function drive(glue, spec) {
             }
         }
     };
+}
+
+// A mirrored element's name: its `aria-label`, else its own text.
+function nameOf(el) {
+    if (!el._kz) return el.getAttribute("aria-label") ?? el.textContent;
+    return el.getAttribute("aria-label") ?? (el._kz.text ? el._kz.text.data : "");
+}
+
+// The ARIA mirror as a screen reader reads it: a line an element (its role, name, place and size on the canvas,
+// its ARIA states, `focused` where the keyboard's focus is), its children indented under it; a linked field's text
+// area (or password input) under its element; then what the live regions say.
+function ariaDump(glue) {
+    const m = glue.platform.aria;
+    if (!m) return "(no mirror)\n";
+    const canvas = glue.page.get("kompoz.canvas").getBoundingClientRect();
+    const lines = [];
+    const walk = (parent, depth) => {
+        const indent = "  ".repeat(depth);
+        for (const el of parent.children) {
+            if (el._kzActions) {
+                for (const b of el.children) lines.push(`${indent}button "${b.textContent}" (custom action)`);
+                continue;
+            }
+            if (!el._kz) continue;
+            const r = el.getBoundingClientRect();
+            const states = [...el.attributes]
+                .filter((a) => a.name.startsWith("aria-") && a.name !== "aria-label" && a.name !== "aria-owns")
+                .map((a) => `${a.name}=${a.value}`);
+            if (document.activeElement === el) states.push("focused");
+            const place = `@${Math.round(r.left - canvas.left)},${Math.round(r.top - canvas.top)} ${Math.round(r.width)}x${Math.round(r.height)}`;
+            lines.push(`${indent}${el.getAttribute("role") || "-"} "${nameOf(el)}" ${place}${states.length ? ` ${states.join(" ")}` : ""}`);
+            const owned = el.getAttribute("aria-owns") && document.getElementById(el.getAttribute("aria-owns"));
+            if (owned) {
+                const value = owned.type === "password" ? "•".repeat(owned.value.length) : owned.value;
+                const focused = document.activeElement === owned ? " focused" : "";
+                const kind = owned.type === "password" ? "password input" : "text area";
+                lines.push(`${indent}  textbox "${owned.getAttribute("aria-label") || ""}" value="${value}" (${kind})${focused}`);
+            }
+            walk(el, depth + 1);
+        }
+    };
+    walk(m.root, 0);
+    lines.push(`polite: ${m.polite.textContent}`, `assertive: ${m.assertive.textContent}`);
+    return `${lines.join("\n")}\n`;
 }
 
 start().catch((e) => {

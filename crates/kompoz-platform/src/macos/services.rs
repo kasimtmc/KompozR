@@ -63,7 +63,7 @@ pub fn cursor(icon: PointerIcon) -> Retained<NSCursor> {
     match icon {
         PointerIcon::Default | PointerIcon::Wait => NSCursor::arrowCursor(),
         PointerIcon::Hand => NSCursor::pointingHandCursor(),
-        PointerIcon::Text => NSCursor::IBeamCursor(),
+        PointerIcon::Text | PointerIcon::Handwriting => NSCursor::IBeamCursor(),
         PointerIcon::Crosshair => NSCursor::crosshairCursor(),
         PointerIcon::Move => NSCursor::closedHandCursor(),
         PointerIcon::ResizeHorizontal => NSCursor::resizeLeftRightCursor(),

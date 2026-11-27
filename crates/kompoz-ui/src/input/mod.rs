@@ -261,6 +261,9 @@ pub struct InputState {
     swallowed: RefCell<Vec<i64>>,
     /// Each indirect pointer's last time (ms), position and press, what the next event of it was from.
     indirect: RefCell<Vec<(i64, i64, Offset, bool)>>,
+    /// The positions a pointer (by its host id) passed through since its last event, as the platform batched them
+    /// (Android's historical samples), for the next event of it.
+    historical: RefCell<Vec<(i64, Vec<HistoricalChange>)>>,
 }
 
 impl Default for InputState {
@@ -274,6 +277,7 @@ impl Default for InputState {
             keyboard_modifiers: Cell::new(KeyModifiers::None),
             swallowed: RefCell::new(Vec::new()),
             indirect: RefCell::new(Vec::new()),
+            historical: RefCell::new(Vec::new()),
         }
     }
 }
@@ -341,12 +345,33 @@ impl InputState {
         }
     }
 
+    /// The positions pointer `host_id` passed through before its next event (oldest first), for that event.
+    pub(crate) fn set_historical(&self, host_id: i64, historical: Vec<HistoricalChange>) {
+        let mut pending = self.historical.borrow_mut();
+        pending.retain(|(id, _)| *id != host_id);
+        if !historical.is_empty() {
+            pending.push((host_id, historical));
+        }
+    }
+
+    /// What pointer `host_id` passed through before this event of it (taken: the next one starts afresh).
+    fn take_historical(&self, host_id: i64) -> Vec<HistoricalChange> {
+        let mut pending = self.historical.borrow_mut();
+        match pending.iter().position(|(id, _)| *id == host_id) {
+            Some(i) => pending.swap_remove(i).1,
+            None => Vec::new(),
+        }
+    }
+
     /// The fingers down as an event's pointers, `lifted` (if any) let go at its position.
     fn touch_pointers(&self, time_nanos: i64, lifted: Option<i64>) -> Vec<PointerInputEventData> {
         self.touches
             .borrow()
             .iter()
-            .map(|p| data(p.id, time_nanos, p.position, Some(p.host_id) != lifted, p.r#type, false))
+            .map(|p| PointerInputEventData {
+                historical: self.take_historical(p.host_id),
+                ..data(p.id, time_nanos, p.position, Some(p.host_id) != lifted, p.r#type, false)
+            })
             .collect()
     }
 
@@ -354,14 +379,16 @@ impl InputState {
     fn stylus_pointer(&self, time_nanos: i64) -> Option<PointerInputEventData> {
         self.stylus.borrow().map(|s| PointerInputEventData {
             pressure: s.pressure,
+            historical: self.take_historical(s.host_id),
             ..data(s.id, time_nanos, s.position, s.down, s.r#type, true)
         })
     }
 
     fn mouse_pointer(&self, time_nanos: i64) -> Option<PointerInputEventData> {
-        self.mouse
-            .borrow()
-            .map(|m| data(m.id, time_nanos, m.position, m.buttons.are_any_pressed(), PointerType::Mouse, true))
+        self.mouse.borrow().map(|m| PointerInputEventData {
+            historical: self.take_historical(m.host_id),
+            ..data(m.id, time_nanos, m.position, m.buttons.are_any_pressed(), PointerType::Mouse, true)
+        })
     }
 
     /// The mouse at `position` (now over the window if it wasn't).
@@ -745,6 +772,7 @@ pub(crate) fn pointer_cancel(host: &KompozHost) {
         let state = host.input.borrow();
         state.touches.borrow_mut().clear();
         state.swallowed.borrow_mut().clear();
+        state.historical.borrow_mut().clear();
         if let Some(m) = state.mouse.borrow_mut().as_mut() {
             m.buttons = PointerButtons::None;
         }

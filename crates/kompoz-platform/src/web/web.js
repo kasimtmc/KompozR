@@ -16,12 +16,20 @@
 //   the module at once (the app's copy goes into the event); Ctrl+V's key waits for its paste event's data.
 // - Drops: a drop's strings and files read before the module is told (a file's bytes are read asynchronously).
 //   Drags out: a drag the browser begins (`dragstart`) of a press the app's drag within it already took.
+// - Screen readers: the ARIA mirror (aria.rs says what it is): elements over the canvas, made and changed by the
+//   module's operations (web_aria), transparent and letting the pointer through; what a screen reader does to them
+//   (activates, asks a context menu of, focuses, steps a slider, scrolls, a custom action's button, a selection in
+//   the text area) recorded as `aria` and `select` records. A field's element while it is typed into is the text
+//   area (a password field's: a password input, whose text screen readers don't read out).
 //
 //   import { instantiate } from "./kompoz.js";
 //   import { gpuImports, requestGpu } from "./webgpu.js";
 //   import { platformImports, runApp } from "./platform.js";
 //   const { glue } = await instantiate(fetch("app.wasm"), { parts: [gpuImports, platformImports], before: [requestGpu] });
 //   runApp(glue);
+
+// A clickable mirrored element's own click listener (what it does is the mirror's root's).
+function ariaClickable() {}
 
 const TEXT_TYPES = new Set(["text/plain", "text/html", "text/uri-list"]);
 const APPLE = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
@@ -71,6 +79,9 @@ class WebPlatform {
         this.hash = location.hash;
         this.measureContext = null;
         this.drawCanvas = null;
+        this.aria = null;
+        this.composing = false;
+        this.surfaceSelection = [0, 0];
         // Hooks a page sets (the test runner's): a file the app writes, an error it shows, its end, each animation
         // frame before the app's turn (its number from 1).
         glue.onFrame = glue.onFrame || null;
@@ -175,32 +186,18 @@ class WebPlatform {
         canvas.draggable = true;
         this.glue.page.set("kompoz.canvas", canvas);
 
+        // The surfaces typing goes into: the text area, and for a password field the mirror links (screen readers
+        // read a text area's text out, a password input's not) a password input; `textArea` the one in use.
         const ta = document.createElement("textarea");
+        const pw = document.createElement("input");
+        pw.type = "password";
         this.textArea = ta;
-        ta.setAttribute("aria-hidden", "true");
-        ta.setAttribute("autocomplete", "off");
-        ta.tabIndex = -1;
-        Object.assign(ta.style, {
-            position: "fixed",
-            left: "0px",
-            top: "0px",
-            width: "1px",
-            height: "1px",
-            opacity: "0",
-            fontSize: "16px", // (iOS zooms into a field with a smaller font)
-            resize: "none",
-            overflow: "hidden",
-            border: "0",
-            padding: "0",
-            margin: "0",
-            outline: "none",
-            pointerEvents: "none",
-            caretColor: "transparent",
-            background: "transparent",
-            color: "transparent",
-            whiteSpace: "pre",
-        });
+        this.surfaces = [ta, pw];
+        ta.id = "kompoz-text";
+        pw.id = "kompoz-password";
+        for (const surface of this.surfaces) this.surfaceStyle(surface);
         document.body.appendChild(ta);
+        document.body.appendChild(pw);
 
         // The safe area's insets, as CSS has them.
         const probe = document.createElement("div");
@@ -221,6 +218,38 @@ class WebPlatform {
         return 1;
     }
 
+    // A surface typing goes into: hidden from sight (and from screen readers until the mirror links it to a field),
+    // where the field is.
+    surfaceStyle(el) {
+        el.setAttribute("aria-hidden", "true");
+        el.setAttribute("autocomplete", "off");
+        el.tabIndex = -1;
+        Object.assign(el.style, {
+            position: "fixed",
+            left: "0px",
+            top: "0px",
+            width: "1px",
+            height: "1px",
+            opacity: "0",
+            fontSize: "16px", // (iOS zooms into a field with a smaller font)
+            resize: "none",
+            overflow: "hidden",
+            border: "0",
+            padding: "0",
+            margin: "0",
+            outline: "none",
+            pointerEvents: "none",
+            caretColor: "transparent",
+            background: "transparent",
+            color: "transparent",
+            whiteSpace: "pre",
+        });
+    }
+
+    isSurface(t) {
+        return this.surfaces.includes(t);
+    }
+
     // The canvas fills the page (or not: the app's size).
     fill(on) {
         const c = this.canvas;
@@ -233,6 +262,7 @@ class WebPlatform {
 
     state() {
         const c = this.canvas;
+        this.ariaPlace();
         const r = c.getBoundingClientRect();
         const m = (q) => (matchMedia(q).matches ? 1 : 0);
         const safe = getComputedStyle(this.safeProbe);
@@ -280,7 +310,6 @@ class WebPlatform {
 
     listen() {
         const c = this.canvas;
-        const ta = this.textArea;
         const at = (e) => {
             const r = c.getBoundingClientRect();
             return [e.clientX - r.left, e.clientY - r.top];
@@ -394,7 +423,14 @@ class WebPlatform {
         // Keys.
         const ours = (e) => {
             const t = e.target;
-            return t === ta || t === c || t === document.body || t === document.documentElement || t === window;
+            return (
+                this.isSurface(t) ||
+                t === c ||
+                t === document.body ||
+                t === document.documentElement ||
+                t === window ||
+                (this.aria !== null && this.aria.root.contains(t))
+            );
         };
         window.addEventListener("keydown", (e) => {
             if (!ours(e) || e.isComposing || e.keyCode === 229) return; // (an input method's)
@@ -420,19 +456,29 @@ class WebPlatform {
         });
 
         // The text area: what is typed, composed, corrected.
-        const sel = () => [ta.selectionStart, ta.selectionEnd];
-        ta.addEventListener("input", () => this.record("input", encoded(ta.value), ...sel()));
-        ta.addEventListener("compositionstart", () => this.record("compositionstart"));
-        ta.addEventListener("compositionupdate", (e) =>
-            this.record("compositionupdate", encoded(e.data || ""), encoded(ta.value), ...sel()),
-        );
-        ta.addEventListener("compositionend", (e) =>
-            this.record("compositionend", encoded(e.data || ""), encoded(ta.value), ...sel()),
-        );
+        // (Each surface's; the selection they leave kept: a selection that moves by itself after it is a screen
+        // reader's.)
+        for (const ta of this.surfaces) {
+            const sel = () => (this.surfaceSelection = [ta.selectionStart, ta.selectionEnd]);
+            ta.addEventListener("input", () => this.record("input", encoded(ta.value), ...sel()));
+            ta.addEventListener("compositionstart", () => {
+                this.composing = true;
+                this.record("compositionstart");
+            });
+            ta.addEventListener("compositionupdate", (e) =>
+                this.record("compositionupdate", encoded(e.data || ""), encoded(ta.value), ...sel()),
+            );
+            ta.addEventListener("compositionend", (e) => {
+                this.composing = false;
+                this.record("compositionend", encoded(e.data || ""), encoded(ta.value), ...sel());
+            });
+            ta.addEventListener("select", () => this.selectionMoved());
+        }
+        document.addEventListener("selectionchange", () => this.selectionMoved());
 
         // The clipboard.
         const copy = (cut) => (e) => {
-            if (!ours(e) && e.target !== ta) return;
+            if (!ours(e)) return;
             this.clipEvent = e;
             this.clipSet = false;
             this.call("kompoz_web_clipboard", cut ? 1 : 0);
@@ -442,7 +488,7 @@ class WebPlatform {
         document.addEventListener("copy", copy(false));
         document.addEventListener("cut", copy(true));
         document.addEventListener("paste", (e) => {
-            if (!ours(e) && e.target !== ta) return;
+            if (!ours(e)) return;
             e.preventDefault();
             const held = this.heldPaste;
             if (held) clearTimeout(held.timer);
@@ -574,6 +620,397 @@ class WebPlatform {
         const ta = this.textArea;
         if (ta.value !== text) ta.value = text;
         if (ta.selectionStart !== start || ta.selectionEnd !== end) ta.setSelectionRange(start, end);
+        this.surfaceSelection = [start, end];
+    }
+
+    // The surface's selection moved, neither by a key (the app's: it sets it) nor by what was typed (its input
+    // events): a screen reader's, the field's (only while the mirror links a field: its node takes it).
+    selectionMoved() {
+        const ta = this.textArea;
+        if (!this.aria || !this.aria.linked || this.composing || document.activeElement !== ta) return;
+        const [start, end] = [ta.selectionStart, ta.selectionEnd];
+        if (start === null || (start === this.surfaceSelection[0] && end === this.surfaceSelection[1])) return;
+        this.surfaceSelection = [start, end];
+        this.record("select", start, end);
+    }
+
+    // `el` the surface typing goes into (the text area, or the password input): what the other held moved to it,
+    // the focus too; the other emptied.
+    useSurface(el) {
+        const old = this.textArea;
+        if (old === el) return;
+        el.value = old.value;
+        for (const k of ["left", "top", "width", "height"]) el.style[k] = old.style[k];
+        el.inputMode = old.inputMode;
+        el.enterKeyHint = old.enterKeyHint;
+        for (const a of ["autocapitalize", "autocorrect"]) {
+            const v = old.getAttribute(a);
+            if (v !== null) el.setAttribute(a, v);
+        }
+        try {
+            el.setSelectionRange(old.selectionStart, old.selectionEnd);
+        } catch {}
+        const focused = document.activeElement === old;
+        this.textArea = el;
+        if (focused) el.focus({ preventScroll: true });
+        old.value = "";
+    }
+
+    // ---- Screen readers: the ARIA mirror (aria.rs) ----
+
+    // The mirror's root (over the canvas, just after it on the page: read where the app is), its live regions,
+    // its listeners: made at its first operations.
+    ariaStart() {
+        const root = document.createElement("div");
+        root.id = "kompoz-aria";
+        Object.assign(root.style, {
+            position: "fixed",
+            left: "0px",
+            top: "0px",
+            width: "0px",
+            height: "0px",
+            margin: "0",
+            padding: "0",
+            pointerEvents: "none",
+            color: "transparent",
+            background: "transparent",
+            userSelect: "none",
+            webkitUserSelect: "none",
+            font: "12px sans-serif",
+            whiteSpace: "pre",
+            overflow: "visible",
+        });
+        this.canvas.after(root);
+        // (What is said: written into a live region after it was emptied, so that the same words are said again.)
+        const region = (assertive) => {
+            const d = document.createElement("div");
+            d.setAttribute("aria-live", assertive ? "assertive" : "polite");
+            d.setAttribute("aria-atomic", "true");
+            Object.assign(d.style, {
+                position: "fixed",
+                left: "0px",
+                top: "0px",
+                width: "1px",
+                height: "1px",
+                overflow: "hidden",
+                clipPath: "inset(50%)",
+                whiteSpace: "nowrap",
+                pointerEvents: "none",
+            });
+            root.after(d);
+            return d;
+        };
+        this.aria = {
+            root,
+            nodes: new Map(),
+            linked: null,
+            focused: "",
+            focusing: false,
+            polite: region(false),
+            assertive: region(true),
+        };
+        const nodeOf = (t) => {
+            for (let e = t; e && e !== root; e = e.parentElement) if (e._kz) return e;
+            return null;
+        };
+        root.addEventListener("click", (e) => {
+            e.preventDefault();
+            const action = e.target.closest && e.target.closest("[data-kz-action]");
+            if (action && action._kzNode) {
+                this.record("aria", action._kzNode, "custom", action.getAttribute("data-kz-action"));
+                return;
+            }
+            const el = nodeOf(e.target);
+            if (el) this.record("aria", el._kz.id, "click");
+        });
+        root.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            const el = nodeOf(e.target);
+            if (el) this.record("aria", el._kz.id, "longclick");
+        });
+        root.addEventListener("focusin", (e) => {
+            if (this.aria.focusing) return;
+            const el = nodeOf(e.target);
+            if (el && el === e.target) this.record("aria", el._kz.id, "focus");
+        });
+        // A slider's keys while it isn't the app's focused node (a screen reader's increment: its arrow keys sent to
+        // the element): its value stepped. The focused one's keys are the app's, as any.
+        root.addEventListener(
+            "keydown",
+            (e) => {
+                const el = nodeOf(e.target);
+                if (!el || el !== e.target || el._kz.id === this.aria.focused) return;
+                const a = el._kz.attrs;
+                const step = Number(a.get("data-step"));
+                if (!step || !a.has("aria-valuenow")) return;
+                const [now, min, max] = ["aria-valuenow", "aria-valuemin", "aria-valuemax"].map((k) => Number(a.get(k)));
+                const v = {
+                    ArrowUp: now + step,
+                    ArrowRight: now + step,
+                    ArrowDown: now - step,
+                    ArrowLeft: now - step,
+                    PageUp: now + 2 * step,
+                    PageDown: now - 2 * step,
+                    Home: min,
+                    End: max,
+                }[e.key];
+                if (v === undefined) return;
+                e.preventDefault();
+                e.stopPropagation();
+                this.record("aria", el._kz.id, "progress", Math.min(max, Math.max(min, v)));
+            },
+            true,
+        );
+        // A scrollable's element scrolls (a screen reader's scrolling, a page at a time): a page of the app's,
+        // forward or back; the element back in its middle. (Less than half its size is a screen reader bringing an
+        // element into view: not a page.)
+        root.addEventListener(
+            "scroll",
+            (e) => {
+                const el = e.target;
+                if (!el._kz || !el._kz.scroll) return;
+                const k = el._kz;
+                const [px, py] = k.pad;
+                const [dx, dy] = [el.scrollLeft - px, el.scrollTop - py];
+                if (!dx && !dy) return;
+                let direction = 0;
+                if (Math.abs(dy) >= Math.abs(dx)) {
+                    if (Math.abs(dy) >= py / 2) direction = Math.sign(dy);
+                } else if (Math.abs(dx) >= px / 2) {
+                    direction = Math.sign(dx);
+                }
+                if (direction) this.record("aria", k.id, "scroll", direction > 0 ? "forward" : "backward");
+                el.scrollLeft = px;
+                el.scrollTop = py;
+            },
+            true,
+        );
+    }
+
+    // The root over the canvas.
+    ariaPlace() {
+        if (!this.aria) return;
+        const r = this.canvas.getBoundingClientRect();
+        Object.assign(this.aria.root.style, {
+            left: `${r.left}px`,
+            top: `${r.top}px`,
+            width: `${r.width}px`,
+            height: `${r.height}px`,
+        });
+    }
+
+    // The module's operations (aria.rs's lines), done; then each element touched drawn as its attributes say, and
+    // the keyboard's focus put where the app's is.
+    ariaApply(text) {
+        if (!this.aria) this.ariaStart();
+        const m = this.aria;
+        const touched = new Set();
+        const active = document.activeElement;
+        let moved = false;
+        const node = (id) => m.nodes.get(id);
+        for (const line of text.split("\n")) {
+            const f = line.split("\t");
+            const op = f[0];
+            if (op === "new") {
+                const el = document.createElement("div");
+                el.id = `kompoz-node-${f[1]}`;
+                el._kz = { id: f[1], attrs: new Map(), applied: new Set(), text: null, actions: null, spacer: null, scroll: false, pad: [0, 0] };
+                Object.assign(el.style, { position: "absolute", boxSizing: "border-box", margin: "0", padding: "0", outline: "none" });
+                m.nodes.set(f[1], el);
+                touched.add(el);
+            } else if (op === "attr" || op === "unattr") {
+                const el = node(f[1]);
+                if (!el) continue;
+                if (op === "attr") el._kz.attrs.set(f[2], decodeURIComponent(f[3] || ""));
+                else el._kz.attrs.delete(f[2]);
+                touched.add(el);
+            } else if (op === "order") {
+                const parent = f[1] === "" ? m.root : node(f[1]);
+                if (!parent) continue;
+                // (Only what is out of place moved: moving an element takes the focus from it.)
+                const managed = (n) => n && n.nodeType === 1 && (n._kz || n._kzActions);
+                const nextManaged = (n) => {
+                    while (n && !managed(n)) n = n.nextSibling;
+                    return n;
+                };
+                let cursor = nextManaged(parent.firstChild);
+                for (const id of f[2] ? f[2].split(",") : []) {
+                    const el = node(id);
+                    if (!el) continue;
+                    for (const w of el._kz.actions ? [el, el._kz.actions] : [el]) {
+                        if (cursor === w) {
+                            cursor = nextManaged(w.nextSibling);
+                        } else {
+                            parent.insertBefore(w, cursor);
+                            touched.add(el);
+                        }
+                    }
+                }
+            } else if (op === "remove") {
+                const el = node(f[1]);
+                if (!el) continue;
+                if (el._kz.actions) el._kz.actions.remove();
+                el.remove();
+                m.nodes.delete(f[1]);
+                for (const d of el.querySelectorAll("div")) if (d._kz && m.nodes.get(d._kz.id) === d) m.nodes.delete(d._kz.id);
+                if (m.linked && !m.nodes.has(m.linked.id)) this.ariaLink(null);
+            } else if (op === "link") {
+                const was = m.linked && node(m.linked.id);
+                if (was) touched.add(was);
+                this.ariaLink(f[1] ? { id: f[1], multiLine: f[2] === "1", password: f[3] === "1" } : null);
+                const now = m.linked && node(m.linked.id);
+                if (now) touched.add(now);
+            } else if (op === "focus") {
+                m.focused = f[1] || "";
+                moved = true;
+            } else if (op === "say") {
+                const region = f[1] === "1" ? m.assertive : m.polite;
+                const words = decodeURIComponent(f[2] || "");
+                region.textContent = "";
+                setTimeout(() => (region.textContent = words), 50);
+            }
+        }
+        // (Parents before their children: a child's place is from its parent's.)
+        const depth = (el) => {
+            let d = 0;
+            for (let e = el; e && e !== m.root; e = e.parentElement) d++;
+            return d;
+        };
+        for (const el of [...touched].sort((a, b) => depth(a) - depth(b))) {
+            if (el.isConnected) this.ariaDraw(el, touched);
+        }
+        this.ariaPlace();
+        // The keyboard's focus where the app's went (the text area's while a field is typed into: not taken from it).
+        const focusOn = (el) => {
+            m.focusing = true;
+            try {
+                el.focus({ preventScroll: true });
+            } finally {
+                m.focusing = false;
+            }
+        };
+        const target = m.focused ? node(m.focused) : null;
+        const typing = this.fieldActive && this.isSurface(document.activeElement);
+        if (moved && target && !typing && !(m.linked && m.linked.id === m.focused)) {
+            if (document.activeElement !== target) focusOn(target);
+        } else if (moved && !target && m.root.contains(document.activeElement)) {
+            focusOn(this.canvas);
+        } else if (active && active !== document.activeElement && m.root.contains(active) && !typing) {
+            focusOn(active); // (moved: its focus given back)
+        }
+    }
+
+    // The text area (a password field's: the password input) linked to a field's node (its element while it is),
+    // or unlinked (hidden from screen readers again).
+    ariaLink(link) {
+        const m = this.aria;
+        for (const surface of this.surfaces) {
+            surface.setAttribute("aria-hidden", "true");
+            for (const k of ["aria-label", "aria-description", "aria-invalid", "aria-disabled", "aria-multiline"]) {
+                surface.removeAttribute(k);
+            }
+        }
+        m.linked = link;
+        if (!link) {
+            if (this.textArea !== this.surfaces[0]) this.useSurface(this.surfaces[0]);
+            return;
+        }
+        this.useSurface(link.password ? this.surfaces[1] : this.surfaces[0]);
+        this.textArea.removeAttribute("aria-hidden");
+    }
+
+    // A node's element as its attributes say: ARIA's and the platform's attributes, its text, where it is (from its
+    // parent's corner; in a scrollable's element, from the middle it is kept at), a scrollable's scrolling, its
+    // custom actions' buttons beside it. A linked field's element owns the text area, which has its name and states.
+    ariaDraw(el, touched) {
+        const m = this.aria;
+        const k = el._kz;
+        const a = k.attrs;
+        const linked = m.linked && m.linked.id === k.id;
+        const want = new Map();
+        for (const [name, value] of a) if (!name.startsWith("#") && name !== "data-actions") want.set(name, value);
+        if (linked) {
+            const surface = this.textArea;
+            for (const name of ["aria-label", "aria-description", "aria-invalid", "aria-disabled"]) {
+                if (a.has(name)) surface.setAttribute(name, a.get(name));
+                else surface.removeAttribute(name);
+                want.delete(name);
+            }
+            if (surface.tagName === "TEXTAREA") surface.setAttribute("aria-multiline", m.linked.multiLine ? "true" : "false");
+            want.delete("tabindex");
+            want.set("role", "none");
+            want.set("aria-owns", surface.id);
+        }
+        for (const name of k.applied) if (!want.has(name)) el.removeAttribute(name);
+        for (const [name, value] of want) if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+        k.applied = new Set(want.keys());
+        // (A clickable's own listener: browsers tell screen readers an element with one can be clicked.)
+        el.onclick = a.has("data-click") ? ariaClickable : null;
+        const text = linked ? "" : a.get("#text") || "";
+        if (text) {
+            if (!k.text) {
+                k.text = document.createTextNode("");
+                el.insertBefore(k.text, el.firstChild);
+            }
+            if (k.text.data !== text) k.text.data = text;
+        } else if (k.text) {
+            k.text.remove();
+            k.text = null;
+        }
+        const [x, y, w, h] = (a.get("#rect") || "0 0 0 0").split(" ").map(Number);
+        const p = el.parentElement;
+        const [px, py] = p && p._kz && p._kz.scroll ? p._kz.pad : [0, 0];
+        Object.assign(el.style, { left: `${x + px}px`, top: `${y + py}px`, width: `${w}px`, height: `${h}px` });
+        const scroll = a.has("data-scroll");
+        if (scroll !== k.scroll || (scroll && (k.pad[0] !== w || k.pad[1] !== h))) {
+            k.scroll = scroll;
+            k.pad = scroll ? [w, h] : [0, 0];
+            Object.assign(el.style, { overflow: scroll ? "scroll" : "visible", scrollbarWidth: scroll ? "none" : "" });
+            if (scroll && !k.spacer) {
+                k.spacer = document.createElement("div");
+                k.spacer.setAttribute("aria-hidden", "true");
+                Object.assign(k.spacer.style, { position: "absolute", left: "0px", top: "0px" });
+                el.insertBefore(k.spacer, k.text ? k.text.nextSibling : el.firstChild);
+            } else if (!scroll && k.spacer) {
+                k.spacer.remove();
+                k.spacer = null;
+            }
+            if (k.spacer) Object.assign(k.spacer.style, { width: `${3 * w}px`, height: `${3 * h}px` });
+            el.scrollLeft = k.pad[0];
+            el.scrollTop = k.pad[1];
+            // (Its children's places are from its middle now.)
+            for (const c of el.children) if (c._kz && !touched.has(c)) this.ariaDraw(c, touched);
+        }
+        const labels = a.has("data-actions") ? a.get("data-actions").split("\n") : [];
+        if (labels.length) {
+            if (!k.actions) {
+                k.actions = document.createElement("div");
+                k.actions._kzActions = true;
+                k.actions.setAttribute("role", "group");
+                el.after(k.actions);
+            }
+            const box = k.actions;
+            Object.assign(box.style, { position: "absolute", left: el.style.left, top: el.style.top, width: `${w}px`, height: `${h}px` });
+            if (box.getAttribute("data-labels") !== labels.join("\n")) {
+                box.setAttribute("data-labels", labels.join("\n"));
+                box.replaceChildren(
+                    ...labels.map((label, i) => {
+                        const b = document.createElement("div");
+                        b.setAttribute("role", "button");
+                        b.setAttribute("data-kz-action", String(i));
+                        b.tabIndex = -1;
+                        b._kzNode = k.id;
+                        b.onclick = ariaClickable;
+                        b.textContent = label;
+                        Object.assign(b.style, { position: "absolute", inset: "0px", outline: "none" });
+                        return b;
+                    }),
+                );
+            }
+        } else if (k.actions) {
+            k.actions.remove();
+            k.actions = null;
+        }
     }
 
     // ---- The clipboard ----
@@ -870,6 +1307,7 @@ class WebPlatform {
             web_text_draw: (tp, tl, fp, fl, w, h, x, y) => glue.hold(this.draw(s(tp, tl), s(fp, fl), w, h, x, y)),
             web_image_load: (p, l, w, h, fill) => this.loadImage(s(p, l), w, h, fill),
             web_image_result: (id) => this.imageResult(id),
+            web_aria: (p, l) => this.ariaApply(s(p, l)),
         };
         // What a call throws is logged, and the call returns 0 (none): a JavaScript exception must not unwind
         // through Rust's frames.

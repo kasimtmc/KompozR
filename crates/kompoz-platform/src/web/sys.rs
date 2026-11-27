@@ -58,6 +58,7 @@ mod imports {
         ) -> i32;
         pub(super) fn web_image_load(url: *const u8, length: usize, width: u32, height: u32, fill: u32) -> u32;
         pub(super) fn web_image_result(image: u32) -> i32;
+        pub(super) fn web_aria(ops: *const u8, length: usize);
     }
 }
 
@@ -263,6 +264,12 @@ pub fn image_result(image: u32) -> Option<Option<(u32, u32, Vec<u8>)>> {
             Some(Some((w, h, bytes[8..].to_vec())))
         }
     }
+}
+
+/// The ARIA mirror's operations (aria.rs's lines) done on the page's elements.
+pub fn aria(ops: &str) {
+    // SAFETY: the import reads `ops.len()` bytes at its pointer, which are the string's.
+    unsafe { imports::web_aria(ops.as_ptr(), ops.len()) }
 }
 
 // ---- What the page calls (web.js, only between the module's own calls) ----

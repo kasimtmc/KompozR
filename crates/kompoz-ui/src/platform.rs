@@ -158,6 +158,24 @@ pub enum PointerIcon {
     ResizeVertical,
     NotAllowed,
     Wait,
+    /// A stylus over a field it can write into by hand (Compose's `handwritingPointerIcon`: Android 14's
+    /// `PointerIcon.TYPE_HANDWRITING`; the text cursor where the platform has none).
+    Handwriting,
+}
+
+/// Whether the platform's input method takes handwriting from a stylus over a text field (Compose's
+/// `isStylusHandwritingSupported`: Android 14 and later): set by the platform as it starts, read by the text fields
+/// as they compose (their stylus handwriting modifier). False until a platform says so.
+static STYLUS_HANDWRITING_SUPPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether stylus handwriting is supported (Compose's `isStylusHandwritingSupported`).
+pub fn is_stylus_handwriting_supported() -> bool {
+    STYLUS_HANDWRITING_SUPPORTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The platform's say on stylus handwriting (Android: API 34 and later).
+pub fn set_stylus_handwriting_supported(supported: bool) {
+    STYLUS_HANDWRITING_SUPPORTED.store(supported, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// A kind of haptic feedback (Compose's HapticFeedbackType).
@@ -246,6 +264,10 @@ pub trait PlatformCallbacks {
         let _ = kind;
     }
     fn hide_software_keyboard(&self) {}
+    /// The input method's handwriting started for the focused field's session (a stylus moved past the
+    /// handwriting slop over it: Compose's `startStylusHandwriting`, Android 14's
+    /// `InputMethodManager.startStylusHandwriting`).
+    fn start_stylus_handwriting(&self) {}
     /// Whether the keyboard can be moved by hand (Android 11+'s WindowInsetsAnimationController): what
     /// `ime_nested_scroll` drives through `ime_control_by` and `ime_control_end`.
     fn can_control_ime(&self) -> bool {

@@ -60,6 +60,9 @@ impl PlatformCallbacks for Recorder {
     fn open_uri(&self, uri: &str) {
         push(&self.0, format!("open {uri}"));
     }
+    fn start_stylus_handwriting(&self) {
+        push(&self.0, "handwriting");
+    }
 }
 
 fn state(text: &str, selection: (usize, usize), composition: Option<(usize, usize)>) -> TextEditState {
@@ -266,6 +269,64 @@ fn a_service_over_its_own_platform_text_input_service() {
         ["start \"ab\"", "update Some(\"ab\") \"ab!\"", "rect 5", "show", "hide", "start \"\"", "stop"]
     );
     assert!(!service.has_session() && taken(&platform).is_empty());
+}
+
+/// Stylus handwriting (Compose's `startStylusHandwriting`): started for the session open; asked for before one
+/// opens (the field the stylus wrote over only taking the focus), started as the next one does.
+fn stylus_handwriting_starts_for_the_open_session_or_the_next() {
+    let platform = new_log();
+    let rule = KompozTestRule::new(kompozable_lambda!(|| {}));
+    let host = rule.host();
+    host.set_callbacks(Rc::new(Recorder(platform.clone())));
+    let service = host.text_input_service();
+    service.start_stylus_handwriting();
+    assert!(taken(&platform).is_empty());
+    let session = service.start_input(TextEditState::default(), ImeOptions::default(), |_: &[EditCommand]| {}, |_| {});
+    assert_eq!(taken(&platform), ["text_input true \"\" 0", "handwriting"]);
+    service.start_stylus_handwriting();
+    assert_eq!(taken(&platform), ["handwriting"]);
+    session.dispose();
+    // (Once: the next session starts without it.)
+    let next = service.start_input(TextEditState::default(), ImeOptions::default(), |_: &[EditCommand]| {}, |_| {});
+    assert_eq!(taken(&platform), ["text_input false \"\" 0", "text_input true \"\" 0"]);
+    next.dispose();
+}
+
+/// The positions a platform batched between two events of a pointer (Android's historical samples) reach that
+/// pointer's next change as its history, oldest first, each at its time; the change after starts afresh.
+fn batched_samples_are_a_pointers_history() {
+    let log = new_log();
+    let l = log.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let l = l.clone();
+        Box(modifier = Modifier.size(100.dp()).on_pointer_event(
+            PointerEventType::Move,
+            on_event = move |_: &AwaitPointerEventScope, e: &PointerEvent| {
+                for c in &e.changes {
+                    let history: Vec<String> = c
+                        .historical()
+                        .iter()
+                        .map(|h| format!("{},{}@{}", h.position.x, h.position.y, h.uptime_millis))
+                        .collect();
+                    push(&l, format!("{} {},{} [{}]", c.id.0, c.position.x, c.position.y, history.join(" ")));
+                }
+            },
+        ));
+    }));
+    let h = rule.host();
+    let ms = 1_000_000;
+    h.pointer_down(at(10.0, 10.0), 100 * ms, 7, PointerType::Touch);
+    h.pointer_down(at(50.0, 10.0), 100 * ms, 8, PointerType::Touch);
+    taken(&log);
+    h.pointer_historical(7, &[(at(11.0, 10.0), 104 * ms), (at(12.0, 10.0), 108 * ms)]);
+    h.pointer_historical(8, &[(at(51.0, 10.0), 104 * ms)]);
+    assert!(h.pointer_moves(&[(7, at(13.0, 10.0)), (8, at(52.0, 10.0))], 112 * ms));
+    let moved = taken(&log);
+    assert_eq!(moved.len(), 2);
+    assert!(moved[0].ends_with("13,10 [11,10@104 12,10@108]"), "{moved:?}");
+    assert!(moved[1].ends_with("52,10 [51,10@104]"), "{moved:?}");
+    h.pointer_moves(&[(7, at(14.0, 10.0)), (8, at(53.0, 10.0))], 116 * ms);
+    assert!(taken(&log).iter().all(|m| m.ends_with("[]")));
 }
 
 fn zooms_and_pinches_are_scale_events() {
@@ -622,6 +683,8 @@ tests!(
     input_methods_place_the_caret_inside_their_composing_text,
     text_input_sessions_take_what_the_input_method_does,
     a_service_over_its_own_platform_text_input_service,
+    stylus_handwriting_starts_for_the_open_session_or_the_next,
+    batched_samples_are_a_pointers_history,
     zooms_and_pinches_are_scale_events,
     drags_from_outside_reach_the_targets_under_them,
     strings_and_right_to_left_languages,

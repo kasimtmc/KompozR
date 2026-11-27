@@ -994,6 +994,17 @@ impl KompozHost {
         crate::input::pointer_moves(self, moves, t)
     }
 
+    /// The positions (px) pointer `pointer_id` passed through since its last event, oldest first, each at its time
+    /// (ns, on the frame clock), as the platform batched them (Android's historical samples): its next event
+    /// carries them (Compose's `PointerInputChange.historical`, what velocity trackers read).
+    pub fn pointer_historical(&self, pointer_id: i64, samples: &[(Offset, i64)]) {
+        let historical = samples
+            .iter()
+            .map(|&(position, time)| crate::input::HistoricalChange::new(self.event_time(time) / 1_000_000, position))
+            .collect();
+        self.input.borrow().set_historical(pointer_id, historical);
+    }
+
     pub fn pointer_up(&self, position: Offset, time_nanos: i64, pointer_id: i64) -> bool {
         let t = self.event_time(time_nanos);
         crate::input::pointer_up(self, position, t, pointer_id)

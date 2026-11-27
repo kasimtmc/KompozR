@@ -15,7 +15,7 @@ pub(super) fn shape_of(icon: PointerIcon) -> WpCursorShapeDeviceV1Shape {
     match icon {
         PointerIcon::Default => Shape::DEFAULT,
         PointerIcon::Hand => Shape::POINTER,
-        PointerIcon::Text => Shape::TEXT,
+        PointerIcon::Text | PointerIcon::Handwriting => Shape::TEXT,
         PointerIcon::Crosshair => Shape::CROSSHAIR,
         PointerIcon::Move => Shape::MOVE,
         PointerIcon::ResizeHorizontal => Shape::EW_RESIZE,
@@ -31,7 +31,7 @@ pub(super) fn theme_names(icon: PointerIcon) -> &'static [&'static str] {
     match icon {
         PointerIcon::Default => &["default", "left_ptr"],
         PointerIcon::Hand => &["pointer", "hand2", "hand1"],
-        PointerIcon::Text => &["text", "xterm", "ibeam"],
+        PointerIcon::Text | PointerIcon::Handwriting => &["text", "xterm", "ibeam"],
         PointerIcon::Crosshair => &["crosshair", "cross", "tcross"],
         PointerIcon::Move => &["move", "fleur", "all-scroll"],
         PointerIcon::ResizeHorizontal => &["ew-resize", "sb_h_double_arrow", "h_double_arrow"],

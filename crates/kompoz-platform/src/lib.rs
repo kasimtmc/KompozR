@@ -12,9 +12,10 @@
 //! built on every target).
 //!
 //! `unsafe` code is confined to `unix::sys`, `linux::sys`, `windows::sys` and the FFI modules (`linux::xkb`'s,
-//! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface and
-//! WinHTTP, `android`'s JNI, NDK, natives and Vulkan surface, `web::sys`) and the macOS platform's that define or
-//! call Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:` comment; everything else is safe.
+//! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface, WinHTTP,
+//! IMM32 and TSF, `android`'s JNI, NDK, natives and Vulkan surface, `web::sys`) and the macOS platform's that define
+//! or call Objective-C classes through objc2 (`macos`), each block with a `// SAFETY:` comment; everything else is
+//! safe.
 
 //!
 //! What an app's build script adds to its program for a platform (the Windows program's resources) is [`build`]'s,
@@ -57,6 +58,15 @@ pub mod unix;
 pub mod web;
 #[cfg(all(feature = "platform", windows))]
 pub mod windows;
+
+// The Windows platform's input methods' translations (what they see of a field, what they do to it), tested on every
+// host.
+#[cfg(all(test, feature = "platform", not(windows)))]
+#[allow(dead_code)]
+#[path = "windows"]
+mod windows_tested_here {
+    mod ime;
+}
 
 // The macOS platform's parts that need no AppKit (its key codes and menus' key equivalents, what its input methods
 // see of a field, the pasteboard's types), tested on every host.

@@ -115,10 +115,15 @@ mod slot {
     pub const CALL_VOID_METHOD_A: usize = 63;
     pub const GET_ARRAY_LENGTH: usize = 171;
     pub const NEW_BYTE_ARRAY: usize = 176;
+    pub const NEW_INT_ARRAY: usize = 179;
+    pub const NEW_FLOAT_ARRAY: usize = 181;
     pub const GET_BYTE_ARRAY_REGION: usize = 200;
     pub const GET_INT_ARRAY_REGION: usize = 203;
+    pub const GET_LONG_ARRAY_REGION: usize = 204;
     pub const GET_FLOAT_ARRAY_REGION: usize = 205;
     pub const SET_BYTE_ARRAY_REGION: usize = 208;
+    pub const SET_INT_ARRAY_REGION: usize = 211;
+    pub const SET_FLOAT_ARRAY_REGION: usize = 213;
     pub const REGISTER_NATIVES: usize = 215;
     pub const GET_JAVA_VM: usize = 219;
     pub const EXCEPTION_CHECK: usize = 228;
@@ -539,6 +544,55 @@ impl<'a> Env<'a> {
             }
         }
         if self.check() { Vec::new() } else { out }
+    }
+
+    /// A `long[]`'s values (empty for null).
+    pub fn longs(&self, array: JObject) -> Vec<i64> {
+        let n = self.array_length(array);
+        let mut out = vec![0i64; n];
+        if n > 0 {
+            // SAFETY: GetLongArrayRegion of the whole array into a buffer of its length.
+            unsafe {
+                let get: unsafe extern "system" fn(*mut JNIEnv, jobject, jsize, jsize, *mut jlong) =
+                    self.f(slot::GET_LONG_ARRAY_REGION);
+                get(self.raw, array.0, 0, n as jsize, out.as_mut_ptr());
+            }
+        }
+        if self.check() { Vec::new() } else { out }
+    }
+
+    /// A new `int[]` of `values` (none if the VM can't make it).
+    pub fn new_ints(&self, values: &[i32]) -> Option<Local<'a>> {
+        // SAFETY: NewIntArray, then SetIntArrayRegion of its whole length from `values`.
+        let raw = unsafe {
+            let new: unsafe extern "system" fn(*mut JNIEnv, jsize) -> jobject = self.f(slot::NEW_INT_ARRAY);
+            new(self.raw, values.len() as jsize)
+        };
+        let array = self.local(raw)?;
+        // SAFETY: as above.
+        unsafe {
+            let set: unsafe extern "system" fn(*mut JNIEnv, jobject, jsize, jsize, *const jint) =
+                self.f(slot::SET_INT_ARRAY_REGION);
+            set(self.raw, array.raw, 0, values.len() as jsize, values.as_ptr());
+        }
+        (!self.check()).then_some(array)
+    }
+
+    /// A new `float[]` of `values` (none if the VM can't make it).
+    pub fn new_floats(&self, values: &[f32]) -> Option<Local<'a>> {
+        // SAFETY: NewFloatArray, then SetFloatArrayRegion of its whole length from `values`.
+        let raw = unsafe {
+            let new: unsafe extern "system" fn(*mut JNIEnv, jsize) -> jobject = self.f(slot::NEW_FLOAT_ARRAY);
+            new(self.raw, values.len() as jsize)
+        };
+        let array = self.local(raw)?;
+        // SAFETY: as above.
+        unsafe {
+            let set: unsafe extern "system" fn(*mut JNIEnv, jobject, jsize, jsize, *const jfloat) =
+                self.f(slot::SET_FLOAT_ARRAY_REGION);
+            set(self.raw, array.raw, 0, values.len() as jsize, values.as_ptr());
+        }
+        (!self.check()).then_some(array)
     }
 
     /// The raw `JNIEnv *` (for the NDK's functions that take one: `ANativeWindow_fromSurface`).

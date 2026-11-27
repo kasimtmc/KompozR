@@ -4,6 +4,7 @@
 //! id, a pen's or an eraser's contact, pressure and barrel buttons, and its hovering; the wheel's lines and pages
 //! as notches.
 
+use super::aria::AriaAction;
 use super::keys;
 use crate::app::{Event, MouseButton};
 use kompoz_ui::draganddrop::DragAndDropTransferAction;
@@ -117,6 +118,16 @@ pub enum Record {
     Page(String),
     /// The page is going away (pagehide).
     Leaving,
+    /// A screen reader's action on a node's element of the ARIA mirror (aria.rs).
+    Aria {
+        node: u64,
+        action: AriaAction,
+    },
+    /// The text area's selection moved by itself (a screen reader's, not a key's nor an input's): UTF-16.
+    Select {
+        start: u32,
+        end: u32,
+    },
 }
 
 /// A percent-encoded string field.
@@ -222,6 +233,19 @@ pub fn parse(line: &str) -> Option<Record> {
         },
         "page" => Record::Page(text(1)),
         "leaving" => Record::Leaving,
+        "aria" => Record::Aria {
+            node: f.get(1)?.parse().ok()?,
+            action: match *f.get(2)? {
+                "click" => AriaAction::Click,
+                "longclick" => AriaAction::LongClick,
+                "focus" => AriaAction::Focus,
+                "progress" => AriaAction::Progress(num(3).filter(|v| v.is_finite())? as f32),
+                "scroll" => AriaAction::Scroll(*f.get(3)? == "forward"),
+                "custom" => AriaAction::Custom(int(3)?.try_into().ok()?),
+                _ => return None,
+            },
+        },
+        "select" => Record::Select { start: int(1)? as u32, end: int(2)? as u32 },
         _ => return None,
     })
 }
@@ -360,6 +384,18 @@ mod tests {
         assert_eq!(parse("page\tresize").unwrap(), Record::Page("resize".into()));
         assert_eq!(parse("nothing\t1"), None);
         assert_eq!(parse("pointer\tdown"), None);
+        assert_eq!(parse("aria\t42\tclick").unwrap(), Record::Aria { node: 42, action: AriaAction::Click });
+        assert_eq!(
+            parse("aria\t7\tprogress\t0.75").unwrap(),
+            Record::Aria { node: 7, action: AriaAction::Progress(0.75) }
+        );
+        assert_eq!(
+            parse("aria\t7\tscroll\tbackward").unwrap(),
+            Record::Aria { node: 7, action: AriaAction::Scroll(false) }
+        );
+        assert_eq!(parse("aria\t7\tcustom\t2").unwrap(), Record::Aria { node: 7, action: AriaAction::Custom(2) });
+        assert_eq!(parse("aria\t7\tprogress\tNaN"), None);
+        assert_eq!(parse("select\t1\t4").unwrap(), Record::Select { start: 1, end: 4 });
     }
 
     fn pointer(phase: Phase, kind: PointerKind, button: i32, buttons: u32) -> Pointer {

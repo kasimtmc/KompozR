@@ -10,6 +10,7 @@
 
 use super::clipboard::Clipboard;
 use super::event_loop::{EventLoop, Waker};
+use super::input_method::{self, InputMethod};
 use super::keyboard::{self, Characters, VK_CONTROL, VK_F4, VK_MENU, VK_SPACE};
 use super::sys::{self, Cursor, Hwnd, Icon, Placed, WindowHandler, WindowMessage};
 use super::{Route, StepKind, now, route};
@@ -21,7 +22,7 @@ use kompoz_graphics::{Color, Rect};
 use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
-use kompoz_ui::platform::{PlatformCallbacks, PointerIcon};
+use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
 use kompoz_ui::window::{WindowId, WindowPlacement};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -103,7 +104,7 @@ impl Shared {
     }
 
     /// The platform's own window gone (what the app put on the clipboard rendered first: WM_RENDERALLFORMATS), the
-    /// display let sleep again.
+    /// display let sleep again, TSF deactivated.
     pub fn close(&self) {
         let helper = self.helper.replace(Hwnd::NONE);
         if !helper.is_none() {
@@ -111,6 +112,18 @@ impl Shared {
         }
         if self.kept_on.replace(false) {
             sys::keep_display_on(false);
+        }
+        if self.windows.borrow().iter().all(|w| w.hwnd.get().is_none()) {
+            super::tsf::ThreadManager::shutdown();
+        }
+    }
+
+    /// The field of window `id` as its core has it after handling what was typed (none: no session open): its
+    /// input method answered.
+    pub(super) fn answer_input_method(&self, id: WindowId, state: Option<TextEditState>) {
+        let window = self.windows.borrow().iter().find(|w| w.id == id).cloned();
+        if let Some(w) = window {
+            w.ime.answer(state);
         }
     }
 
@@ -146,7 +159,7 @@ impl Shared {
         let (i, id) = match icon {
             PointerIcon::Default => (0, wm::IDC_ARROW),
             PointerIcon::Hand => (1, wm::IDC_HAND),
-            PointerIcon::Text => (2, wm::IDC_IBEAM),
+            PointerIcon::Text | PointerIcon::Handwriting => (2, wm::IDC_IBEAM),
             PointerIcon::Crosshair => (3, wm::IDC_CROSS),
             PointerIcon::Move => (4, wm::IDC_SIZEALL),
             PointerIcon::ResizeHorizontal => (5, wm::IDC_SIZEWE),
@@ -271,7 +284,9 @@ pub struct WindowState {
     pub(super) id: WindowId,
     shared: Weak<Shared>,
     hwnd: Cell<Hwnd>,
-    events: RefCell<VecDeque<Event>>,
+    events: Rc<RefCell<VecDeque<Event>>>,
+    /// Its input method: the focused field's composition and requests (IMM32's or TSF's).
+    ime: Rc<InputMethod>,
     /// The client area's size, its pixels (what the swapchain is made at; kept as it was while minimized).
     size: Rc<Cell<(i32, i32)>>,
     dpi: Cell<u32>,
@@ -299,11 +314,13 @@ pub struct WindowState {
 
 impl WindowState {
     fn new(shared: &Rc<Shared>, id: WindowId) -> WindowState {
+        let events = Rc::new(RefCell::new(VecDeque::new()));
         WindowState {
             id,
             shared: Rc::downgrade(shared),
             hwnd: Cell::new(Hwnd::NONE),
-            events: RefCell::new(VecDeque::new()),
+            ime: InputMethod::new(events.clone()),
+            events,
             size: Rc::new(Cell::new((1, 1))),
             dpi: Cell::new(sys::system_dpi()),
             refresh_rate: Cell::new(60.0),
@@ -418,8 +435,10 @@ impl WindowState {
         let answer = if message == wm::WM_SYSKEYDOWN && (vk == VK_F4 || vk == VK_SPACE) { None } else { Some(0) };
         let answer = if system { answer } else { None };
         // (An input method's key: its own, VK_PROCESSKEY.)
-        const VK_PROCESSKEY: u16 = 0xE5;
-        if vk == VK_PROCESSKEY {
+        if down {
+            self.ime.key(vk);
+        }
+        if vk == input_method::VK_PROCESSKEY {
             return answer;
         }
         // (AltGr: the left Ctrl Windows sends first, at the right Alt's time.)
@@ -482,6 +501,23 @@ impl WindowHandler for WindowState {
     fn message(&self, hwnd: Hwnd, m: &WindowMessage) -> Option<isize> {
         let shared = self.shared.upgrade()?;
         let (message, w, l) = (m.id(), m.w(), m.l());
+        if (wm::WM_IME_SETCONTEXT..=wm::WM_IME_KEYUP).contains(&message)
+            || matches!(message, wm::WM_IME_STARTCOMPOSITION | wm::WM_IME_ENDCOMPOSITION | wm::WM_IME_COMPOSITION)
+        {
+            if message == wm::WM_IME_CHAR {
+                // (An input method's character: left out where its result was committed already.)
+                if !self.ime.typed_by_result(w as u16)
+                    && let Some(text) = self.characters.borrow_mut().unit(w as u16)
+                {
+                    self.push(Event::Text(text));
+                }
+                return Some(0);
+            }
+            if let Some(answer) = self.ime.message(hwnd, m) {
+                return Some(answer);
+            }
+            return None;
+        }
         match message {
             wm::WM_CLOSE => {
                 self.push(Event::CloseRequest);
@@ -617,6 +653,9 @@ impl WindowHandler for WindowState {
             }
             // A character typed (an input method's too, a dead key's with the next), in UTF-16 halves.
             wm::WM_CHAR => {
+                if self.ime.typed_by_result(w as u16) {
+                    return Some(0);
+                }
                 if let Some(text) = self.characters.borrow_mut().unit(w as u16) {
                     self.push(Event::Text(text));
                 }
@@ -643,6 +682,18 @@ impl Win32Window {
 
     fn hwnd(&self) -> Hwnd {
         self.state.hwnd.get()
+    }
+
+    /// Its window's handle (tests).
+    #[cfg(test)]
+    pub(super) fn handle(&self) -> Hwnd {
+        self.state.hwnd.get()
+    }
+
+    /// Its input method (tests).
+    #[cfg(test)]
+    pub(super) fn input_method(&self) -> Rc<InputMethod> {
+        self.state.ime.clone()
     }
 
     /// px per dp: `KOMPOZ_SCALE`, else the window's DPI / 96.
@@ -673,6 +724,15 @@ struct Win32Callbacks {
 impl PlatformCallbacks for Win32Callbacks {
     fn waker(&self) -> Option<Arc<dyn Fn() + Send + Sync>> {
         Some(self.waker.as_fn())
+    }
+
+    /// The window's input method given the focused field (IMM32's context, TSF's document), or taken from it.
+    fn text_input(&self, active: bool, area: Rect, state: &TextEditState, options: &ImeOptions) {
+        self.state.ime.text_input(active, area, state, options);
+    }
+
+    fn text_input_changed(&self, state: &TextEditState) {
+        self.state.ime.text_input_changed(state);
     }
 
     /// Shown at once where the mouse is over the window, else as it comes in (WM_SETCURSOR).
@@ -756,6 +816,7 @@ impl Platform for Win32Window {
         let hwnd = sys::create_window(super::window::CLASS, &spec.title, style, ex_style, at, state.clone())
             .ok_or_else(|| format!("the window couldn't be made ({})", sys::last_error()))?;
         state.hwnd.set(hwnd);
+        state.ime.attach(hwnd, input_method::mode());
         state.dpi.set(hwnd.dpi());
         let scale = self.scale();
         let width = ((spec.width.0 as f64 * scale).round() as i32).max(1);
@@ -801,6 +862,7 @@ impl Platform for Win32Window {
         self.state.modal.set(false);
         self.state.tracking_leave.set(false);
         self.state.windowed.set(None);
+        self.state.ime.detach();
         hwnd.destroy();
     }
 

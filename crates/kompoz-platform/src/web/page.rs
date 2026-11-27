@@ -182,7 +182,7 @@ pub(super) fn cursor_name(icon: PointerIcon) -> &'static str {
     match icon {
         PointerIcon::Default => "default",
         PointerIcon::Hand => "pointer",
-        PointerIcon::Text => "text",
+        PointerIcon::Text | PointerIcon::Handwriting => "text",
         PointerIcon::Crosshair => "crosshair",
         PointerIcon::Move => "move",
         PointerIcon::ResizeHorizontal => "ew-resize",

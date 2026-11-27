@@ -5,7 +5,8 @@
 use super::configuration::{SemanticsConfiguration, SemanticsPropertyKey};
 use super::node::{SemanticsNode, SemanticsOwner};
 use super::properties::{
-    AccessibilityAction, ActionFn, LiveRegionMode, ProgressBarRangeInfo, Role, SemanticsActions, SemanticsProperties,
+    AccessibilityAction, ActionFn, CollectionInfo, CollectionItemInfo, LiveRegionMode, ProgressBarRangeInfo, Role,
+    SemanticsActions, SemanticsProperties,
 };
 use crate::state::ToggleableState;
 use kompoz_graphics::{LayoutDirection, Rect};
@@ -43,6 +44,23 @@ pub struct AccessibilityNode {
     pub selectable_group: bool,
     /// On or off (a toggleable's state, or a selectable's selection); none if neither, or indeterminate.
     pub checked: Option<bool>,
+    /// A toggleable's state (on, off, indeterminate), apart from a selection (the web's `aria-checked`, `mixed`
+    /// for the indeterminate).
+    pub toggleable_state: Option<ToggleableState>,
+    /// A selectable's selection (a tab's, an option's: the web's `aria-selected`), apart from a toggle.
+    pub selected: Option<bool>,
+    /// Expanded (it offers to collapse) or collapsed (it offers to expand): Compose's Expand and Collapse actions,
+    /// as Android's delegate offers them; none if it offers neither.
+    pub expanded: Option<bool>,
+    /// What is wrong with its input (Compose's `error`), if something is.
+    pub error: Option<String>,
+    /// It is a link in a text (Compose's LinkTestMarker: a `LinkAnnotation`'s node).
+    pub link: bool,
+    /// It is a collection: its rows and columns (-1 where unknown: a lazy one's).
+    pub collection_info: Option<CollectionInfo>,
+    /// Its place in the collection above it: its own (Compose's `collectionItemInfo`), else, among the selectables
+    /// of a selectable group that isn't lazy, its index among them (Compose's `setCollectionItemInfo`).
+    pub collection_item_info: Option<CollectionItemInfo>,
     pub range: Option<ProgressBarRangeInfo>,
     /// `SetProgress` sets its value (offered only while it is enabled, as Compose does).
     pub settable: bool,
@@ -265,6 +283,21 @@ fn summarize(
         heading: config.contains(SemanticsProperties::Heading),
         selectable_group: config.contains(SemanticsProperties::SelectableGroup),
         checked,
+        toggleable_state: config.get(SemanticsProperties::ToggleableState),
+        selected: config.get(SemanticsProperties::Selected),
+        expanded: if config.get(SemanticsActions::Collapse).is_some_and(|a| a.action.is_some()) {
+            Some(true)
+        } else if config.get(SemanticsActions::Expand).is_some_and(|a| a.action.is_some()) {
+            Some(false)
+        } else {
+            None
+        },
+        error: config.get(SemanticsProperties::Error),
+        link: config.contains(SemanticsProperties::LinkTestMarker),
+        collection_info: config.get(SemanticsProperties::CollectionInfo),
+        collection_item_info: config
+            .get(SemanticsProperties::CollectionItemInfo)
+            .or_else(|| item_in_group(node, config)),
         range: config.get(SemanticsProperties::ProgressBarRangeInfo),
         // (Compose offers set-progress only on an enabled node: `addSetProgressAction`)
         settable: config.get(SemanticsActions::SetProgress).is_some_and(|a| a.action.is_some())
@@ -285,6 +318,38 @@ fn summarize(
         pane_title: config.get(SemanticsProperties::PaneTitle),
         test_tag: config.get(SemanticsProperties::TestTag),
     }
+}
+
+/// A selectable's place among the selectables of the selectable group it is in, where that group isn't a lazy
+/// collection (Compose's `setCollectionItemInfo`): a row each (a column each where they are side by side).
+fn item_in_group(node: &SemanticsNode, config: &SemanticsConfiguration) -> Option<CollectionItemInfo> {
+    if !config.contains(SemanticsProperties::Selected) {
+        return None;
+    }
+    let parent = node.parent()?;
+    let group = parent.config();
+    if !group.contains(SemanticsProperties::SelectableGroup)
+        || group.get(SemanticsProperties::CollectionInfo).is_some_and(|c| c.row_count < 0 || c.column_count < 0)
+    {
+        return None;
+    }
+    let selectables: Vec<SemanticsNode> =
+        parent.replaced_children().into_iter().filter(|c| c.config().contains(SemanticsProperties::Selected)).collect();
+    let index = selectables.iter().position(|s| s.id() == node.id())? as i32;
+    // (Side by side: the first two at the same height, the second to the right; Compose's
+    // `calculateIfHorizontallyStacked`.)
+    let horizontal = match selectables.as_slice() {
+        [a, b, ..] => {
+            let (a, b) = (a.bounds_in_window(), b.bounds_in_window());
+            a.top == b.top && b.left > a.left
+        }
+        _ => false,
+    };
+    Some(if horizontal {
+        CollectionItemInfo { row_index: 0, row_span: 1, column_index: index, column_span: 1 }
+    } else {
+        CollectionItemInfo { row_index: index, row_span: 1, column_index: 0, column_span: 1 }
+    })
 }
 
 /// A node's words: its own content descriptions and texts, then (where it merges) those of the unmerged nodes

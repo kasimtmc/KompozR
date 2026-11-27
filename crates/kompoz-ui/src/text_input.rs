@@ -170,6 +170,8 @@ struct ServiceState {
     /// What its sessions go to when it was made over one (Compose's TextInputService(platformTextInputService)):
     /// then the platform's callbacks aren't told, the service is.
     platform_service: Option<Rc<dyn PlatformTextInputService>>,
+    /// Stylus handwriting asked for before a session opened: started with the next one.
+    handwriting_pending: Cell<bool>,
 }
 
 /// What a focused editor starts its input sessions with (Compose's TextInputService and the owner's
@@ -187,6 +189,7 @@ impl TextInputService {
             session: RefCell::new(None),
             text_input_sessions: crate::platform_text_input::SessionMutex::new(),
             platform_service: None,
+            handwriting_pending: Cell::new(false),
         }))
     }
 
@@ -199,6 +202,7 @@ impl TextInputService {
             session: RefCell::new(None),
             text_input_sessions: crate::platform_text_input::SessionMutex::new(),
             platform_service: Some(platform_text_input_service),
+            handwriting_pending: Cell::new(false),
         }))
     }
 
@@ -268,6 +272,10 @@ impl TextInputService {
             self.tell(&before, false);
         }
         self.tell(&session, true);
+        // A stylus started writing over the field as it took the focus.
+        if self.0.handwriting_pending.replace(false) {
+            self.0.platform.get().start_stylus_handwriting();
+        }
         TextInputSession { service: self.clone(), session }
     }
 
@@ -283,6 +291,18 @@ impl TextInputService {
                 Some(service) => service.show_software_keyboard(),
                 None => self.tell(&session, true),
             }
+        }
+    }
+
+    /// Starts the input method's stylus handwriting for the open session (Compose's `startStylusHandwriting`); if
+    /// none is open yet (the field the stylus wrote over is only getting the focus), for the next session to open
+    /// (Compose's replayed handwriting trigger).
+    pub fn start_stylus_handwriting(&self) {
+        if self.current().is_some() {
+            self.0.handwriting_pending.set(false);
+            self.0.platform.get().start_stylus_handwriting();
+        } else {
+            self.0.handwriting_pending.set(true);
         }
     }
 

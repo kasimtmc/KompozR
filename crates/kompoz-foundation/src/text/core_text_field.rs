@@ -4,6 +4,7 @@
 //! scrolling, gestures, semantics, autofill's highlight) around the inner field (its size in lines, scrolling, the
 //! cursor, the text and selection drawn, its layout), the selection's handles and toolbar, the cursor's handle.
 
+use super::handwriting::StylusHandwritingModifiers;
 use super::input::internal::core_text_field_semantics_modifier::CoreTextFieldSemanticsModifier;
 use super::input::internal::legacy_platform_text_input_service_adapter::{
     LegacyPlatformTextInputServiceAdapter, legacy_text_input_adapter,
@@ -51,11 +52,11 @@ use kompoz_ui::layout::{
     MeasurePolicy, layout_into,
 };
 use kompoz_ui::platform::{
-    ImeAction, ImeOptions, LocalClipboard, LocalDensity, LocalFocusManager, LocalFontFamilyResolver,
+    ImeAction, ImeOptions, KeyboardType, LocalClipboard, LocalDensity, LocalFocusManager, LocalFontFamilyResolver,
     LocalHapticFeedback, LocalSoftwareKeyboardController, LocalTextToolbar, LocalWindowInfo,
     SoftwareKeyboardController,
 };
-use kompoz_ui::text_input::{TextInputService, TextInputSession};
+use kompoz_ui::text_input::{LocalTextInputService, TextInputService, TextInputSession};
 use kompoz_ui::{MeasureResult, MeasureScope, Modifier};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -850,7 +851,22 @@ pub fn core_text_field(args: CoreTextFieldArgs) {
                 ime_options.ime_action,
             );
 
-            // (stylus handwriting: stage 15's)
+            // A stylus writing over the field: the input method's handwriting (not for a password: the field only
+            // takes the focus, as Compose's).
+            let handwriting_enabled =
+                !matches!(ime_options.keyboard_type, KeyboardType::Password | KeyboardType::NumberPassword);
+            let stylus_handwriting_modifier = {
+                let service = LocalTextInputService.current();
+                Modifier.stylus_handwriting(
+                    enabled && !read_only,
+                    handwriting_enabled,
+                    Rc::new(move || {
+                        if handwriting_enabled {
+                            service.start_stylus_handwriting();
+                        }
+                    }),
+                )
+            };
 
             let autofill_highlight_brush = resolve_autofill_highlight(
                 LocalAutofillHighlightBrush.current(),
@@ -897,6 +913,7 @@ pub fn core_text_field(args: CoreTextFieldArgs) {
                     &state,
                     &manager,
                 )
+                .then(stylus_handwriting_modifier)
                 .then(focus_modifier)
                 // (the desktop's D-pad interception: none)
                 .then(preview_key_event_to_deselect_on_back(&state, &manager))

@@ -25,6 +25,7 @@ platform = [
     "dep:kompoz-web",
     "dep:libc",
     "dep:windows",
+    "dep:windows-core",
     "dep:block2",
     "dep:dispatch2",
     "dep:objc2",
@@ -55,6 +56,11 @@ kompoz-web = { path = "../kompoz-web", optional = true }
 
 # (stage 15) The Windows platform: Win32 through the `windows` crate's bindings (the version fontique's DirectWrite
 # backend already brings), every behaviour our own (windows/).
+# (`windows-core` too: what `#[implement]`'s COM objects of our own — the TSF text store — are made with.)
+[target.'cfg(windows)'.dependencies.windows-core]
+version = "0.62.2"
+optional = true
+
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.62.2"
 optional = true
@@ -68,6 +74,7 @@ features = [
     "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_Com",
     "Win32_System_Console",
     "Win32_System_DataExchange",
     "Win32_System_Diagnostics_Debug",
@@ -78,10 +85,13 @@ features = [
     "Win32_System_Registry",
     "Win32_System_SystemServices",
     "Win32_System_Threading",
+    "Win32_System_Variant",
     "Win32_UI_HiDpi",
     "Win32_UI_Input",
+    "Win32_UI_Input_Ime",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
+    "Win32_UI_TextServices",
     "Win32_UI_WindowsAndMessaging",
 ]
 

@@ -2,7 +2,7 @@
 //! system's libandroid.so and liblog.so at API 29 (the app's minSdk: none needs a `dlsym`), and safe wrappers of
 //! them: the view's native window ([`NativeWindow`]), the UI thread's looper and the descriptors it watches
 //! ([`Looper`]), the display's frame callbacks ([`post_frame_callback`]), the APK's assets ([`Assets`]) and logcat
-//! ([`log_write`]).
+//! ([`log_write`]), the device's API level ([`api_level`]).
 //!
 //! An FFI module: its `unsafe` is here, each block saying why it holds.
 
@@ -77,6 +77,17 @@ unsafe extern "C" {
 #[link(name = "log")]
 unsafe extern "C" {
     fn __android_log_write(priority: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+}
+
+// (bionic's libc, API 29.)
+unsafe extern "C" {
+    fn android_get_device_api_level() -> c_int;
+}
+
+/// The device's API level (`Build.VERSION.SDK_INT`).
+pub fn api_level() -> i32 {
+    // SAFETY: a plain query of the system's properties, no arguments.
+    unsafe { android_get_device_api_level() }
 }
 
 /// A line into logcat under `tag` (a NUL in it ends it there).

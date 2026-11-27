@@ -31,12 +31,16 @@
 //!   the browser ([`images`]), the app's own by its decoders; files dropped or pasted, and assets the app embeds,
 //!   read from memory ([`files`]).
 //!
-//! The ARIA mirror of the semantics tree (screen readers) is a later package's.
+//! - **Screen readers** ([`aria`]): the semantics tree mirrored as the page's elements over the canvas, with ARIA's
+//!   roles, names and states, kept as the tree changes; what a screen reader does there (activating, the focus, a
+//!   slider's keys, a scroll, a custom action, a selection in a field) the nodes' semantics actions; the text area
+//!   the field's element while it is typed into. `KOMPOZ_ARIA=0` turns it off.
 
 // (Off the web only the host's tests build this module: its parts that are plain Rust, what the page's calls use
 // of them unused there.)
 #![cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), allow(dead_code))]
 
+mod aria;
 mod clipboard;
 mod events;
 pub mod files;

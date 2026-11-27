@@ -5,10 +5,12 @@
 //! the focused field, the clipboard, links, vibration, the screen kept on, the address's fragment) as the page's
 //! calls ([`sys`]).
 
+use super::aria::{self, Mirror};
 use super::clipboard;
 use super::ime::TextArea;
 use super::page::{PageState, cursor_name, keyboard_kind};
 use super::sys;
+use crate::accessibility::{Snapshot, Window as A11yWindow};
 use crate::app::{Event, Metrics, Platform, WindowSpec};
 use crate::system::preferred_language;
 use kompoz_gpu::device::{Backend, Surface, WebGpuSurface};
@@ -59,6 +61,19 @@ pub(super) struct Shared {
     pub(super) dragging_out: Cell<bool>,
     /// The page handles a `dragstart` (a drag the browser begins): the app's drag may be handed to it now.
     pub(super) drag_starting: Cell<bool>,
+    /// The ARIA mirror of the canvas's window (none: `KOMPOZ_ARIA=0`).
+    pub(super) aria: RefCell<Option<Aria>>,
+    /// The field the keyboard types into is multi-line (its options' `single_line` false), while one is.
+    input_multi_line: Cell<Option<bool>>,
+}
+
+/// The ARIA mirror as published: the tree the page shows, whether the app's changed since (and whether that is to
+/// be published at once: the field typed into changed), when it was published (the platform's clock, ns).
+pub(super) struct Aria {
+    pub(super) mirror: Mirror,
+    dirty: bool,
+    urgent: bool,
+    last: Option<i64>,
 }
 
 impl Shared {
@@ -85,6 +100,11 @@ impl Shared {
             location: RefCell::new(String::new()),
             dragging_out: Cell::new(false),
             drag_starting: Cell::new(false),
+            aria: RefCell::new(
+                (kompoz_runtime::environment::var("KOMPOZ_ARIA").as_deref().map(str::trim) != Some("0"))
+                    .then(|| Aria { mirror: Mirror::default(), dirty: true, urgent: false, last: None }),
+            ),
+            input_multi_line: Cell::new(None),
         });
         shared.read_page();
         shared
@@ -118,6 +138,54 @@ impl Shared {
     fn point_to_px(&self) -> f64 {
         let width = self.page.borrow().width.max(1.0);
         self.pixel_size().0 as f64 / width
+    }
+
+    /// The mirror's tree to publish at the next frame (the field typed into changed: the text area is to be linked
+    /// to it before what is typed there, a screen reader's typing too).
+    fn aria_changed(&self) {
+        if let Some(a) = self.aria.borrow_mut().as_mut() {
+            a.dirty = true;
+            a.urgent = true;
+        }
+    }
+
+    /// After a frame of the canvas's window (`redraw`: it drew one, at `frame_time`): its semantics tree mirrored
+    /// as it changed (as the AT-SPI bridge publishes it: at most every 50 ms, 500 ms while the app is busy; at once
+    /// when the field typed into changed).
+    fn publish_aria(&self, host: &KompozHost, redraw: bool, frame_time: i64) {
+        let mut aria = self.aria.borrow_mut();
+        let Some(a) = aria.as_mut() else { return };
+        a.dirty |= redraw || host.take_semantics_changed();
+        let interval = if host.has_pending_work() { 500_000_000 } else { 50_000_000 };
+        if !a.dirty || (!a.urgent && a.last.is_some_and(|t| frame_time - t <= interval)) {
+            return;
+        }
+        a.last = Some(frame_time);
+        a.dirty = false;
+        a.urgent = false;
+        let k = (1.0 / self.point_to_px().max(1e-3)) as f32;
+        let window = {
+            let page = self.page.borrow();
+            A11yWindow {
+                x: 0.0,
+                y: 0.0,
+                width: page.width as f32,
+                height: page.height as f32,
+                px_to_points: k,
+                focused: page.focused,
+                title: String::new(),
+            }
+        };
+        let tree = Snapshot::new(host.accessibility_tree(), window);
+        let ops = a.mirror.update(tree, k, self.input_multi_line.get());
+        if !ops.is_empty() {
+            sys::aria(&aria::encode(&ops));
+        }
+    }
+
+    /// Whether the mirror has a tree still to publish.
+    fn aria_dirty(&self) -> bool {
+        self.aria.borrow().as_ref().is_some_and(|a| a.dirty)
     }
 }
 
@@ -169,6 +237,12 @@ impl PlatformCallbacks for WebCallbacks {
         let kind = if options.show_keyboard { kind } else { format!("none{}", &kind[kind.find(' ').unwrap_or(0)..]) };
         sys::text_input(active, css, &kind);
         *self.shared.text_input.borrow_mut() = (css, kind);
+        // (A field taking the typing, or none now — another field's typing begins with this one's closed first —:
+        // the mirror links the text area to the focused one at once.)
+        let multi_line = active.then_some(!options.single_line);
+        if self.shared.input_multi_line.replace(multi_line) != multi_line {
+            self.shared.aria_changed();
+        }
     }
 
     fn text_input_changed(&self, state: &TextEditState) {
@@ -382,13 +456,22 @@ impl Platform for WebWindow {
         }
     }
 
-    /// The screen kept on while a `keep_screen_on` is in the tree (the Screen Wake Lock API).
-    fn composed(&mut self, host: &KompozHost, _redraw: bool, _frame_time: i64) {
+    /// The screen kept on while a `keep_screen_on` is in the tree (the Screen Wake Lock API); the canvas's window's
+    /// semantics tree mirrored for screen readers.
+    fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64) {
         let keep = host.keep_screen_on();
         if keep != self.shared.keep_awake.get() {
             self.shared.keep_awake.set(keep);
             sys::keep_awake(keep);
         }
+        if self.owns_canvas() {
+            self.shared.publish_aria(host, redraw, frame_time);
+        }
+    }
+
+    /// A frame more while the mirror has a tree to publish.
+    fn wants_frames(&self) -> bool {
+        self.owns_canvas() && self.shared.aria_dirty()
     }
 
     fn take_drop_entry(&mut self) -> Option<ClipEntry> {

@@ -18,6 +18,7 @@ pub mod context_menu;
 pub mod context_menu_area;
 pub mod core_text_field;
 mod dead_key_combiner;
+pub mod handwriting;
 mod inline_content;
 pub mod input;
 mod key_event_helpers;

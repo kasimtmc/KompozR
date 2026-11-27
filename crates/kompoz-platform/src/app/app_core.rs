@@ -1064,6 +1064,16 @@ impl<P: Platform> AppCore<P> {
             &Event::TouchMove { pointer, x, y, time } => {
                 host.pointer_move(self.to_px(x, y), self.event_time(time), pointer);
             }
+            Event::TouchMoves { moves, time } => {
+                let moves: Vec<(i64, Offset)> = moves.iter().map(|&(p, x, y)| (p, self.to_px(x, y))).collect();
+                host.pointer_moves(&moves, self.event_time(*time));
+            }
+            Event::TouchCancel => host.pointer_cancel(),
+            Event::History { pointer, samples } => {
+                let samples: Vec<(Offset, i64)> =
+                    samples.iter().map(|&(x, y, time)| (self.to_px(x, y), self.event_time(time))).collect();
+                host.pointer_historical(*pointer, &samples);
+            }
             &Event::TouchUp { pointer, x, y, time } => {
                 host.pointer_up(self.to_px(x, y), self.event_time(time), pointer);
                 host.pointer_exit(); // (a lifted finger doesn't hover)
@@ -1112,6 +1122,9 @@ impl<P: Platform> AppCore<P> {
             },
             &Event::DeleteSurroundingText { before, after } => {
                 host.send_edit_commands(&[EditCommand::DeleteSurroundingText { before, after }]);
+            }
+            &Event::SetSelection { start, end } => {
+                host.send_edit_commands(&[EditCommand::SetSelection { start, end }]);
             }
             Event::Back => {
                 if !host.back_invoked() {
@@ -1940,6 +1953,9 @@ fn is_input(e: &Event) -> bool {
                 | Event::MouseUp { .. }
                 | Event::TouchDown { .. }
                 | Event::TouchMove { .. }
+                | Event::TouchMoves { .. }
+                | Event::TouchCancel
+                | Event::History { .. }
                 | Event::TouchUp { .. }
                 | Event::Stylus { .. }
                 | Event::Wheel { .. }
@@ -1949,6 +1965,7 @@ fn is_input(e: &Event) -> bool {
                 | Event::Text(_)
                 | Event::Preedit { .. }
                 | Event::DeleteSurroundingText { .. }
+                | Event::SetSelection { .. }
                 | Event::DropBegin { .. }
                 | Event::DropMove { .. }
                 | Event::DropComplete { .. }

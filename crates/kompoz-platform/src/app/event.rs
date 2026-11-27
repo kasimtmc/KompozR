@@ -119,6 +119,22 @@ pub enum Event {
         y: f32,
         time: i64,
     },
+    /// Fingers moved together (one report of the platform's: Android's `ACTION_MOVE`), each `(pointer, x, y)`: one
+    /// pointer event for all of them, as Compose's.
+    TouchMoves {
+        moves: Vec<(i64, f32, f32)>,
+        time: i64,
+    },
+    /// The system took the fingers' gesture (Android's `ACTION_CANCEL`): what they began is called off, nothing
+    /// clicked.
+    TouchCancel,
+    /// The positions pointer `pointer` (a finger's id, a stylus's, the mouse's 0) passed through since its last
+    /// report, oldest first, each `(x, y, time)`: what the platform batched (Android's historical samples), given
+    /// just before the report it leads to (its move), which carries them.
+    History {
+        pointer: i64,
+        samples: Vec<(f32, f32, i64)>,
+    },
     /// A stylus near the window (`eraser`: its other end, or an eraser of its own; `pointer` its id): where it is,
     /// whether it touches (`down`) and how hard (`pressure`, 0 to 1), its barrel buttons held (a bit each: the
     /// first, the second, the third), as one report of the tablet's.
@@ -162,6 +178,13 @@ pub enum Event {
     DeleteSurroundingText {
         before: usize,
         after: usize,
+    },
+    /// An input method selected bytes `start` to `end` of the field's text (the same: the caret there), the
+    /// composition kept (Compose's SetSelectionCommand): the part it reconverts, where its edit away from the caret
+    /// begins (Windows' text services edit the field anywhere).
+    SetSelection {
+        start: usize,
+        end: usize,
     },
     /// The system's back (Android's button).
     Back,

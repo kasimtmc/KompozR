@@ -30,6 +30,8 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 mod configuration;
+mod devices;
+pub mod ime;
 pub mod input;
 mod saved_state;
 
@@ -43,6 +45,8 @@ mod natives;
 mod ndk;
 #[cfg(target_os = "android")]
 mod platform;
+#[cfg(target_os = "android")]
+mod text_input;
 #[cfg(target_os = "android")]
 mod vulkan;
 

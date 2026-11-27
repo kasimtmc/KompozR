@@ -863,6 +863,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "windows",
+ "windows-core",
 ]
 
 [[package]]

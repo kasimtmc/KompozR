@@ -332,7 +332,7 @@ impl Shared {
         let (i, name, shape) = match icon {
             PointerIcon::Default => (0, c"default", ffi::XC_LEFT_PTR),
             PointerIcon::Hand => (1, c"pointer", ffi::XC_HAND2),
-            PointerIcon::Text => (2, c"text", ffi::XC_XTERM),
+            PointerIcon::Text | PointerIcon::Handwriting => (2, c"text", ffi::XC_XTERM),
             PointerIcon::Crosshair => (3, c"crosshair", ffi::XC_CROSSHAIR),
             PointerIcon::Move => (4, c"move", ffi::XC_FLEUR),
             PointerIcon::ResizeHorizontal => (5, c"ew-resize", ffi::XC_SB_H_DOUBLE_ARROW),

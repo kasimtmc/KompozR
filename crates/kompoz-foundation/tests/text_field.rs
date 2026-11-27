@@ -51,6 +51,8 @@ struct TestPlatform {
     cursors: RefCell<Vec<PointerIcon>>,
     keyboard_hidden: Cell<i32>,
     text_inputs: RefCell<Vec<bool>>,
+    stylus_icons: RefCell<Vec<Option<PointerIcon>>>,
+    handwriting: Cell<i32>,
 }
 
 impl PlatformCallbacks for TestPlatform {
@@ -77,6 +79,12 @@ impl PlatformCallbacks for TestPlatform {
         _options: &kompoz_ui::platform::ImeOptions,
     ) {
         self.text_inputs.borrow_mut().push(active);
+    }
+    fn stylus_hover_icon(&self, icon: Option<PointerIcon>) {
+        self.stylus_icons.borrow_mut().push(icon);
+    }
+    fn start_stylus_handwriting(&self) {
+        self.handwriting.set(self.handwriting.get() + 1);
     }
 }
 
@@ -166,6 +174,23 @@ fn is_focused(rule: &KompozTestRule, tag: &str) -> bool {
     rule.on_node_with_tag(tag).fetch_semantics_node().config().get(SemanticsProperties::Focused) == Some(true)
 }
 
+/// A stylus pressed at `from` and moved to `to` (a frame each of `steps`), lifted there, gone.
+fn stylus_stroke(rule: &KompozTestRule, from: Offset, to: Offset, steps: i32) {
+    let h = rule.host();
+    let none = PointerButtons::None;
+    h.stylus(from, -1, 5, PointerType::Stylus, false, 0.0, none);
+    h.stylus(from, -1, 5, PointerType::Stylus, true, 0.5, none);
+    for i in 1..=steps {
+        rule.advance_frame();
+        let f = i as f32 / steps as f32;
+        let p = at(from.x + (to.x - from.x) * f, from.y + (to.y - from.y) * f);
+        h.stylus(p, -1, 5, PointerType::Stylus, true, 0.5, none);
+    }
+    h.stylus(to, -1, 5, PointerType::Stylus, false, 0.0, none);
+    h.stylus_exit(5);
+    rule.wait_for_idle();
+}
+
 const NONE: KeyModifiers = KeyModifiers::None;
 const CTRL: KeyModifiers = KeyModifiers::Ctrl;
 const SHIFT: KeyModifiers = KeyModifiers::Shift;
@@ -190,6 +215,65 @@ fn basic_text_field_types_and_draws_its_cursor() {
     assert_eq!((state.text().as_str(), state.selection()), ("merhaba", TextRange::at(7)));
     let canvas = rule.draw();
     assert_eq!(canvas.texts, vec!["merhaba".to_string()]);
+}
+
+/// Stylus handwriting (Compose's StylusHandwriting, where the platform supports it: Android 14): a stylus moving
+/// past the handwriting slop over a field — or near it, 40 dp above — focuses it and starts the input method's
+/// handwriting for its session; a short stroke within the slop doesn't, a finger doesn't, a password field only
+/// takes the focus; a hovering stylus shows the handwriting icon. Both the state-based and the value-based fields.
+fn a_stylus_writing_over_a_field_starts_handwriting() {
+    kompoz_ui::platform::set_stylus_handwriting_supported(true);
+    let state = TextFieldState::new("");
+    let (s, value) = (state.clone(), mutable_state_of(String::new()));
+    let v = value.clone();
+    let rule = KompozTestRule::new(kompozable_lambda!(move || {
+        let (s, v) = (s.clone(), v.clone());
+        Column(
+            content = move || {
+                Spacer(modifier = Modifier.height(100.dp()));
+                BasicTextField(s.clone(), modifier = Modifier.width(200.dp()).test_tag("f"), text_style = style16());
+                Spacer(modifier = Modifier.height(100.dp()));
+                let v2 = v.clone();
+                BasicTextFieldString(
+                    v.get(),
+                    move |it: String| v2.set(it),
+                    modifier = Modifier.width(200.dp()).test_tag("g"),
+                    text_style = style16(),
+                );
+                Spacer(modifier = Modifier.height(100.dp()));
+                BasicSecureTextField(TextFieldState::new(""), modifier = Modifier.width(200.dp()).test_tag("p"));
+            },
+        );
+    }));
+    let p = platform(&rule);
+    rule.wait_for_idle();
+    let (f, g, secure) = (bounds(&rule, "f"), bounds(&rule, "g"), bounds(&rule, "p"));
+    // A short stroke (within the slop) and a finger's drag: no handwriting.
+    stylus_stroke(&rule, f.center(), at(f.center().x + 1.0, f.center().y), 2);
+    drag(&rule, f.center(), at(f.center().x + 60.0, f.center().y), PointerType::Touch);
+    assert_eq!(p.handwriting.get(), 0);
+    // A stroke over the field (focused by the short stroke's tap): its session's handwriting started.
+    stylus_stroke(&rule, at(f.left + 10.0, f.center().y), at(f.left + 80.0, f.center().y), 4);
+    assert!(is_focused(&rule, "f") && p.sessions_started() >= 1);
+    assert_eq!(p.handwriting.get(), 1);
+    // Over the unfocused value-based field, starting 30 px above it (within its 40 dp): focused, then started.
+    stylus_stroke(&rule, at(g.left + 10.0, g.top - 30.0), at(g.left + 90.0, g.top - 30.0), 4);
+    assert!(is_focused(&rule, "g"));
+    assert_eq!(p.handwriting.get(), 2);
+    // The stroke went to the input method: nothing selected, nothing typed.
+    assert_eq!((state.text().as_str(), value.get().as_str()), ("", ""));
+    // A password field: focused, no handwriting.
+    stylus_stroke(&rule, at(secure.left + 10.0, secure.center().y), at(secure.left + 90.0, secure.center().y), 4);
+    assert!(is_focused(&rule, "p"));
+    assert_eq!(p.handwriting.get(), 2);
+    // A hovering stylus over a field shows the handwriting icon.
+    let h = rule.host();
+    h.stylus(f.center(), -1, 6, PointerType::Stylus, false, 0.0, PointerButtons::None);
+    rule.wait_for_idle();
+    assert_eq!(p.stylus_icons.borrow().last().copied().flatten(), Some(PointerIcon::Handwriting));
+    h.stylus_exit(6);
+    rule.wait_for_idle();
+    kompoz_ui::platform::set_stylus_handwriting_supported(false);
 }
 
 /// C++ 21948: a BasicTextField is just its text: one line tall, nothing drawn but the text (the C++ field's
@@ -1430,6 +1514,7 @@ fn a_scrolled_text_field_draws_its_text_where_it_scrolled() {
 
 tests!(
     default_key_mapping;
+    a_stylus_writing_over_a_field_starts_handwriting,
     a_scrolled_text_field_draws_its_text_where_it_scrolled,
     basic_text_field_types_and_draws_its_cursor,
     basic_text_field_is_just_the_text,

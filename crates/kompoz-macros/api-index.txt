@@ -1264,6 +1264,7 @@ kompoz-material3/navigation_drawer kompozable ModalNavigationDrawerSample - crat
 kompoz-foundation/text_input kompozable ModelField rr crates/kompoz-foundation/tests/text_input.rs
 * super Modifier - ImeNestedScrollModifiers
 * super Modifier - RulerAlignmentModifiers
+* super Modifier - StylusHandwritingModifiers
 * super ModifierLocalModifierNode - ModifierNode
 * kompozable Month rrrrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
 * kompozable MonthsNavigation rrrrrrrrrrrr crates/kompoz-material3/src/date_picker.rs
@@ -2033,6 +2034,10 @@ kompoz-foundation/text_field_value kompozable StringField rr crates/kompoz-found
 * super StyleStateScopeExt - StyleStateScope
 * kompozable StyledFloatingActionButton rrrrrrrrrrr crates/kompoz-material3/src/floating_action_button.rs
 * kompozable StyledLabel rrrrr crates/kompoz-material3/src/navigation_item.rs
+* super StylusHandwritingElement - ModifierNodeElement
+* super StylusHandwritingNode - FocusEventModifierNode
+* super StylusHandwritingNode - ModifierNode
+* super StylusHandwritingNode - PointerInputModifierNode
 * kompozable SubcomposeAsyncImage rrdddddddddddddd crates/kompoz-coil/src/compose.rs
 * kompozable SubcomposeAsyncImageContent rd crates/kompoz-coil/src/compose.rs
 * kompozable SubcomposeAsyncImageWith rrrdddddddddr crates/kompoz-coil/src/compose.rs
