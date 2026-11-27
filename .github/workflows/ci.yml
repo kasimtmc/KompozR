@@ -466,6 +466,15 @@ jobs:
           KOMPOZ_DISPLAY_TESTS: "1"
           KOMPOZ_GPU_REQUIRED: "1"
         run: cargo test -p kompoz-platform --test pointer_windows
+      # (The desktop's services: the app in its window following the apps' theme, DWM's accent and the text size
+      # written to the registry and the wallpaper set, each put back after; the lib's own test, with the workspace's,
+      # follows the animations, the mouse's settings, "intl" and the time too.)
+      - name: The desktop's settings followed by the app in its window (lavapipe)
+        if: success() || failure()
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_GPU_REQUIRED: "1"
+        run: cargo test -p kompoz-platform --test desktop_windows
       - name: The Counter in a window by CI's script, clicked and resized (lavapipe)
         if: success() || failure()
         env:

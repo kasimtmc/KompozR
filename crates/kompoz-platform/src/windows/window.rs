@@ -9,12 +9,14 @@
 //! frames are stepped through the loop's stepper, which skips a step while one runs.
 
 use super::clipboard::Clipboard;
+use super::desktop::{self, Desktop, WM_DESKTOP_KEY, WM_DESKTOP_WALLPAPER};
 use super::event_loop::{EventLoop, Waker};
 use super::input_method::{self, InputMethod};
 use super::keyboard::{self, Characters, VK_CONTROL, VK_F4, VK_MENU, VK_SPACE};
 use super::manipulation::{self, Manipulation};
 use super::ole::{self, DropAnswers, DropTarget, OwnDrag};
 use super::pointer::{self, PointerInput};
+use super::settings::Changes;
 use super::sys::{self, Cursor, Hwnd, Icon, Placed, WindowHandler, WindowMessage};
 use super::uia_bridge::{UiaAction, UiaBridge};
 use super::{Route, StepKind, now, route};
@@ -22,11 +24,13 @@ use crate::app::{Event, Metrics, MouseButton, Platform, TitleBarColors, TrayImag
 use crate::system::{log, preferred_language};
 use ::windows::Win32::UI::WindowsAndMessaging as wm;
 use kompoz_gpu::device::{Backend, Surface};
+use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_graphics::{Color, Rect};
 use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::draganddrop::PlatformDragAndDrop;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
+use kompoz_ui::motion_duration_scale::MotionDurationScale;
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
 use kompoz_ui::semantics::{SemanticsAction, SemanticsProperties};
 use kompoz_ui::window::{WindowId, WindowPlacement};
@@ -79,8 +83,8 @@ pub struct Shared {
     cursors: RefCell<[Option<Cursor>; 9]>,
     /// The root core's id.
     app_id: WindowId,
-    /// The system's apps' theme (Settings > Personalization > Colors: "dark").
-    dark: Cell<bool>,
+    /// The desktop's settings (the apps' theme, the accent, the text size …) and the wallpaper's colors, followed.
+    pub(super) desktop: Desktop,
     /// A microphone and a camera, once looked for.
     probed: Cell<Option<(bool, bool)>>,
     /// The display kept on (some window's host asks).
@@ -108,19 +112,24 @@ impl Shared {
             stepper: RefCell::new(None),
             cursors: RefCell::new([None; 9]),
             app_id,
-            dark: Cell::new(dark_mode()),
+            desktop: Desktop::new(),
             probed: Cell::new(None),
             kept_on: Cell::new(false),
         });
         let helper = sys::create_hidden_window(CLASS, Rc::new(Helper { shared: Rc::downgrade(&shared) }))
             .ok_or_else(|| format!("no window of the platform's own ({})", sys::last_error()))?;
         shared.helper.set(helper);
+        // (The lib's tests start it themselves where they test it: a test that changes the system's settings must
+        // not reach the other tests' windows.)
+        #[cfg(not(test))]
+        shared.desktop.start(helper);
         Ok(shared)
     }
 
     /// The platform's own window gone (what the app put on the clipboard rendered first: WM_RENDERALLFORMATS), the
     /// display let sleep again, TSF deactivated, OLE let go.
     pub fn close(&self) {
+        self.desktop.stop();
         let helper = self.helper.replace(Hwnd::NONE);
         if !helper.is_none() {
             helper.destroy();
@@ -236,41 +245,55 @@ impl Shared {
         }
     }
 
-    /// The system's theme changed (WM_SETTINGCHANGE "ImmersiveColorSet"): each window's caption with it, the cores
-    /// told.
-    fn theme_changed(&self) {
-        let dark = dark_mode();
-        if dark == self.dark.replace(dark) {
+    /// The desktop followed (tests: where they test it).
+    #[cfg(test)]
+    pub(super) fn start_desktop(&self) {
+        self.desktop.start(self.helper.get());
+    }
+
+    /// The platform's own window (tests).
+    #[cfg(test)]
+    pub(super) fn helper_window(&self) -> Hwnd {
+        self.helper.get()
+    }
+
+    /// The desktop's settings changed (`desktop`): each window's caption with the theme and the accent, the cores
+    /// told (MetricsChanged: the theme, the text size, high contrast, the view configuration; AccentChanged).
+    fn desktop_changed(&self, changes: Changes) {
+        if !changes.any() {
             return;
         }
-        for w in self.windows.borrow().iter() {
-            let hwnd = w.hwnd.get();
-            if !hwnd.is_none() {
-                caption(hwnd, dark);
+        if changes.theme || changes.accent {
+            let (dark, palette) = (self.desktop.dark(), self.desktop.accent_palette());
+            for w in self.windows.borrow().iter() {
+                let hwnd = w.hwnd.get();
+                if !hwnd.is_none() {
+                    caption(hwnd, dark, palette.as_ref());
+                }
             }
         }
-        self.push(Route::All, Event::MetricsChanged);
+        if changes.metrics {
+            self.push(Route::All, Event::MetricsChanged);
+        }
+        if changes.accent {
+            self.push(Route::All, Event::AccentChanged);
+        }
     }
-}
-
-/// Whether the user prefers dark apps (C++'s `darkMode`: `AppsUseLightTheme` 0).
-fn dark_mode() -> bool {
-    sys::user_dword(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme") == Some(0)
 }
 
 /// The system's caption (DWM's frame, KompozR leaving it to the system) in the system's theme: dark or light;
 /// Mica behind it where Windows 11 has the backdrop (22H2), else the caption and its text in the colors KompozR's own
-/// title bar would have (Material 3's surface container and on-surface: the system's palette's where W6 brings one,
-/// else the baseline's); round corners (Windows 11). What DWM doesn't know (Windows 10, wine) it refuses: the frame
-/// stays as it is.
-fn caption(hwnd: Hwnd, dark: bool) {
+/// title bar would have (Material 3's surface container and on-surface: the accent's palette's where the system has
+/// one, else the baseline's); round corners (Windows 11). What DWM doesn't know (Windows 10, wine) it refuses: the
+/// frame stays as it is.
+fn caption(hwnd: Hwnd, dark: bool, palette: Option<&DynamicTonalPalette>) {
     let on = dark as u32;
     if !hwnd.set_dwm_attribute(DWMWA_USE_IMMERSIVE_DARK_MODE, on) {
         hwnd.set_dwm_attribute(DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, on);
     }
     hwnd.set_dwm_attribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND);
     if !hwnd.set_dwm_attribute(DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_MAINWINDOW) {
-        let colors = TitleBarColors::of(dark, None);
+        let colors = TitleBarColors::of(dark, palette);
         hwnd.set_dwm_attribute(DWMWA_CAPTION_COLOR, colorref(colors.surface_container));
         hwnd.set_dwm_attribute(DWMWA_TEXT_COLOR, colorref(colors.on_surface));
     }
@@ -305,10 +328,27 @@ impl WindowHandler for Helper {
                 shared.clipboard.lost(hwnd);
                 Some(0)
             }
+            // (The theme's "ImmersiveColorSet", the language's "intl", a system parameter's SPI_SET… among them.)
             wm::WM_SETTINGCHANGE => {
-                if m.setting_name().as_deref() == Some("ImmersiveColorSet") {
-                    shared.theme_changed();
-                }
+                let changes = shared.desktop.setting_changed(w, m.setting_name().as_deref());
+                shared.desktop_changed(changes);
+                None
+            }
+            wm::WM_DWMCOLORIZATIONCOLORCHANGED => {
+                shared.desktop_changed(shared.desktop.colorization_changed());
+                None
+            }
+            WM_DESKTOP_KEY => {
+                shared.desktop_changed(shared.desktop.key_changed(w));
+                Some(0)
+            }
+            WM_DESKTOP_WALLPAPER => {
+                shared.push(Route::All, Event::WallpaperChanged);
+                Some(0)
+            }
+            wm::WM_TIMECHANGE => {
+                desktop::time_changed();
+                shared.push(Route::All, Event::Wake);
                 None
             }
             wm::WM_DEVICECHANGE => {
@@ -1062,7 +1102,7 @@ impl Platform for Win32Window {
         let (fw, fh) = hwnd.frame_size(width, height, state.dpi.get());
         hwnd.set_pos(None, 0, 0, fw, fh, wm::SWP_NOMOVE | wm::SWP_NOZORDER | wm::SWP_NOACTIVATE);
         state.client_size(hwnd);
-        caption(hwnd, self.shared.dark.get());
+        caption(hwnd, self.shared.desktop.dark(), self.shared.desktop.accent_palette().as_ref());
         state.refresh_rate.set(hwnd.monitor().and_then(|m| m.refresh_rate()).unwrap_or(60.0));
         if let Some(icon) = state.icon.borrow().as_ref() {
             hwnd.set_icon(Some(icon));
@@ -1118,8 +1158,8 @@ impl Platform for Win32Window {
         sys::message_box(owner, &self.state.title.borrow(), message);
     }
 
-    /// Points are the window's pixels; the scale its monitor's DPI / 96; `KOMPOZ_SCALE` and `KOMPOZ_FONT_SCALE`
-    /// stand in for them (the system's text size is the desktop services' package's, W6).
+    /// Points are the window's pixels; the scale its monitor's DPI / 96, the font scale the system's text size, the
+    /// theme the apps' (`desktop`); `KOMPOZ_SCALE` and `KOMPOZ_FONT_SCALE` stand in for them.
     fn metrics(&self) -> Metrics {
         let (w, h) = self.state.size.get();
         Metrics {
@@ -1133,10 +1173,10 @@ impl Platform for Win32Window {
                 .option("KOMPOZ_FONT_SCALE")
                 .and_then(|v| v.trim().parse::<f32>().ok())
                 .map(|s| s.max(0.5))
-                .unwrap_or(1.0),
+                .unwrap_or_else(|| self.shared.desktop.font_scale()),
             refresh_rate: self.state.refresh_rate.get(),
             safe_area: Some(Rect::new(0.0, 0.0, w as f32, h as f32)),
-            dark_theme: self.shared.dark.get(),
+            dark_theme: self.shared.desktop.dark(),
             language: preferred_language().unwrap_or_default(),
             // (The system's frame: DWM draws the caption. KompozR's own is `KOMPOZ_DECORATIONS=kompoz`'s, W7.)
             title_bar: None,
@@ -1158,7 +1198,8 @@ impl Platform for Win32Window {
     }
 
     /// A mouse is a fine pointer, a touch screen alone a coarse one; a physical keyboard as the raw input devices
-    /// say; a microphone (waveIn) and a camera (its device interface) as probed (C++'s `media`).
+    /// say; a microphone (waveIn) and a camera (its device interface) as probed (C++'s `media`); high contrast as
+    /// the system has it.
     fn media(&mut self, probe: bool) -> MediaInfo {
         if probe && self.shared.probed.get().is_none() {
             self.shared.probed.set(Some((sys::has_microphone(), sys::has_camera())));
@@ -1176,8 +1217,37 @@ impl Platform for Win32Window {
             physical_keyboard: sys::has_keyboard(),
             has_microphone: microphone,
             has_camera: camera,
+            high_contrast: self.shared.desktop.high_contrast(),
             ..MediaInfo::default()
         }
+    }
+
+    /// The desktop's palettes on the new host: the accent's and the wallpaper's (where they are known already).
+    fn started(&mut self, host: &KompozHost) {
+        if let Some(palette) = self.shared.desktop.accent_palette() {
+            host.set_dynamic_tonal_palette(Some(palette));
+        }
+        if let Some(palette) = self.shared.desktop.wallpaper_palette() {
+            host.set_wallpaper_tonal_palette(Some(palette));
+        }
+    }
+
+    /// The mouse's and the caret's settings as the view configuration at the window's scale; the main window's
+    /// monitor the wallpaper's.
+    fn metrics_updated(&mut self, host: &KompozHost) {
+        host.set_view_configuration(self.shared.desktop.view_configuration(self.scale() as f32));
+        let hwnd = self.hwnd();
+        if self.state.id == self.shared.app_id
+            && !hwnd.is_none()
+            && let Some(monitor) = hwnd.monitor()
+        {
+            self.shared.desktop.set_monitor(monitor.rect);
+        }
+    }
+
+    /// The client area's animations off: the app's end at once (read as each asks).
+    fn motion_duration_scale(&self) -> Option<MotionDurationScale> {
+        Some(self.shared.desktop.motion_duration_scale())
     }
 
     fn attach(&mut self, _: &KompozHost) -> Rc<dyn PlatformCallbacks> {
@@ -1185,7 +1255,7 @@ impl Platform for Win32Window {
     }
 
     /// What UI Automation clients asked of the window's nodes performed (C++'s `performSemanticsAction`s); its tree
-    /// to publish again as the window's focus changes.
+    /// to publish again as the window's focus changes; the desktop's palettes as they change.
     fn handled(&mut self, host: &KompozHost, event: &Event) {
         match event {
             Event::AccessibilityRequest => {
@@ -1202,6 +1272,9 @@ impl Platform for Win32Window {
                 }
             }
             Event::FocusGained | Event::FocusLost => self.state.uia_dirty.set(true),
+            // (The desktop's accent and wallpaper, as Linux's desktop services set them.)
+            Event::AccentChanged => host.set_dynamic_tonal_palette(self.shared.desktop.accent_palette()),
+            Event::WallpaperChanged => host.set_wallpaper_tonal_palette(self.shared.desktop.wallpaper_palette()),
             _ => {}
         }
     }

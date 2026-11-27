@@ -364,6 +364,35 @@ pub struct ViewConfiguration {
     pub minimum_fling_velocity: f32,
     /// How far a mouse moves before a press is a drag (Compose desktop's handwriting slop is separate).
     pub handwriting_slop: f32,
+    // KompozR's, what a desktop's settings say where Compose has fixed values:
+    /// The rectangle, centered on a click, a second click lands within to count with it (a double click; Windows'
+    /// SM_CXDOUBLECLK × SM_CYDOUBLECLK), px; none: within the pointer's slop (Compose's click counting).
+    pub double_click_area: Option<Size>,
+    /// How long a text field's cursor shows, then hides (Windows' caret blink time); none: it doesn't blink (the
+    /// system's "none", as `LocalCursorBlinkEnabled` off). Compose's: 500 ms.
+    pub cursor_blink_interval: Option<Duration>,
+    /// What a mouse wheel's notch scrolls (Windows' "lines to scroll at a time").
+    pub wheel_scroll_amount: WheelScrollAmount,
+}
+
+/// What a mouse wheel's notch scrolls, as the system says (Windows' SPI_GETWHEELSCROLLLINES): lines, three of them
+/// KompozR's notch of 64 dp (Compose's, Android's scroll factor) — Windows' default —, or a page: the scrollable's
+/// size along the wheel's axis.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum WheelScrollAmount {
+    Lines(f32),
+    Page,
+}
+
+impl WheelScrollAmount {
+    /// The lines a notch is where the system says nothing (Windows' default).
+    pub const DEFAULT_LINES: f32 = 3.0;
+}
+
+impl Default for WheelScrollAmount {
+    fn default() -> Self {
+        WheelScrollAmount::Lines(WheelScrollAmount::DEFAULT_LINES)
+    }
 }
 
 impl Default for ViewConfiguration {
@@ -378,6 +407,9 @@ impl Default for ViewConfiguration {
             maximum_fling_velocity: 8000.0,
             minimum_fling_velocity: 50.0,
             handwriting_slop: 2.0,
+            double_click_area: None,
+            cursor_blink_interval: Some(Duration::from_millis(500)),
+            wheel_scroll_amount: WheelScrollAmount::default(),
         }
     }
 }

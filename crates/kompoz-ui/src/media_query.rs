@@ -1,8 +1,8 @@
 //! What the app runs on, to adapt to (Compose's `UiMediaScope`, `mediaQuery` and `derivedMediaQuery`): the window's
 //! size, the most precise pointer there is, the keyboard, a microphone and a camera, how far away the screen is
-//! seen, a foldable's posture. The host keeps it from what the platform tells it ([`MediaInfo`], the viewport, the
-//! keyboard's insets), each part in a state of its own: what reads only the pointer isn't composed again as the
-//! window is resized.
+//! seen, a foldable's posture, whether the system asks for high contrast (KompozR's). The host keeps it from what
+//! the platform tells it ([`MediaInfo`], the viewport, the keyboard's insets), each part in a state of its own: what
+//! reads only the pointer isn't composed again as the window is resized.
 //!
 //! ```text
 //! if media_query(|m| m.pointer_precision() == PointerPrecision::Fine) {
@@ -70,6 +70,9 @@ pub struct MediaInfo {
     pub has_camera: bool,
     pub viewing_distance: ViewingDistance,
     pub window_posture: Posture,
+    /// The system asks for high contrast (Windows' high contrast themes): KompozR's, as Compose has no high contrast
+    /// scheme — an app reads it with [`UiMediaScope::high_contrast`] and picks its colors.
+    pub high_contrast: bool,
 }
 
 struct MediaStates {
@@ -124,6 +127,10 @@ impl UiMediaScope {
     }
     pub fn viewing_distance(&self) -> ViewingDistance {
         self.0.info.get().viewing_distance
+    }
+    /// Whether the system asks for high contrast (KompozR's query: Windows' high contrast themes).
+    pub fn high_contrast(&self) -> bool {
+        self.0.info.get().high_contrast
     }
 
     /// The device as the platform told it last (read by no one).

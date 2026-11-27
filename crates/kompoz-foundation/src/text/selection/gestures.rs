@@ -313,8 +313,16 @@ impl ClicksCounter {
         new_click.uptime_millis - prev_click.uptime_millis < self.view_configuration.double_tap_timeout_millis()
     }
 
+    /// Near it: within the system's double click area around it where it says one (KompozR's: Windows'), else within
+    /// the pointer's slop (Compose's).
     fn position_is_tolerable(&self, prev_click: &PointerInputChange, new_click: &PointerInputChange) -> bool {
-        distance_is_tolerable(&self.view_configuration, prev_click, new_click)
+        match self.view_configuration.double_click_area {
+            Some(area) => {
+                let d = new_click.position - prev_click.position;
+                d.x.abs() <= area.width / 2.0 && d.y.abs() <= area.height / 2.0
+            }
+            None => distance_is_tolerable(&self.view_configuration, prev_click, new_click),
+        }
     }
 }
 

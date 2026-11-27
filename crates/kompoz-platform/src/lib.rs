@@ -5,11 +5,11 @@
 //! every platform's accessibility bridge is made of (the semantics tree published and what changed in it:
 //! [`accessibility`]), what Linux and Android share of the kernel (`unix`: eventfds, timerfds, the monotonic clock,
 //! the waker), on Linux what its platforms share: the event loop, the kernel's other facilities, keyboards through
-//! xkbcommon (`linux`); what the app offers other apps through the clipboard and drags (`transfer`, Linux's,
-//! Windows', macOS's and the web's); the Windows platform (`windows`: Win32); the macOS platform (`macos`: AppKit);
-//! the web platform (`web`: the page's canvas, WebGPU, our own JavaScript glue); and the Android platform
-//! ([`android`]: the app's library, its natives, the activity's surface, frames and lifecycle; its input's decoding
-//! built on every target).
+//! xkbcommon (`linux`); what Linux and Windows share of a wallpaper (its palette: `wallpaper_palette`); what the app
+//! offers other apps through the clipboard and drags (`transfer`, Linux's, Windows', macOS's and the web's); the
+//! Windows platform (`windows`: Win32); the macOS platform (`macos`: AppKit); the web platform (`web`: the page's
+//! canvas, WebGPU, our own JavaScript glue); and the Android platform ([`android`]: the app's library, its natives,
+//! the activity's surface, frames and lifecycle; its input's decoding built on every target).
 //!
 //! `unsafe` code is confined to `unix::sys`, `linux::sys`, `windows::sys` and the FFI modules (`linux::xkb`'s,
 //! `linux::wayland`'s `ffi` and Vulkan surface, `linux::x11`'s, `linux::curl`'s, `windows`' Vulkan surface, WinHTTP,
@@ -49,6 +49,9 @@ pub mod system;
 pub mod transfer;
 #[cfg(all(feature = "platform", any(target_os = "linux", target_os = "android")))]
 pub mod unix;
+/// A wallpaper's palette: what Linux's and Windows' desktop services share.
+#[cfg(all(feature = "platform", any(target_os = "linux", windows)))]
+pub mod wallpaper_palette;
 // (The web's: on its target, and its parts that are plain Rust in the tests on Linux and Windows, which have the
 // clipboard's `transfer` it shares.)
 #[cfg(all(
@@ -61,7 +64,7 @@ pub mod windows;
 
 // The Windows platform's transfer formats (the clipboard's and drag and drop's), its input methods' translations
 // (what they see of a field, what they do to it), UI Automation's view of the semantics tree, its pens' and fingers'
-// reports and its touchpads' gestures as events, tested on every host.
+// reports and its touchpads' gestures as events, and what the desktop's settings say, tested on every host.
 #[cfg(all(test, feature = "platform", not(windows)))]
 #[allow(dead_code)]
 #[path = "windows"]
@@ -72,6 +75,7 @@ mod windows_tested_here {
     mod ime;
     mod manipulation;
     mod pointer;
+    mod settings;
     mod uia;
 }
 

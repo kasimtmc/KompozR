@@ -17,7 +17,7 @@ use kompoz_runtime::named_args;
 use kompoz_text::{TextLayoutResult, TextRange};
 use kompoz_ui::draw::{ContentDrawScope, DefaultBlendMode, DrawModifierNode, DrawStyle};
 use kompoz_ui::layout::{GlobalPositionAwareModifierNode, LayoutCoordinates, LayoutModifierNode, Measurable};
-use kompoz_ui::platform::{LocalCursorBlinkEnabled, LocalWindowInfo};
+use kompoz_ui::platform::{LocalCursorBlinkEnabled, LocalViewConfiguration, LocalWindowInfo};
 use kompoz_ui::{
     MeasureResult, MeasureScope, ModifierNode, ModifierNodeElement, NodeCx, NodeHandle, node_capabilities,
 };
@@ -136,7 +136,8 @@ impl CoreShared {
         let Some(handle) = self.handle() else { return };
         if self.cursor_animation.borrow().is_none() {
             let animate = handle.current_value_of(&LocalCursorBlinkEnabled);
-            *self.cursor_animation.borrow_mut() = Some(CursorAnimationState::new(animate));
+            let interval = handle.current_value_of(&LocalViewConfiguration).cursor_blink_interval;
+            *self.cursor_animation.borrow_mut() = Some(CursorAnimationState::with_blink_interval(animate, interval));
             // Draw didn't read the alpha before.
             handle.invalidate_draw();
         }

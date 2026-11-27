@@ -40,11 +40,16 @@
 //! DirectManipulation (`manipulation`: Compose's trackpad pinch and pan events; the mouse's wheel and Ctrl+wheel as
 //! they were).
 //!
-//! What comes in later packages: the desktop's accent, wallpaper and text size, KompozR's
-//! own title bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and WM_NCHITTEST, where `window` leaves the frame to
-//! the system), the tray.
+//! The desktop's services (`desktop`, `settings`, `wallpaper`): the apps' light or dark theme (the captions with
+//! it), the accent color and the wallpaper's colors as the dynamic palettes, the system's text size, high contrast,
+//! the animations turned off, the mouse's and the caret's settings — from the registry and the system's
+//! parameters, followed as they change; the language and the time zone read again as they change.
+//!
+//! What comes in later packages: KompozR's own title bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and
+//! WM_NCHITTEST, where `window` leaves the frame to the system), the tray.
 
 mod clipboard;
+mod desktop;
 mod event_loop;
 mod formats;
 pub mod http;
@@ -55,11 +60,13 @@ mod keyboard;
 mod manipulation;
 mod ole;
 mod pointer;
+mod settings;
 pub mod sys;
 mod tsf;
 mod uia;
 mod uia_bridge;
 mod vulkan;
+mod wallpaper;
 mod window;
 
 pub use ole::drop_target;

@@ -17,6 +17,7 @@ use kompoz_graphics::{Density, Dp, IntSize, Offset};
 use kompoz_runtime::{KompozitionLocal, named_args};
 use kompoz_ui::NodeCx;
 use kompoz_ui::input::{NestedScrollSource, PointerEvent, PointerEventPass, PointerEventType, VelocityTracker1D};
+use kompoz_ui::platform::{LocalViewConfiguration, WheelScrollAmount};
 use kompoz_ui::unit::Velocity;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -57,19 +58,29 @@ pub trait ScrollConfig {
 
     /// The scroll `event` makes in a scrollable of `bounds` (Compose's `calculateMouseWheelScroll`).
     fn calculate_mouse_wheel_scroll(&self, density: Density, event: &PointerEvent, bounds: IntSize) -> Offset;
+
+    /// This configuration as the system says a notch scrolls (KompozR's: [`ViewConfiguration::wheel_scroll_amount`],
+    /// Windows' "lines to scroll at a time"); an app's own configuration keeps its own (itself, by default).
+    ///
+    /// [`ViewConfiguration::wheel_scroll_amount`]: kompoz_ui::platform::ViewConfiguration::wheel_scroll_amount
+    fn with_wheel_scroll_amount(self: Rc<Self>, amount: WheelScrollAmount) -> Rc<dyn ScrollConfig>;
 }
 
 /// KompozR's wheel (the C++ Kompoz's, Compose for desktop's behaviour): a notch scrolls 64 dp, each axis (Android's
-/// scroll factor, as its AndroidConfig does); a precise wheel's parts of notches scroll at once (Compose for
-/// desktop's heuristic: not a whole number of notches); smooth unless turned off.
+/// scroll factor, as its AndroidConfig does) — as many lines' share of it as the system's notch scrolls (three
+/// lines are 64 dp), or the scrollable's size where a notch scrolls a page (Windows' settings); a precise wheel's
+/// parts of notches scroll at once (Compose for desktop's heuristic: not a whole number of notches); smooth unless
+/// turned off.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct DefaultScrollConfig {
     pub is_smooth_scrolling_enabled: bool,
+    /// What a notch scrolls, as the system says.
+    pub wheel_scroll_amount: WheelScrollAmount,
 }
 
 impl Default for DefaultScrollConfig {
     fn default() -> Self {
-        DefaultScrollConfig { is_smooth_scrolling_enabled: true }
+        DefaultScrollConfig { is_smooth_scrolling_enabled: true, wheel_scroll_amount: WheelScrollAmount::default() }
     }
 }
 
@@ -89,10 +100,22 @@ impl ScrollConfig for DefaultScrollConfig {
         (d.x - d.x.trunc()).abs() > 0.001 || (d.y - d.y.trunc()).abs() > 0.001
     }
 
-    fn calculate_mouse_wheel_scroll(&self, density: Density, event: &PointerEvent, _bounds: IntSize) -> Offset {
-        let factor = -density.to_px(WheelNotch);
+    fn calculate_mouse_wheel_scroll(&self, density: Density, event: &PointerEvent, bounds: IntSize) -> Offset {
         let d = total_scroll_delta(event);
-        Offset::new(d.x * factor, d.y * factor)
+        match self.wheel_scroll_amount {
+            WheelScrollAmount::Lines(lines) => {
+                let factor = -density.to_px(WheelNotch) * lines / WheelScrollAmount::DEFAULT_LINES;
+                Offset::new(d.x * factor, d.y * factor)
+            }
+            WheelScrollAmount::Page => Offset::new(-d.x * bounds.width as f32, -d.y * bounds.height as f32),
+        }
+    }
+
+    fn with_wheel_scroll_amount(self: Rc<Self>, amount: WheelScrollAmount) -> Rc<dyn ScrollConfig> {
+        if self.wheel_scroll_amount == amount {
+            return self;
+        }
+        Rc::new(DefaultScrollConfig { wheel_scroll_amount: amount, ..*self })
     }
 }
 
@@ -100,9 +123,10 @@ impl ScrollConfig for DefaultScrollConfig {
 pub static LocalScrollConfig: KompozitionLocal<Rc<dyn ScrollConfig>> =
     KompozitionLocal::new(|| Rc::new(DefaultScrollConfig::default()));
 
-/// Compose's `platformScrollConfig`.
+/// Compose's `platformScrollConfig`: the local one, as the system says a notch scrolls.
 pub(crate) fn platform_scroll_config(cx: &NodeCx) -> Rc<dyn ScrollConfig> {
-    cx.current_value_of(&LocalScrollConfig)
+    let amount = cx.current_value_of(&LocalViewConfiguration).wheel_scroll_amount;
+    cx.current_value_of(&LocalScrollConfig).with_wheel_scroll_amount(amount)
 }
 
 // ---------------------------------------------------------------------------------------------------------------

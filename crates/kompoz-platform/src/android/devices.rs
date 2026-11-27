@@ -49,6 +49,8 @@ pub fn view_configuration(values: &[f32], density: f32) -> ViewConfiguration {
         maximum_fling_velocity: at(5).unwrap_or(base.maximum_fling_velocity),
         handwriting_slop: at(6).unwrap_or(base.handwriting_slop),
         minimum_touch_target_size: at(7).map_or(base.minimum_touch_target_size, |v| Size::new(v, v)),
+        // (the desktop's settings: Android's are Compose's)
+        ..base
     }
 }
 

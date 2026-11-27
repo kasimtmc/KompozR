@@ -232,6 +232,13 @@ name = "pointer_windows"
 harness = false
 required-features = ["platform"]
 
+# The desktop's services followed by the app in a real window on Windows (KOMPOZ_DISPLAY_TESTS=1; under wine here):
+# the theme, the accent and the text size written to the registry, the wallpaper set, as the app's locals say them.
+[[test]]
+name = "desktop_windows"
+harness = false
+required-features = ["platform"]
+
 # KompozR's title bar (WindowFrame) in a test rule: its layout, its buttons as the desktop lays them out, what it
 # asks of the window, its labels, colors and direction.
 [[test]]

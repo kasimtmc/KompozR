@@ -1,6 +1,7 @@
 //! A value-based field's cursor (Compose's TextFieldCursor.kt, the legacy `Modifier.cursor`): while the field and
 //! its window have the focus and the selection is a caret, a line of `cursor_brush` at the caret, shown at once
-//! after each edit or move and blinking every half second (unless `LocalCursorBlinkEnabled` says not to).
+//! after each edit or move and blinking every half second (the system's caret blink time where it says one; unless
+//! `LocalCursorBlinkEnabled` says not to).
 
 use super::core_text_field::LegacyTextFieldState;
 use crate::text::input::internal::CursorAnimationState;
@@ -11,7 +12,7 @@ use kompoz_runtime::remember_keyed;
 use kompoz_text::input::{OffsetMapping, TextFieldValue};
 use kompoz_ui::Modifier;
 use kompoz_ui::draw::DefaultBlendMode;
-use kompoz_ui::platform::{LocalCursorBlinkEnabled, LocalWindowInfo};
+use kompoz_ui::platform::{LocalCursorBlinkEnabled, LocalViewConfiguration, LocalWindowInfo};
 use std::rc::Rc;
 
 /// The cursor drawn over the inner field's content (Compose's legacy `Modifier.cursor`): nothing when not
@@ -32,7 +33,10 @@ pub fn cursor(
                 return modifier;
             }
             let animate_cursor = LocalCursorBlinkEnabled.current();
-            let cursor_animation = remember_keyed(animate_cursor, move || CursorAnimationState::new(animate_cursor));
+            let interval = LocalViewConfiguration.current().cursor_blink_interval;
+            let cursor_animation = remember_keyed((animate_cursor, interval), move || {
+                CursorAnimationState::with_blink_interval(animate_cursor, interval)
+            });
             // (no animation for a cursor that draws no pixel)
             let is_brush_specified = cursor_brush.solid_color().is_none_or(|c| c.is_specified());
             // (only blinking while its window has the focus: not with the screen off)

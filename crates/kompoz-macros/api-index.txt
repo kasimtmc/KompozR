@@ -506,6 +506,7 @@ kompoz-material3/date_picker kompozable DateRangePickerSample - crates/kompoz-ma
 * super DelegatingVectorized - VectorizedAnimationSpec
 * super DerivedSizeElement - ModifierNodeElement
 * super DerivedState - StateSource
+kompoz-platform/desktop_windows kompozable Desktop - crates/kompoz-platform/tests/desktop_windows.rs
 kompoz-material3-adaptive/samples kompozable DetailPaneContent rrrdddr crates/kompoz-material3-adaptive/tests/samples.rs
 * kompozable DetectClickFromInteractionSource rr crates/kompoz-material3/src/search_bar.rs
 * super DeterminateCircularWavyProgressElement - ModifierNodeElement

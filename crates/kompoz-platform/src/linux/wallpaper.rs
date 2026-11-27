@@ -1,16 +1,15 @@
 //! The wallpaper's own colors on Linux desktops, the way Android 12 takes them from the wallpaper (C++'s
 //! common/wallpaper_colors.cpp): the wallpaper found (KDE Plasma's, GNOME's and the desktops' that keep its
 //! settings, Cinnamon's, MATE's, Xfce's), decoded small and its palette picked
-//! ([`DynamicTonalPalette::from_image`]) on a thread of its own, and again whenever it changes — told by inotify
-//! when the desktop's settings files are written, looked at again every 30 seconds (a picture replaced in place);
-//! it notifies as each palette comes. A palette is worked out on a thread of its own again, which stopping (the app
-//! quitting) never waits for: decoding a big picture is one long call (seconds in a debug build), so it is told to
-//! stop at its next step and left to end by itself. `KOMPOZ_NO_WALLPAPER_COLORS` leaves it out (screenshots the
+//! ([`DynamicTonalPalette::from_image`], the core Windows shares: [`wallpaper_palette`](crate::wallpaper_palette)) on
+//! a thread of its own, and again whenever it changes — told by inotify when the desktop's settings files are
+//! written, looked at again every 30 seconds (a picture replaced in place); it notifies as each palette comes. A
+//! palette is worked out on a thread of its own again, which stopping (the app quitting) never waits for. `KOMPOZ_NO_WALLPAPER_COLORS` leaves it out (screenshots the
 //! same on every machine).
 
 use super::desktop::Notify;
 use super::sys::{self, PollFd};
-use kompoz_graphics::ImageRequestSize;
+use crate::wallpaper_palette::PaletteWork;
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use std::fs::File;
 use std::io::Read;
@@ -254,69 +253,22 @@ pub fn find_wallpaper(dark: bool, options: &WallpaperOptions) -> Option<String> 
     (!found.is_empty()).then_some(found)
 }
 
-/// The wallpaper's palette, if it is a picture that can be read: decoded as big as a screen (as the wallpaper
-/// Android takes its colors from is; decoders scale down as they go).
-pub fn palette_of(path: &str) -> Option<DynamicTonalPalette> {
-    palette_unless_stopped(path, &AtomicBool::new(false))
-}
+/// The wallpaper's palette (the core Windows shares: [`wallpaper_palette`](crate::wallpaper_palette)).
+pub use crate::wallpaper_palette::palette_of;
 
-/// [`palette_of`], given up (none) at the step after `stop` is set: read, decoded, made ARGB, its palette picked.
-fn palette_unless_stopped(path: &str, stop: &AtomicBool) -> Option<DynamicTonalPalette> {
-    let go = || !stop.load(Ordering::SeqCst);
-    let bytes = std::fs::read(path).ok().filter(|b| !b.is_empty() && go())?;
-    let image = kompoz_graphics::decode_image(&bytes, ImageRequestSize::new(1920, 1080, true)).filter(|_| go())?;
-    drop(bytes);
-    let rgba = image.pixels();
-    let argb: Vec<u32> = rgba
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|p| u32::from(p[3]) << 24 | u32::from(p[0]) << 16 | u32::from(p[1]) << 8 | u32::from(p[2]))
-        .collect();
-    go().then(|| DynamicTonalPalette::from_image(&argb, image.width() as usize, image.height() as usize))
-}
-
-/// A palette being worked out on a thread of its own, told to stop when dropped (its result then goes nowhere): the
-/// wallpaper's thread waits for it on its wake eventfd, which it writes when done, so that it still hears the theme
-/// changing, the wallpaper changing again, and stopping, which never waits for it.
-struct Work {
-    stop: Arc<AtomicBool>,
-    /// The palette once worked out (none in it: the picture couldn't be read).
-    result: Arc<Mutex<Option<Option<DynamicTonalPalette>>>>,
-}
+/// A palette being worked out, waking the wallpaper's thread (its eventfd) when it comes.
+struct Work(PaletteWork);
 
 impl Work {
     fn start(path: String, wake: &Arc<OwnedFd>) -> Work {
-        let work = Work { stop: Arc::new(AtomicBool::new(false)), result: Arc::new(Mutex::new(None)) };
-        let (stop, result, wake) = (work.stop.clone(), work.result.clone(), wake.clone());
-        let done = move |palette| {
-            *result.lock().unwrap_or_else(|e| e.into_inner()) = Some(palette);
+        let wake = wake.clone();
+        Work(PaletteWork::start(path, move || {
             let _ = sys::eventfd_write(wake.as_fd(), 1);
-        };
-        let spawned = std::thread::Builder::new().name("kompoz-wallpaper-palette".into()).spawn({
-            let (path, stop, done) = (path.clone(), stop.clone(), done.clone());
-            move || {
-                let palette = palette_unless_stopped(&path, &stop);
-                if !stop.load(Ordering::SeqCst) {
-                    done(palette);
-                }
-            }
-        });
-        if spawned.is_err() {
-            done(palette_unless_stopped(&path, &stop)); // (no thread to be had: here, then)
-        }
-        work
+        }))
     }
 
-    /// The palette, once it was worked out.
     fn take(&self) -> Option<Option<DynamicTonalPalette>> {
-        self.result.lock().unwrap_or_else(|e| e.into_inner()).take()
-    }
-}
-
-impl Drop for Work {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
+        self.0.take()
     }
 }
 
