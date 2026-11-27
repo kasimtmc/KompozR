@@ -625,12 +625,12 @@ pub fn compare(
                 let (a, b) = (a.rows(0, h), b.rows(0, h));
                 let w = a.width;
                 let at = |i: usize| ((i as i32) % w, (i as i32) / w);
-                c.outside = golden::difference_except(&a.rgba, &b.rgba, |i| {
+                c.outside = golden::difference_within(&a.rgba, &b.rgba, tolerance(), |i| {
                     let (x, y) = at(i);
                     held.iter().any(|g| g.contains(x, y, config.scale))
                 });
                 for g in &held {
-                    let d = golden::difference_except(&a.rgba, &b.rgba, |i| {
+                    let d = golden::difference_within(&a.rgba, &b.rgba, tolerance(), |i| {
                         let (x, y) = at(i);
                         !g.contains(x, y, config.scale)
                     });
@@ -646,6 +646,14 @@ pub fn compare(
         result.push(c);
     }
     result
+}
+
+/// How far a channel may be off the C++ showcase's pictures (drawn on lavapipe): the goldens' [`golden::TOLERANCE`]
+/// drawn on lavapipe too; where Metal is the API, on the system's GPU, twice it — its pictures within the goldens'
+/// three of lavapipe's (kompoz-gpu's tests check it), lavapipe's within three of the C++ ones (an Apple GPU's edge
+/// coverage and blending land a channel 4 off, never more, on the macOS runner).
+pub fn tolerance() -> i32 {
+    if NATIVE_BACKEND == Backend::Metal { 2 * golden::TOLERANCE } else { golden::TOLERANCE }
 }
 
 /// A part's name with its section's (`s05 InteractionSection`).

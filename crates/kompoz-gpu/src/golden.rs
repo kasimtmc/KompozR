@@ -22,6 +22,12 @@ pub struct Difference {
 /// How `a` differs from `b` (RGBA of one size), pixel by pixel; the pixels `skip` says to leave out (by their
 /// index) aren't counted.
 pub fn difference_except(a: &[u8], b: &[u8], skip: impl Fn(usize) -> bool) -> Difference {
+    difference_within(a, b, TOLERANCE, skip)
+}
+
+/// How `a` differs from `b`, as [`difference_except`], a channel `tolerance` off still no difference (pictures of two
+/// drawings each within [`TOLERANCE`] of a third: lavapipe's and another GPU's against a renderer's on lavapipe).
+pub fn difference_within(a: &[u8], b: &[u8], tolerance: i32, skip: impl Fn(usize) -> bool) -> Difference {
     let mut d = Difference::default();
     for (i, (p, q)) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).enumerate() {
         if skip(i) {
@@ -29,7 +35,7 @@ pub fn difference_except(a: &[u8], b: &[u8], skip: impl Fn(usize) -> bool) -> Di
         }
         let m = max_difference(*p, *q);
         d.worst = d.worst.max(m);
-        d.count += (m > TOLERANCE) as usize;
+        d.count += (m > tolerance) as usize;
     }
     d
 }

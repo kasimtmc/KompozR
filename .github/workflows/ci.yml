@@ -226,6 +226,7 @@ jobs:
             target/tmp/showcase-shots/*/s*.png
             target/tmp/showcase-shots/*/top*.png
             target/tmp/showcase-shots/*/bottom*.png
+            target/tmp/showcase-shots/*/places*.png
           if-no-files-found: ignore
 
   # The shaders' generated SPIR-V, MSL and WGSL are what the .slang sources compile to (cargo xtask shaders --check),
@@ -470,6 +471,7 @@ jobs:
             target/tmp/showcase-shots/*/s*.png
             target/tmp/showcase-shots/*/top*.png
             target/tmp/showcase-shots/*/bottom*.png
+            target/tmp/showcase-shots/*/places*.png
           if-no-files-found: ignore
 
   # macOS on Apple silicon (the runner's paravirtual Apple GPU), Metal: kompoz-gpu's tests against the same goldens
@@ -574,6 +576,7 @@ jobs:
             target/tmp/showcase-shots/*/s*.png
             target/tmp/showcase-shots/*/top*.png
             target/tmp/showcase-shots/*/bottom*.png
+            target/tmp/showcase-shots/*/places*.png
             shots/
             target/tmp/macos-display/
             target/tmp/counter-macos-*/
