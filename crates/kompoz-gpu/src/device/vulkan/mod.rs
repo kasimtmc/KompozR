@@ -67,6 +67,18 @@ pub fn headless_surface() -> VulkanSurface {
     }
 }
 
+/// Whether the loader has [`headless_surface`]'s extensions (Mesa's drivers on Linux do; mesa-dist-win's lavapipe on
+/// Windows doesn't): a headless run's swapchain only where it does.
+pub fn has_headless_surface() -> bool {
+    // SAFETY: the loader loaded and let go here; only queried.
+    let Ok(entry) = (unsafe { ash::Entry::load() }) else { return false };
+    // SAFETY: a query of the loader just loaded.
+    let available = unsafe { entry.enumerate_instance_extension_properties(None) }.unwrap_or_default();
+    [ash::khr::surface::NAME, ash::ext::headless_surface::NAME]
+        .iter()
+        .all(|e| available.iter().any(|a| a.extension_name_as_c_str() == Ok(*e)))
+}
+
 /// The Vulkan device.
 pub struct VulkanDevice {
     choice: Choice,

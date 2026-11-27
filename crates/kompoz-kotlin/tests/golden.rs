@@ -30,7 +30,14 @@ fn generated(text: &str, file: bool) -> String {
 /// `rust` formatted by rustfmt (edition 2024, the workspace's width); as it is when rustfmt isn't there or can't.
 fn format(rust: &str) -> String {
     let child = Command::new("rustfmt")
-        .args(["--edition", "2024", "--emit", "stdout", "--config", "max_width=120,use_small_heuristics=Max"])
+        .args([
+            "--edition",
+            "2024",
+            "--emit",
+            "stdout",
+            "--config",
+            "max_width=120,use_small_heuristics=Max,newline_style=Unix",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

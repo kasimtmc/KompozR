@@ -613,6 +613,11 @@ fn a_menu_bar_the_platform_shows() {
 /// `KOMPOZ_HEADLESS_SWAPCHAIN=1` the same through a swapchain (its composite alpha the transparent window's).
 fn a_transparent_window_shows_what_is_behind_it() {
     for swapchain in ["0", "1"] {
+        #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+        if swapchain == "1" && !kompoz_gpu::device::vulkan::has_headless_surface() {
+            println!("  (no VK_EXT_headless_surface here: the swapchain's case left to where there is one)");
+            continue;
+        }
         let dir = temp_dir(&format!("transparent-{swapchain}"));
         let (clear, opaque) = (dir.join("clear.png"), dir.join("opaque.png"));
         let content = AppContent::Window(Rc::new(kompozable_lambda!(move || {

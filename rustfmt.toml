@@ -1,2 +1,4 @@
 max_width = 120
 use_small_heuristics = "Max"
+# LF on every system, as .gitattributes checks the sources out (rustfmt writes CRLF on Windows otherwise).
+newline_style = "Unix"
