@@ -1781,7 +1781,9 @@ mod tests {
             match find("OK").GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId) {
                 Ok(invoke) => {
                     invoke.Invoke().expect("invoked");
-                    let asked = bridge.take_requests();
+                    // (Windows' client focuses the element before it invokes it; wine's doesn't.)
+                    let mut asked = bridge.take_requests();
+                    asked.retain(|r| *r != Request { id: 1, action: UiaAction::Do(SemanticsAction::Focus) });
                     assert_eq!(asked, [Request { id: 1, action: UiaAction::Do(SemanticsAction::Click) }]);
                 }
                 Err(e) => {

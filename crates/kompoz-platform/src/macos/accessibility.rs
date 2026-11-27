@@ -859,6 +859,30 @@ impl KompozElement {
             let invalid = self.read(|r| r.n.error.is_some()).unwrap_or(false);
             return Some(string(if invalid { "true" } else { "false" }).into());
         }
+        // The attributes of the properties implemented here, from them: AppKit's own answer of the old API (super's)
+        // gives them empty once a subclass answers attributeValue: itself (CI's macOS runner, 2026-11-27).
+        // SAFETY: this element's own NSAccessibility properties (objects or nil), on the main thread AppKit calls.
+        let own: Option<Option<Retained<AnyObject>>> = unsafe {
+            match name.to_string().as_str() {
+                "AXRole" => Some(msg_send![self, accessibilityRole]),
+                "AXSubrole" => Some(msg_send![self, accessibilitySubrole]),
+                "AXRoleDescription" => Some(msg_send![self, accessibilityRoleDescription]),
+                "AXDescription" => Some(msg_send![self, accessibilityLabel]),
+                "AXTitle" => Some(msg_send![self, accessibilityTitle]),
+                "AXHelp" => Some(msg_send![self, accessibilityHelp]),
+                "AXIdentifier" => Some(msg_send![self, accessibilityIdentifier]),
+                "AXValue" => Some(msg_send![self, accessibilityValue]),
+                "AXValueDescription" => Some(msg_send![self, accessibilityValueDescription]),
+                "AXMinValue" => Some(msg_send![self, accessibilityMinValue]),
+                "AXMaxValue" => Some(msg_send![self, accessibilityMaxValue]),
+                "AXParent" => Some(msg_send![self, accessibilityParent]),
+                "AXChildren" => Some(msg_send![self, accessibilityChildren]),
+                _ => None,
+            }
+        };
+        if let Some(value) = own {
+            return value;
+        }
         // SAFETY: NSObject's (NSAccessibility) own, with the name AppKit gave this override.
         unsafe { msg_send![super(self), accessibilityAttributeValue: name] }
     }
