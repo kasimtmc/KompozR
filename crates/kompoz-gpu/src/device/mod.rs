@@ -5,8 +5,8 @@
 //! for what the CPU hands the GPU once. The renderer does the rest.
 //!
 //! Which backends a build has is the target's: [`vulkan`] (and `ash`) where Vulkan is the API, nowhere else (not on
-//! Apple's systems, where Metal is, nor on the web, which has no Vulkan loader); the Metal and WebGPU devices come
-//! with their own modules, and until a build has one, [`create`] says it has no such backend. What presenting needs
+//! Apple's systems, where Metal is, nor on the web, which has no Vulkan loader); `metal` on Apple's systems; the
+//! WebGPU device comes with its own module, and until a build has one, [`create`] says it has no such backend. What presenting needs
 //! from each window system is in [`Surface`]; reading pixels back is synchronous where the API can wait
 //! ([`Device::read_pixels`]) and through a callback everywhere ([`Device::read_pixels_async`]: WebGPU can only map a
 //! buffer asynchronously).
@@ -29,12 +29,15 @@
 //! with the frames that may use them.
 //!
 //! The environment:
-//! - `KOMPOZ_GPU_VALIDATION=1`: the API's validation on where it has one (Vulkan's `VK_LAYER_KHRONOS_validation`),
+//! - `KOMPOZ_GPU_VALIDATION=1`: the API's validation on where it has one (Vulkan's `VK_LAYER_KHRONOS_validation`;
+//!   Metal's API validation is the environment's `MTL_DEBUG_LAYER=1`, which Metal reads itself: see `metal`),
 //!   its messages logged and its errors counted ([`Device::validation_errors`]: tests want none).
 //! - `KOMPOZ_GPU_DEVICE=<part of a name>`: the GPU whose name has it ("Intel", "RTX", "llvmpipe"), else an
 //!   integrated one (it saves power), else a discrete one, else any.
 //! - `KOMPOZ_GPU_REQUIRED=1` ([`gpu_required`]): no device is a failure (CI), not a reason to skip, for the tests.
 
+#[cfg(target_vendor = "apple")]
+pub mod metal;
 mod pipeline_cache;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 pub mod vulkan;
@@ -66,12 +69,13 @@ pub const NATIVE_BACKEND: Backend = if cfg!(target_vendor = "apple") {
     Backend::Vulkan
 };
 
-/// Whether this build of KompozR has a device for `backend` (Vulkan's where it is the target's API; Metal's and
-/// WebGPU's once their modules are in).
+/// Whether this build of KompozR has a device for `backend` (Vulkan's where it is the target's API, Metal's on Apple's
+/// systems; WebGPU's once its module is in).
 pub const fn has_backend(backend: Backend) -> bool {
     match backend {
         Backend::Vulkan => cfg!(not(any(target_family = "wasm", target_vendor = "apple"))),
-        Backend::Metal | Backend::WebGpu => false,
+        Backend::Metal => cfg!(target_vendor = "apple"),
+        Backend::WebGpu => false,
     }
 }
 
@@ -747,6 +751,10 @@ pub fn create(backend: Backend, surface: Surface) -> Result<Box<dyn Device>, Str
     if backend == Backend::Vulkan {
         return Ok(Box::new(vulkan::VulkanDevice::new(surface)?));
     }
+    #[cfg(target_vendor = "apple")]
+    if backend == Backend::Metal {
+        return Ok(Box::new(metal::MetalDevice::new(surface)?));
+    }
     drop(surface);
     Err(format!("this build of KompozR has no {} backend", backend.name()))
 }
@@ -777,8 +785,9 @@ mod tests {
     fn each_target_has_its_own_backend() {
         let native = NATIVE_BACKEND;
         assert_eq!(native, if cfg!(target_os = "linux") { Backend::Vulkan } else { native });
-        assert!(!has_backend(Backend::WebGpu) && !has_backend(Backend::Metal));
-        for missing in [Backend::Metal, Backend::WebGpu] {
+        assert_eq!(has_backend(Backend::Metal), cfg!(target_vendor = "apple"));
+        assert!(!has_backend(Backend::WebGpu));
+        for missing in [Backend::Vulkan, Backend::Metal, Backend::WebGpu].into_iter().filter(|&b| !has_backend(b)) {
             let why = create(missing, Surface::default()).err().unwrap();
             assert_eq!(why, format!("this build of KompozR has no {} backend", missing.name()));
         }

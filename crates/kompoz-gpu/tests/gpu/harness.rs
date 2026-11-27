@@ -37,12 +37,27 @@ pub fn near(p: [u8; 4], r: u8, g: u8, b: u8, tolerance: i32) -> bool {
     max_difference(p, [r, g, b, 255]) <= tolerance
 }
 
-pub static QUAD_VERTEX: ShaderCode =
-    ShaderCode { spirv: include_bytes!("shaders/quad.vert.spv"), msl: "", wgsl: "", entry: "main" };
-pub static COLOR_FRAGMENT: ShaderCode =
-    ShaderCode { spirv: include_bytes!("shaders/color.frag.spv"), msl: "", wgsl: "", entry: "main" };
-pub static TEXTURE_FRAGMENT: ShaderCode =
-    ShaderCode { spirv: include_bytes!("shaders/texture.frag.spv"), msl: "", wgsl: "", entry: "main" };
+/// (MSL's entry points can't be called `main`, which is C++'s: the Metal shaders' are named for what they are.)
+const MSL: bool = cfg!(target_vendor = "apple");
+
+pub static QUAD_VERTEX: ShaderCode = ShaderCode {
+    spirv: include_bytes!("shaders/quad.vert.spv"),
+    msl: include_str!("shaders/quad.vert.metal"),
+    wgsl: "",
+    entry: if MSL { "quad_vertex" } else { "main" },
+};
+pub static COLOR_FRAGMENT: ShaderCode = ShaderCode {
+    spirv: include_bytes!("shaders/color.frag.spv"),
+    msl: include_str!("shaders/color.frag.metal"),
+    wgsl: "",
+    entry: if MSL { "color_fragment" } else { "main" },
+};
+pub static TEXTURE_FRAGMENT: ShaderCode = ShaderCode {
+    spirv: include_bytes!("shaders/texture.frag.spv"),
+    msl: include_str!("shaders/texture.frag.metal"),
+    wgsl: "",
+    entry: if MSL { "texture_fragment" } else { "main" },
+};
 
 /// A quad's instance: its rectangle (left, top, right, bottom in px) and its color (premultiplied).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -113,8 +128,9 @@ impl Pipelines {
 /// top, right, bottom) across each.
 pub fn draw_quads(device: &mut dyn Device, pipeline: PipelineId, target: TextureId, quads: &[Quad], source: [f32; 4]) {
     let (w, h) = (target.width() as f32, target.height() as f32);
-    let uniforms: Vec<u8> =
-        [2.0 / w, 2.0 / h, -1.0, -1.0].iter().chain(&source).flat_map(|v| v.to_ne_bytes()).collect();
+    // (Into clip space as the renderer's: flipped where y goes down in it.)
+    let to_clip = kompoz_gpu::shaders::to_clip(w, h, device.clip_y_down());
+    let uniforms: Vec<u8> = to_clip.iter().chain(&source).flat_map(|v| v.to_ne_bytes()).collect();
     let instances: Vec<u8> =
         quads.iter().flat_map(|q| q.rect.iter().chain(&q.color)).flat_map(|v| v.to_ne_bytes()).collect();
     device.set_pipeline(pipeline);

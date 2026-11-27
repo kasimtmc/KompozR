@@ -317,6 +317,77 @@ jobs:
               -- -A clippy::missing_const_for_thread_local
           done
 
+  # macOS on Apple silicon (the runner's paravirtual Apple GPU), Metal: kompoz-gpu's tests against the same goldens
+  # as lavapipe's, strictly (the renderer's y-up clip space runs here), Metal's API validation on (MTL_DEBUG_LAYER=1:
+  # an error it finds aborts the run; KOMPOZ_GPU_VALIDATION=1 counts what Metal reports to the device), then the app
+  # core and the Counters and the showcase on the headless platform (Metal drawing only into the kept frame, as C++'s
+  # headless Metal step), then the workspace's tests. Each step runs whether those before failed or not (each tells
+  # something of its own); the pictures that differ are kept.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
+      - name: kompoz-gpu's tests (Metal, validated, against tests/golden)
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+        run: cargo test -p kompoz-gpu
+      - name: kompoz-platform's app core tests (Metal, validated)
+        if: success() || failure()
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+        run: cargo test -p kompoz-platform --test app_core
+      - name: The Counter, headless, clicked by a script
+        if: success() || failure()
+        env:
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+          KOMPOZ_HEADLESS: "1"
+        run: |
+          rm -f before.png shot.png
+          KOMPOZ_SCRIPT="wait 30;shot before.png;click 70 70;wait 30;shot shot.png;quit" target/debug/counter 2>&1 \
+            | tee counter.log
+          test -s before.png && test -s shot.png
+          if cmp -s before.png shot.png; then echo "the click changed nothing"; exit 1; fi
+          if grep -qE "GPU validation|Metal: " counter.log; then exit 1; fi
+      - name: The Kotlin Counter, headless, drawing the Rust Counter's pixels
+        if: success() || failure()
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+        run: cargo test -p counter-kotlin --test headless
+      - name: The showcase, headless, against the C++ showcase's pictures
+        if: success() || failure()
+        env:
+          KOMPOZ_GPU_REQUIRED: "1"
+          KOMPOZ_GPU_VALIDATION: "1"
+          MTL_DEBUG_LAYER: "1"
+        run: cargo test -p showcase --test headless
+      - name: The workspace's tests
+        if: success() || failure()
+        run: cargo test --workspace --no-fail-fast
+      - name: The Counter's shots, and the pictures that differ from their goldens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-shots
+          path: |
+            before.png
+            shot.png
+            crates/kompoz-gpu/tests/golden/*.actual.png
+            crates/kompoz-gpu/tests/golden/*.diff.png
+            target/tmp/showcase-shots/*/s*.png
+            target/tmp/showcase-shots/*/top*.png
+            target/tmp/showcase-shots/*/bottom*.png
+          if-no-files-found: ignore
+
   # The web's workspace (wasm32-unknown-unknown) as its build makes it: the pinned nightly (the web's only toolchain:
   # unwinding on wasm needs std rebuilt with panic=unwind, which only nightly's -Zbuild-std does; the Kotlin syntax's
   # exceptions and jumps unwind), with the standard exception-handling instructions. The same pin and flags are the

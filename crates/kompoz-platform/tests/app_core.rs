@@ -793,7 +793,7 @@ fn the_windows_events_move_the_apps_lifecycle() {
 fn main() {
     kompoz_runtime::set_ui_thread();
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
-    match device::create(Backend::Vulkan, Surface::default()) {
+    match device::create(device::NATIVE_BACKEND, Surface::default()) {
         Ok(d) => println!("device: {}", d.device_name()),
         Err(why) => {
             println!("skipped: {why}");
