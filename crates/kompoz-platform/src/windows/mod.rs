@@ -26,7 +26,12 @@
 //! the field, their requests (reconversion, the text around, where characters are) answered, the field's input
 //! scopes told.
 //!
-//! What comes in later packages: pen and touch (WM_POINTER), drags in and out (OLE), UI Automation, the desktop's accent, wallpaper and text size, KompozR's own title
+//! Screen readers and other UI Automation clients (Narrator, NVDA, the touch keyboard) read each window's semantics
+//! tree through its providers (`uia_bridge`, `uia`'s model: control types, properties, patterns — a field's text
+//! and its ranges too —, the tree's changes as events), at the AT-SPI bridge's parity; `KOMPOZ_UIA=0` turns them
+//! off.
+//!
+//! What comes in later packages: pen and touch (WM_POINTER), drags in and out (OLE), the desktop's accent, wallpaper and text size, KompozR's own title
 //! bar (`KOMPOZ_DECORATIONS=kompoz`: WM_NCCALCSIZE and WM_NCHITTEST, where `window` leaves the frame to the
 //! system), the tray.
 
@@ -39,9 +44,12 @@ mod input_method;
 mod keyboard;
 pub mod sys;
 mod tsf;
+mod uia;
+mod uia_bridge;
 mod vulkan;
 mod window;
 
+pub use uia_bridge::root_provider as uia_root_provider;
 pub use window::Win32Window;
 
 use self::event_loop::EventLoop;

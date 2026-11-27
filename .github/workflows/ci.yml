@@ -442,6 +442,14 @@ jobs:
           cargo test -p counter-kotlin --test windows
           cargo test -p showcase --test windows
           cargo test -p kompoz-platform --test win32_windows
+      # (The UI Automation bridge's own test, a client in-process against a window of its own, runs with the
+      # workspace's tests; this one drives the app in its window as Narrator would: everything required here.)
+      - name: UI Automation's client driving the app in its window (lavapipe)
+        if: success() || failure()
+        env:
+          KOMPOZ_DISPLAY_TESTS: "1"
+          KOMPOZ_GPU_REQUIRED: "1"
+        run: cargo test -p kompoz-platform --test uia_windows
       - name: The Counter in a window by CI's script, clicked and resized (lavapipe)
         if: success() || failure()
         env:

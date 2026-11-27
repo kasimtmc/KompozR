@@ -6,7 +6,7 @@ use super::configuration::{SemanticsConfiguration, SemanticsPropertyKey};
 use super::node::{SemanticsNode, SemanticsOwner};
 use super::properties::{
     AccessibilityAction, ActionFn, CollectionInfo, CollectionItemInfo, LiveRegionMode, ProgressBarRangeInfo, Role,
-    SemanticsActions, SemanticsProperties,
+    ScrollAxisRange, SemanticsActions, SemanticsProperties,
 };
 use crate::state::ToggleableState;
 use kompoz_graphics::{LayoutDirection, Rect};
@@ -76,6 +76,25 @@ pub struct AccessibilityNode {
     pub is_dialog: bool,
     pub pane_title: Option<String>,
     pub test_tag: Option<String>,
+    /// A field's selection (its caret where it is collapsed), start then end, in code points of its text as typed
+    /// (Compose's `textSelectionRange`): the same places in `value` where the field shows what is typed, or hides it
+    /// a character for a character (a password); none where it isn't a field.
+    pub text_selection: Option<(usize, usize)>,
+    /// How far it has scrolled sideways (Compose's `horizontalScrollAxisRange`, read as the tree is made), where it
+    /// says.
+    pub horizontal_scroll: Option<ScrollPosition>,
+    /// How far it has scrolled up and down (Compose's `verticalScrollAxisRange`), where it says.
+    pub vertical_scroll: Option<ScrollPosition>,
+}
+
+/// Where a scrollable is along an axis as the tree was made (a [`ScrollAxisRange`](super::ScrollAxisRange) read):
+/// how far it has scrolled and how far it can, px (a lazy list's estimates), and whether it scrolls the other way
+/// (its start at the end).
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct ScrollPosition {
+    pub value: f32,
+    pub max_value: f32,
+    pub reverse_scrolling: bool,
 }
 
 /// What accessibility asks of a node (C++'s SemanticsAction; Android's accessibility actions), each done through
@@ -104,6 +123,12 @@ pub enum SemanticsAction {
     },
     InsertTextAtCursor(String),
     ImeAction,
+    /// Scrolled by this many px along each axis (its `ScrollBy` action): to a place (UI Automation's
+    /// SetScrollPercent).
+    ScrollBy {
+        x: f32,
+        y: f32,
+    },
     CopyText,
     CutText,
     PasteText,
@@ -201,6 +226,9 @@ impl SemanticsOwner {
                 config.get(SemanticsActions::InsertTextAtCursor).and_then(|a| a.action).is_some_and(|f| f(text.into()))
             }
             SemanticsAction::ImeAction => run0(SemanticsActions::OnImeAction),
+            SemanticsAction::ScrollBy { x, y } => {
+                config.get(SemanticsActions::ScrollBy).and_then(|a| a.action).is_some_and(|f| f(x, y))
+            }
             SemanticsAction::CopyText => run0(SemanticsActions::CopyText),
             SemanticsAction::CutText => run0(SemanticsActions::CutText),
             SemanticsAction::PasteText => run0(SemanticsActions::PasteText),
@@ -317,7 +345,24 @@ fn summarize(
         is_dialog: config.contains(SemanticsProperties::IsDialog),
         pane_title: config.get(SemanticsProperties::PaneTitle),
         test_tag: config.get(SemanticsProperties::TestTag),
+        text_selection: config.get(SemanticsProperties::TextSelectionRange).map(|r| {
+            // (Byte offsets of the text as typed, as code points: what a bridge reads `value` by.)
+            let typed = config
+                .get(SemanticsProperties::InputText)
+                .or_else(|| config.get(SemanticsProperties::EditableText))
+                .map(|t| t.text().to_string())
+                .unwrap_or_default();
+            let code_points = |byte: usize| typed.char_indices().take_while(|&(i, _)| i < byte).count();
+            (code_points(r.start), code_points(r.end))
+        }),
+        horizontal_scroll: config.get(SemanticsProperties::HorizontalScrollAxisRange).map(scroll_position),
+        vertical_scroll: config.get(SemanticsProperties::VerticalScrollAxisRange).map(scroll_position),
     }
+}
+
+/// A scroll axis's range as it is now.
+fn scroll_position(r: ScrollAxisRange) -> ScrollPosition {
+    ScrollPosition { value: (r.value)(), max_value: (r.max_value)(), reverse_scrolling: r.reverse_scrolling }
 }
 
 /// A selectable's place among the selectables of the selectable group it is in, where that group isn't a lazy

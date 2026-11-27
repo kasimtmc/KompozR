@@ -20,7 +20,7 @@ mod properties;
 mod sort;
 
 pub use crate::state::ToggleableState;
-pub use accessibility::{AccessibilityNode, SemanticsAction};
+pub use accessibility::{AccessibilityNode, ScrollPosition, SemanticsAction};
 pub use configuration::{SemanticsConfiguration, SemanticsPropertyKey};
 pub use modifier::{CoreSemanticsModifierNode, SemanticsModifierNode, TestTagNode};
 pub use node::{SemanticsListener, SemanticsNode, SemanticsOwner};

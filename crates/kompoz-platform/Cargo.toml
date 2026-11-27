@@ -86,6 +86,7 @@ features = [
     "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_System_Variant",
+    "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",
     "Win32_UI_Input",
     "Win32_UI_Input_Ime",
@@ -170,6 +171,12 @@ objc2-foundation = "0.3.2"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityProtocols", "NSApplication", "NSResponder", "NSView", "NSWindow"] }
 
 # The app core on the headless platform (a GPU device: lavapipe in CI), one thread, in sequence.
+# Android's accessibility, content capture, translation, autofill and scroll capture over the host (plain Rust).
+[[test]]
+name = "android_semantics"
+harness = false
+required-features = ["platform"]
+
 [[test]]
 name = "app_core"
 harness = false
@@ -194,6 +201,13 @@ required-features = ["platform"]
 # each, a script reaching one by its title, its close, a state's size, place and placement.
 [[test]]
 name = "win32_windows"
+harness = false
+required-features = ["platform"]
+
+# UI Automation's own client driving the app in a real window on Windows (KOMPOZ_DISPLAY_TESTS=1; under wine here):
+# the Counter's button invoked, a field's TextPattern read, a switch toggled, the focus heard.
+[[test]]
+name = "uia_windows"
 harness = false
 required-features = ["platform"]
 

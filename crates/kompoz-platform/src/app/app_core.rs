@@ -1777,6 +1777,32 @@ impl<P: Platform> AppCore<P> {
         }
     }
 
+    /// The window's pixels in `x, y, width, height` (px, cut to the window) as the last frame drew them: the kept
+    /// frame read back (RGBA, alpha premultiplied, row by row) and the size read; none before a frame was drawn, or
+    /// while the renderer is busy. What a platform copies of the window itself (Android's scroll capture: the parts
+    /// of a long screenshot).
+    pub fn read_frame(&mut self, x: i32, y: i32, width: i32, height: i32) -> Option<(i32, i32, Vec<u8>)> {
+        let gpu = self.gpu.as_ref()?;
+        let frame = gpu.frame.as_ref()?;
+        let (fw, fh) = (frame.width(), frame.height());
+        let (left, top) = (x.clamp(0, fw), y.clamp(0, fh));
+        let (right, bottom) = (x.saturating_add(width).clamp(left, fw), y.saturating_add(height).clamp(top, fh));
+        let (w, h) = (right - left, bottom - top);
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let mut r = gpu.renderer.try_borrow_mut().ok()?;
+        let own = !self.in_frame.get(); // (between frames: a frame of its own)
+        if own {
+            r.device_mut().begin_frame();
+        }
+        let pixels = r.device_mut().read_pixels(frame.id(), IRect::new(left, top, w, h));
+        if own {
+            r.device_mut().end_frame(false);
+        }
+        (pixels.len() == w as usize * h as usize * 4).then_some((w, h, pixels))
+    }
+
     /// Before the platform goes (C++'s `quit`): `KOMPOZ_STATE_FILE` written, as Android keeps an app's state when
     /// it ends it.
     pub fn quit(&mut self) {

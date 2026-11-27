@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What accessibility says of states and roles where a node says none of its own (Compose's ui strings: its tab,
+     state_on, state_off, indeterminate, selected, not_selected, template_percent, in_progress, state_empty), in the
+     system's language. -->
+<resources>
+    <string name="kompoz_tab">Tab</string>
+    <string name="kompoz_state_on">On</string>
+    <string name="kompoz_state_off">Off</string>
+    <string name="kompoz_indeterminate">Partially checked</string>
+    <string name="kompoz_selected">Selected</string>
+    <string name="kompoz_not_selected">Not selected</string>
+    <string name="kompoz_template_percent">%1$d percent</string>
+    <string name="kompoz_in_progress">In progress</string>
+    <string name="kompoz_state_empty">Empty</string>
+</resources>

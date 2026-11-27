@@ -8,7 +8,9 @@
 //! What it keeps is [`Shared`] with the natives (`super::app`), which change it as the activity tells them; the core
 //! reads it through the platform. All on the UI thread.
 
+use super::autofill::Notice;
 use super::configuration::{Configuration, option_file, option_value};
+use super::delegate::{Pending, queue_autofill};
 use super::text_input::TextInput;
 use super::vulkan;
 use crate::app::{Metrics, Platform, WindowSpec};
@@ -102,6 +104,33 @@ impl PlatformCallbacks for AndroidCallbacks {
             t.hide_text_toolbar();
         }
     }
+    // Autofill (Compose's AndroidAutofillManager over the AutofillManager): told after the frame (`delegate`).
+    fn autofill_focus(&self, id: u64, bounds: Rect, entered: bool) {
+        let Some(id) = autofill_id(id) else { return };
+        let notice = if entered { Notice::Entered { id, bounds } } else { Notice::Exited { id } };
+        queue_autofill(Pending::Notice(notice));
+    }
+    fn autofill_value(&self, id: u64, text: &str) {
+        queue_autofill(Pending::Value(id, text.to_string()));
+    }
+    fn autofill_visibility(&self, id: u64, visible: bool) {
+        if let Some(id) = autofill_id(id) {
+            queue_autofill(Pending::Notice(Notice::Visibility { id, visible }));
+        }
+    }
+    fn autofill_done(&self, commit: bool) {
+        queue_autofill(Pending::Notice(Notice::Done { commit }));
+    }
+    fn autofill_request(&self, id: u64, bounds: Rect) {
+        if let Some(id) = autofill_id(id) {
+            queue_autofill(Pending::Notice(Notice::Request { id, bounds }));
+        }
+    }
+}
+
+/// A node's autofill virtual id (its semantics id).
+fn autofill_id(id: u64) -> Option<i32> {
+    i32::try_from(id).ok()
 }
 
 impl AndroidPlatform {
@@ -210,10 +239,11 @@ impl Platform for AndroidPlatform {
     }
 
     /// The input method told where the field and its caret are now, and the field's state where its Editable
-    /// differs (a key typed, the app changed it).
-    fn composed(&mut self, host: &KompozHost, _: bool, _: i64) {
+    /// differs (a key typed, the app changed it); accessibility, content capture and autofill told what changed.
+    fn composed(&mut self, host: &KompozHost, redraw: bool, _: i64) {
         if let Some(t) = &self.shared.text_input {
             t.sync(host);
         }
+        super::delegate::composed(host, redraw);
     }
 }

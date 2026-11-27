@@ -21,7 +21,7 @@ use std::path::PathBuf;
 
 /// `f`, a panic in it caught (`what` names the entry in the log): the app let go and its activity finished, and
 /// `fallback` returned to the caller.
-fn guard<R>(what: &str, fallback: R, f: impl FnOnce() -> R) -> R {
+pub(super) fn guard<R>(what: &str, fallback: R, f: impl FnOnce() -> R) -> R {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(r) => r,
         Err(_) => {
@@ -36,7 +36,7 @@ fn guard<R>(what: &str, fallback: R, f: impl FnOnce() -> R) -> R {
 ///
 /// # Safety
 /// `env` must be the `JNIEnv *` the VM passed to the native method being run.
-unsafe fn env<'a>(env: *mut JNIEnv) -> Env<'a> {
+pub(super) unsafe fn env<'a>(env: *mut JNIEnv) -> Env<'a> {
     // SAFETY: (the caller's) the current call's env.
     unsafe { Env::from_raw(env) }
 }
@@ -75,7 +75,7 @@ pub fn on_load(vm: Vm, entry: fn() -> AndroidApp) -> jint {
 
 /// Each class's native methods, by name and JNI signature (KompozActivity.kt's and KompozView.kt's `external fun`s).
 fn natives() -> Vec<(&'static CStr, Vec<super::jni::JNINativeMethod>)> {
-    vec![
+    let mut list = vec![
         (
             c"dev/kompozr/KompozActivity",
             vec![
@@ -103,7 +103,10 @@ fn natives() -> Vec<(&'static CStr, Vec<super::jni::JNINativeMethod>)> {
                 native(c"nativeToolbarAction", c"(I)V", native_toolbar_action as *mut c_void),
             ],
         ),
-    ]
+    ];
+    // (KompozView's accessibility, content capture, translation, autofill and scroll capture: delegate's.)
+    list[1].1.extend(super::delegate::view_natives());
+    list
 }
 
 // ---- KompozActivity ----

@@ -136,6 +136,8 @@ impl Running {
             log_error("kompoz: KompozView's input methods aren't there: no text input");
         }
         kompoz_ui::platform::set_stylus_handwriting_supported(api_level() >= 34);
+        // Accessibility, content capture, translation, autofill and scroll capture: told through the view.
+        super::delegate::attach(&env, c.view);
         MOTION.with(|m| *m.borrow_mut() = MotionDecoder::default());
         let shared = Rc::new(Shared {
             window: Rc::new(Cell::new(0)),
@@ -205,8 +207,18 @@ impl Running {
         }
     }
 
+    /// The host, once the core started.
+    pub(super) fn host(&self) -> Option<&kompoz_ui::KompozHost> {
+        if self.started { self.core.host() } else { None }
+    }
+
+    /// The window's pixels in that area as the last frame drew them (the core's `read_frame`).
+    pub(super) fn read_frame(&mut self, x: i32, y: i32, width: i32, height: i32) -> Option<(i32, i32, Vec<u8>)> {
+        self.core.read_frame(x, y, width, height)
+    }
+
     /// A frame on the display's next beat (one posted at a time).
-    fn request_frame(&self) {
+    pub(super) fn request_frame(&self) {
         if self.ended || self.frame_posted.get() {
             return;
         }
@@ -356,6 +368,7 @@ impl Running {
             return;
         }
         let next = self.core.frame(Some(frame_time));
+        super::delegate::after_frame(self);
         if next.quit || self.core.quitting() {
             if let Some(env) = VM.get().and_then(Vm::env) {
                 self.end(&env);
@@ -453,6 +466,7 @@ pub(super) fn destroy() {
     if let Some(mut running) = running {
         running.core.quit();
         drop(running);
+        super::delegate::detach();
     }
 }
 

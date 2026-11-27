@@ -2,7 +2,11 @@ package dev.kompozr
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Point
+import android.graphics.Rect
 import android.os.Build
+import android.util.LongSparseArray
+import android.util.SparseArray
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -10,9 +14,16 @@ import android.view.MotionEvent
 import android.view.PointerIcon
 import android.view.Surface
 import android.view.SurfaceHolder
+import android.view.ScrollCaptureTarget
 import android.view.SurfaceView
+import android.view.View
+import android.view.ViewStructure
+import android.view.autofill.AutofillValue
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.translation.ViewTranslationRequest
+import android.view.translation.ViewTranslationResponse
+import java.util.function.Consumer
 
 /**
  * The view a KompozR app draws into (C++ Kompoz's KompozView, Compose's AndroidComposeView): a SurfaceView whose
@@ -21,16 +32,22 @@ import android.view.inputmethod.InputConnection
  * with its tool, pressure and historical samples, a touchpad's gestures, the keys with a dead key's accent composed
  * —; the input method's editor while a text field has a session ([KompozIme]: this view is its text editor, as
  * Compose's is), the pointer's icons, the floating text toolbar ([KompozTextToolbar]), the input devices and the
- * system's gesture thresholds ([KompozInputDevices]). The display's frames come to the app from the NDK's
- * choreographer itself.
+ * system's gesture thresholds ([KompozInputDevices]); accessibility over its virtual views ([KompozAccessibility]),
+ * autofill ([KompozAutofill]), content capture and translation ([KompozContentCapture]) and long screenshots
+ * ([KompozScrollCapture]), all of them from the app's semantics. The display's frames come to the app from the
+ * NDK's choreographer itself.
  *
- * Its methods named `ime*`, `set*PointerIconType` and `*TextToolbar` are the app's to call (by name, from the
- * native side, on this thread).
+ * Its methods named `ime*`, `set*PointerIconType`, `*TextToolbar`, `accessibilityChanged`, `autofillNotify` and
+ * `scrollCapture*` are the app's to call (by name, from the native side, on this thread).
  */
 open class KompozView(context: Context) : SurfaceView(context), SurfaceHolder.Callback {
     private val ime = KompozIme(this)
     private val toolbar = KompozTextToolbar(this)
     private val devices = KompozInputDevices(this)
+    private val accessibility = KompozAccessibility(this)
+    private val autofill = KompozAutofill(this)
+    private val contentCapture = KompozContentCapture(this)
+    private val scrollCapture = if (Build.VERSION.SDK_INT >= 31) KompozScrollCapture(this) else null
 
     /** The icon a hovering stylus shows, if the app set one (`PointerIcon.TYPE_*`; 0: the mouse's). */
     private var stylusPointerIconType = 0
@@ -48,17 +65,31 @@ open class KompozView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         // A stylus starts handwriting over a text field, not over the view: the fields ask for it themselves
         // (Compose's AndroidComposeView turns the view's own off).
         if (Build.VERSION.SDK_INT >= 34) isAutoHandwritingEnabled = false
+        accessibilityDelegate = accessibility
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        importantForAutofill = IMPORTANT_FOR_AUTOFILL_YES
+        if (Build.VERSION.SDK_INT >= 30) importantForContentCapture = IMPORTANT_FOR_CONTENT_CAPTURE_YES
+        if (Build.VERSION.SDK_INT >= 31) setViewTranslationCallback(contentCapture.translationCallback())
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         devices.start()
+        if (windowVisibility == View.VISIBLE) contentCapture.start()
     }
 
     override fun onDetachedFromWindow() {
         devices.stop()
         toolbar.hide()
+        contentCapture.stop()
+        accessibility.detached()
         super.onDetachedFromWindow()
+    }
+
+    /** The window shown or hidden (the activity started or stopped): content capture's session with it. */
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) contentCapture.start() else contentCapture.stop()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -76,6 +107,9 @@ open class KompozView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     // ---- Pointers ----
 
     override fun onTouchEvent(event: MotionEvent): Boolean = motion(event)
+
+    /** A screen reader's finger exploring (touch exploration) finds a virtual view; else the app's hover. */
+    override fun dispatchHoverEvent(event: MotionEvent): Boolean = accessibility.hover(event) || super.dispatchHoverEvent(event)
 
     /** A mouse's (or a touchpad's, a stylus's) hovering, buttons and wheel. */
     override fun onGenericMotionEvent(event: MotionEvent): Boolean =
@@ -247,6 +281,78 @@ open class KompozView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     @Suppress("unused") // (the app's)
     private fun hideTextToolbar() = toolbar.hide()
 
+    // ---- Accessibility, autofill, content capture, translation, scroll capture ----
+
+    override fun onProvideAutofillVirtualStructure(structure: ViewStructure, flags: Int) =
+        autofill.provideStructure(structure)
+
+    override fun autofill(values: SparseArray<AutofillValue>) = autofill.fill(values)
+
+    override fun onCreateVirtualViewTranslationRequests(
+        virtualIds: LongArray,
+        supportedFormats: IntArray,
+        requestsCollector: Consumer<ViewTranslationRequest>,
+    ) {
+        if (Build.VERSION.SDK_INT >= 31) contentCapture.translationRequests(virtualIds, requestsCollector)
+    }
+
+    override fun onVirtualViewTranslationResponses(response: LongSparseArray<ViewTranslationResponse>) {
+        if (Build.VERSION.SDK_INT >= 31) contentCapture.translationResponses(response)
+    }
+
+    override fun onScrollCaptureSearch(localVisibleRect: Rect, windowOffset: Point, targets: Consumer<ScrollCaptureTarget>) {
+        scrollCapture?.search(windowOffset, targets)
+    }
+
+    /** The app's semantics or layout changed (after its frame). */
+    @Suppress("unused") // (the app's)
+    private fun accessibilityChanged() {
+        accessibility.changed()
+        contentCapture.changed()
+    }
+
+    @Suppress("unused") // (the app's)
+    private fun autofillNotify(notices: ByteArray) = autofill.notify(notices)
+
+    @Suppress("unused") // (the app's)
+    private fun scrollCaptureImage(token: Int, rect: IntArray, pixels: ByteArray?, width: Int, height: Int) =
+        scrollCapture?.image(token, rect, pixels, width, height) ?: Unit
+
+    @Suppress("unused") // (the app's)
+    private fun scrollCaptureEnded(token: Int) = scrollCapture?.ended(token) ?: Unit
+
+    // What KompozAccessibility, KompozAutofill, KompozContentCapture and KompozScrollCapture ask the app.
+    internal fun accessibilityTree(withEvents: Boolean): ByteArray? = nativeAccessibilityTree(withEvents)
+
+    internal fun accessibilityHit(x: Float, y: Float): Int = nativeAccessibilityHit(x, y)
+
+    internal fun accessibilityAction(id: Int, request: Int, a: Int, b: Int, value: Float, text: ByteArray?): Boolean =
+        nativeAccessibilityAction(id, request, a, b, value, text)
+
+    internal fun characterBounds(id: Int, start: Int, length: Int): FloatArray? = nativeCharacterBounds(id, start, length)
+
+    internal fun contentCapture(mode: Int): ByteArray? = nativeContentCapture(mode)
+
+    internal fun translationText(id: Long): String? = nativeTranslationText(id)?.toString(Charsets.UTF_8)
+
+    internal fun translation(id: Long, text: String): Boolean = nativeTranslation(id, text.toByteArray())
+
+    internal fun showTranslation(mode: Int) = nativeShowTranslation(mode)
+
+    internal fun autofillStructure(): ByteArray? = nativeAutofillStructure()
+
+    internal fun autofillValue(id: Int, type: Int, number: Long, text: ByteArray?): Boolean =
+        nativeAutofill(id, type, number, text)
+
+    internal fun scrollCaptureSearch(): IntArray? = nativeScrollCaptureSearch()
+
+    internal fun scrollCaptureStart(): Boolean = nativeScrollCaptureStart()
+
+    internal fun scrollCaptureRequest(token: Int, left: Int, top: Int, right: Int, bottom: Int) =
+        nativeScrollCaptureRequest(token, left, top, right, bottom)
+
+    internal fun scrollCaptureEnd(token: Int) = nativeScrollCaptureEnd(token)
+
     // What KompozIme, KompozTextToolbar and KompozInputDevices tell the app.
     internal fun imeEdit(session: Int, ops: IntArray, texts: ByteArray, text: ByteArray, offsets: IntArray) =
         nativeImeEdit(session, ops, texts, text, offsets)
@@ -286,4 +392,32 @@ open class KompozView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     private external fun nativeImeContent(session: Int, mimeTypes: ByteArray, uri: ByteArray, linkUri: ByteArray?): Boolean
 
     private external fun nativeToolbarAction(item: Int)
+
+    private external fun nativeAccessibilityTree(withEvents: Boolean): ByteArray?
+
+    private external fun nativeAccessibilityHit(x: Float, y: Float): Int
+
+    private external fun nativeAccessibilityAction(id: Int, request: Int, a: Int, b: Int, value: Float, text: ByteArray?): Boolean
+
+    private external fun nativeCharacterBounds(id: Int, start: Int, length: Int): FloatArray?
+
+    private external fun nativeContentCapture(mode: Int): ByteArray?
+
+    private external fun nativeTranslationText(id: Long): ByteArray?
+
+    private external fun nativeTranslation(id: Long, text: ByteArray): Boolean
+
+    private external fun nativeShowTranslation(mode: Int)
+
+    private external fun nativeAutofillStructure(): ByteArray?
+
+    private external fun nativeAutofill(id: Int, type: Int, number: Long, text: ByteArray?): Boolean
+
+    private external fun nativeScrollCaptureSearch(): IntArray?
+
+    private external fun nativeScrollCaptureStart(): Boolean
+
+    private external fun nativeScrollCaptureRequest(token: Int, left: Int, top: Int, right: Int, bottom: Int)
+
+    private external fun nativeScrollCaptureEnd(token: Int)
 }

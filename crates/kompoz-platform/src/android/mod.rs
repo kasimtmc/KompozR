@@ -21,22 +21,31 @@
 //!
 //! Our own JNI and NDK bindings (`jni`, `ndk`: no crates; text crosses as UTF-8 `byte[]`). What comes in later
 //! packages, each with a Kotlin class of its own beside KompozActivity and KompozView: the input methods, stylus
-//! and the full input (KompozIme), accessibility and autofill (KompozAccessibility, KompozAutofill), insets
-//! (KompozInsets), back (KompozBack) and the system's services (KompozServices).
+//! and the full input (KompozIme), accessibility (KompozAccessibility: a node provider over virtual views, from the
+//! shared semantics snapshot), autofill (KompozAutofill), content capture and translation (KompozContentCapture),
+//! scroll capture (KompozScrollCapture) — the last four through `delegate` —, insets (KompozInsets), back
+//! (KompozBack) and the system's services (KompozServices).
 //!
-//! The input's decoding, the configuration and the saved state's guard are plain Rust, built and tested on every
-//! host; the rest is Android's alone.
+//! The input's decoding, the configuration, the saved state's guard, and what accessibility, content capture,
+//! autofill and scroll capture are told and do (`accessibility`, `capture`, `autofill`, `semantics`) are plain Rust,
+//! built and tested on every host; the rest is Android's alone.
 
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
+pub mod accessibility;
+pub mod autofill;
+pub mod capture;
 mod configuration;
 mod devices;
 pub mod ime;
 pub mod input;
 mod saved_state;
+pub mod semantics;
 
 #[cfg(target_os = "android")]
 mod app;
+#[cfg(target_os = "android")]
+mod delegate;
 #[cfg(target_os = "android")]
 pub mod jni;
 #[cfg(target_os = "android")]

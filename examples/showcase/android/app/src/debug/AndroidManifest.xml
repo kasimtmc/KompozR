@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The debug build's accessibility probe: an instrumentation of the showcase itself (no test APK, no libraries),
+     run by `cargo xtask android a11y` through `adb shell am instrument`. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation
+        android:name=".A11yProbe"
+        android:label="KompozR accessibility probe"
+        android:targetPackage="dev.kompozr.showcase" />
+
+    <!-- An autofill service of the probe's (the emulator has none): ProbeAutofillService.kt. -->
+    <application>
+        <service
+            android:name=".ProbeAutofillService"
+            android:exported="true"
+            android:label="KompozR probe"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

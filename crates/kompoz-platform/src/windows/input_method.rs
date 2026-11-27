@@ -111,6 +111,13 @@ impl InputMethod {
         self.mode.get()
     }
 
+    /// The caret's box of the field that takes typing (px in the client area), if one does (UI Automation's text
+    /// ranges at the caret).
+    pub fn caret_box(&self) -> Option<Rect> {
+        let f = self.field.borrow();
+        f.active.then_some(f.area)
+    }
+
     /// The field as the input method sees it (tests).
     #[cfg(test)]
     pub fn field(&self) -> Field {
@@ -549,10 +556,47 @@ mod tests {
         u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
     }
 
+    /// A composition through the field's context (`c`, of `hwnd`'s field holding "ab"): its composing text, the
+    /// requests answered from the field while it composes, its result committed (the characters Windows would type
+    /// for it left out), a key's after, the core's answer taken.
+    fn composition_and_its_result(shared: &Shared, ime: &InputMethod, c: &Context, hwnd: Hwnd) {
+        use ::windows::Win32::UI::Input::Ime as imm32;
+        // Composing: the field's composing text, its caret where the input method has it.
+        c.set_open(true);
+        assert!(c.is_open());
+        assert!(c.set_composition(&units("かな")));
+        assert_eq!(typed(shared), [Event::Preedit { text: "かな".into(), cursor: Some((6, 6)) }]);
+        assert_eq!(ime.field().state, state("abかな", (8, 8), Some((2, 8))));
+        // The input method reads the text around its composition; asks where its characters are.
+        let feed = reconvert_string(hwnd, imm32::IMR_DOCUMENTFEED).expect("the document fed");
+        assert_eq!([dword(&feed, 2), dword(&feed, 4), dword(&feed, 5)], [4, 2, 4]);
+        assert_eq!(reconvert_string(hwnd, imm32::IMR_RECONVERTSTRING), None, "no reconversion while composing");
+        let mut position = imm32::IMECHARPOSITION {
+            dwSize: std::mem::size_of::<imm32::IMECHARPOSITION>() as u32,
+            ..Default::default()
+        };
+        let answered =
+            hwnd.send(wm::WM_IME_REQUEST, imm32::IMR_QUERYCHARPOSITION as usize, &mut position as *mut _ as isize);
+        let (x, y) = hwnd.client_origin();
+        assert_eq!(answered, 1);
+        assert_eq!((position.pt.x, position.pt.y, position.cLineHeight), (x + 10, y + 20, 20));
+        // Committed: the result the field's text, its characters typed by Windows after it left out; a key's after.
+        c.end_composition(true);
+        assert_eq!(typed(shared), [Event::Text("かな".into())]);
+        hwnd.send(wm::WM_CHAR, 'か' as usize, 0);
+        hwnd.send(wm::WM_IME_CHAR, 'な' as usize, 0);
+        hwnd.send(wm::WM_CHAR, 'x' as usize, 0);
+        assert_eq!(typed(shared), [Event::Text("x".into())]);
+        // The core's answer: the field as it took it (the key's character too).
+        ime.answer(Some(state("abかなx", (9, 9), None)));
+        assert_eq!(ime.field().state, state("abかなx", (9, 9), None));
+    }
+
     /// IMM32 under wine (its default input method: compositions set and completed through the context, as an
     /// input method makes them): the context only while a field takes typing (not a password's), its windows at the
     /// caret, its composition the field's composing text and its result committed (the characters Windows would type
-    /// for it left out), its requests answered from the field, a composition the app ended cancelled.
+    /// for it left out), its requests answered from the field, a composition the app ended cancelled. On Windows
+    /// (CI's runners: no input method that composes) the context, its windows, reconversion and the fields' ends.
     #[test]
     fn imm32_compositions_requests_and_the_apps_changes() {
         use ::windows::Win32::UI::Input::Ime as imm32;
@@ -578,35 +622,13 @@ mod tests {
         );
         // Its composition window hidden (KompozR draws the composing text): answered, Windows' own handling with it.
         hwnd.send(wm::WM_IME_SETCONTEXT, 1, ISC_SHOWUICOMPOSITIONWINDOW as i32 as isize | 0xF);
-        // Composing: the field's composing text, its caret where the input method has it.
-        c.set_open(true);
-        assert!(c.is_open());
-        assert!(c.set_composition(&units("かな")));
-        assert_eq!(typed(&shared), [Event::Preedit { text: "かな".into(), cursor: Some((6, 6)) }]);
-        assert_eq!(ime.field().state, state("abかな", (8, 8), Some((2, 8))));
-        // The input method reads the text around its composition; asks where its characters are.
-        let feed = reconvert_string(hwnd, imm32::IMR_DOCUMENTFEED).expect("the document fed");
-        assert_eq!([dword(&feed, 2), dword(&feed, 4), dword(&feed, 5)], [4, 2, 4]);
-        assert_eq!(reconvert_string(hwnd, imm32::IMR_RECONVERTSTRING), None, "no reconversion while composing");
-        let mut position = imm32::IMECHARPOSITION {
-            dwSize: std::mem::size_of::<imm32::IMECHARPOSITION>() as u32,
-            ..Default::default()
-        };
-        let answered =
-            hwnd.send(wm::WM_IME_REQUEST, imm32::IMR_QUERYCHARPOSITION as usize, &mut position as *mut _ as isize);
-        let (x, y) = hwnd.client_origin();
-        assert_eq!(answered, 1);
-        assert_eq!((position.pt.x, position.pt.y, position.cLineHeight), (x + 10, y + 20, 20));
-        // Committed: the result the field's text, its characters typed by Windows after it left out; a key's after.
-        c.end_composition(true);
-        assert_eq!(typed(&shared), [Event::Text("かな".into())]);
-        hwnd.send(wm::WM_CHAR, 'か' as usize, 0);
-        hwnd.send(wm::WM_IME_CHAR, 'な' as usize, 0);
-        hwnd.send(wm::WM_CHAR, 'x' as usize, 0);
-        assert_eq!(typed(&shared), [Event::Text("x".into())]);
-        // The core's answer: the field as it took it (the key's character too).
-        ime.answer(Some(state("abかなx", (9, 9), None)));
-        assert_eq!(ime.field().state, state("abかなx", (9, 9), None));
+        // Composing (wine's default input method composes what it is given; Windows without an East Asian input
+        // method installed — CI's runners — may commit it at once or keep it, by the keyboard's state: there only
+        // what needs no composition is checked).
+        let composes = crate::windows::sys::under_wine();
+        if composes {
+            composition_and_its_result(&shared, &ime, &c, hwnd);
+        }
         // Reconversion: a word selected, the paragraph given; confirmed over more of it, that part selected.
         ime.text_input_changed(&state("kanji desu", (0, 5), None));
         let mut r = reconvert_string(hwnd, imm32::IMR_RECONVERTSTRING).expect("the selection to reconvert");
@@ -617,12 +639,14 @@ mod tests {
         assert_eq!(confirmed, 1);
         assert_eq!(typed(&shared), [Event::SetSelection { start: 0, end: 10 }]);
         // The app ends a composition: the input method's cancelled, nothing more of it sent.
-        ime.answer(Some(state("kanji desu", (10, 10), None)));
-        assert!(c.set_composition(&units("と")));
-        assert_eq!(typed(&shared), [Event::Preedit { text: "と".into(), cursor: Some((3, 3)) }]);
-        ime.answer(Some(state("", (0, 0), None)));
-        assert!(c.string(Part::Composition).is_empty(), "cancelled");
-        assert!(typed(&shared).is_empty());
+        if composes {
+            ime.answer(Some(state("kanji desu", (10, 10), None)));
+            assert!(c.set_composition(&units("と")));
+            assert_eq!(typed(&shared), [Event::Preedit { text: "と".into(), cursor: Some((3, 3)) }]);
+            ime.answer(Some(state("", (0, 0), None)));
+            assert!(c.string(Part::Composition).is_empty(), "cancelled");
+            assert!(typed(&shared).is_empty());
+        }
         // A password: no input method; the field gone: none.
         drop(c);
         let password = ImeOptions { keyboard_type: kompoz_ui::platform::KeyboardType::Password, ..options.clone() };

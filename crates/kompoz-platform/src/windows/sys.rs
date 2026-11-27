@@ -1294,3 +1294,14 @@ pub fn has_camera() -> bool {
     };
     result == CR_SUCCESS && size > 1 // (an empty list is its terminating 0)
 }
+
+/// Whether this runs under wine (its ntdll says its version): what tests whose Windows parts wine lacks, or has
+/// where Windows doesn't (an input method that composes), ask.
+#[cfg(test)]
+pub fn under_wine() -> bool {
+    // SAFETY: queries of the process's ntdll.
+    unsafe {
+        GetModuleHandleW(::windows::core::w!("ntdll.dll"))
+            .is_ok_and(|m| GetProcAddress(m, ::windows::core::s!("wine_get_version")).is_some())
+    }
+}

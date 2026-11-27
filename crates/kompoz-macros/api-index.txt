@@ -3,6 +3,7 @@
 # The format: crates/kompoz-macros/src/api_index.rs. Parameters: r without a default, d with one (R, D #[memoized]).
 # <scope> <kind> <name> <parameters> <owner>
 * super AboveTooltipPositionProvider - PopupPositionProvider
+kompoz-platform/macos_display kompozable Accessible - crates/kompoz-platform/tests/macos_display.rs
 kompoz-material3/floating_toolbar kompozable Action r crates/kompoz-material3/tests/floating_toolbar.rs
 kompoz-material3/snackbars_tooltips kompozable ActionButton r crates/kompoz-material3/tests/snackbars_tooltips.rs
 * super AdapterEditorState - TextEditorState
@@ -1749,6 +1750,7 @@ kompoz-runtime/macros kompozable ScopeItems r crates/kompoz-runtime/tests/macros
 * super ScopeObserver - LifecycleEventObserver
 * super ScopeObserver - LifecycleObserver
 kompoz-navigation3/navigation3 kompozable Screen r crates/kompoz-navigation3/tests/navigation3.rs
+kompoz-platform/uia_windows kompozable Screen - crates/kompoz-platform/tests/uia_windows.rs
 * kompozable Scrim rdddd crates/kompoz-material3/src/scrim.rs
 * super ScrollLayoutElement - ModifierNodeElement
 * super ScrollLayoutNode - LayoutModifierNode

@@ -13,6 +13,7 @@ use super::event_loop::{EventLoop, Waker};
 use super::input_method::{self, InputMethod};
 use super::keyboard::{self, Characters, VK_CONTROL, VK_F4, VK_MENU, VK_SPACE};
 use super::sys::{self, Cursor, Hwnd, Icon, Placed, WindowHandler, WindowMessage};
+use super::uia_bridge::{UiaAction, UiaBridge};
 use super::{Route, StepKind, now, route};
 use crate::app::{Event, Metrics, MouseButton, Platform, TitleBarColors, TrayImage, WindowSpec};
 use crate::system::{log, preferred_language};
@@ -23,6 +24,7 @@ use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
 use kompoz_ui::platform::{ImeOptions, PlatformCallbacks, PointerIcon, TextEditState};
+use kompoz_ui::semantics::{SemanticsAction, SemanticsProperties};
 use kompoz_ui::window::{WindowId, WindowPlacement};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -310,6 +312,11 @@ pub struct WindowState {
     icon: RefCell<Option<Icon>>,
     /// Its host asks for the display to be kept on.
     keep_on: Cell<bool>,
+    /// Its UI Automation bridge while it is open (none: `KOMPOZ_UIA=0`).
+    uia: RefCell<Option<UiaBridge>>,
+    /// Its semantics tree to publish to UI Automation (it changed), and when it was last (the platform's clock).
+    uia_dirty: Cell<bool>,
+    uia_last: Cell<Option<i64>>,
 }
 
 impl WindowState {
@@ -337,6 +344,9 @@ impl WindowState {
             windowed: Cell::new(None),
             icon: RefCell::new(None),
             keep_on: Cell::new(false),
+            uia: RefCell::new(None),
+            uia_dirty: Cell::new(true),
+            uia_last: Cell::new(None),
         }
     }
 
@@ -344,8 +354,17 @@ impl WindowState {
         self.events.borrow_mut().push_back(event);
     }
 
+    /// The events gathered since (a UI Automation client's requests among them).
     pub(super) fn take_events(&self) -> Vec<Event> {
+        if self.uia.borrow().as_ref().is_some_and(UiaBridge::take_pending) {
+            self.push(Event::AccessibilityRequest);
+        }
         self.events.borrow_mut().drain(..).collect()
+    }
+
+    /// The window's bridge, if it has one (cloned: what it calls may come back to the window's procedure).
+    fn uia(&self) -> Option<UiaBridge> {
+        self.uia.borrow().clone()
     }
 
     /// The client area's size as it is now; whether it changed (minimized: kept as it was).
@@ -491,6 +510,22 @@ impl WindowState {
     }
 }
 
+/// Code points `start` and `end` of field `id`'s text as typed (what UI Automation's ranges are in) as its bytes
+/// (what its SetSelection action takes).
+fn typed_bytes(host: &KompozHost, id: u64, start: usize, end: usize) -> (i32, i32) {
+    let typed = host
+        .semantics_owner()
+        .find(id, true)
+        .and_then(|n| {
+            let config = n.config();
+            config.get(SemanticsProperties::InputText).or_else(|| config.get(SemanticsProperties::EditableText))
+        })
+        .map(|t| t.text().to_string())
+        .unwrap_or_default();
+    let byte = |at: usize| typed.char_indices().nth(at).map_or(typed.len(), |(i, _)| i) as i32;
+    (byte(start), byte(end))
+}
+
 /// A mouse message's position (signed: outside the window while captured).
 fn point_of(l: isize) -> (i32, i32) {
     ((l & 0xffff) as u16 as i16 as i32, ((l >> 16) & 0xffff) as u16 as i16 as i32)
@@ -522,6 +557,14 @@ impl WindowHandler for WindowState {
             wm::WM_CLOSE => {
                 self.push(Event::CloseRequest);
                 Some(0)
+            }
+            // UI Automation asks for the window's root (the first time: its tree is to be published).
+            wm::WM_GETOBJECT => {
+                let (answer, first) = self.uia()?.answer(hwnd, w, l)?;
+                if first {
+                    self.push(Event::AccessibilityRequest);
+                }
+                Some(answer)
             }
             wm::WM_SIZE => {
                 const SIZE_RESTORED: usize = 0;
@@ -817,6 +860,11 @@ impl Platform for Win32Window {
             .ok_or_else(|| format!("the window couldn't be made ({})", sys::last_error()))?;
         state.hwnd.set(hwnd);
         state.ime.attach(hwnd, input_method::mode());
+        if UiaBridge::enabled() {
+            *state.uia.borrow_mut() = Some(UiaBridge::new(hwnd, self.shared.waker().as_fn()));
+            state.uia_dirty.set(true);
+            state.uia_last.set(None);
+        }
         state.dpi.set(hwnd.dpi());
         let scale = self.scale();
         let width = ((spec.width.0 as f64 * scale).round() as i32).max(1);
@@ -863,6 +911,10 @@ impl Platform for Win32Window {
         self.state.tracking_leave.set(false);
         self.state.windowed.set(None);
         self.state.ime.detach();
+        let bridge = self.state.uia.borrow_mut().take();
+        if let Some(bridge) = bridge {
+            bridge.close();
+        }
         hwnd.destroy();
     }
 
@@ -938,12 +990,51 @@ impl Platform for Win32Window {
         Rc::new(Win32Callbacks { shared: self.shared.clone(), state: self.state.clone(), waker: self.shared.waker() })
     }
 
-    /// The display kept on while the host asks (any window's: `SetThreadExecutionState`).
-    fn composed(&mut self, host: &KompozHost, _redraw: bool, _frame_time: i64) {
+    /// What UI Automation clients asked of the window's nodes performed (C++'s `performSemanticsAction`s); its tree
+    /// to publish again as the window's focus changes.
+    fn handled(&mut self, host: &KompozHost, event: &Event) {
+        match event {
+            Event::AccessibilityRequest => {
+                let Some(bridge) = self.state.uia() else { return };
+                for r in bridge.take_requests() {
+                    let action = match r.action {
+                        UiaAction::Do(action) => action,
+                        UiaAction::Select { start, end } => {
+                            let (start, end) = typed_bytes(host, r.id, start, end);
+                            SemanticsAction::SetSelection { start, end, relative_to_original_text: true }
+                        }
+                    };
+                    host.perform_semantics_action(r.id, action);
+                }
+            }
+            Event::FocusGained | Event::FocusLost => self.state.uia_dirty.set(true),
+            _ => {}
+        }
+    }
+
+    /// The display kept on while the host asks (any window's: `SetThreadExecutionState`); the window's semantics
+    /// tree published to UI Automation as its clients ask for it (at once when they do, else at most every 50 ms,
+    /// 500 ms while the app is busy: Linux's AT-SPI bridge's pace), with the focused field's caret box.
+    fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64) {
         let on = host.keep_screen_on() && !self.hwnd().is_none();
         if self.state.keep_on.replace(on) != on {
             self.shared.keep_display_on();
         }
+        let Some(bridge) = self.state.uia().filter(UiaBridge::active) else { return };
+        let requested = bridge.take_tree_request();
+        let state = &self.state;
+        state.uia_dirty.set(state.uia_dirty.get() || redraw || requested || host.take_semantics_changed());
+        let interval = if host.has_pending_work() { 500_000_000 } else { 50_000_000 };
+        if state.uia_dirty.get() && (requested || state.uia_last.get().is_none_or(|t| frame_time - t > interval)) {
+            state.uia_last.set(Some(frame_time));
+            state.uia_dirty.set(false);
+            bridge.publish(host.accessibility_tree(), state.ime.caret_box());
+        }
+    }
+
+    /// One more frame publishes the tree to UI Automation (it changed, or a client wants it).
+    fn wants_frames(&self) -> bool {
+        self.state.uia().is_some_and(|b| b.active()) && self.state.uia_dirty.get()
     }
 
     fn set_title(&mut self, title: &str) {

@@ -784,6 +784,13 @@ fn the_value_overload_keeps_the_apps_selection() {
     value.set(TextFieldValue::from_text("merhaba", TextRange::new(0, 3), None));
     rule.wait_for_idle();
     assert_eq!(config_of(&rule, "f").get(SemanticsProperties::TextSelectionRange), Some(TextRange::new(0, 3)));
+    // Accessibility's: in code points (the bytes of "çağ" are five).
+    value.set(TextFieldValue::from_text("çağ", TextRange::new(2, 5), None));
+    rule.wait_for_idle();
+    let field = |tree: Vec<AccessibilityNode>| tree.into_iter().find(|n| n.editable).unwrap();
+    assert_eq!(field(rule.host().accessibility_tree()).text_selection, Some((1, 3)));
+    value.set(TextFieldValue::from_text("merhaba", TextRange::new(0, 3), None));
+    rule.wait_for_idle();
     // The app's selection is the input method's too.
     assert!(p.changed.borrow().last().is_some_and(|s| (s.selection_start, s.selection_end) == (0, 3)));
     type_text(&rule, "X");

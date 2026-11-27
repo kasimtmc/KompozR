@@ -611,7 +611,7 @@ fn scroll_actions_page_by_the_viewport() {
             .size_wh(100.dp(), 300.dp())
             .semantics(move |c| {
                 let s = s.clone();
-                c.set_vertical_scroll_axis_range(ScrollAxisRange::new(|| 0.0, || 1000.0, false));
+                c.set_vertical_scroll_axis_range(ScrollAxisRange::new(|| 250.0, || 1000.0, false));
                 c.scroll_by(move |x, y| {
                     s.borrow_mut().push((x, y));
                     true
@@ -620,10 +620,18 @@ fn scroll_actions_page_by_the_viewport() {
             .test_tag("liste"));
     }));
     let id = rule.on_node_with_tag("liste").fetch_semantics_node().id();
-    assert!(rule.host().accessibility_tree().iter().any(|n| n.id == id && n.scrollable));
+    let tree = rule.host().accessibility_tree();
+    let list = tree.iter().find(|n| n.id == id).unwrap();
+    assert!(list.scrollable && list.horizontal_scroll.is_none());
+    // (Where it is as the tree was made: what UI Automation's scroll percentages are worked out of.)
+    assert_eq!(
+        list.vertical_scroll,
+        Some(ScrollPosition { value: 250.0, max_value: 1000.0, reverse_scrolling: false })
+    );
     assert!(rule.host().perform_semantics_action(id, SemanticsAction::ScrollForward));
     assert!(rule.host().perform_semantics_action(id, SemanticsAction::ScrollBackward));
-    assert_eq!(*scrolled.borrow(), [(0.0, 300.0), (0.0, -300.0)]);
+    assert!(rule.host().perform_semantics_action(id, SemanticsAction::ScrollBy { x: 0.0, y: 125.0 }));
+    assert_eq!(*scrolled.borrow(), [(0.0, 300.0), (0.0, -300.0), (0.0, 125.0)]);
     rule.on_node_with_tag("liste").assert(has_scroll_action());
 }
 

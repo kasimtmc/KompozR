@@ -15,6 +15,14 @@
 //!     same fonts): its shots the window's, pixel for pixel, as the Windows test compares them.
 //! cargo xtask android compare <dir> <dir>
 //!     the shots of two runs compared (the same pictures, byte for byte: one encoder)
+//! cargo xtask android a11y [--serial <device>] [--steps "<steps>"] [--autofill] [--out <dir>]
+//!     the installed debug app's accessibility as a service sees it, without TalkBack: its probe (an
+//!     instrumentation of the app, examples/showcase/android/app/src/debug: `am instrument`) runs the steps (dump,
+//!     clicks, scrolls, texts, selections, events: A11yProbe.kt's) and reports; then `uiautomator dump`'s tree is
+//!     checked (the app's virtual views there: classes, texts, states). Fails on a step that failed or a tree that
+//!     lacks them. With --out: the report and the dump kept there. With --autofill the probe's own autofill
+//!     service (ProbeAutofillService: it logs the structure it is given, offers "KompozR probe") is the device's
+//!     for the run (an emulator has none), its log shown after.
 //! ```
 //!
 //! Gradle runs offline without a daemon (`--offline --no-daemon`: everything it needs is in ~/.gradle). The SDK is
@@ -42,6 +50,7 @@ pub fn run(workspace: &Path, args: &[&str]) -> Result<(), String> {
             adb(&options, &["install", "-r", &apk.to_string_lossy()])
         }
         "shots" => shots(workspace, &options),
+        "a11y" => a11y(&options),
         "compare" => match options.free.as_slice() {
             [a, b] => compare(Path::new(a), Path::new(b)),
             _ => Err(USAGE.into()),
@@ -52,7 +61,8 @@ pub fn run(workspace: &Path, args: &[&str]) -> Result<(), String> {
 
 const USAGE: &str = "usage: cargo xtask android build|install [--abi <abi>]… [--release] [--serial <device>] | \
                      cargo xtask android shots --out <dir> --script <script> [--serial <device>] [--option N=V]… \
-                     [--headless --abi <abi>] [--timeout <s>] | cargo xtask android compare <dir> <dir>";
+                     [--headless --abi <abi>] [--timeout <s>] | cargo xtask android compare <dir> <dir> | \
+                     cargo xtask android a11y [--serial <device>] [--steps <steps>] [--autofill] [--out <dir>]";
 
 #[derive(Default)]
 struct Options {
@@ -61,6 +71,8 @@ struct Options {
     serial: Option<String>,
     out: Option<PathBuf>,
     script: Option<String>,
+    steps: Option<String>,
+    autofill: bool,
     options: Vec<(String, String)>,
     headless: bool,
     timeout: Duration,
@@ -79,6 +91,8 @@ impl Options {
                 "--serial" => o.serial = Some(value()?),
                 "--out" => o.out = Some(PathBuf::from(value()?)),
                 "--script" => o.script = Some(value()?),
+                "--steps" => o.steps = Some(value()?),
+                "--autofill" => o.autofill = true,
                 "--option" => {
                     let v = value()?;
                     let (name, value) = v.split_once('=').ok_or(format!("--option {v}: not NAME=VALUE"))?;
@@ -271,6 +285,113 @@ fn headless_shots(workspace: &Path, o: &Options, script: &str, out: &Path) -> Re
         std::fs::write(out.join(name), png).map_err(|e| format!("{name}: {e}"))?;
     }
     Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+/// The probe's instrumentation (the debug app's).
+const PROBE: &str = "dev.kompozr.showcase/.A11yProbe";
+
+/// The probe's autofill service.
+const AUTOFILL_SERVICE: &str = "dev.kompozr.showcase/.ProbeAutofillService";
+
+/// What the probe does without `--steps`: the tree and the events of the app's start.
+const DEFAULT_STEPS: &str = "dump;events";
+
+/// `cargo xtask android a11y`.
+fn a11y(o: &Options) -> Result<(), String> {
+    let steps = o.steps.as_deref().unwrap_or(DEFAULT_STEPS);
+    if let Some(out) = &o.out {
+        std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    adb(o, &["shell", "am", "force-stop", PACKAGE])?;
+    if o.autofill {
+        adb(o, &["shell", "settings", "put", "secure", "autofill_service", AUTOFILL_SERVICE])?;
+        adb(o, &["logcat", "-c"])?;
+    }
+    let run = format!("am instrument -w -e steps {} {PROBE}", quoted(steps));
+    let output = adb_output(o, &["shell", &run], None);
+    if o.autofill {
+        let log = adb_output(o, &["logcat", "-d", "-s", "kompoz-probe:*"], None).unwrap_or_default();
+        println!("{}", String::from_utf8_lossy(&log));
+        adb(o, &["shell", "settings", "delete", "secure", "autofill_service"])?;
+    }
+    let output = String::from_utf8_lossy(&output?).into_owned();
+    // (`am instrument -w` prints the result's bundle: INSTRUMENTATION_RESULT: result=… lines, then its code.)
+    let report = output.split_once("result=").map_or(output.as_str(), |(_, r)| r);
+    let report = report.split("INSTRUMENTATION_CODE").next().unwrap_or(report).trim_end();
+    println!("{report}");
+    if let Some(out) = &o.out {
+        std::fs::write(out.join("probe.txt"), &output).map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    if output.contains("error=") || !output.contains("INSTRUMENTATION_CODE: -1") {
+        return Err(format!("the probe failed:\n{output}"));
+    }
+    let failed: Vec<&str> = report.lines().filter(|l| l.contains("FAIL")).collect();
+    if !failed.is_empty() {
+        return Err(format!("{} steps failed: {failed:?}", failed.len()));
+    }
+    // The tree as UI Automator dumps it (the app still shown: the probe's activity is the app's).
+    adb(o, &["shell", "am", "start", "-W", "-n", ACTIVITY])?;
+    std::thread::sleep(Duration::from_secs(3));
+    let path = "/sdcard/kompozr-a11y.xml";
+    let dumped = String::from_utf8_lossy(&adb_output(o, &["shell", "uiautomator", "dump", path], None)?).into_owned();
+    let xml = String::from_utf8_lossy(&adb_output(o, &["exec-out", "cat", path], None)?).into_owned();
+    if let Some(out) = &o.out {
+        std::fs::write(out.join("uiautomator.xml"), &xml).map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+    let summary = ui_summary(&xml);
+    println!("uiautomator: {} ({dumped}): {summary:?}", path);
+    summary.check()
+}
+
+/// What a `uiautomator dump` of the app shows: its nodes, their classes, those with texts, those clickable,
+/// checkable and scrollable.
+#[derive(Debug, Default)]
+struct UiSummary {
+    nodes: usize,
+    classes: std::collections::BTreeMap<String, usize>,
+    texts: usize,
+    clickable: usize,
+    checkable: usize,
+    scrollable: usize,
+}
+
+impl UiSummary {
+    /// The app's virtual views are there: more than the view itself, with texts, classes of their own and things
+    /// to click.
+    fn check(&self) -> Result<(), String> {
+        let own = self.classes.keys().any(|c| c != "android.view.View" && c != "android.view.SurfaceView");
+        if self.nodes > 3 && self.texts > 0 && self.clickable > 0 && own {
+            Ok(())
+        } else {
+            Err(format!("the dump lacks the app's virtual views: {self:?}"))
+        }
+    }
+}
+
+/// The app's nodes in a `uiautomator dump` (its `<node …>` elements of the app's package).
+fn ui_summary(xml: &str) -> UiSummary {
+    let attribute = |node: &str, name: &str| -> Option<String> {
+        let start = node.find(&format!(" {name}=\""))? + name.len() + 3;
+        let end = node[start..].find('"')? + start;
+        Some(node[start..end].to_string())
+    };
+    let mut s = UiSummary::default();
+    for node in xml.split("<node ").skip(1) {
+        let node = node.split('>').next().unwrap_or(node);
+        if attribute(node, "package").as_deref() != Some(PACKAGE) {
+            continue;
+        }
+        s.nodes += 1;
+        *s.classes.entry(attribute(node, "class").unwrap_or_default()).or_default() += 1;
+        if attribute(node, "text").is_some_and(|t| !t.is_empty()) {
+            s.texts += 1;
+        }
+        let yes = |name: &str| attribute(node, name).as_deref() == Some("true");
+        s.clickable += yes("clickable") as usize;
+        s.checkable += yes("checkable") as usize;
+        s.scrollable += yes("scrollable") as usize;
+    }
+    s
 }
 
 /// The PNGs in `dir`, by name.
