@@ -388,11 +388,11 @@ jobs:
   # The Windows platform on windows-latest (MSVC, the runner's own target): clippy for Windows' cfg; then on Mesa's
   # lavapipe as mesa-dist-win builds it for Windows (cached; registered as the system's Vulkan driver: the runner is
   # elevated, so the loader ignores VK_DRIVER_FILES; the runner's own driver has no surfaces) the workspace's tests
-  # (the showcase's comparison with the C++ showcase's pictures left to Linux: it sets its text in the showcase's fonts
-  # through fontconfig; its composition tests run), and in real windows: the Counter and the Kotlin Counter (their
-  # shots the headless Counter's, pixel for pixel), the showcase (its window's shots its headless run's), the app's
-  # several windows, and the Counter by CI's script as the Linux display job runs it (its shots checked and kept). The Vulkan validation layers on Windows
-  # (LunarG's SDK) are package W8's: the device code is validated on Linux.
+  # (the showcase's against the C++ showcase's pictures too: its text in the showcase's fonts alone, KOMPOZ_FONTS),
+  # and in real windows: the Counter and the Kotlin Counter (their shots the headless Counter's, pixel for pixel), the
+  # showcase (its window's shots its headless run's), the app's several windows, and the Counter by CI's script as
+  # the Linux display job runs it (its shots checked and kept). The Vulkan validation layers on Windows (LunarG's SDK)
+  # are package W8's: the device code is validated on Linux.
   windows:
     runs-on: windows-latest
     defaults:
@@ -430,7 +430,7 @@ jobs:
         run: |
           cargo test --workspace --no-fail-fast --exclude showcase
           cargo test -p showcase --lib
-          cargo test -p showcase --test headless -- composes opens deep_links
+          cargo test -p showcase --test headless
       - name: The Counters, the showcase and the app's windows in real windows (lavapipe)
         if: success() || failure()
         env:
@@ -467,14 +467,17 @@ jobs:
             target/tmp/counter-kotlin-windows-*/
             target/tmp/showcase-windows-*/
             target/tmp/win32-windows/
+            target/tmp/showcase-shots/*/s*.png
+            target/tmp/showcase-shots/*/top*.png
+            target/tmp/showcase-shots/*/bottom*.png
           if-no-files-found: ignore
 
   # macOS on Apple silicon (the runner's paravirtual Apple GPU), Metal: kompoz-gpu's tests against the same goldens
   # as lavapipe's, strictly (the renderer's y-up clip space runs here), Metal's API validation on (MTL_DEBUG_LAYER=1:
   # an error it finds aborts the run; KOMPOZ_GPU_VALIDATION=1 counts what Metal reports to the device), then the app
   # core and the Counters and the showcase on the headless platform (Metal drawing only into the kept frame, as C++'s
-  # headless Metal step; the showcase's sections, not its pictures against the C++ one's: those are of fontconfig's
-  # fonts narrowed to its own, and macOS's text is set in CoreText's), then the macOS platform in real windows on
+  # headless Metal step; the showcase's sections and its pictures against the C++ one's, its text in the showcase's
+  # fonts alone through KOMPOZ_FONTS, as CoreText's aren't narrowed), then the macOS platform in real windows on
   # the runner's display (its own tests, the Counter's and the showcase's window shots against their headless runs',
   # the Counter by CI's script), then the workspace's tests. Each step runs
   # whether those before failed or not (each tells something of its own); the pictures that differ are kept.

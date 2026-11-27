@@ -87,7 +87,7 @@ pub struct FontFamilyResolverImpl {
 }
 
 thread_local! {
-    static SYSTEM: Rc<FontFamilyResolverImpl> = Rc::new(FontFamilyResolverImpl::new(Rc::new(FontCollection::system())));
+    static SYSTEM: Rc<FontFamilyResolverImpl> = Rc::new(FontFamilyResolverImpl::new(Rc::new(FontCollection::of_environment())));
 }
 
 impl FontFamilyResolverImpl {
@@ -104,8 +104,8 @@ impl FontFamilyResolverImpl {
     }
 
     /// The thread's resolver over the system's fonts (fontconfig's on Linux, through fontique; scanned when text
-    /// is first resolved): what a host lays text out with unless told otherwise (Compose's
-    /// `createFontFamilyResolver(context)`).
+    /// is first resolved), or only `KOMPOZ_FONTS`' ([`FontCollection::of_environment`]): what a host lays text out
+    /// with unless told otherwise (Compose's `createFontFamilyResolver(context)`).
     pub fn system() -> Rc<FontFamilyResolverImpl> {
         SYSTEM.with(Rc::clone)
     }

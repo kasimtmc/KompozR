@@ -293,6 +293,25 @@ fn a_collection_registers_families_and_its_fallbacks() {
     assert_eq!(c.face(kompoz, FontWeight::Normal, FontStyle::Normal).unwrap().font, face.font);
 }
 
+/// A directory's fonts alone (`KOMPOZ_FONTS`): its font files registered (others left out), every generic family its
+/// first family until set otherwise, no system fonts.
+#[test]
+fn a_collection_of_a_directorys_fonts_alone() {
+    let c = FontCollection::of_directory(font_path(""));
+    assert!(!c.has_system_fonts());
+    let mut names = c.family_names();
+    names.sort();
+    assert!(names.contains(&"Noto Sans".to_string()) && names.contains(&"Kompoz Test".to_string()), "{names:?}");
+    // (Cantarell-VF-Subset.otf comes first by name; generate.py and README aren't fonts)
+    let first = c.family_id("Cantarell").expect("Cantarell");
+    for generic in [GenericFontFamily::SansSerif, GenericFontFamily::Serif, GenericFontFamily::Monospace] {
+        assert_eq!(c.generic_families(generic), vec![first]);
+    }
+    c.set_generic_families(GenericFontFamily::Monospace, &["Noto Sans"]);
+    assert_eq!(c.generic_families(GenericFontFamily::Monospace), vec![c.family_id("Noto Sans").unwrap()]);
+    assert!(FontCollection::of_directory("missing-directory").family_names().is_empty());
+}
+
 /// The system's fonts (fontconfig on Linux, loaded at run time): set KOMPOZ_SYSTEM_FONTS=1 to run it on a machine
 /// that has fonts.
 #[test]

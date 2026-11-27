@@ -101,6 +101,55 @@ impl FontCollection {
         FontCollection { options, inner: RefCell::new(None) }
     }
 
+    /// A collection of only the font files in `dir` (`.ttf`, `.otf`, `.ttc`, `.otc`, registered in their names'
+    /// order; what can't be read is left out), every generic family its first family until set otherwise: text set
+    /// in the same fonts on every system, as fontconfig narrowed to a directory sets it on Linux — but on Apple's
+    /// systems and Windows too, whose font services no configuration narrows.
+    pub fn of_directory(dir: impl AsRef<Path>) -> FontCollection {
+        let collection = FontCollection::registered_only();
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| ["ttf", "otf", "ttc", "otc"].iter().any(|known| e.eq_ignore_ascii_case(known)))
+            })
+            .collect();
+        files.sort();
+        let mut first = None;
+        for file in files {
+            if let Some(bytes) = load_font_file(&file) {
+                let names = collection.register(bytes);
+                first = first.or_else(|| names.into_iter().next());
+            }
+        }
+        if let Some(first) = first {
+            for generic in GENERICS {
+                collection.set_generic_families(generic, &[&first]);
+            }
+        }
+        collection
+    }
+
+    /// The collection a thread's text is set in unless told otherwise: the system's, or — `KOMPOZ_FONTS` naming a
+    /// directory — [only its fonts](FontCollection::of_directory), its generic families as `KOMPOZ_FONT_FAMILIES`
+    /// names them (`sans-serif=Noto Sans;monospace=Noto Sans Mono`: the families of each, in order, comma-separated).
+    pub fn of_environment() -> FontCollection {
+        let Some(dir) = kompoz_runtime::environment::var_os("KOMPOZ_FONTS").filter(|d| !d.is_empty()) else {
+            return FontCollection::system();
+        };
+        let collection = FontCollection::of_directory(Path::new(&dir));
+        if let Some(families) = kompoz_runtime::environment::var("KOMPOZ_FONT_FAMILIES") {
+            for (generic, names) in generic_families_of(&families) {
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                collection.set_generic_families(generic, &names);
+            }
+        }
+        collection
+    }
+
     /// Whether it holds the system's fonts.
     pub fn has_system_fonts(&self) -> bool {
         self.options.system_fonts
@@ -276,6 +325,24 @@ impl fmt::Debug for FontCollection {
     }
 }
 
+/// The generic families a collection names (the default family is sans-serif's).
+const GENERICS: [GenericFontFamily; 4] =
+    [GenericFontFamily::SansSerif, GenericFontFamily::Serif, GenericFontFamily::Monospace, GenericFontFamily::Cursive];
+
+/// `KOMPOZ_FONT_FAMILIES`' generic families and their families (`generic=Family, Family;…`; unknown generics and
+/// empty entries left out).
+fn generic_families_of(text: &str) -> Vec<(GenericFontFamily, Vec<String>)> {
+    text.split(';')
+        .filter_map(|entry| {
+            let (generic, families) = entry.split_once('=')?;
+            let generic = GenericFontFamily::from_name(generic.trim())?;
+            let families: Vec<String> =
+                families.split(',').map(str::trim).filter(|f| !f.is_empty()).map(str::to_string).collect();
+            (!families.is_empty()).then_some((generic, families))
+        })
+        .collect()
+}
+
 fn generic_of(generic: GenericFontFamily) -> GenericFamily {
     match generic {
         GenericFontFamily::Default | GenericFontFamily::SansSerif => GenericFamily::SansSerif,
@@ -288,4 +355,20 @@ fn generic_of(generic: GenericFontFamily) -> GenericFamily {
 fn fallback_key(script: [u8; 4], locale: Option<&Locale>) -> FallbackKey {
     let language = locale.and_then(|l| Language::parse(&l.to_language_tag()).ok());
     FallbackKey::new(Script::from_bytes(script), language.as_ref())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_families_are_read_from_their_text() {
+        assert_eq!(
+            generic_families_of("sans-serif=Noto Sans; monospace = Noto Sans Mono, DejaVu Sans Mono;fantasy=X;serif="),
+            [
+                (GenericFontFamily::SansSerif, vec!["Noto Sans".to_string()]),
+                (GenericFontFamily::Monospace, vec!["Noto Sans Mono".to_string(), "DejaVu Sans Mono".to_string()]),
+            ]
+        );
+    }
 }

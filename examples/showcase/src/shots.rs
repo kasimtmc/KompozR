@@ -116,10 +116,9 @@ pub fn places_script(config: Config, showcase: Showcase) -> String {
     s
 }
 
-/// Whether the app's text is set in fontconfig's fonts here (fontique's system fonts are fontconfig's on Linux; on
-/// Apple's systems CoreText's, on Windows DirectWrite's, which no configuration narrows to [`fonts_dir`]'s): only
-/// then is its text set in the C++ showcase's fonts alone, as the comparison with its pictures needs.
-pub const FONTS_BY_FONTCONFIG: bool = cfg!(target_os = "linux");
+/// The generic families of the app's text in [`fonts_dir`]'s fonts alone (`KOMPOZ_FONT_FAMILIES`), as
+/// [`write_fontconfig`]'s configuration names them for the C++ showcase.
+pub const FONT_FAMILIES: &str = "sans-serif=Noto Sans;serif=Noto Sans;cursive=Noto Sans;monospace=Noto Sans Mono";
 
 /// The directory of the fonts both showcases set their text in (examples/showcase/fonts).
 pub fn fonts_dir() -> PathBuf {
@@ -166,10 +165,12 @@ pub fn run(
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut command = Command::new(binary);
     command.args(args);
-    // (on lavapipe, the CPU's Vulkan, unless the environment names a driver: every machine draws alike; where Metal
-    // is the API, on the system's GPU, whose pictures are lavapipe's within the goldens' three, as kompoz-gpu's tests
-    // check)
+    // (on lavapipe, the CPU's Vulkan, unless the environment names a driver: every machine draws alike — on Windows
+    // lavapipe registered as the system's driver, as CI's job does, since an elevated process's loader ignores
+    // VK_DRIVER_FILES; where Metal is the API, on the system's GPU, whose pictures are lavapipe's within the goldens'
+    // three, as kompoz-gpu's tests check)
     if NATIVE_BACKEND == Backend::Vulkan
+        && !cfg!(windows)
         && std::env::var_os("VK_DRIVER_FILES").is_none()
         && std::env::var_os("VK_ICD_FILENAMES").is_none()
     {
@@ -184,7 +185,11 @@ pub fn run(
         .env("KOMPOZ_NO_WALLPAPER_COLORS", "1")
         .env("KOMPOZ_LANGUAGE", "tr")
         .env("KOMPOZ_LAYOUT_DIRECTION", "ltr")
+        // (the C++ showcase's text in fontconfig's configuration of the fonts; KompozR's in those fonts alone on
+        // every system, whose font services — CoreText's, DirectWrite's — no configuration narrows)
         .env("FONTCONFIG_FILE", fontconfig)
+        .env("KOMPOZ_FONTS", fonts_dir())
+        .env("KOMPOZ_FONT_FAMILIES", FONT_FAMILIES)
         .env_remove("KOMPOZ_STATE_FILE")
         .env_remove("KOMPOZ_PREVIEW")
         .stdout(Stdio::null())
