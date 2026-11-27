@@ -8,13 +8,20 @@
 //!
 //! A tray started (or restarted) after the app has its icons registered with it again (the watcher's
 //! `NameOwnerChanged`).
+//!
+//! The windows' menu bars go the same way where the desktop has a global menu (KDE's, Unity's: a
+//! `com.canonical.AppMenu.Registrar` on the bus): each window's menus a `com.canonical.dbusmenu` of its own
+//! (`/WindowMenu/<window>`), an X11 window registered with the registrar by its id (`RegisterWindow`; a Wayland
+//! window's surface told the address through KDE's appmenu protocol by its platform); a click told as an
+//! [`Event::MenuBarItem`], the registrar coming or going as [`Event::MenuBarHostChanged`] (the windows' menu bars
+//! shown again: by the desktop, or drawn in the windows).
 
 use super::dbus::{Connection, MatchRule, Message, MessageType, Type, Value, errors};
 use super::desktop::Notify;
 use super::sys;
 use crate::app::{Event, TrayIcon, TrayMenuItem};
 use kompoz_ui::input::KeyModifiers;
-use kompoz_ui::window::{MenuItemKind, Notification, NotificationType};
+use kompoz_ui::window::{MenuItemKind, Notification, NotificationType, WindowId};
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -31,6 +38,10 @@ const NOTIFICATIONS: &str = "org.freedesktop.Notifications";
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 const ITEM_PREFIX: &str = "/StatusNotifierItem/";
 const MENU_PREFIX: &str = "/MenuBar/";
+const REGISTRAR: &str = "com.canonical.AppMenu.Registrar";
+const REGISTRAR_PATH: &str = "/com/canonical/AppMenu/Registrar";
+/// A window's menu bar's dbusmenu: `/WindowMenu/<window>` (its `WindowId`'s number).
+pub const WINDOW_MENU_PREFIX: &str = "/WindowMenu/";
 const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// An item of an icon's menu as the bus's thread shows it (dbusmenu's id its index: from 1, 0 the root): its
@@ -52,6 +63,17 @@ struct Icon {
     revision: u32,
 }
 
+/// A window's menu bar as the bus's thread shows it: the window (its id's number), its X11 window (registered with
+/// the registrar by it; none: a Wayland window, whose platform tells its compositor), its menus flattened, their
+/// revision.
+#[derive(Clone, Debug)]
+struct WindowMenu {
+    window: u64,
+    xid: Option<u32>,
+    items: Vec<Item>,
+    revision: u32,
+}
+
 /// A notification to send, as the bus's thread sends it.
 struct Sent {
     app: String,
@@ -66,6 +88,9 @@ struct State {
     icons: Vec<Icon>,
     /// Icons to register again, or tell to read theirs again.
     changed: bool,
+    /// The windows' menu bars, and whether they changed since they were last published.
+    windows: Vec<WindowMenu>,
+    windows_changed: bool,
     notifications: Vec<Sent>,
     /// What the user did since, for the platform's thread.
     actions: Vec<Event>,
@@ -77,6 +102,10 @@ struct Shared {
     running: AtomicBool,
     /// A StatusNotifierWatcher is on the bus (a tray shows the icons).
     watcher: AtomicBool,
+    /// A global menu's registrar is on the bus (the desktop shows the windows' menu bars).
+    registrar: AtomicBool,
+    /// The connection's name on the bus (what a Wayland compositor is told a window's menu is at), once connected.
+    bus_name: Mutex<Option<String>>,
     state: Mutex<State>,
 }
 
@@ -103,6 +132,8 @@ impl StatusNotifier {
             notify,
             running: AtomicBool::new(true),
             watcher: AtomicBool::new(false),
+            registrar: AtomicBool::new(false),
+            bus_name: Mutex::new(None),
             state: Mutex::new(State::default()),
         });
         let thread = address.and_then(|address| {
@@ -157,6 +188,41 @@ impl StatusNotifier {
             notification: notification.clone(),
             image,
         });
+        self.wake();
+    }
+
+    /// Whether the desktop shows the windows' menu bars (a global menu's registrar on the bus).
+    pub fn global_menu(&self) -> bool {
+        self.thread.is_some() && self.shared.registrar.load(Ordering::SeqCst)
+    }
+
+    /// The connection's name on the bus, once connected (where the windows' menus are).
+    pub fn bus_name(&self) -> Option<String> {
+        self.shared.bus_name.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Window `window`'s menu bar as it is now (none: gone), its X11 window `xid` (registered with the registrar by
+    /// it; none: a Wayland window's, told to the compositor by its platform): published at
+    /// [`window_menu_path`]`(window)`.
+    pub fn set_window_menu(&self, window: u64, menus: Option<&[TrayMenuItem]>, xid: Option<u32>) {
+        {
+            let mut state = self.shared.state();
+            let at = state.windows.iter().position(|w| w.window == window);
+            match (menus, at) {
+                (Some(menus), Some(i)) => {
+                    let w = &mut state.windows[i];
+                    (w.items, w.xid, w.revision) = (flatten(menus), xid, w.revision + 1);
+                }
+                (Some(menus), None) => {
+                    state.windows.push(WindowMenu { window, xid, items: flatten(menus), revision: 1 })
+                }
+                (None, Some(i)) => {
+                    state.windows.remove(i);
+                }
+                (None, None) => return,
+            }
+            state.windows_changed = true;
+        }
         self.wake();
     }
 
@@ -236,16 +302,34 @@ fn menu_path(id: u64) -> String {
     format!("{MENU_PREFIX}{id}")
 }
 
+/// Where window `window`'s menu bar is published (its dbusmenu).
+pub fn window_menu_path(window: u64) -> String {
+    format!("{WINDOW_MENU_PREFIX}{window}")
+}
+
 /// The bus's thread: connected, watching for the watcher; then publishing, sending and answering until stopped.
 fn run(shared: &Shared, wake: &OwnedFd, address: &str) {
     let running = || shared.running.load(Ordering::SeqCst);
     let Ok(mut bus) = Connection::open(address) else { return };
-    let rule = MatchRule::signal().interface("org.freedesktop.DBus").member("NameOwnerChanged").arg(0, WATCHER);
-    let _ = bus.add_match(&rule);
-    shared.watcher.store(watcher_there(&mut bus), Ordering::SeqCst);
+    for name in [WATCHER, REGISTRAR] {
+        let rule = MatchRule::signal().interface("org.freedesktop.DBus").member("NameOwnerChanged").arg(0, name);
+        let _ = bus.add_match(&rule);
+    }
+    *shared.bus_name.lock().unwrap_or_else(|e| e.into_inner()) = Some(bus.unique_name().to_string());
+    shared.watcher.store(name_there(&mut bus, WATCHER), Ordering::SeqCst);
+    if name_there(&mut bus, REGISTRAR) {
+        shared.registrar.store(true, Ordering::SeqCst);
+        shared.state().actions.push(Event::MenuBarHostChanged); // (the windows' menu bars: the desktop's)
+        (shared.notify)();
+    }
     let mut registered: Vec<u64> = Vec::new();
+    // (The windows registered with the registrar: their ids, their X11 windows.)
+    let mut registered_windows: Vec<(u64, u32)> = Vec::new();
     while running() {
-        if publish(shared, &mut bus, &mut registered).is_err() || send_notifications(shared, &mut bus).is_err() {
+        if publish(shared, &mut bus, &mut registered).is_err()
+            || publish_windows(shared, &mut bus, &mut registered_windows).is_err()
+            || send_notifications(shared, &mut bus).is_err()
+        {
             return;
         }
         match bus.read(None, Some(wake.as_fd())) {
@@ -255,9 +339,21 @@ fn run(shared: &Shared, wake: &OwnedFd, address: &str) {
                 }
             }
             Ok(Some(m)) if m.is_signal("org.freedesktop.DBus", "NameOwnerChanged") => {
+                if m.arg(0).and_then(Value::as_str) == Some(REGISTRAR) {
+                    // (A global menu came or went: the windows registered with the new one, or drawn again.)
+                    registered_windows.clear();
+                    let there = name_there(&mut bus, REGISTRAR);
+                    if shared.registrar.swap(there, Ordering::SeqCst) != there {
+                        let mut state = shared.state();
+                        state.windows_changed = true;
+                        state.actions.push(Event::MenuBarHostChanged);
+                    }
+                    (shared.notify)();
+                    continue;
+                }
                 // (A tray came or went: the icons registered with the new one.)
                 registered.clear();
-                shared.watcher.store(watcher_there(&mut bus), Ordering::SeqCst);
+                shared.watcher.store(name_there(&mut bus, WATCHER), Ordering::SeqCst);
                 shared.state().changed = true;
                 (shared.notify)(); // (is_tray_supported may say otherwise now)
             }
@@ -267,16 +363,66 @@ fn run(shared: &Shared, wake: &OwnedFd, address: &str) {
     }
 }
 
-fn watcher_there(bus: &mut Connection) -> bool {
+/// Whether `name` has an owner on the bus (the tray's watcher, a global menu's registrar).
+fn name_there(bus: &mut Connection, name: &str) -> bool {
     let reply = bus.call_method(
         "org.freedesktop.DBus",
         "/org/freedesktop/DBus",
         "org.freedesktop.DBus",
         "NameHasOwner",
-        vec![Value::str(WATCHER)],
+        vec![Value::str(name)],
         CALL_TIMEOUT,
     );
     reply.ok().and_then(|r| r.first().and_then(Value::as_bool)).unwrap_or(false)
+}
+
+/// What changed in the windows' menu bars since: X11 windows registered with the registrar (`RegisterWindow`) as
+/// they come, `UnregisterWindow` as they go; those that stay told to read their menus again (`LayoutUpdated`).
+fn publish_windows(
+    shared: &Shared,
+    bus: &mut Connection,
+    registered: &mut Vec<(u64, u32)>,
+) -> Result<(), super::dbus::Error> {
+    let windows = {
+        let mut state = shared.state();
+        if !state.windows_changed {
+            return Ok(());
+        }
+        state.windows_changed = false;
+        state.windows.clone()
+    };
+    let there = shared.registrar.load(Ordering::SeqCst);
+    let gone: Vec<(u64, u32)> = registered
+        .iter()
+        .filter(|(w, xid)| !windows.iter().any(|m| m.window == *w && m.xid == Some(*xid)))
+        .copied()
+        .collect();
+    for (_, xid) in &gone {
+        if there {
+            let call = Message::method_call(Some(REGISTRAR), REGISTRAR_PATH, Some(REGISTRAR), "UnregisterWindow")
+                .with_body(vec![Value::Uint32(*xid)]);
+            bus.send(&call)?;
+        }
+    }
+    registered.retain(|r| !gone.contains(r));
+    for w in &windows {
+        let path = window_menu_path(w.window);
+        match w.xid {
+            Some(xid) if there && !registered.contains(&(w.window, xid)) => {
+                let call = Message::method_call(Some(REGISTRAR), REGISTRAR_PATH, Some(REGISTRAR), "RegisterWindow")
+                    .with_body(vec![Value::Uint32(xid), Value::path(path.as_str())]);
+                if bus.call(call, CALL_TIMEOUT).is_ok() {
+                    registered.push((w.window, xid));
+                }
+            }
+            _ => {
+                let layout = Message::signal(&path, MENU, "LayoutUpdated")
+                    .with_body(vec![Value::Uint32(w.revision), Value::Int32(0)]);
+                bus.send(&layout)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What changed since: new icons registered with the watcher (by path, on this connection), the others told to
@@ -469,13 +615,16 @@ fn item_properties(item: &Item) -> Value {
     Value::dict(Type::String, Type::Variant, p)
 }
 
-/// The layout of `icon`'s menu from item `id`, `depth` levels down (-1: all), as GetLayout gives it.
-fn layout(icon: &Icon, id: i32, depth: i32) -> Value {
-    let item = &icon.items[id as usize];
+/// The layout of a menu of `items` from item `id`, `depth` levels down (-1: all), as GetLayout gives it.
+fn layout(items: &[Item], id: i32, depth: i32) -> Value {
+    let item = &items[id as usize];
     let children = if depth == 0 {
         Vec::new()
     } else {
-        item.children.iter().map(|&c| Value::variant(layout(icon, c, if depth < 0 { -1 } else { depth - 1 }))).collect()
+        item.children
+            .iter()
+            .map(|&c| Value::variant(layout(items, c, if depth < 0 { -1 } else { depth - 1 })))
+            .collect()
     };
     Value::Struct(vec![Value::Int32(id), item_properties(item), Value::array(Type::Variant, children)])
 }
@@ -508,32 +657,33 @@ type Answer = Result<Option<Vec<Value>>, (&'static str, &'static str)>;
 
 fn answer(shared: &Shared, state: &mut State, path: &str, interface: &str, member: &str, call: &Message) -> Answer {
     let by = |prefix: &str| path.strip_prefix(prefix).and_then(|id| id.parse::<u64>().ok());
+    if let Some(window) = by(WINDOW_MENU_PREFIX) {
+        let Some(menu) = state.windows.iter().find(|w| w.window == window).cloned() else {
+            return Err((errors::UNKNOWN_OBJECT, "No such object"));
+        };
+        let clicked = |state: &mut State, path: Vec<usize>| {
+            state.actions.push(Event::MenuBarItem { window: WindowId(window), path });
+        };
+        return dbusmenu(state, &menu.items, menu.revision, interface, member, call, &clicked);
+    }
     let (item, menu) = (by(ITEM_PREFIX), by(MENU_PREFIX));
     let Some(icon) = item.or(menu).and_then(|id| state.icons.iter().find(|i| i.icon.id == id)).cloned() else {
         return Err((errors::UNKNOWN_OBJECT, "No such object"));
     };
-    let arg_i32 = |i: usize| call.arg(i).and_then(|v| v.unwrap_variants().as_i32());
     let arg_str = |i: usize| call.arg(i).and_then(Value::as_str).unwrap_or("");
-    if interface == INTROSPECTABLE && member == "Introspect" {
-        return Ok(Some(vec![Value::str(if item.is_some() { ITEM_XML } else { MENU_XML })]));
+    if interface == INTROSPECTABLE && member == "Introspect" && item.is_some() {
+        return Ok(Some(vec![Value::str(ITEM_XML)]));
     }
-    if interface == PROPERTIES {
+    if interface == PROPERTIES && item.is_some() {
         let (of, name) = (arg_str(0), arg_str(1));
         if member == "Set" {
             return Err((errors::PROPERTY_READ_ONLY, "Read only"));
         }
-        let all: Vec<(String, Value)> = if item.is_some() && of == ITEM {
+        let all: Vec<(String, Value)> = if of == ITEM {
             ITEM_PROPERTIES
                 .iter()
                 .filter_map(|p| Some((p.to_string(), item_property(&shared.app, &icon, p)?)))
                 .collect()
-        } else if menu.is_some() && of == MENU {
-            vec![
-                ("Version".into(), Value::variant(Value::Uint32(3))),
-                ("TextDirection".into(), Value::variant(Value::str("ltr"))),
-                ("Status".into(), Value::variant(Value::str("normal"))),
-                ("IconThemePath".into(), Value::variant(Value::array(Type::String, Vec::new()))),
-            ]
         } else {
             Vec::new()
         };
@@ -557,68 +707,122 @@ fn answer(shared: &Shared, state: &mut State, path: &str, interface: &str, membe
         }
         return Ok(Some(Vec::new()));
     }
-    if menu.is_some() && interface == MENU {
-        let clicked = |state: &mut State, id: i32, kind: &str| {
-            if kind == "clicked"
-                && let Some(it) = usize::try_from(id).ok().filter(|&i| i > 0).and_then(|i| icon.items.get(i))
-                && it.item.as_ref().is_some_and(|m| m.enabled && m.kind != MenuItemKind::Separator)
-            {
-                state.actions.push(Event::TrayMenuItem { tray: icon.icon.id, path: it.path.clone() });
-            }
+    if menu.is_some() {
+        let tray = icon.icon.id;
+        let clicked = |state: &mut State, path: Vec<usize>| state.actions.push(Event::TrayMenuItem { tray, path });
+        return dbusmenu(state, &icon.items, icon.revision, interface, member, call, &clicked);
+    }
+    Err((errors::UNKNOWN_METHOD, "No such method"))
+}
+
+/// A `com.canonical.dbusmenu` call (its properties, its introspection) on a menu of `items` at `revision`: a tray
+/// icon's, a window's menu bar's; `clicked` told the path of an item clicked.
+fn dbusmenu(
+    state: &mut State,
+    items: &[Item],
+    revision: u32,
+    interface: &str,
+    member: &str,
+    call: &Message,
+    clicked: &dyn Fn(&mut State, Vec<usize>),
+) -> Answer {
+    let arg_i32 = |i: usize| call.arg(i).and_then(|v| v.unwrap_variants().as_i32());
+    let arg_str = |i: usize| call.arg(i).and_then(Value::as_str).unwrap_or("");
+    if interface == INTROSPECTABLE && member == "Introspect" {
+        return Ok(Some(vec![Value::str(MENU_XML)]));
+    }
+    if interface == PROPERTIES {
+        let (of, name) = (arg_str(0), arg_str(1));
+        if member == "Set" {
+            return Err((errors::PROPERTY_READ_ONLY, "Read only"));
+        }
+        let all: Vec<(String, Value)> = if of == MENU {
+            vec![
+                ("Version".into(), Value::variant(Value::Uint32(3))),
+                ("TextDirection".into(), Value::variant(Value::str("ltr"))),
+                ("Status".into(), Value::variant(Value::str("normal"))),
+                ("IconThemePath".into(), Value::variant(Value::array(Type::String, Vec::new()))),
+            ]
+        } else {
+            Vec::new()
         };
         return match member {
-            "GetLayout" => {
-                let parent = arg_i32(0).filter(|&p| p >= 0 && (p as usize) < icon.items.len()).unwrap_or(0);
-                let depth = arg_i32(1).unwrap_or(-1);
-                Ok(Some(vec![Value::Uint32(icon.revision), layout(&icon, parent, depth)]))
-            }
-            "GetGroupProperties" => {
-                let mut ids: Vec<i32> = call
-                    .arg(0)
-                    .and_then(Value::items)
-                    .map(|items| items.iter().filter_map(Value::as_i32).collect())
-                    .unwrap_or_default();
-                if ids.is_empty() {
-                    ids = (0..icon.items.len() as i32).collect();
-                }
-                let entries = ids
-                    .into_iter()
-                    .filter(|&id| id >= 0 && (id as usize) < icon.items.len())
-                    .map(|id| Value::Struct(vec![Value::Int32(id), item_properties(&icon.items[id as usize])]))
-                    .collect();
-                let element = Type::Struct(vec![Type::Int32, Type::dict(Type::String, Type::Variant)]);
-                Ok(Some(vec![Value::array(element, entries)]))
-            }
-            "GetProperty" => {
-                let id = arg_i32(0).unwrap_or(-1);
-                let props = usize::try_from(id).ok().and_then(|i| icon.items.get(i)).map(item_properties);
-                let wanted = arg_str(1);
-                let value = props.as_ref().and_then(|p| p.get(wanted)).cloned();
-                match value {
-                    Some(v) => Ok(Some(vec![v])),
-                    None => Err((errors::INVALID_ARGS, "No such property")),
-                }
-            }
-            "Event" => {
-                clicked(state, arg_i32(0).unwrap_or(-1), arg_str(1));
-                Ok(Some(Vec::new()))
-            }
-            "EventGroup" => {
-                for e in call.arg(0).and_then(Value::items).unwrap_or(&[]) {
-                    if let Some([id, kind, ..]) = e.fields() {
-                        clicked(state, id.as_i32().unwrap_or(-1), kind.as_str().unwrap_or(""));
-                    }
-                }
-                Ok(Some(vec![Value::array(Type::Int32, Vec::new())]))
-            }
-            "AboutToShow" => Ok(Some(vec![Value::Boolean(false)])),
-            "AboutToShowGroup" => {
-                Ok(Some(vec![Value::array(Type::Int32, Vec::new()), Value::array(Type::Int32, Vec::new())]))
+            "Get" => match all.into_iter().find(|(n, _)| n == name) {
+                Some((_, v)) => Ok(Some(vec![v])),
+                None => Err((errors::UNKNOWN_PROPERTY, "No such property")),
+            },
+            "GetAll" => {
+                let entries = all.into_iter().map(|(n, v)| (Value::String(n), v)).collect();
+                Ok(Some(vec![Value::dict(Type::String, Type::Variant, entries)]))
             }
             _ => Err((errors::UNKNOWN_METHOD, "No such method")),
         };
     }
-    Err((errors::UNKNOWN_METHOD, "No such method"))
+    if interface != MENU {
+        return Err((errors::UNKNOWN_METHOD, "No such method"));
+    }
+    let click = |state: &mut State, id: i32, kind: &str| {
+        if kind == "clicked"
+            && let Some(it) = usize::try_from(id).ok().filter(|&i| i > 0).and_then(|i| items.get(i))
+            && it
+                .item
+                .as_ref()
+                .is_some_and(|m| m.enabled && !matches!(m.kind, MenuItemKind::Separator | MenuItemKind::Menu))
+        {
+            clicked(state, it.path.clone());
+        }
+    };
+    match member {
+        "GetLayout" => {
+            let parent = arg_i32(0).filter(|&p| p >= 0 && (p as usize) < items.len()).unwrap_or(0);
+            let depth = arg_i32(1).unwrap_or(-1);
+            Ok(Some(vec![Value::Uint32(revision), layout(items, parent, depth)]))
+        }
+        "GetGroupProperties" => {
+            let mut ids: Vec<i32> = call
+                .arg(0)
+                .and_then(Value::items)
+                .map(|items| items.iter().filter_map(Value::as_i32).collect())
+                .unwrap_or_default();
+            if ids.is_empty() {
+                ids = (0..items.len() as i32).collect();
+            }
+            let entries = ids
+                .into_iter()
+                .filter(|&id| id >= 0 && (id as usize) < items.len())
+                .map(|id| Value::Struct(vec![Value::Int32(id), item_properties(&items[id as usize])]))
+                .collect();
+            let element = Type::Struct(vec![Type::Int32, Type::dict(Type::String, Type::Variant)]);
+            Ok(Some(vec![Value::array(element, entries)]))
+        }
+        "GetProperty" => {
+            let id = arg_i32(0).unwrap_or(-1);
+            let props = usize::try_from(id).ok().and_then(|i| items.get(i)).map(item_properties);
+            let wanted = arg_str(1);
+            let value = props.as_ref().and_then(|p| p.get(wanted)).cloned();
+            match value {
+                Some(v) => Ok(Some(vec![v])),
+                None => Err((errors::INVALID_ARGS, "No such property")),
+            }
+        }
+        "Event" => {
+            click(state, arg_i32(0).unwrap_or(-1), arg_str(1));
+            Ok(Some(Vec::new()))
+        }
+        "EventGroup" => {
+            for e in call.arg(0).and_then(Value::items).unwrap_or(&[]) {
+                if let Some([id, kind, ..]) = e.fields() {
+                    click(state, id.as_i32().unwrap_or(-1), kind.as_str().unwrap_or(""));
+                }
+            }
+            Ok(Some(vec![Value::array(Type::Int32, Vec::new())]))
+        }
+        "AboutToShow" => Ok(Some(vec![Value::Boolean(false)])),
+        "AboutToShowGroup" => {
+            Ok(Some(vec![Value::array(Type::Int32, Vec::new()), Value::array(Type::Int32, Vec::new())]))
+        }
+        _ => Err((errors::UNKNOWN_METHOD, "No such method")),
+    }
 }
 
 const ITEM_XML: &str = r#"<node><interface name="org.kde.StatusNotifierItem">

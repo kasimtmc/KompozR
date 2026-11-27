@@ -250,6 +250,8 @@ pub struct WebGpuDevice {
     /// The canvas presented to (the platform's handle) and the format its context is configured with.
     canvas: Option<u32>,
     canvas_format: Format,
+    /// The canvas composited with its alpha, premultiplied (a transparent window's), else opaque.
+    transparent: bool,
     configured: (i32, i32),
     drawable_size: Option<Box<dyn Fn() -> (i32, i32)>>,
     retired: Arc<RetiredQueue>,
@@ -290,7 +292,7 @@ impl WebGpuDevice {
     /// A device on the page's `GPUDevice` (the surface's, else the loader's), presenting to the surface's canvas if
     /// it has one (else drawing only into textures); why not if the page has no WebGPU device.
     pub fn new(surface: Surface) -> Result<WebGpuDevice, String> {
-        let Surface { webgpu, drawable_size, .. } = surface;
+        let Surface { webgpu, drawable_size, transparent, .. } = surface;
         let (device, canvas) = match webgpu {
             Some(WebGpuSurface { device, canvas }) => (JsObject::share_raw(device).ok_or("no WebGPU device")?, canvas),
             None => {
@@ -314,6 +316,7 @@ impl WebGpuDevice {
             timestamps: features & 1 != 0,
             canvas,
             canvas_format,
+            transparent,
             configured: (0, 0),
             drawable_size,
             retired: Arc::default(),
@@ -732,7 +735,8 @@ impl Device for WebGpuDevice {
         }
         if (w, h) != self.configured {
             let format = format_code(self.canvas_format);
-            if sys::gpu_canvas_configure(self.raw(), canvas, format, w as u32, h as u32) == 0 {
+            let premultiplied = u32::from(self.transparent);
+            if sys::gpu_canvas_configure(self.raw(), canvas, format, w as u32, h as u32, premultiplied) == 0 {
                 return None;
             }
             self.configured = (w, h);

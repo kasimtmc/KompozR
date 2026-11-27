@@ -1,6 +1,7 @@
-//! Menus of the desktop's own (Compose Desktop's Menu.desktop.kt MenuScope: a tray icon's menu): items built as the
-//! composable that takes them composes ([`MenuScope`]), shown by the platform (Linux's dbusmenu), their clicks
-//! called back on the app's thread.
+//! Menus of the desktop's own (Compose Desktop's Menu.desktop.kt: a tray icon's menu, a window's menu bar): items
+//! built as the composable that takes them composes ([`MenuScope`]; a menu bar's menus [`MenuBarScope`]), shown by
+//! the platform (Linux's dbusmenu, a global menu) or drawn by KompozR (a menu bar in its window), their clicks called
+//! back on the app's thread; the items' shortcuts found for a key ([`shortcut_item`]: a menu bar's accelerators).
 
 use crate::draw::Painter;
 use crate::input::Key;
@@ -149,6 +150,83 @@ impl MenuScope {
     fn push(&self, item: MenuItem) {
         self.items.borrow_mut().push(item);
     }
+}
+
+/// The menus a window's menu bar's content makes (Compose Desktop's MenuBarScope), in order, each a submenu item.
+#[derive(Default)]
+pub struct MenuBarScope {
+    menus: RefCell<Vec<MenuItem>>,
+}
+
+impl MenuBarScope {
+    pub fn new() -> MenuBarScope {
+        MenuBarScope::default()
+    }
+
+    /// The menus made, taken.
+    pub fn take_menus(&self) -> Vec<MenuItem> {
+        std::mem::take(&mut *self.menus.borrow_mut())
+    }
+}
+
+#[kompoz_runtime::named]
+impl MenuBarScope {
+    /// A menu of the bar (Compose Desktop's `MenuBarScope.Menu`): `text` on the bar, `mnemonic` (Alt and it opens
+    /// the menu; its first occurrence in `text` underlined), `content` making its items.
+    pub fn Menu(
+        &self,
+        text: String,
+        #[default(None)] mnemonic: Option<char>,
+        #[default(true)] enabled: bool,
+        content: impl Fn(&MenuScope) + 'static,
+    ) {
+        let sub = MenuScope::new();
+        content(&sub);
+        let mut item = MenuItem::new(MenuItemKind::Menu, text);
+        item.enabled = enabled;
+        item.mnemonic = mnemonic;
+        item.items = sub.take_items();
+        self.menus.borrow_mut().push(item);
+    }
+}
+
+/// The item at `path` in `items` (an index at each level: a submenu's items below it).
+pub fn item_at(items: &[MenuItem], path: &[usize]) -> Option<MenuItem> {
+    let (&first, rest) = path.split_first()?;
+    let item = items.get(first)?;
+    if rest.is_empty() { Some(item.clone()) } else { item_at(&item.items, rest) }
+}
+
+/// Whether `shortcut` is what `event` pressed: its key with exactly its modifiers (Swing's KeyStroke, as Compose
+/// Desktop's menus' accelerators match).
+pub fn shortcut_matches(shortcut: &KeyShortcut, event: &crate::input::KeyEvent) -> bool {
+    use crate::input::KeyModifiers;
+    let m = event.modifiers;
+    event.r#type == crate::input::KeyEventType::KeyDown
+        && event.key == shortcut.key
+        && m.contains(KeyModifiers::Ctrl) == shortcut.ctrl
+        && m.contains(KeyModifiers::Meta) == shortcut.meta
+        && m.contains(KeyModifiers::Alt) == shortcut.alt
+        && m.contains(KeyModifiers::Shift) == shortcut.shift
+}
+
+/// The enabled item (not a submenu) whose shortcut `event` presses, in `items` and their enabled submenus, first
+/// first; its path.
+pub fn shortcut_item(items: &[MenuItem], event: &crate::input::KeyEvent) -> Option<Vec<usize>> {
+    for (i, item) in items.iter().enumerate() {
+        if !item.enabled {
+            continue;
+        }
+        if item.kind == MenuItemKind::Menu {
+            if let Some(mut path) = shortcut_item(&item.items, event) {
+                path.insert(0, i);
+                return Some(path);
+            }
+        } else if item.shortcut.as_ref().is_some_and(|s| shortcut_matches(s, event)) {
+            return Some(vec![i]);
+        }
+    }
+    None
 }
 
 #[kompoz_runtime::named]

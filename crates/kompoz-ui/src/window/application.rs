@@ -23,6 +23,7 @@
 //!
 //! On Android and the web, which give an app one window, a `Window` isn't shown (the platforms report one window).
 
+use super::menu::{MenuBarScope, MenuItem, MenuItemKind, item_at, same_items, shortcut_item};
 use super::tray::TrayRequest;
 use crate::alignment::Alignment;
 use crate::draw::Painter;
@@ -30,8 +31,9 @@ use crate::input::KeyEvent;
 use kompoz_graphics::{Dp, DpSize};
 use kompoz_runtime::{
     DisposableEffect, KompozitionLocal, KompozitionLocalContext, MutableState, SavedValue, Saver, SideEffect,
-    current_kompozition_local_context, kompozable, mutable_confined_state_of, mutable_confined_state_of_with_policy,
-    mutable_state_of, never_equal_policy, on_dispose, remember, remember_saveable_with,
+    current_kompozition_local_context, kompozable, kompozable_block, mutable_confined_state_of,
+    mutable_confined_state_of_with_policy, mutable_state_of, never_equal_policy, on_dispose, remember,
+    remember_saveable_with,
 };
 use std::cell::{Cell, RefCell};
 use std::fmt;
@@ -372,6 +374,31 @@ pub struct WindowRequest {
     locals: MutableState<KompozitionLocalContext>,
     /// Bumped as its properties change (the platform's window follows).
     version: Cell<u64>,
+    menu_bar: MenuBarSlot,
+}
+
+/// A window's menu bar ([`FrameWindowScope::MenuBar`]): its menus as last composed (their callbacks the latest),
+/// what is shown (set only as what it shows changes: what the drawn bar reads), bumped as that changes, whose
+/// `MenuBar` it is, and what the drawn bar does with the window's keys (before its focused path sees them: an open
+/// menu's navigation; after: its mnemonics).
+struct MenuBarSlot {
+    latest: RefCell<Option<Vec<MenuItem>>>,
+    shown: MutableState<Option<Rc<Vec<MenuItem>>>>,
+    version: Cell<u64>,
+    owner: Cell<u64>,
+    keys: RefCell<Option<(KeyHandler, KeyHandler)>>,
+}
+
+impl MenuBarSlot {
+    fn new() -> MenuBarSlot {
+        MenuBarSlot {
+            latest: RefCell::new(None),
+            shown: mutable_confined_state_of_with_policy(None, never_equal_policy()),
+            version: Cell::new(0),
+            owner: Cell::new(0),
+            keys: RefCell::new(None),
+        }
+    }
 }
 
 impl WindowRequest {
@@ -395,6 +422,7 @@ impl WindowRequest {
             content: mutable_confined_state_of_with_policy(content, never_equal_policy()),
             locals: mutable_confined_state_of(locals),
             version: Cell::new(0),
+            menu_bar: MenuBarSlot::new(),
         }
     }
 
@@ -442,6 +470,84 @@ impl WindowRequest {
     /// Bumped as its properties change.
     pub fn version(&self) -> u64 {
         self.version.get()
+    }
+
+    // ---- Its menu bar ----
+
+    /// The menus of `owner`'s `MenuBar` (none: it left the composition), as it composed them: kept for their
+    /// clicks; shown again where what they show changed.
+    pub fn set_menu_bar(&self, owner: u64, menus: Option<Vec<MenuItem>>) {
+        let slot = &self.menu_bar;
+        if menus.is_none() && slot.owner.get() != owner {
+            return; // (another MenuBar took the window's since)
+        }
+        slot.owner.set(owner);
+        let changed = match (&*slot.latest.borrow(), &menus) {
+            (None, None) => false,
+            (Some(a), Some(b)) => !same_items(a, b),
+            _ => true,
+        };
+        *slot.latest.borrow_mut() = menus.clone();
+        if changed {
+            slot.version.set(slot.version.get() + 1);
+            slot.shown.set(menus.map(Rc::new));
+        }
+    }
+
+    /// Its menu bar's menus as shown, read (what reads them composes again as they change).
+    pub fn menu_bar(&self) -> Option<Rc<Vec<MenuItem>>> {
+        self.menu_bar.shown.get()
+    }
+
+    /// Its menu bar's menus as last composed, not observed (the platform's view, a click's).
+    pub fn menu_bar_menus(&self) -> Option<Vec<MenuItem>> {
+        self.menu_bar.latest.borrow().clone()
+    }
+
+    /// Bumped as what its menu bar shows changes (the platform shows it again).
+    pub fn menu_bar_version(&self) -> u64 {
+        self.menu_bar.version.get()
+    }
+
+    /// The menu bar's item at `path` (a menu's index, then its items' and its submenus') clicked: its `on_click`
+    /// (a checkbox's `on_checked_change`), as it was last composed. False if there is none there.
+    pub fn click_menu_bar_item(&self, path: &[usize]) -> bool {
+        let item = self.menu_bar.latest.borrow().as_deref().and_then(|menus| item_at(menus, path));
+        match item {
+            Some(item) if item.enabled && !matches!(item.kind, MenuItemKind::Menu | MenuItemKind::Separator) => {
+                item.click();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A key down the window's focused path left: the menu bar's item whose shortcut it is clicked (Swing's
+    /// accelerators, Compose Desktop's menus' `shortcut`), else what the drawn bar does with it (Alt and a menu's
+    /// mnemonic, F10). Whether it was taken. `accelerators`: whether shortcuts are KompozR's to run (not where the
+    /// platform's own menu runs them).
+    pub fn menu_bar_key(&self, event: &KeyEvent, accelerators: bool) -> bool {
+        if accelerators {
+            let path = self.menu_bar.latest.borrow().as_deref().and_then(|menus| shortcut_item(menus, event));
+            if let Some(path) = path {
+                return self.click_menu_bar_item(&path);
+            }
+        }
+        let keys = self.menu_bar.keys.borrow().as_ref().map(|k| k.1.clone());
+        keys.is_some_and(|k| k(event))
+    }
+
+    /// A key before the window's focused path sees it: what the drawn menu bar's open menu does with it (its
+    /// navigation: an open menu has the keyboard, Swing's). Whether it was taken.
+    pub fn menu_bar_preview_key(&self, event: &KeyEvent) -> bool {
+        let keys = self.menu_bar.keys.borrow().as_ref().map(|k| k.0.clone());
+        keys.is_some_and(|k| k(event))
+    }
+
+    /// What the drawn menu bar does with the window's keys, before its focused path and after it (none: it isn't
+    /// drawn).
+    pub fn set_menu_bar_keys(&self, keys: Option<(KeyHandler, KeyHandler)>) {
+        *self.menu_bar.keys.borrow_mut() = keys;
     }
 }
 
@@ -532,6 +638,34 @@ impl FrameWindowScope {
     pub fn window(&self) -> ComposeWindow {
         self.window.clone()
     }
+
+    /// The window's menu bar (Compose Desktop's `FrameWindowScope.MenuBar`): `content` makes its menus
+    /// ([`MenuBarScope::Menu`]), made again as what they read changes; the bar is the window's while this is
+    /// composed (the last composed, if more are). On Linux KompozR draws it at the window's top (as Compose Desktop's
+    /// Swing JMenuBar is: keyboard navigation, mnemonics, the items' shortcuts working in the window), or the
+    /// desktop's global menu shows it (KDE's, through `com.canonical.dbusmenu`); Windows' and macOS's own menus in
+    /// their platforms. Composable.
+    #[track_caller]
+    pub fn MenuBar(&self, content: impl Fn(&MenuBarScope) + 'static) {
+        let request = self.window.request();
+        kompozable_block!({
+            let Some(request) = request.clone() else { return };
+            static NEXT: AtomicU64 = AtomicU64::new(1);
+            let owner = remember(|| NEXT.fetch_add(1, Ordering::Relaxed));
+            // (Made as this composes: what the menus read composes this again.)
+            let scope = MenuBarScope::new();
+            content(&scope);
+            let menus = scope.take_menus();
+            {
+                let request = request.clone();
+                SideEffect(move || request.set_menu_bar(owner, Some(menus.clone())));
+            }
+            DisposableEffect((), move || {
+                let request = request.clone();
+                on_dispose(move || request.set_menu_bar(owner, None))
+            });
+        });
+    }
 }
 
 /// Compose Desktop's WindowScope (`FrameWindowScope`'s supertype): the same scope.
@@ -547,6 +681,10 @@ pub struct ComposeWindow {
 impl ComposeWindow {
     pub fn new(request: &Rc<WindowRequest>) -> ComposeWindow {
         ComposeWindow { request: Rc::downgrade(request) }
+    }
+    /// Its request (none: the window went).
+    pub fn request(&self) -> Option<Rc<WindowRequest>> {
+        self.request.upgrade()
     }
     /// Its title.
     pub fn title(&self) -> String {
@@ -572,9 +710,12 @@ impl ComposeWindow {
 /// go meanwhile). `enabled = false` takes no input; `focusable = false` asks the window manager not to give it the
 /// keyboard (X11); `always_on_top` keeps it above the others (X11; Wayland has no protocol for it); `resizable`
 /// lets the user resize it; `undecorated` leaves the frame out (KompozR's own title bar isn't drawn either);
-/// `transparent` isn't supported yet (the window is opaque: see the follow-ups); `icon` is the window's (X11's
-/// `_NET_WM_ICON`; Wayland's xdg-toplevel-icon isn't bound yet). `on_preview_key_event` and `on_key_event` see the
-/// window's keys before and after its focused path.
+/// `transparent` shows what is behind the window where its content draws nothing or draws translucently (read as
+/// the window opens: an X11 window of a 32-bit visual, a Wayland surface's alpha, presented premultiplied; Compose
+/// Desktop asks for it undecorated, KompozR draws its own title bar over it too where the window has one); `icon` is
+/// the window's (X11's `_NET_WM_ICON`; Wayland's xdg-toplevel-icon, else the app's by its desktop entry).
+/// `on_preview_key_event` and `on_key_event` see the window's keys before and after its focused path. Its menu bar:
+/// [`FrameWindowScope::MenuBar`].
 #[kompozable]
 pub fn Window(
     on_close_request: impl Fn() + 'static,
@@ -659,6 +800,46 @@ impl ApplicationScope {
 impl fmt::Debug for ApplicationScope {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("ApplicationScope")
+    }
+}
+
+/// What a single window app's content is given (Compose Desktop's SingleWindowApplicationScope, `singleWindowApplication`'s
+/// receiver): the application's scope (its [`exit_application`](SingleWindowApplicationScope::exit_application))
+/// and its window's ([`FrameWindowScope`], which it derefs to: its `window`, its `MenuBar`).
+#[derive(Clone)]
+pub struct SingleWindowApplicationScope {
+    application: ApplicationScope,
+    frame: FrameWindowScope,
+}
+
+impl SingleWindowApplicationScope {
+    pub fn new(application: ApplicationScope, frame: FrameWindowScope) -> SingleWindowApplicationScope {
+        SingleWindowApplicationScope { application, frame }
+    }
+    /// Closes the window and ends the app (Compose Desktop's `exitApplication`).
+    pub fn exit_application(&self) {
+        self.application.exit_application();
+    }
+    /// The window (Compose Desktop's `window`).
+    pub fn window(&self) -> ComposeWindow {
+        self.frame.window()
+    }
+    /// The application's scope alone.
+    pub fn application_scope(&self) -> ApplicationScope {
+        self.application.clone()
+    }
+}
+
+impl std::ops::Deref for SingleWindowApplicationScope {
+    type Target = FrameWindowScope;
+    fn deref(&self) -> &FrameWindowScope {
+        &self.frame
+    }
+}
+
+impl fmt::Debug for SingleWindowApplicationScope {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("SingleWindowApplicationScope")
     }
 }
 

@@ -14,7 +14,7 @@ use super::{AppCore, Event, Platform, TrayIcon, TrayImage, TrayMenuItem};
 use crate::system::log;
 use kompoz_ui::input::{Key, KeyModifiers};
 use kompoz_ui::window::{
-    ApplicationControl, MenuItem, MenuItemKind, Notification, TrayRequest, WindowId, WindowRequest,
+    ApplicationControl, MenuItem, MenuItemKind, Notification, TrayRequest, WindowId, WindowRequest, item_at,
     set_application_control,
 };
 use std::cell::Cell;
@@ -152,6 +152,12 @@ impl<P: Platform> AppWindows<P> {
             Event::TrayAction { tray } => {
                 if let Some(r) = self.tray_request(*tray) {
                     r.action();
+                }
+            }
+            // (A menu bar's item: to the window it is in, whichever platform window it came through.)
+            Event::MenuBarItem { window, .. } => {
+                if let Some(core) = self.core_mut(*window) {
+                    core.handle(event);
                 }
             }
             Event::TrayMenuItem { tray, path } => {
@@ -328,13 +334,6 @@ impl<P: Platform> Drop for AppWindows<P> {
     }
 }
 
-/// The item at `path` in `items` (an index at each level).
-fn item_at(items: &[MenuItem], path: &[usize]) -> Option<MenuItem> {
-    let (&first, rest) = path.split_first()?;
-    let item = items.get(first)?;
-    if rest.is_empty() { Some(item.clone()) } else { item_at(&item.items, rest) }
-}
-
 /// A tray request as the platform shows it: its icon drawn at the tray's sizes, its menu without its callbacks.
 fn tray_icon(r: &TrayRequest) -> TrayIcon {
     let icon = r.icon();
@@ -347,7 +346,7 @@ fn tray_icon(r: &TrayRequest) -> TrayIcon {
     }
 }
 
-fn menu_item(item: &MenuItem) -> TrayMenuItem {
+pub(crate) fn menu_item(item: &MenuItem) -> TrayMenuItem {
     TrayMenuItem {
         kind: item.kind,
         text: item.text.clone(),

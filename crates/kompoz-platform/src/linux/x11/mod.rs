@@ -46,7 +46,8 @@ use super::desktop::{DesktopServices, open_uri};
 use super::event_loop::{EventLoop, Waker};
 use super::sys::{self, PollFd};
 use crate::app::{
-    AppConfig, AppContent, AppWindows, DisplayPlatform, Event, Metrics, Platform, TrayIcon, TrayImage, WindowSpec,
+    AppConfig, AppContent, AppWindows, DisplayPlatform, Event, MenuBarShown, Metrics, Platform, TrayIcon, TrayImage,
+    TrayMenuItem, WindowSpec,
 };
 use crate::linux::transfer::{Payload, X11_TEXT_TYPES};
 use crate::system::{log, preferred_language};
@@ -240,6 +241,8 @@ atoms! {
     XdndActionLink = c"XdndActionLink",
     XdndProxy = c"XdndProxy",
     _NET_WM_WINDOW_TYPE_DND = c"_NET_WM_WINDOW_TYPE_DND",
+    _KDE_NET_WM_APPMENU_SERVICE_NAME = c"_KDE_NET_WM_APPMENU_SERVICE_NAME",
+    _KDE_NET_WM_APPMENU_OBJECT_PATH = c"_KDE_NET_WM_APPMENU_OBJECT_PATH",
 }
 
 /// The X connection's token in the event loop.
@@ -688,6 +691,8 @@ struct XWindowData {
     minimized: bool,
     /// Its host's field (the input method told it while the window has the focus).
     field: Rc<Cell<(bool, XPoint)>>,
+    /// A transparent window's colormap (its 32-bit visual's), freed after it; NONE: the root's visual.
+    colormap: ffi::Colormap,
 }
 
 impl XWindowData {
@@ -703,6 +708,7 @@ impl XWindowData {
             placement: WindowPlacement::Floating,
             minimized: false,
             field: Rc::new(Cell::new((false, XPoint::default()))),
+            colormap: NONE,
         }
     }
 }
@@ -943,12 +949,11 @@ impl X11Platform {
         let preedit = ime.preedit(); // (a method gone takes what it composed with it)
         drop(ime);
         self.routed.extend(preedit.into_iter().map(|e| (Route::Focused, e)));
-        // What the desktop's services told: to all the windows; an assistive technology's requests to the focused
-        // window (the one a screen reader reads), the tray's to the app's core.
+        // What the desktop's services told: to all the windows (an assistive technology's requests: each window takes
+        // those for its own nodes), the tray's to the app's core.
         for e in self.desktop.take_events() {
             let route = match e {
-                Event::AccessibilityRequest => Route::Focused,
-                Event::TrayAction { .. } | Event::TrayMenuItem { .. } => Route::App,
+                Event::TrayAction { .. } | Event::TrayMenuItem { .. } | Event::MenuBarItem { .. } => Route::App,
                 _ => Route::All,
             };
             self.routed.push_back((route, e));
@@ -1316,7 +1321,19 @@ impl Platform for X11Platform {
             | ffi::KEY_RELEASE_MASK;
         let d = self.shared.display.clone();
         let a = self.shared.atoms;
-        let window = d.create_window(width as u32, height as u32, events).ok_or("the window couldn't be made")?;
+        // A transparent window: of the screen's 32-bit visual (what a compositing manager shows with its alpha);
+        // without one, opaque.
+        let argb = if app.transparent { d.create_argb_window(width as u32, height as u32, events) } else { None };
+        if app.transparent && argb.is_none() {
+            log("kompoz: X11: no 32-bit visual: the transparent window is opaque");
+        }
+        let window = match argb {
+            Some((window, colormap)) => {
+                self.win.colormap = colormap;
+                window
+            }
+            None => d.create_window(width as u32, height as u32, events).ok_or("the window couldn't be made")?,
+        };
         self.win.x.set(window);
         self.shared.window.set(window);
         self.win.size.set((width, height));
@@ -1393,6 +1410,7 @@ impl Platform for X11Platform {
             vulkan: Some(vulkan_surface(&d, window)),
             drawable_size: Some(Box::new(move || size.get())),
             pipeline_cache: None,
+            transparent: self.win.colormap != NONE,
         })
     }
 
@@ -1403,6 +1421,7 @@ impl Platform for X11Platform {
         self.shared.can_drag.set(false);
         let window = self.shared.window.replace(NONE);
         self.win.x.set(NONE);
+        self.desktop.window_closed(self.win.id); // (its tree gone from the screen readers)
         if window != NONE {
             if self.ime_window.get() == window {
                 self.ime_window.set(NONE);
@@ -1410,6 +1429,8 @@ impl Platform for X11Platform {
             }
             self.shared.cursors.borrow_mut().icons.remove(&window);
             self.display().destroy_window(window);
+            let colormap = std::mem::replace(&mut self.win.colormap, NONE);
+            self.display().free_colormap(colormap);
             self.display().flush();
         }
     }
@@ -1487,7 +1508,7 @@ impl Platform for X11Platform {
     }
 
     fn handled(&mut self, host: &KompozHost, event: &Event) {
-        self.desktop.handled(host, event);
+        self.desktop.handled(self.win.id, host, event);
         self.start_outgoing_drag(); // (one the host asked for as it handled the event)
     }
 
@@ -1509,26 +1530,20 @@ impl Platform for X11Platform {
     }
 
     /// The screen saver held off while the app keeps the screen on (D-Bus: X11 has no inhibitor of its own; any of
-    /// its windows); the semantics tree published to the screen readers — the focused window's (else the first
-    /// open one's), where it is on the screen.
+    /// its windows); the window's semantics tree published to the screen readers (each open window's, a frame of
+    /// the app's each), where it is on the screen.
     fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64) {
         let title = self.win.title.clone();
         if self.win.x.get() == NONE {
             return;
         }
         self.desktop.keep_screen_on(host.keep_screen_on(), &title);
-        let reads = match self.focused {
-            Some(id) => id == self.win.id,
-            None => !self.parked.iter().any(|w| w.x.get() != NONE && w.id.0 < self.win.id.0),
-        };
-        if reads {
-            let bounds = self.window_bounds();
-            self.desktop.composed(host, redraw, frame_time, bounds, 1.0, &title);
-        }
+        let bounds = self.window_bounds();
+        self.desktop.composed(self.win.id, host, redraw, frame_time, bounds, 1.0, &title);
     }
 
     fn wants_frames(&self) -> bool {
-        self.desktop.wants_frames()
+        self.win.x.get() != NONE && self.desktop.wants_frames(self.win.id)
     }
 
     fn set_title(&mut self, title: &str) {
@@ -1633,6 +1648,29 @@ impl Platform for X11Platform {
             None => d.delete_property(window, a._NET_WM_ICON),
         }
         d.flush();
+    }
+
+    /// Exported to the desktop's global menu where there is one (the registrar given the window's id; KDE's
+    /// window properties naming where its menus are, as Qt's apps set them), else drawn by KompozR.
+    fn set_menu_bar(&mut self, menus: Option<&[TrayMenuItem]>) -> MenuBarShown {
+        let window = self.window();
+        let id = self.win.id;
+        let shown = self.desktop.set_window_menu(id, menus, (window != NONE).then_some(window as u32), window != NONE);
+        if window != NONE {
+            let (d, a) = (self.display(), self.shared.atoms);
+            match self.desktop.window_menu_address(id).filter(|_| shown == MenuBarShown::Exported) {
+                Some((name, path)) => {
+                    d.set_property_8(window, a._KDE_NET_WM_APPMENU_SERVICE_NAME, a.UTF8_STRING, name.as_bytes());
+                    d.set_property_8(window, a._KDE_NET_WM_APPMENU_OBJECT_PATH, a.UTF8_STRING, path.as_bytes());
+                }
+                None => {
+                    d.delete_property(window, a._KDE_NET_WM_APPMENU_SERVICE_NAME);
+                    d.delete_property(window, a._KDE_NET_WM_APPMENU_OBJECT_PATH);
+                }
+            }
+            d.flush();
+        }
+        shown
     }
 
     fn window_position(&self) -> Option<(i32, i32)> {
@@ -1800,6 +1838,9 @@ impl Platform for X11Window {
     }
     fn set_icon(&mut self, icon: Option<&TrayImage>) {
         self.on().set_icon(icon);
+    }
+    fn set_menu_bar(&mut self, menus: Option<&[TrayMenuItem]>) -> MenuBarShown {
+        self.on().set_menu_bar(menus)
     }
     fn window_position(&self) -> Option<(i32, i32)> {
         self.on().window_position()

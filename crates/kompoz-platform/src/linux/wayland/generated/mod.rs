@@ -7,6 +7,7 @@
 
 #![allow(clippy::too_many_arguments, clippy::large_enum_variant, clippy::should_implement_trait)]
 
+pub mod appmenu;
 pub mod cursor_shape_v1;
 pub mod fractional_scale_v1;
 pub mod idle_inhibit_unstable_v1;
@@ -18,7 +19,9 @@ pub mod wayland;
 pub mod xdg_activation_v1;
 pub mod xdg_decoration_unstable_v1;
 pub mod xdg_shell;
+pub mod xdg_toplevel_icon_v1;
 
+pub use self::appmenu::*;
 pub use self::cursor_shape_v1::*;
 pub use self::fractional_scale_v1::*;
 pub use self::idle_inhibit_unstable_v1::*;
@@ -30,6 +33,7 @@ pub use self::wayland::*;
 pub use self::xdg_activation_v1::*;
 pub use self::xdg_decoration_unstable_v1::*;
 pub use self::xdg_shell::*;
+pub use self::xdg_toplevel_icon_v1::*;
 
 use crate::linux::wayland::ffi::{Args, ObjectId, RawEvent};
 
@@ -69,6 +73,7 @@ pub enum Event {
     XdgSurface(XdgSurfaceEvent),
     XdgToplevel(XdgToplevelEvent),
     XdgPopup(XdgPopupEvent),
+    XdgToplevelIconManagerV1(XdgToplevelIconManagerV1Event),
 }
 
 impl Event {
@@ -127,6 +132,9 @@ impl Event {
             b"xdg_surface" => Event::XdgSurface(XdgSurfaceEvent::decode(opcode, &mut args)?),
             b"xdg_toplevel" => Event::XdgToplevel(XdgToplevelEvent::decode(opcode, &mut args)?),
             b"xdg_popup" => Event::XdgPopup(XdgPopupEvent::decode(opcode, &mut args)?),
+            b"xdg_toplevel_icon_manager_v1" => {
+                Event::XdgToplevelIconManagerV1(XdgToplevelIconManagerV1Event::decode(opcode, &mut args)?)
+            }
             _ => return None,
         };
         Some((sender, event))

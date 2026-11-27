@@ -226,6 +226,15 @@ pub enum Event {
         tray: u64,
         path: Vec<usize>,
     },
+    // A window's menu bar, where the platform shows it (a global menu, Windows' and macOS's own).
+    /// An item of window `window`'s menu bar clicked: where it is (the menu's index, then an index at each level).
+    MenuBarItem {
+        window: kompoz_ui::window::WindowId,
+        path: Vec<usize>,
+    },
+    /// Where the platform can show a menu bar changed (a global menu came or went): each window shows its own again
+    /// ([`Platform::set_menu_bar`](super::Platform::set_menu_bar) asked again).
+    MenuBarHostChanged,
 }
 
 impl Event {

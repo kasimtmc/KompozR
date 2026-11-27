@@ -35,3 +35,8 @@ copyright holders HarfBuzz's COPYING file lists, licensed under the "Old MIT" li
   OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS" BASIS,
   AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
   MODIFICATIONS.
+
+crates/kompoz-platform/src/linux/wayland/protocols/appmenu.xml is KDE's appmenu Wayland protocol
+(plasma-wayland-protocols, as Qt ships it), Copyright 2017 David Edmundson, licensed under the GNU Lesser General
+Public License, version 2.1 or later (its SPDX header); crates/kompoz-platform/src/linux/wayland/generated/appmenu.rs
+is generated from it (`cargo xtask wayland`): the protocol's interface, for speaking it with the compositor.

@@ -30,7 +30,7 @@ pub type Xid = c_ulong;
 pub type Window = Xid;
 pub type Cursor = Xid;
 pub type Pixmap = Xid;
-type Colormap = Xid;
+pub type Colormap = Xid;
 type Gc = *mut c_void;
 pub type Atom = c_ulong;
 pub type Time = c_ulong;
@@ -1450,6 +1450,57 @@ impl Display {
 
     /// A top-level window of `width` by `height` pixels, the screen's visual, its contents kept at the top left
     /// while it is resized, `events` selected on it; none if it can't be made.
+    /// A top-level window of the screen's 32-bit TrueColor visual (its pixels' alpha what a compositing manager
+    /// shows the window with: a transparent window's), with a colormap of its own; its border and background
+    /// transparent black. None where the screen has no such visual (or it can't be made).
+    pub fn create_argb_window(&self, width: u32, height: u32, events: c_long) -> Option<(Window, Colormap)> {
+        // SAFETY: an all-zero XVisualInfo is a valid one.
+        let mut info: XVisualInfo = unsafe { std::mem::zeroed() };
+        // SAFETY: the display is open; `info` a valid out struct.
+        if unsafe { (self.x.x.match_visual_info)(self.raw, self.screen(), 32, TRUE_COLOR, &mut info) } == 0 {
+            return None;
+        }
+        // SAFETY: the display is open; the visual is the screen's (just matched).
+        let colormap = unsafe { (self.x.x.create_colormap)(self.raw, self.root, info.visual, ALLOC_NONE) };
+        // SAFETY: an all-zero XSetWindowAttributes is a valid one (only the fields the mask names are read).
+        let mut attributes: XSetWindowAttributes = unsafe { std::mem::zeroed() };
+        attributes.event_mask = events;
+        attributes.bit_gravity = NORTH_WEST_GRAVITY;
+        attributes.colormap = colormap;
+        let mask = CW_EVENT_MASK | CW_BIT_GRAVITY | CW_COLORMAP | CW_BORDER_PIXEL | CW_BACK_PIXEL;
+        // SAFETY: the display is open; `attributes` valid for the fields the mask names; the visual the screen's,
+        // its depth 32 (a window of another visual than its parent's needs its own colormap and border pixel).
+        let w = unsafe {
+            (self.x.x.create_window)(
+                self.raw,
+                self.root,
+                0,
+                0,
+                width.max(1),
+                height.max(1),
+                0,
+                32,
+                INPUT_OUTPUT,
+                info.visual,
+                mask,
+                &mut attributes,
+            )
+        };
+        if w == NONE {
+            self.free_colormap(colormap);
+            return None;
+        }
+        Some((w, colormap))
+    }
+
+    /// A colormap made for a window let go (after the window).
+    pub fn free_colormap(&self, colormap: Colormap) {
+        if colormap != NONE {
+            // SAFETY: the display is open; made on it, not used after.
+            unsafe { (self.x.x.free_colormap)(self.raw, colormap) };
+        }
+    }
+
     pub fn create_window(&self, width: u32, height: u32, events: c_long) -> Option<Window> {
         // SAFETY: an all-zero XSetWindowAttributes is a valid one (only the fields the mask names are read).
         let mut attributes: XSetWindowAttributes = unsafe { std::mem::zeroed() };

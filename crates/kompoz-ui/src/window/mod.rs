@@ -10,8 +10,9 @@
 //! window.
 //!
 //! Windows of the desktop's (Compose Desktop's `Window`, `WindowState`, `application`'s `ApplicationScope`:
-//! [`application`]), its tray icons and notifications ([`tray`]) and their menus ([`menu`]) are asked for here and
-//! shown by the platform's app core.
+//! [`application`]; `singleWindowApplication`'s scope), its tray icons and notifications ([`tray`]), their menus and
+//! a window's menu bar ([`menu`], [`FrameWindowScope::MenuBar`]) are asked for here and shown by the platform's app
+//! core.
 
 pub mod application;
 mod desktop_popup;
@@ -21,11 +22,14 @@ mod popup;
 pub mod tray;
 
 pub use application::{
-    ApplicationControl, ApplicationScope, ComposeWindow, FrameWindowScope, LocalWindowRegistry, Window, WindowContent,
-    WindowId, WindowPlacement, WindowPosition, WindowPositionArgs, WindowProperties, WindowRegistry, WindowRequest,
-    WindowScope, WindowState, exit_application, is_tray_supported, remember_window_state, set_application_control,
+    ApplicationControl, ApplicationScope, ComposeWindow, FrameWindowScope, LocalWindowRegistry,
+    SingleWindowApplicationScope, Window, WindowContent, WindowId, WindowPlacement, WindowPosition, WindowPositionArgs,
+    WindowProperties, WindowRegistry, WindowRequest, WindowScope, WindowState, exit_application, is_tray_supported,
+    remember_window_state, set_application_control,
 };
-pub use menu::{KeyShortcut, MenuItem, MenuItemKind, MenuScope, same_items};
+pub use menu::{
+    KeyShortcut, MenuBarScope, MenuItem, MenuItemKind, MenuScope, item_at, same_items, shortcut_item, shortcut_matches,
+};
 pub use tray::{
     Notification, NotificationType, Tray, TrayRequest, TrayState, remember_notification, remember_tray_state,
 };

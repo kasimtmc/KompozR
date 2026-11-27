@@ -69,6 +69,10 @@ const API_CRATES: &[&str] = &[
     "kompoz-test",
 ];
 
+/// Crates of which only some modules are Kotlin's (by crate, the modules' paths): kompoz-platform's app entry
+/// (stage 15: `application`, `singleWindowApplication`), not the platforms under it.
+const API_MODULES: &[(&str, &[&str])] = &[("kompoz-platform", &["app::entry"])];
+
 pub fn run(root: &Path, check: bool) -> Result<(), String> {
     let packages = packages(root)?;
     let (kotlin, supers) = kotlin_index(&packages)?;
@@ -1020,9 +1024,15 @@ struct KBase {
 fn kotlin_index(packages: &[Package]) -> Result<(String, BTreeSet<(String, String)>), String> {
     let mut scan = Scan::default();
     let mut files = Vec::new();
-    for p in packages.iter().filter(|p| API_CRATES.contains(&p.name.as_str())) {
+    let only = |name: &str| API_MODULES.iter().find(|(c, _)| *c == name).map(|(_, m)| *m);
+    for p in packages.iter().filter(|p| API_CRATES.contains(&p.name.as_str()) || only(&p.name).is_some()) {
         if let Some(lib) = p.targets.iter().find(|t| t.lib) {
             for mut s in sources(lib)? {
+                if let Some(modules) = only(&p.name)
+                    && !modules.contains(&s.module.join("::").as_str())
+                {
+                    continue;
+                }
                 expand_local_macros(&mut s.file.items);
                 files.push((lib.krate.clone(), s));
             }

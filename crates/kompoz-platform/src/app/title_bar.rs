@@ -7,6 +7,7 @@
 //!
 //! [`Metrics::title_bar`]: super::Metrics::title_bar
 
+use super::menu_bar::{MENU_BAR_ID, MenuBarFrame, MenuBarView};
 use super::{TitleBar, WindowAction, WindowButton};
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::material_color::palettes::{DynamicTonalPalette, palette_tone};
@@ -261,16 +262,28 @@ fn Bar(bar: TitleBar, title: String, act: WindowActions) {
 }
 
 /// The window's content (C++'s WindowFrame): `title_bar` above `content` (none: `content` alone, the whole window,
-/// as it would be without it), the content's nodes each in what the bar leaves of the window. `act` does what the
-/// bar's buttons and gestures ask.
+/// as it would be without it), a `Window`'s menu bar between them while KompozR draws it ([`MenuBarView`]), the
+/// content's nodes each in what the bars leave of the window. `act` does what the title bar's buttons and gestures
+/// ask.
 #[kompozable]
-pub fn WindowFrame(title_bar: Option<TitleBar>, title: String, act: WindowActions, content: Rc<dyn Content>) {
+pub fn WindowFrame(
+    title_bar: Option<TitleBar>,
+    title: String,
+    act: WindowActions,
+    menu_bar: Option<MenuBarFrame>,
+    content: Rc<dyn Content>,
+) {
     let policy = FRAME_POLICY.with(Rc::clone);
     layout_into(Modifier, policy, false, move || {
-        // (Each in a group of its own: the content stays what it was as the bar comes and goes.)
+        // (Each in a group of its own: the content stays what it was as the bars come and go.)
         key(&0, || {
             if let Some(bar) = title_bar.clone() {
                 Bar(bar, title.clone(), act.clone());
+            }
+        });
+        key(&2, || {
+            if let Some(menu_bar) = menu_bar.clone() {
+                MenuBarView(menu_bar);
             }
         });
         key(&1, || content.compose());
@@ -282,25 +295,41 @@ thread_local! {
     static FRAME_POLICY: Rc<dyn MeasurePolicy> = Rc::new(FrameMeasurePolicy);
 }
 
-/// The bar across the top, the content's nodes each in what is left, as the window holds them.
+/// The title bar across the top, the menu bar below it, the content's nodes each in what is left, as the window
+/// holds them.
 struct FrameMeasurePolicy;
+
+/// Whether a child is the one of layout id `id`.
+fn has_id(m: &dyn Measurable, id: &'static str) -> bool {
+    m.layout_id().is_some_and(|i| i.is(&id))
+}
 
 impl MeasurePolicy for FrameMeasurePolicy {
     fn measure(&self, scope: &MeasureScope, children: &[&dyn Measurable], c: Constraints) -> MeasureResult {
-        let is_bar = |m: &&&dyn Measurable| m.layout_id().is_some_and(|id| id.is(&TITLE_BAR_ID));
-        let bar: Option<Placeable> = children
-            .iter()
-            .find(is_bar)
-            .map(|m| m.measure(Constraints::new(c.max_width, c.max_width, 0, c.max_height)));
+        let across = |m: &dyn Measurable, max_height: i32| {
+            m.measure(Constraints::new(c.max_width, c.max_width, 0, max_height.max(0)))
+        };
+        let bar: Option<Placeable> =
+            children.iter().find(|m| has_id(**m, TITLE_BAR_ID)).map(|m| across(*m, c.max_height));
         let top = bar.as_ref().map_or(0, Placeable::height);
-        let rest = Constraints::new(0, c.max_width, 0, (c.max_height - top).max(0));
-        let content: Vec<Placeable> = children.iter().filter(|m| !is_bar(m)).map(|m| m.measure(rest)).collect();
+        let menu: Option<Placeable> =
+            children.iter().find(|m| has_id(**m, MENU_BAR_ID)).map(|m| across(*m, c.max_height - top));
+        let below = top + menu.as_ref().map_or(0, Placeable::height);
+        let rest = Constraints::new(0, c.max_width, 0, (c.max_height - below).max(0));
+        let content: Vec<Placeable> = children
+            .iter()
+            .filter(|m| !has_id(**m, TITLE_BAR_ID) && !has_id(**m, MENU_BAR_ID))
+            .map(|m| m.measure(rest))
+            .collect();
         scope.layout(c.max_width, c.max_height, move |p| {
             if let Some(bar) = &bar {
                 p.place_relative(bar, 0, 0);
             }
+            if let Some(menu) = &menu {
+                p.place_relative(menu, 0, top);
+            }
             for placeable in &content {
-                p.place_relative(placeable, 0, top);
+                p.place_relative(placeable, 0, below);
             }
         })
     }

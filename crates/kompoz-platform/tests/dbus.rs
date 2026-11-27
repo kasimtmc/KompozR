@@ -23,7 +23,7 @@ mod linux {
     use kompoz_runtime::*;
     use kompoz_ui::input::{Key as UiKey, KeyModifiers};
     use kompoz_ui::semantics::{AccessibilityNode, LiveRegionMode, ProgressBarRangeInfo, Role, SemanticsAction};
-    use kompoz_ui::window::{MenuItemKind, Notification, NotificationType};
+    use kompoz_ui::window::{MenuItemKind, Notification, NotificationType, WindowId};
     use kompoz_ui::{KompozHost, Modifier};
     use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
@@ -330,6 +330,130 @@ mod linux {
         drop(tray);
         stop.store(true, Ordering::SeqCst);
         side.join().unwrap();
+    }
+
+    /// What the global menu's registrar heard: windows registered (their X11 ids, their menus' paths, the sender),
+    /// unregistered.
+    #[derive(Debug, PartialEq)]
+    enum Registrar {
+        Registered(u32, String, String),
+        Unregistered(u32),
+    }
+
+    /// A `com.canonical.AppMenu.Registrar` (KDE's, Unity's) on a connection of the test's own until `stop`.
+    fn registrar_side(address: String, stop: Arc<AtomicBool>, heard: mpsc::Sender<Registrar>) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let mut b = Connection::open(&address).unwrap();
+            assert_eq!(b.request_name("com.canonical.AppMenu.Registrar", 4).unwrap(), 1);
+            while !stop.load(Ordering::SeqCst) {
+                let Some(m) = b.read(Some(Duration::from_millis(50)), None).unwrap() else { continue };
+                if m.kind != MessageType::MethodCall || b.answer_peer(&m).unwrap() {
+                    continue;
+                }
+                let xid = m.arg(0).and_then(Value::as_u32).unwrap_or(0);
+                match m.member.as_deref().unwrap() {
+                    "RegisterWindow" => {
+                        let path = match m.arg(1) {
+                            Some(Value::ObjectPath(p)) => p.clone(),
+                            _ => String::new(),
+                        };
+                        heard.send(Registrar::Registered(xid, path, m.sender.clone().unwrap_or_default())).unwrap();
+                        b.reply(&m, vec![]).unwrap();
+                    }
+                    "UnregisterWindow" => {
+                        heard.send(Registrar::Unregistered(xid)).unwrap();
+                        let _ = b.reply(&m, vec![]);
+                    }
+                    _ => b.reply_error(&m, "org.freedesktop.DBus.Error.UnknownMethod", "no").unwrap(),
+                }
+            }
+        })
+    }
+
+    /// A window's menu bar on the desktop's global menu (KDE's): none without a registrar (KompozR draws it); the
+    /// registrar coming told (the windows show theirs again); the window registered by its X11 id with its menu's
+    /// path; the menu read through dbusmenu as the global menu reads it (its mnemonics, its shortcut, a checkbox, a
+    /// submenu); a click told by where it is; a change signalled; the menu gone, the window unregistered; the
+    /// registrar gone, told.
+    pub fn window_menus_on_a_global_menu() {
+        let Some(bus) = TestBus::start() else { return };
+        drop(bus.connect()); // (the bus listening)
+        let (_, notify) = counter();
+        let tray = StatusNotifier::new("KompozR test", notify, Some(bus.address.clone()));
+        assert!(wait_for(TIMEOUT, || tray.bus_name().is_some()), "connected");
+        assert!(!tray.global_menu(), "no registrar yet");
+        let (heard, hear) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let side = registrar_side(bus.address.clone(), stop.clone(), heard);
+        assert!(wait_for(TIMEOUT, || tray.global_menu()), "the registrar seen");
+        assert_eq!(tray.take_actions(), [Event::MenuBarHostChanged]);
+        // The window's menus: registered by its X11 window.
+        let menus = tray_icon("").menu;
+        tray.set_window_menu(5, Some(&menus), Some(0x2a00007));
+        let Ok(Registrar::Registered(xid, path, sender)) = hear.recv_timeout(TIMEOUT) else { panic!("not registered") };
+        assert_eq!((xid, path.as_str()), (0x2a00007, "/WindowMenu/5"));
+        assert_eq!(Some(sender.clone()), tray.bus_name());
+        // Read as the global menu reads it.
+        let mut host = bus.connect();
+        host.add_match(&MatchRule::signal().sender(&sender)).unwrap();
+        let menu = "com.canonical.dbusmenu";
+        let layout_of = |host: &mut Connection| {
+            let args = vec![Value::Int32(0), Value::Int32(-1), Value::array(Type::String, vec![])];
+            host.call_method(&sender, &path, menu, "GetLayout", args, TIMEOUT).unwrap()
+        };
+        let layout = layout_of(&mut host);
+        assert_eq!(layout[0].as_u32(), Some(1));
+        let [_, _, children] = layout[1].fields().unwrap() else { panic!() };
+        let children: Vec<Value> = children.items().unwrap().iter().map(|c| c.unwrap_variants().clone()).collect();
+        let label = |c: &Value| c.fields().unwrap()[1].get("label").map(|v| v.unwrap_variants().clone());
+        assert_eq!(label(&children[0]), Some(Value::str("_Open")));
+        let version = host.get_property(&sender, &path, menu, "Version", TIMEOUT).unwrap();
+        assert_eq!(version.unwrap_variants().as_u32(), Some(3));
+        // A click on the submenu's item: told by its path; a submenu's own click nothing.
+        let sub = children[3].fields().unwrap()[2].items().unwrap()[0].unwrap_variants().clone();
+        let event = |host: &mut Connection, id: i32| {
+            let args = vec![Value::Int32(id), Value::str("clicked"), Value::variant(Value::Int32(0)), Value::Uint32(0)];
+            host.call_method(&sender, &path, menu, "Event", args, TIMEOUT).unwrap();
+        };
+        event(&mut host, children[3].fields().unwrap()[0].as_i32().unwrap());
+        event(&mut host, sub.fields().unwrap()[0].as_i32().unwrap());
+        let mut actions = Vec::new();
+        assert!(wait_for(TIMEOUT, || {
+            actions.extend(tray.take_actions());
+            !actions.is_empty()
+        }));
+        std::thread::sleep(Duration::from_millis(100));
+        actions.extend(tray.take_actions());
+        assert_eq!(actions, [Event::MenuBarItem { window: WindowId(5), path: vec![3, 0] }]);
+        // A change: signalled, not registered again.
+        let mut changed = tray_icon("").menu;
+        changed[1].kind = MenuItemKind::Checkbox { checked: false };
+        tray.set_window_menu(5, Some(&changed), Some(0x2a00007));
+        let mut signals = Vec::new();
+        assert!(
+            wait_for(TIMEOUT, || {
+                while let Ok(Some(m)) = host.read(Some(Duration::from_millis(10)), None) {
+                    if m.kind == MessageType::Signal {
+                        signals.push(m.member.clone().unwrap_or_default());
+                    }
+                }
+                signals.iter().any(|s| s == "LayoutUpdated")
+            }),
+            "{signals:?}"
+        );
+        assert_eq!(layout_of(&mut host)[0].as_u32(), Some(2));
+        assert!(hear.recv_timeout(Duration::from_millis(200)).is_err(), "not registered again");
+        // Gone: unregistered, no more there.
+        tray.set_window_menu(5, None, None);
+        assert_eq!(hear.recv_timeout(TIMEOUT).ok(), Some(Registrar::Unregistered(0x2a00007)));
+        let args = vec![Value::Int32(0), Value::Int32(-1), Value::array(Type::String, vec![])];
+        assert!(host.call_method(&sender, &path, menu, "GetLayout", args, TIMEOUT).is_err());
+        // The registrar gone: told, no global menu.
+        stop.store(true, Ordering::SeqCst);
+        side.join().unwrap();
+        assert!(wait_for(TIMEOUT, || !tray.global_menu()), "the registrar's going seen");
+        assert_eq!(tray.take_actions(), [Event::MenuBarHostChanged]);
+        drop(tray);
     }
 
     // ---- The client ----
@@ -818,10 +942,10 @@ mod linux {
 
     const A11Y: &str = "/org/a11y/atspi/accessible/";
     const ROOT: &str = "/org/a11y/atspi/accessible/root";
-    const WINDOW: &str = "/org/a11y/atspi/accessible/window";
+    const WINDOW: &str = "/org/a11y/atspi/accessible/0/window";
 
     fn node(id: u64) -> String {
-        format!("{A11Y}{id}")
+        format!("{A11Y}0/{id}")
     }
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
@@ -905,8 +1029,8 @@ mod linux {
         let (name, path) = embedded.borrow().clone().expect("embedded");
         assert_eq!(path, ROOT);
         peer.bridge = name;
-        assert!(bridge.take_tree_request() && !bridge.take_tree_request());
-        bridge.publish(test_tree(), window(true, "Main"));
+        assert!(bridge.take_tree_request(0) && !bridge.take_tree_request(0));
+        bridge.publish(0, test_tree(), window(true, "Main"));
         peer.serve(300, |_| false);
         assert!(peer.heard_line("Activate  0 0 window Main"), "{:?}", peer.heard);
         assert!(peer.heard_line("StateChanged active 1 0 window"));
@@ -941,9 +1065,9 @@ mod linux {
         assert!(peer.boolean(&node(1), "org.a11y.atspi.Action", "DoAction", vec![Value::Int32(0)]));
         assert!(!peer.boolean(&node(1), "org.a11y.atspi.Action", "DoAction", vec![Value::Int32(1)]));
         assert!(notified.load(Ordering::SeqCst) > 0); // the main loop woken
-        let requests = bridge.take_requests();
-        assert_eq!(requests, [Request { id: 1, action: SemanticsAction::Click }]);
-        assert!(bridge.take_requests().is_empty());
+        let requests = bridge.take_requests(0);
+        assert_eq!(requests, [Request { window: 0, id: 1, action: SemanticsAction::Click }]);
+        assert!(bridge.take_requests(0).is_empty());
         assert!(!peer.succeeds(&node(1), "org.a11y.atspi.Text", "GetText", vec![Value::Int32(0), Value::Int32(-1)]));
         assert_eq!(peer.last_error, "org.freedesktop.DBus.Error.UnknownMethod"); // a button has no text
         // A checkbox.
@@ -971,15 +1095,15 @@ mod linux {
         assert!(peer.boolean(&node(3), "org.a11y.atspi.Component", "GrabFocus", vec![]));
         assert!(peer.boolean(&node(1), "org.a11y.atspi.Component", "GrabFocus", vec![])); // a button: Tab goes to it
         assert!(!peer.boolean(&node(6), "org.a11y.atspi.Component", "GrabFocus", vec![])); // a label: nothing to focus
-        let requests = bridge.take_requests();
+        let requests = bridge.take_requests(0);
         assert_eq!(
             requests,
             [
-                Request { id: 3, action: SemanticsAction::SetText("x".into()) },
-                Request { id: 3, action: SemanticsAction::SetText("wörld".into()) },
-                Request { id: 3, action: SemanticsAction::SetText("héllo! wörld".into()) },
-                Request { id: 3, action: SemanticsAction::Focus },
-                Request { id: 1, action: SemanticsAction::Focus },
+                Request { window: 0, id: 3, action: SemanticsAction::SetText("x".into()) },
+                Request { window: 0, id: 3, action: SemanticsAction::SetText("wörld".into()) },
+                Request { window: 0, id: 3, action: SemanticsAction::SetText("héllo! wörld".into()) },
+                Request { window: 0, id: 3, action: SemanticsAction::Focus },
+                Request { window: 0, id: 1, action: SemanticsAction::Focus },
             ]
         );
         // A password field: what is typed isn't said.
@@ -995,7 +1119,7 @@ mod linux {
         assert_eq!(peer.property(&node(4), "org.a11y.atspi.Accessible", "Description"), "3");
         let set = vec![s(value), s("CurrentValue"), Value::variant(Value::Double(7.0))];
         assert!(peer.succeeds(&node(4), "org.freedesktop.DBus.Properties", "Set", set));
-        assert_eq!(bridge.take_requests(), [Request { id: 4, action: SemanticsAction::SetProgress(7.0) }]);
+        assert_eq!(bridge.take_requests(0), [Request { window: 0, id: 4, action: SemanticsAction::SetProgress(7.0) }]);
         // A scrolling list: its actions (its own too), the node in it.
         let action = "org.a11y.atspi.Action";
         assert_eq!((peer.role(&node(5)), peer.role(&node(6))), (49, 29));
@@ -1005,10 +1129,10 @@ mod linux {
         assert!(peer.boolean(&node(5), action, "DoAction", vec![i(1)]));
         assert!(peer.boolean(&node(5), action, "DoAction", vec![i(2)]));
         assert_eq!(
-            bridge.take_requests(),
+            bridge.take_requests(0),
             [
-                Request { id: 5, action: SemanticsAction::ScrollBackward },
-                Request { id: 5, action: SemanticsAction::CustomAction(0) }
+                Request { window: 0, id: 5, action: SemanticsAction::ScrollBackward },
+                Request { window: 0, id: 5, action: SemanticsAction::CustomAction(0) }
             ]
         );
         let mut interfaces = |path: &str| {
@@ -1052,7 +1176,7 @@ mod linux {
         next.remove(5); // the list's item
         next.push(AccessibilityNode { id: 8, label: "New".into(), enabled: true, ..AccessibilityNode::default() });
         peer.heard.clear();
-        bridge.publish(next.clone(), window(false, "Main"));
+        bridge.publish(0, next.clone(), window(false, "Main"));
         peer.serve(300, |_| false);
         let lines = [
             "PropertyChange accessible-name 0 0 1 Done",
@@ -1087,7 +1211,7 @@ mod linux {
             ..Default::default()
         });
         peer.heard.clear();
-        bridge.publish(after, window(false, "Other"));
+        bridge.publish(0, after, window(false, "Other"));
         peer.serve(300, |_| false);
         let lines = [
             "TextChanged delete 2 4 3 llo,",
@@ -1109,6 +1233,108 @@ mod linux {
         assert!(!peer.boolean(&node(2), component, "GrabFocus", vec![])); // disabled: Tab doesn't go to it
         // In the spaces after a word: that word's.
         assert_eq!(peer.text(&node(3), text, "GetStringAtOffset", vec![i(3), u(1)]), "hé   0 4");
+        drop(bridge);
+    }
+
+    /// The registry's Embed answered by `peer` (the app's name on the bus kept), a bridge forced on: connected.
+    fn embedded_bridge(bus: &TestBus, peer: &mut Peer) -> AtspiBridge {
+        assert!(peer.own("org.a11y.atspi.Registry"));
+        let embedded = Rc::new(RefCell::new(None::<String>));
+        let e = embedded.clone();
+        peer.answer = Some(Box::new(move |c, m| {
+            if m.member.as_deref() != Some("Embed") {
+                return false;
+            }
+            *e.borrow_mut() = Some(m.arg(0).and_then(Value::fields).unwrap()[0].as_str().unwrap().to_string());
+            c.reply(m, vec![Value::Struct(vec![s("org.a11y.atspi.Registry"), Value::path(ROOT)])]).unwrap();
+            true
+        }));
+        let (_, notify) = counter();
+        let bridge = AtspiBridge::new("Test app", notify, AtspiOptions { forced: Some(true), ..options_for(bus) });
+        assert!(peer.serve(3000, |_| bridge.active()));
+        peer.bridge = embedded.borrow().clone().expect("embedded");
+        bridge
+    }
+
+    /// The paths of an object's children (whole: a window's are under its own key).
+    fn child_paths(peer: &mut Peer, path: &str) -> Vec<String> {
+        let reply = peer.ask(path, "org.a11y.atspi.Accessible", "GetChildren", vec![]);
+        reply[0].items().unwrap().iter().map(|r| r.fields().unwrap()[1].as_str().unwrap().to_string()).collect()
+    }
+
+    /// Every window's tree, as GTK's and Qt's apps publish theirs: one application, a frame for each window (by its
+    /// key), each with its own nodes (the same ids in two windows are two objects); a window's activation told on its
+    /// frame, a screen reader's request kept for the window whose node it names; a window closed taken away with its
+    /// subtree (its deactivation, `window:destroy`, the application's ChildrenChanged).
+    pub fn atspi_bridge_serves_every_window() {
+        let Some(bus) = TestBus::start() else { return };
+        let mut peer = Peer::new(&bus);
+        let bridge = embedded_bridge(&bus, &mut peer);
+        let button = |id: u64, label: &str| AccessibilityNode {
+            id,
+            label: label.into(),
+            clickable: true,
+            enabled: true,
+            bounds: rect(0.0, 0.0, 50.0, 20.0),
+            ..AccessibilityNode::default()
+        };
+        let frame = |x: f32, focused: bool, title: &str| Window {
+            x,
+            y: 0.0,
+            width: 200.0,
+            height: 100.0,
+            px_to_points: 1.0,
+            focused,
+            title: title.into(),
+        };
+        bridge.publish(0, vec![button(1, "Main's")], frame(0.0, true, "Main"));
+        bridge.publish(3, vec![button(1, "Second's"), button(2, "More")], frame(300.0, false, "Second"));
+        peer.serve(300, |_| false);
+        let main = format!("{A11Y}0/window");
+        let second = format!("{A11Y}3/window");
+        assert!(peer.heard_line("ChildrenChanged add 0 0 root window"), "{:?}", peer.heard);
+        assert!(peer.heard_line("ChildrenChanged add 1 0 root window"), "{:?}", peer.heard);
+        assert!(peer.heard_line("Create  0 0 window Second"), "{:?}", peer.heard);
+        assert!(peer.heard_line("Activate  0 0 window Main"), "{:?}", peer.heard);
+        assert!(!peer.heard_line("Activate  0 0 window Second"), "{:?}", peer.heard);
+        assert_eq!(child_paths(&mut peer, ROOT), [main.clone(), second.clone()]);
+        assert_eq!(peer.property(ROOT, "org.a11y.atspi.Accessible", "ChildCount"), "2");
+        assert_eq!(peer.property(&second, "org.a11y.atspi.Accessible", "Name"), "Second");
+        assert_eq!(child_paths(&mut peer, &second), [format!("{A11Y}3/1"), format!("{A11Y}3/2")]);
+        assert_eq!(peer.property(&format!("{A11Y}3/1"), "org.a11y.atspi.Accessible", "Name"), "Second's");
+        assert_eq!(peer.property(&format!("{A11Y}0/1"), "org.a11y.atspi.Accessible", "Name"), "Main's");
+        assert_eq!(peer.ask(&second, "org.a11y.atspi.Accessible", "GetIndexInParent", vec![])[0], Value::Int32(1));
+        assert_eq!(peer.extents(&format!("{A11Y}3/2"), 0), "300 0 50 20");
+        assert!(peer.state(&main, 1) && !peer.state(&second, 1)); // the main one is active
+        // The focus moves to the second window: each frame's activation told.
+        peer.heard.clear();
+        bridge.publish(0, vec![button(1, "Main's")], frame(0.0, false, "Main"));
+        bridge.publish(3, vec![button(1, "Second's"), button(2, "More")], frame(300.0, true, "Second"));
+        peer.serve(300, |_| false);
+        for line in ["Deactivate  0 0 window Main", "Activate  0 0 window Second", "StateChanged active 1 0 window"] {
+            assert!(peer.heard_line(line), "not heard: {line} ({:?})", peer.heard);
+        }
+        assert!(peer.state(&second, 1) && !peer.state(&main, 1));
+        // A click on the second window's node: its request, not the main window's.
+        assert!(peer.boolean(&format!("{A11Y}3/2"), "org.a11y.atspi.Action", "DoAction", vec![Value::Int32(0)]));
+        assert!(bridge.take_requests(0).is_empty());
+        assert_eq!(bridge.take_requests(3), [Request { window: 3, id: 2, action: SemanticsAction::Click }]);
+        // The second window closed: gone with its nodes.
+        peer.heard.clear();
+        bridge.remove_window(3);
+        peer.serve(300, |_| false);
+        for line in
+            ["Deactivate  0 0 window Second", "Destroy  0 0 window Second", "ChildrenChanged remove 1 0 root window"]
+        {
+            assert!(peer.heard_line(line), "not heard: {line} ({:?})", peer.heard);
+        }
+        assert_eq!(child_paths(&mut peer, ROOT), [main]);
+        assert!(!peer.succeeds(&format!("{A11Y}3/1"), "org.a11y.atspi.Accessible", "GetRole", vec![]));
+        assert_eq!(peer.last_error, "org.freedesktop.DBus.Error.UnknownObject");
+        assert!(!peer.succeeds(&second, "org.a11y.atspi.Accessible", "GetRole", vec![]));
+        // Open again: a new child, its tree asked for again on the next connection.
+        assert!(bridge.take_tree_request(7), "a window the bridge didn't know publishes at once");
+        assert!(!bridge.take_tree_request(7));
         drop(bridge);
     }
 
@@ -1152,7 +1378,7 @@ mod linux {
         launcher.c.send(&changed).unwrap();
         assert!(launcher.serve(3000, |_| bridge.active()));
         assert!(launcher.serve(1000, |_| notified.load(Ordering::SeqCst) > 0)); // to publish the tree
-        assert!(bridge.take_tree_request());
+        assert!(bridge.take_tree_request(0));
         drop(bridge);
 
         // KOMPOZ_ATSPI=0: never.
@@ -1212,27 +1438,27 @@ mod linux {
         let mut t = 0;
         let mut frame = |desktop: &mut DesktopServices| {
             for e in desktop.take_events() {
-                desktop.handled(&host, &e);
+                desktop.handled(WindowId::MAIN, &host, &e);
             }
             t += 100_000_000;
             let redraw = host.frame(t);
-            desktop.composed(&host, redraw, t, Rect::new(10.0, 20.0, 410.0, 320.0), 1.0, "Main");
+            desktop.composed(WindowId::MAIN, &host, redraw, t, Rect::new(10.0, 20.0, 410.0, 320.0), 1.0, "Main");
         };
         // (Connected, it wakes the loop for the tree; published, it wants no more frames.)
         assert!(peer.serve(3000, |_| {
             frame(&mut desktop);
-            woken.load(Ordering::SeqCst) > 0 && !desktop.wants_frames()
+            woken.load(Ordering::SeqCst) > 0 && !desktop.wants_frames(WindowId::MAIN)
         }));
         peer.bridge = embedded.borrow().clone().unwrap();
         peer.serve(100, |_| false);
         // The host's root, the button in it.
         let roots = peer.children(WINDOW);
         assert_eq!(roots.len(), 1, "{roots:?}");
-        let root = format!("{A11Y}{}", roots[0]);
+        let root = format!("{A11Y}0/{}", roots[0]);
         assert_eq!(peer.role(&root), 39);
         let buttons = peer.children(&root);
         assert_eq!(buttons.len(), 1, "{buttons:?}");
-        let plus = format!("{A11Y}{}", buttons[0]);
+        let plus = format!("{A11Y}0/{}", buttons[0]);
         assert_eq!(peer.role(&plus), 43);
         assert_eq!(peer.property(&plus, "org.a11y.atspi.Accessible", "Name"), "Plus");
         assert_eq!(peer.extents(&plus, 0), "10 20 120 80");
@@ -1244,10 +1470,25 @@ mod linux {
         }));
         // The window focused: the tree published again, its activation told.
         peer.heard.clear();
-        desktop.handled(&host, &Event::FocusGained);
-        assert!(desktop.wants_frames());
+        desktop.handled(WindowId::MAIN, &host, &Event::FocusGained);
+        assert!(desktop.wants_frames(WindowId::MAIN));
         frame(&mut desktop);
         assert!(peer.serve(1000, |p| p.heard_line("Activate  0 0 window Main")), "{:?}", peer.heard);
+        // Another window (a `Window`'s host): its own frame under the application, its own tree; closed, gone.
+        let second = WindowId(5);
+        let other = KompozHost::new(kompozable_lambda!(move || Plus(Rc::new(Cell::new(0)))));
+        other.set_viewport_size(IntSize::new(200, 100));
+        assert!(desktop.wants_frames(second), "a window not yet published");
+        let redraw = other.frame(t + 1);
+        desktop.composed(second, &other, redraw, t + 1, Rect::new(500.0, 0.0, 700.0, 100.0), 1.0, "Second");
+        assert!(!desktop.wants_frames(second));
+        peer.serve(300, |_| false);
+        assert_eq!(child_paths(&mut peer, ROOT), [WINDOW.to_string(), format!("{A11Y}5/window")]);
+        assert_eq!(peer.property(&format!("{A11Y}5/window"), "org.a11y.atspi.Accessible", "Name"), "Second");
+        assert_eq!(peer.children(&format!("{A11Y}5/window")).len(), 1);
+        desktop.window_closed(second);
+        assert!(peer.serve(1000, |p| p.heard_line("Destroy  0 0 window Second")), "{:?}", peer.heard);
+        assert_eq!(child_paths(&mut peer, ROOT), [WINDOW.to_string()]);
         desktop.stop();
     }
 }
@@ -1261,9 +1502,11 @@ fn main() {
             ("portal_settings_are_read_and_followed", linux::portal_settings_are_read_and_followed),
             ("desktop_services_tell_the_app", linux::desktop_services_tell_the_app),
             ("atspi_bridge_serves_the_tree", linux::atspi_bridge_serves_the_tree),
+            ("atspi_bridge_serves_every_window", linux::atspi_bridge_serves_every_window),
             ("atspi_bridge_follows_the_desktop", linux::atspi_bridge_follows_the_desktop),
             ("desktop_services_serve_the_hosts_tree", linux::desktop_services_serve_the_hosts_tree),
             ("tray_icons_and_notifications_on_the_bus", linux::tray_icons_and_notifications_on_the_bus),
+            ("window_menus_on_a_global_menu", linux::window_menus_on_a_global_menu),
         ];
         let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
         let mut failed = 0;

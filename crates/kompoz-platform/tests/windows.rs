@@ -15,6 +15,7 @@ use kompoz_platform::headless::{HeadlessPlatform, HeadlessShared, headless_windo
 use kompoz_platform::{AppConfig, AppContent, Event, GpuPriority, TrayMenuItem};
 use kompoz_runtime::*;
 use kompoz_ui::draw::{ColorPainter, Painter};
+use kompoz_ui::input::{Key, KeyModifiers};
 use kompoz_ui::window::*;
 use kompoz_ui::{Alignment, Modifier};
 use std::cell::{Cell, RefCell};
@@ -457,6 +458,250 @@ fn a_window_in_a_window_opens_too() {
     let _ = shared;
 }
 
+/// A window with a menu bar (Compose Desktop's `MenuBar`): File (Count, Ctrl+K; Shown, a checkbox; More, a submenu
+/// with Deep) and a disabled Help; green below the bar; what ran told in `ran`.
+fn menu_window(ran: Seen, shown: MutableState<bool>) -> AppContent {
+    AppContent::Window(Rc::new(kompozable_lambda!(move || {
+        let (ran, shown) = (ran.clone(), shown.clone());
+        Window(
+            on_close_request = || {},
+            title = "Menus".to_string(),
+            state = remember_window_state(size = DpSize(Dp(300.0), Dp(200.0))),
+            content = move |scope: &FrameWindowScope| {
+                let (ran, shown) = (ran.clone(), shown.clone());
+                scope.MenuBar(move |bar: &MenuBarScope| {
+                    let (ran, shown) = (ran.clone(), shown.clone());
+                    bar.Menu(
+                        text = "File".to_string(),
+                        mnemonic = Some('F'),
+                        content = move |m: &MenuScope| {
+                            let (count, deep, toggle) = (ran.clone(), ran.clone(), shown.clone());
+                            m.Item(
+                                text = "Count".to_string(),
+                                mnemonic = Some('C'),
+                                shortcut = Some(KeyShortcut(Key::K, ctrl = true)),
+                                on_click = move || count.borrow_mut().push("count".into()),
+                            );
+                            m.CheckboxItem(
+                                text = "Shown".to_string(),
+                                checked = shown.get(),
+                                on_checked_change = move |on: bool| toggle.set(on),
+                            );
+                            m.Separator();
+                            m.Menu(
+                                text = "More".to_string(),
+                                content = move |sub: &MenuScope| {
+                                    let deep = deep.clone();
+                                    sub.Item(
+                                        text = "Deep".to_string(),
+                                        on_click = move || deep.borrow_mut().push("deep".into()),
+                                    );
+                                },
+                            );
+                        },
+                    );
+                    bar.Menu(text = "Help".to_string(), enabled = false, content = |_: &MenuScope| {});
+                });
+                Box(modifier = Modifier.fill_max_size().background(Color::Green));
+            },
+        );
+    })))
+}
+
+/// The menu bar KompozR draws (Linux's, as Compose Desktop's Swing JMenuBar): across the window's top, the content
+/// below it; its item's shortcut runs it; Alt and the menu's mnemonic opens the menu (its first item highlighted),
+/// Enter runs it; Down, Enter toggles the checkbox; into the submenu with Right; the pointer opens the menu and runs
+/// an item; a press below closes it; the platform told the menus.
+fn a_windows_menu_bar_is_drawn_and_driven() {
+    let dir = temp_dir("menu-bar");
+    let (closed, open) = (dir.join("closed.png"), dir.join("open.png"));
+    let ran: Seen = Rc::default();
+    let shown = mutable_state_of(false);
+    let script = format!(
+        "wait 3; @Menus: shot {closed}; @Menus: key ctrl+k; wait 2; @Menus: key alt+f; wait 3; @Menus: shot {open}; \
+         @Menus: key enter; wait 2; @Menus: key alt+f; wait 2; @Menus: key down; @Menus: key enter; wait 2; \
+         @Menus: key alt+f; wait 2; @Menus: key up; @Menus: key right; wait 2; @Menus: key enter; wait 2; \
+         @Menus: click 20 14; wait 3; @Menus: click 60 46; wait 3; @Menus: click 20 14; wait 3; @Menus: click 150 150; \
+         wait 3; @Menus: key enter; wait 2; quit",
+        closed = closed.display(),
+        open = open.display()
+    );
+    let shared = run(menu_window(ran.clone(), shown.clone()), &script, &[]);
+    let c = picture(&closed);
+    let bar = pixel(&c, 150, 10);
+    assert_eq!(bar, [0xF2, 0xF2, 0xF2, 255], "the bar across the top");
+    assert_eq!(pixel(&c, 150, 100), [0, 255, 0, 255], "the content below it");
+    assert_eq!(pixel(&c, 150, 30), [0, 255, 0, 255], "right below it (28 dp)");
+    let o = picture(&open);
+    assert_eq!(pixel(&o, 250, 100), [0, 255, 0, 255], "beside the menu, the content");
+    assert_ne!(pixel(&o, 60, 60), [0, 255, 0, 255], "the menu below File");
+    assert_eq!(
+        *ran.borrow(),
+        ["count", "count", "deep", "count"],
+        "Ctrl+K, Alt+F Enter, the submenu by keys, the pointer's click; the press below closed the menu (Enter then \
+         did nothing)"
+    );
+    assert!(shown.peek(), "Alt+F, Down, Enter toggled the checkbox");
+    let _ = shared;
+}
+
+/// A menu bar the platform shows (`KOMPOZ_HEADLESS_MENU_BAR`): not drawn (the content from the window's top); its
+/// clicks come back as `Event::MenuBarItem`; exported (a global menu), its shortcuts are still KompozR's; native
+/// (the platform's own menu), the platform's.
+fn a_menu_bar_the_platform_shows() {
+    for (how, shortcut_runs) in [("exported", true), ("native", false)] {
+        let dir = temp_dir(&format!("menu-bar-{how}"));
+        let shot = dir.join("shot.png");
+        let ran: Seen = Rc::default();
+        let shown = mutable_state_of(false);
+        let mut platform = HeadlessPlatform::new();
+        platform.set_option(
+            "KOMPOZ_SCRIPT",
+            &format!(
+                "wait 3; @Menus: shot {}; @Menus: key ctrl+k; wait 2; @Menus: key alt+f; wait 2; quit",
+                shot.display()
+            ),
+        );
+        platform.set_option("KOMPOZ_HEADLESS_MENU_BAR", how);
+        let shared = platform.shared();
+        let queue = platform.queue();
+        let mut windows = headless_windows(platform, &config(), &menu_window(ran.clone(), shown.clone()));
+        assert!(windows.start());
+        // A few frames, then the platform's menu clicked (More, Deep), as its event comes.
+        let mut clicked = false;
+        let mut told = None;
+        loop {
+            for (id, e) in queue.take() {
+                windows.handle(id, &e);
+            }
+            windows.sync();
+            for core in windows.cores_mut() {
+                core.frame(None);
+            }
+            windows.sync();
+            if !clicked
+                && let Some((id, w)) = shared.windows().iter().find(|(_, w)| w.title == "Menus" && w.menu_bar.is_some())
+            {
+                clicked = true;
+                told = w.menu_bar.clone();
+                windows.handle(WindowId::MAIN, &Event::MenuBarItem { window: *id, path: vec![0, 3, 0] });
+            }
+            if windows.quitting() {
+                break;
+            }
+        }
+        windows.quit();
+        assert_eq!(pixel(&picture(&shot), 150, 10), [0, 255, 0, 255], "{how}: not drawn");
+        let mut expected = vec!["deep".to_string()];
+        if shortcut_runs {
+            expected.push("count".into());
+        }
+        assert_eq!(*ran.borrow(), expected, "{how}");
+        let menus = told.expect("the platform told the menus");
+        let texts: Vec<&str> = menus.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(texts, ["File", "Help"]);
+        assert_eq!(menus[0].mnemonic, Some('F'));
+        assert_eq!(menus[0].items[1].kind, MenuItemKind::Checkbox { checked: false });
+        assert_eq!(menus[0].items[0].shortcut, Some((KeyModifiers::Ctrl, "k".to_string())));
+        assert_eq!(menus[0].items[3].items[0].text, "Deep");
+        assert!(!menus[1].enabled);
+    }
+}
+
+/// A transparent window (`Window(transparent = true)`, Compose Desktop's): its pixels where the app draws nothing
+/// have no alpha (what is behind it shows), what it draws is as drawn; an opaque window's are white there. With
+/// `KOMPOZ_HEADLESS_SWAPCHAIN=1` the same through a swapchain (its composite alpha the transparent window's).
+fn a_transparent_window_shows_what_is_behind_it() {
+    for swapchain in ["0", "1"] {
+        let dir = temp_dir(&format!("transparent-{swapchain}"));
+        let (clear, opaque) = (dir.join("clear.png"), dir.join("opaque.png"));
+        let content = AppContent::Window(Rc::new(kompozable_lambda!(move || {
+            for (title, transparent) in [("Clear", true), ("Opaque", false)] {
+                Window(
+                    on_close_request = || {},
+                    title = title.to_string(),
+                    undecorated = true,
+                    transparent = transparent,
+                    state = remember_window_state(size = DpSize(Dp(100.0), Dp(100.0))),
+                    content = |_: &FrameWindowScope| {
+                        Box(modifier = Modifier.size(Dp(40.0)).background(Color::Red));
+                    },
+                );
+            }
+        })));
+        let script =
+            format!("wait 4; @Clear: shot {}; @Opaque: shot {}; wait 2; quit", clear.display(), opaque.display());
+        let shared = Rc::new(RefCell::new(None));
+        let s = shared.clone();
+        let mut platform = HeadlessPlatform::new();
+        platform.set_option("KOMPOZ_SCRIPT", &script);
+        platform.set_option("KOMPOZ_HEADLESS_SWAPCHAIN", swapchain);
+        let seen = platform.shared();
+        let queue = platform.queue();
+        let mut windows = headless_windows(platform, &config(), &content);
+        assert!(windows.start());
+        loop {
+            for (id, e) in queue.take() {
+                windows.handle(id, &e);
+            }
+            windows.sync();
+            for core in windows.cores_mut() {
+                core.frame(None);
+            }
+            windows.sync();
+            if s.borrow().is_none()
+                && let Some(w) = seen.window_titled("Clear")
+            {
+                *s.borrow_mut() = Some(w.transparent);
+            }
+            if windows.quitting() {
+                break;
+            }
+        }
+        windows.quit();
+        assert_eq!(*shared.borrow(), Some(true), "the platform's window is a transparent one");
+        let c = picture(&clear);
+        assert_eq!(pixel(&c, 20, 20), [255, 0, 0, 255], "what it draws as drawn (swapchain {swapchain})");
+        assert_eq!(pixel(&c, 80, 80)[3], 0, "nothing where it draws nothing (swapchain {swapchain})");
+        let o = picture(&opaque);
+        assert_eq!(pixel(&o, 80, 80), [255, 255, 255, 255], "an opaque window's white (swapchain {swapchain})");
+    }
+}
+
+/// `single_window_application`'s app (Compose Desktop's `singleWindowApplication`): its one window, its content
+/// given the window's and the app's scopes (`window.title`, `exit_application`); the user closing it ends the app.
+fn a_single_window_application_ends_with_its_window() {
+    let dir = temp_dir("single");
+    let never = dir.join("never.png");
+    let seen: Seen = Rc::default();
+    let s = seen.clone();
+    let content = kompoz_platform::app::single_window_content(
+        WindowState::new(WindowPlacement::Floating, false, WindowPosition::PlatformDefault, DpSize(Dp(80.0), Dp(60.0))),
+        true,
+        "Solo".to_string(),
+        None,
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
+        Rc::new(|_: &kompoz_ui::input::KeyEvent| false),
+        Rc::new(|_: &kompoz_ui::input::KeyEvent| false),
+        Rc::new(move |scope: &SingleWindowApplicationScope| {
+            s.borrow_mut().push(scope.window().title());
+            kompozable_block!({
+                Second(Color::Green);
+            });
+        }),
+    );
+    let script = format!("wait 3; @Solo: window close; wait 5; shot {}; quit", never.display());
+    let shared = run(AppContent::Application(Rc::new(content)), &script, &[]);
+    assert!(seen.borrow().iter().any(|t| t == "Solo"), "its scope's window: {:?}", seen.borrow());
+    assert!(!never.exists(), "the window's close ended the app");
+    assert!(shared.window_titled("Solo").is_none());
+}
+
 fn main() {
     kompoz_runtime::set_ui_thread();
     let required = std::env::var_os("KOMPOZ_GPU_REQUIRED").is_some_and(|v| v == "1");
@@ -481,6 +726,10 @@ fn main() {
             the_tray_icon_its_menu_and_notifications_reach_the_platform,
         ),
         ("a_window_in_a_window_opens_too", a_window_in_a_window_opens_too),
+        ("a_windows_menu_bar_is_drawn_and_driven", a_windows_menu_bar_is_drawn_and_driven),
+        ("a_menu_bar_the_platform_shows", a_menu_bar_the_platform_shows),
+        ("a_transparent_window_shows_what_is_behind_it", a_transparent_window_shows_what_is_behind_it),
+        ("a_single_window_application_ends_with_its_window", a_single_window_application_ends_with_its_window),
     ];
     let filters: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
     let mut failed = 0;

@@ -384,7 +384,7 @@ export function gpuImports(glue) {
             record.data = null;
         },
 
-        gpu_canvas_configure: (device, canvas, format, width, height) => {
+        gpu_canvas_configure: (device, canvas, format, width, height, premultiplied) => {
             const c = get(canvas);
             if (c.width !== width) c.width = width;
             if (c.height !== height) c.height = height;
@@ -397,7 +397,8 @@ export function gpuImports(glue) {
             context.configure({
                 device: get(device),
                 format: FORMATS[format],
-                alphaMode: "opaque",
+                // (A transparent window's canvas: composited with its premultiplied alpha.)
+                alphaMode: premultiplied ? "premultiplied" : "opaque",
                 // (The renderer copies from it, as from Metal's drawables.)
                 usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
             });

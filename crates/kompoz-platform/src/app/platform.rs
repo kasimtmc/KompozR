@@ -35,6 +35,9 @@ pub struct WindowSpec {
     pub placement: WindowPlacement,
     pub minimized: bool,
     pub undecorated: bool,
+    /// What is behind the window shows where its pixels aren't opaque (an ARGB visual on X11, the surface's alpha on
+    /// Wayland; presented premultiplied: `Surface::transparent`). Read as it opens.
+    pub transparent: bool,
     pub resizable: bool,
     pub focusable: bool,
     pub always_on_top: bool,
@@ -54,6 +57,7 @@ impl WindowSpec {
             placement: WindowPlacement::Floating,
             minimized: false,
             undecorated: false,
+            transparent: false,
             resizable: true,
             focusable: true,
             always_on_top: false,
@@ -70,8 +74,22 @@ pub struct TrayImage {
     pub rgba: Vec<u8>,
 }
 
-/// A tray menu's item as the platform shows it (a `MenuItem` without its callbacks: a click comes back as an
-/// [`Event::TrayMenuItem`] by where it is).
+/// Who shows a window's menu bar ([`Platform::set_menu_bar`]'s answer).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum MenuBarShown {
+    /// KompozR, at the window's top (its keys, mnemonics and the items' shortcuts KompozR's).
+    #[default]
+    Drawn,
+    /// The desktop, somewhere of its own (KDE's global menu through dbusmenu): not drawn in the window; the items'
+    /// shortcuts still KompozR's to run (the desktop only shows them).
+    Exported,
+    /// The platform's own menu (Windows' HMENU, macOS's NSMenu): not drawn; the items' shortcuts the platform's
+    /// (its accelerator table, its key equivalents), a click an [`Event::MenuBarItem`].
+    Native,
+}
+
+/// A menu's item as the platform shows it: a tray icon's, a window's menu bar's (a `MenuItem` without its
+/// callbacks: a click comes back as an [`Event::TrayMenuItem`] or [`Event::MenuBarItem`] by where it is).
 #[derive(Clone, PartialEq, Debug)]
 pub struct TrayMenuItem {
     pub kind: MenuItemKind,
@@ -282,6 +300,16 @@ pub trait Platform {
     /// Its icon (none: the app's).
     fn set_icon(&mut self, icon: Option<&TrayImage>) {
         let _ = icon;
+    }
+    /// Its menu bar's menus as they are now (each a `Menu` item with its items; none: it has none any more): what
+    /// shows it. The platform's own menu (Windows' HMENU, macOS's main NSMenu while the window is key) answers
+    /// [`MenuBarShown::Native`], the desktop's global menu (Linux's dbusmenu export) [`MenuBarShown::Exported`]; by
+    /// default KompozR draws it at the window's top ([`MenuBarShown::Drawn`], as Compose Desktop's Swing JMenuBar
+    /// on Linux). Clicks on a platform's menu come back as [`Event::MenuBarItem`]. Asked again as the menus change
+    /// and after [`Event::MenuBarHostChanged`].
+    fn set_menu_bar(&mut self, menus: Option<&[TrayMenuItem]>) -> MenuBarShown {
+        let _ = menus;
+        MenuBarShown::Drawn
     }
     /// Where it is on the screen, its points (none: not told, as on Wayland).
     fn window_position(&self) -> Option<(i32, i32)> {

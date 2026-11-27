@@ -117,7 +117,14 @@ mod imports {
         pub(super) fn gpu_map_read(buffer: u32, size: f64);
         pub(super) fn gpu_map_state(buffer: u32) -> i32;
         pub(super) fn gpu_map_take(buffer: u32, into: *mut u8);
-        pub(super) fn gpu_canvas_configure(device: u32, canvas: u32, format: u32, width: u32, height: u32) -> u32;
+        pub(super) fn gpu_canvas_configure(
+            device: u32,
+            canvas: u32,
+            format: u32,
+            width: u32,
+            height: u32,
+            premultiplied: u32,
+        ) -> u32;
         pub(super) fn gpu_canvas_texture(canvas: u32) -> u32;
     }
 }
@@ -245,8 +252,9 @@ numbers_only! {
     fn gpu_map_read(buffer: u32, size: f64);
     /// A mapped read's bytes: their number once they are there, -1 while being mapped, -2 if it failed.
     fn gpu_map_state(buffer: u32) -> i32;
-    /// Configures the canvas's `webgpu` context for the device (its size the drawable's); 0 if it can't be.
-    fn gpu_canvas_configure(device: u32, canvas: u32, format: u32, width: u32, height: u32) -> u32;
+    /// Configures the canvas's `webgpu` context for the device (its size the drawable's; its alpha mode
+    /// premultiplied, else opaque); 0 if it can't be.
+    fn gpu_canvas_configure(device: u32, canvas: u32, format: u32, width: u32, height: u32, premultiplied: u32) -> u32;
     /// The canvas's texture for this frame (a handle of its own; 0: none).
     fn gpu_canvas_texture(canvas: u32) -> u32;
 }

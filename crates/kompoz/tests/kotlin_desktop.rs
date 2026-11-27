@@ -10,7 +10,8 @@
 //! an app writes them (`Window(onCloseRequest =, state = rememberWindowState(…), …) { … window.title … }`,
 //! `WindowPosition(Alignment.Center)`, `Tray(icon =, state = rememberTrayState(), …) { Item(…); CheckboxItem(…);
 //! Separator(); Menu(…) { … } }`, `trayState.sendNotification(Notification(…, Notification.Type.Info))`,
-//! `exitApplication()`), the requests they make checked (what the platform's app core opens: its own tests run them).
+//! `exitApplication()`), the requests they make checked (what the platform's app core opens: its own tests run them);
+//! a window's `MenuBar { Menu(…) { Item(…) … } }` and `singleWindowApplication(…) { … }`'s scope.
 
 #![allow(non_snake_case, non_upper_case_globals)]
 
@@ -21,7 +22,8 @@ use kompoz::test::{KompozTestRule, RecordingCanvas};
 use kompoz::ui::input::{PointerButton, PointerEventType, PointerKeyboardModifiers, PointerType};
 use kompoz::ui::window::{
     ApplicationScope, ComposeWindow, FrameWindowScope, KeyShortcut, MenuItemKind, Notification, NotificationType,
-    Popup, PopupPositionProvider, PopupProperties, WindowPosition,
+    Popup, PopupPositionProvider, PopupProperties, SingleWindowApplicationScope, WindowPosition, WindowProperties,
+    WindowRequest, WindowState,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -317,9 +319,102 @@ fn windows_and_tray_as_compose_writes_them() {
     assert!(exited.get());
 }
 
+// ---- menu_bar_and_single_window_app_as_compose_writes_them (Compose Desktop's MenuBar, singleWindowApplication) ---
+
+kompoz! {
+    @Composable
+    fun SingleWindowApplicationScope.Editor(saved: MutableState<Int>) {
+        var wrap by remember { mutableStateOf(false) }
+        MenuBar {
+            Menu("Dosya", mnemonic = 'D') {
+                Item("Kaydet", mnemonic = 'K', shortcut = KeyShortcut(Key.S, ctrl = true), onClick = { saved.value++ })
+                Separator()
+                Menu("Son açılanlar") {
+                    Item("a.txt", onClick = { })
+                }
+                Item("Çık", onClick = ::exitApplication)
+            }
+            Menu("Görünüm", enabled = true) {
+                CheckboxItem("Satır kaydır", checked = wrap, onCheckedChange = { wrap = it })
+                RadioButtonItem("Koyu", selected = !wrap, onClick = { wrap = false })
+            }
+        }
+        Text("pencere: ${window.title}")
+    }
+
+    fun runEditor() = singleWindowApplication(title = "Düzenleyici", undecorated = true, transparent = true,
+                                                         exitProcessOnExit = false) {
+        Editor(mutableStateOf(0))
+    }
+}
+
+/// A window's menu bar and the single-window app's scope as Compose Desktop's samples write them: `MenuBar { Menu(…)
+/// { Item(…, shortcut = KeyShortcut(…)); Separator(); Menu(…) { … }; CheckboxItem(…); RadioButtonItem(…) } }` in a
+/// `SingleWindowApplicationScope` extension (its `window`, its `::exitApplication`), the menus the window's request
+/// holds (what the platform's app core shows), a click by path running the item, the shortcut; and
+/// `singleWindowApplication(title =, …, exitProcessOnExit = false) { … }` as a program's entry (compiled: it runs the
+/// app).
+fn menu_bar_and_single_window_app_as_compose_writes_them() {
+    let _ = run_editor; // (compiled; it would run the app)
+    let exited = Rc::new(Cell::new(false));
+    let app = {
+        let exited = exited.clone();
+        ApplicationScope::new(Rc::new(move || exited.set(true)))
+    };
+    let request = Rc::new(WindowRequest::new(
+        WindowProperties { title: "Düzenleyici".into(), ..WindowProperties::default() },
+        WindowState::default(),
+        Rc::new(|| {}),
+        Rc::new(|_: &FrameWindowScope| {}),
+        Default::default(),
+    ));
+    let saved = mutable_state_of(0);
+    let (r, s) = (request.clone(), saved.clone());
+    let rule = KompozTestRule::with_viewport(
+        kompozable_lambda!(move || {
+            let scope = SingleWindowApplicationScope::new(app.clone(), FrameWindowScope::new(ComposeWindow::new(&r)));
+            scope.Editor(s.clone());
+        }),
+        IntSize::new(300, 200),
+    );
+    rule.wait_for_idle();
+    rule.on_node_with_text("pencere: Düzenleyici").assert_exists();
+    let menus = request.menu_bar_menus().expect("the window's menu bar");
+    let texts: Vec<&str> = menus.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(texts, ["Dosya", "Görünüm"]);
+    assert_eq!(menus[0].mnemonic, Some('D'));
+    let file: Vec<&str> = menus[0].items.iter().map(|m| m.text.as_str()).collect();
+    assert_eq!(file, ["Kaydet", "", "Son açılanlar", "Çık"]);
+    assert_eq!(
+        menus[0].items[0].shortcut,
+        Some(KeyShortcut { key: Key::S, ctrl: true, meta: false, alt: false, shift: false })
+    );
+    assert_eq!(menus[0].items[2].items[0].text, "a.txt");
+    assert_eq!(menus[1].items[0].kind, MenuItemKind::Checkbox { checked: false });
+    assert_eq!(menus[1].items[1].kind, MenuItemKind::RadioButton { selected: true });
+    // A click by where it is (the platform's menu, the drawn bar): the checkbox, then the item; the shortcut.
+    assert!(request.click_menu_bar_item(&[1, 0]));
+    rule.wait_for_idle();
+    let menus = request.menu_bar_menus().unwrap();
+    assert_eq!(menus[1].items[0].kind, MenuItemKind::Checkbox { checked: true });
+    assert_eq!(menus[1].items[1].kind, MenuItemKind::RadioButton { selected: false });
+    assert!(request.click_menu_bar_item(&[0, 0]));
+    let ctrl_s = kompoz::ui::input::KeyEvent::new(
+        Key::S,
+        kompoz::ui::input::KeyEventType::KeyDown,
+        kompoz::ui::input::KeyModifiers::Ctrl,
+    );
+    assert!(request.menu_bar_key(&ctrl_s, true));
+    assert!(!request.menu_bar_key(&ctrl_s, false), "the platform's own menu runs it");
+    assert_eq!(saved.peek(), 2);
+    assert!(request.click_menu_bar_item(&[0, 3]));
+    assert!(exited.get(), "::exitApplication");
+}
+
 tests![
     input_forms_as_compose_writes_them,
     scrollbars_on_drag_and_menus_from_a_kt_file,
     windows_and_tray_as_compose_writes_them,
     a_single_window_app_exits_on_close,
+    menu_bar_and_single_window_app_as_compose_writes_them,
 ];

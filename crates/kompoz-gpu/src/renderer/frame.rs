@@ -130,7 +130,7 @@ impl Renderer {
             }
             let cover = list.opaque_cover(area.unwrap_or(all));
             if cover.is_none() {
-                self.fill_opaque(target.bounds(), Color::White);
+                self.fill_opaque(target.bounds(), self.frame_background);
             }
             list.replay_from(self, area, cover.unwrap_or(0));
             if area.is_some() {

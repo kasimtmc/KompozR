@@ -3,7 +3,12 @@
 //! all the app's windows (the main one and each `Window`'s: [`WaylandWindow`], a handle on it by its id), an
 //! xdg-shell toplevel each, drawn into by a Vulkan device of its own (`VK_KHR_wayland_surface`), its frames paced by
 //! its own frame callbacks, its events routed to it by the surface they come for (the pointer's, the keyboard's,
-//! a finger's, the input method's, a tablet tool's, a drag's), brought to the front through xdg-activation;
+//! a finger's, the input method's, a tablet tool's, a drag's), brought to the front through xdg-activation (which
+//! restores a minimized one: xdg-shell has no request for it; its restoring is seen as the compositor activates it
+//! again), its icon its own (xdg-toplevel-icon), its menu bar the desktop's global menu where KDE's has one (appmenu:
+//! the dbusmenu's address on the bus), what is behind it showing where a transparent window draws nothing (the
+//! swapchain's premultiplied alpha); where it is on the screen and above the others no protocol lets a client say
+//! (a `Window`'s position and `always_on_top` aren't followed here);
 //! its scale fractional (fractional-scale + viewporter) or whole (the surface's preferred buffer scale, else its
 //! outputs'); the compositor's decorations (xdg-decoration) or, without them, KompozR's own (the title bar in the
 //! metrics, the window's actions; edges around the window with shadows, resizing it: [`decorations`]); the seat's
@@ -52,8 +57,8 @@ use super::event_loop::{EventLoop, Waker};
 use super::sys;
 use super::xkb::{self, ComposeState, Keyboard, RepeatTimer};
 use crate::app::{
-    AppConfig, AppContent, AppWindows, DisplayPlatform, Event, Metrics, Platform, TrayIcon, TrayImage, WindowAction,
-    WindowSpec,
+    AppConfig, AppContent, AppWindows, DisplayPlatform, Event, MenuBarShown, Metrics, Platform, TrayIcon, TrayImage,
+    TrayMenuItem, WindowAction, WindowSpec,
 };
 use crate::system::{log, preferred_language};
 use kompoz_gpu::device::{Backend, Surface};
@@ -199,6 +204,10 @@ struct Globals {
     idle_inhibits: Option<ZwpIdleInhibitManagerV1>,
     gestures: Option<ZwpPointerGesturesV1>,
     activation: Option<XdgActivationV1>,
+    /// KDE's appmenu (a window's menu bar's address on the bus, for the global menu).
+    appmenu: Option<OrgKdeKwinAppmenuManager>,
+    /// xdg-toplevel-icon (a window's own icon).
+    toplevel_icons: Option<XdgToplevelIconManagerV1>,
     shm: Option<Rc<WlShm>>,
     subcompositor: Option<WlSubcompositor>,
     seat: Option<WlSeat>,
@@ -209,6 +218,11 @@ struct Globals {
 /// The window's objects (destroyed in this order: KompozR's edges and roles before the surface). The decoration and
 /// the fractional scale are only kept: their events come to the platform, dropping them would end them.
 struct Window {
+    /// Its icon (xdg-toplevel-icon) and the buffer it was made of (the buffer kept until the icon is destroyed:
+    /// the tuple's order).
+    icon: Option<(XdgToplevelIconV1, WlBuffer)>,
+    /// Where its menu bar is on the bus, told the compositor (KDE's appmenu).
+    appmenu: Option<OrgKdeKwinAppmenu>,
     edges: decorations::Edges,
     frame_callback: Option<WlCallback>,
     inhibitor: Option<ZwpIdleInhibitorV1>,
@@ -380,6 +394,11 @@ pub(crate) struct WindowData {
     own_decorations: bool,
     /// A `Window` without decorations: none of the compositor's, no title bar of KompozR's.
     undecorated: bool,
+    /// Its icon, as its `Window` gives it (given again to a window shown again).
+    icon: Option<TrayImage>,
+    /// Minimized by the app or its title bar (Wayland tells a client nothing of its minimizing): until the
+    /// compositor shows it again (activated, or no longer suspended), which is its restoring.
+    minimized: bool,
     /// The pointer over an edge: where, in the window's points (what a press resizes from).
     edge_x: f64,
     edge_y: f64,
@@ -419,6 +438,8 @@ impl WindowData {
             can_maximize: true,
             own_decorations: false,
             undecorated: false,
+            icon: None,
+            minimized: false,
             edge_x: 0.0,
             edge_y: 0.0,
             drawable: Rc::new(Cell::new((1, 1))),
@@ -771,12 +792,11 @@ impl WaylandPlatform {
             self.shared.cursor.borrow_mut().animate(sys::monotonic_now());
             self.shared.tablet.borrow_mut().animate(sys::monotonic_now());
         }
-        // What the desktop's services told meanwhile (they wake the loop): to all the windows; an assistive
-        // technology's requests to the window it reads (the one with the keyboard), the tray's to the app's core.
+        // What the desktop's services told meanwhile (they wake the loop): to all the windows (an assistive
+        // technology's requests: each window takes those for its own nodes), the tray's to the app's core.
         for e in self.desktop.take_events() {
             let route = match e {
-                Event::AccessibilityRequest => Route::Keyboard,
-                Event::TrayAction { .. } | Event::TrayMenuItem { .. } => Route::App,
+                Event::TrayAction { .. } | Event::TrayMenuItem { .. } | Event::MenuBarItem { .. } => Route::App,
                 _ => Route::All,
             };
             self.routed.push_back((route, e));
@@ -1016,6 +1036,8 @@ impl WaylandPlatform {
                     "zwp_pointer_gestures_v1" => g.gestures = bind(registry, name, version, 1),
                     "zwp_idle_inhibit_manager_v1" => g.idle_inhibits = bind(registry, name, version, 1),
                     "xdg_activation_v1" => g.activation = bind(registry, name, version, 1),
+                    "org_kde_kwin_appmenu_manager" => g.appmenu = bind(registry, name, version, 1),
+                    "xdg_toplevel_icon_manager_v1" => g.toplevel_icons = bind(registry, name, version, 1),
                     "wl_seat" if g.seat.is_none() => g.seat = bind(registry, name, version, 8),
                     "wl_output" => {
                         if let Some(output) = bind(registry, name, version, 2) {
@@ -1165,6 +1187,7 @@ impl Platform for WaylandPlatform {
         self.win.configured = false;
         self.win.awaiting_callback = false;
         self.win.entered.clear();
+        self.desktop.window_closed(self.win.id); // (its tree gone from the screen readers)
         let _ = self.connection.flush();
     }
 
@@ -1251,7 +1274,7 @@ impl Platform for WaylandPlatform {
     }
 
     fn handled(&mut self, host: &KompozHost, event: &Event) {
-        self.desktop.handled(host, event);
+        self.desktop.handled(self.win.id, host, event);
         self.start_outgoing_drag(); // (one the host asked for as it handled the event)
     }
 
@@ -1263,20 +1286,15 @@ impl Platform for WaylandPlatform {
         self.finish_drop(taken);
     }
 
-    /// keep_screen_on: an idle inhibitor on the window while it is laid out (C++'s); the semantics tree to the
-    /// screen readers (the window at the origin: Wayland doesn't tell a window where it is) — the tree of the window
-    /// with the keyboard (else the first with a surface): the one a screen reader reads.
+    /// keep_screen_on: an idle inhibitor on the window while it is laid out (C++'s); the window's semantics tree to
+    /// the screen readers (each window with a surface: a frame of the app's each; at the origin: Wayland doesn't
+    /// tell a window where it is).
     fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64) {
-        let reads = match self.keyboard_window {
-            Some(id) => id == self.win.id,
-            None => {
-                self.win.window.is_some() && !self.parked.iter().any(|w| w.window.is_some() && w.id.0 < self.win.id.0)
-            }
-        };
-        if reads && self.win.window.is_some() {
+        if self.win.window.is_some() {
             let window = Rect::new(0.0, 0.0, self.win.width as f32, self.win.height as f32);
             let title = self.win.title.clone();
-            self.desktop.composed(host, redraw, frame_time, window, (1.0 / self.scale()) as f32, &title);
+            let id = self.win.id;
+            self.desktop.composed(id, host, redraw, frame_time, window, (1.0 / self.scale()) as f32, &title);
         }
         let on = host.keep_screen_on();
         let Some(w) = &mut self.win.window else { return };
@@ -1290,7 +1308,7 @@ impl Platform for WaylandPlatform {
     }
 
     fn wants_frames(&self) -> bool {
-        self.desktop.wants_frames()
+        self.win.window.is_some() && self.desktop.wants_frames(self.win.id)
     }
 
     fn set_title(&mut self, title: &str) {
@@ -1325,15 +1343,19 @@ impl Platform for WaylandPlatform {
         let _ = self.connection.flush();
     }
 
-    /// Minimized (xdg_toplevel's set_minimized); a window can't restore itself on Wayland: restoring brings it to
-    /// the front (`to_front`, through an activation token).
+    /// Minimized (xdg_toplevel's set_minimized); a window can't restore itself on Wayland (xdg-shell has no
+    /// request for it): restoring brings it to the front (`to_front`, through an activation token), which the
+    /// compositor restores it for; its restoring is told as the compositor activates it again or stops suspending
+    /// it (the user restoring it from the taskbar too).
     fn set_minimized(&mut self, minimized: bool) {
         if minimized {
             if let Some(w) = &self.win.window {
                 w.toplevel.set_minimized();
                 let _ = self.connection.flush();
             }
-            // (Wayland tells a client nothing of its minimizing: the core's state says it.)
+            // (Wayland tells a client nothing of its minimizing: the core's state says it, until the compositor
+            // shows the window again.)
+            self.win.minimized = true;
             self.win.events.push_back(Event::Minimized);
         } else {
             self.to_front();
@@ -1375,6 +1397,37 @@ impl Platform for WaylandPlatform {
         })
     }
 
+    /// Its icon through xdg-toplevel-icon (kept: a window shown again gets it again); a compositor without it
+    /// shows the app's icon, by the app id's desktop entry.
+    fn set_icon(&mut self, icon: Option<&TrayImage>) {
+        self.win.icon = icon.cloned();
+        self.apply_icon();
+    }
+
+    /// Exported to the desktop's global menu where there is one and the compositor takes the window's menu's
+    /// address (KDE's appmenu protocol: the bus name and path, as Qt's apps tell it), else drawn by KompozR.
+    fn set_menu_bar(&mut self, menus: Option<&[TrayMenuItem]>) -> MenuBarShown {
+        let id = self.win.id;
+        let address = self.desktop.window_menu_address(id);
+        let can = self.globals.appmenu.is_some() && self.win.window.is_some() && address.is_some();
+        let shown = self.desktop.set_window_menu(id, menus, None, can);
+        if let Some(w) = &mut self.win.window {
+            match address.filter(|_| shown == MenuBarShown::Exported) {
+                Some((name, path)) => {
+                    if w.appmenu.is_none() {
+                        w.appmenu = self.globals.appmenu.as_ref().and_then(|m| m.create(&w.surface));
+                    }
+                    if let Some(appmenu) = &w.appmenu {
+                        appmenu.set_address(&name, &path);
+                    }
+                }
+                None => w.appmenu = None, // (released: the compositor forgets the address)
+            }
+            let _ = self.connection.flush();
+        }
+        shown
+    }
+
     fn tray_supported(&self) -> bool {
         self.desktop.tray_supported()
     }
@@ -1389,6 +1442,33 @@ impl Platform for WaylandPlatform {
 }
 
 impl WaylandPlatform {
+    /// The window's icon (its `Window`'s, kept in its state) given to the compositor (xdg-toplevel-icon): a square
+    /// ARGB8888 buffer, premultiplied; none: the app's again.
+    fn apply_icon(&mut self) {
+        let (Some(manager), Some(w)) = (&self.globals.toplevel_icons, &mut self.win.window) else { return };
+        let made = self.win.icon.as_ref().and_then(|image| {
+            let shm = self.globals.shm.as_ref()?;
+            let side = image.width.min(image.height);
+            let pixels: Vec<u32> = (0..side)
+                .flat_map(|y| (0..side).map(move |x| (y * image.width + x) as usize * 4))
+                .map(|i| {
+                    let p = &image.rgba[i..i + 4];
+                    let a = p[3] as u32;
+                    let pre = |c: u8| (c as u32 * a + 127) / 255;
+                    a << 24 | pre(p[0]) << 16 | pre(p[1]) << 8 | pre(p[2])
+                })
+                .collect();
+            let buffer = decorations::shm_buffer(shm, "kompoz-icon", &pixels, side, side)?;
+            let icon = manager.create_icon()?;
+            icon.add_buffer(&buffer, 1);
+            Some((icon, buffer))
+        });
+        manager.set_icon(&w.toplevel, made.as_ref().map(|(icon, _)| icon));
+        w.surface.commit();
+        w.icon = made; // (the one before goes: its icon, then its buffer)
+        let _ = self.connection.flush();
+    }
+
     /// An activation token came (asked for by `to_front`): its window activated with it.
     fn activate(&mut self, token: ObjectId, name: &str) {
         let Some(i) = self.activations.iter().position(|(t, _)| t.id() == token) else { return };
@@ -1533,7 +1613,9 @@ impl Platform for WaylandWindow {
         self.on().send_notification(tray, notification);
     }
     fn set_icon(&mut self, icon: Option<&TrayImage>) {
-        // (Wayland's xdg-toplevel-icon isn't bound yet: the desktop shows the app's icon, by its app id.)
-        let _ = icon;
+        self.on().set_icon(icon);
+    }
+    fn set_menu_bar(&mut self, menus: Option<&[TrayMenuItem]>) -> MenuBarShown {
+        self.on().set_menu_bar(menus)
     }
 }

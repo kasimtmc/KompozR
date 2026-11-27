@@ -8,9 +8,12 @@
 //!
 //! - `KOMPOZ_SCALE`: px per dp (a phone's 2.625, say); `KOMPOZ_FONT_SCALE`: the system's text size.
 //! - `KOMPOZ_HEADLESS_SCREEN=WxH`: the screen's size (points) windows are aligned in (1920x1080).
+//! - `KOMPOZ_HEADLESS_MENU_BAR=exported|native`: a window's menu bar shown as a desktop's global menu or a
+//!   platform's own would (not drawn; the shortcuts KompozR's, or the platform's), not drawn by KompozR.
 
 use crate::app::{
-    AppConfig, AppContent, AppCore, AppWindows, Event, Metrics, Platform, TrayIcon, TrayImage, WindowSpec,
+    AppConfig, AppContent, AppCore, AppWindows, Event, MenuBarShown, Metrics, Platform, TrayIcon, TrayImage,
+    TrayMenuItem, WindowSpec,
 };
 use crate::system::{log, preferred_language};
 use kompoz_gpu::device::{Backend, NATIVE_BACKEND, Surface};
@@ -107,9 +110,13 @@ pub struct HeadlessWindow {
     pub resizable: bool,
     pub always_on_top: bool,
     pub undecorated: bool,
+    /// Shown with its alpha (`Window(transparent = true)`).
+    pub transparent: bool,
     /// `to_front`s asked.
     pub fronted: u32,
     pub icon: Option<TrayImage>,
+    /// Its menu bar's menus as the platform was last given them (none: none).
+    pub menu_bar: Option<Vec<TrayMenuItem>>,
 }
 
 /// What the headless platform's windows share: the loop's queue, a clipboard of the app's own, the settings given
@@ -278,8 +285,10 @@ impl Platform for HeadlessPlatform {
                 resizable: window.resizable,
                 always_on_top: window.always_on_top,
                 undecorated: window.undecorated,
+                transparent: window.transparent,
                 fronted: 0,
                 icon: None,
+                menu_bar: None,
             },
         );
         let drawable = self.size.clone();
@@ -397,6 +406,16 @@ impl Platform for HeadlessPlatform {
 
     fn set_icon(&mut self, icon: Option<&TrayImage>) {
         self.with_window(|w| w.icon = icon.cloned());
+    }
+
+    /// Kept; drawn by KompozR unless `KOMPOZ_HEADLESS_MENU_BAR` says the platform shows it.
+    fn set_menu_bar(&mut self, menus: Option<&[TrayMenuItem]>) -> MenuBarShown {
+        self.with_window(|w| w.menu_bar = menus.map(<[TrayMenuItem]>::to_vec));
+        match self.option("KOMPOZ_HEADLESS_MENU_BAR").as_deref() {
+            Some("exported") => MenuBarShown::Exported,
+            Some("native") => MenuBarShown::Native,
+            _ => MenuBarShown::Drawn,
+        }
     }
 
     fn window_position(&self) -> Option<(i32, i32)> {

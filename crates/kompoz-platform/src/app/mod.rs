@@ -10,7 +10,9 @@
 //! ```
 
 mod app_core;
+pub mod entry;
 mod event;
+pub mod menu_bar;
 mod platform;
 mod profile;
 pub mod regions;
@@ -19,10 +21,13 @@ mod title_bar;
 mod windows;
 
 pub use app_core::{AppCore, DeviceFactory, Next, lifecycle_state_of, paint_image};
+pub use entry::{application, single_window_application};
 pub use event::{Event, MouseButton};
 pub use kompoz_gpu::device::GpuPriority;
+pub use menu_bar::{MENU_BAR_HEIGHT, MENU_BAR_ID, MenuBarColors, MenuBarFrame, MenuBarView, MenuNav};
 pub use platform::{
-    Metrics, Platform, TitleBar, TrayIcon, TrayImage, TrayMenuItem, WindowAction, WindowButton, WindowSpec,
+    MenuBarShown, Metrics, Platform, TitleBar, TrayIcon, TrayImage, TrayMenuItem, WindowAction, WindowButton,
+    WindowSpec,
 };
 pub use title_bar::{
     TITLE_BAR_BUTTON, TITLE_BAR_GAP, TITLE_BAR_HEIGHT, TITLE_BAR_ID, TitleBarColors, WindowActions, WindowFrame,
@@ -33,7 +38,10 @@ pub use windows::{AppWindows, MakeWindow, key_name};
 use crate::system::log;
 use kompoz_graphics::Dp;
 use kompoz_runtime::Content;
-use kompoz_ui::window::ApplicationScope;
+use kompoz_runtime::kompozable_block;
+use kompoz_ui::draw::Painter;
+use kompoz_ui::input::KeyEvent;
+use kompoz_ui::window::{ApplicationScope, FrameWindowScope, SingleWindowApplicationScope, Window, WindowState};
 use std::process::ExitCode;
 use std::rc::Rc;
 
@@ -190,24 +198,47 @@ impl App {
     }
 }
 
-/// Compose Desktop's `application { }`: `content` composed without a window of its own, given the app's scope
-/// ([`ApplicationScope::exit_application`]), its `Window`s and `Tray`s shown, until it exits or nothing is left in
-/// it (no window, no tray icon); what the program returns. The app's title (its caches', its window class's) is the
-/// program's name; `App::new(title)….application(content)` gives another and the rest of its configuration.
-///
-/// ```text
-/// fn main() -> ExitCode {
-///     application(|app: &ApplicationScope| {
-///         let app = app.clone();
-///         Window(on_close_request = move || app.exit_application(), content = |_: &FrameWindowScope| App());
-///     })
-/// }
-/// ```
-pub fn application(content: impl Fn(&ApplicationScope) + 'static) -> ExitCode {
-    let name = std::env::args()
-        .next()
-        .and_then(|a| std::path::Path::new(&a).file_stem().map(|s| s.to_string_lossy().into_owned()))
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "KompozR".into());
-    App::new(name).application(content)
+/// What `single_window_application` composes in the app's scope: its one `Window`, closed by `exit_application`
+/// (a test's headless run composes the same; not Kotlin's: the platform's entry module is).
+#[allow(clippy::too_many_arguments)]
+pub fn single_window_content(
+    state: WindowState,
+    visible: bool,
+    title: String,
+    icon: Option<Rc<dyn Painter>>,
+    undecorated: bool,
+    transparent: bool,
+    resizable: bool,
+    enabled: bool,
+    focusable: bool,
+    always_on_top: bool,
+    on_preview_key_event: Rc<dyn Fn(&KeyEvent) -> bool>,
+    on_key_event: Rc<dyn Fn(&KeyEvent) -> bool>,
+    content: Rc<dyn Fn(&SingleWindowApplicationScope)>,
+) -> impl Fn(&ApplicationScope) + 'static {
+    move |app: &ApplicationScope| {
+        let (state, title, icon) = (state.clone(), title.clone(), icon.clone());
+        let (preview, after, content) = (on_preview_key_event.clone(), on_key_event.clone(), content.clone());
+        let (closer, scope) = (app.clone(), app.clone());
+        kompozable_block!({
+            Window(
+                on_close_request = move || closer.exit_application(),
+                state = state,
+                visible = visible,
+                title = title,
+                icon = icon,
+                undecorated = undecorated,
+                transparent = transparent,
+                resizable = resizable,
+                enabled = enabled,
+                focusable = focusable,
+                always_on_top = always_on_top,
+                on_preview_key_event = move |e: &KeyEvent| preview(e),
+                on_key_event = move |e: &KeyEvent| after(e),
+                content = move |frame: &FrameWindowScope| {
+                    content(&SingleWindowApplicationScope::new(scope.clone(), frame.clone()));
+                },
+            );
+        });
+    }
 }

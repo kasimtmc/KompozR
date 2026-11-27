@@ -16,11 +16,13 @@
 //!   drawn.
 //! - `KOMPOZ_LAYOUT_DIRECTION=rtl|ltr`, `KOMPOZ_LANGUAGE=tr|en`: instead of the system language's.
 
+use super::menu_bar::MenuBarFrame;
 use super::profile::{DrawCounts, Profile};
 use super::regions::{ShownChanges, drawn_area, frame_changes};
 use super::script::{Command, Script, WindowEvent, parse_command};
 use super::title_bar::{WindowActions, WindowFrame};
-use super::{AppConfig, Event, MouseButton, Platform, TitleBar, TrayImage, WindowAction, WindowSpec};
+use super::windows::menu_item;
+use super::{AppConfig, Event, MenuBarShown, MouseButton, Platform, TitleBar, TrayImage, WindowAction, WindowSpec};
 use crate::image_loader::{load_image_async, load_image_file, save_pixels, start_image_disk_cache, stop_image_loader};
 use crate::system::{app_cache_directory, log, read_file};
 use kompoz_gpu::Renderer;
@@ -132,6 +134,8 @@ struct Applied {
     placement: WindowPlacement,
     position: WindowPosition,
     front: u64,
+    /// The menu bar's version the platform was last given (none: not yet, or to give again).
+    menu_bar: Option<u64>,
     properties: Option<WindowProperties>,
 }
 
@@ -179,6 +183,8 @@ pub struct AppCore<P: Platform> {
     point_to_px: f32,
     /// KompozR's title bar, as the platform says (Metrics::title_bar).
     title_bar: MutableState<Option<TitleBar>>,
+    /// Who shows a `Window`'s menu bar, as the platform last said (KompozR draws it where none other does).
+    menu_bar_shown: MutableState<MenuBarShown>,
     /// What the title bar asked of the window while the host was busy (its input, its frame), done after.
     window_actions: Rc<RefCell<Vec<(WindowAction, Offset)>>>,
     quit: bool,
@@ -256,6 +262,7 @@ impl<P: Platform> AppCore<P> {
             scale: 1.0,
             point_to_px: 1.0,
             title_bar: mutable_state_of(None),
+            menu_bar_shown: mutable_state_of(MenuBarShown::Drawn),
             window_actions: Rc::default(),
             quit: false,
             script: Script::default(),
@@ -533,8 +540,15 @@ impl<P: Platform> AppCore<P> {
         let (title_bar, title) = (self.title_bar.clone(), self.title.clone());
         let queue = self.window_actions.clone();
         let act: WindowActions = Rc::new(move |action, at| queue.borrow_mut().push((action, at)));
+        // (A `Window`'s menu bar between the title bar and the content while KompozR draws it.)
+        let menu_bar = match &self.kind {
+            Kind::Window(request) => {
+                Some(MenuBarFrame { request: Rc::downgrade(request), shown: self.menu_bar_shown.clone() })
+            }
+            _ => None,
+        };
         let framed = kompozable_lambda!(move || {
-            WindowFrame(title_bar.get(), title.get(), act.clone(), content.clone());
+            WindowFrame(title_bar.get(), title.get(), act.clone(), menu_bar.clone(), content.clone());
         });
         let host = match &self.kind {
             Kind::Main => KompozHost::new(framed),
@@ -544,10 +558,19 @@ impl<P: Platform> AppCore<P> {
             }
             Kind::Window(request) => {
                 let host = KompozHost::new_window(framed, request.locals());
+                // The window's keys: an open menu of the drawn menu bar's first (it has the keyboard), then the
+                // window's own handlers around its focused path, then the menu bar's shortcuts and mnemonics
+                // (where the platform's own menu doesn't run the shortcuts).
                 let (preview, after) = (Rc::downgrade(request), Rc::downgrade(request));
+                let shown = self.menu_bar_shown.clone();
                 host.set_window_key_handlers(Some((
-                    Rc::new(move |e| preview.upgrade().is_some_and(|r| r.on_preview_key_event(e))),
-                    Rc::new(move |e| after.upgrade().is_some_and(|r| r.on_key_event(e))),
+                    Rc::new(move |e| {
+                        preview.upgrade().is_some_and(|r| r.menu_bar_preview_key(e) || r.on_preview_key_event(e))
+                    }),
+                    Rc::new(move |e| {
+                        let accelerators = shown.peek() != MenuBarShown::Native;
+                        after.upgrade().is_some_and(|r| r.on_key_event(e) || r.menu_bar_key(e, accelerators))
+                    }),
                 )));
                 host
             }
@@ -589,6 +612,7 @@ impl<P: Platform> AppCore<P> {
                 placement,
                 position,
                 front: state.to_front_requests(),
+                menu_bar: None,
                 properties: Some(request.properties()),
             };
         }
@@ -611,6 +635,7 @@ impl<P: Platform> AppCore<P> {
             spec.placement = placement;
             spec.minimized = minimized;
             spec.undecorated = p.undecorated;
+            spec.transparent = p.transparent;
             spec.resizable = p.resizable;
             spec.focusable = p.focusable;
             spec.always_on_top = p.always_on_top;
@@ -655,10 +680,11 @@ impl<P: Platform> AppCore<P> {
     /// again) if it can't be made.
     fn start_gpu(&mut self, backend: Backend) -> bool {
         // (The app's composition without a window: a device that draws only into textures.)
+        let spec = self.window_spec();
         let mut surface = if self.is_application() {
             Surface::default()
         } else {
-            match self.platform.open_window(&self.window_spec(), backend) {
+            match self.platform.open_window(&spec, backend) {
                 Ok(surface) => surface,
                 Err(why) => {
                     self.logf(&format!("kompoz: no window for {}: {why}", backend.name()));
@@ -666,6 +692,9 @@ impl<P: Platform> AppCore<P> {
                 }
             }
         };
+        // A transparent window's: presented with its alpha, its frames drawn over nothing (where the app draws
+        // nothing, what is behind the window shows).
+        surface.transparent = spec.transparent && !self.is_application();
         self.window_open = !self.is_application();
         // The compiled pipelines beside the downloaded images, a file for each backend and build of the shaders;
         // another's goes (a driver keeps what it was given: an older build's pipelines would stay in it, read at
@@ -690,6 +719,9 @@ impl<P: Platform> AppCore<P> {
         let made = device.and_then(|d| Renderer::new(d).ok_or("no renderer".to_string()));
         match made {
             Ok(mut renderer) => {
+                if spec.transparent {
+                    renderer.set_frame_background(Color::Transparent);
+                }
                 self.logf(&format!(
                     "kompoz: renderer: KompozR on {} ({})",
                     backend.name(),
@@ -755,6 +787,7 @@ impl<P: Platform> AppCore<P> {
         }
         self.shown = visible;
         if !visible {
+            self.applied.menu_bar = None; // (its window goes: told again as it is shown)
             self.release_gpu();
             self.hidden = true;
             self.update_lifecycle();
@@ -916,6 +949,12 @@ impl<P: Platform> AppCore<P> {
         }
         match e {
             Event::Quit => self.quit = true,
+            Event::MenuBarItem { path, .. } => {
+                if let Kind::Window(r) = &self.kind {
+                    r.clone().click_menu_bar_item(path);
+                }
+            }
+            Event::MenuBarHostChanged => self.applied.menu_bar = None, // (shown again at the next sync)
             Event::CloseRequest => match &self.kind {
                 Kind::Main => self.quit = true,
                 Kind::Window(r) => r.clone().close_requested(),
@@ -1746,6 +1785,16 @@ impl<P: Platform> AppCore<P> {
         }
         if !self.window_open {
             return; // (hidden: the rest as it is shown again)
+        }
+        // Its menu bar, to whatever shows it (the platform, or KompozR's own frame).
+        let version = request.menu_bar_version();
+        if self.applied.menu_bar != Some(version) {
+            self.applied.menu_bar = Some(version);
+            let menus: Option<Vec<_>> = request.menu_bar_menus().map(|m| m.iter().map(menu_item).collect());
+            let shown = self.platform.set_menu_bar(menus.as_deref());
+            if self.menu_bar_shown.peek() != shown {
+                self.menu_bar_shown.set(shown);
+            }
         }
         // What the window manager did, back into the state first (then what the app set since is told).
         if let Some(placed) = self.platform.window_placement()

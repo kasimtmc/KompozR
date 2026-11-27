@@ -111,7 +111,7 @@ impl MetalDevice {
     /// A device presenting to `surface`'s layer (or drawing only into textures without one); why not if this system
     /// has no Metal device. `KOMPOZ_GPU_DEVICE=<part of a name>` picks the GPU (on macOS, where there may be several).
     pub fn new(surface: Surface) -> Result<MetalDevice, String> {
-        let Surface { metal, drawable_size, pipeline_cache } = surface;
+        let Surface { metal, drawable_size, pipeline_cache, transparent } = surface;
         autoreleasepool(|_| {
             let validating = env_is_one("KOMPOZ_GPU_VALIDATION");
             if validating && !env_is_one("MTL_DEBUG_LAYER") {
@@ -130,6 +130,8 @@ impl MetalDevice {
                 layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
                 // (The renderer copies from it: blend modes read what is below.)
                 layer.setFramebufferOnly(false);
+                // A transparent window's: composited with its (premultiplied) alpha.
+                layer.setOpaque(!transparent);
                 layer
             });
             let errors = Arc::new(AtomicU32::new(0));

@@ -146,6 +146,8 @@ impl WaylandPlatform {
         }
         surface.commit();
         self.win.window = Some(Window {
+            icon: None,
+            appmenu: None,
             edges: Default::default(),
             frame_callback: None,
             inhibitor: None,
@@ -168,6 +170,7 @@ impl WaylandPlatform {
         }
         self.apply_size();
         self.update_edges();
+        self.apply_icon(); // (a window shown again: its icon again)
         if app.minimized
             && let Some(w) = &self.win.window
         {
@@ -342,6 +345,13 @@ impl WaylandPlatform {
         if resized || state_changed {
             self.update_edges(); // (where they are, whether they are, how active their shadows are)
         }
+        // Restored after it was minimized: shown again by the compositor (activated, or no longer suspended).
+        if self.win.minimized
+            && ((self.win.state.activated && !was.activated) || (was.suspended && !self.win.state.suspended))
+        {
+            self.win.minimized = false;
+            self.win.events.push_back(Event::Restored);
+        }
         if state_changed {
             self.win.events.push_back(Event::MetricsChanged); // (the title bar's)
             if self.win.state.suspended != was.suspended {
@@ -400,7 +410,12 @@ impl WaylandPlatform {
                 w.toplevel.r#move(seat, self.press_serial);
                 self.let_go();
             }
-            WindowAction::Minimize => w.toplevel.set_minimized(),
+            WindowAction::Minimize => {
+                w.toplevel.set_minimized();
+                // (Told by no event of the compositor's: the core's state says it, until the window is shown again.)
+                self.win.minimized = true;
+                self.win.events.push_back(Event::Minimized);
+            }
             WindowAction::ToggleMaximize => {
                 if self.win.state.maximized {
                     w.toplevel.unset_maximized();

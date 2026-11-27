@@ -79,6 +79,8 @@ pub struct VulkanDevice {
     pipeline_layout: vk::PipelineLayout,
     /// Where the pipeline cache is kept between runs (none: not kept).
     cache_file: Option<PathBuf>,
+    /// Presented with its alpha (a transparent window's), else opaque.
+    transparent: bool,
     /// The cache's data's size when it was made (with the file's) or kept.
     cache_size: usize,
     retired: Arc<RetiredQueue>,
@@ -118,7 +120,7 @@ impl VulkanDevice {
     /// system can't have one. `KOMPOZ_GPU_VALIDATION=1` turns the validation layer on, `KOMPOZ_GPU_DEVICE=<part of a
     /// name>` picks the GPU.
     pub fn new(surface: Surface) -> Result<VulkanDevice, String> {
-        let Surface { vulkan, drawable_size, pipeline_cache } = surface;
+        let Surface { vulkan, drawable_size, pipeline_cache, transparent } = surface;
         let instance = Instance::new(vulkan)?;
         let presents = instance.surface_fn.is_some();
         let Some(choice) = pick_physical_device(&instance) else {
@@ -195,6 +197,7 @@ impl VulkanDevice {
             set_layout,
             pipeline_layout,
             cache_file: pipeline_cache,
+            transparent,
             cache_size: 0,
             retired,
             drawable_size,

@@ -556,6 +556,10 @@ pub struct Surface {
     /// A file where the pipelines' compiled shaders are kept between runs, read when the device is made and written
     /// when it has made more (Vulkan's pipeline cache); none to compile them every run.
     pub pipeline_cache: Option<PathBuf>,
+    /// The window shows what is behind it where its pixels aren't opaque (Compose Desktop's `Window(transparent =
+    /// true)`): presented with their alpha, premultiplied (Vulkan's composite alpha, a Metal layer not opaque, a
+    /// canvas's premultiplied alpha mode); else opaque.
+    pub transparent: bool,
 }
 
 /// What presenting with Metal needs from the window system: the view's `CAMetalLayer`, which the device configures

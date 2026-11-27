@@ -167,15 +167,7 @@ impl VulkanDevice {
         } else {
             extent
         };
-        let composite_alpha = [
-            vk::CompositeAlphaFlagsKHR::OPAQUE,
-            vk::CompositeAlphaFlagsKHR::INHERIT,
-            vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED,
-            vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED,
-        ]
-        .into_iter()
-        .find(|&a| caps.supported_composite_alpha.contains(a))
-        .unwrap_or(vk::CompositeAlphaFlagsKHR::OPAQUE);
+        let composite_alpha = composite_alpha(caps.supported_composite_alpha, self.transparent);
         let info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(min_images)
@@ -386,5 +378,37 @@ impl VulkanDevice {
             Err(vk::Result::ERROR_SURFACE_LOST_KHR) => self.surface_lost = true,
             Err(_) => {}
         }
+    }
+}
+
+/// How the swapchain's images are composited with what is behind the window: an opaque window's the first of
+/// opaque, inherited (the window system's own way), premultiplied, straight the surface has; a transparent window's
+/// with its alpha — premultiplied (what the renderer draws), else straight, else inherited (Wayland's and X11's
+/// 32-bit visuals take the alpha as premultiplied that way), opaque only where the surface has nothing else.
+pub(crate) fn composite_alpha(supported: vk::CompositeAlphaFlagsKHR, transparent: bool) -> vk::CompositeAlphaFlagsKHR {
+    use vk::CompositeAlphaFlagsKHR as A;
+    let order = if transparent {
+        [A::PRE_MULTIPLIED, A::POST_MULTIPLIED, A::INHERIT, A::OPAQUE]
+    } else {
+        [A::OPAQUE, A::INHERIT, A::PRE_MULTIPLIED, A::POST_MULTIPLIED]
+    };
+    order.into_iter().find(|&a| supported.contains(a)).unwrap_or(A::OPAQUE)
+}
+
+#[cfg(test)]
+mod composite_alpha_tests {
+    use super::*;
+    use vk::CompositeAlphaFlagsKHR as A;
+
+    #[test]
+    fn a_transparent_window_is_composited_with_its_alpha() {
+        let all = A::OPAQUE | A::INHERIT | A::PRE_MULTIPLIED | A::POST_MULTIPLIED;
+        assert_eq!(composite_alpha(all, false), A::OPAQUE);
+        assert_eq!(composite_alpha(all, true), A::PRE_MULTIPLIED);
+        assert_eq!(composite_alpha(A::OPAQUE | A::POST_MULTIPLIED, true), A::POST_MULTIPLIED);
+        assert_eq!(composite_alpha(A::OPAQUE | A::INHERIT, true), A::INHERIT);
+        assert_eq!(composite_alpha(A::OPAQUE, true), A::OPAQUE);
+        assert_eq!(composite_alpha(A::INHERIT | A::PRE_MULTIPLIED, false), A::INHERIT);
+        assert_eq!(composite_alpha(A::empty(), true), A::OPAQUE);
     }
 }

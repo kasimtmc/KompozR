@@ -48,7 +48,7 @@ fn framed(bar: MutableState<Option<TitleBar>>, acts: &Acts) -> KompozTestRule {
         );
     }));
     KompozTestRule::new(kompozable_lambda!(move || {
-        WindowFrame(bar.get(), "Sayaç".to_string(), act.clone(), content.clone());
+        WindowFrame(bar.get(), "Sayaç".to_string(), act.clone(), None, content.clone());
     }))
 }
 

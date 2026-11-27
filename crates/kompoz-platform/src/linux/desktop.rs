@@ -4,7 +4,8 @@
 //! own that wakes the platform's loop: the accent color, the light or dark preference, GNOME's window buttons and
 //! the system's text size (the settings portal: [`portal`](super::portal)), the wallpaper's colors
 //! ([`wallpaper`](super::wallpaper)), the screen readers (AT-SPI: [`atspi`](super::atspi)), the app's tray icons and
-//! the desktop's notifications ([`status_notifier`](super::status_notifier)); the screen saver held off over D-Bus,
+//! the desktop's notifications, the windows' menu bars on a global menu ([`status_notifier`](super::status_notifier));
+//! the screen saver held off over D-Bus,
 //! a microphone and a camera ([`media`](super::media)).
 //!
 //! # How a platform runs them
@@ -22,13 +23,16 @@
 //! m.title_bar = own_decorations.then(|| self.desktop.title_bar(maximized, can_minimize, can_maximize));
 //! // Platform::metrics_updated, handled, composed, wants_frames, media:
 //! fn metrics_updated(&mut self, _: &KompozHost) { self.desktop.metrics_updated() }
-//! fn handled(&mut self, host: &KompozHost, e: &Event) { self.desktop.handled(host, e) }
+//! // (each for the window the call is for: its id; every window's tree is published, a frame each under the app)
+//! fn handled(&mut self, host: &KompozHost, e: &Event) { self.desktop.handled(id, host, e) }
 //! fn composed(&mut self, host: &KompozHost, redraw: bool, t: i64) {
 //!     // (X11 only: Wayland holds the screen saver off with an idle inhibitor on its surface.)
 //!     self.desktop.keep_screen_on(host.keep_screen_on(), &title);
-//!     self.desktop.composed(host, redraw, t, window_in_points, points_per_px, &title);
+//!     self.desktop.composed(id, host, redraw, t, window_in_points, points_per_px, &title);
 //! }
-//! fn wants_frames(&self) -> bool { self.desktop.wants_frames() }  // a frame more: the tree to publish
+//! fn wants_frames(&self) -> bool { self.desktop.wants_frames(id) }  // a frame more: the tree to publish
+//! // A window closed or hidden: its tree gone from the screen readers.
+//! self.desktop.window_closed(id);
 //! fn media(&mut self, probe: bool) -> MediaInfo { self.desktop.media(probe, pointer, keyboard) }
 //! // Before the loop goes: their threads ended.
 //! self.desktop.stop();
@@ -40,13 +44,14 @@ use super::media::MediaDevices;
 use super::portal::{DesktopSettings, PortalOptions, Settings};
 use super::status_notifier::StatusNotifier;
 use super::wallpaper::{WallpaperColors, WallpaperOptions};
-use crate::app::{Event, TitleBar, TrayIcon, WindowButton};
+use crate::app::{Event, MenuBarShown, TitleBar, TrayIcon, TrayMenuItem, WindowButton};
 use crate::system::log;
 use kompoz_graphics::Rect;
 use kompoz_graphics::material_color::palettes::DynamicTonalPalette;
 use kompoz_ui::KompozHost;
 use kompoz_ui::media_query::{MediaInfo, PointerPrecision};
-use kompoz_ui::window::Notification;
+use kompoz_ui::window::{Notification, WindowId};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -107,6 +112,20 @@ struct Told {
     tray: AtomicBool,
 }
 
+/// A window's tree as the screen readers were last given it: whether the window has the focus, whether its tree
+/// changed since, when it was published.
+struct A11yWindow {
+    focused: bool,
+    dirty: bool,
+    last: Option<i64>,
+}
+
+impl A11yWindow {
+    fn new() -> A11yWindow {
+        A11yWindow { focused: false, dirty: true, last: None }
+    }
+}
+
 /// The desktop's services a Linux platform runs (C++'s DesktopServices): see the module's documentation for the
 /// hooks a platform passes on.
 pub struct DesktopServices {
@@ -116,10 +135,9 @@ pub struct DesktopServices {
     known: Settings,
     wallpaper: Option<WallpaperColors>,
     a11y: Option<AtspiBridge>,
+    /// Each window's tree as the screen readers were last given it.
+    a11y_windows: HashMap<WindowId, A11yWindow>,
     tray: Option<StatusNotifier>,
-    focused: bool,
-    semantics_dirty: bool,
-    last_semantics: Option<i64>,
     /// The session bus connection holding the screen saver off (closing it lets it go).
     screen_saver: Option<Connection>,
     media: MediaDevices,
@@ -140,10 +158,8 @@ impl DesktopServices {
             known: Settings::default(),
             wallpaper: None,
             a11y: None,
+            a11y_windows: HashMap::new(),
             tray: None,
-            focused: false,
-            semantics_dirty: true,
-            last_semantics: None,
             screen_saver: None,
             media: MediaDevices::default(),
         }
@@ -217,6 +233,35 @@ impl DesktopServices {
         }
     }
 
+    /// `Platform::set_menu_bar` for window `window`: its menus exported to the desktop's global menu where there
+    /// is one (a `com.canonical.AppMenu.Registrar` on the session bus: KDE's, Unity's) and the window can tell it
+    /// (`can_export`: an X11 window, registered by its id `xid`; a Wayland window through KDE's appmenu protocol,
+    /// told [`window_menu_address`](Self::window_menu_address) by its platform), else drawn in the window
+    /// (Compose Desktop's Swing JMenuBar). `KOMPOZ_MENU_BAR=window` draws it in the window anyway.
+    pub fn set_window_menu(
+        &mut self,
+        window: WindowId,
+        menus: Option<&[TrayMenuItem]>,
+        xid: Option<u32>,
+        can_export: bool,
+    ) -> MenuBarShown {
+        let Some(tray) = &self.tray else { return MenuBarShown::Drawn };
+        let in_window = std::env::var("KOMPOZ_MENU_BAR").is_ok_and(|v| v.trim() == "window");
+        if menus.is_none() || in_window || !can_export || !tray.global_menu() {
+            tray.set_window_menu(window.0, None, None);
+            return MenuBarShown::Drawn;
+        }
+        tray.set_window_menu(window.0, menus, xid);
+        MenuBarShown::Exported
+    }
+
+    /// Where window `window`'s menus are published on the session bus: the connection's name and the object's path
+    /// (what KDE's appmenu protocol tells the compositor); none before the bus is connected.
+    pub fn window_menu_address(&self, window: WindowId) -> Option<(String, String)> {
+        let name = self.tray.as_ref()?.bus_name()?;
+        Some((name, super::status_notifier::window_menu_path(window.0)))
+    }
+
     /// `Platform::send_notification`: a notification of the desktop's, for tray icon `tray`.
     pub fn send_notification(&mut self, tray: &TrayIcon, notification: &Notification) {
         if let Some(t) = &self.tray {
@@ -259,9 +304,9 @@ impl DesktopServices {
         }
     }
 
-    /// `Platform::handled`: the accent's and the wallpaper's palettes set, assistive technologies' requests
-    /// performed, the window's focus kept for the screen readers.
-    pub fn handled(&mut self, host: &KompozHost, event: &Event) {
+    /// `Platform::handled` for window `window`: the accent's and the wallpaper's palettes set, assistive
+    /// technologies' requests for this window's nodes performed, the window's focus kept for the screen readers.
+    pub fn handled(&mut self, window: WindowId, host: &KompozHost, event: &Event) {
         match event {
             Event::AccentChanged if self.settings.is_some() => {
                 host.set_dynamic_tonal_palette(self.known.accent.map(DynamicTonalPalette::from_seed));
@@ -273,28 +318,31 @@ impl DesktopServices {
             }
             Event::AccessibilityRequest => {
                 if let Some(a11y) = &self.a11y {
-                    for r in a11y.take_requests() {
+                    for r in a11y.take_requests(window.0) {
                         host.perform_semantics_action(r.id, r.action);
                     }
                 }
             }
             Event::FocusGained | Event::FocusLost => {
-                self.focused = matches!(event, Event::FocusGained);
-                self.semantics_dirty = true;
+                let w = self.a11y_windows.entry(window).or_insert_with(A11yWindow::new);
+                w.focused = matches!(event, Event::FocusGained);
+                w.dirty = true;
             }
             _ => {}
         }
     }
 
-    /// `Platform::composed`: the semantics tree published to the screen readers as they ask for it (at once when
-    /// they ask, else at most every 50 ms, 500 ms while the app is busy), `window` where the window is (points),
-    /// `px_to_points` its points per px, `title` its title.
+    /// `Platform::composed` for window `window` (each window's, its own tree): its semantics tree published to the
+    /// screen readers as they ask for it (at once when they ask, else at most every 50 ms, 500 ms while the app is
+    /// busy), `frame` where the window is (points), `px_to_points` its points per px, `title` its title.
+    #[allow(clippy::too_many_arguments)]
     pub fn composed(
         &mut self,
+        window: WindowId,
         host: &KompozHost,
         redraw: bool,
         frame_time: i64,
-        window: Rect,
+        frame: Rect,
         px_to_points: f32,
         title: &str,
     ) {
@@ -302,28 +350,38 @@ impl DesktopServices {
         if !a11y.active() {
             return;
         }
-        let tree_requested = a11y.take_tree_request();
-        self.semantics_dirty |= redraw || tree_requested || host.take_semantics_changed();
+        let w = self.a11y_windows.entry(window).or_insert_with(A11yWindow::new);
+        let tree_requested = a11y.take_tree_request(window.0);
+        w.dirty |= redraw || tree_requested || host.take_semantics_changed();
         let interval = if host.has_pending_work() { 500_000_000 } else { 50_000_000 };
-        if self.semantics_dirty && (tree_requested || self.last_semantics.is_none_or(|t| frame_time - t > interval)) {
-            self.last_semantics = Some(frame_time);
-            self.semantics_dirty = false;
-            let window = AtspiWindow {
-                x: window.left,
-                y: window.top,
-                width: window.width(),
-                height: window.height(),
+        if w.dirty && (tree_requested || w.last.is_none_or(|t| frame_time - t > interval)) {
+            w.last = Some(frame_time);
+            w.dirty = false;
+            let at = AtspiWindow {
+                x: frame.left,
+                y: frame.top,
+                width: frame.width(),
+                height: frame.height(),
                 px_to_points,
-                focused: self.focused,
+                focused: w.focused,
                 title: title.to_string(),
             };
-            a11y.publish(host.accessibility_tree(), window);
+            a11y.publish(window.0, host.accessibility_tree(), at);
         }
     }
 
-    /// `Platform::wants_frames`: one more frame publishes the tree.
-    pub fn wants_frames(&self) -> bool {
-        self.a11y.as_ref().is_some_and(AtspiBridge::active) && self.semantics_dirty
+    /// `Platform::wants_frames` for window `window`: one more frame publishes its tree (it changed, or the screen
+    /// readers want it).
+    pub fn wants_frames(&self, window: WindowId) -> bool {
+        self.a11y.as_ref().is_some_and(AtspiBridge::active) && self.a11y_windows.get(&window).is_none_or(|w| w.dirty)
+    }
+
+    /// Window `window` closed (or hidden): its tree taken from the screen readers, its state forgotten.
+    pub fn window_closed(&mut self, window: WindowId) {
+        self.a11y_windows.remove(&window);
+        if let Some(a11y) = &self.a11y {
+            a11y.remove_window(window.0);
+        }
     }
 
     /// `Platform::media`: the pointer and the keyboard as the platform knows them, a microphone and a camera probed.

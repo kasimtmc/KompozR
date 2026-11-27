@@ -1,11 +1,14 @@
 //! Screen readers (Orca) and other assistive technologies on Linux read the app through AT-SPI (C++'s
-//! atspi_bridge.cpp): its semantics tree ([`KompozHost::accessibility_tree`](kompoz_ui::KompozHost)) served on the
-//! accessibility bus by a thread of its own, from the tree last published ([`tree`]), the app embedded in the AT-SPI
-//! registry's desktop. It starts when the desktop's accessibility is on (`org.a11y.Status`'s IsEnabled or
-//! ScreenReaderEnabled, also once it is turned on later); `KOMPOZ_ATSPI=1` starts it anyway, `KOMPOZ_ATSPI=0` never.
+//! atspi_bridge.cpp): the semantics tree of each of its windows (each window's host's
+//! [`KompozHost::accessibility_tree`](kompoz_ui::KompozHost)) served on the accessibility bus by a thread of its
+//! own, from the trees last published ([`tree`]: one accessible application, a frame for each window under it, as
+//! GTK's and Qt's apps have), the app embedded in the AT-SPI registry's desktop. It starts when the desktop's
+//! accessibility is on (`org.a11y.Status`'s IsEnabled or ScreenReaderEnabled, also once it is turned on later);
+//! `KOMPOZ_ATSPI=1` starts it anyway, `KOMPOZ_ATSPI=0` never.
 //! What an assistive technology asks the app to do (click, focus, set a slider, a text) is kept as requests and
-//! notified ([`serve`]); what changes in the tree (focus, states, names, values, texts, children, live regions, the
-//! window's activation) is told as AT-SPI events.
+//! notified ([`serve`]), for the window whose node it names; what changes in a tree (focus, states, names, values,
+//! texts, children, live regions, the window's activation) is told as AT-SPI events, a window opened (its frame
+//! added to the application, `window:create`) and closed (`window:destroy`, its frame and subtree taken away) too.
 
 pub mod serve;
 pub mod tree;
@@ -16,10 +19,12 @@ pub use tree::Window;
 use super::dbus::{Connection, MatchRule, Message, MessageType, Value, errors};
 use super::desktop::Notify;
 use super::sys;
+use crate::accessibility::Snapshot;
 use kompoz_ui::semantics::AccessibilityNode;
 use serve::{Bus, PROPERTIES, Served};
+use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -61,7 +66,10 @@ struct Shared {
     notify: Notify,
     running: AtomicBool,
     connected: AtomicBool,
-    tree_request: AtomicBool,
+    /// Bumped as the bridge connects: each window's tree is published again ([`AtspiBridge::take_tree_request`]),
+    /// and the generation each window last saw.
+    generation: AtomicU64,
+    seen: Mutex<HashMap<u64, u64>>,
     served: Mutex<Served>,
 }
 
@@ -87,7 +95,8 @@ impl AtspiBridge {
             notify,
             running: AtomicBool::new(true),
             connected: AtomicBool::new(false),
-            tree_request: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            seen: Mutex::new(HashMap::new()),
             served: Mutex::new(Served::default()),
         });
         let thread = (options.forced != Some(false))
@@ -117,28 +126,61 @@ impl AtspiBridge {
         self.shared.connected.load(Ordering::SeqCst)
     }
 
-    /// Whether it wants the tree now (it just connected), even if nothing changed.
-    pub fn take_tree_request(&self) -> bool {
-        self.shared.tree_request.swap(false, Ordering::SeqCst)
+    /// Whether window `window` (its key) is to publish its tree now even if nothing changed: the bridge connected
+    /// (or connected again) since the window last asked.
+    pub fn take_tree_request(&self, window: u64) -> bool {
+        let generation = self.shared.generation.load(Ordering::SeqCst);
+        let mut seen = self.shared.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let before = seen.insert(window, generation);
+        generation > 0 && before != Some(generation)
     }
 
-    /// The tree as it is now (the UI thread's): what changed since the last one is told to the listeners.
-    pub fn publish(&self, nodes: Vec<AccessibilityNode>, window: Window) {
-        let next = tree::Tree::new(nodes, window);
+    /// Window `window`'s tree (its key: the platform's `WindowId`'s number) as it is now (the UI thread's): a new
+    /// window told as the application's child, what changed since its last one told to the listeners.
+    pub fn publish(&self, window: u64, nodes: Vec<AccessibilityNode>, frame: Window) {
+        let title = frame.title.clone();
+        let next = Snapshot::new(nodes, frame);
         {
             let mut served = self.shared.served();
-            if self.active() {
-                let events = tree::compare(&served.tree, &next);
+            let active = self.active();
+            let new = served.tree.snapshot(window).is_none();
+            let old = served.tree.set(window, next);
+            if active {
+                let mut events = Vec::new();
+                if new {
+                    let index = served.tree.windows().len() - 1;
+                    events.extend(tree::window_added(window, index, &title));
+                }
+                let next = served.tree.snapshot(window).expect("just set");
+                events.extend(tree::compare(window, &old, next));
                 served.events.extend(events);
             }
-            served.tree = next;
         }
         self.wake();
     }
 
-    /// What assistive technologies asked for since, in order.
-    pub fn take_requests(&self) -> Vec<Request> {
-        std::mem::take(&mut self.shared.served().requests)
+    /// Window `window` gone (closed, or hidden): its frame and its subtree taken away from the application, told;
+    /// its requests not yet taken dropped.
+    pub fn remove_window(&self, window: u64) {
+        {
+            let mut served = self.shared.served();
+            let Some((index, old)) = served.tree.remove(window) else { return };
+            served.requests.retain(|r| r.window != window);
+            if self.active() {
+                let events = tree::window_removed(window, index, &old);
+                served.events.extend(events);
+            }
+        }
+        self.shared.seen.lock().unwrap_or_else(|e| e.into_inner()).remove(&window);
+        self.wake();
+    }
+
+    /// What assistive technologies asked of window `window`'s nodes since, in order.
+    pub fn take_requests(&self, window: u64) -> Vec<Request> {
+        let mut served = self.shared.served();
+        let (mine, others) = std::mem::take(&mut served.requests).into_iter().partition(|r| r.window == window);
+        served.requests = others;
+        mine
     }
 
     fn wake(&self) {
@@ -185,7 +227,7 @@ fn run(shared: &Shared, wake: &OwnedFd, options: &AtspiOptions) {
     let Some((mut bus, names)) = connect(session.as_mut(), options) else { return };
     drop(session); // (not needed any more)
     shared.connected.store(true, Ordering::SeqCst);
-    shared.tree_request.store(true, Ordering::SeqCst);
+    shared.generation.fetch_add(1, Ordering::SeqCst);
     (shared.notify)(); // to publish the tree
     while running() {
         let events = std::mem::take(&mut shared.served().events);

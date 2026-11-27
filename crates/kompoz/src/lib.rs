@@ -212,12 +212,15 @@ pub mod prelude {
     pub use kompoz_platform::App;
     // (stage 15 WP-MW: Compose Desktop's androidx.compose.ui.window — windows of their own and their state, the
     // application without a window of its own, the tray icon, its menu and notifications)
-    pub use kompoz_platform::application;
+    pub use kompoz_platform::{application, single_window_application};
+    // (what `application` and `singleWindowApplication` return: a Kotlin `fun main() = application { … }`'s type)
     pub use kompoz_ui::window::{
         ApplicationScope, ComposeWindow, FrameWindowScope, KeyShortcut, MenuScope, Notification, NotificationType,
-        Tray, TrayState, Window, WindowPlacement, WindowPosition, WindowScope, WindowState, exit_application,
-        is_tray_supported, remember_notification, remember_tray_state, remember_window_state,
+        SingleWindowApplicationScope, Tray, TrayState, Window, WindowPlacement, WindowPosition, WindowScope,
+        WindowState, exit_application, is_tray_supported, remember_notification, remember_tray_state,
+        remember_window_state,
     };
+    pub use std::process::ExitCode;
     // (WP1b: toggle_split — the trait a TooltipBox's `positionProvider` is: Kotlin code naming none of it still
     // makes a value of it, `TooltipDefaults.rememberTooltipPositionProvider(…)`, which the generated Rust types)
     pub use kompoz_ui::window::PopupPositionProvider;

@@ -1,5 +1,5 @@
 //! What the bridge answers (C++'s `AtspiBridge::State::answer` and `property`): the AT-SPI interfaces of the
-//! application, its window and its nodes, read from the tree last published; what an assistive technology asks the
+//! application, its windows and their nodes, read from the tree last published; what an assistive technology asks the
 //! app to do kept as requests.
 
 use super::tree::*;
@@ -9,9 +9,10 @@ use kompoz_ui::semantics::SemanticsAction;
 pub const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 pub const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 
-/// What an assistive technology asked the app to do: an action on the node `id`.
+/// What an assistive technology asked the app to do: an action on the node `id` of window `window` (its key).
 #[derive(Clone, PartialEq, Debug)]
 pub struct Request {
+    pub window: u64,
     pub id: u64,
     pub action: SemanticsAction,
 }
@@ -108,7 +109,7 @@ fn property_names(interface: &str) -> &'static [&'static str] {
 fn property(served: &Served, app_name: &str, bus: &Bus, o: Object, interface: &str, name: &str) -> Option<Value> {
     let tree = &served.tree;
     let node = match o {
-        Object::Node(id) => Some(tree.node(id)),
+        Object::Node(w, id) => Some(tree.node(w, id)),
         _ => None,
     };
     match (interface, name) {
@@ -188,10 +189,14 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
                 match (iface.as_str(), name.as_str(), value) {
                     (APPLICATION, "Id", Some(Value::Int32(id))) => served.app_id = *id,
                     (VALUE, "CurrentValue", Some(Value::Double(v))) => {
-                        if let Object::Node(id) = o
-                            && served.tree.node(id).settable
+                        if let Object::Node(window, id) = o
+                            && served.tree.node(window, id).settable
                         {
-                            served.requests.push(Request { id, action: SemanticsAction::SetProgress(*v as f32) });
+                            served.requests.push(Request {
+                                window,
+                                id,
+                                action: SemanticsAction::SetProgress(*v as f32),
+                            });
                         }
                     }
                     _ => return None,
@@ -274,18 +279,18 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
                     }]
                 }
             }
-            "GetLayer" => vec![Value::Uint32(if o == Object::Window { LAYER_WINDOW } else { LAYER_WIDGET })],
+            "GetLayer" => vec![Value::Uint32(if matches!(o, Object::Window(_)) { LAYER_WINDOW } else { LAYER_WIDGET })],
             "GetMDIZOrder" => vec![Value::Int16(0)],
             "GrabFocus" => {
                 let focusable = match o {
-                    Object::Node(id) => {
-                        let n = tree.node(id);
+                    Object::Node(w, id) => {
+                        let n = tree.node(w, id);
                         n.editable || (n.clickable && n.enabled)
                     }
                     _ => false,
                 };
-                if let (true, Object::Node(id)) = (focusable, o) {
-                    served.requests.push(Request { id, action: SemanticsAction::Focus });
+                if let (true, Object::Node(window, id)) = (focusable, o) {
+                    served.requests.push(Request { window, id, action: SemanticsAction::Focus });
                 }
                 vec![Value::Boolean(focusable)]
             }
@@ -294,8 +299,8 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
             _ => return None,
         }),
         ACTION => {
-            let Object::Node(id) = o else { return None };
-            let actions = actions_of(tree.node(id));
+            let Object::Node(window, id) = o else { return None };
+            let actions = actions_of(tree.node(window, id));
             if member == "GetActions" {
                 let items = actions
                     .iter()
@@ -310,7 +315,7 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
                 "GetDescription" | "GetKeyBinding" => vec![Value::str("")],
                 "DoAction" => {
                     if let Some((_, action)) = action {
-                        served.requests.push(Request { id, action: action.clone() });
+                        served.requests.push(Request { window, id, action: action.clone() });
                     }
                     vec![Value::Boolean(action.is_some())]
                 }
@@ -318,8 +323,8 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
             })
         }
         TEXT => {
-            let Object::Node(id) = o else { return None };
-            let text = text_of(tree.node(id));
+            let Object::Node(window, id) = o else { return None };
+            let text = text_of(tree.node(window, id));
             let cps = code_points(&text);
             let count = cps.len() as i32 - 1;
             let range = |(from, to): (i32, i32)| {
@@ -380,8 +385,8 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
             })
         }
         EDITABLE_TEXT => {
-            let Object::Node(id) = o else { return None };
-            let value = tree.node(id).value.clone();
+            let Object::Node(window, id) = o else { return None };
+            let value = tree.node(window, id).value.clone();
             let cps = code_points(&value);
             let text = match member {
                 "SetTextContents" => args.str(),
@@ -403,7 +408,7 @@ pub fn answer(served: &mut Served, app_name: &str, bus: &Bus, call: &Message, o:
             if !args.ok {
                 return None;
             }
-            served.requests.push(Request { id, action: SemanticsAction::SetText(text) });
+            served.requests.push(Request { window, id, action: SemanticsAction::SetText(text) });
             Some(vec![Value::Boolean(true)])
         }
         _ => None,

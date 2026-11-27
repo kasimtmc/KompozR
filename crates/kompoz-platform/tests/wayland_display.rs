@@ -17,7 +17,10 @@
 //! for. (No input method or tablet can be scripted on the compositor: what they send is unit-tested.) And two
 //! windows on one connection: a click opening a `Window` of its own (its own toplevel, drawn by a device of its own,
 //! at its state's size), a script reaching it by its title, its own title bar's close (KompozR's decorations) its
-//! `on_close_request`, the main window going on.
+//! `on_close_request`, the main window going on. And a transparent, undecorated window with an icon and a menu
+//! bar (xdg-toplevel-icon, KDE's appmenu where a global menu's registrar is on the session bus): see-through where
+//! it draws nothing, its menu bar drawn and driven by the keyboard, or left to the global menu (its shortcut still
+//! the app's), no protocol error.
 
 #![allow(non_snake_case)]
 
@@ -83,6 +86,150 @@ fn TwoWindows() {
                 Box(modifier = Modifier.fill_max_size().background(Color::Red));
             },
         );
+    }
+}
+
+/// A transparent, undecorated window of its own with an icon and a menu bar (Dosya: Bitti, Ctrl+B), over the
+/// main window (white; green once Bitti ran); its content a red square 40 dp down.
+#[kompozable]
+fn Extras() {
+    let done = remember(|| mutable_state_of(false));
+    Box(modifier = Modifier.fill_max_size().background(if done.get() { Color::Green } else { Color::White }));
+    let d = done.clone();
+    kompoz_ui::window::Window(
+        on_close_request = || {},
+        title = "Üçüncü".to_string(),
+        transparent = true,
+        undecorated = true,
+        icon = Some(Rc::new(kompoz_ui::draw::ColorPainter(Color::Blue)) as Rc<dyn kompoz_ui::draw::Painter>),
+        state = kompoz_ui::window::remember_window_state(size = DpSize(200.dp(), 150.dp())),
+        content = move |scope: &kompoz_ui::window::FrameWindowScope| {
+            let d = d.clone();
+            scope.MenuBar(move |bar: &kompoz_ui::window::MenuBarScope| {
+                let d = d.clone();
+                bar.Menu(
+                    text = "Dosya".to_string(),
+                    mnemonic = Some('D'),
+                    content = move |m: &kompoz_ui::window::MenuScope| {
+                        let d = d.clone();
+                        m.Item(
+                            text = "Bitti".to_string(),
+                            shortcut = Some(kompoz_ui::window::KeyShortcut(kompoz_ui::input::Key::B, ctrl = true)),
+                            on_click = move || d.set(true),
+                        );
+                    },
+                );
+            });
+            Box(modifier = Modifier.padding_sides(top = 40.dp()).size(60.dp()).background(Color::Red));
+        },
+    );
+}
+
+/// The extras' script: a shot of the transparent window; its menu opened by Alt+D and a shot (`menu`: the menu bar
+/// drawn), Enter running its item, or its item's shortcut (`menu` false: the desktop's global menu shows it); a shot
+/// of the main window.
+#[cfg(target_os = "linux")]
+fn extras_script(work: &Path, menu: bool) -> String {
+    let run = if menu {
+        "@Üçüncü: key alt+d;wait 10;@Üçüncü: shot {0}/menu.png;@Üçüncü: key enter"
+    } else {
+        "@Üçüncü: key ctrl+b"
+    };
+    format!("wait 40;@Üçüncü: shot {{0}}/third.png;{run};wait 10;shot {{0}}/main.png;quit")
+        .replace("{0}", &work.display().to_string())
+}
+
+/// The extras' run checked: the transparent window's pixels see-through where it draws nothing, its content and (when
+/// drawn) its menu bar opaque; its icon and menu bar given to the compositor without a protocol error (the connection
+/// never broke); the menu's item run; with a global menu, the bar not drawn (the desktop shows it).
+#[cfg(target_os = "linux")]
+fn check_extras(work: &Path, out: &str, drawn: bool) {
+    for line in ["the connection broke", "GPU validation:", "no window", "couldn't be opened"] {
+        assert!(!out.lines().any(|l| l.contains(line)), "logged '{line}':\n{out}");
+    }
+    let third = work.join("third.png");
+    assert_eq!(png_size(&third), (200, 150));
+    assert_eq!(pixel(&third, 150, 120)[3], 0, "see-through where it draws nothing");
+    assert!(near(pixel(&third, 20, 90), 0xffff0000), "its content as drawn");
+    if drawn {
+        assert!(near(pixel(&third, 150, 10), 0xfff2f2f2), "the menu bar drawn at its top");
+        assert_eq!(pixel(&third, 40, 45)[3], 0, "nothing below the bar before");
+        assert_eq!(pixel(&work.join("menu.png"), 40, 45)[3], 255, "its menu open below it");
+    } else {
+        assert_eq!(pixel(&third, 150, 10)[3], 0, "the menu bar the desktop's: not drawn");
+    }
+    assert!(near(pixel(&work.join("main.png"), 300, 400), 0xff00ff00), "the menu's item ran");
+}
+
+/// A `com.canonical.AppMenu.Registrar` on a session bus of the test's own (a dbus-daemon, stopped when dropped):
+/// what makes an app's menu bars the desktop's global menu's. (Linux's D-Bus client: the display tests are Linux's.)
+#[cfg(target_os = "linux")]
+struct GlobalMenu {
+    daemon: Child,
+    address: String,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    registrar: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "linux")]
+impl GlobalMenu {
+    fn start(work: &Path) -> GlobalMenu {
+        use kompoz_platform::linux::dbus::Connection;
+        let address = format!("unix:abstract=kompoz-wayland-test-bus-{}", std::process::id());
+        let config = work.join("bus.conf");
+        std::fs::write(
+            &config,
+            format!(
+                "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\" \
+                 \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
+                 <busconfig><type>session</type><listen>{address}</listen><auth>EXTERNAL</auth>\
+                 <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/>\
+                 <allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>\n"
+            ),
+        )
+        .unwrap();
+        let daemon = Command::new("dbus-daemon")
+            .arg(format!("--config-file={}", config.display()))
+            .args(["--nofork", "--nopidfile"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("dbus-daemon");
+        let start = Instant::now();
+        let mut bus = loop {
+            match Connection::open(&address) {
+                Ok(c) => break c,
+                Err(e) if start.elapsed() > Duration::from_secs(10) => panic!("the test bus doesn't answer: {e}"),
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        assert_eq!(bus.request_name("com.canonical.AppMenu.Registrar", 4).unwrap(), 1);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
+        let registrar = std::thread::spawn(move || {
+            while !stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                let Ok(Some(m)) = bus.read(Some(Duration::from_millis(50)), None) else { continue };
+                if m.kind == kompoz_platform::linux::dbus::MessageType::MethodCall
+                    && !bus.answer_peer(&m).unwrap_or(true)
+                {
+                    let _ = bus.reply(&m, vec![]);
+                }
+            }
+        });
+        GlobalMenu { daemon, address, stop, registrar: Some(registrar) }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for GlobalMenu {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(r) = self.registrar.take() {
+            let _ = r.join();
+        }
+        let _ = self.daemon.kill();
+        let _ = self.daemon.wait();
     }
 }
 
@@ -238,6 +385,9 @@ enum Drive {
     TitleBar,
     Editor,
     Windows,
+    /// A transparent window with an icon and a menu bar: drawn (`false`), or the global menu's (`true`).
+    #[cfg(target_os = "linux")]
+    Extras(bool),
 }
 
 /// The Counter's script: shots before and after a click on its button (70, 70 dp: in it with a title bar above it
@@ -274,7 +424,8 @@ fn run_app(compositor: &Compositor, work: &Path, app: &str, script: &str, env: &
         .env("KOMPOZ_SCRIPT", script)
         .env("KOMPOZ_GPU_VALIDATION", "1")
         .env("KOMPOZ_NO_WALLPAPER_COLORS", "1")
-        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent") // (the desktop's services: none)
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent") // (the desktop's services: none, unless env says)
+        .env("KOMPOZ_ATSPI", "0")
         .env("XDG_CACHE_HOME", work.join("cache"))
         .env_remove("KOMPOZ_HEADLESS")
         .env_remove("KOMPOZ_PLATFORM");
@@ -444,6 +595,9 @@ fn main() -> ExitCode {
         if child == "windows" {
             return App::new("Pencereler").size(360.dp(), 480.dp()).run(TwoWindows);
         }
+        if child == "extras" {
+            return App::new("Ekstralar").size(360.dp(), 480.dp()).run(Extras);
+        }
         return App::new("Sayaç").size(360.dp(), 480.dp()).run(Counter);
     }
     if std::env::var("KOMPOZ_DISPLAY_TESTS").as_deref() != Ok("1") {
@@ -483,6 +637,11 @@ fn main() -> ExitCode {
         Drive::Windows,
         vec![("VK_DRIVER_FILES", lavapipe), ("KOMPOZ_DECORATIONS", "kompoz")],
     ));
+    #[cfg(target_os = "linux")]
+    {
+        runs.push(("extras: lavapipe, the menu bar drawn", Drive::Extras(false), vec![("VK_DRIVER_FILES", lavapipe)]));
+        runs.push(("extras: lavapipe, a global menu", Drive::Extras(true), vec![("VK_DRIVER_FILES", lavapipe)]));
+    }
     runs.push((
         "editor: lavapipe, the protocol logged",
         Drive::Editor,
@@ -520,6 +679,17 @@ fn main() -> ExitCode {
                 Drive::Windows => {
                     let out = run_app(&compositor, &work, "windows", &windows_script(&work), &env);
                     check_windows(&work, &out);
+                }
+                #[cfg(target_os = "linux")]
+                Drive::Extras(global) => {
+                    // (A global menu: the app's session bus a test's own, with a registrar on it.)
+                    let bus = global.then(|| GlobalMenu::start(&work));
+                    let mut env = env.clone();
+                    if let Some(bus) = &bus {
+                        env.push(("DBUS_SESSION_BUS_ADDRESS", bus.address.as_str()));
+                    }
+                    let out = run_app(&compositor, &work, "extras", &extras_script(&work, !global), &env);
+                    check_extras(&work, &out, !global);
                 }
             }
         })

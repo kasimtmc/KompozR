@@ -47,7 +47,7 @@ pub use image::RendererBitmaps;
 use crate::device::{ClearColor, Device, IRect, Pipeline, Sampler, Texture, TextureId, TextureUsage};
 use crate::path::Edge;
 use crate::shaders::{EdgeInstance, GLYPH, IMAGE, LAYER, MESH, PATH, Prim};
-use kompoz_graphics::{BlendMode, ColorFilter, Contour, Projective, Rect};
+use kompoz_graphics::{BlendMode, Color, ColorFilter, Contour, Projective, Rect};
 use kompoz_ui::graphics_context::ShadowLight;
 use std::collections::HashMap;
 use std::ops::BitOrAssign;
@@ -295,6 +295,9 @@ struct KeptPath {
 /// The renderer: [`GraphicsContext`](kompoz_ui::graphics_context::GraphicsContext) drawn on a [`Device`], which it
 /// owns (the platform reaches it through [`device_mut`](Renderer::device_mut) for its frames and swapchain).
 pub struct Renderer {
+    /// What a frame is drawn over where nothing opaque covers it ([`draw_frame`](Renderer::draw_frame)): white, a
+    /// transparent window's transparent.
+    frame_background: Color,
     /// Layers pushed (KOMPOZ_PROFILE).
     pub layer_count: i32,
     /// Of them, composited from the pixels they had in a frame before.
@@ -403,6 +406,7 @@ impl Renderer {
     pub fn new(mut device: Box<dyn Device>) -> Option<Renderer> {
         let white = device.create_texture(1, 1, crate::device::Format::Rgba8, TextureUsage::SAMPLED)?;
         Some(Renderer {
+            frame_background: Color::White,
             layer_count: 0,
             kept_layers: 0,
             path_count: 0,
@@ -460,6 +464,12 @@ impl Renderer {
     }
 
     /// The device it draws on.
+    /// What frames are drawn over where nothing opaque covers them: white (C++'s), or a transparent window's
+    /// `Color::Transparent` (its pixels left with no alpha where the app draws nothing).
+    pub fn set_frame_background(&mut self, color: Color) {
+        self.frame_background = color;
+    }
+
     pub fn device(&self) -> &dyn Device {
         &*self.device
     }
