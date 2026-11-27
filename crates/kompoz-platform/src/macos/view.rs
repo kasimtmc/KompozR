@@ -11,12 +11,13 @@
 
 #![allow(unsafe_code)]
 
+use super::accessibility;
 use super::text_input::NOT_FOUND;
 use super::window::{MouseKind, WindowState};
 use crate::app::MouseButton;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject, ProtocolObject, Sel};
-use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo, NSDraggingSession,
     NSDraggingSource, NSEvent, NSResponder, NSScreen, NSTextInputClient, NSTrackingArea, NSTrackingAreaOptions, NSView,
@@ -274,6 +275,28 @@ define_class!(
             }
         }
 
+        // ---- Accessibility (accessibility.rs: the semantics tree's elements under the view) ----
+
+        /// The elements of the tree's top nodes (asked: an assistive technology came, the tree published from now).
+        #[unsafe(method_id(accessibilityChildren))]
+        fn accessibility_children(&self) -> Option<Retained<NSArray>> {
+            self.state().map(|state| accessibility::view_children(&state))
+        }
+
+        /// The deepest element at a point of the screen, the view where there is none.
+        #[unsafe(method_id(accessibilityHitTest:))]
+        fn accessibility_hit_test(&self, point: NSPoint) -> Option<Retained<AnyObject>> {
+            let found = self.state().and_then(|state| accessibility::view_hit_test(&state, point));
+            Some(found.unwrap_or_else(|| self.retain().into()))
+        }
+
+        /// The focused node's element, the view where none has the focus.
+        #[unsafe(method_id(accessibilityFocusedUIElement))]
+        fn accessibility_focused_ui_element(&self) -> Option<Retained<AnyObject>> {
+            let found = self.state().and_then(|state| accessibility::view_focused(&state));
+            Some(found.unwrap_or_else(|| self.retain().into()))
+        }
+
         /// The display link's tick (macOS 14's: `-[NSView displayLinkWithTarget:selector:]`).
         #[unsafe(method(displayLinkTick:))]
         fn display_link_tick(&self, _link: &AnyObject) {
@@ -366,8 +389,10 @@ define_class!(
             self.window().map_or(NSRect::ZERO, |w| w.convertRectToScreen(in_window))
         }
 
-        /// The character at a point of the screen: the caret's where it is in the field (KompozR's text layout isn't
-        /// the platform's to ask), none elsewhere.
+        /// The character at a point of the screen: the caret's where it is in the field's caret box, none elsewhere
+        /// (as Windows' text services' `GetACPFromPoint`). A glyph's own would need the field's text layout, which
+        /// doesn't reach the platform: the host's text input service keeps `update_text_layout_result` to itself
+        /// (only the caret's rectangle, `notify_focused_rect`, comes out as the field's area).
         #[unsafe(method(characterIndexForPoint:))]
         fn character_index_for_point(&self, point: NSPoint) -> NSUInteger {
             let (Some(state), Some(window)) = (self.state(), self.window()) else { return NOT_FOUND };

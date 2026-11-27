@@ -8,6 +8,7 @@
 
 #![allow(unsafe_code)]
 
+use super::accessibility::{self, Accessibility};
 use super::app::{Shared, host_waker, wake_loop};
 use super::clipboard::{self, Items};
 use super::display_link::{DisplayLink, Tick};
@@ -123,6 +124,8 @@ pub struct WindowState {
     /// What a drop from another app brought, read as it dropped (the core takes it: `take_drop_entry`).
     drop_entry: RefCell<Option<ClipEntry>>,
     own_drag: RefCell<Option<OwnDrag>>,
+    /// What NSAccessibility reads of the window (its published semantics tree, its nodes' elements).
+    pub(super) a11y: Accessibility,
 }
 
 impl WindowState {
@@ -162,10 +165,11 @@ impl WindowState {
             drop_own: Cell::new(false),
             drop_entry: RefCell::new(None),
             own_drag: RefCell::new(None),
+            a11y: Accessibility::new(),
         }
     }
 
-    fn push(&self, event: Event) {
+    pub(super) fn push(&self, event: Event) {
         self.events.borrow_mut().push_back(event);
     }
 
@@ -173,16 +177,37 @@ impl WindowState {
         self.events.borrow_mut().drain(..).collect()
     }
 
-    fn shared(&self) -> Option<Rc<Shared>> {
+    pub(super) fn shared(&self) -> Option<Rc<Shared>> {
         self.shared.upgrade()
     }
 
-    fn window(&self) -> Option<Retained<KompozWindow>> {
+    pub(super) fn window(&self) -> Option<Retained<KompozWindow>> {
         self.window.borrow().clone()
     }
 
-    fn view(&self) -> Option<Retained<KompozView>> {
+    pub(super) fn view(&self) -> Option<Retained<KompozView>> {
         self.view.borrow().clone()
+    }
+
+    /// px per point (the backing scale, or `KOMPOZ_SCALE`).
+    pub(super) fn px_per_point(&self) -> f64 {
+        self.px_per_point.get()
+    }
+
+    /// The view's size, points.
+    pub(super) fn points(&self) -> (f64, f64) {
+        self.points.get()
+    }
+
+    pub(super) fn title(&self) -> String {
+        self.title.borrow().clone()
+    }
+
+    /// The focused field's selection as the input methods see it (UTF-16 location, length), and where its caret is
+    /// (px in the window); none without a field.
+    pub(super) fn field_selection(&self) -> Option<((usize, usize), Rect)> {
+        let ime = self.ime.borrow();
+        ime.active.then(|| (ime.selected_range(), ime.area))
     }
 
     pub fn is_key(&self) -> bool {
@@ -847,7 +872,8 @@ impl PlatformCallbacks for MacCallbacks {
         Some(host_waker())
     }
 
-    fn text_input(&self, active: bool, area: Rect, state: &TextEditState, _options: &ImeOptions) {
+    fn text_input(&self, active: bool, area: Rect, state: &TextEditState, options: &ImeOptions) {
+        self.state.a11y.set_field_multi_line(active && !options.single_line);
         self.state.set_text_input(active, area, state);
     }
 
@@ -983,6 +1009,7 @@ impl Platform for MacWindow {
             _ => {}
         }
         state.push(Event::Shown);
+        accessibility::opened(state);
         let layer = view.layer().ok_or("the view has no layer")?;
         let size = state.size.clone();
         Ok(Surface {
@@ -1000,6 +1027,7 @@ impl Platform for MacWindow {
     fn close_window(&mut self) {
         self.state.link.borrow_mut().take();
         self.state.waiting_since.set(None);
+        accessibility::closed(&self.state);
         let window = self.state.window.borrow_mut().take();
         let view = self.state.view.borrow_mut().take();
         self.state.last_mouse.borrow_mut().take();
@@ -1085,19 +1113,34 @@ impl Platform for MacWindow {
         host.set_dynamic_tonal_palette(self.shared.accent.get().map(DynamicTonalPalette::from_seed));
     }
 
-    /// The accent changed: its palette.
+    /// The accent changed: its palette; assistive technologies asked: their actions performed on the host's nodes.
     fn handled(&mut self, host: &KompozHost, event: &Event) {
-        if *event == Event::AccentChanged {
-            host.set_dynamic_tonal_palette(self.shared.accent.get().map(DynamicTonalPalette::from_seed));
+        match event {
+            Event::AccentChanged => {
+                host.set_dynamic_tonal_palette(self.shared.accent.get().map(DynamicTonalPalette::from_seed));
+            }
+            Event::AccessibilityRequest => {
+                for (id, action) in self.state.a11y.take_requests() {
+                    host.perform_semantics_action(id, action);
+                }
+            }
+            _ => {}
         }
     }
 
-    /// The display kept awake while the host asks (any window's: an IOKit assertion).
-    fn composed(&mut self, host: &KompozHost, _redraw: bool, _frame_time: i64) {
+    /// The display kept awake while the host asks (any window's: an IOKit assertion); the semantics tree published
+    /// to NSAccessibility as it changed.
+    fn composed(&mut self, host: &KompozHost, redraw: bool, frame_time: i64) {
         let on = host.keep_screen_on() && self.window().is_some();
         if self.state.keep_on.replace(on) != on {
             self.shared.keep_display_awake();
         }
+        accessibility::publish(&self.state, host, redraw, frame_time);
+    }
+
+    /// A frame more while NSAccessibility has a tree still to publish.
+    fn wants_frames(&self) -> bool {
+        self.state.a11y.dirty()
     }
 
     fn take_drop_entry(&mut self) -> Option<ClipEntry> {

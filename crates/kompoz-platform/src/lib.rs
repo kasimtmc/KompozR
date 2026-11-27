@@ -69,11 +69,12 @@ mod windows_tested_here {
 }
 
 // The macOS platform's parts that need no AppKit (its key codes and menus' key equivalents, what its input methods
-// see of a field, the pasteboard's types), tested on every host.
+// see of a field, the pasteboard's types, what NSAccessibility says of the semantics tree), tested on every host.
 #[cfg(all(test, feature = "platform", not(target_os = "macos")))]
 #[allow(dead_code)]
 #[path = "macos"]
 mod macos_tested_here {
+    mod ax;
     mod keyboard;
     mod text_input;
     mod types;

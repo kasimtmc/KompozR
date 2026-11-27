@@ -530,9 +530,15 @@ jobs:
           KOMPOZ_GPU_VALIDATION: "1"
           MTL_DEBUG_LAYER: "1"
         run: cargo test -p showcase --test headless
+      # The macOS platform's own unit tests: its keys, its input methods' replacement ranges, what NSAccessibility
+      # says of the semantics tree (roles, values, actions, notifications) and that its names are AppKit's constants'.
+      - name: The macOS platform's unit tests (NSAccessibility's names against AppKit's)
+        if: success() || failure()
+        run: cargo test -p kompoz-platform --lib macos
       # The macOS platform (AppKit) in real windows on the runner's display: the Counter by CI's script, the app's
-      # windows, a transparent borderless one with a native menu bar; the Counter's and the showcase's window shots
-      # their headless runs', pixel for pixel.
+      # windows, a transparent borderless one with a native menu bar, the Counter read and pressed through
+      # NSAccessibility from inside the app (its elements, roles, values, a text field's selection); the Counter's and
+      # the showcase's window shots their headless runs', pixel for pixel.
       - name: The macOS platform in real windows (Metal, validated)
         if: success() || failure()
         env:

@@ -22,10 +22,14 @@
 //! wake (the hosts' wakers, a display link's tick, a signal: Grand Central Dispatch's main queue posts an
 //! application-defined event), or what is due.
 //!
-//! What comes in later packages: NSAccessibility (MA), the tray and notifications (NSStatusItem,
-//! UNUserNotificationCenter).
+//! Screen readers (VoiceOver) and other assistive technologies read each window through NSAccessibility
+//! (`accessibility`, `ax`: an element of our own for each semantics node under the window's view — AT-SPI's parity).
+//!
+//! What comes in later packages: the tray and notifications (NSStatusItem, UNUserNotificationCenter).
 
+mod accessibility;
 mod app;
+mod ax;
 mod clipboard;
 mod display_link;
 mod keyboard;
@@ -205,8 +209,13 @@ impl Loop {
         let mut typed: Vec<WindowId> = Vec::new();
         for (id, e) in shared.take_events() {
             quit |= e == Event::Quit;
-            if matches!(e, Event::Text(_) | Event::Preedit { .. } | Event::DeleteSurroundingText { .. })
-                && !typed.contains(&id)
+            if matches!(
+                e,
+                Event::Text(_)
+                    | Event::Preedit { .. }
+                    | Event::DeleteSurroundingText { .. }
+                    | Event::SetSelection { .. }
+            ) && !typed.contains(&id)
             {
                 typed.push(id);
             }

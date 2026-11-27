@@ -6,10 +6,10 @@
 //! here at once too (an input method asks again before the core has handled them: `selectedRange` right after
 //! `insertText:` must already count what it inserted).
 //!
-//! A replacement range (the press-and-hold accent menu replacing the letter before the caret, a reconversion) is
-//! the text around the selection deleted first (`Event::DeleteSurroundingText`), when it covers the selection; the
-//! inserted or composed text then takes the selection's place. Elsewhere it can't be said with the events: what is
-//! there stays, the text goes in at the selection.
+//! A replacement range (the press-and-hold accent menu replacing the letter before the caret, a reconversion of a
+//! word anywhere in the field, a dictation's correction) is selected first (`Event::SetSelection`, as Windows' text
+//! services do), wherever it is; the inserted or composed text then takes the selection's place, as AppKit's own
+//! text views do.
 //!
 //! Plain Rust: tested on every host.
 
@@ -100,37 +100,35 @@ impl Ime {
         Some((self.text()[a..b].to_string(), actual))
     }
 
-    /// What deletes the replacement range (UTF-16) around the selection (before its start, after its end), applied
-    /// here; none (nothing deleted) without one, while composing (the composition is what is replaced), or where it
-    /// doesn't cover the selection.
-    fn delete_replaced(&mut self, replacement: Option<(usize, usize)>) -> Option<Event> {
+    /// What selects the replacement range (UTF-16, clamped to the text and to whole characters), applied here; none
+    /// (nothing to do) without one, while composing (the composition is what is replaced: AppKit's input methods
+    /// replace a range only with nothing marked), or where it is the selection already.
+    fn select_replaced(&mut self, replacement: Option<(usize, usize)>) -> Option<Event> {
         let (location, length) = replacement.filter(|&(l, _)| l != NOT_FOUND)?;
         if self.has_marked_text() {
             return None;
         }
         let text = self.text();
-        let (a, b) = (byte_of_utf16(text, location), byte_of_utf16(text, location.saturating_add(length)));
+        let (start, end) = (byte_of_utf16(text, location), byte_of_utf16(text, location.saturating_add(length)));
         let s = &self.state;
-        let (start, end) = (s.selection_start.min(s.selection_end), s.selection_start.max(s.selection_end));
-        if a > start || b < end || (a == start && b == end) {
+        if (start, end) == (s.selection_start.min(s.selection_end), s.selection_start.max(s.selection_end)) {
             return None;
         }
-        let (before, after) = (start - a, b - end);
-        self.state.apply(&EditCommand::DeleteSurroundingText { before, after });
-        Some(Event::DeleteSurroundingText { before, after })
+        self.state.apply(&EditCommand::SetSelection { start, end });
+        Some(Event::SetSelection { start, end })
     }
 
-    /// `insertText:replacementRange:`: `text` in place of the composition, else the selection (and the replacement
-    /// range around it); the events for the app core.
+    /// `insertText:replacementRange:`: `text` in place of the composition, else the replacement range (selected
+    /// first), else the selection; the events for the app core.
     pub fn insert(&mut self, text: &str, replacement: Option<(usize, usize)>) -> Vec<Event> {
-        let mut events: Vec<Event> = self.delete_replaced(replacement).into_iter().collect();
+        let mut events: Vec<Event> = self.select_replaced(replacement).into_iter().collect();
         self.state.apply(&EditCommand::CommitText { text: text.to_string(), new_cursor_position: 1 });
         events.push(Event::Text(text.to_string()));
         events
     }
 
     /// `setMarkedText:selectedRange:replacementRange:`: `text` composing in place of the composition, else the
-    /// selection (and the replacement range around it), `selected` (UTF-16 of `text`: its caret, or what it
+    /// replacement range (selected first), else the selection, `selected` (UTF-16 of `text`: its caret, or what it
     /// highlights) as the preedit's caret; empty: the composition gone. The events for the app core.
     pub fn set_marked(
         &mut self,
@@ -138,7 +136,7 @@ impl Ime {
         selected: (usize, usize),
         replacement: Option<(usize, usize)>,
     ) -> Vec<Event> {
-        let mut events: Vec<Event> = self.delete_replaced(replacement).into_iter().collect();
+        let mut events: Vec<Event> = self.select_replaced(replacement).into_iter().collect();
         let start = byte_of_utf16(text, selected.0.min(utf16_len(text)));
         let end = byte_of_utf16(text, selected.0.saturating_add(selected.1));
         let at = {
@@ -238,22 +236,34 @@ mod tests {
     }
 
     #[test]
-    fn a_replacement_range_around_the_caret_is_deleted_first() {
+    fn a_replacement_range_is_selected_first_wherever_it_is() {
         // Press and hold e: é replacing the e before the caret.
         let mut i = ime("se", (2, 2), None);
         let events = i.insert("é", Some((1, 1)));
-        assert_eq!(events, [Event::DeleteSurroundingText { before: 1, after: 0 }, Event::Text("é".into())]);
+        assert_eq!(events, [Event::SetSelection { start: 1, end: 2 }, Event::Text("é".into())]);
         assert_eq!(i.state.text, "sé");
+        assert_eq!(i.selected_range(), (2, 0));
         // A reconversion of a selected word with a letter after it: composing over all of it.
         let mut i = ime("kanji!", (0, 5), None);
         let events = i.set_marked("漢字", (2, 0), Some((0, 6)));
-        assert_eq!(events[0], Event::DeleteSurroundingText { before: 0, after: 1 });
+        assert_eq!(events[0], Event::SetSelection { start: 0, end: 6 });
         assert_eq!(i.state.text, "漢字");
-        // Elsewhere (not around the selection): at the selection, nothing deleted.
-        let mut i = ime("abc", (3, 3), None);
-        assert_eq!(i.insert("d", Some((0, 1))), [Event::Text("d".into())]);
-        assert_eq!(i.state.text, "abcd");
-        // NSNotFound: none.
+        assert_eq!(i.marked_range(), Some((0, 2)));
+        // A word away from the caret (a reconversion, a correction): replaced where it is, the caret after it.
+        let mut i = ime("bir iki üç", (3, 3), None);
+        let events = i.insert("dört", Some((4, 3)));
+        assert_eq!(events, [Event::SetSelection { start: 4, end: 7 }, Event::Text("dört".into())]);
+        assert_eq!(i.state.text, "bir dört üç");
+        assert_eq!(i.selected_range(), (8, 0));
+        // In UTF-16 (😀 two units, four bytes), past the end clamped.
+        let mut i = ime("😀a", (0, 0), None);
+        assert_eq!(i.insert("b", Some((2, 9)))[0], Event::SetSelection { start: 4, end: 5 });
+        assert_eq!(i.state.text, "😀b");
+        // The selection already, NSNotFound, or while composing: nothing selected.
+        let mut i = ime("abc", (1, 2), None);
+        assert_eq!(i.insert("x", Some((1, 1))), [Event::Text("x".into())]);
         assert_eq!(i.insert("e", Some((NOT_FOUND, 0))), [Event::Text("e".into())]);
+        i.set_marked("k", (1, 0), None);
+        assert_eq!(i.set_marked("ka", (2, 0), Some((0, 1))).len(), 1);
     }
 }

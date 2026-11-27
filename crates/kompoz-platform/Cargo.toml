@@ -118,6 +118,10 @@ features = [
     "objc2-core-foundation",
     "objc2-quartz-core",
     "NSAccessibility",
+    "NSAccessibilityConstants",
+    "NSAccessibilityCustomAction",
+    "NSAccessibilityElement",
+    "NSAccessibilityProtocols",
     "NSAlert",
     "NSAppearance",
     "NSApplication",
@@ -156,6 +160,14 @@ features = [
 
 [dev-dependencies]
 kompoz-test = { path = "../kompoz-test" }
+
+# (macos_display reads the app's accessibility from inside it, as AppKit's assistive technologies do: the view's
+# NSAccessibility elements, on the main thread through its dispatch queue.)
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+dispatch2 = "0.3.1"
+objc2 = "0.6.5"
+objc2-foundation = "0.3.2"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityProtocols", "NSApplication", "NSResponder", "NSView", "NSWindow"] }
 
 # The app core on the headless platform (a GPU device: lavapipe in CI), one thread, in sequence.
 [[test]]
