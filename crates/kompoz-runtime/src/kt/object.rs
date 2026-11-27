@@ -533,7 +533,7 @@ impl<F: 'static> Default for KtSingleton<F> {
 /// Kotlin's default `toString()` of an object of class `name` (`Ledger@1b6d3586`): its class's name and an
 /// identity hash (the object's address here).
 pub fn default_to_string(name: &str, address: *const ()) -> String {
-    format!("{name}@{:x}", (address as usize) & 0xffff_ffff)
+    format!("{name}@{:x}", (address as usize as u64) & 0xffff_ffff)
 }
 
 #[cfg(test)]

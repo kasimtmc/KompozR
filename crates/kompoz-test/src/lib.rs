@@ -261,7 +261,7 @@ impl KompozTestRule {
     #[track_caller]
     pub fn wait_for_idle(&self) {
         self.check_not_in_frame();
-        let start = std::time::Instant::now();
+        let start = kompoz_runtime::clock::Instant::now();
         let mut attempts = 0u32;
         let mut was_idle = false;
         loop {
@@ -278,7 +278,9 @@ impl KompozTestRule {
                 return;
             }
             if kompoz_coroutines::background_work_in_flight() > 0 {
-                // (what worker threads do takes real time: give it some)
+                // (what worker threads do takes real time: give it some; on the web there are none, and it runs as
+                // the dispatcher runs)
+                #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
             was_idle = idle;
@@ -492,14 +494,15 @@ impl KompozTestRule {
         #[default(1_000)] timeout_millis: i64,
         condition: impl Fn() -> bool,
     ) {
-        let start = std::time::Instant::now();
+        let start = kompoz_runtime::clock::Instant::now();
         while !condition() {
             if self.auto_advance.get() {
                 self.advance_frame();
             } else {
                 self.run_current();
             }
-            // (Compose's Thread.sleep(10): what other threads do takes real time)
+            // (Compose's Thread.sleep(10): what other threads do takes real time; none on the web, which can't sleep)
+            #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
             std::thread::sleep(std::time::Duration::from_millis(10));
             if start.elapsed().as_millis() as i64 > timeout_millis {
                 let what = condition_description.map_or(String::from("Condition"), |d| format!("Condition ({d})"));

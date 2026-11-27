@@ -154,7 +154,7 @@ impl Choice {
 /// `KOMPOZ_GPU_DEVICE` names part of, else an integrated one (it saves power), else a discrete one, else any, a
 /// CPU's last.
 pub(super) fn pick_physical_device(instance: &Instance) -> Option<Choice> {
-    let wanted = std::env::var("KOMPOZ_GPU_DEVICE").ok().filter(|w| !w.is_empty());
+    let wanted = kompoz_runtime::environment::var("KOMPOZ_GPU_DEVICE").filter(|w| !w.is_empty());
     let surface = instance.surface_fn.as_ref().map(|f| (f, instance.surface));
     // SAFETY: queries of the instance's physical devices.
     unsafe {

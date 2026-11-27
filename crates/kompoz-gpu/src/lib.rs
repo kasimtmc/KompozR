@@ -5,7 +5,8 @@
 //! mask), text's glyphs ([`glyph`]: rasterized as FreeType does, colour glyphs painted, kept in an atlas), and the
 //! [`renderer`] that draws kompoz-ui's GraphicsContext with them; [`golden`] tells a picture from its golden one.
 //!
-//! `unsafe` code is confined to [`device::vulkan`], each block with a `// SAFETY:` comment; everything else is safe.
+//! `unsafe` code is confined to the backends' modules (`device::vulkan` where Vulkan is the target's API), each block
+//! with a `// SAFETY:` comment; everything else is safe.
 
 #![deny(unsafe_code, unsafe_op_in_unsafe_fn, clippy::undocumented_unsafe_blocks)]
 

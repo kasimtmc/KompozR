@@ -6,13 +6,13 @@
 
 use crate::vector::{AnimationVector1D, AnimationVector2D};
 use kompoz_graphics::{Color, IntOffset, IntSize, Offset};
+use kompoz_runtime::clock::Instant;
 use kompoz_runtime::{MutableState, mutable_state_of, named};
 use kompoz_ui::input::{VelocityTracker, VelocityTracker1D};
 use kompoz_ui::layout::{LayoutCoordinates, TransformOrigin};
 use kompoz_ui::modifier::{ModifierLocal, modifier_local_of};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
 
 thread_local! {
     /// The milliseconds the handed-over velocities are tracked against, in tests (Compose's `@VisibleForTesting

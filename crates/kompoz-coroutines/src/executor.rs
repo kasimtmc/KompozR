@@ -210,6 +210,15 @@ impl Dispatcher {
         *self.0.queue.notify.lock() = Some(Arc::new(notify));
     }
 
+    /// Tells the host there is something to run (as a coroutine woken does): the web's background work queued.
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    pub(crate) fn notify_host(&self) {
+        let notify = self.0.queue.notify.lock().clone();
+        if let Some(n) = notify {
+            n();
+        }
+    }
+
     /// The time of its clock, in nanoseconds: the last frame's (or a newer event's).
     pub fn now(&self) -> i64 {
         self.0.now.get()
@@ -310,11 +319,15 @@ impl Dispatcher {
         self.run_ready();
     }
 
-    /// Polls what was woken (from this thread or another) until nothing is left.
+    /// Polls what was woken (from this thread or another) until nothing is left; on the web, the background work
+    /// queued runs then too (and what it wakes after it).
     pub fn run_ready(&self) {
         loop {
             let ready = std::mem::take(&mut *self.0.queue.ready.lock());
             if ready.is_empty() {
+                if crate::background::run_queued_work() {
+                    continue;
+                }
                 return;
             }
             for (index, generation) in ready {

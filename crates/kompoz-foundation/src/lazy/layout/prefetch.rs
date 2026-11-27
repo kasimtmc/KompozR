@@ -7,6 +7,7 @@
 
 use super::lazy_layout::LazyLayoutItemContentFactory;
 use kompoz_graphics::IntSize;
+use kompoz_runtime::clock::Instant;
 use kompoz_runtime::{kompozable, remember_keyed};
 use kompoz_ui::layout::{PausedPrecomposition, PrecomposedSlotHandle, SlotKey, SubcomposeLayoutState};
 use kompoz_ui::modifier::{TraversableNode, TraversalDecision};
@@ -18,7 +19,6 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::time::Instant;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Requests and the scheduler

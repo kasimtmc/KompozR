@@ -120,7 +120,7 @@ impl App {
         if crate::headless::headless_requested() {
             return crate::headless::run_headless(&self.config, content);
         }
-        let only = std::env::var("KOMPOZ_PLATFORM").ok().filter(|p| !p.is_empty());
+        let only = kompoz_runtime::environment::var("KOMPOZ_PLATFORM").filter(|p| !p.is_empty());
         if DISPLAY_PLATFORMS.is_empty() {
             log("kompoz: no display platform built in (KOMPOZ_HEADLESS=1 runs the app without a window)");
             return ExitCode::FAILURE;

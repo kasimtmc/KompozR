@@ -281,11 +281,7 @@ fn parse_numeric_date(date: &str, pattern: &str) -> Option<CalendarDate> {
 
 /// A two-digit year in Java's default century: the 100 years from 80 years before today.
 fn two_digit_year(value: i32) -> i32 {
-    let this_year = {
-        // SAFETY: `time` with a null pointer only returns the time.
-        let now = unsafe { libc::time(std::ptr::null_mut()) } as i64;
-        civil_from_days(now.div_euclid(86_400)).0
-    };
+    let this_year = civil_from_days(kompoz_runtime::clock::unix_time().as_secs().div_euclid(86_400)).0;
     let start = this_year - 80;
     let candidate = start - start.rem_euclid(100) + value;
     if candidate < start { candidate + 100 } else { candidate }

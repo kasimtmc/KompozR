@@ -1383,7 +1383,8 @@ impl KompozHost {
     /// is time, and one with more to do runs first in the next pause (Compose's prefetch scheduler). What each
     /// changed is composed then (laid out and drawn by the next frame).
     pub fn idle(&self, budget_nanos: i64) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_nanos(budget_nanos.max(0) as u64);
+        let deadline =
+            kompoz_runtime::clock::Instant::now() + std::time::Duration::from_nanos(budget_nanos.max(0) as u64);
         let scope = IdleScope::new(deadline);
         loop {
             let left = scope.available_time_nanos();
@@ -1395,7 +1396,7 @@ impl KompozHost {
             let owner = entry.owner;
             match entry.work {
                 IdleWork::Once { start, took, .. } => {
-                    let started = std::time::Instant::now();
+                    let started = kompoz_runtime::clock::Instant::now();
                     if !start() {
                         continue;
                     }

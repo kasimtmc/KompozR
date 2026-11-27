@@ -17,6 +17,8 @@ mod scope;
 pub mod sync;
 mod time;
 
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub use background::run_queued_background_work;
 pub use background::{Background, background_work_in_flight, run_in_background, with_background};
 pub use channel::{BufferOverflow, Channel, ChannelResult, ProducerScope, ReceiveFuture, SendFuture, produce};
 pub use compose::{

@@ -15,6 +15,7 @@ use super::variation::{FontVariation, FontVariationSettings};
 use super::weight::FontWeight;
 use crate::draw::GlyphSynthesis;
 use crate::shape::{FontBackend, HarfrustBackend};
+use kompoz_runtime::clock::Instant;
 use kompoz_runtime::{MutableState, State, mutable_state_of};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Reads an asset's bytes by its path (the platform's: an APK's assets, files next to the binary).
 pub type AssetLoader = Rc<dyn Fn(&str) -> Option<FontBytes>>;

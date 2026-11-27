@@ -11,9 +11,10 @@ use crate::device::{ClearColor, Format, IRect, Texture, TextureId, TextureUsage}
 use crate::path::{PathPlacement, flatten};
 use crate::shaders::{FLAG_OUTLINE, LAYER, Prim};
 use kompoz_graphics::{Offset, Path, Projective, Rect, RenderEffect, StretchEffect};
+use kompoz_runtime::clock::Instant;
 use kompoz_ui::graphics_context::{CornerRadii, LayerContent, LayerTransform};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// A layer's texture is in the parent's pixels before the parent's transform, times `resolution` (the transform's
 /// scale, so that what it enlarges stays sharp).

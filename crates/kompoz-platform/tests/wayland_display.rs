@@ -140,6 +140,8 @@ impl Compositor {
             .env("XDG_CACHE_HOME", work.join("cache"));
         c.env_remove("WAYLAND_DISPLAY").env_remove("DISPLAY").env_remove("DBUS_SESSION_BUS_ADDRESS");
         c.stdout(Stdio::null()).stderr(std::fs::File::create(work.join("compositor.log")).unwrap());
+        // (its own process group: what is left of it killed with it; the display tests run on Linux)
+        #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut c, 0);
         let child = c.spawn().expect("dbus-run-session and the compositor");
         let compositor = Compositor { child, socket: socket.to_string() };

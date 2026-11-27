@@ -182,21 +182,15 @@ pub fn set_today_for_tests(today: Option<fn() -> (i32, i32, i32)>) {
     TODAY_OVERRIDE.with(|t| t.set(today));
 }
 
-/// Today's date in the system's time zone: year, month 1 to 12, day of the month.
+/// Today's date in the system's time zone (kotlinx-datetime's `TimeZone.currentSystemDefault()`, the JVM's default
+/// zone: kompoz-runtime's, on every target): year, month 1 to 12, day of the month.
 fn local_today() -> (i32, i32, i32) {
     if let Some(today) = TODAY_OVERRIDE.with(Cell::get) {
         return today();
     }
-    // SAFETY: `time` with a null pointer only returns the time; `localtime_r` writes the broken-down local time of
-    // `now` into `tm`, which outlives the call, and returns null only if it can't (then the UTC date is used).
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&now, &mut tm).is_null() {
-            return civil_from_days((now as i64).div_euclid(86_400));
-        }
-        (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday)
-    }
+    let now = kompoz_runtime::kt::Instant::of_epoch_milli(kompoz_runtime::clock::current_time_millis());
+    let today = now.at_zone(kompoz_runtime::kt::ZoneId::system_default());
+    (today.year(), today.month_value(), today.day_of_month())
 }
 
 #[cfg(test)]

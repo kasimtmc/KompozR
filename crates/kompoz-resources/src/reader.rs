@@ -197,6 +197,10 @@ impl DefaultResourceReader {
             if source.is_file() {
                 return Ok(uri(source));
             }
+            // (the web has no files to write it out to)
+            if cfg!(all(target_family = "wasm", target_os = "unknown")) {
+                return Err(MissingResourceException::with_message(path, "No file for a URI on the web"));
+            }
             let out = std::env::temp_dir().join(format!("kompoz-resources-{}", std::process::id())).join(path);
             if !out.is_file() {
                 let written = out.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok())

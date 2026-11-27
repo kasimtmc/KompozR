@@ -90,7 +90,7 @@ pub fn app_cache_directory(app_name: &str) -> Option<PathBuf> {
         return set.clone();
     }
     let name = directory_name(app_name);
-    let var = |v: &str| std::env::var_os(v).filter(|s| !s.is_empty()).map(PathBuf::from);
+    let var = |v: &str| kompoz_runtime::environment::var_os(v).filter(|s| !s.is_empty()).map(PathBuf::from);
     if cfg!(target_os = "macos") {
         return var("HOME").map(|home| home.join("Library").join("Caches").join(name));
     }
@@ -109,17 +109,21 @@ pub fn set_cache_directory(directory: Option<PathBuf>) {
 }
 
 /// The language the environment asks for (C++'s `preferredLanguage`: `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`;
-/// "tr_TR.UTF-8" is "tr"); none if it doesn't say.
+/// "tr_TR.UTF-8" is "tr"), else the one the system says the user prefers first
+/// ([`system_languages`](kompoz_runtime::environment::system_languages): Windows' `GetUserDefaultLocaleName`, what
+/// the Android, web and macOS platforms say: "tr-TR" is "tr"); none if neither says.
 pub fn preferred_language() -> Option<String> {
+    let language_of =
+        |tag: &str| -> String { tag.chars().take_while(|c| !matches!(c, '_' | '.' | '@' | '-')).collect() };
     for name in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"] {
-        let Ok(value) = std::env::var(name) else { continue };
-        let first = value.split(':').next().unwrap_or("");
-        let language: String = first.chars().take_while(|c| !matches!(c, '_' | '.' | '@' | '-')).collect();
+        let Some(value) = kompoz_runtime::environment::var(name) else { continue };
+        let language = language_of(value.split(':').next().unwrap_or(""));
         if !language.is_empty() && language != "C" && language != "POSIX" {
             return Some(language);
         }
     }
-    None
+    let system = kompoz_runtime::environment::system_languages();
+    system.first().map(|tag| language_of(tag)).filter(|l| !l.is_empty() && l != "und")
 }
 
 /// A dropped file's path as a `file:` URI (C++'s `fileUri`, a `text/uri-list`'s line): kompoz-ui's.

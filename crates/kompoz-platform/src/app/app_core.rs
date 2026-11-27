@@ -28,6 +28,7 @@ use kompoz_gpu::device::{self, Backend, ClearColor, Device, Format, IRect, Surfa
 use kompoz_gpu::renderer::RendererBitmaps;
 use kompoz_graphics::{Color, Density, ImageBitmap, IntSize, LayoutDirection, Matrix, Offset, Rect, Size};
 use kompoz_lifecycle::LifecycleState;
+use kompoz_runtime::clock::Instant;
 use kompoz_runtime::{Content, MutableState, RecompositionStats, kompozable_lambda, mutable_state_of};
 use kompoz_ui::clipboard::{ClipEntry, ClipMetadata};
 use kompoz_ui::draganddrop::DragAndDropTransferData;
@@ -43,7 +44,6 @@ use kompoz_ui::{DisplayList, KompozHost};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::Instant;
 
 /// What the platform's frame loop does after a frame (C++'s Next).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -1145,6 +1145,9 @@ impl<P: Platform> AppCore<P> {
         }
         if self.script.sleep_until > 0 {
             if self.platform.now() < self.script.sleep_until {
+                // (not a frame after another while the time goes by; on the web, which can't block, the page's next
+                // frame comes when it does)
+                #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
                 std::thread::sleep(std::time::Duration::from_millis(2));
                 return None;
             }

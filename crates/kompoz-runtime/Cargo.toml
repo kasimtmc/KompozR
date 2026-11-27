@@ -12,6 +12,15 @@ workspace = true
 [dev-dependencies]
 trybuild = "1"
 
+# (stage 15) The system's word without a platform's: Windows' user locale and time zone (its zone's name mapped to an
+# IANA ID by CLDR's table, ICU4X's); Android's system properties (its time zone).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Time"] }
+icu_time = "2.4.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+
 [dependencies]
 kompoz-macros = { path = "../kompoz-macros" }
 parking_lot.workspace = true

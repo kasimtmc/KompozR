@@ -19,6 +19,8 @@
 //!   Ctrl changing the action asked for.
 
 #![allow(non_snake_case)]
+// (Linux's display servers only: elsewhere what the runs share goes unused)
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 
 use kompoz_foundation::prelude::*;
 use kompoz_graphics::*;
@@ -300,6 +302,7 @@ impl Drop for AppProcess {
 // ---------------------------------------------------------------------------------------------------------------
 // Wayland
 
+#[cfg(target_os = "linux")]
 mod wayland {
     use super::*;
     use kompoz_platform::linux::sys::{self, Mmap, PollFd};
@@ -953,6 +956,7 @@ mod wayland {
 // ---------------------------------------------------------------------------------------------------------------
 // X11
 
+#[cfg(target_os = "linux")]
 mod x11 {
     use super::*;
     use kompoz_platform::linux::sys::Library;
@@ -1383,6 +1387,14 @@ mod x11 {
     }
 }
 
+/// Elsewhere there are none of Linux's display servers to drag on.
+#[cfg(not(target_os = "linux"))]
+fn main() -> ExitCode {
+    println!("skipped: the drag display tests are Linux's (Wayland and X11)");
+    ExitCode::SUCCESS
+}
+
+#[cfg(target_os = "linux")]
 fn main() -> ExitCode {
     if let Ok(child) = std::env::var(CHILD) {
         if let Some(file) = child.strip_prefix("x-display:") {

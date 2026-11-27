@@ -190,7 +190,7 @@ pub(crate) fn random_uuid() -> String {
             c.get()
         }));
         h.write_usize(i);
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let nanos = kompoz_runtime::clock::unix_time().as_nanos() as u128;
         h.write_u128(nanos);
         chunk.copy_from_slice(&h.finish().to_le_bytes());
     }

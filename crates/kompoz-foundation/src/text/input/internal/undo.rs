@@ -11,7 +11,7 @@ pub const SNAPSHOTS_INTERVAL_MILLIS: i64 = 5000;
 
 /// The wall clock in milliseconds (Compose's `timeNowMillis`, `System.currentTimeMillis()`).
 pub fn time_now_millis() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+    kompoz_runtime::clock::current_time_millis()
 }
 
 /// The undo and redo stacks (Compose's internal UndoManager): what is recorded clears the redo stack; the oldest

@@ -22,22 +22,9 @@ use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Wakes an [`EventLoop`] from any thread (its eventfd written). Cheap to clone; `Send` and `Sync`.
-#[derive(Clone)]
-pub struct Waker(Arc<OwnedFd>);
-
-impl Waker {
-    /// Wakes the loop: its `wait` returns with [`Ready::woken`] (now, or at once if it isn't waiting).
-    pub fn wake(&self) {
-        let _ = sys::eventfd_write(self.0.as_fd(), 1);
-    }
-
-    /// As the host's waker ([`PlatformCallbacks::waker`](kompoz_ui::platform::PlatformCallbacks::waker)).
-    pub fn as_fn(&self) -> Arc<dyn Fn() + Send + Sync> {
-        let waker = self.clone();
-        Arc::new(move || waker.wake())
-    }
-}
+/// Wakes an [`EventLoop`] from any thread (its eventfd written): its `wait` returns with [`Ready::woken`]. The
+/// waker Android's looper is woken by too.
+pub use crate::unix::waker::Waker;
 
 /// What woke a [`wait`](EventLoop::wait).
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -86,7 +73,7 @@ impl EventLoop {
 
     /// What wakes it from other threads.
     pub fn waker(&self) -> Waker {
-        Waker(self.wake.clone())
+        Waker::new(self.wake.clone())
     }
 
     /// Watches `fd` (to read) as `token`: ready ones are in [`Ready::sources`]. The fd must stay open while it is

@@ -83,12 +83,21 @@ impl LocaleList {
         LocaleList::new(language_tags.split(',').map(|t| Locale::new(t.trim())))
     }
     /// The ones the user prefers, as the platform said them ([`set_current`](LocaleList::set_current)), else the
-    /// process's environment's (`LC_ALL`, `LC_MESSAGES`, `LANG`; English if none): Compose's LocaleList.current.
+    /// process's environment's (`LC_ALL`, `LC_MESSAGES`, `LANG`), else the system's
+    /// ([`system_languages`](kompoz_runtime::environment::system_languages): Windows' user locale, the ones the
+    /// Android, web and macOS platforms say); English if none: Compose's LocaleList.current.
     pub fn current() -> LocaleList {
         if let Some(l) = CURRENT.read().expect("current locales").as_ref() {
             return l.clone();
         }
-        LocaleList::new([environment_locale()])
+        if let Some(locale) = environment_locale() {
+            return LocaleList::new([locale]);
+        }
+        let system = kompoz_runtime::environment::system_languages();
+        if system.is_empty() {
+            return LocaleList::new([Locale::new("en-US")]);
+        }
+        LocaleList::new(system.iter().map(|tag| Locale::new(tag)))
     }
     /// What the user prefers now (a platform tells it when it starts and when the user changes it).
     pub fn set_current(locales: LocaleList) {
@@ -133,18 +142,18 @@ impl<'a> IntoIterator for &'a LocaleList {
     }
 }
 
-/// The environment's locale (a POSIX one: `tr_TR.UTF-8@euro` is `tr-TR`; `C` and `POSIX` are English).
-fn environment_locale() -> Locale {
+/// The environment's locale (a POSIX one: `tr_TR.UTF-8@euro` is `tr-TR`; `C` and `POSIX` are English); none if it
+/// says none.
+fn environment_locale() -> Option<Locale> {
     let value = ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
-        .filter_map(|k| std::env::var(k).ok())
-        .find(|v| !v.is_empty())
-        .unwrap_or_default();
+        .filter_map(|k| kompoz_runtime::environment::var(k))
+        .find(|v| !v.is_empty())?;
     let tag = value.split(['.', '@']).next().unwrap_or("");
     if tag.is_empty() || tag == "C" || tag == "POSIX" {
-        return Locale::new("en-US");
+        return Some(Locale::new("en-US"));
     }
-    Locale::new(&tag.replace('_', "-"))
+    Some(Locale::new(&tag.replace('_', "-")))
 }
 
 // ---- Case mapping ---------------------------------------------------------------------------------------------

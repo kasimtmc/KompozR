@@ -15,9 +15,10 @@ use kompoz_graphics::{
     BlurEffect, Brush, Color, CornerRadius, Matrix, Offset, Outline, Path, PathDirection, PathFillType, PathStroke,
     Projective, Rect, Shadow, TileMode,
 };
+use kompoz_runtime::clock::Instant;
 use kompoz_ui::graphics_context::{ElevationShadow, ShadowLight, default_draw_shadow_path, shadow_path_reach};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// A path's shadow's mask (as Compose's DropShadowRenderer and InnerShadowRenderer keep their blurred bitmaps), by
 /// what it is drawn from (draw_shadow_path): white where the shadow is, its texture's top left `width` x `height`.

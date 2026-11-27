@@ -7,12 +7,16 @@
 use crate::system::{app_cache_directory, log, read_file};
 use kompoz_graphics::{ImageBitmap, ImageRequestSize as DecodeSize, decode_image, save_png};
 use kompoz_ui::platform::ImageRequestSize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use std::collections::VecDeque;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use std::sync::Condvar;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::SystemTime;
 
 // ---- The disk cache ----------------------------------------------------------------------------------------------
@@ -181,7 +185,7 @@ impl DiskCache {
         let name = file_name(key);
         // Written beside it and renamed into place: a reader (or the next run, after a crash) never sees half of it.
         s.temp += 1;
-        let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+        let stamp = kompoz_runtime::clock::unix_time().as_nanos() as u64;
         let temp = self.directory.join(format!("{name}.{}.tmp", stamp % 1_000_000_007 + s.temp));
         let written = fs::File::create(&temp).and_then(|mut f| {
             f.write_all(&head)?;
@@ -293,7 +297,7 @@ pub fn decode(bytes: &[u8], size: ImageRequestSize) -> Option<ImageBitmap> {
 /// `KOMPOZ_IMAGE_LOG`: where each image came from, how big.
 fn image_log() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("KOMPOZ_IMAGE_LOG").is_some())
+    *ON.get_or_init(|| kompoz_runtime::environment::var_os("KOMPOZ_IMAGE_LOG").is_some())
 }
 
 /// `model` (a path or an http(s) URL) loaded now, for `size` (C++'s `loadNow`): a URL from the disk cache, else
@@ -348,29 +352,34 @@ pub fn load_now(model: &str, size: ImageRequestSize) -> Option<ImageBitmap> {
 
 type Done = Box<dyn FnOnce(Option<ImageBitmap>) + Send>;
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 struct Job {
     model: String,
     size: ImageRequestSize,
     done: Done,
 }
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 #[derive(Default)]
 struct Queue {
     jobs: VecDeque<Job>,
     threads: Vec<std::thread::JoinHandle<()>>,
 }
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 struct Loader {
     queue: Mutex<Queue>,
     wake: Condvar,
 }
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn loader() -> &'static Loader {
     static LOADER: OnceLock<Loader> = OnceLock::new();
     LOADER.get_or_init(|| Loader { queue: Mutex::new(Queue::default()), wake: Condvar::new() })
 }
 
 /// A worker thread: loads in turn until the app quits.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn work() {
     let l = loader();
     loop {
@@ -394,11 +403,29 @@ fn work() {
 }
 
 /// Loads `model` (a path or an http(s) URL) for `size` away from the UI thread and calls `done` with it, from a
-/// worker thread (C++'s `loadImageAsync`): three workers take the loads in turn.
+/// worker thread (C++'s `loadImageAsync`): three workers take the loads in turn. On the web (no threads) the load
+/// is the coroutines' background work, which runs on the UI thread between frames
+/// ([`run_in_background`](kompoz_coroutines::run_in_background)), `done` called there.
 pub fn load_image_async(model: &str, size: ImageRequestSize, done: Done) {
     if stopping() {
         return;
     }
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    {
+        let model = model.to_string();
+        kompoz_coroutines::run_in_background(move || {
+            let image = load_now(&model, size);
+            if !stopping() {
+                done(image);
+            }
+        });
+    }
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    load_on_workers(model, size, done);
+}
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+fn load_on_workers(model: &str, size: ImageRequestSize, done: Done) {
     let l = loader();
     let mut q = l.queue.lock().unwrap_or_else(|e| e.into_inner());
     if q.threads.is_empty() {
@@ -418,7 +445,7 @@ pub fn load_image_async(model: &str, size: ImageRequestSize, done: Done) {
 /// starts (one stopped before in the process loads again).
 pub fn start_image_disk_cache(app_name: &str, max_bytes: u64) {
     STOPPING.store(false, Ordering::Relaxed);
-    let directory = match std::env::var_os("KOMPOZ_IMAGE_CACHE") {
+    let directory = match kompoz_runtime::environment::var_os("KOMPOZ_IMAGE_CACHE") {
         Some(own) => (!own.is_empty()).then(|| PathBuf::from(own)),
         None => app_cache_directory(app_name).map(|d| d.join("images")),
     };
@@ -434,6 +461,12 @@ pub fn image_disk_cache() -> Option<Arc<DiskCache>> {
 /// At exit (C++'s `stopImageLoader`): loads waiting are dropped, the running ones stop soon, the workers end.
 pub fn stop_image_loader() {
     STOPPING.store(true, Ordering::Relaxed);
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    stop_workers();
+}
+
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+fn stop_workers() {
     let l = loader();
     let threads = {
         let mut q = l.queue.lock().unwrap_or_else(|e| e.into_inner());

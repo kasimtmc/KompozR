@@ -14,7 +14,6 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use icu_locale_core::Locale as IcuLocale;
 
@@ -27,10 +26,7 @@ const DAY_MS: i64 = 86_400_000;
 
 /// The milliseconds since 1970-01-01T00:00Z now (Java's `System.currentTimeMillis`).
 pub(crate) fn current_time_millis() -> i64 {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_millis() as i64,
-        Err(e) => -(e.duration().as_millis() as i64),
-    }
+    crate::clock::current_time_millis()
 }
 
 // ==== Locale =========================================================================================================
@@ -129,18 +125,25 @@ impl JavaLocale {
 
     /// The default locale (Java's `Locale.getDefault()`): the one [`set_default`](JavaLocale::set_default) set,
     /// else the system's — `KOMPOZ_LANGUAGE` (KompozR's language over the system's), else POSIX's `LC_ALL`,
-    /// `LC_MESSAGES`, `LANG` (`tr_TR.UTF-8` is `tr_TR`); English's for none (`C`).
+    /// `LC_MESSAGES`, `LANG` (`tr_TR.UTF-8` is `tr_TR`), else the first of the languages the system says the user
+    /// prefers ([`system_languages`](crate::environment::system_languages): Windows', Android's, the browser's,
+    /// macOS's); English's for none (`C`).
     ///
     /// Kotlin: `JavaLocale.getDefault()`
     pub fn get_default() -> JavaLocale {
         if let Some(set) = DEFAULT_LOCALE.read().unwrap_or_else(|e| e.into_inner()).clone() {
             return set;
         }
-        let system = ["KOMPOZ_LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
+        let posix = ["KOMPOZ_LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]
             .iter()
-            .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
-            .unwrap_or_default();
-        let locale = JavaLocale::of_posix_name(&system);
+            .find_map(|v| crate::environment::var(v).filter(|s| !s.is_empty()));
+        let locale = match posix {
+            Some(name) => JavaLocale::of_posix_name(&name),
+            None => match crate::environment::system_languages().first() {
+                Some(tag) => JavaLocale::for_language_tag(tag),
+                None => JavaLocale::of_posix_name(""),
+            },
+        };
         *DEFAULT_LOCALE.write().unwrap_or_else(|e| e.into_inner()) = Some(locale.clone());
         locale
     }
@@ -280,7 +283,8 @@ impl TimeZone {
     }
 
     /// The default zone (Java's `TimeZone.getDefault()`): the one [`set_default`](TimeZone::set_default) set, else
-    /// the system's (`TZ`, else `/etc/localtime`); GMT if the system has none.
+    /// the system's (`TZ`, the platform's word, else the system's own: `/etc/localtime`, Android's property, Windows'
+    /// zone); GMT if the system has none.
     ///
     /// Kotlin: `TimeZone.getDefault()`
     pub fn get_default() -> TimeZone {
@@ -306,6 +310,11 @@ impl TimeZone {
             *SYSTEM_ZONE.write().unwrap_or_else(|e| e.into_inner()) = None;
         }
         *DEFAULT_ZONE.write().unwrap_or_else(|e| e.into_inner()) = zone;
+    }
+
+    /// The system's zone is to be read again (the platform said another: [`crate::environment`]).
+    pub(crate) fn forget_system_zone() {
+        *SYSTEM_ZONE.write().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// The zone's ID (Java's `getID`, Kotlin's `id`).
@@ -1501,7 +1510,7 @@ impl UUID {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let nanos = crate::clock::unix_time().as_nanos() as u128;
         let half = |i: u64| {
             let mut h = RandomState::new().build_hasher();
             h.write_u64(n);

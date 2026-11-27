@@ -14,12 +14,12 @@ kompoz-animation = { path = "../kompoz-animation" }
 kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-graphics = { path = "../kompoz-graphics" }
-kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
 
 [dev-dependencies]
+kompoz-material3 = { path = "../kompoz-material3" }
 kompoz-material-icons-core = { path = "../kompoz-material-icons-core" }
 kompoz-material-icons-extended = { path = "../kompoz-material-icons-extended" }
 # (NavigableListDetailPaneScaffoldSample's NavHost)

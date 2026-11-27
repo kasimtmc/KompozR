@@ -1,3 +1,13 @@
 [alias]
 # Development tasks (xtask/): `cargo xtask shaders [--check]`.
 xtask = "run -p xtask --"
+# The web's check (wasm32-unknown-unknown) as its build makes it, on the web's pinned nightly, nightly-2026-11-13
+# (rustc 1.102.0-nightly 5f4effd57; CI's web-check job pins the same): std rebuilt with panic=unwind (the Kotlin
+# syntax's exceptions and jumps unwind; stable's wasm std aborts), the standard exception-handling instructions.
+#   cargo +nightly-2026-11-13 check-web --workspace
+check-web = [
+    "check",
+    "--target", "wasm32-unknown-unknown",
+    "-Zbuild-std=std,panic_unwind",
+    "--config", "target.wasm32-unknown-unknown.rustflags = ['-Cpanic=unwind', '-Cllvm-args=-wasm-use-legacy-eh=false']",
+]

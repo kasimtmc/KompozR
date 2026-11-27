@@ -3,7 +3,6 @@
 
 use super::log;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC: &[u8; 8] = b"KPZPIPE2";
 const HEADER: usize = MAGIC.len() + 16;
@@ -58,7 +57,7 @@ pub fn read_pipeline_cache(path: &Path) -> Vec<u8> {
 /// Writes it whole or not at all (a file beside it, renamed), making its directory.
 pub fn write_pipeline_cache(path: &Path, data: &[u8]) {
     // (Another run of the app writing it too writes a file of its own.)
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let stamp = kompoz_runtime::clock::unix_time().as_nanos() as u64;
     let mut part = path.as_os_str().to_owned();
     part.push(format!(".{}.{}.tmp", std::process::id(), stamp % 1_000_000_007));
     let part = PathBuf::from(part);

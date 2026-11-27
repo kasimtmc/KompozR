@@ -19,12 +19,11 @@ kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
 # (WP6: pickers) Dates and times by the locale (D4): CLDR's patterns, names, first day of the week, digits; "today"
-# from the C library's localtime_r.
+# in the system's time zone, kompoz-runtime's (stage 15: every target's).
 icu_calendar = "2.4.0"
 icu_datetime = "2.4.0"
 icu_decimal = "2.4.0"
 icu_locale_core = "2.4.0"
-libc = "0.2"
 writeable = "0.6.4"
 
 [dev-dependencies]

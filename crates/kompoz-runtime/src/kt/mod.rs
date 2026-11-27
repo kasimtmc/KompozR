@@ -70,6 +70,11 @@ pub mod throwable;
 // (stage 14 WPD) the system's time zones, for java.util's and java.time's
 mod zoneinfo;
 
+/// The system's zone is to be read again ([`crate::environment::set_system_time_zone`]).
+pub(crate) fn forget_system_time_zone() {
+    java_util::TimeZone::forget_system_zone();
+}
+
 #[cfg(test)]
 mod tests;
 

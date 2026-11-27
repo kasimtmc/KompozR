@@ -1,9 +1,12 @@
 //! The tree the bridge serves (C++'s atspi_bridge.cpp's published state): the application, its window and the
 //! semantics nodes in it as AT-SPI objects — their roles, states, names, extents, actions, texts — and what changed
-//! between two trees as AT-SPI events.
+//! between two trees (the platform-neutral [`changes`](crate::accessibility::changes)) as AT-SPI events.
 
-use kompoz_ui::semantics::{AccessibilityNode, LiveRegionMode, ProgressBarRangeInfo, Role, SemanticsAction};
-use std::collections::HashMap;
+pub use crate::accessibility::Window;
+pub use crate::accessibility::text::{Unit, code_points, segment, slice, text_of};
+
+use crate::accessibility::{Change, Snapshot, changes};
+use kompoz_ui::semantics::{AccessibilityNode, ProgressBarRangeInfo, Role, SemanticsAction};
 
 pub const ROOT_PATH: &str = "/org/a11y/atspi/accessible/root";
 pub const WINDOW_PATH: &str = "/org/a11y/atspi/accessible/window";
@@ -64,25 +67,6 @@ pub const LAYER_WIDGET: u32 = 3;
 pub const LAYER_WINDOW: u32 = 7;
 pub const COORD_WINDOW: u32 = 1;
 pub const COORD_PARENT: u32 = 2;
-
-/// The window the tree is in: where it is on the screen and its size, in the platform's points (the units AT-SPI's
-/// extents are in), points per px (the nodes' bounds are in px), whether it has the focus, its title.
-#[derive(Clone, PartialEq, Debug)]
-pub struct Window {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub px_to_points: f32,
-    pub focused: bool,
-    pub title: String,
-}
-
-impl Default for Window {
-    fn default() -> Self {
-        Window { x: 0.0, y: 0.0, width: 0.0, height: 0.0, px_to_points: 1.0, focused: true, title: String::new() }
-    }
-}
 
 /// An AT-SPI object of the app: the application, its window, or a semantics node in it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -153,11 +137,6 @@ pub fn actions_of(n: &AccessibilityNode) -> Vec<(String, SemanticsAction)> {
     out
 }
 
-/// A text field's text as it is said: a password's hidden (a bullet a character).
-pub fn text_of(n: &AccessibilityNode) -> String {
-    if n.password { "\u{2022}".repeat(n.value.chars().count()) } else { n.value.clone() }
-}
-
 /// A node's role by what it is and does (as Android's and C++'s bridges tell it).
 fn role_of_node(n: &AccessibilityNode) -> u32 {
     match n.role {
@@ -216,94 +195,31 @@ pub fn role_name(role: u32) -> &'static str {
     }
 }
 
-/// A UTF-8 string's code points (AT-SPI's text offsets): the byte each starts at, then its end.
-pub fn code_points(s: &str) -> Vec<usize> {
-    s.char_indices().map(|(i, _)| i).chain(std::iter::once(s.len())).collect()
-}
-
-/// Code points `from` to `to` (-1: the end) of `s`, clamped.
-pub fn slice<'a>(s: &'a str, at: &[usize], from: i32, to: i32) -> &'a str {
-    let n = at.len() as i32 - 1;
-    let from = from.clamp(0, n);
-    let to = if to < 0 { n } else { to.clamp(from, n) };
-    &s[at[from as usize]..at[to as usize]]
-}
-
-/// The piece of a text an offset is in: a character, a word (with the spaces after it), or the whole (a field's one
-/// line).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Unit {
-    Char,
-    Word,
-    Line,
-}
-
-/// The `unit` around code point `offset` of `s`: [start, end) in code points.
-pub fn segment(s: &str, at: &[usize], offset: i32, unit: Unit) -> (i32, i32) {
-    let n = at.len() as i32 - 1;
-    if offset < 0 || offset >= n {
-        let o = offset.clamp(0, n);
-        return (o, o);
-    }
-    match unit {
-        Unit::Char => return (offset, offset + 1),
-        Unit::Line => return (0, n),
-        Unit::Word => {}
-    }
-    // (C's isspace on a code point's first byte, as C++'s.)
-    let space = |i: i32| matches!(s.as_bytes()[at[i as usize]], b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r');
-    let (mut start, mut end) = (offset, offset);
-    while start > 0 && space(start) {
-        start -= 1; // in the spaces after a word: that word's
-    }
-    while start > 0 && !space(start - 1) {
-        start -= 1;
-    }
-    while end < n && !space(end) {
-        end += 1;
-    }
-    while end < n && space(end) {
-        end += 1;
-    }
-    (start, end)
-}
-
-/// A tree as published: its nodes, where each is, each one's children (none: the window's), the window.
+/// A tree as published (the neutral [`Snapshot`]), its nodes AT-SPI objects.
 #[derive(Default)]
 pub struct Tree {
-    pub nodes: Vec<AccessibilityNode>,
-    at: HashMap<u64, usize>,
-    children: HashMap<Option<u64>, Vec<u64>>,
-    pub window: Window,
-    /// One was published (else this is the empty one before).
-    pub published: bool,
+    snapshot: Snapshot,
 }
 
 impl Tree {
     pub fn new(nodes: Vec<AccessibilityNode>, window: Window) -> Tree {
-        let mut at = HashMap::new();
-        let mut children: HashMap<Option<u64>, Vec<u64>> = HashMap::new();
-        for (i, n) in nodes.iter().enumerate() {
-            at.insert(n.id, i);
-            children.entry(n.parent).or_default().push(n.id);
-        }
-        Tree { nodes, at, children, window, published: true }
+        Tree { snapshot: Snapshot::new(nodes, window) }
     }
 
     pub fn exists(&self, o: Object) -> bool {
         match o {
             Object::Root | Object::Window => true,
-            Object::Node(id) => self.at.contains_key(&id),
+            Object::Node(id) => self.snapshot.contains(id),
         }
     }
 
     pub fn contains(&self, id: u64) -> bool {
-        self.at.contains_key(&id)
+        self.snapshot.contains(id)
     }
 
     /// The node `id` (which exists).
     pub fn node(&self, id: u64) -> &AccessibilityNode {
-        &self.nodes[self.at[&id]]
+        self.snapshot.node(id)
     }
 
     pub fn kids_of(&self, o: Object) -> Vec<Object> {
@@ -312,7 +228,7 @@ impl Tree {
             Object::Window => None,
             Object::Node(id) => Some(id),
         };
-        self.children.get(&key).map(|ids| ids.iter().map(|&id| Object::Node(id)).collect()).unwrap_or_default()
+        self.snapshot.children(key).iter().map(|&id| Object::Node(id)).collect()
     }
 
     pub fn parent_of(&self, o: Object) -> Object {
@@ -320,11 +236,6 @@ impl Tree {
             Object::Root | Object::Window => Object::Root,
             Object::Node(id) => Object::of_parent(self.node(id).parent),
         }
-    }
-
-    /// Where `child` is among `parent`'s children in this tree (-1: it isn't).
-    fn index_in(&self, parent: Option<u64>, child: u64) -> i32 {
-        self.children.get(&parent).and_then(|ids| ids.iter().position(|&id| id == child)).map_or(-1, |i| i as i32)
     }
 
     pub fn interfaces_of(&self, o: Object) -> Vec<&'static str> {
@@ -368,7 +279,7 @@ impl Tree {
     pub fn name_of(&self, o: Object, app_name: &str) -> String {
         match o {
             Object::Root => app_name.to_string(),
-            Object::Window => self.window.title.clone(),
+            Object::Window => self.snapshot.window().title.clone(),
             Object::Node(id) => {
                 let n = self.node(id);
                 match &n.pane_title {
@@ -392,7 +303,7 @@ impl Tree {
             set(STATE_ENABLED);
             set(STATE_SENSITIVE);
             set(STATE_RESIZABLE);
-            if self.window.focused {
+            if self.snapshot.window().focused {
                 set(STATE_ACTIVE);
             }
             return bits;
@@ -435,7 +346,7 @@ impl Tree {
 
     /// Where it is on the screen, in points (left, top, width, height).
     fn on_screen(&self, o: Object) -> [f32; 4] {
-        let w = &self.window;
+        let w = self.snapshot.window();
         match o {
             Object::Root | Object::Window => [w.x, w.y, w.width, w.height],
             Object::Node(id) => {
@@ -450,8 +361,8 @@ impl Tree {
     pub fn extents_of(&self, o: Object, coord_type: u32) -> Extents {
         let mut r = self.on_screen(o);
         if coord_type == COORD_WINDOW {
-            r[0] -= self.window.x;
-            r[1] -= self.window.y;
+            r[0] -= self.snapshot.window().x;
+            r[1] -= self.snapshot.window().y;
         } else if coord_type == COORD_PARENT && matches!(o, Object::Node(_)) {
             let p = self.on_screen(self.parent_of(o));
             r[0] -= p[0];
@@ -501,130 +412,67 @@ impl Event {
     }
 }
 
-/// The events that tell what changed from `old` to `next`.
+/// The events that tell what changed from `old` to `next` ([`changes`]' in AT-SPI's terms, in their order).
 pub fn compare(old: &Tree, next: &Tree) -> Vec<Event> {
+    let title = &next.snapshot.window().title;
     let mut events = Vec::new();
-    let w = &next.window;
-    if old.published {
-        // Whole subtrees come and go: told on the parent that stays (the last first, so that the indexes of those
-        // before still hold).
-        for gone in old.nodes.iter().rev() {
-            if !next.contains(gone.id) && gone.parent.is_none_or(|p| next.contains(p)) {
-                events.push(Event {
-                    data: EventData::Ref(Object::Node(gone.id)),
-                    ..Event::plain(
-                        Object::of_parent(gone.parent),
-                        EVENT_OBJECT,
-                        "ChildrenChanged",
-                        "remove",
-                        old.index_in(gone.parent, gone.id),
-                    )
-                });
+    for change in changes(&old.snapshot, &next.snapshot) {
+        match change {
+            Change::Removed { parent, node, index } => events.push(Event {
+                data: EventData::Ref(Object::Node(node)),
+                ..Event::plain(Object::of_parent(parent), EVENT_OBJECT, "ChildrenChanged", "remove", index as i32)
+            }),
+            Change::Added { parent, node, index } => events.push(Event {
+                data: EventData::Ref(Object::Node(node)),
+                ..Event::plain(Object::of_parent(parent), EVENT_OBJECT, "ChildrenChanged", "add", index as i32)
+            }),
+            Change::WindowFocused(focused) => {
+                let member = if focused { "Activate" } else { "Deactivate" };
+                events.push(Event { interface: EVENT_WINDOW, ..Event::text(Object::Window, member, "", 0, 0, title) });
+                events.push(Event::plain(Object::Window, EVENT_OBJECT, "StateChanged", "active", focused as i32));
             }
-        }
-        for new in &next.nodes {
-            if !old.contains(new.id) && new.parent.is_none_or(|p| old.contains(p)) {
-                events.push(Event {
-                    data: EventData::Ref(Object::Node(new.id)),
-                    ..Event::plain(
-                        Object::of_parent(new.parent),
-                        EVENT_OBJECT,
-                        "ChildrenChanged",
-                        "add",
-                        next.index_in(new.parent, new.id),
-                    )
-                });
+            Change::WindowTitle(title) => {
+                events.push(Event::text(Object::Window, "PropertyChange", "accessible-name", 0, 0, &title));
             }
-        }
-    }
-    if if old.published { w.focused != old.window.focused } else { w.focused } {
-        let member = if w.focused { "Activate" } else { "Deactivate" };
-        events.push(Event { interface: EVENT_WINDOW, ..Event::text(Object::Window, member, "", 0, 0, &w.title) });
-        events.push(Event::plain(Object::Window, EVENT_OBJECT, "StateChanged", "active", w.focused as i32));
-    }
-    if old.published && w.title != old.window.title {
-        events.push(Event::text(Object::Window, "PropertyChange", "accessible-name", 0, 0, &w.title));
-    }
-    let focused_before = old.nodes.iter().filter(|n| n.focused).map(|n| n.id).next_back();
-    let mut focused_now = None;
-    for n in &next.nodes {
-        if n.focused {
-            focused_now = Some(n.id);
-        }
-        if !old.published || !old.contains(n.id) {
-            continue;
-        }
-        let o = old.node(n.id);
-        let at = Object::Node(n.id);
-        if n.label != o.label {
-            events.push(Event::text(at, "PropertyChange", "accessible-name", 0, 0, &n.label));
-        }
-        if n.state_description != o.state_description {
-            events.push(Event::text(at, "PropertyChange", "accessible-description", 0, 0, &n.state_description));
-        }
-        if let Some(live) = n.live_region
-            && (n.label != o.label || n.state_description != o.state_description)
-        {
-            let mut said = n.label.clone();
-            if !n.state_description.is_empty() {
-                if !said.is_empty() {
-                    said.push_str(", ");
+            Change::Name { node, name } => {
+                events.push(Event::text(Object::Node(node), "PropertyChange", "accessible-name", 0, 0, &name));
+            }
+            Change::Description { node, description } => {
+                let at = Object::Node(node);
+                events.push(Event::text(at, "PropertyChange", "accessible-description", 0, 0, &description));
+            }
+            Change::Announcement { node, text, assertive } => {
+                let politeness = if assertive { 2 } else { 1 }; // (AtspiLive)
+                events.push(Event::text(Object::Node(node), "Announcement", "", politeness, 0, &text));
+            }
+            Change::Checked { node, checked } => {
+                let detail = if next.node(node).role == Some(Role::Tab) { "selected" } else { "checked" };
+                events.push(Event::plain(Object::Node(node), EVENT_OBJECT, "StateChanged", detail, checked as i32));
+            }
+            Change::Enabled { node, enabled } => {
+                for detail in ["enabled", "sensitive"] {
+                    events.push(Event::plain(Object::Node(node), EVENT_OBJECT, "StateChanged", detail, enabled as i32));
                 }
-                said.push_str(&n.state_description);
             }
-            let politeness = if live == LiveRegionMode::Assertive { 2 } else { 1 }; // (AtspiLive)
-            events.push(Event::text(at, "Announcement", "", politeness, 0, &said));
-        }
-        if n.checked.unwrap_or(false) != o.checked.unwrap_or(false) {
-            let detail = if n.role == Some(Role::Tab) { "selected" } else { "checked" };
-            events.push(Event::plain(at, EVENT_OBJECT, "StateChanged", detail, n.checked.unwrap_or(false) as i32));
-        }
-        if n.enabled != o.enabled {
-            events.push(Event::plain(at, EVENT_OBJECT, "StateChanged", "enabled", n.enabled as i32));
-            events.push(Event::plain(at, EVENT_OBJECT, "StateChanged", "sensitive", n.enabled as i32));
-        }
-        if let (Some(r), Some(before)) = (&n.range, &o.range)
-            && r.current != before.current
-        {
-            events.push(Event {
-                data: EventData::Number(r.current as f64),
-                ..Event::plain(at, EVENT_OBJECT, "PropertyChange", "accessible-value", 0)
-            });
-        }
-        if n.editable && o.editable && n.value != o.value {
-            // What was typed or taken away: what lies between the same start and the same end.
-            let (before, after) = (text_of(o), text_of(n));
-            let (a, b) = (code_points(&before), code_points(&after));
-            let (na, nb) = (a.len() as i32 - 1, b.len() as i32 - 1);
-            let same = |i: i32, j: i32| slice(&before, &a, i, i + 1) == slice(&after, &b, j, j + 1);
-            let mut head = 0;
-            while head < na && head < nb && same(head, head) {
-                head += 1;
+            Change::Value { node, value } => events.push(Event {
+                data: EventData::Number(value as f64),
+                ..Event::plain(Object::Node(node), EVENT_OBJECT, "PropertyChange", "accessible-value", 0)
+            }),
+            Change::TextRemoved { node, start, length, text } => {
+                let at = Object::Node(node);
+                events.push(Event::text(at, "TextChanged", "delete", start as i32, length as i32, &text));
             }
-            let mut tail = 0;
-            while tail < na - head && tail < nb - head && same(na - 1 - tail, nb - 1 - tail) {
-                tail += 1;
+            Change::TextInserted { node, start, length, text } => {
+                let at = Object::Node(node);
+                events.push(Event::text(at, "TextChanged", "insert", start as i32, length as i32, &text));
             }
-            if na - head - tail > 0 {
-                let gone = slice(&before, &a, head, na - tail);
-                events.push(Event::text(at, "TextChanged", "delete", head, na - head - tail, gone));
+            Change::FocusLeft(node) => {
+                events.push(Event::plain(Object::Node(node), EVENT_OBJECT, "StateChanged", "focused", 0));
             }
-            if nb - head - tail > 0 {
-                let typed = slice(&after, &b, head, nb - tail);
-                events.push(Event::text(at, "TextChanged", "insert", head, nb - head - tail, typed));
+            Change::Focused(node) => {
+                events.push(Event::plain(Object::Node(node), EVENT_OBJECT, "StateChanged", "focused", 1));
+                events.push(Event::plain(Object::Node(node), EVENT_FOCUS, "Focus", "", 0));
             }
-        }
-    }
-    if focused_now != focused_before || (!old.published && focused_now.is_some()) {
-        if old.published
-            && let Some(before) = focused_before
-            && next.contains(before)
-        {
-            events.push(Event::plain(Object::Node(before), EVENT_OBJECT, "StateChanged", "focused", 0));
-        }
-        if let Some(now) = focused_now {
-            events.push(Event::plain(Object::Node(now), EVENT_OBJECT, "StateChanged", "focused", 1));
-            events.push(Event::plain(Object::Node(now), EVENT_FOCUS, "Focus", "", 0));
         }
     }
     events
@@ -646,19 +494,16 @@ mod tests {
     }
 
     #[test]
-    fn texts_are_cut_by_code_points_and_words() {
-        let s = "héllo wörld";
-        let at = code_points(s);
-        assert_eq!(at.len() - 1, 11);
-        assert_eq!(slice(s, &at, 1, 3), "él");
-        assert_eq!(slice(s, &at, 6, -1), "wörld");
-        assert_eq!(slice(s, &at, -4, 99), s);
-        assert_eq!(segment(s, &at, 7, Unit::Word), (6, 11));
-        assert_eq!(segment(s, &at, 5, Unit::Word), (0, 6));
-        assert_eq!(segment(s, &at, 1, Unit::Char), (1, 2));
-        assert_eq!(segment(s, &at, 3, Unit::Line), (0, 11));
-        assert_eq!(segment(s, &at, 11, Unit::Word), (11, 11));
-        let password = AccessibilityNode { value: "abc".into(), password: true, ..Default::default() };
-        assert_eq!(text_of(&password), "•••");
+    fn changes_are_atspi_events() {
+        let node = |id, parent| AccessibilityNode { id, parent, enabled: true, ..Default::default() };
+        let mut tab = node(2, Some(1));
+        tab.role = Some(Role::Tab);
+        let old = Tree::new(vec![node(1, None), tab.clone()], Window::default());
+        tab.checked = Some(true);
+        let next = Tree::new(vec![node(1, None), tab], Window { focused: false, ..Window::default() });
+        let events = compare(&old, &next);
+        let said: Vec<(&str, &str, i32)> = events.iter().map(|e| (e.member, e.detail.as_str(), e.detail1)).collect();
+        assert_eq!(said, [("Deactivate", "", 0), ("StateChanged", "active", 0), ("StateChanged", "selected", 1)]);
+        assert_eq!(events[0].interface, EVENT_WINDOW);
     }
 }

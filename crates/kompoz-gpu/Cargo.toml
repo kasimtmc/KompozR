@@ -10,11 +10,16 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-ash = "0.38.0"
 kompoz-graphics = { path = "../kompoz-graphics" }
+kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
 skrifa = "0.50.0"
+
+# (stage 15) Vulkan where it is the target's API: not on Apple's systems (Metal is), nor on the web (no Vulkan loader:
+# ash's `loaded` loader is libloading's, which has no library to load there).
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple")))'.dependencies]
+ash = "0.38.0"
 
 # The GPU tests: one binary on one device, the tests in sequence (harness = false), as the C++ Kompoz's gpu_tests.
 [[test]]

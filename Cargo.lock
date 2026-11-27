@@ -609,6 +609,7 @@ version = "0.1.0"
 dependencies = [
  "ash",
  "kompoz-graphics",
+ "kompoz-runtime",
  "kompoz-text",
  "kompoz-ui",
  "skrifa",
@@ -727,7 +728,6 @@ dependencies = [
  "kompoz-test",
  "kompoz-text",
  "kompoz-ui",
- "libc",
  "writeable",
 ]
 
@@ -813,6 +813,7 @@ dependencies = [
 name = "kompoz-platform"
 version = "0.1.0"
 dependencies = [
+ "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-gpu",
  "kompoz-graphics",
@@ -828,6 +829,7 @@ dependencies = [
 name = "kompoz-resources"
 version = "0.1.0"
 dependencies = [
+ "kompoz-coroutines",
  "kompoz-foundation",
  "kompoz-graphics",
  "kompoz-macros",
@@ -845,9 +847,12 @@ dependencies = [
  "icu_datetime",
  "icu_decimal",
  "icu_locale_core",
+ "icu_time",
  "kompoz-macros",
+ "libc",
  "parking_lot",
  "trybuild",
+ "windows-sys",
  "writeable",
 ]
 

@@ -16,10 +16,12 @@ extern crate self as kompoz_runtime;
 pub mod __private {
     pub use crate::private::*;
 }
+pub mod clock;
 mod collections;
 mod composer;
 mod context;
 mod derived;
+pub mod environment;
 pub mod kt;
 mod local;
 mod movable;

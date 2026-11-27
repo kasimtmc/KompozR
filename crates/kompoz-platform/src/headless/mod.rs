@@ -8,9 +8,10 @@
 
 use crate::app::{AppConfig, AppCore, Event, Metrics, Platform};
 use crate::system::{log, preferred_language};
-use kompoz_gpu::device::{Backend, Surface};
+use kompoz_gpu::device::{Backend, NATIVE_BACKEND, Surface};
 use kompoz_graphics::Rect;
 use kompoz_runtime::Content;
+use kompoz_runtime::clock::Instant;
 use kompoz_ui::KompozHost;
 use kompoz_ui::clipboard::ClipEntry;
 use kompoz_ui::media_query::MediaInfo;
@@ -20,11 +21,12 @@ use std::collections::{HashMap, VecDeque};
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use std::time::Duration;
 
 /// `KOMPOZ_HEADLESS=1`.
 pub fn headless_requested() -> bool {
-    std::env::var_os("KOMPOZ_HEADLESS").is_some_and(|v| v == "1")
+    kompoz_runtime::environment::flag("KOMPOZ_HEADLESS")
 }
 
 /// The headless platform's clock: ns since the process first asked.
@@ -52,8 +54,19 @@ impl EventQueue {
         std::mem::take(&mut *self.events.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
-    /// Waits until something is posted, or until `wake_at` (the platform's clock; none: as long as it takes).
+    /// Waits until something is posted, or until `wake_at` (the platform's clock; none: as long as it takes). On the
+    /// web it doesn't wait: there is one thread, so nothing could be posted meanwhile (and a page can't block).
     pub fn wait(&self, wake_at: Option<i64>) {
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        {
+            let _ = wake_at;
+        }
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        self.wait_for_post(wake_at);
+    }
+
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    fn wait_for_post(&self, wake_at: Option<i64>) {
         let events = self.events.lock().unwrap_or_else(|e| e.into_inner());
         let ready = |q: &mut VecDeque<Event>| q.is_empty();
         match wake_at {
@@ -122,7 +135,7 @@ impl Default for HeadlessPlatform {
 
 impl Platform for HeadlessPlatform {
     fn option(&self, name: &str) -> Option<String> {
-        self.options.get(name).cloned().or_else(|| std::env::var(name).ok())
+        self.options.get(name).cloned().or_else(|| kompoz_runtime::environment::var(name))
     }
 
     fn log(&self, message: &str) {
@@ -133,19 +146,22 @@ impl Platform for HeadlessPlatform {
         now()
     }
 
+    /// The target's own: Vulkan, Metal on Apple's systems (as C++'s headless Metal runs), WebGPU on the web.
     fn backends(&self) -> Vec<Backend> {
-        if cfg!(target_vendor = "apple") { vec![Backend::Metal] } else { vec![Backend::Vulkan] }
+        vec![NATIVE_BACKEND]
     }
 
     /// The window is its size (the app's, a dp a pixel, as C++'s); what the device needs: nothing (it draws only
-    /// into textures), or a headless surface to present to (`KOMPOZ_HEADLESS_SWAPCHAIN=1`).
+    /// into textures), or on Vulkan a headless surface to present to (`KOMPOZ_HEADLESS_SWAPCHAIN=1`).
     fn open_window(&mut self, app: &AppConfig, backend: Backend) -> Result<Surface, String> {
-        if backend != Backend::Vulkan {
+        if backend != NATIVE_BACKEND {
             return Err(format!("the headless platform has no {} backend", backend.name()));
         }
         self.size.set((app.width.0.round().max(1.0) as i32, app.height.0.round().max(1.0) as i32));
         let size = self.size.clone();
+        #[cfg_attr(any(target_family = "wasm", target_vendor = "apple"), allow(unused_mut))]
         let mut surface = Surface { drawable_size: Some(Box::new(move || size.get())), ..Surface::default() };
+        #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
         if self.option("KOMPOZ_HEADLESS_SWAPCHAIN").is_some_and(|v| v == "1") {
             surface.vulkan = Some(kompoz_gpu::device::vulkan::headless_surface());
         }
@@ -203,6 +219,9 @@ impl Platform for HeadlessPlatform {
 /// Runs the core's loop on the headless platform (or one built on it, posting to `queue`) until the app quits
 /// (C++'s `runHeadless`): the events posted handled, the pause until the next frame is due the host's for work
 /// between frames, a frame, then (with nothing to animate) a wait for an event, a wake or the next coroutine delay.
+///
+/// On the web, where nothing may block, it doesn't sleep nor wait: a headless run there goes through to its end at
+/// once, frame after frame (a script's, a test's), as a batch.
 pub fn run_core<P: Platform>(core: &mut AppCore<P>, queue: &EventQueue) {
     loop {
         for e in queue.take() {
@@ -214,9 +233,12 @@ pub fn run_core<P: Platform>(core: &mut AppCore<P>, queue: &EventQueue) {
             let at = now();
             if at < due {
                 core.idle(due - at);
-                let at = now();
-                if at < due {
-                    std::thread::sleep(Duration::from_nanos((due - at) as u64));
+                #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+                {
+                    let at = now();
+                    if at < due {
+                        std::thread::sleep(Duration::from_nanos((due - at) as u64));
+                    }
                 }
             }
         }

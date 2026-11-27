@@ -1,7 +1,15 @@
 //! The GPU renderer's hardware layer, as the C++ Kompoz's `platform/gpu/device.hpp`: the little of a graphics API
-//! the renderer needs, implemented once for each native API (Vulkan on Linux, Windows and Android; Metal and WebGPU
-//! later). It is explicit like those APIs and small: textures, pipelines made up front, render passes that say which
-//! textures they read, and per-frame memory for what the CPU hands the GPU once. The renderer does the rest.
+//! the renderer needs, implemented once for each native API (Vulkan on Linux, Windows and Android; Metal on Apple's
+//! systems and WebGPU on the web, each the only one there: [`NATIVE_BACKEND`]). It is explicit like those APIs and
+//! small: textures, pipelines made up front, render passes that say which textures they read, and per-frame memory
+//! for what the CPU hands the GPU once. The renderer does the rest.
+//!
+//! Which backends a build has is the target's: [`vulkan`] (and `ash`) where Vulkan is the API, nowhere else (not on
+//! Apple's systems, where Metal is, nor on the web, which has no Vulkan loader); the Metal and WebGPU devices come
+//! with their own modules, and until a build has one, [`create`] says it has no such backend. What presenting needs
+//! from each window system is in [`Surface`]; reading pixels back is synchronous where the API can wait
+//! ([`Device::read_pixels`]) and through a callback everywhere ([`Device::read_pixels_async`]: WebGPU can only map a
+//! buffer asynchronously).
 //!
 //! ```text
 //! device.begin_frame();
@@ -28,6 +36,7 @@
 //! - `KOMPOZ_GPU_REQUIRED=1` ([`gpu_required`]): no device is a failure (CI), not a reason to skip, for the tests.
 
 mod pipeline_cache;
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 pub mod vulkan;
 
 pub use pipeline_cache::{
@@ -46,6 +55,24 @@ pub enum Backend {
     Vulkan,
     Metal,
     WebGpu,
+}
+
+/// The graphics API this target draws with: Metal on Apple's systems, WebGPU on the web, Vulkan elsewhere.
+pub const NATIVE_BACKEND: Backend = if cfg!(target_vendor = "apple") {
+    Backend::Metal
+} else if cfg!(target_family = "wasm") {
+    Backend::WebGpu
+} else {
+    Backend::Vulkan
+};
+
+/// Whether this build of KompozR has a device for `backend` (Vulkan's where it is the target's API; Metal's and
+/// WebGPU's once their modules are in).
+pub const fn has_backend(backend: Backend) -> bool {
+    match backend {
+        Backend::Vulkan => cfg!(not(any(target_family = "wasm", target_vendor = "apple"))),
+        Backend::Metal | Backend::WebGpu => false,
+    }
 }
 
 impl Backend {
@@ -355,6 +382,8 @@ pub struct TextureId {
     format: Format,
 }
 
+// (what the backends make them with: none is built yet for Apple's systems and the web)
+#[cfg_attr(any(target_family = "wasm", target_vendor = "apple"), allow(dead_code))]
 impl TextureId {
     pub(crate) fn new(slot: u32, generation: u32, width: i32, height: i32, format: Format) -> TextureId {
         TextureId { slot, generation, width, height, format }
@@ -390,6 +419,7 @@ impl TextureId {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PipelineId(u64);
 
+#[cfg_attr(any(target_family = "wasm", target_vendor = "apple"), allow(dead_code))]
 impl PipelineId {
     pub(crate) fn new(raw: u64) -> PipelineId {
         PipelineId(raw)
@@ -411,6 +441,7 @@ pub(crate) enum Retired {
 #[derive(Default)]
 pub(crate) struct RetiredQueue(Mutex<Vec<Retired>>);
 
+#[cfg_attr(any(target_family = "wasm", target_vendor = "apple"), allow(dead_code))]
 impl RetiredQueue {
     fn push(&self, retired: Retired) {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).push(retired);
@@ -428,6 +459,7 @@ pub struct Texture {
     retired: Arc<RetiredQueue>,
 }
 
+#[cfg_attr(any(target_family = "wasm", target_vendor = "apple"), allow(dead_code))]
 impl Texture {
     pub(crate) fn new(id: TextureId, retired: Arc<RetiredQueue>) -> Texture {
         Texture { id, retired }
@@ -468,6 +500,7 @@ pub struct Pipeline {
     retired: Arc<RetiredQueue>,
 }
 
+#[cfg_attr(any(target_family = "wasm", target_vendor = "apple"), allow(dead_code))]
 impl Pipeline {
     pub(crate) fn new(id: PipelineId, retired: Arc<RetiredQueue>) -> Pipeline {
         Pipeline { id, retired }
@@ -498,16 +531,45 @@ pub trait PipelineFactory: Send + Sync {
 }
 
 /// What the window system gives a backend to present to (filled by the platform layer); the default draws only
-/// into textures.
+/// into textures. Each target has its backend's field: `vulkan` where Vulkan is the API, `metal` on Apple's
+/// systems, `webgpu` on the web.
 #[derive(Default)]
 pub struct Surface {
     /// Vulkan: what presenting needs; none to draw only into textures.
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
     pub vulkan: Option<vulkan::VulkanSurface>,
+    /// Metal: the layer presented to; none to draw only into textures.
+    #[cfg(target_vendor = "apple")]
+    pub metal: Option<MetalSurface>,
+    /// WebGPU: the device the page acquired and the canvas presented to (WebGPU's device is asked for
+    /// asynchronously, before the app starts: a WebGPU device can't be made without it).
+    #[cfg(target_family = "wasm")]
+    pub webgpu: Option<WebGpuSurface>,
     /// The drawable's size in pixels.
     pub drawable_size: Option<Box<dyn Fn() -> (i32, i32)>>,
     /// A file where the pipelines' compiled shaders are kept between runs, read when the device is made and written
     /// when it has made more (Vulkan's pipeline cache); none to compile them every run.
     pub pipeline_cache: Option<PathBuf>,
+}
+
+/// What presenting with Metal needs from the window system: the view's `CAMetalLayer`, which the device configures
+/// (its device, BGRA8, not only a framebuffer: the renderer copies from its drawables) and takes its drawables from
+/// each frame.
+#[cfg(target_vendor = "apple")]
+pub struct MetalSurface {
+    /// The `CAMetalLayer *` (an Objective-C object); the platform keeps a reference to it for as long as the device
+    /// lives (its view's).
+    pub layer: std::ptr::NonNull<std::ffi::c_void>,
+}
+
+/// What WebGPU needs from the page, as handles of the web platform's JavaScript glue (its table of the page's
+/// objects): the `GPUDevice` the page asked for before the app started, and the canvas presented to.
+#[cfg(target_family = "wasm")]
+pub struct WebGpuSurface {
+    /// The `GPUDevice`'s handle (its adapter's features and limits are the device's).
+    pub device: u32,
+    /// The `<canvas>`'s handle (its `webgpu` context configured by the device); none to draw only into textures.
+    pub canvas: Option<u32>,
 }
 
 /// A pass's time in a [`GpuFrameTime`]: what it drew into ([`pass_label`]) and how long it took.
@@ -558,7 +620,7 @@ pub fn log(message: &str) {
 
 /// Whether the environment variable is set to 1.
 pub(crate) fn env_is_one(name: &str) -> bool {
-    std::env::var_os(name).is_some_and(|v| v == "1")
+    kompoz_runtime::environment::flag(name)
 }
 
 /// `KOMPOZ_GPU_REQUIRED=1`: no device is a failure (CI), not a reason to skip.
@@ -608,7 +670,7 @@ pub trait Device {
     fn swapchain_age(&self) -> i32 {
         0
     }
-    /// The window's native window went away or is another ([`vulkan::VulkanSurface::native_window`] tells which),
+    /// The window's native window went away or is another (Vulkan's `VulkanSurface::native_window` tells which),
     /// between frames: what was made for the old one is let go of now, as the platform must before the system takes
     /// it (Android's surfaceDestroyed), not at the next frame.
     fn surface_changed(&mut self) {}
@@ -643,8 +705,24 @@ pub trait Device {
     /// Part of one texture into another of the same format, at (x, y); outside passes.
     fn copy_texture(&mut self, source: TextureId, region: IRect, destination: TextureId, x: i32, y: i32);
     /// A texture's pixels (RGBA8 for `Rgba8` and `Bgra8`, else its own format's texels: half floats for `Rgba16f`;
-    /// the top row first, rows packed), waiting for what was drawn into it so far; outside passes.
+    /// the top row first, rows packed), waiting for what was drawn into it so far; outside passes. Only where the
+    /// API can wait for the GPU ([`reads_pixels_at_once`](Device::reads_pixels_at_once): Vulkan, Metal); a backend
+    /// that can't (WebGPU, whose buffers map asynchronously) has none to give here (empty): it reads them with
+    /// [`read_pixels_async`](Device::read_pixels_async).
     fn read_pixels(&mut self, texture: TextureId, region: IRect) -> Vec<u8>;
+    /// Whether [`read_pixels`](Device::read_pixels) gives the pixels (the API can wait for the GPU): all but
+    /// WebGPU's.
+    fn reads_pixels_at_once(&self) -> bool {
+        true
+    }
+    /// A texture's pixels as [`read_pixels`](Device::read_pixels) gives them, handed to `done` once the GPU has them
+    /// (what was drawn into it so far); outside passes, on any backend. `done` runs on this thread: at once where
+    /// the API can wait (the default: [`read_pixels`](Device::read_pixels)), else later, from the platform's loop,
+    /// when the copy's buffer is mapped (WebGPU's `mapAsync`), after the frame's work is submitted; empty if the
+    /// device went away meanwhile.
+    fn read_pixels_async(&mut self, texture: TextureId, region: IRect, done: Box<dyn FnOnce(Vec<u8>)>) {
+        done(self.read_pixels(texture, region));
+    }
     /// Submits the frame, and shows the swapchain image if `present` (and it was asked for).
     fn end_frame(&mut self, present: bool);
     /// Times the GPU's work from the next frame on (or no longer), where the API can (Vulkan's timestamps); false if
@@ -662,12 +740,15 @@ pub trait Device {
     fn wait_idle(&mut self);
 }
 
-/// A device for `backend` presenting to `surface`; why not if this system can't have one.
+/// A device for `backend` presenting to `surface`; why not if this system can't have one, or this build has no such
+/// backend ([`has_backend`]: each target has its own API's only).
 pub fn create(backend: Backend, surface: Surface) -> Result<Box<dyn Device>, String> {
-    match backend {
-        Backend::Vulkan => Ok(Box::new(vulkan::VulkanDevice::new(surface)?)),
-        Backend::Metal | Backend::WebGpu => Err(format!("this build of KompozR has no {} backend", backend.name())),
+    #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+    if backend == Backend::Vulkan {
+        return Ok(Box::new(vulkan::VulkanDevice::new(surface)?));
     }
+    drop(surface);
+    Err(format!("this build of KompozR has no {} backend", backend.name()))
 }
 
 #[cfg(test)]
@@ -690,6 +771,17 @@ mod tests {
                 && IRect::new(1, 2, 3, -1).is_empty()
                 && !IRect::new(0, 0, 1, 1).is_empty()
         );
+    }
+
+    #[test]
+    fn each_target_has_its_own_backend() {
+        let native = NATIVE_BACKEND;
+        assert_eq!(native, if cfg!(target_os = "linux") { Backend::Vulkan } else { native });
+        assert!(!has_backend(Backend::WebGpu) && !has_backend(Backend::Metal));
+        for missing in [Backend::Metal, Backend::WebGpu] {
+            let why = create(missing, Surface::default()).err().unwrap();
+            assert_eq!(why, format!("this build of KompozR has no {} backend", missing.name()));
+        }
     }
 
     #[test]

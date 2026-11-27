@@ -5,9 +5,9 @@
 //! it has more to do (it is run again in the next pause, before what was asked after it).
 
 use kompoz_runtime::KompozitionLocal;
+use kompoz_runtime::clock::Instant;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
 
 /// What a piece of idle work is told (Compose's PrefetchRequestScope): how long it has.
 pub struct IdleScope {

@@ -234,6 +234,12 @@ macro_rules! passed_on {
         fn read_pixels(&mut self, texture: TextureId, region: IRect) -> Vec<u8> {
             self.$($field).+.borrow_mut().read_pixels(texture, region)
         }
+        fn reads_pixels_at_once(&self) -> bool {
+            self.$($field).+.borrow().reads_pixels_at_once()
+        }
+        fn read_pixels_async(&mut self, texture: TextureId, region: IRect, done: Box<dyn FnOnce(Vec<u8>)>) {
+            self.$($field).+.borrow_mut().read_pixels_async(texture, region, done)
+        }
         fn end_frame(&mut self, present: bool) {
             self.$($field).+.borrow_mut().end_frame(present)
         }
@@ -334,7 +340,7 @@ impl Gpu {
     /// not if this system has none.
     pub fn start(pipeline_cache: Option<PathBuf>) -> Result<Gpu, String> {
         let surface = Surface { drawable_size: Some(Box::new(|| (64, 64))), pipeline_cache, ..Surface::default() };
-        let mut device = SharedDevice(Rc::new(RefCell::new(device::create(Backend::Vulkan, surface)?)));
+        let mut device = SharedDevice(Rc::new(RefCell::new(device::create(device::NATIVE_BACKEND, surface)?)));
         let pipelines = Pipelines::new(&mut device).ok_or("the test pipelines couldn't be made")?;
         let renderer = Renderer::new(Box::new(device.clone())).ok_or("the renderer couldn't be made")?;
         Ok(Gpu { pipelines, device, renderer })

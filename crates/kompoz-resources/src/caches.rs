@@ -50,6 +50,11 @@ impl<K: Eq + Hash + Clone, V: Clone> AsyncCache<K, V> {
                 }
             }
         };
+        // (On the web there is one thread, and a load doesn't suspend: an entry still loading there was left by a load
+        // that unwound, and is loaded again here.)
+        #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+        drop(waiting);
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
         if let Some(slot) = waiting {
             let (lock, ready) = &*slot;
             let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -110,8 +115,10 @@ impl ResourceCaches {
     }
 }
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 struct Unpark(std::thread::Thread);
 
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 impl Wake for Unpark {
     fn wake(self: Arc<Self>) {
         self.0.unpark();
@@ -122,6 +129,37 @@ impl Wake for Unpark {
 }
 
 /// `future` run to its end on this thread (Kotlin's `runBlocking`): polled, the thread parked until it is woken.
+///
+/// On the web, which can't block, it is polled again as long as something on this thread moves it on (the
+/// background work queued, [`run_queued_background_work`](kompoz_coroutines::run_queued_background_work), or a
+/// wake meanwhile); a future waiting for what only the page's later events could give panics instead of hanging
+/// the page. (The resources' own loads never wait: what is embedded is read at once.)
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub fn run_blocking<T>(future: impl Future<Output = T>) -> T {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Flag(AtomicBool);
+    impl Wake for Flag {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let mut future = pin!(future);
+    let woken = Arc::new(Flag(AtomicBool::new(false)));
+    let waker = Waker::from(woken.clone());
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        if let Poll::Ready(v) = future.as_mut().poll(&mut cx) {
+            return v;
+        }
+        let moved = kompoz_coroutines::run_queued_background_work();
+        if !moved && !woken.0.swap(false, Ordering::SeqCst) {
+            panic!("kompoz: run_blocking on the web waits for what only the page's later events could give");
+        }
+    }
+}
+
+/// `future` run to its end on this thread (Kotlin's `runBlocking`): polled, the thread parked until it is woken.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 pub fn run_blocking<T>(future: impl Future<Output = T>) -> T {
     let mut future = pin!(future);
     let waker = Waker::from(Arc::new(Unpark(std::thread::current())));

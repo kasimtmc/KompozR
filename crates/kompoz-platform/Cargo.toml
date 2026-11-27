@@ -10,6 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+kompoz-coroutines = { path = "../kompoz-coroutines" }
 kompoz-foundation = { path = "../kompoz-foundation" }
 kompoz-gpu = { path = "../kompoz-gpu" }
 kompoz-graphics = { path = "../kompoz-graphics" }
@@ -17,6 +18,9 @@ kompoz-lifecycle = { path = "../kompoz-lifecycle" }
 kompoz-runtime = { path = "../kompoz-runtime" }
 kompoz-text = { path = "../kompoz-text" }
 kompoz-ui = { path = "../kompoz-ui" }
+
+# The unix module (Linux and Android): eventfd, timerfd, poll, dlopen.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
